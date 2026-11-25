@@ -19,10 +19,29 @@ export interface SourceFiles {
   open(absolutePath: string): Promise<{ name: string; stream: Readable }>; // rejects with SourceNotReadableError
 }
 
+export interface StorageRef {
+  id: string;
+  kind: 'workspace_root';
+  createdAt: string;
+}
+
+export interface StorageRepository {
+  getPrimary(): Promise<StorageRef | null>;
+  /** Returns the existing primary storage, or inserts and returns one built from `r`. */
+  ensurePrimary(r: { id: string; createdAt: string }): Promise<StorageRef>;
+}
+
 export interface FileRepository {
-  insertPending(r: { id: string; originalName: string; relativePath: string; mimeType: string; importedAt: string }): Promise<void>;
-  markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void>;
-  markFailed(id: string, error: string): Promise<void>;
+  insertPending(r: {
+    id: string;
+    storageId: string;
+    originalName: string;
+    relativePath: string;
+    mimeType: string;
+    importedAt: string;
+  }): Promise<void>;
+  markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void>; // rejects with NotFoundError for an unknown id
+  markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;
   list(q: { limit: number; offset: number }): Promise<FileList>; // newest importedAt first
@@ -37,11 +56,12 @@ export interface WorkspaceMeta {
 
 export interface WorkspaceMetaRepository {
   get(): Promise<WorkspaceMeta | null>;
-  init(meta: WorkspaceMeta): Promise<void>;
+  init(meta: WorkspaceMeta): Promise<void>; // rejects with InvalidOperationError when a row exists
 }
 
 export interface WorkspaceDatabase {
   meta: WorkspaceMetaRepository;
+  storages: StorageRepository;
   files: FileRepository;
   close(): Promise<void>;
 }

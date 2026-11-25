@@ -6,6 +6,7 @@ import type { FileRepository, SourceFiles, Storage } from './ports.js';
 
 export interface ImportContext {
   storage: Storage;
+  storageId: string;
   files: FileRepository;
   sources: SourceFiles;
   newId(): string;
@@ -44,6 +45,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
   const finalPath = inboxPath(id, name);
   const pending = {
     id,
+    storageId: ctx.storageId,
     originalName: name,
     relativePath: finalPath,
     mimeType: mimeFromFileName(name),
@@ -72,7 +74,9 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     await ctx.files.markComplete(id, { sizeBytes, sha256 });
     const file: FileRecord = {
       id,
+      storageId: ctx.storageId,
       assetId: null,
+      role: null,
       originalName: name,
       relativePath: finalPath,
       mimeType: pending.mimeType,
@@ -100,7 +104,9 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     }
     const file: FileRecord = {
       id,
+      storageId: ctx.storageId,
       assetId: null,
+      role: null,
       originalName: name,
       relativePath: finalPath,
       mimeType: pending.mimeType,

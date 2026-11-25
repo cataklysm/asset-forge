@@ -38,6 +38,7 @@ function isSameRoot(a: string, b: string): boolean {
 interface OpenWorkspace {
   summary: WorkspaceSummary;
   storage: Storage;
+  storageId: string;
   database: WorkspaceDatabase;
 }
 
@@ -92,6 +93,10 @@ export class WorkspaceManager {
           `Database belongs to workspace ${meta.id}, but the manifest says ${manifest.id}`,
         );
       }
+      const primary = await database.storages.ensurePrimary({
+        id: this.host.newId(),
+        createdAt: this.host.now().toISOString(),
+      });
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       const summary: WorkspaceSummary = {
@@ -101,10 +106,14 @@ export class WorkspaceManager {
         lastOpenedAt: this.host.now().toISOString(),
       };
       await this.host.registry.upsert(summary);
-      this.open_ = { summary, storage, database };
+      this.open_ = { summary, storage, storageId: primary.id, database };
       return summary;
     } catch (error) {
-      await database.close();
+      try {
+        await database.close();
+      } catch {
+        // The error that made the open fail is the one worth reporting.
+      }
       throw error;
     }
   }
@@ -141,9 +150,10 @@ export class WorkspaceManager {
   }
 
   async importFiles(sourcePaths: string[]): Promise<ImportResult[]> {
-    const { storage, database } = this.requireOpen();
+    const { storage, storageId, database } = this.requireOpen();
     const ctx: ImportContext = {
       storage,
+      storageId,
       files: database.files,
       sources: this.host.sources,
       newId: () => this.host.newId(),

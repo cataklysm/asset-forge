@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { FileList, FileRecord, ImportStatus, WorkspaceSummary } from '@assetforge/contracts';
 import { LAYOUT_DIRS } from '../src/paths.js';
-import { SourceNotReadableError } from '../src/errors.js';
+import { InvalidOperationError, NotFoundError, SourceNotReadableError } from '../src/errors.js';
 import type {
   FileRepository,
   SourceFiles,
   Storage,
+  StorageRef,
+  StorageRepository,
   WorkspaceDatabase,
   WorkspaceHost,
   WorkspaceMeta,
@@ -137,7 +139,21 @@ class InMemoryMeta implements WorkspaceMetaRepository {
   }
 
   async init(meta: WorkspaceMeta): Promise<void> {
+    if (this.current !== null) throw new InvalidOperationError('The workspace row already exists');
     this.current = meta;
+  }
+}
+
+class InMemoryStorages implements StorageRepository {
+  readonly rows: StorageRef[] = [];
+
+  async getPrimary(): Promise<StorageRef | null> {
+    return this.rows[0] ?? null;
+  }
+
+  async ensurePrimary(r: { id: string; createdAt: string }): Promise<StorageRef> {
+    if (this.rows.length === 0) this.rows.push({ id: r.id, kind: 'workspace_root', createdAt: r.createdAt });
+    return this.rows[0]!;
   }
 }
 
@@ -146,6 +162,7 @@ class InMemoryFiles implements FileRepository {
 
   async insertPending(r: {
     id: string;
+    storageId: string;
     originalName: string;
     relativePath: string;
     mimeType: string;
@@ -153,7 +170,9 @@ class InMemoryFiles implements FileRepository {
   }): Promise<void> {
     this.records.set(r.id, {
       id: r.id,
+      storageId: r.storageId,
       assetId: null,
+      role: null,
       originalName: r.originalName,
       relativePath: r.relativePath,
       mimeType: r.mimeType,
@@ -190,13 +209,14 @@ class InMemoryFiles implements FileRepository {
 
   private require(id: string): FileRecord {
     const rec = this.records.get(id);
-    if (!rec) throw new Error(`Unknown file id: ${id}`);
+    if (!rec) throw new NotFoundError(`Unknown file id: ${id}`);
     return rec;
   }
 }
 
 export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
+  readonly storages = new InMemoryStorages();
   readonly files = new InMemoryFiles();
   closed = false;
 

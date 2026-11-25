@@ -68,6 +68,18 @@ describe('WorkspaceManager lifecycle', () => {
     expect(manager.current()).toEqual(opened);
   });
 
+  it('creates the primary storage on first open and reuses it afterwards', async () => {
+    const { manager, databases } = setup();
+    const created = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const db = databases.get(created.id)!;
+    const first = await db.storages.getPrimary();
+    expect(first).toMatchObject({ kind: 'workspace_root' });
+    await manager.close();
+    await manager.open({ rootPath: ROOT });
+    expect(await db.storages.getPrimary()).toEqual(first);
+    expect(db.storages.rows).toHaveLength(1);
+  });
+
   it('close is a no-op when nothing is open', async () => {
     const { manager } = setup();
     await expect(manager.close()).resolves.toBeUndefined();
@@ -219,6 +231,19 @@ describe('WorkspaceManager lifecycle', () => {
     expect(manager.current()).toBeNull();
     expect(db.closed).toBe(true);
     expect(await host.registry.list()).toHaveLength(1);
+  });
+
+  it('a failing close in the open error path does not hide the original error', async () => {
+    const { manager, databases } = setup();
+    const created = await manager.create({ name: 'Demo', rootPath: ROOT });
+    await manager.close();
+    const db = databases.get(created.id)!;
+    db.meta.current = { id: crypto.randomUUID(), formatVersion: 1, name: 'Other', createdAt: new Date().toISOString() };
+    db.close = async () => {
+      throw new Error('close failed');
+    };
+    await expect(manager.open({ rootPath: ROOT })).rejects.toBeInstanceOf(WorkspaceMismatchError);
+    expect(manager.current()).toBeNull();
   });
 
   it('open closes the database of the previously open workspace', async () => {

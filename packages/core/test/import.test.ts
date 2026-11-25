@@ -16,6 +16,8 @@ const ROOT = '/ws/a';
 const HELLO_SHA = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
 const EMPTY_SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
+const STORAGE_ID = '99999999-9999-4999-8999-999999999999';
+
 async function setup() {
   const fake = createFakeHost();
   const manager = new WorkspaceManager(fake.host);
@@ -24,6 +26,7 @@ async function setup() {
   const db = fake.databases.get(summary.id)!;
   const ctx: ImportContext = {
     storage,
+    storageId: STORAGE_ID,
     files: db.files,
     sources: fake.sources,
     newId: () => crypto.randomUUID(),
@@ -56,6 +59,26 @@ describe('importFile', () => {
     expect(sources.get('/src/ref.png')?.toString()).toBe('hello');
   });
 
+  it('stores the storage id on the imported file', async () => {
+    const { ctx, sources, storage, db } = await setup();
+    sources.set('/src/ref.png', Buffer.from('hello'));
+    const pendingRows: { storageId: string }[] = [];
+    const files = Object.create(ctx.files) as ImportContext['files'];
+    files.insertPending = async (r) => {
+      pendingRows.push(r);
+      return ctx.files.insertPending(r);
+    };
+    const ok = await importFile({ ...ctx, files }, '/src/ref.png');
+    expect(pendingRows.map((r) => r.storageId)).toEqual([STORAGE_ID]);
+    expect(ok.file).toMatchObject({ storageId: STORAGE_ID, role: null });
+    expect(db.files.records.get(ok.file!.id)).toMatchObject({ storageId: STORAGE_ID, role: null });
+
+    sources.set('/src/bad.png', Buffer.from('x'));
+    storage.failNext('move', new Error('rename failed'));
+    const failed = await importFile(ctx, '/src/bad.png');
+    expect(failed.file).toMatchObject({ status: 'failed', storageId: STORAGE_ID, role: null });
+  });
+
   it('imports the same source twice as separate records and reports the duplicate', async () => {
     const { ctx, sources, storage } = await setup();
     sources.set('/src/ref.png', Buffer.from('hello'));
@@ -85,7 +108,7 @@ describe('importFile', () => {
   });
 
   it('processes a batch in input order and isolates per-file failures', async () => {
-    const { manager, sources } = await setup();
+    const { manager, sources, db } = await setup();
     sources.set('/src/dir', Buffer.from('x'));
     sources.unreadable.add('/src/dir');
     sources.set('/src/ok.png', Buffer.from('ok'));
@@ -97,6 +120,8 @@ describe('importFile', () => {
     expect(results[1]!.file).toBeNull();
     expect(results[1]!.error).toBeTruthy();
     expect(results[2]!.file!.status).toBe('complete');
+    const primary = await db.storages.getPrimary();
+    expect(results[2]!.file!.storageId).toBe(primary!.id);
     expect((await manager.listFiles({ limit: 10, offset: 0 })).total).toBe(1);
   });
 

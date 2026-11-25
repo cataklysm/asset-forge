@@ -35,7 +35,9 @@ describe('FileRecordSchema', () => {
   it('parses a pending record with null size and hash', () => {
     const record = {
       id: uuid,
+      storageId: uuid,
       assetId: null,
+      role: null,
       originalName: 'a.png',
       relativePath: 'files/a.png',
       mimeType: 'image/png',

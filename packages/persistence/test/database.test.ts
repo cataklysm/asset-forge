@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { FileRecordSchema } from '@assetforge/contracts';
-import type { WorkspaceDatabase } from '@assetforge/core';
+import { InvalidOperationError, NotFoundError, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const HASH_A = 'a'.repeat(64);
@@ -19,10 +19,17 @@ let dir: string;
 let dbPath: string;
 let db: WorkspaceDatabase | undefined;
 
-const open = async () => (db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER));
+const STORAGE_ID = '22222222-2222-4222-8222-222222222222';
+
+const open = async () => {
+  db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
+  await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: '2026-01-01T00:00:00.000Z' });
+  return db;
+};
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const pending = (n: number, importedAt = '2026-01-01T00:00:00.000Z') => ({
   id: uuid(n),
+  storageId: STORAGE_ID,
   originalName: `f${n}.png`,
   relativePath: `files/f${n}.png`,
   mimeType: 'image/png',
@@ -67,6 +74,7 @@ describe('workspace database', () => {
     expect(list.items[0]).toEqual({
       ...pending(1),
       assetId: null,
+      role: null,
       sizeBytes: null,
       sha256: null,
       status: 'pending',
@@ -129,5 +137,46 @@ describe('workspace database', () => {
     const d = await open();
     await d.files.insertPending(pending(1));
     await expect(d.files.insertPending({ ...pending(2), relativePath: 'files/f1.png' })).rejects.toThrow();
+  });
+
+  test('markComplete and markFailed reject for an unknown id', async () => {
+    const d = await open();
+    await expect(d.files.markComplete(uuid(9), { sizeBytes: 1, sha256: HASH_A })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(d.files.markFailed(uuid(9), 'x')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test('meta.init rejects a second row', async () => {
+    const d = await open();
+    await d.meta.init(meta);
+    await expect(d.meta.init({ ...meta, id: uuid(9) })).rejects.toBeInstanceOf(InvalidOperationError);
+    expect(await d.meta.get()).toEqual(meta);
+  });
+
+  test('a list page and its total come from one snapshot', async () => {
+    const d = await open();
+    for (const n of [1, 2, 3, 4, 5]) await d.files.insertPending(pending(n, `2026-01-0${n}T00:00:00.000Z`));
+    const pages = [
+      await d.files.list({ limit: 2, offset: 0 }),
+      await d.files.list({ limit: 2, offset: 2 }),
+      await d.files.list({ limit: 2, offset: 4 }),
+    ];
+    expect(pages.map((p) => p.total)).toEqual([5, 5, 5]);
+    expect(pages.flatMap((p) => p.items.map((f) => f.id))).toEqual([uuid(5), uuid(4), uuid(3), uuid(2), uuid(1)]);
+  });
+
+  test('enforces foreign keys on its connection', async () => {
+    const d = await open();
+    await expect(
+      d.files.insertPending({ ...pending(1), storageId: '99999999-9999-4999-8999-999999999999' }),
+    ).rejects.toThrow(/FOREIGN KEY/);
+  });
+
+  test('the primary storage is created once', async () => {
+    const d = await open();
+    expect(await d.storages.ensurePrimary({ id: uuid(9), createdAt: '2026-02-01T00:00:00.000Z' })).toEqual({
+      id: STORAGE_ID,
+      kind: 'workspace_root',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
   });
 });

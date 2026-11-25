@@ -1,5 +1,5 @@
 import type { FileList, FileRecord, ImportStatus } from '@assetforge/contracts';
-import type { FileRepository } from '@assetforge/core';
+import { NotFoundError, type FileRepository } from '@assetforge/core';
 import { and, asc, count, desc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { file } from './schema.js';
@@ -7,7 +7,9 @@ import { file } from './schema.js';
 // Row shape equals FileRecord; spelled out so schema drift fails at compile time.
 const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   id: row.id,
+  storageId: row.storageId,
   assetId: row.assetId,
+  role: row.role,
   originalName: row.originalName,
   relativePath: row.relativePath,
   mimeType: row.mimeType,
@@ -19,18 +21,35 @@ const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
 });
 
 export function createFileRepository(db: BetterSQLite3Database): FileRepository {
+  const requireChanged = (changes: number, id: string) => {
+    if (changes === 0) throw new NotFoundError(`File ${id} does not exist`);
+  };
+
   return {
     async insertPending(r) {
-      db.insert(file).values({ ...r, status: 'pending' }).run();
+      db.insert(file)
+        .values({
+          id: r.id,
+          storageId: r.storageId,
+          originalName: r.originalName,
+          relativePath: r.relativePath,
+          mimeType: r.mimeType,
+          importedAt: r.importedAt,
+          status: 'pending',
+        })
+        .run();
     },
     async markComplete(id, r) {
-      db.update(file)
+      const { changes } = db
+        .update(file)
         .set({ sizeBytes: r.sizeBytes, sha256: r.sha256, status: 'complete', error: null })
         .where(eq(file.id, id))
         .run();
+      requireChanged(changes, id);
     },
     async markFailed(id, error) {
-      db.update(file).set({ status: 'failed', error }).where(eq(file.id, id)).run();
+      const { changes } = db.update(file).set({ status: 'failed', error }).where(eq(file.id, id)).run();
+      requireChanged(changes, id);
     },
     async findCompleteBySha256(sha256) {
       return db
@@ -51,16 +70,22 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         .map(toRecord);
     },
     async list({ limit, offset }): Promise<FileList> {
-      const items = db
-        .select()
-        .from(file)
-        .orderBy(desc(file.importedAt), desc(file.id))
-        .limit(limit)
-        .offset(offset)
-        .all()
-        .map(toRecord);
-      const total = db.select({ n: count() }).from(file).get()?.n ?? 0;
-      return { items, total };
+      // One read transaction, so the page and the total describe the same snapshot.
+      return db.transaction(
+        (tx) => {
+          const items = tx
+            .select()
+            .from(file)
+            .orderBy(desc(file.importedAt), desc(file.id))
+            .limit(limit)
+            .offset(offset)
+            .all()
+            .map(toRecord);
+          const total = tx.select({ n: count() }).from(file).get()?.n ?? 0;
+          return { items, total };
+        },
+        { behavior: 'deferred' },
+      );
     },
   };
 }

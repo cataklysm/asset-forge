@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createFileRepository } from './file-repository.js';
 import { createMetaRepository } from './meta-repository.js';
+import { createStorageRepository } from './storage-repository.js';
 
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url));
 
@@ -23,6 +24,7 @@ export async function openWorkspaceDatabase(
     migrate(db, { migrationsFolder });
     return {
       meta: createMetaRepository(db),
+      storages: createStorageRepository(db),
       files: createFileRepository(db),
       async close() {
         if (sqlite.open) sqlite.close();

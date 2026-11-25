@@ -1,11 +1,14 @@
 import { z } from 'zod';
+import { FileRoleSchema } from './library';
 
 export const ImportStatusSchema = z.enum(['pending', 'complete', 'failed']);
 export type ImportStatus = z.infer<typeof ImportStatusSchema>;
 
 export const FileRecordSchema = z.object({
   id: z.uuid(),
+  storageId: z.uuid(),
   assetId: z.uuid().nullable(),
+  role: FileRoleSchema.nullable(),
   originalName: z.string(),
   relativePath: z.string(),
   mimeType: z.string(),
