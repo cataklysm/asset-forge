@@ -1,5 +1,6 @@
 import { ipcContract, type IpcChannel, type IpcResult } from '@assetforge/contracts';
-import { AssetForgeError, type WorkspaceManager } from '@assetforge/core';
+import { join } from 'node:path';
+import { AssetForgeError, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
 import type { z } from 'zod';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
@@ -20,6 +21,8 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
     'workspace:list': () => manager.list(),
     'workspace:current': async () => manager.current(),
     'workspace:create': (request) => manager.create(request),
+    'workspace:resolveCreatePath': async (request) =>
+      join(request.parentPath, workspaceFolderName(request.name)),
     'workspace:open': (request) => manager.open(request),
     'workspace:close': async () => {
       await manager.close();

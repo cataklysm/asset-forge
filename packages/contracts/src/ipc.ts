@@ -25,6 +25,11 @@ export const ipcContract = {
     request: z.object({ name: z.string().min(1).max(200), rootPath: z.string() }),
     response: WorkspaceSummarySchema,
   },
+  /** Resolves the directory a new workspace with this name would get inside `parentPath`. */
+  'workspace:resolveCreatePath': {
+    request: z.object({ name: z.string().min(1).max(200), parentPath: z.string().min(1) }),
+    response: z.string(),
+  },
   'workspace:open': {
     request: z.object({ rootPath: z.string() }),
     response: WorkspaceSummarySchema,

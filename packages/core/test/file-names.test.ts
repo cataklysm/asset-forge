@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inboxPath, mimeFromFileName, sanitizeFileName, stagingPath } from '../src/index.js';
+import { inboxPath, mimeFromFileName, sanitizeFileName, stagingPath, workspaceFolderName } from '../src/index.js';
 
 describe('sanitizeFileName', () => {
   it('replaces unsafe characters', () => {
@@ -71,5 +71,40 @@ describe('paths', () => {
   it('builds inbox and staging paths', () => {
     expect(inboxPath(id, 'a b.png')).toBe(`inbox/${id}_a_b.png`);
     expect(stagingPath(id)).toBe(`.assetforge/staging/${id}.part`);
+  });
+});
+
+describe('workspaceFolderName', () => {
+  it('keeps a readable name, including spaces and non-ASCII letters', () => {
+    expect(workspaceFolderName('Gilded Hour')).toBe('Gilded Hour');
+    expect(workspaceFolderName('Größe über alles')).toBe('Größe über alles');
+    expect(workspaceFolderName('资产 2026')).toBe('资产 2026');
+  });
+
+  it('replaces separators and characters Windows rejects', () => {
+    expect(workspaceFolderName('a/b\\c:d*e?"f<g>h|i')).toBe('a_b_c_d_e_f_g_h_i');
+    expect(workspaceFolderName('tab\there')).toBe('tab_here');
+  });
+
+  it('cannot produce a traversal segment or a hidden or trailing-dot name', () => {
+    expect(workspaceFolderName('..')).toBe('workspace');
+    expect(workspaceFolderName('../../x')).toBe('_.._x');
+    expect(workspaceFolderName('  .name. ')).toBe('name');
+  });
+
+  it('falls back to a placeholder when nothing usable is left', () => {
+    expect(workspaceFolderName('   ')).toBe('workspace');
+    expect(workspaceFolderName('???')).toBe('workspace');
+  });
+
+  it('prefixes Windows device names', () => {
+    expect(workspaceFolderName('CON')).toBe('_CON');
+    expect(workspaceFolderName('nul.txt')).toBe('_nul.txt');
+    expect(workspaceFolderName('console')).toBe('console');
+  });
+
+  it('limits the length without leaving a trailing space', () => {
+    const name = workspaceFolderName(`${'a'.repeat(99)} bcd`);
+    expect(name).toBe('a'.repeat(99));
   });
 });

@@ -93,3 +93,34 @@ describe('dispatch', () => {
     expect(log).toHaveBeenCalled();
   });
 });
+
+describe('workspace:resolveCreatePath', () => {
+  it('puts a folder named after the workspace inside the chosen location', async () => {
+    const result = await dispatch(handlers, 'workspace:resolveCreatePath', {
+      name: 'Gilded Hour',
+      parentPath: base,
+    });
+    expect(result).toEqual({ ok: true, value: join(base, 'Gilded Hour') });
+  });
+
+  it('never resolves outside the chosen location', async () => {
+    const result = await dispatch(handlers, 'workspace:resolveCreatePath', {
+      name: '..\\..\\escape',
+      parentPath: base,
+    });
+    expect(result).toEqual({ ok: true, value: join(base, '_.._escape') });
+  });
+
+  it('creates the workspace in the resolved folder', async () => {
+    const resolved = await dispatch(handlers, 'workspace:resolveCreatePath', {
+      name: 'Nested',
+      parentPath: base,
+    });
+    if (!resolved.ok) throw new Error('resolve failed');
+    const created = await dispatch(handlers, 'workspace:create', {
+      name: 'Nested',
+      rootPath: resolved.value,
+    });
+    expect(created).toMatchObject({ ok: true, value: { name: 'Nested', rootPath: join(base, 'Nested') } });
+  });
+});

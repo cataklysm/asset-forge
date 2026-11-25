@@ -31,6 +31,23 @@ export function sanitizeFileName(name: string): string {
   return chars.slice(0, MAX_LENGTH - [...ext].length).join('').replace(/\.+$/, '') + ext;
 }
 
+const PLACEHOLDER_FOLDER = 'workspace';
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+
+/**
+ * Derives the directory name for a new workspace from its display name. Unlike
+ * `sanitizeFileName` it keeps spaces and punctuation, so the folder stays recognisable;
+ * only characters and names that a common file system rejects are replaced.
+ */
+export function workspaceFolderName(name: string): string {
+  const trim = (value: string) => value.replace(/^[. ]+/, '').replace(/[. ]+$/, '');
+  const replaced = trim(name.replace(/[<>:"/\\|?*\p{Cc}]+/gu, '_').replace(/\s+/g, ' '));
+  // Count code points so truncation never splits a surrogate pair.
+  const cleaned = trim([...replaced].slice(0, MAX_LENGTH).join(''));
+  if (cleaned === '' || /^_+$/.test(cleaned)) return PLACEHOLDER_FOLDER;
+  return WINDOWS_DEVICE_NAME.test(cleaned) ? `_${cleaned}` : cleaned;
+}
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
