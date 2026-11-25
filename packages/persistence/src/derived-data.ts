@@ -20,12 +20,16 @@ export interface DerivedDataOptions {
 
 const DEFAULT_BATCH_SIZE = 500;
 
+/** Lets the event loop run between batches, so a long rebuild does not freeze the main process. */
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 /**
  * Recomputes every file's kind and rebuilds the search index unless the stored stamp equals
  * `DERIVED_DATA_VERSION`. Each batch is its own transaction and the stamp is written last, so an
- * interrupted run keeps the old stamp and the next open starts over.
+ * interrupted run keeps the old stamp and the next open starts over. Each transaction is synchronous;
+ * the function yields to the event loop after every batch.
  */
-export function ensureDerivedData(db: BetterSQLite3Database, options: DerivedDataOptions = {}): void {
+export async function ensureDerivedData(db: BetterSQLite3Database, options: DerivedDataOptions = {}): Promise<void> {
   const stored = db.select({ v: workspace.derivedDataVersion }).from(workspace).limit(1).get();
   if (stored?.v === DERIVED_DATA_VERSION) return;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
@@ -50,6 +54,7 @@ export function ensureDerivedData(db: BetterSQLite3Database, options: DerivedDat
     });
     if (last === null) break;
     afterFile = last;
+    await yieldToEventLoop();
   }
 
   // (2) Empty the index.
@@ -77,6 +82,7 @@ export function ensureDerivedData(db: BetterSQLite3Database, options: DerivedDat
     if (last === null) break;
     options.afterBatch?.(batchIndex);
     afterAsset = last;
+    await yieldToEventLoop();
   }
 
   // (4) The stamp, in its own statement.

@@ -29,7 +29,7 @@ import type {
 import { automaticCover } from '../src/asset-cover.js';
 import { fileKind, isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
-import { foldSearchWord, searchWords } from '../src/search.js';
+import { foldSearchWord, searchWords, textWords } from '../src/search.js';
 import {
   InvalidOperationError,
   NotFoundError,
@@ -668,7 +668,7 @@ class InMemoryProjects implements ProjectRepository {
 const startsWithToken = (tokens: string[], word: string) => tokens.some((t) => t.startsWith(word));
 
 /** All words of a text, without the 16-word cap of a search query. */
-const allWords = (text: string) => text.normalize('NFC').toLowerCase().match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
+const allWords = textWords;
 
 /** 1 when every query word is a prefix of some name word, else 0 (the fake's two-bucket ranking). */
 const nameMatches = (a: Asset, words: string[]) => {

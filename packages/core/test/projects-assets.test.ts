@@ -198,6 +198,14 @@ describe('asset list filters', () => {
     expect(await names({ query: 'iron gold' })).toEqual([]);
   });
 
+  it('a word of marks alone is ignored', async () => {
+    const { make, names } = await seed();
+    await make('Sword');
+    await make('Shield');
+    expect(await names({ query: 'sword ⚔️' })).toEqual(['Sword']);
+    expect(await names({ query: '⚔️' })).toEqual(['Shield', 'Sword']);
+  });
+
   it('diacritics and case are folded', async () => {
     const { make, names } = await seed();
     await make('Café');

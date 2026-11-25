@@ -65,9 +65,17 @@ export function importExtension(fileName: string): string | null {
   return extension === '' ? null : extension.toLowerCase();
 }
 
+/**
+ * True when the name, or its part before the first `:` (an NTFS alternate data stream such as
+ * `a.exe::$DATA` or `a.exe:stream`, where Windows opens the main stream), has a refused extension.
+ */
 export function isRefusedImport(fileName: string): boolean {
-  const extension = importExtension(fileName);
-  return extension !== null && REFUSED_IMPORT_EXTENSIONS.includes(extension);
+  const refused = (name: string) => {
+    const extension = importExtension(name);
+    return extension !== null && REFUSED_IMPORT_EXTENSIONS.includes(extension);
+  };
+  const colon = fileName.indexOf(':');
+  return refused(fileName) || (colon >= 0 && refused(fileName.slice(0, colon)));
 }
 
 /** A file can be opened externally when its kind is image, model or document, except SVG. */

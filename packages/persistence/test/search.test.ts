@@ -215,8 +215,28 @@ describe('search queries', () => {
     await expect(found('a:b')).resolves.toContain('a b');
     await expect(found('x'.repeat(200))).resolves.toEqual(['x'.repeat(200)]);
     await expect(found('AND OR NOT')).resolves.toEqual(['and or not']);
-    // A word of combining marks alone folds to no token at all.
-    await expect(found('́')).resolves.toEqual([]);
+    // A run of combining marks alone is no word, so the query behaves like no query.
+    await expect(found('́')).resolves.toEqual(all);
+  });
+
+  test('an emoji with a variation selector does not empty the search', async () => {
+    await db.assets.insert(asset(1, 'Sword'));
+    await db.assets.insert(asset(2, 'Shield'));
+    await expect(found('sword')).resolves.toEqual(['Sword']);
+    await expect(found('sword ⚔️')).resolves.toEqual(['Sword']);
+    await expect(found('⚔️')).resolves.toEqual(['Shield', 'Sword']);
+  });
+
+  test('decomposed (NFD) names and file names are found by a composed query', async () => {
+    const hangul = '한글';
+    const kana = 'がぎ';
+    expect(hangul.normalize('NFD')).not.toBe(hangul);
+    expect(kana.normalize('NFD')).not.toBe(kana);
+    await db.assets.insert(asset(1, hangul.normalize('NFD')));
+    await db.assets.insert(asset(2, 'Other'));
+    await addFile(uuid(2), `${kana.normalize('NFD')}.png`);
+    await expect(found(hangul)).resolves.toEqual([hangul.normalize('NFD')]);
+    await expect(found(kana)).resolves.toEqual(['Other']);
   });
 
   test('diacritics and case are folded', async () => {

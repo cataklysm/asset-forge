@@ -41,9 +41,11 @@ export function reindexAsset(tx: Tx, assetId: string): void {
   } else {
     rowid = tx.insert(assetSearchMap).values({ assetId }).returning({ rowid: assetSearchMap.rowid }).get().rowid;
   }
+  // Index text is NFC like the query words; the stored rows keep their spelling.
+  const nfc = (text: string) => text.normalize('NFC');
   tx.run(sql`insert into asset_search (rowid, name, description, tags, file_names) values (
-    ${rowid}, ${row.name}, ${row.description},
-    ${tags.map((t) => t.name).join(' ')}, ${fileNames.map((f) => f.name).join(' ')})`);
+    ${rowid}, ${nfc(row.name)}, ${nfc(row.description)},
+    ${nfc(tags.map((t) => t.name).join(' '))}, ${nfc(fileNames.map((f) => f.name).join(' '))})`);
 }
 
 /** Reindexes each distinct, non-null asset id once (the asset a file left and the one it joined). */

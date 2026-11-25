@@ -40,7 +40,7 @@ export function assetFilter(
   }
   if (q.fileRole !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.role)} = ${q.fileRole}`));
   if (q.fileKind !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.kind)} = ${q.fileKind}`));
-  const names = q.tagNames ?? [];
+  const names = [...new Set(q.tagNames ?? [])];
   if (names.length > 0) {
     const tagIds = tx.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
     if (tagIds.length < names.length) return null;

@@ -195,4 +195,29 @@ describe('derived-data step', () => {
     expect(stamp()).toBe(DERIVED_DATA_VERSION);
     expect(snapshot()).toEqual(incremental);
   });
+
+  test('the rebuild yields to the event loop between batches', async () => {
+    for (let n = 1; n <= 5; n++) await db.assets.insert(asset(n, `Asset ${n}`));
+    const incremental = snapshot();
+    await db.close();
+    setStamp(null);
+
+    let immediates = 0;
+    const seen: number[] = [];
+    db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER, {
+      derivedData: { batchSize: 2, afterBatch: () => seen.push(immediates) },
+    });
+    const tick = () => {
+      immediates++;
+      if (immediates < 100) setImmediate(tick);
+    };
+    setImmediate(tick);
+    await db.ensureDerivedData();
+
+    expect(seen).toHaveLength(3);
+    expect(seen[2]).toBeGreaterThan(seen[1]!);
+    expect(seen[1]).toBeGreaterThan(seen[0]!);
+    expect(snapshot()).toEqual(incremental);
+    expect(stamp()).toBe(DERIVED_DATA_VERSION);
+  });
 });

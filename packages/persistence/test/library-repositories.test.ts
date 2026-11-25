@@ -550,6 +550,15 @@ describe('asset repository filters', () => {
     expect(page.total).toBe(3);
   });
 
+  test('a repeated tag name behaves like the name once', async () => {
+    const { typeId, names, tagAsset } = await setup();
+    await db.assets.insert(asset(1, 'A', typeId));
+    await db.assets.insert(asset(2, 'B', typeId));
+    await tagAsset(uuid(1), 'metal');
+    await expect(names({ tagNames: ['metal'] })).resolves.toEqual(['A']);
+    await expect(names({ tagNames: ['metal', 'metal'] })).resolves.toEqual(['A']);
+  });
+
   test('an unknown tag yields an empty page', async () => {
     const { typeId, tagAsset } = await setup();
     await db.assets.insert(asset(1, 'A', typeId));

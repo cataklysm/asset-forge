@@ -9,6 +9,7 @@ import {
   IpcErrorSchema,
   NameInputSchema,
   normalizeTagName,
+  normalizeTagPrefix,
   PageRequestSchema,
   ProjectMemberSchema,
   SetCoverRequestSchema,
@@ -270,6 +271,13 @@ describe('normalizeTagName', () => {
     const acute = String.fromCodePoint(0x301);
     expect(normalizeTagName('e' + acute)).toBe(String.fromCodePoint(0xe9));
     expect(normalizeTagName('E' + acute)).toBe(normalizeTagName(String.fromCodePoint(0xc9)));
+  });
+
+  it('normalises to NFC again after lower-casing', () => {
+    // J + caron has no composed capital, but j + caron composes to U+01F0.
+    expect(normalizeTagName('J̌')).toBe('ǰ');
+    expect(normalizeTagName('J̌')).toBe(normalizeTagName('ǰ'));
+    expect(normalizeTagPrefix('J̌')).toBe('ǰ');
   });
 
   it('returns null for empty or blank input', () => {

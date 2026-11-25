@@ -47,7 +47,7 @@ export async function openWorkspaceDatabase(
       assetWorkflows: createAssetWorkflowRepository(db),
       tags: createTagRepository(db),
       async ensureDerivedData() {
-        ensureDerivedData(db, options.derivedData);
+        await ensureDerivedData(db, options.derivedData);
       },
       async close() {
         if (sqlite.open) sqlite.close();

@@ -352,4 +352,14 @@ describe('refused imports', () => {
     expect(sources.opened).toEqual([]);
     expect(inserted).toBe(0);
   });
+
+  it('importFile refuses a Windows path to an alternate data stream', async () => {
+    const { ctx, sources } = await setup();
+    for (const p of ['C:\\x\\a.exe::$DATA', 'C:\\x\\a.exe:stream', 'C:\\x\\evil.txt:payload.exe']) {
+      sources.set(p, Buffer.from('x'));
+      const result = await importFile(ctx, p);
+      expect(result).toEqual({ sourcePath: p, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    }
+    expect(sources.opened).toEqual([]);
+  });
 });

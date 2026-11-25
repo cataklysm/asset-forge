@@ -15,6 +15,12 @@ describe('searchWords', () => {
     expect(searchWords(words.join(' '))).toEqual(words.slice(0, 16));
   });
 
+  it('a word starts with a letter or digit; marks alone are no word', () => {
+    expect(searchWords('sword ⚔️')).toEqual(['sword']);
+    expect(searchWords('́')).toEqual([]);
+    expect(searchWords('️ ́́')).toEqual([]);
+  });
+
   it('keeps a decomposed accent inside its word', () => {
     expect(searchWords('é')).toEqual(['é']);
     expect(searchWords('Café bar')).toEqual(['café', 'bar']);

@@ -30,10 +30,8 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - The session failure memory of the preview service also remembers worker timeouts and crashes, and it is unbounded.
 - No index on `asset.cover_file_id`.
 - `setCover` is not a guarded UPDATE and `getAssetDetail` reads in two steps; both are safe only under serialised writes.
-- The derived-data rebuild runs synchronously on the main process while a workspace opens, with no yield between batches (about 1.7 s at 10 000 assets). The step also runs on every new workspace.
+- The derived-data rebuild still runs on the main process while a workspace opens (about 1.7 s at 10 000 assets); it yields to the event loop between batches of 500, but each batch blocks it. The step also runs on every new workspace.
 - `asset_search_map` rowids: once assets can be deleted, the FTS row and the map row must be deleted together; otherwise rowid reuse attaches a stale index row to a new asset.
-- A query that consists only of combining marks returns no results instead of behaving like no query.
-- `normalizeTagName` has no NFC pass after lower-casing.
 - `FileKindSchema.catch('other')` in the file repository hides an invalid stored kind.
 - Adding and removing a tag are check-then-act in the use cases (safe today because one writer holds the workspace lock).
 - The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.

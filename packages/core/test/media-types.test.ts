@@ -63,6 +63,11 @@ describe('media types', () => {
     for (const name of ['a.py', 'a.js', 'a.sh', 'a.html', 'a.svg', 'a.exe.txt']) expect(isRefusedImport(name)).toBe(false);
   });
 
+  it('isRefusedImport sees through alternate data streams', () => {
+    for (const name of ['a.exe::$DATA', 'a.exe:stream', 'evil.txt:payload.exe']) expect(isRefusedImport(name)).toBe(true);
+    expect(isRefusedImport('a.png:stream')).toBe(false);
+  });
+
   it('isOpenable by kind', () => {
     expect(isOpenable('inbox/x_a.exe.txt')).toBe(true);
     expect(isOpenable('assets/a/working/x_scene.blend')).toBe(true);
