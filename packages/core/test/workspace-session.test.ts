@@ -88,6 +88,34 @@ describe('WorkspaceManager sessions', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it('opening a workspace ensures derived data once, after the built-in templates', async () => {
+    const fake = createFakeHost();
+    const order: string[] = [];
+    const openDatabase = fake.host.openDatabase.bind(fake.host);
+    fake.host.openDatabase = async (workspaceId) => {
+      const db = await openDatabase(workspaceId);
+      const findByKey = db.workflowTemplates.findByKey.bind(db.workflowTemplates);
+      db.workflowTemplates.findByKey = async (key) => {
+        order.push('templates');
+        return findByKey(key);
+      };
+      const ensureDerivedData = db.ensureDerivedData.bind(db);
+      db.ensureDerivedData = async () => {
+        order.push('derived');
+        return ensureDerivedData();
+      };
+      return db;
+    };
+    const manager = new WorkspaceManager(fake.host);
+
+    const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const db = fake.databases.get(summary.id)!;
+    expect(db.derivedDataCalls).toBe(1);
+    expect(order.filter((o) => o === 'derived')).toEqual(['derived']);
+    expect(order.at(-1)).toBe('derived');
+    expect(order).toContain('templates');
+  });
+
   it('create still opens the workspace', async () => {
     const { manager } = setup();
     const summary = await manager.create({ name: 'Demo', rootPath: ROOT });

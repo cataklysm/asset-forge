@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
+import { ensureDerivedData, type DerivedDataOptions } from './derived-data.js';
 import { createFileMoveRepository } from './file-move-repository.js';
 import { createFileRepository } from './file-repository.js';
 import { createMetaRepository } from './meta-repository.js';
@@ -23,6 +24,7 @@ export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.m
 export async function openWorkspaceDatabase(
   dbFilePath: string,
   migrationsFolder: string,
+  options: { derivedData?: DerivedDataOptions } = {},
 ): Promise<WorkspaceDatabase> {
   mkdirSync(dirname(dbFilePath), { recursive: true });
   const sqlite = new Database(dbFilePath);
@@ -44,6 +46,9 @@ export async function openWorkspaceDatabase(
       workflowTemplates: createWorkflowTemplateRepository(db),
       assetWorkflows: createAssetWorkflowRepository(db),
       tags: createTagRepository(db),
+      async ensureDerivedData() {
+        ensureDerivedData(db, options.derivedData);
+      },
       async close() {
         if (sqlite.open) sqlite.close();
       },

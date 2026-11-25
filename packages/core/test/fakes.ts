@@ -27,7 +27,7 @@ import type {
   WorkspaceSummary,
 } from '@assetforge/contracts';
 import { automaticCover } from '../src/asset-cover.js';
-import { isOpenable, isPreviewable } from '../src/media-types.js';
+import { fileKind, isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { foldSearchWord, searchWords } from '../src/search.js';
 import {
@@ -880,6 +880,17 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;
+  /** How often `ensureDerivedData` ran. */
+  derivedDataCalls = 0;
+
+  /** Recomputes every file's kind from its original name; the fake has no search index to rebuild. */
+  async ensureDerivedData(): Promise<void> {
+    this.derivedDataCalls++;
+    for (const [id, rec] of this.files.records) {
+      const kind = fileKind(rec.originalName);
+      if (kind !== rec.kind) this.files.records.set(id, { ...rec, kind });
+    }
+  }
 
   async close(): Promise<void> {
     this.closed = true;

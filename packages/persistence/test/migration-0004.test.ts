@@ -97,6 +97,24 @@ describe('migration 0004', () => {
     } finally {
       check.close();
     }
+
+    // The manager's open runs the derived-data step right after.
+    const reopened = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
+    try {
+      await reopened.ensureDerivedData();
+      const byName = await reopened.assets.list({ limit: 10, offset: 0, query: 'pump' });
+      expect(byName.items.map((a) => a.id)).toEqual([uuid(10)]);
+      const byFileName = await reopened.assets.list({ limit: 10, offset: 0, query: 'a.png' });
+      expect(byFileName.items.map((a) => a.id)).toEqual([uuid(10)]);
+    } finally {
+      await reopened.close();
+    }
+    const after = new Database(dbPath, { readonly: true });
+    try {
+      expect(after.prepare('SELECT kind FROM file WHERE id = ?').get(uuid(20))).toEqual({ kind: 'image' });
+    } finally {
+      after.close();
+    }
   });
 
   test('0004 creates the tag tables with their keys', async () => {

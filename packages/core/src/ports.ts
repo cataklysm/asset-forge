@@ -291,6 +291,11 @@ export interface WorkspaceDatabase {
   workflowTemplates: WorkflowTemplateRepository;
   assetWorkflows: AssetWorkflowRepository;
   tags: TagRepository;
+  /**
+   * Recomputes derived data (file kinds, the search index) unless the stored stamp is current;
+   * the stamp is written last, so an interrupted run is redone on the next open.
+   */
+  ensureDerivedData(): Promise<void>;
   close(): Promise<void>;
 }
 

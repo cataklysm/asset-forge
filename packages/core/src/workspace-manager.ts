@@ -170,6 +170,7 @@ export class WorkspaceManager {
         newId: () => this.host.newId(),
         now: () => this.host.now(),
       });
+      await database.ensureDerivedData();
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
