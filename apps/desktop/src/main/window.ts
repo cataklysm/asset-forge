@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow } from 'electron';
+import { createLoadFailureHandler } from './load-failure.js';
 
 export interface MainWindowOptions {
   preloadPath: string;
@@ -39,21 +40,16 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
   window.once('ready-to-show', () => window.show());
 
   // Only the initial load is fatal; later failures (e.g. a dev-server restart) are left to the user.
-  let initialLoadDone = false;
-  contents.once('did-finish-load', () => {
-    initialLoadDone = true;
-  });
-  contents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
-    // -3 (ERR_ABORTED) is a superseded or cancelled navigation, not a failed load.
-    if (isMainFrame && !initialLoadDone && errorCode !== -3) {
-      opts.onLoadFailure(new Error(`Loading the app page failed: ${errorDescription} (${errorCode})`));
-    }
-  });
+  const loadFailure = createLoadFailureHandler(opts.onLoadFailure);
+  contents.once('did-finish-load', () => loadFailure.finished());
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) =>
+    loadFailure.didFailLoad(errorCode, errorDescription, isMainFrame),
+  );
 
   const loading = opts.devServerUrl
     ? window.loadURL(opts.devServerUrl)
     : window.loadFile(opts.rendererHtmlPath);
-  loading.catch(opts.onLoadFailure);
+  loading.catch((error: unknown) => loadFailure.rejected(error));
   return window;
 }
 
