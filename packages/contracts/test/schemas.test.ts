@@ -12,6 +12,7 @@ import {
   normalizeTagPrefix,
   PageRequestSchema,
   ProjectMemberSchema,
+  ProjectSummarySchema,
   SetCoverRequestSchema,
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
@@ -189,6 +190,32 @@ describe('library IPC requests', () => {
     expect(request.safeParse({ ...base, tagNames: ['x'.repeat(201)] }).success).toBe(false);
     expect(request.safeParse({ ...base, role: 'nope' }).success).toBe(false);
     expect(request.safeParse({ ...base, kind: 'nope' }).success).toBe(false);
+  });
+
+  it('projects:list accepts query, status and tagNames within their limits', () => {
+    const request = ipcContract['projects:list'].request;
+    const base = { limit: 10, offset: 0 };
+    const full = { ...base, query: 'x'.repeat(200), status: 'on_hold', tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`) };
+    expect(request.parse(base)).toEqual(base);
+    expect(request.parse(full)).toEqual(full);
+    expect(request.safeParse({ ...base, query: 'x'.repeat(201) }).success).toBe(false);
+    expect(request.safeParse({ ...base, status: 'nope' }).success).toBe(false);
+    expect(request.safeParse({ ...base, tagNames: Array.from({ length: 11 }, (_, i) => `t${i}`) }).success).toBe(false);
+    expect(request.safeParse({ ...base, tagNames: ['x'.repeat(201)] }).success).toBe(false);
+  });
+
+  it('a project summary requires assetCount and imageCount and accepts matchedTags', () => {
+    const base = { id: uuid, name: 'P', description: '', status: 'active', createdAt: now, updatedAt: now, assetCount: 1 };
+    expect(ProjectSummarySchema.safeParse(base).success).toBe(false);
+    expect(ProjectSummarySchema.safeParse({ ...base, imageCount: 2 }).success).toBe(true);
+    expect(ProjectSummarySchema.safeParse({ ...base, imageCount: -1 }).success).toBe(false);
+    expect(
+      ProjectSummarySchema.safeParse({
+        ...base,
+        imageCount: 0,
+        matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: false, onFiles: true }],
+      }).success,
+    ).toBe(true);
   });
 });
 

@@ -1,7 +1,8 @@
 import type { Project, ProjectList, ProjectStatus } from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
-import type { Page } from './ports.js';
+import type { ProjectQuery } from './ports.js';
 import type { WorkspaceSession } from './session.js';
+import { tagName } from './tags.js';
 
 export async function createProject(
   s: WorkspaceSession,
@@ -36,6 +37,14 @@ export async function getProject(s: WorkspaceSession, id: string): Promise<Proje
   return project;
 }
 
-export function listProjects(s: WorkspaceSession, q: Page): Promise<ProjectList> {
-  return s.database.projects.list(q);
+/** Trims the query (dropped when empty) and normalises and de-duplicates the tag names, as `listAssets` does. */
+export async function listProjects(s: WorkspaceSession, q: ProjectQuery): Promise<ProjectList> {
+  const { query, tagNames, ...rest } = q;
+  const text = query?.trim() ?? '';
+  const names = tagNames === undefined ? [] : [...new Set(tagNames.map((t) => tagName(t).name))];
+  return s.database.projects.list({
+    ...rest,
+    ...(text.length > 0 && { query: text }),
+    ...(names.length > 0 && { tagNames: names }),
+  });
 }

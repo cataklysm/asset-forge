@@ -17,6 +17,7 @@ import type {
   ProjectAssignment,
   ProjectList,
   ProjectMemberList,
+  ProjectStatus,
   RelationKind,
   TagAssignment,
   TagOrigin,
@@ -192,7 +193,18 @@ export interface ProjectRepository {
     id: string,
     patch: Partial<Pick<Project, 'name' | 'description' | 'status'>> & { updatedAt: string },
   ): Promise<Project | null>;
-  list(q: Page): Promise<ProjectList>; // by name (case-insensitive), then id
+  list(q: ProjectQuery): Promise<ProjectList>; // by name (case-insensitive), then id
+}
+
+export interface ProjectQuery extends Page {
+  /** Free text, trimmed; matches a folded substring of the name or the description. Absent when empty. */
+  query?: string;
+  status?: ProjectStatus;
+  /**
+   * Normalised, distinct tag names; one member asset must carry all of them, each on the asset or
+   * on one of its complete files. With tags, `matchedTags` is aggregated over exactly those members.
+   */
+  tagNames?: string[];
 }
 
 export interface AssetQuery extends Page {

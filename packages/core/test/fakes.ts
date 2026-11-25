@@ -56,6 +56,7 @@ import type {
   FileRepository,
   Page,
   ProjectAssetRepository,
+  ProjectQuery,
   ProjectRepository,
   RelationKey,
   SourceFiles,
@@ -646,10 +647,49 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
 class AssignmentRows extends Map<string, ProjectAssignment> {}
 const assignmentKey = (k: AssignmentKey) => `${k.projectId}|${k.assetId}`;
 
+const completeFilesOf = (files: InMemoryFiles, assetId: string): FileRecord[] =>
+  [...files.records.values()].filter((f) => f.assetId === assetId && f.status === 'complete');
+
+/** Each tag must be on the asset or on one of its complete files; different tags may have different owners. */
+function carriesTags(tags: InMemoryTags, files: InMemoryFiles, assetId: string, names: string[]): boolean {
+  if (names.length === 0) return true;
+  const fileIds = new Set(completeFilesOf(files, assetId).map((f) => f.id));
+  return names.every(
+    (name) =>
+      tags.assetAssignments.some((a) => a.assetId === assetId && a.name === name) ||
+      tags.fileAssignments.some((a) => fileIds.has(a.fileId) && a.name === name),
+  );
+}
+
+/**
+ * One entry per requested tag, in request order, saying whether one of the assets or one of their
+ * complete files carries it. Unknown tags are left out.
+ */
+function matchedTagsOver(tags: InMemoryTags, files: InMemoryFiles, assetIds: string[], names: string[]): MatchedTag[] {
+  const owners = new Set(assetIds);
+  const fileIds = new Set(assetIds.flatMap((id) => completeFilesOf(files, id).map((f) => f.id)));
+  return [...new Set(names)].flatMap((name) => {
+    const known = tags.tags.get(name);
+    if (known === undefined) return [];
+    return [
+      {
+        name,
+        displayName: known.displayName,
+        onAsset: tags.assetAssignments.some((t) => owners.has(t.assetId) && t.name === name),
+        onFiles: tags.fileAssignments.some((t) => fileIds.has(t.fileId) && t.name === name),
+      },
+    ];
+  });
+}
+
 class InMemoryProjects implements ProjectRepository {
   readonly rows = new Map<string, Project>();
 
-  constructor(private readonly links: AssignmentRows) {}
+  constructor(
+    private readonly links: AssignmentRows,
+    private readonly files: InMemoryFiles,
+    private readonly tags: InMemoryTags,
+  ) {}
 
   async insert(project: Project): Promise<void> {
     this.rows.set(project.id, project);
@@ -670,12 +710,30 @@ class InMemoryProjects implements ProjectRepository {
     return next;
   }
 
-  async list(q: Page): Promise<ProjectList> {
-    const sorted = [...this.rows.values()].sort(byNameThenId);
-    const items = sorted.slice(q.offset, q.offset + q.limit).map((p) => ({
-      ...p,
-      assetCount: [...this.links.values()].filter((l) => l.projectId === p.id).length,
-    }));
+  private memberIds(projectId: string): string[] {
+    return [...this.links.values()].filter((l) => l.projectId === projectId).map((l) => l.assetId);
+  }
+
+  async list(q: ProjectQuery): Promise<ProjectList> {
+    const text = q.query === undefined ? undefined : foldSearchWord(q.query);
+    const names = q.tagNames ?? [];
+    /** The members that carry every requested tag (all members without tags). */
+    const matchingMembers = (projectId: string) =>
+      this.memberIds(projectId).filter((id) => carriesTags(this.tags, this.files, id, names));
+    const sorted = [...this.rows.values()]
+      .filter((p) => q.status === undefined || p.status === q.status)
+      .filter((p) => text === undefined || [p.name, p.description].some((t) => foldSearchWord(t).includes(text)))
+      .filter((p) => names.length === 0 || matchingMembers(p.id).length > 0)
+      .sort(byNameThenId);
+    const items = sorted.slice(q.offset, q.offset + q.limit).map((p) => {
+      const members = this.memberIds(p.id);
+      return {
+        ...p,
+        assetCount: members.length,
+        imageCount: members.flatMap((id) => completeFilesOf(this.files, id)).filter((f) => f.kind === 'image').length,
+        ...(names.length > 0 && { matchedTags: matchedTagsOver(this.tags, this.files, matchingMembers(p.id), names) }),
+      };
+    });
     return { items, total: sorted.length };
   }
 }
@@ -742,18 +800,7 @@ class InMemoryAssets implements AssetRepository {
   }
 
   private completeFiles(assetId: string): FileRecord[] {
-    return [...this.files.records.values()].filter((f) => f.assetId === assetId && f.status === 'complete');
-  }
-
-  /** Each tag must be on the asset or on one of its complete files; different tags may have different owners. */
-  private hasTags(assetId: string, names: string[]): boolean {
-    if (names.length === 0) return true;
-    const fileIds = new Set(this.completeFiles(assetId).map((f) => f.id));
-    return names.every(
-      (name) =>
-        this.tags.assetAssignments.some((a) => a.assetId === assetId && a.name === name) ||
-        this.tags.fileAssignments.some((a) => fileIds.has(a.fileId) && a.name === name),
-    );
+    return completeFilesOf(this.files, assetId);
   }
 
   /** Folded word tokens per searchable field: name, description, tags and complete file names. */
@@ -776,7 +823,7 @@ class InMemoryAssets implements AssetRepository {
       .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
       .filter((a) => q.status === undefined || a.status === q.status)
       .filter((a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })))
-      .filter((a) => this.hasTags(a.id, q.tagNames ?? []))
+      .filter((a) => carriesTags(this.tags, this.files, a.id, q.tagNames ?? []))
       .filter((a) => q.fileRole === undefined || this.completeFiles(a.id).some((f) => f.role === q.fileRole))
       .filter((a) => q.fileKind === undefined || this.completeFiles(a.id).some((f) => f.kind === q.fileKind))
       .filter((a) => words.every((w) => this.searchFields(a).some((tokens) => startsWithToken(tokens, w))))
@@ -791,27 +838,10 @@ class InMemoryAssets implements AssetRepository {
         coverFileId,
         tags: this.tags.forAsset(a.id),
         coverTags: coverFileId === null ? [] : this.tags.forFile(coverFileId),
-        ...(q.tagNames !== undefined && q.tagNames.length > 0 && { matchedTags: this.matchedTags(a.id, q.tagNames) }),
+        ...(q.tagNames !== undefined && q.tagNames.length > 0 && { matchedTags: matchedTagsOver(this.tags, this.files, [a.id], q.tagNames) }),
       };
     });
     return { items, total: matching.length };
-  }
-
-  /** One entry per requested tag, in request order, saying whether the asset or one of its complete files carries it. */
-  private matchedTags(assetId: string, names: string[]): MatchedTag[] {
-    const fileIds = new Set(this.completeFiles(assetId).map((f) => f.id));
-    return [...new Set(names)].flatMap((name) => {
-      const known = this.tags.tags.get(name);
-      if (known === undefined) return [];
-      return [
-        {
-          name,
-          displayName: known.displayName,
-          onAsset: this.tags.assetAssignments.some((t) => t.assetId === assetId && t.name === name),
-          onFiles: this.tags.fileAssignments.some((t) => fileIds.has(t.fileId) && t.name === name),
-        },
-      ];
-    });
   }
 }
 
@@ -911,7 +941,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
-  readonly projects = new InMemoryProjects(this.links);
+  readonly projects = new InMemoryProjects(this.links, this.files, this.tags);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
   readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);

@@ -83,7 +83,11 @@ export const ProjectSchema = z.object({
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
-export const ProjectSummarySchema = ProjectSchema.extend({ assetCount: count });
+export const ProjectSummarySchema = ProjectSchema.extend({
+  assetCount: count,
+  imageCount: count, // complete image files over all member assets
+  matchedTags: z.array(MatchedTagSchema).optional(), // one per requested filter tag, over the members that carry all of them; only when the list filtered by tags
+});
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
 
 export const AssetSchema = z.object({

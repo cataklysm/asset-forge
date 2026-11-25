@@ -124,7 +124,11 @@ export const ipcContract = {
     response: z.array(AssetTypeSchema),
   },
   'projects:list': {
-    request: PageRequestSchema,
+    request: PageRequestSchema.extend({
+      query: z.string().max(200).optional(),
+      status: ProjectStatusSchema.optional(),
+      tagNames: z.array(z.string().max(200)).max(10).optional(),
+    }),
     response: ProjectListSchema,
   },
   'projects:get': {

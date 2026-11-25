@@ -11,15 +11,22 @@ export const outerAssetId = qualified(asset, asset.id);
 const hasCompleteFile = (predicate: SQL): SQL =>
   sql`exists (select 1 from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${predicate})`;
 
+/** The asset `assetId` (an expression such as `outerAssetId`) carries the tag itself. */
+export const hasAssetTag = (assetId: SQL, tagId: string): SQL =>
+  sql`exists (select 1 from ${assetTag} where ${qualified(assetTag, assetTag.assetId)} = ${assetId} and ${qualified(assetTag, assetTag.tagId)} = ${tagId})`;
+
 /**
- * The outer asset carries the tag itself or through one of its complete files. `cross join` keeps
- * `file` (keyed on the asset) as the outer loop; otherwise SQLite drives from `file_tag` by tag id
- * and reads every file carrying the tag for each candidate asset.
+ * One of the complete files of the asset `assetId` carries the tag. `cross join` keeps `file`
+ * (keyed on the asset) as the outer loop; otherwise SQLite drives from `file_tag` by tag id and
+ * reads every file carrying the tag for each candidate asset.
  */
-const carriesTag = (tagId: string): SQL =>
-  sql`(exists (select 1 from ${assetTag} where ${qualified(assetTag, assetTag.assetId)} = ${outerAssetId} and ${qualified(assetTag, assetTag.tagId)} = ${tagId})
-    or exists (select 1 from ${file} cross join ${fileTag} on ${qualified(fileTag, fileTag.fileId)} = ${qualified(file, file.id)}
-      where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${qualified(fileTag, fileTag.tagId)} = ${tagId}))`;
+export const hasFileTag = (assetId: SQL, tagId: string): SQL =>
+  sql`exists (select 1 from ${file} cross join ${fileTag} on ${qualified(fileTag, fileTag.fileId)} = ${qualified(file, file.id)}
+      where ${qualified(file, file.assetId)} = ${assetId} and ${qualified(file, file.status)} = 'complete' and ${qualified(fileTag, fileTag.tagId)} = ${tagId})`;
+
+/** The asset `assetId` carries the tag itself or through one of its complete files. */
+export const carriesTag = (assetId: SQL, tagId: string): SQL =>
+  sql`(${hasAssetTag(assetId, tagId)} or ${hasFileTag(assetId, tagId)})`;
 
 /**
  * The filters of the asset list except the words, against the outer `asset` row, with every column
@@ -44,7 +51,7 @@ export function assetFilter(
   if (names.length > 0) {
     const tagIds = tx.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
     if (tagIds.length < names.length) return null;
-    conditions.push(...tagIds.map(({ id }) => carriesTag(id)));
+    conditions.push(...tagIds.map(({ id }) => carriesTag(outerAssetId, id)));
   }
   return { where: and(...conditions) };
 }

@@ -19,6 +19,7 @@ import {
 import { fileListSql } from '../src/file-repository.js';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 import { assetTagsSql, matchedTagsSql } from '../src/list-tags.js';
+import { projectListSql, projectMatchedTagsSql } from '../src/project-repository.js';
 import { searchStatements } from '../src/search-index.js';
 import { registerSqlFunctions } from '../src/sql-functions.js';
 
@@ -27,6 +28,9 @@ const TAG_COUNT = 200;
 /** Tags `0 .. ASSET_TAG_COUNT - 1` go on assets, the rest only on files. */
 const ASSET_TAG_COUNT = 150;
 const PROJECT_COUNT = 5;
+/** Projects `uuid(6, p)` with the disjoint members `uuid(3, p * MEMBERS_PER_PROJECT + m)`, for the project list. */
+const LARGE_PROJECT_COUNT = 200;
+const MEMBERS_PER_PROJECT = 50;
 const INBOX_FILE_COUNT = 2_000;
 
 const TS = '2026-01-01T00:00:00.000Z';
@@ -57,7 +61,7 @@ const KEY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   file_tag: ['file_id'],
   ft: ['file_id'],
   t: ['id'],
-  project_asset: ['asset_id'],
+  project_asset: ['asset_id', 'project_id'],
   asset_workflow: ['asset_id'],
 };
 const INDEXED_TABLES = Object.keys(KEY_COLUMNS);
@@ -110,6 +114,8 @@ let orm: BetterSQLite3Database;
 let typeIds: string[];
 const seeded: SeededAsset[] = [];
 const seededInbox: SeededInboxFile[] = [];
+/** Member assets by project id, over the small and the large projects. */
+const seededMembers = new Map<string, SeededAsset[]>();
 
 /** Seeds the workspace with prepared statements in one transaction. */
 function seed(): void {
@@ -173,6 +179,14 @@ function seed(): void {
       }
       if (a.projectId !== null) insertProjectAsset.run(a.projectId, a.id, TS, TS);
       seeded.push(a);
+    }
+    for (const id of projectIds) seededMembers.set(id, seeded.filter((a) => a.projectId === id));
+    for (let p = 0; p < LARGE_PROJECT_COUNT; p++) {
+      const id = uuid(6, p);
+      insertProject.run(id, `Large project ${String(p).padStart(3, '0')}`, TS, TS);
+      const members = seeded.slice(p * MEMBERS_PER_PROJECT, (p + 1) * MEMBERS_PER_PROJECT);
+      for (const a of members) insertProjectAsset.run(id, a.id, TS, TS);
+      seededMembers.set(id, members);
     }
     // Inbox files: no asset, two kinds, one file-only tag each, distinct import times.
     for (let i = 0; i < INBOX_FILE_COUNT; i++) {
@@ -286,7 +300,6 @@ describe('search scale', () => {
       sql`select 1 from file where status = 'complete'`,
       sql`select 1 from file_tag where tag_id = 'x'`,
       sql`select 1 from asset_tag where tag_id = 'x'`,
-      sql`select 1 from project_asset where project_id = 'x'`,
     ];
     for (const statement of notKeyed) {
       const lines = plan(statement);
@@ -435,5 +448,81 @@ describe('file list plans', () => {
     // The unfiltered, query, tag and kind cases select real subsets of the inbox.
     expect(totals[0]).toBe(INBOX_FILE_COUNT);
     expect([totals[1], totals[2], totals[4]].every((n) => n! > 0 && n! < INBOX_FILE_COUNT)).toBe(true);
+  });
+});
+
+describe('project list plans', () => {
+  /** A member of a large project with an asset tag and a file-only tag on a complete file. */
+  const tagged = () => seeded.find((a) => a.files.some((f) => f.complete))!;
+  const seededTag = () => tagLabel(tagged().tags[0]!);
+  const otherTag = () => tagLabel(tagged().files.find((f) => f.complete)!.tag);
+  const carries = (a: SeededAsset, name: string) =>
+    a.tags.map(tagLabel).includes(name) || a.files.some((f) => f.complete && tagLabel(f.tag) === name);
+
+  test('projects:list with tags reads project_asset, asset_tag, file and file_tag only by key', () => {
+    for (const q of [{ tagNames: [seededTag(), otherTag()] }, { query: 'large 01', status: 'active' as const, tagNames: [seededTag()] }, {}]) {
+      const statements = projectListSql(orm, { limit: 60, offset: 0, ...q });
+      expect(statements).not.toBeNull();
+      for (const [name, statement] of Object.entries(statements!)) {
+        const lines = plan(statement);
+        console.info(`plan of the project list ${name} for ${JSON.stringify(q)}:\n  ${lines.join('\n  ')}`);
+        expect({ name, q, violations: violations(lines.filter((l) => !/^SCAN project\b/.test(l))) }).toEqual({
+          name,
+          q,
+          violations: [],
+        });
+        if (name === 'page') expect(lines).toContain('SEARCH file USING INDEX file_asset_id_kind_idx (asset_id=? AND kind=?)');
+      }
+    }
+    const pageIds = Array.from({ length: 60 }, (_, p) => uuid(6, p));
+    const lines = plan(projectMatchedTagsSql(pageIds, [uuid(2, 0), uuid(2, ASSET_TAG_COUNT)]));
+    console.info(`plan of projectMatchedTagsSql for 60 projects:\n  ${lines.join('\n  ')}`);
+    expect(violations(lines)).toEqual([]);
+  });
+
+  test('matched tags of a project page take the same number of statements for 1 and 60 projects', async () => {
+    const spy = vi.spyOn(Database.prototype, 'prepare');
+    try {
+      spy.mockClear();
+      const one = await db.projects.list({ limit: 1, offset: 0, tagNames: [seededTag()] });
+      const oneCalls = spy.mock.calls.length;
+      spy.mockClear();
+      const sixty = await db.projects.list({ limit: 60, offset: 0, tagNames: [seededTag()] });
+      const sixtyCalls = spy.mock.calls.length;
+      expect(one.items).toHaveLength(1);
+      expect(sixty.items).toHaveLength(60);
+      expect(sixty.items.every((p) => p.matchedTags?.length === 1)).toBe(true);
+      expect(oneCalls).toBeGreaterThan(0);
+      expect(sixtyCalls).toBe(oneCalls);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('tag totals and matched tags over 205 projects match a brute-force evaluation', async () => {
+    const names = [seededTag(), otherTag()];
+    const expected = [...seededMembers.entries()]
+      .map(([id, members]) => ({ id, members: members.filter((a) => names.every((n) => carries(a, n))) }))
+      .filter((p) => p.members.length > 0);
+    expect(expected.length).toBeGreaterThan(0);
+    const result = await db.projects.list({ limit: 200, offset: 0, tagNames: names });
+    expect(result.total).toBe(expected.length);
+    expect(result.items.map((p) => p.id).sort()).toEqual(expected.map((p) => p.id).sort());
+    for (const p of result.items) {
+      const members = expected.find((e) => e.id === p.id)!.members;
+      expect(p.matchedTags).toEqual(
+        names.map((name) => ({
+          name,
+          displayName: name,
+          onAsset: members.some((a) => a.tags.map(tagLabel).includes(name)),
+          onFiles: members.some((a) => a.files.some((f) => f.complete && tagLabel(f.tag) === name)),
+        })),
+      );
+      expect(p.imageCount).toBe(
+        seededMembers.get(p.id)!.flatMap((a) => a.files).filter((f) => f.complete && f.kind === 'image').length,
+      );
+    }
+    const single = await db.projects.list({ limit: 1, offset: 0, tagNames: [seededTag()] });
+    expect(single.total).toBe([...seededMembers.values()].filter((ms) => ms.some((a) => carries(a, seededTag()))).length);
   });
 });

@@ -688,3 +688,166 @@ describe('file repository filters', () => {
     await expect(names({ scope: all, kind: 'model' })).resolves.toEqual(['inbox.glb', 'mesh.glb']);
   });
 });
+
+describe('project repository filters', () => {
+  let nextId = 4000;
+  const newId = () => uuid(nextId++);
+
+  const setup = async () => {
+    await db.storages.ensurePrimary({ id: uuid(900), createdAt: TS });
+    await db.assetTypes.insertMissing(typeRows(100));
+    const typeId = uuid(100);
+    const addProject = async (name: string, description = '', status: Project['status'] = 'active') => {
+      const p = { ...project(0, name), id: newId(), description, status };
+      await db.projects.insert(p);
+      return p.id;
+    };
+    const member = async (projectId: string, name: string) => {
+      const id = newId();
+      await db.assets.insert({ ...asset(0, name, typeId), id });
+      await db.projectAssets.insert({
+        projectId,
+        assetId: id,
+        priority: 'normal',
+        intendedUse: '',
+        approvalStatus: 'pending',
+        notes: '',
+        assignedAt: TS,
+        updatedAt: TS,
+      });
+      return id;
+    };
+    const addFile = async (assetId: string, kind: FileKind, status: 'complete' | 'failed' = 'complete') => {
+      const id = newId();
+      const relativePath = `assets/${assetId}/${id}.bin`;
+      await db.files.insertPending({
+        id,
+        storageId: uuid(900),
+        originalName: `${id}.bin`,
+        relativePath,
+        mimeType: 'application/octet-stream',
+        importedAt: TS,
+        kind,
+      });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      else await db.files.markFailed(id, 'x');
+      await db.files.setPlacement(id, { relativePath, assetId, role: 'reference' });
+      return id;
+    };
+    const tagAsset = (assetId: string, name: string) =>
+      db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    const tagFile = (fileId: string, name: string) =>
+      db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    type Q = Partial<Parameters<WorkspaceDatabase['projects']['list']>[0]>;
+    const list = async (q: Q) => (await db.projects.list({ limit: 60, offset: 0, ...q })).items;
+    const names = async (q: Q) => (await list(q)).map((p) => p.name);
+    return { addProject, member, addFile, tagAsset, tagFile, list, names };
+  };
+
+  test('query matches a folded substring of name or description', async () => {
+    const { addProject, names } = await setup();
+    await addProject('Forest', 'Älter Wald');
+    await addProject('Desert', 'sand');
+    await addProject('Kältere Stadt');
+    await expect(names({ query: 'alter' })).resolves.toEqual(['Forest', 'Kältere Stadt']);
+    await expect(names({ query: 'WALD' })).resolves.toEqual(['Forest']);
+    await expect(names({ query: 'ter wa' })).resolves.toEqual(['Forest']);
+    await expect(names({ query: 'ocean' })).resolves.toEqual([]);
+    await expect(db.projects.list({ limit: 1, offset: 1, query: 'alter' })).resolves.toMatchObject({
+      items: [{ name: 'Kältere Stadt' }],
+      total: 2,
+    });
+  });
+
+  test('status filters', async () => {
+    const { addProject, names } = await setup();
+    await addProject('A');
+    await addProject('B', '', 'on_hold');
+    await expect(names({ status: 'on_hold' })).resolves.toEqual(['B']);
+    await expect(names({ status: 'active' })).resolves.toEqual(['A']);
+    await expect(names({ status: 'archived' })).resolves.toEqual([]);
+  });
+
+  test('a project matches only when one member asset carries all tags', async () => {
+    const { addProject, member, addFile, tagAsset, tagFile, names } = await setup();
+    const p1 = await addProject('P1');
+    const x = await member(p1, 'X');
+    await tagAsset(x, 'oak');
+    await tagFile(await addFile(x, 'image'), 'bark');
+    await tagAsset(await member(p1, 'W'), 'moss');
+    const p2 = await addProject('P2');
+    await tagAsset(await member(p2, 'Y'), 'oak');
+    await tagAsset(await member(p2, 'Z'), 'bark');
+    const p3 = await addProject('P3');
+    const v = await member(p3, 'V');
+    await tagAsset(v, 'oak');
+    await tagFile(await addFile(v, 'image', 'failed'), 'bark');
+
+    const page = await db.projects.list({ limit: 60, offset: 0, tagNames: ['oak', 'bark'] });
+    expect(page.items.map((p) => p.name)).toEqual(['P1']);
+    expect(page.total).toBe(1);
+    expect(page.items[0]!.matchedTags).toEqual([
+      { name: 'oak', displayName: 'oak', onAsset: true, onFiles: false },
+      { name: 'bark', displayName: 'bark', onAsset: false, onFiles: true },
+    ]);
+    await expect(names({ tagNames: ['oak'] })).resolves.toEqual(['P1', 'P2', 'P3']);
+  });
+
+  test('matchedTags aggregate only over the member assets that carry all tags', async () => {
+    const { addProject, member, addFile, tagAsset, tagFile, list } = await setup();
+    const p = await addProject('P');
+    await tagAsset(await member(p, 'A'), 'oak');
+    const b = await member(p, 'B');
+    await tagFile(await addFile(b, 'image'), 'oak');
+    await tagFile(await addFile(b, 'image'), 'bark');
+    expect((await list({ tagNames: ['oak'] }))[0]!.matchedTags).toEqual([
+      { name: 'oak', displayName: 'oak', onAsset: true, onFiles: true },
+    ]);
+    // Only B carries both tags; A's asset tag does not count.
+    expect((await list({ tagNames: ['oak', 'bark'] }))[0]!.matchedTags).toEqual([
+      { name: 'oak', displayName: 'oak', onAsset: false, onFiles: true },
+      { name: 'bark', displayName: 'bark', onAsset: false, onFiles: true },
+    ]);
+  });
+
+  test('an unknown tag yields an empty page', async () => {
+    const { addProject, member, tagAsset } = await setup();
+    await tagAsset(await member(await addProject('P'), 'A'), 'oak');
+    await expect(db.projects.list({ limit: 10, offset: 0, tagNames: ['oak', 'nope'] })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  test('imageCount counts complete image files over member assets', async () => {
+    const { addProject, member, addFile, list } = await setup();
+    const p = await addProject('P');
+    const a = await member(p, 'A');
+    await addFile(a, 'image');
+    await addFile(a, 'image', 'failed');
+    await addFile(a, 'model');
+    await addFile(await member(p, 'B'), 'image');
+    await addProject('Empty');
+    expect((await list({})).map((x) => [x.name, x.assetCount, x.imageCount])).toEqual([
+      ['Empty', 0, 0],
+      ['P', 2, 2],
+    ]);
+  });
+
+  test('without filters matchedTags is absent', async () => {
+    const { addProject, member, tagAsset, list } = await setup();
+    await tagAsset(await member(await addProject('B'), 'A'), 'oak');
+    await addProject('A');
+    const items = await list({ limit: 200 });
+    expect(items.map((p) => p.name)).toEqual(['A', 'B']);
+    expect(items.every((p) => !('matchedTags' in p))).toBe(true);
+  });
+
+  test('filters combine', async () => {
+    const { addProject, member, tagAsset, names } = await setup();
+    await tagAsset(await member(await addProject('Oak forest'), 'A'), 'oak');
+    await tagAsset(await member(await addProject('Oak grove', '', 'archived'), 'B'), 'oak');
+    await addProject('Oak hill');
+    await expect(names({ query: 'oak', status: 'active', tagNames: ['oak'] })).resolves.toEqual(['Oak forest']);
+  });
+});

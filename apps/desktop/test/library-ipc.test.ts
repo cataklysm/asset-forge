@@ -124,6 +124,41 @@ describe('library IPC', () => {
     });
   });
 
+  it('projects:list rejects 11 tag names and an unknown status', async () => {
+    await openWorkspace();
+    const invalid = { ok: false, error: { code: 'invalid_request' } };
+    const tagNames = Array.from({ length: 11 }, (_, i) => `t${i}`);
+    expect(await call('projects:list', { ...page, tagNames })).toMatchObject(invalid);
+    expect(await call('projects:list', { ...page, status: 'paused' })).toMatchObject(invalid);
+  });
+
+  it('projects:list returns imageCount and filters by query, status and tags', async () => {
+    await openWorkspace();
+    const created = await ok('projects:create', { name: 'Forest', description: 'Älter Wald' });
+    await ok('projects:create', { name: 'Desert' });
+
+    const all = await ok('projects:list', { limit: 200, offset: 0 });
+    expect(ipcContract['projects:list'].response.safeParse(all).success).toBe(true);
+    expect(all.items).toMatchObject([
+      { name: 'Desert', assetCount: 0, imageCount: 0 },
+      { name: 'Forest', assetCount: 0, imageCount: 0 },
+    ]);
+    expect(all.items[0]).not.toHaveProperty('matchedTags');
+
+    const byQuery = await ok('projects:list', { ...page, query: 'alter', status: 'active' });
+    expect(byQuery.items.map((p: { id: string }) => p.id)).toEqual([created.id]);
+
+    const types = await ok<{ id: string }[]>('assetTypes:list', {});
+    const assetId = (await ok('assets:create', { name: 'Oak', typeId: types[0]!.id })).id;
+    await ok('assignments:assign', { projectId: created.id, assetId });
+    await ok('assets:addTag', { assetId, name: 'Oak' });
+    const byTag = await ok('projects:list', { ...page, tagNames: ['OAK'] });
+    expect(ipcContract['projects:list'].response.safeParse(byTag).success).toBe(true);
+    expect(byTag.items).toMatchObject([
+      { id: created.id, assetCount: 1, matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }] },
+    ]);
+  });
+
   describe('tags', () => {
     async function assetWithFile() {
       await openWorkspace();
