@@ -15,7 +15,9 @@ import {
   WorkspaceMismatchError,
   WorkspaceNotFoundError,
 } from './errors.js';
+import { importFile, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
+import { recoverIncompleteImports } from './recover-imports.js';
 import type { Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
 
 interface OpenWorkspace {
@@ -99,9 +101,17 @@ export class WorkspaceManager {
   }
 
   async importFiles(sourcePaths: string[]): Promise<ImportResult[]> {
-    this.requireOpen();
-    void sourcePaths;
-    throw new Error('importFiles is not implemented yet');
+    const { storage, database } = this.requireOpen();
+    const ctx: ImportContext = {
+      storage,
+      files: database.files,
+      sources: this.host.sources,
+      newId: () => this.host.newId(),
+      now: () => this.host.now(),
+    };
+    const results: ImportResult[] = [];
+    for (const sourcePath of sourcePaths) results.push(await importFile(ctx, sourcePath));
+    return results;
   }
 
   listFiles(q: { limit: number; offset: number }): Promise<FileList> {
@@ -138,9 +148,7 @@ export class WorkspaceManager {
     return parsed.data;
   }
 
-  /** Placeholder for startup import recovery; filled in by Task 7. */
   private async recoverImports(storage: Storage, database: WorkspaceDatabase): Promise<void> {
-    void storage;
-    void database;
+    await recoverIncompleteImports({ storage, files: database.files });
   }
 }

@@ -19,6 +19,8 @@ export class InMemoryStorage implements Storage {
   readonly files = new Map<string, Buffer>();
   readonly dirs = new Set<string>();
   reachable = true;
+  /** When set, `hashFile` returns this value instead of the real hash. */
+  hashOverride: string | null = null;
   private readonly failures = new Map<keyof Storage, Error>();
 
   /** The next call to `method` rejects with `error` (once). */
@@ -78,7 +80,7 @@ export class InMemoryStorage implements Storage {
     await this.guard('hashFile');
     const data = this.files.get(relPath);
     if (!data) throw new Error(`File not found: ${relPath}`);
-    return sha256Of(data);
+    return this.hashOverride ?? sha256Of(data);
   }
 
   async move(from: string, to: string): Promise<void> {
@@ -221,9 +223,12 @@ export class InMemoryRegistry implements WorkspaceRegistry {
 
 /** Maps absolute source paths to file contents. */
 export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles {
+  /** Paths that exist but cannot be read (e.g. directories). */
+  readonly unreadable = new Set<string>();
+
   async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
     const data = this.get(absolutePath);
-    if (!data) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
+    if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
     return { name, stream: Readable.from([data]) };
   }
