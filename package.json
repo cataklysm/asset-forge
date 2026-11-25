@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.5.2",
   "scripts": {
+    "dev": "pnpm --filter @assetforge/desktop dev",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },

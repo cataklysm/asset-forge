@@ -3,7 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./out/main/index.js",
   "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
     "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit"
   },
@@ -11,13 +14,22 @@
     "@assetforge/contracts": "workspace:*",
     "@assetforge/core": "workspace:*",
     "@assetforge/persistence": "workspace:*",
-    "@assetforge/storage": "workspace:*"
+    "@assetforge/storage": "workspace:*",
+    "better-sqlite3": "^13.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
     "cross-env": "^10.1.0",
     "electron": "^45.4.1",
+    "electron-vite": "^6.0.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "vitest": "^5.1.1"
   }
 }
