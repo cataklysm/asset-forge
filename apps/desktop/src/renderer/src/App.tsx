@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from './api';
-import { FilesScreen } from './screens/FilesScreen';
+import { WorkspaceShell } from './components/WorkspaceShell';
 import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
 export function App() {
@@ -33,5 +33,5 @@ export function App() {
   }
   if (current === undefined) return <p className="p-6 text-slate-600 dark:text-slate-400">Loading…</p>;
   if (current === null) return <WorkspaceScreen onOpened={setCurrent} />;
-  return <FilesScreen workspace={current} onClosed={() => setCurrent(null)} />;
+  return <WorkspaceShell workspace={current} onClosed={() => setCurrent(null)} />;
 }

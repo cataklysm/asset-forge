@@ -26,6 +26,7 @@ export async function call<C extends IpcChannel>(
 }
 
 const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
+  not_found: 'This item no longer exists.',
   directory_not_empty: 'The folder is not empty. Choose an empty folder for a new workspace.',
   workspace_not_found: 'No workspace was found in this folder.',
   storage_unreachable:
