@@ -69,7 +69,13 @@ export function FilesScreen({ workspace, onClosed }: Props) {
           <h1 className="text-2xl font-semibold">{workspace.name}</h1>
           <p className="truncate text-sm text-slate-600">{workspace.rootPath}</p>
         </div>
-        <button type="button" className={BUTTON} onClick={() => void closeWorkspace()}>
+        {/* Closing mid-batch would fail the remaining files and leave a pending row. */}
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={importing}
+          onClick={() => void closeWorkspace()}
+        >
           Close workspace
         </button>
       </header>
