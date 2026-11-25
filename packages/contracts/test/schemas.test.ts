@@ -48,8 +48,14 @@ describe('FileRecordSchema', () => {
       status: 'pending',
       error: null,
       importedAt: now,
+      previewable: true,
+      openable: true,
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);
+    const { previewable: _p, ...withoutPreviewable } = record;
+    const { openable: _o, ...withoutOpenable } = record;
+    expect(() => FileRecordSchema.parse(withoutPreviewable)).toThrow();
+    expect(() => FileRecordSchema.parse(withoutOpenable)).toThrow();
   });
 });
 

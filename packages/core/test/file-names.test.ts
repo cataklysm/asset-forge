@@ -108,3 +108,7 @@ describe('workspaceFolderName', () => {
     expect(name).toBe('a'.repeat(99));
   });
 });
+
+describe('avif', () => {
+  it('maps .avif to image/avif', () => expect(mimeFromFileName('a.AVIF')).toBe('image/avif'));
+});

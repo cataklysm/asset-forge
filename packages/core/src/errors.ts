@@ -34,3 +34,4 @@ export class StorageAccessDeniedError extends define('storage_access_denied') {}
 export class StorageFullError extends define('storage_full') {}
 export class NotFoundError extends define('not_found') {}
 export class InvalidOperationError extends define('invalid_operation') {}
+export class ValidationFailedError extends define('validation_failed') {}

@@ -289,6 +289,22 @@ describe('file placement and moves', () => {
     ...patch,
   });
 
+  test('records carry previewable and openable flags', async () => {
+    await seed();
+    await db.files.insertPending({
+      id: fileId(4),
+      storageId: STORAGE,
+      originalName: 'setup.exe',
+      relativePath: 'inbox/f4_setup.exe',
+      mimeType: 'application/octet-stream',
+      importedAt: '2026-01-04T00:00:00.000Z',
+    });
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ previewable: true, openable: true });
+    await expect(db.files.get(fileId(4))).resolves.toMatchObject({ previewable: false, openable: false });
+    const listed = await db.files.list({ limit: 10, offset: 0, scope: { kind: 'inbox' } });
+    expect(listed.items.find((f) => f.id === fileId(4))?.openable).toBe(false);
+  });
+
   test('get returns the record or null', async () => {
     await seed();
     await expect(db.files.get(fileId(1))).resolves.toMatchObject({ id: fileId(1), relativePath: 'inbox/f1.png' });

@@ -79,6 +79,8 @@ describe('workspace database', () => {
       sha256: null,
       status: 'pending',
       error: null,
+      previewable: true,
+      openable: true,
     });
     expect(() => FileRecordSchema.parse(list.items[0])).not.toThrow();
   });

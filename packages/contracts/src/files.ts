@@ -20,6 +20,8 @@ export const FileRecordSchema = z.object({
   status: ImportStatusSchema,
   error: z.string().nullable(),
   importedAt: z.iso.datetime(),
+  previewable: z.boolean(),
+  openable: z.boolean(),
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 

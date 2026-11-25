@@ -22,6 +22,7 @@ import type {
   WorkflowTemplate,
   WorkspaceSummary,
 } from '@assetforge/contracts';
+import { isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { InvalidOperationError, NotFoundError, SourceNotReadableError } from '../src/errors.js';
 import type {
@@ -220,6 +221,8 @@ class InMemoryFiles implements FileRepository {
       status: 'pending',
       error: null,
       importedAt: r.importedAt,
+      previewable: isPreviewable(r.mimeType),
+      openable: isOpenable(r.relativePath),
     });
   }
 
@@ -246,7 +249,7 @@ class InMemoryFiles implements FileRepository {
   }
 
   async setPlacement(id: string, placement: FilePlacement): Promise<FileRecord> {
-    const next = { ...this.require(id), ...placement };
+    const next = { ...this.require(id), ...placement, openable: isOpenable(placement.relativePath) };
     this.records.set(id, next);
     return next;
   }

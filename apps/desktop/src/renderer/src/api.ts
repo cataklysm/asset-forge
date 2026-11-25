@@ -31,6 +31,7 @@ const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   workspace_not_found: 'No workspace was found in this folder.',
   storage_unreachable:
     'The folder cannot be reached. Check that the drive or network share is available.',
+  validation_failed: 'This action is not possible for this file.',
   unsupported_format_version: 'This workspace was created by a newer version of AssetForge.',
   workspace_mismatch: 'The local database does not belong to this workspace.',
   workspace_duplicate:

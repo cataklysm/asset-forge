@@ -4,6 +4,7 @@ export * from './assignments.js';
 export * from './assets.js';
 export * from './errors.js';
 export * from './file-names.js';
+export * from './media-types.js';
 export * from './import-file.js';
 export * from './paths.js';
 export * from './projects.js';

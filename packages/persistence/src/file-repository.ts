@@ -1,5 +1,5 @@
 import type { FileList, FileRecord, FileScope, ImportStatus } from '@assetforge/contracts';
-import { NotFoundError, type FileRepository } from '@assetforge/core';
+import { NotFoundError, isOpenable, isPreviewable, type FileRepository } from '@assetforge/core';
 import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { file } from './schema.js';
@@ -18,6 +18,8 @@ export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   status: row.status,
   error: row.error,
   importedAt: row.importedAt,
+  previewable: isPreviewable(row.mimeType),
+  openable: isOpenable(row.relativePath),
 });
 
 const scopeMatches = (scope: FileScope) => {

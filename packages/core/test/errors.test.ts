@@ -16,6 +16,10 @@ describe('ErrorCodeSchema', () => {
     }
   });
 
+  it('ValidationFailedError carries validation_failed', () => {
+    expect(new core.ValidationFailedError('x').code).toBe('validation_failed');
+  });
+
   it('defines not_found and invalid_operation errors', () => {
     expect(new core.NotFoundError('x').code).toBe('not_found');
     expect(new core.InvalidOperationError('x').code).toBe('invalid_operation');

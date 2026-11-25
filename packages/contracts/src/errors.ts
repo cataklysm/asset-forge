@@ -17,6 +17,7 @@ export const ErrorCodeSchema = z.enum([
   'storage_full',
   'not_found',
   'invalid_operation',
+  'validation_failed',
   'unknown_channel',
   'invalid_request',
   'internal_error',
