@@ -3,7 +3,7 @@ import { WorkflowStepStateSchema, type AssetWorkflow } from '@assetforge/contrac
 import { call, describeError } from '../api';
 import { useLoad } from '../hooks/useLoad';
 import { label } from '../labels';
-import { formatProgress } from '../progress';
+import { formatProgress, pickTemplate } from '../progress';
 import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
 import { CommitInput } from './CommitInput';
 
@@ -51,11 +51,15 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
   const templateItems = templates.data ?? [];
   const typeDefault =
     (types.data ?? []).find((t) => t.id === assetTypeId)?.defaultWorkflowTemplateId ?? null;
-  const effectiveTemplate = templateItems.some((t) => t.id === chosen)
-    ? chosen
-    : templateItems.some((t) => t.id === typeDefault)
-      ? (typeDefault ?? '')
-      : (templateItems[0]?.id ?? '');
+  // Until both lists have settled (success or failure) nothing is preselected or startable.
+  const ready = !templates.loading && !types.loading;
+  const effectiveTemplate = ready
+    ? pickTemplate(
+        templateItems.map((t) => t.id),
+        chosen,
+        typeDefault,
+      )
+    : '';
 
   const loadErrors = [loaded, templates, types]
     .map((l) => l.error)
@@ -147,6 +151,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
             className={INPUT}
             aria-label="Workflow template"
             value={effectiveTemplate}
+            disabled={!ready}
             onChange={(e) => setChosen(e.target.value)}
           >
             {templateItems.map((t) => (

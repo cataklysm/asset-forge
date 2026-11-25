@@ -156,7 +156,7 @@ export interface AssetWorkflowRepository {
   ): Promise<void>;
   getByAsset(assetId: string): Promise<AssetWorkflow | null>;
   getStepContext(stepId: string): Promise<StepContext | null>;
-  /** Writes exactly the given fields; `completedAt` is not derived from `state`. */
+  /** Writes exactly the given fields; `completedAt` is not derived from `state`. An unknown step id is a no-op. */
   updateStep(
     stepId: string,
     patch: { state?: WorkflowStepState; notes?: string; completedAt?: string | null; updatedAt: string },

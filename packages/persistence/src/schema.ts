@@ -63,7 +63,7 @@ export const assetType = sqliteTable('asset_type', {
   defaultWorkflowTemplateId: text('default_workflow_template_id').references(() => workflowTemplate.id),
 });
 
-export const asset =sqliteTable(
+export const asset = sqliteTable(
   'asset',
   {
     id: text('id').primaryKey(),
