@@ -93,11 +93,8 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
 
   function cleanup(): Promise<void> {
     cleaning ??= (async () => {
-      for (const directory of Object.values(DIRECTORIES)) {
-        await evictLeastRecentlyUsed(join(cacheDir, directory), limitBytes, CACHE_TARGET_RATIO).catch(
-          () => undefined,
-        );
-      }
+      // Both directories form one LRU set against the whole-cache limit.
+      await evictLeastRecentlyUsed(cacheDir, limitBytes, CACHE_TARGET_RATIO).catch(() => undefined);
     })().finally(() => {
       cleaning = undefined;
     });
@@ -154,7 +151,8 @@ async function removeIfPresent(path: string): Promise<boolean> {
 }
 
 /**
- * Walks the two-character shard directories of `dir`. Deletes temporary files older than one
+ * Walks `dir` recursively as one LRU set (the service passes the cache root, so thumbnails
+ * and previews share one budget). Deletes temporary files older than one
  * hour, then, if the remaining entries exceed `limitBytes`, deletes the least recently used
  * (oldest mtime) until the total is at most `limitBytes * targetRatio`. Temporary files never
  * count towards the total. Files that vanish during the walk are skipped.
@@ -168,18 +166,20 @@ export async function evictLeastRecentlyUsed(
   let removedFiles = 0;
   const staleBefore = Date.now() - STALE_TMP_MS;
 
-  const shards = await listOrEmpty(() => readdir(dir, { withFileTypes: true }));
-  for (const shard of shards) {
-    if (!shard.isDirectory() || shard.name.length !== 2) continue;
-    const shardPath = join(dir, shard.name);
-    for (const name of await listOrEmpty(() => readdir(shardPath))) {
-      const path = join(shardPath, name);
+  async function walk(current: string): Promise<void> {
+    for (const name of await listOrEmpty(() => readdir(current))) {
+      const path = join(current, name);
       let info;
       try {
         info = await lstat(path);
       } catch (error) {
         if (isMissing(error)) continue;
         throw error;
+      }
+      // lstat: symbolic links and junctions are neither followed nor counted.
+      if (info.isDirectory()) {
+        await walk(path);
+        continue;
       }
       if (!info.isFile()) continue;
       if (name.endsWith('.tmp')) {
@@ -189,6 +189,7 @@ export async function evictLeastRecentlyUsed(
       entries.push({ path, size: info.size, mtimeMs: info.mtimeMs });
     }
   }
+  await walk(dir);
 
   let total = entries.reduce((sum, entry) => sum + entry.size, 0);
   if (total <= limitBytes) return { removedFiles };

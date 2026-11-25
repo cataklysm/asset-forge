@@ -21,12 +21,14 @@ import { TEST_WORKER_URL } from './worker-url.js';
 
 /** Lets a test act between a directory listing and the stats that follow it. */
 const hooks = vi.hoisted(() => ({
+  beforeReaddir: undefined as ((path: string) => void) | undefined,
   afterReaddir: undefined as ((path: string, entries: unknown[]) => void) | undefined,
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const readdirWithHook = async (...args: Parameters<typeof actual.readdir>) => {
+    hooks.beforeReaddir?.(String(args[0]));
     const entries = (await actual.readdir(...args)) as unknown[];
     hooks.afterReaddir?.(String(args[0]), entries);
     return entries;
@@ -49,6 +51,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  hooks.beforeReaddir = undefined;
   hooks.afterReaddir = undefined;
   await Promise.all(services.splice(0).map((service) => service.close()));
   // No retries: after close() no worker may still hold a file handle.
@@ -253,17 +256,43 @@ describe('preview cache', () => {
     expect(left).toBe(2);
   });
 
+  it('treats thumbnails and previews as one LRU set against the limit', async () => {
+    // Ten 100-byte entries, mtimes interleaved: even ages in thumbnails, odd ages in previews.
+    // Each directory holds 500 bytes (under the 600-byte limit), together 1000 bytes.
+    const paths: string[] = [];
+    for (let age = 0; age < 10; age++) {
+      const path = join(cacheDir, age % 2 === 0 ? 'thumbnails' : 'previews', 'aa', `${age}.webp`);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, Buffer.alloc(100));
+      await utimes(path, 1_600_000_000 + age, 1_600_000_000 + age);
+      paths.push(path);
+    }
+    const s = service(fakePool(), { limitBytes: 600 });
+    await s.cleanup();
+    // Down to at most 540 bytes: the five oldest go, whichever directory they are in.
+    expect(await Promise.all(paths.map(exists))).toEqual([
+      false, false, false, false, false, true, true, true, true, true,
+    ]);
+  });
+
   it('runs cleanup after every `cleanupEvery` new entries', async () => {
     const pool = fakePool();
     const s = service(pool, { cleanupEvery: 3, limitBytes: 150 });
+    // A cleanup run starts by listing the cache root, synchronously within the triggering get.
+    let cleanupRuns = 0;
+    hooks.beforeReaddir = (path) => {
+      if (path === cacheDir) cleanupRuns++;
+    };
     const sourcePath = await source('a.png');
     const first = (await s.get({ sha256: A, sourcePath, size: 'thumb' })) as string;
-    const second = (await s.get({ sha256: B, sourcePath, size: 'thumb' })) as string;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(await exists(first)).toBe(true);
-    expect(await exists(second)).toBe(true);
+    await s.get({ sha256: B, sourcePath, size: 'thumb' });
+    expect(cleanupRuns).toBe(0);
     const third = (await s.get({ sha256: C, sourcePath, size: 'thumb' })) as string;
-    await vi.waitFor(async () => expect(await exists(first)).toBe(false));
+    expect(cleanupRuns).toBe(1);
+    // Joins the run the third entry started instead of starting a new one.
+    await s.cleanup();
+    expect(cleanupRuns).toBe(1);
+    expect(await exists(first)).toBe(false);
     expect(await exists(third)).toBe(true);
   });
 
