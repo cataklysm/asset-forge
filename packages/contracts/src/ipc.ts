@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { ErrorCodeSchema } from './errors';
 import { FileListSchema, ImportResultSchema } from './files';
+import { PageRequestSchema } from './library';
 import { WorkspaceSummarySchema } from './workspace';
 
 export const IpcErrorSchema = z.object({
-  code: z.string(),
+  code: ErrorCodeSchema,
   message: z.string(),
 });
 export type IpcError = z.infer<typeof IpcErrorSchema>;
@@ -51,10 +53,7 @@ export const ipcContract = {
     response: z.array(ImportResultSchema),
   },
   'files:list': {
-    request: z.object({
-      limit: z.number().int().min(1).max(200),
-      offset: z.number().int().min(0),
-    }),
+    request: PageRequestSchema,
     response: FileListSchema,
   },
   'dialog:pickDirectory': {

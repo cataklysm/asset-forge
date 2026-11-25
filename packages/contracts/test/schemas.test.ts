@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AssetAssignmentSchema,
+  AssetRelationViewSchema,
   FileRecordSchema,
+  IpcErrorSchema,
+  NameInputSchema,
+  PageRequestSchema,
+  ProjectMemberSchema,
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
   ipcContract,
@@ -53,5 +59,85 @@ describe('ipcContract', () => {
 
   it('rejects files:import with empty sourcePaths', () => {
     expect(ipcContract['files:import'].request.safeParse({ sourcePaths: [] }).success).toBe(false);
+  });
+});
+
+describe('NameInputSchema', () => {
+  it('trims and rejects whitespace-only names', () => {
+    expect(NameInputSchema.parse('  Gabriella ')).toBe('Gabriella');
+    expect(NameInputSchema.safeParse('   ').success).toBe(false);
+    expect(NameInputSchema.safeParse('a'.repeat(201)).success).toBe(false);
+  });
+});
+
+describe('PageRequestSchema', () => {
+  it('rejects limit 0, limit 201, a negative offset and fractions', () => {
+    expect(PageRequestSchema.safeParse({ limit: 1, offset: 0 }).success).toBe(true);
+    expect(PageRequestSchema.safeParse({ limit: 0, offset: 0 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 201, offset: 0 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 10, offset: -1 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 1.5, offset: 0 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 10, offset: 0.5 }).success).toBe(false);
+  });
+});
+
+describe('IpcErrorSchema', () => {
+  it('rejects an unknown code', () => {
+    expect(IpcErrorSchema.safeParse({ code: 'not_found', message: 'm' }).success).toBe(true);
+    expect(IpcErrorSchema.safeParse({ code: 'bogus', message: 'm' }).success).toBe(false);
+  });
+});
+
+describe('assignment and relation views', () => {
+  const asset = {
+    id: uuid,
+    name: 'A',
+    typeId: uuid,
+    description: '',
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const project = {
+    id: uuid,
+    name: 'P',
+    description: '',
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const member = {
+    projectId: uuid,
+    assetId: uuid,
+    priority: 'normal',
+    intendedUse: '',
+    approvalStatus: 'pending',
+    notes: '',
+    assignedAt: now,
+    updatedAt: now,
+    asset,
+  };
+  const relation = {
+    fromAssetId: uuid,
+    toAssetId: uuid,
+    kind: 'uses',
+    createdAt: now,
+    direction: 'outgoing',
+    other: asset,
+  };
+
+  it('ProjectMemberSchema accepts a sample and rejects an unknown priority', () => {
+    expect(ProjectMemberSchema.safeParse(member).success).toBe(true);
+    expect(ProjectMemberSchema.safeParse({ ...member, priority: 'urgent' }).success).toBe(false);
+  });
+
+  it('AssetRelationViewSchema accepts a sample and rejects an unknown kind', () => {
+    expect(AssetRelationViewSchema.safeParse(relation).success).toBe(true);
+    expect(AssetRelationViewSchema.safeParse({ ...relation, kind: 'owns' }).success).toBe(false);
+  });
+
+  it('AssetAssignmentSchema embeds the project', () => {
+    const { asset: _omit, ...base } = member;
+    expect(AssetAssignmentSchema.safeParse({ ...base, project }).success).toBe(true);
   });
 });

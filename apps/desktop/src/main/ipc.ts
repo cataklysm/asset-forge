@@ -1,4 +1,5 @@
 import {
+  type ErrorCode,
   ipcContract,
   type IpcChannel,
   type IpcResult,
@@ -95,7 +96,7 @@ export async function dispatch(
   }
 }
 
-function failure(code: string, message: string): IpcResult<never> {
+function failure(code: ErrorCode, message: string): IpcResult<never> {
   return { ok: false, error: { code, message } };
 }
 

@@ -1,9 +1,9 @@
-import type { IpcChannel, IpcRequest, IpcResponse } from '@assetforge/contracts';
+import type { ErrorCode, IpcChannel, IpcRequest, IpcResponse } from '@assetforge/contracts';
 
 export class ApiError extends Error {
-  readonly code: string;
+  readonly code: ErrorCode;
 
-  constructor(code: string, message: string) {
+  constructor(code: ErrorCode, message: string) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
@@ -25,7 +25,7 @@ export async function call<C extends IpcChannel>(
   return result.value;
 }
 
-const ERROR_MESSAGES: Record<string, string> = {
+const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   directory_not_empty: 'The folder is not empty. Choose an empty folder for a new workspace.',
   workspace_not_found: 'No workspace was found in this folder.',
   storage_unreachable:

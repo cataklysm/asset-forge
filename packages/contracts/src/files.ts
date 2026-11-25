@@ -9,7 +9,7 @@ export const FileRecordSchema = z.object({
   originalName: z.string(),
   relativePath: z.string(),
   mimeType: z.string(),
-  sizeBytes: z.number().nullable(),
+  sizeBytes: z.number().int().min(0).nullable(),
   sha256: z
     .string()
     .regex(/^[0-9a-f]{64}$/)
@@ -30,6 +30,6 @@ export type ImportResult = z.infer<typeof ImportResultSchema>;
 
 export const FileListSchema = z.object({
   items: z.array(FileRecordSchema),
-  total: z.number(),
+  total: z.number().int().min(0),
 });
 export type FileList = z.infer<typeof FileListSchema>;

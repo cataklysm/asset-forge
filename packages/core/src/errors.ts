@@ -1,14 +1,16 @@
-export class AssetForgeError extends Error {
-  readonly code: string;
+import type { ErrorCode } from '@assetforge/contracts';
 
-  constructor(code: string, message: string, options?: { cause?: unknown }) {
+export class AssetForgeError extends Error {
+  readonly code: ErrorCode;
+
+  constructor(code: ErrorCode, message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.code = code;
     this.name = new.target.name;
   }
 }
 
-function define(code: string) {
+function define(code: ErrorCode) {
   return class extends AssetForgeError {
     constructor(message: string, options?: { cause?: unknown }) {
       super(code, message, options);
@@ -30,3 +32,5 @@ export class SourceNotReadableError extends define('source_not_readable') {}
 export class ChecksumMismatchError extends define('checksum_mismatch') {}
 export class StorageAccessDeniedError extends define('storage_access_denied') {}
 export class StorageFullError extends define('storage_full') {}
+export class NotFoundError extends define('not_found') {}
+export class InvalidOperationError extends define('invalid_operation') {}
