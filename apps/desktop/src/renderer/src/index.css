@@ -1,10 +1,30 @@
 @import 'tailwindcss';
 
-/* Light or dark follows the operating system (`prefers-color-scheme`); there is no in-app switch. */
+@theme {
+  --color-bg: #060b1d;
+  --color-surface: #0c1428;
+  --color-raised: #131d36;
+  --color-nav-active: #26324d;
+  --color-line: #2a3550;
+  --color-line-strong: #4a5670;
+  --color-text: #e8ebf2;
+  --color-muted: #97a1b5;
+  --color-accent: #38c6f4;
+  --color-accent-soft: #0f2b3d;
+  --color-danger: #f87171;
+  --color-danger-soft: #2a1015;
+  --color-warning: #fbbf24;
+  --font-sans: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --radius-control: 6px;
+  --radius-tile: 8px;
+  --radius-dialog: 10px;
+}
+
+/* The application is dark only; there is no light theme and no in-app switch. */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 body {
-  @apply bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  @apply bg-bg text-text font-sans text-[15px];
 }

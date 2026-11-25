@@ -8,13 +8,16 @@ export interface MainWindowOptions extends AppUrlOptions {
   onLoadFailure(error: unknown): void;
 }
 
+/** The background equals the page token `--color-bg`, so the window does not flash light before the page paints. */
+export const WINDOW_APPEARANCE = { backgroundColor: '#060b1d', minWidth: 1024, minHeight: 680 } as const;
+
 export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
+  nativeTheme.themeSource = 'dark';
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
     show: false,
-    // Matches the renderer's page background, so the window does not flash white in dark mode.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#020617' : '#ffffff',
+    ...WINDOW_APPEARANCE,
     webPreferences: {
       preload: opts.preloadPath,
       contextIsolation: true,

@@ -1,22 +1,45 @@
-// Shared class strings, so both screens look the same in light and dark mode.
+// Shared class strings. The application is dark only; colours come from the design tokens in index.css.
 
 export const FOCUS =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500';
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 /** Hover background of list items that are links (tiles, table rows). */
-export const ITEM_HOVER = 'hover:bg-slate-100 dark:hover:bg-slate-800';
+export const ITEM_HOVER = 'hover:bg-raised';
 
 /**
- * The one button style: every button in the application looks the same. A toggle button
- * (`aria-pressed`) shows its pressed state through the same style.
+ * The one button look: every button in the application looks the same, only its size differs.
+ * A toggle button (`aria-pressed`) shows its pressed state through the same look.
  */
-export const BUTTON = `rounded border border-slate-300 bg-slate-100 px-3 py-1.5 text-sm text-slate-900 hover:bg-slate-200 disabled:opacity-50 aria-pressed:border-slate-500 aria-pressed:bg-slate-300 aria-pressed:font-medium dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 dark:aria-pressed:border-slate-400 dark:aria-pressed:bg-slate-600 ${FOCUS}`;
+export const BUTTON_LOOK = `inline-flex items-center justify-center gap-2 rounded-control border border-line-strong bg-raised text-sm text-text hover:bg-nav-active disabled:opacity-50 aria-pressed:border-accent aria-pressed:bg-accent-soft ${FOCUS}`;
 
-export const INPUT = `rounded border border-slate-300 bg-transparent px-2 py-1.5 placeholder:text-slate-500 dark:border-slate-700 ${FOCUS}`;
+export const BUTTON = `${BUTTON_LOOK} h-9 px-3.5`;
+export const ICON_BUTTON = `${BUTTON_LOOK} h-9 w-9`;
+/** Compact variants for use inside rows and tiles. */
+export const BUTTON_INLINE = `${BUTTON_LOOK} h-8 px-3`;
+export const ICON_BUTTON_INLINE = `${BUTTON_LOOK} h-8 w-8`;
 
-export const MUTED = 'text-slate-600 dark:text-slate-400';
+export const INPUT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text placeholder:text-muted ${FOCUS}`;
 
-export const BORDER = 'border-slate-300 dark:border-slate-700';
+export const SELECT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text ${FOCUS}`;
 
-export const ALERT =
-  'rounded border border-red-300 bg-red-50 p-3 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200';
+export const CHIP = 'inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-0.5 text-sm text-text';
+
+export const FILTER_CHIP = `${CHIP} border-accent bg-accent-soft`;
+
+export const MUTED = 'text-muted';
+
+export const BORDER = 'border-line';
+
+export const ALERT = 'rounded-control border border-danger bg-danger-soft p-3 text-danger';
+
+export const WARNING = 'rounded-control border border-warning bg-surface p-3 text-warning';
+
+export const LABEL = 'text-sm text-muted';
+
+export const PAGE_TITLE = 'text-2xl font-semibold text-text';
+
+export const SECTION_TITLE = 'text-lg font-semibold text-text';
+
+export const TILE_TITLE = 'truncate text-sm font-medium text-text';
+
+export const COUNT = 'text-sm tabular-nums text-muted';
