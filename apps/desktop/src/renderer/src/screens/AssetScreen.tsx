@@ -13,6 +13,7 @@ import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
 import { Pager } from '../components/Pager';
+import { WorkflowSection } from '../components/WorkflowSection';
 import { formatBytes } from '../format';
 import { useLoad } from '../hooks/useLoad';
 import { label, relationLabel } from '../labels';
@@ -231,6 +232,8 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
               onCommit={(description) => saveAsset({ description })}
             />
           </div>
+
+          <WorkflowSection assetId={id} assetTypeId={data.typeId} />
 
           <section className="space-y-2" aria-label="Projects">
             <h2 className="text-lg font-semibold">Projects</h2>

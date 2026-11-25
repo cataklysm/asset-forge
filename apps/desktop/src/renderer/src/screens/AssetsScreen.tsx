@@ -3,6 +3,7 @@ import { AssetStatusSchema } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { Pager } from '../components/Pager';
 import { useLoad } from '../hooks/useLoad';
+import { formatProgress } from '../progress';
 import { label } from '../labels';
 import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
 
@@ -163,6 +164,7 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
                 <th className="py-1 pr-3">Name</th>
                 <th className="py-1 pr-3">Type</th>
                 <th className="py-1 pr-3">Status</th>
+                <th className="py-1 pr-3">Progress</th>
                 <th className="py-1 pr-3">Projects</th>
                 <th className="py-1">Files</th>
               </tr>
@@ -177,6 +179,7 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
                   </td>
                   <td className="py-1 pr-3">{typeName(asset.typeId)}</td>
                   <td className="py-1 pr-3">{label(asset.status)}</td>
+                  <td className="py-1 pr-3">{formatProgress(asset.workflowProgress)}</td>
                   <td className="py-1 pr-3">{asset.projectCount}</td>
                   <td className="py-1">{asset.fileCount}</td>
                 </tr>
