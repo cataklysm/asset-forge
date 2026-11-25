@@ -183,6 +183,34 @@ describe('importFile', () => {
     expect(stream.destroyed).toBe(true);
   });
 
+  it('never deletes an existing file at the final path when the move fails', async () => {
+    const { ctx, sources, storage } = await setup();
+    const id = '44444444-4444-4444-8444-444444444444';
+    const existing = inboxPath(id, 'a.png');
+    storage.files.set(existing, Buffer.from('existing'));
+    sources.set('/src/a.png', Buffer.from('new'));
+    const result = await importFile({ ...ctx, newId: () => id }, '/src/a.png');
+
+    expect(result.file!.status).toBe('failed');
+    expect(storage.files.get(existing)?.toString()).toBe('existing');
+    expect(stagingEntries(storage)).toEqual([]);
+  });
+
+  it('removes the moved inbox file when markComplete fails', async () => {
+    const { ctx, sources, storage, db } = await setup();
+    sources.set('/src/a.png', Buffer.from('x'));
+    const files = Object.create(ctx.files) as ImportContext['files'];
+    files.markComplete = async () => {
+      throw new Error('commit failed');
+    };
+    const result = await importFile({ ...ctx, files }, '/src/a.png');
+
+    expect(result.file!.status).toBe('failed');
+    expect(result.error).toBe('commit failed');
+    expect(inboxEntries(storage)).toEqual([]);
+    expect([...db.files.records.values()].map((r) => r.status)).toEqual(['failed']);
+  });
+
   it('does not reject when markFailed itself throws', async () => {
     const { ctx, sources, storage, db } = await setup();
     sources.set('/src/a.png', Buffer.from('x'));

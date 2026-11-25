@@ -49,6 +49,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     return { sourcePath, file: null, error: messageOf(error), duplicateOf: [] };
   }
 
+  // `move` rejects when the target exists, so the final path is ours to clean up only after it succeeded.
+  let moved = false;
   try {
     const { sizeBytes, sha256 } = await ctx.storage.writeStream(staging, stream);
     const verified = await ctx.storage.hashFile(staging);
@@ -57,6 +59,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     }
     const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
     await ctx.storage.move(staging, finalPath);
+    moved = true;
     await ctx.files.markComplete(id, { sizeBytes, sha256 });
     const file: FileRecord = {
       id,
@@ -74,7 +77,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
   } catch (error) {
     const message = messageOf(error);
     stream.destroy();
-    for (const path of [staging, finalPath]) {
+    for (const path of moved ? [staging, finalPath] : [staging]) {
       try {
         await ctx.storage.remove(path);
       } catch {

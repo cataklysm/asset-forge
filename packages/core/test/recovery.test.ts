@@ -74,7 +74,68 @@ describe('recoverIncompleteImports', () => {
   });
 });
 
+describe('recoverIncompleteImports best-effort', () => {
+  it('keeps a row pending and reports the path when its removal fails, and continues', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending(pending(ID1, 'a.png'));
+    await db.files.insertPending(pending(ID2, 'b.png'));
+    storage.files.set(stagingPath(ID1), Buffer.from('p1'));
+    storage.files.set(stagingPath(ID2), Buffer.from('p2'));
+    storage.failNext('remove', new Error('EBUSY'));
+
+    const result = await recoverIncompleteImports({ storage, files: db.files });
+
+    expect(result.skippedPaths).toEqual([stagingPath(ID1)]);
+    expect(result.failedIds).toEqual([ID2]);
+    expect(db.files.records.get(ID1)?.status).toBe('pending');
+    expect(db.files.records.get(ID2)?.status).toBe('failed');
+    expect(storage.files.has(stagingPath(ID2))).toBe(false);
+  });
+
+  it('keeps a row pending when markFailed throws', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending(pending(ID1, 'a.png'));
+    const files = Object.create(db.files) as typeof db.files;
+    files.markFailed = async () => {
+      throw new Error('db gone');
+    };
+
+    const result = await recoverIncompleteImports({ storage, files });
+
+    expect(result.failedIds).toEqual([]);
+    expect(db.files.records.get(ID1)?.status).toBe('pending');
+  });
+
+  it('reports an orphan staging entry that cannot be removed', async () => {
+    const { storage, db } = await setup();
+    storage.files.set(stagingPath(ID3), Buffer.from('orphan'));
+    storage.failNext('remove', new Error('EBUSY'));
+
+    const result = await recoverIncompleteImports({ storage, files: db.files });
+
+    expect(result.skippedPaths).toEqual([stagingPath(ID3)]);
+    expect(result.removedStagingFiles).toEqual([]);
+  });
+
+  it('does not throw when listing fails', async () => {
+    const { storage, db } = await setup();
+    storage.failNext('list', new Error('EIO'));
+    await expect(recoverIncompleteImports({ storage, files: db.files })).resolves.toMatchObject({ failedIds: [] });
+  });
+});
+
 describe('recovery on open', () => {
+  it('still opens when a removal fails during recovery', async () => {
+    const { manager, storage, db } = await setup();
+    await db.files.insertPending(pending(ID1, 'a.png'));
+    storage.files.set(stagingPath(ID1), Buffer.from('partial'));
+    await manager.close();
+    storage.failNext('remove', new Error('EBUSY'));
+
+    await expect(manager.open({ rootPath: ROOT })).resolves.toMatchObject({ rootPath: ROOT });
+    expect(db.files.records.get(ID1)?.status).toBe('pending');
+  });
+
   it('cleans up an interrupted import when the workspace is reopened', async () => {
     const { manager, storage, db } = await setup();
     await db.files.insertPending(pending(ID1, 'a.png'));
