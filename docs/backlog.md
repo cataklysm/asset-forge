@@ -38,6 +38,8 @@ Findings from the phase 1 and phase 2a reviews that were deliberately not fixed.
 - The type select on the asset form is empty when loading the asset types fails.
 - The "Importing…" label is shown while the file picker is still open.
 - `formatBytes(1048575)` yields `1024.0 KiB`; no guard for NaN or negative values.
+- Asset detail groups files by role per loaded page; with more than one page a role shows up incompletely on several pages.
+- A file whose placement failed counts as failed on the asset screen although it was imported into the inbox (the inbox screen counts it as imported).
 
 ## Code structure
 
@@ -51,12 +53,11 @@ Findings from the phase 1 and phase 2a reviews that were deliberately not fixed.
 - The renderer has no DOM test environment: hooks (`useLoad`) and screens are untested; the labels test only checks lengths.
 - Crash-recovery test on the real adapters (currently only on the fakes).
 - Tests for `journal_mode=wal`, a failed migration closing its handle, the dangling-link and Windows case-folding branches, temp-file cleanup in the registry, and the "ignore removal errors" branch of `importFile`.
-- The migration upgrade test does not compare `mimeType`, `sizeBytes` and `error` of migrated rows.
-- No test for a backslash in `nameContains`, for a `%` filter against a name that contains a literal `%`, or for a failed placement when importing directly into an asset.
+- No test for a backslash in `nameContains` or for a `%` filter against a name that contains a literal `%`.
 - The in-memory fakes sort with `localeCompare`, SQLite with `lower()`; the orders can differ for non-ASCII names.
 - The IPC test hard-codes the number of channels; the absolute-path scan in the error tests only looks for the native separator.
 - The `EACCES` test of `writeStream` does not assert that the target is absent.
 
 ## Not covered by any automated check
 
-Native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, and the rendered messages for `storage_unreachable`, `unsupported_format_version` and `workspace_mismatch`.
+Native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `storage_unreachable`, `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation of the screens.
