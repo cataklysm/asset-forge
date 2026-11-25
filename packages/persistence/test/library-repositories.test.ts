@@ -109,9 +109,12 @@ describe('asset repository', () => {
   test('filters assets by type, status and name', async () => {
     const { prop, building } = await seed();
     const page = { limit: 10, offset: 0 };
+    const all = ['100% wool', 'Gas station', 'gas_pump', 'Motel'];
     await expect(names({ ...page, query: 'GAS' })).resolves.toEqual(['Gas station', 'gas_pump']);
-    await expect(names({ ...page, query: '_' })).resolves.toEqual(['gas_pump']);
-    await expect(names({ ...page, query: '%' })).resolves.toEqual(['100% wool']);
+    await expect(names({ ...page, query: 'pum' })).resolves.toEqual(['gas_pump']);
+    await expect(names({ ...page, query: 'tel' })).resolves.toEqual([]);
+    await expect(names({ ...page, query: '_' })).resolves.toEqual(all);
+    await expect(names({ ...page, query: '%' })).resolves.toEqual(all);
     await expect(names({ ...page, typeId: building })).resolves.toEqual(['Gas station', 'Motel']);
     await expect(names({ ...page, typeId: building, status: 'completed' })).resolves.toEqual(['Motel']);
     await expect(names({ ...page, typeId: prop, query: 'gas' })).resolves.toEqual(['gas_pump']);

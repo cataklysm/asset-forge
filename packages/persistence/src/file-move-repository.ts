@@ -3,6 +3,7 @@ import { asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { clearCoverOutside, toRecordWithTags } from './file-repository.js';
 import { file, fileMove } from './schema.js';
+import { assetOfFile, reindexAssets } from './search-index.js';
 
 const toMove = (row: typeof fileMove.$inferSelect): FileMove => ({
   fileId: row.fileId,
@@ -35,6 +36,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
       return db.transaction((tx) => {
         const move = tx.select().from(fileMove).where(eq(fileMove.fileId, fileId)).get();
         if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
+        const left = assetOfFile(tx, fileId);
         const row = tx
           .update(file)
           .set({ relativePath: move.targetRelativePath, assetId: move.targetAssetId, role: move.targetRole })
@@ -43,6 +45,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
           .get();
         if (!row) throw new NotFoundError(`File ${fileId} does not exist`);
         clearCoverOutside(tx, fileId, move.targetAssetId);
+        reindexAssets(tx, [left, row.assetId]);
         tx.delete(fileMove).where(eq(fileMove.fileId, fileId)).run();
         return toRecordWithTags(tx, row);
       });

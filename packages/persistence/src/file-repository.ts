@@ -4,6 +4,7 @@ import { NotFoundError, isOpenable, isPreviewable, type FileRepository } from '@
 import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { asset, file, fileTag, tag } from './schema.js';
+import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
 const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRecord => ({
@@ -76,10 +77,6 @@ const scopeMatches = (scope: FileScope) => {
 };
 
 export function createFileRepository(db: BetterSQLite3Database): FileRepository {
-  const requireChanged = (changes: number, id: string) => {
-    if (changes === 0) throw new NotFoundError(`File ${id} does not exist`);
-  };
-
   return {
     async insertPending(r) {
       db.insert(file)
@@ -96,16 +93,28 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         .run();
     },
     async markComplete(id, r) {
-      const { changes } = db
-        .update(file)
-        .set({ sizeBytes: r.sizeBytes, sha256: r.sha256, status: 'complete', error: null })
-        .where(eq(file.id, id))
-        .run();
-      requireChanged(changes, id);
+      db.transaction((tx) => {
+        const row = tx
+          .update(file)
+          .set({ sizeBytes: r.sizeBytes, sha256: r.sha256, status: 'complete', error: null })
+          .where(eq(file.id, id))
+          .returning({ assetId: file.assetId })
+          .get();
+        if (!row) throw new NotFoundError(`File ${id} does not exist`);
+        reindexAssets(tx, [row.assetId]);
+      });
     },
     async markFailed(id, error) {
-      const { changes } = db.update(file).set({ status: 'failed', error }).where(eq(file.id, id)).run();
-      requireChanged(changes, id);
+      db.transaction((tx) => {
+        const row = tx
+          .update(file)
+          .set({ status: 'failed', error })
+          .where(eq(file.id, id))
+          .returning({ assetId: file.assetId })
+          .get();
+        if (!row) throw new NotFoundError(`File ${id} does not exist`);
+        reindexAssets(tx, [row.assetId]);
+      });
     },
     async findCompleteBySha256(sha256) {
       return db.transaction(
@@ -149,6 +158,7 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
     async setPlacement(id, placement) {
       // Throwing inside the transaction rolls back both statements.
       return db.transaction((tx) => {
+        const left = assetOfFile(tx, id);
         const row = tx
           .update(file)
           .set({ relativePath: placement.relativePath, assetId: placement.assetId, role: placement.role })
@@ -157,6 +167,7 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
           .get();
         if (!row) throw new NotFoundError(`File ${id} does not exist`);
         clearCoverOutside(tx, id, placement.assetId);
+        reindexAssets(tx, [left, row.assetId]);
         return toRecordWithTags(tx, row);
       });
     },

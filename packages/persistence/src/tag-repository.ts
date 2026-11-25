@@ -3,6 +3,7 @@ import type { TagRepository } from '@assetforge/core';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetTag, fileTag, tag } from './schema.js';
+import { assetOfFile, reindexAsset, reindexAssets } from './search-index.js';
 
 /** Highest code point; sorts after every character that can follow a prefix in a name. */
 const PREFIX_END = String.fromCodePoint(0x10ffff);
@@ -44,18 +45,22 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           .values({ assetId: r.assetId, tagId, origin: r.origin, createdAt: r.now })
           .onConflictDoNothing()
           .run();
+        reindexAsset(tx, r.assetId);
       });
     },
     async removeFromAsset(r) {
-      db.delete(assetTag)
-        .where(
-          and(
-            eq(assetTag.assetId, r.assetId),
-            eq(assetTag.origin, r.origin),
-            eq(assetTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
-          ),
-        )
-        .run();
+      db.transaction((tx) => {
+        tx.delete(assetTag)
+          .where(
+            and(
+              eq(assetTag.assetId, r.assetId),
+              eq(assetTag.origin, r.origin),
+              eq(assetTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
+            ),
+          )
+          .run();
+        reindexAsset(tx, r.assetId);
+      });
     },
     async addToFile(r) {
       db.transaction((tx) => {
@@ -64,18 +69,22 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           .values({ fileId: r.fileId, tagId, origin: r.origin, createdAt: r.now })
           .onConflictDoNothing()
           .run();
+        reindexAssets(tx, [assetOfFile(tx, r.fileId)]);
       });
     },
     async removeFromFile(r) {
-      db.delete(fileTag)
-        .where(
-          and(
-            eq(fileTag.fileId, r.fileId),
-            eq(fileTag.origin, r.origin),
-            eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
-          ),
-        )
-        .run();
+      db.transaction((tx) => {
+        tx.delete(fileTag)
+          .where(
+            and(
+              eq(fileTag.fileId, r.fileId),
+              eq(fileTag.origin, r.origin),
+              eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
+            ),
+          )
+          .run();
+        reindexAssets(tx, [assetOfFile(tx, r.fileId)]);
+      });
     },
     async listForAsset(assetId): Promise<TagAssignment[]> {
       return db
