@@ -75,8 +75,13 @@ describe('library IPC', () => {
       'assets:setCover': { assetId: uuid, fileId: null },
       'files:openExternal': { fileId: uuid },
       'files:showInFolder': { fileId: uuid },
+      'tags:suggest': { prefix: 'me', limit: 10 },
+      'assets:addTag': { assetId: uuid, name: 'metal' },
+      'assets:removeTag': { assetId: uuid, name: 'metal' },
+      'files:addTag': { fileId: uuid, name: 'metal' },
+      'files:removeTag': { fileId: uuid, name: 'metal' },
     };
-    expect(Object.keys(requests)).toHaveLength(24);
+    expect(Object.keys(requests)).toHaveLength(29);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({
@@ -93,12 +98,121 @@ describe('library IPC', () => {
     const created = await ok('assets:create', { name: ' Pump ', typeId });
     expect(created).toMatchObject({ name: 'Pump', typeId, status: 'draft' });
 
-    const listed = await ok('assets:list', { ...page, nameContains: 'pum' });
+    const listed = await ok('assets:list', { ...page, query: 'pum' });
     expect(ipcContract['assets:list'].response.safeParse(listed).success).toBe(true);
     expect(listed.items).toMatchObject([{ id: created.id, projectCount: 0, fileCount: 0 }]);
 
-    const percent = await ok('assets:list', { ...page, nameContains: '%' });
-    expect(percent).toEqual({ items: [], total: 0 });
+    // A query without words is dropped, so it does not narrow the list.
+    const symbols = await ok('assets:list', { ...page, query: '%' });
+    expect(symbols.total).toBe(1);
+  });
+
+  it('assets:list rejects more than 10 tag names', async () => {
+    await openWorkspace();
+    const tagNames = Array.from({ length: 11 }, (_, i) => `t${i}`);
+    expect(await call('assets:list', { ...page, tagNames })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+  });
+
+  it('assets:list rejects an unknown file kind', async () => {
+    await openWorkspace();
+    expect(await call('assets:list', { ...page, fileKind: 'spreadsheet' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+  });
+
+  describe('tags', () => {
+    async function assetWithFile() {
+      await openWorkspace();
+      const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+      const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
+      const source = join(base, 'a.png');
+      await writeFile(source, 'hello');
+      const [result] = await ok<any[]>('files:import', {
+        sourcePaths: [source],
+        target: { assetId: asset.id, role: 'reference' },
+      });
+      return { asset, file: result.file };
+    }
+
+    it('tags round-trip through IPC', async () => {
+      const { asset, file } = await assetWithFile();
+      const withTag = await ok('assets:addTag', { assetId: asset.id, name: '  Metal ' });
+      expect(ipcContract['assets:addTag'].response.safeParse(withTag).success).toBe(true);
+      expect(withTag.tags).toMatchObject([{ name: 'metal', displayName: 'Metal', origin: 'manual' }]);
+      const tagged = await ok('files:addTag', { fileId: file.id, name: 'Sci-Fi' });
+      expect(ipcContract['files:addTag'].response.safeParse(tagged).success).toBe(true);
+      expect(tagged.tags).toMatchObject([{ name: 'sci-fi' }]);
+
+      expect((await ok('assets:get', { id: asset.id })).tags.map((t: any) => t.name)).toEqual(['metal']);
+      const files = await ok('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
+      expect(files.items[0].tags.map((t: any) => t.name)).toEqual(['sci-fi']);
+
+      const suggested = await ok('tags:suggest', { prefix: '', limit: 10 });
+      expect(suggested.map((t: any) => t.name).sort()).toEqual(['metal', 'sci-fi']);
+      expect(await ok('tags:suggest', { prefix: 'sc', limit: 10 })).toMatchObject([{ name: 'sci-fi' }]);
+
+      for (let i = 0; i < 2; i++) {
+        expect((await ok('assets:removeTag', { assetId: asset.id, name: 'METAL' })).tags).toEqual([]);
+        expect((await ok('files:removeTag', { fileId: file.id, name: 'sci-fi' })).tags).toEqual([]);
+      }
+    });
+
+    it('a too long tag answers validation_failed without echoing the input', async () => {
+      const { asset, file } = await assetWithFile();
+      const name = 'x'.repeat(65);
+      for (const [channel, request] of [
+        ['assets:addTag', { assetId: asset.id, name }],
+        ['files:addTag', { fileId: file.id, name }],
+      ] as const) {
+        const result = await call(channel, request);
+        expect(result).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
+        expect(JSON.stringify(result)).not.toContain(name);
+      }
+    });
+
+    it('an unknown asset answers not_found', async () => {
+      await openWorkspace();
+      expect(await call('assets:addTag', { assetId: uuid, name: 'metal' })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found' },
+      });
+    });
+
+    it('files:addTag on a pending file answers validation_failed', async () => {
+      await openWorkspace();
+      const id = await manager.exclusive(async (s) => {
+        const storage = await s.database.storages.getPrimary();
+        const fileId = s.newId();
+        await s.database.files.insertPending({
+          id: fileId,
+          storageId: storage!.id,
+          originalName: 'pending.png',
+          relativePath: 'inbox/pending.png',
+          mimeType: 'image/png',
+          importedAt: s.now().toISOString(),
+          kind: 'image',
+        });
+        return fileId;
+      });
+      expect(await call('files:addTag', { fileId: id, name: 'metal' })).toMatchObject({
+        ok: false,
+        error: { code: 'validation_failed' },
+      });
+    });
+
+    it('tags:suggest rejects limit 0 and 51', async () => {
+      await openWorkspace();
+      for (const limit of [0, 51]) {
+        expect(await call('tags:suggest', { prefix: '', limit })).toMatchObject({
+          ok: false,
+          error: { code: 'invalid_request' },
+        });
+      }
+    });
   });
 
   it('maps an unknown asset to not_found', async () => {

@@ -7,6 +7,7 @@ import type {
   AssetRelation,
   AssetRelationView,
   AssetType,
+  FileKind,
   FileList,
   FileRecord,
   FileScope,
@@ -15,6 +16,9 @@ import type {
   ProjectAssignment,
   ProjectList,
   ProjectMemberList,
+  TagAssignment,
+  TagOrigin,
+  TagSuggestion,
   AssetWorkflow,
   WorkflowProgress,
   WorkflowStep,
@@ -23,8 +27,9 @@ import type {
   WorkspaceSummary,
 } from '@assetforge/contracts';
 import { automaticCover } from '../src/asset-cover.js';
-import { isOpenable, isPreviewable } from '../src/media-types.js';
+import { fileKind, isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
+import { foldSearchWord, searchWords, textWords } from '../src/search.js';
 import {
   InvalidOperationError,
   NotFoundError,
@@ -56,6 +61,7 @@ import type {
   Storage,
   StorageRef,
   StorageRepository,
+  TagRepository,
   WorkspaceDatabase,
   WorkspaceHost,
   WorkspaceMeta,
@@ -213,10 +219,77 @@ class InMemoryStorages implements StorageRepository {
 /** Chosen covers, assetId -> fileId; shared so a file placement can clear a cover like the database does. */
 class CoverChoices extends Map<string, string> {}
 
+/** Tags and both kinds of assignment. Assignments are kept in insertion order and sorted on read. */
+class InMemoryTags implements TagRepository {
+  readonly tags = new Map<string, { id: string; displayName: string }>(); // by normalised name
+  readonly assetAssignments: { assetId: string; name: string; origin: TagOrigin }[] = [];
+  readonly fileAssignments: { fileId: string; name: string; origin: TagOrigin }[] = [];
+
+  private static sorted(rows: { name: string; origin: TagOrigin }[], tags: Map<string, { displayName: string }>): TagAssignment[] {
+    return rows
+      .map((r) => ({ name: r.name, displayName: tags.get(r.name)!.displayName, origin: r.origin }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0));
+  }
+
+  async suggest(q: { prefix: string; limit: number }): Promise<TagSuggestion[]> {
+    const used = new Map<string, number>();
+    for (const a of [...this.assetAssignments, ...this.fileAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
+    return [...used]
+      .filter(([name]) => name.startsWith(q.prefix))
+      .sort(([an, ac], [bn, bc]) => bc - ac || (an < bn ? -1 : an > bn ? 1 : 0))
+      .slice(0, q.limit)
+      .map(([name]) => ({ name, displayName: this.tags.get(name)!.displayName }));
+  }
+
+  private ensureTag(r: { name: string; displayName: string; newId: string }): void {
+    if (!this.tags.has(r.name)) this.tags.set(r.name, { id: r.newId, displayName: r.displayName });
+  }
+
+  async addToAsset(r: { assetId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+    this.ensureTag(r);
+    if (!this.assetAssignments.some((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin)) {
+      this.assetAssignments.push({ assetId: r.assetId, name: r.name, origin: r.origin });
+    }
+  }
+
+  async removeFromAsset(r: { assetId: string; name: string; origin: TagOrigin }): Promise<void> {
+    const i = this.assetAssignments.findIndex((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin);
+    if (i >= 0) this.assetAssignments.splice(i, 1);
+  }
+
+  async addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+    this.ensureTag(r);
+    if (!this.fileAssignments.some((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin)) {
+      this.fileAssignments.push({ fileId: r.fileId, name: r.name, origin: r.origin });
+    }
+  }
+
+  async removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void> {
+    const i = this.fileAssignments.findIndex((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin);
+    if (i >= 0) this.fileAssignments.splice(i, 1);
+  }
+
+  async listForAsset(assetId: string): Promise<TagAssignment[]> {
+    return InMemoryTags.sorted(this.assetAssignments.filter((a) => a.assetId === assetId), this.tags);
+  }
+
+  forFile(fileId: string): TagAssignment[] {
+    return InMemoryTags.sorted(this.fileAssignments.filter((a) => a.fileId === fileId), this.tags);
+  }
+}
+
 class InMemoryFiles implements FileRepository {
+  /** Stored without tags; every method that returns a record attaches the current file tags. */
   readonly records = new Map<string, FileRecord>();
 
-  constructor(private readonly covers: CoverChoices) {}
+  constructor(
+    private readonly covers: CoverChoices,
+    private readonly tags: InMemoryTags,
+  ) {}
+
+  private withTags(rec: FileRecord): FileRecord {
+    return { ...rec, tags: this.tags.forFile(rec.id) };
+  }
 
   async insertPending(r: {
     id: string;
@@ -225,6 +298,7 @@ class InMemoryFiles implements FileRepository {
     relativePath: string;
     mimeType: string;
     importedAt: string;
+    kind: FileKind;
   }): Promise<void> {
     this.records.set(r.id, {
       id: r.id,
@@ -241,6 +315,8 @@ class InMemoryFiles implements FileRepository {
       importedAt: r.importedAt,
       previewable: isPreviewable(r.mimeType),
       openable: isOpenable(r.relativePath),
+      kind: r.kind,
+      tags: [],
     });
   }
 
@@ -255,15 +331,16 @@ class InMemoryFiles implements FileRepository {
   }
 
   async findCompleteBySha256(sha256: string): Promise<FileRecord[]> {
-    return [...this.records.values()].filter((r) => r.status === 'complete' && r.sha256 === sha256);
+    return [...this.records.values()].filter((r) => r.status === 'complete' && r.sha256 === sha256).map((r) => this.withTags(r));
   }
 
   async listByStatus(status: ImportStatus): Promise<FileRecord[]> {
-    return [...this.records.values()].filter((r) => r.status === status);
+    return [...this.records.values()].filter((r) => r.status === status).map((r) => this.withTags(r));
   }
 
   async get(id: string): Promise<FileRecord | null> {
-    return this.records.get(id) ?? null;
+    const rec = this.records.get(id);
+    return rec ? this.withTags(rec) : null;
   }
 
   async setPlacement(id: string, placement: FilePlacement): Promise<FileRecord> {
@@ -273,7 +350,7 @@ class InMemoryFiles implements FileRepository {
     for (const [assetId, fileId] of this.covers) {
       if (fileId === id && assetId !== placement.assetId) this.covers.delete(assetId);
     }
-    return next;
+    return this.withTags(next);
   }
 
   async list(q: Page & { scope: FileScope }): Promise<FileList> {
@@ -281,7 +358,7 @@ class InMemoryFiles implements FileRepository {
     const sorted = [...this.records.values()]
       .filter((r) => scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null))
       .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-    return { items: sorted.slice(q.offset, q.offset + q.limit), total: sorted.length };
+    return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }
 
   private require(id: string): FileRecord {
@@ -588,6 +665,18 @@ class InMemoryProjects implements ProjectRepository {
   }
 }
 
+const startsWithToken = (tokens: string[], word: string) => tokens.some((t) => t.startsWith(word));
+
+/** All words of a text, without the 16-word cap of a search query. */
+const allWords = textWords;
+
+/** 1 when every query word is a prefix of some name word, else 0 (the fake's two-bucket ranking). */
+const nameMatches = (a: Asset, words: string[]) => {
+  if (words.length === 0) return 0;
+  const tokens = allWords(a.name).map(foldSearchWord);
+  return words.every((w) => startsWithToken(tokens, w)) ? 1 : 0;
+};
+
 class InMemoryAssets implements AssetRepository {
   readonly rows = new Map<string, Asset>();
 
@@ -596,6 +685,7 @@ class InMemoryAssets implements AssetRepository {
     private readonly files: InMemoryFiles,
     private readonly workflows: InMemoryAssetWorkflows,
     private readonly covers: CoverChoices,
+    private readonly tags: InMemoryTags,
   ) {}
 
   private coverOf(assetId: string): AssetCover {
@@ -636,14 +726,46 @@ class InMemoryAssets implements AssetRepository {
     return next;
   }
 
+  private completeFiles(assetId: string): FileRecord[] {
+    return [...this.files.records.values()].filter((f) => f.assetId === assetId && f.status === 'complete');
+  }
+
+  /** Each tag must be on the asset or on one of its complete files; different tags may have different owners. */
+  private hasTags(assetId: string, names: string[]): boolean {
+    if (names.length === 0) return true;
+    const fileIds = new Set(this.completeFiles(assetId).map((f) => f.id));
+    return names.every(
+      (name) =>
+        this.tags.assetAssignments.some((a) => a.assetId === assetId && a.name === name) ||
+        this.tags.fileAssignments.some((a) => fileIds.has(a.fileId) && a.name === name),
+    );
+  }
+
+  /** Folded word tokens per searchable field: name, description, tags and complete file names. */
+  private searchFields(a: Asset): string[][] {
+    const files = this.completeFiles(a.id);
+    const fileIds = new Set(files.map((f) => f.id));
+    const texts = [
+      a.name,
+      a.description,
+      ...this.tags.assetAssignments.filter((t) => t.assetId === a.id).map((t) => t.name),
+      ...this.tags.fileAssignments.filter((t) => fileIds.has(t.fileId)).map((t) => t.name),
+      ...files.map((f) => f.originalName),
+    ];
+    return texts.map((t) => allWords(t).map(foldSearchWord));
+  }
+
   async list(q: AssetQuery): Promise<AssetList> {
-    const needle = q.nameContains?.toLowerCase();
+    const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
     const matching = [...this.rows.values()]
       .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
       .filter((a) => q.status === undefined || a.status === q.status)
       .filter((a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })))
-      .filter((a) => needle === undefined || a.name.toLowerCase().includes(needle))
-      .sort(byNameThenId);
+      .filter((a) => this.hasTags(a.id, q.tagNames ?? []))
+      .filter((a) => q.fileRole === undefined || this.completeFiles(a.id).some((f) => f.role === q.fileRole))
+      .filter((a) => q.fileKind === undefined || this.completeFiles(a.id).some((f) => f.kind === q.fileKind))
+      .filter((a) => words.every((w) => this.searchFields(a).some((tokens) => startsWithToken(tokens, w))))
+      .sort((a, b) => nameMatches(b, words) - nameMatches(a, words) || byNameThenId(a, b));
     const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({
       ...a,
       projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
@@ -746,17 +868,29 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
   private readonly covers = new CoverChoices();
-  readonly files = new InMemoryFiles(this.covers);
+  readonly tags = new InMemoryTags();
+  readonly files = new InMemoryFiles(this.covers, this.tags);
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
   readonly projects = new InMemoryProjects(this.links);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers);
+  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;
+  /** How often `ensureDerivedData` ran. */
+  derivedDataCalls = 0;
+
+  /** Recomputes every file's kind from its original name; the fake has no search index to rebuild. */
+  async ensureDerivedData(): Promise<void> {
+    this.derivedDataCalls++;
+    for (const [id, rec] of this.files.records) {
+      const kind = fileKind(rec.originalName);
+      if (kind !== rec.kind) this.files.records.set(id, { ...rec, kind });
+    }
+  }
 
   async close(): Promise<void> {
     this.closed = true;
@@ -787,8 +921,11 @@ export class InMemoryRegistry implements WorkspaceRegistry {
 export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles {
   /** Paths that exist but cannot be read (e.g. directories). */
   readonly unreadable = new Set<string>();
+  /** Every path `open` was called with. */
+  readonly opened: string[] = [];
 
   async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
+    this.opened.push(absolutePath);
     const data = this.get(absolutePath);
     if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;

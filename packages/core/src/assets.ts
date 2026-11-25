@@ -2,6 +2,8 @@ import type { Asset, AssetList, AssetStatus, AssetType } from '@assetforge/contr
 import { NotFoundError } from './errors.js';
 import type { AssetQuery } from './ports.js';
 import type { WorkspaceSession } from './session.js';
+import { searchWords } from './search.js';
+import { tagName } from './tags.js';
 import { startWorkflow } from './workflows.js';
 
 async function requireType(s: WorkspaceSession, typeId: string): Promise<AssetType> {
@@ -47,6 +49,12 @@ export async function getAsset(s: WorkspaceSession, id: string): Promise<Asset> 
   return asset;
 }
 
-export function listAssets(s: WorkspaceSession, q: AssetQuery): Promise<AssetList> {
-  return s.database.assets.list(q);
+export async function listAssets(s: WorkspaceSession, q: AssetQuery): Promise<AssetList> {
+  const { query, tagNames, ...rest } = q;
+  const names = tagNames === undefined ? [] : [...new Set(tagNames.map((t) => tagName(t).name))];
+  return s.database.assets.list({
+    ...rest,
+    ...(query !== undefined && searchWords(query).length > 0 && { query }),
+    ...(names.length > 0 && { tagNames: names }),
+  });
 }

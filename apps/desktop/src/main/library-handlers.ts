@@ -1,4 +1,6 @@
 import {
+  addAssetTag,
+  addFileTag,
   addRelation,
   assignAsset,
   createAsset,
@@ -16,12 +18,15 @@ import {
   listRelations,
   listWorkflowTemplates,
   relocateFile,
+  removeAssetTag,
   removeAssignment,
+  removeFileTag,
   removeRelation,
   removeWorkflow,
   resolveFilePath,
   setAssetCover,
   startWorkflow,
+  suggestTags,
   updateAsset,
   updateAssignment,
   updateProject,
@@ -49,6 +54,11 @@ export type LibraryHandlers = Pick<
   | 'assets:create'
   | 'assets:update'
   | 'assets:setCover'
+  | 'tags:suggest'
+  | 'assets:addTag'
+  | 'assets:removeTag'
+  | 'files:addTag'
+  | 'files:removeTag'
   | 'files:openExternal'
   | 'files:showInFolder'
   | 'assignments:listByAsset'
@@ -95,6 +105,12 @@ export function createLibraryHandlers(
       }),
     // Validation and the two-step write must not interleave with a file move.
     'assets:setCover': (r) => manager.exclusive((s) => setAssetCover(s, r)),
+
+    'tags:suggest': (r) => manager.read((s) => suggestTags(s, r)),
+    'assets:addTag': (r) => manager.exclusive((s) => addAssetTag(s, r)),
+    'assets:removeTag': (r) => manager.exclusive((s) => removeAssetTag(s, r)),
+    'files:addTag': (r) => manager.exclusive((s) => addFileTag(s, r)),
+    'files:removeTag': (r) => manager.exclusive((s) => removeFileTag(s, r)),
 
     'files:openExternal': async (r) => {
       const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));

@@ -14,6 +14,8 @@ export * from './recover-imports.js';
 export * from './relations.js';
 export type * from './ports.js';
 export * from './serial-queue.js';
+export * from './search.js';
+export * from './tags.js';
 export type * from './session.js';
 export * from './workflow-templates.js';
 export * from './workflows.js';

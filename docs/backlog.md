@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -30,6 +30,15 @@ Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately n
 - The session failure memory of the preview service also remembers worker timeouts and crashes, and it is unbounded.
 - No index on `asset.cover_file_id`.
 - `setCover` is not a guarded UPDATE and `getAssetDetail` reads in two steps; both are safe only under serialised writes.
+- The derived-data rebuild still runs on the main process while a workspace opens (about 1.7 s at 10 000 assets); it yields to the event loop between batches of 500, but each batch blocks it. The step also runs on every new workspace.
+- `asset_search_map` rowids: once assets can be deleted, the FTS row and the map row must be deleted together; otherwise rowid reuse attaches a stale index row to a new asset.
+- `FileKindSchema.catch('other')` in the file repository hides an invalid stored kind.
+- Adding and removing a tag are check-then-act in the use cases (safe today because one writer holds the workspace lock).
+- The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
+- The search path without a query still orders by `lower(name)` over all assets.
+- Unused tag rows are never deleted and there is no tag rename or merge.
+- A drive-relative source path without a backslash (`C:a.exe::$DATA`) still passes the refused-import check; no file dialog produces such a path.
+- The 200-character limit of the search query counts UTF-16 code units, not characters.
 - `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
 
 ## IPC and security
@@ -38,7 +47,6 @@ Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately n
 - Track dialog-granted paths: `files:import` and `workspace:open` currently accept any absolute path sent by the renderer.
 - Permission request handler on the session.
 - `shutting_down` is returned before the sender check.
-- The open-externally block list is a deny-list of 42 extensions and omits other launchable types (e.g. `ws`, `wsc`, `sct`, `pyc`, `pyz`, `msix`, `appx`, `appinstaller`, `psd1`, `xhtml`, `mht`, `mhtml`, `pl`, `rb`, `iso`, `vhd`); open decision.
 
 ## Renderer
 
@@ -61,7 +69,9 @@ Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately n
 - `CoverImage` keeps a failed id per instance, so non-virtualised tiles stay on the format tile after the storage returns until the user navigates away and back.
 - A paged loader re-activated after an inactive settle would keep stale loading entries.
 - Focus is lost when a focused placeholder becomes a Retry button.
-- "Loading…" flashes on every keystroke in the name filter.
+- "Loading…" flashes on every keystroke in the search field.
+- The search field still carries the label "Filter by name" and the placeholder "Name" from the old name filter.
+- The search, filter and tag-row UI does not exist yet (UI phase): search field with the 250 ms debounce and request superseding, tag filter, role and kind selects, tag rows on the asset screen and in the file detail dialog. Asset tags and file tags must be visually distinct there.
 
 ## Code structure
 
@@ -76,7 +86,7 @@ Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately n
 - The renderer has no DOM test environment: hooks (`useLoad`) and screens are untested; the labels test only checks lengths.
 - Crash-recovery test on the real adapters (currently only on the fakes).
 - Tests for `journal_mode=wal`, a failed migration closing its handle, the dangling-link and Windows case-folding branches, temp-file cleanup in the registry, and the "ignore removal errors" branch of `importFile`.
-- No test for a backslash in `nameContains` or for a `%` filter against a name that contains a literal `%`.
+- The in-memory fakes approximate BM25 by a two-bucket rule (name matches first, then the rest).
 - The in-memory fakes sort with `localeCompare`, SQLite with `lower()`; the orders can differ for non-ASCII names.
 - The IPC test hard-codes the number of channels; the absolute-path scan in the error tests only looks for the native separator.
 - The `EACCES` test of `writeStream` does not assert that the target is absent.

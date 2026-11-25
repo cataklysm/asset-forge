@@ -63,6 +63,7 @@ async function addFile(f: {
     relativePath: `inbox/${id}/f${f.n}`,
     mimeType: f.mimeType ?? PNG,
     importedAt: f.importedAt ?? T1,
+    kind: 'image',
   });
   const status = f.status ?? 'complete';
   if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });

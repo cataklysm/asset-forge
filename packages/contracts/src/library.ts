@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TagAssignmentSchema } from './tags';
 import { WorkflowProgressSchema } from './workflows';
 
 const id = z.uuid();
@@ -107,6 +108,7 @@ export type AssetSummary = z.infer<typeof AssetSummarySchema>;
 export const AssetDetailSchema = AssetSchema.extend({
   coverFileId: id.nullable(), // effective cover, as in AssetSummary
   coverIsChosen: z.boolean(), // false when the cover is the automatic one or there is none
+  tags: z.array(TagAssignmentSchema), // asset tags only; file tags are on the file records
 });
 export type AssetDetail = z.infer<typeof AssetDetailSchema>;
 

@@ -15,7 +15,7 @@ Search a large library: with ten thousand assets, typing a word narrows the gall
 - **Tags.** Normalised tags with a display name; assignable to assets and to files; each assignment records its origin (`manual` or `ai`). Phase 3b only creates manual assignments.
 - **Tag editing.** Add and remove tags on the asset screen and in the file detail dialog, with suggestions from tags already in use.
 - **Full-text search** over asset name, asset description, the tags of the asset, and the original names and tags of its files. Prefix matching per word, all words must match, results ranked with name matches first.
-- **Filters** combined with the search: project, asset type and asset status (existing), plus tags (all selected tags must be present), file role and file kind ("has at least one file with …").
+- **Filters** combined with the search: project, asset type and asset status (existing), plus tags (every selected tag must be present on the asset itself or on at least one of its complete files — the filter does not distinguish where a tag sits), file role and file kind ("has at least one file with …").
 - **File kind.** Every file gets a kind — `image`, `model`, `document`, `other` — derived from its extension by one function in `core`, stored on the row.
 - **Index consistency.** The search index can always be rebuilt from the tables and repairs itself when it is out of date.
 - **No programs in the library.** Importing a program, installer or shortcut is refused; "Open externally" is offered only for files of a known asset kind (an allow-list replacing the block list of phase 3a).
@@ -80,7 +80,7 @@ Search a large library: with ten thousand assets, typing a word narrows the gall
 
 **Open externally by allow-list.** `isOpenable` becomes: the file's kind is `image`, `model` or `document`, and its extension is not `svg` (an SVG can carry script and opens in a browser). Everything else — kind `other`, which includes every script and every file without an extension — offers only "Show in folder". The block list of phase 3a is removed; its tests are replaced by tests of the allow-list and of the refused-import list.
 
-**Use cases and IPC.** `tags:suggest { prefix, limit }` (tags in use, by normalised prefix, most used first); `assets:addTag` / `assets:removeTag { assetId, name }`; `files:addTag` / `files:removeTag { fileId, name }`. Adding an existing assignment and removing a missing one are no-ops. Asset detail and file records carry their tags (display name, origin). `assets:list` gains `query` (replacing `nameContains`), `tagNames[]` (at most 10, normalised like tags; an unknown tag yields no results), `fileRole`, `fileKind`. The role and kind filters each mean "has at least one complete file with …" and are independent of each other.
+**Use cases and IPC.** `tags:suggest { prefix, limit }` (tags in use, by normalised prefix, most used first); `assets:addTag` / `assets:removeTag { assetId, name }`; `files:addTag` / `files:removeTag { fileId, name }`. Adding an existing assignment and removing a missing one are no-ops. Asset detail and file records carry their tags (display name, origin). `assets:list` gains `query` (replacing `nameContains`), `tagNames[]` (at most 10, normalised like tags; an unknown tag yields no results; each tag matches when the asset carries it or one of its complete files does, and different tags may be satisfied by different owners), `fileRole`, `fileKind`. The role and kind filters each mean "has at least one complete file with …" and are independent of each other.
 
 **Search behaviour changes from phase 2.** The name filter matched any substring; the search matches the beginnings of words. "swo" finds "Sword", "ord" no longer does. This is intended: it is what makes the index usable and the ranking meaningful.
 
@@ -95,6 +95,7 @@ Search a large library: with ten thousand assets, typing a word narrows the gall
 - *Assets screen:* the name filter becomes the search field; next to the existing filters a tag filter (type to add, chips to remove), a file role select and a file kind select. All of it is part of the list state that survives navigation (3a), and it applies to the grid and the table view alike; search results scroll endlessly like the unfiltered list.
 - *Asset screen:* a tag row under the fields — chips with a remove control, an input that adds on Enter and offers suggestions. AI-origin tags will render differently in phase 4; the component takes the origin already.
 - *File detail dialog:* the same tag row for the file.
+- Wherever tags of an asset and tags of its files appear together, the two are visually distinguishable (asset tags and file tags never share one undifferentiated row). There is no control for choosing which of the two the tag filter looks at.
 - Everything is reachable by keyboard; removing a chip keeps focus in the row.
 
 ## Testing

@@ -51,7 +51,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
 
   const { filters } = state;
-  const trimmed: AssetFilters = { ...filters, nameContains: filters.nameContains.trim() };
+  const trimmed: AssetFilters = { ...filters, query: filters.query.trim() };
   const key = filterKey(trimmed);
   const viewKey = `${key}|${view}`;
 
@@ -72,7 +72,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
         ...(trimmed.typeId !== '' && { typeId: trimmed.typeId }),
         ...(trimmed.status !== '' && { status: AssetStatusSchema.parse(trimmed.status) }),
         ...(trimmed.projectId !== '' && { projectId: trimmed.projectId }),
-        ...(trimmed.nameContains !== '' && { nameContains: trimmed.nameContains }),
+        ...(trimmed.query !== '' && { query: trimmed.query }),
       }),
     // `key` encodes every filter value used above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -257,8 +257,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           className={INPUT}
           aria-label="Filter by name"
           placeholder="Name"
-          value={filters.nameContains}
-          onChange={(e) => setFilter({ nameContains: e.target.value })}
+          value={filters.query}
+          onChange={(e) => setFilter({ query: e.target.value })}
         />
         <div className="ml-auto flex items-center gap-2">
           {total !== null && (

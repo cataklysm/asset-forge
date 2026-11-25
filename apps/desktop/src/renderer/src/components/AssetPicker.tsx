@@ -30,7 +30,7 @@ export function AssetPicker({ excludeIds = [], onPick }: Props) {
       call('assets:list', {
         limit: Math.min(200, RESULTS + excludeIds.length),
         offset: 0,
-        ...(term !== '' && { nameContains: term }),
+        ...(term !== '' && { query: term }),
       }),
     [term, excludeIds.join(',')],
   );

@@ -5,7 +5,18 @@ import { workspace } from './schema.js';
 export function createMetaRepository(db: BetterSQLite3Database): WorkspaceMetaRepository {
   return {
     async get(): Promise<WorkspaceMeta | null> {
-      return db.select().from(workspace).limit(1).get() ?? null;
+      return (
+        db
+          .select({
+            id: workspace.id,
+            formatVersion: workspace.formatVersion,
+            name: workspace.name,
+            createdAt: workspace.createdAt,
+          })
+          .from(workspace)
+          .limit(1)
+          .get() ?? null
+      );
     },
     async init(meta: WorkspaceMeta): Promise<void> {
       db.transaction((tx) => {

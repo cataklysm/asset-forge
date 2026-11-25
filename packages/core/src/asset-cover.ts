@@ -22,7 +22,7 @@ export async function getAssetDetail(s: WorkspaceSession, id: string): Promise<A
   const asset = await s.database.assets.get(id);
   const cover = asset === null ? null : await s.database.assets.getCover(id);
   if (asset === null || cover === null) throw new NotFoundError(`Asset ${id} does not exist`);
-  return { ...asset, ...cover };
+  return { ...asset, ...cover, tags: await s.database.tags.listForAsset(id) };
 }
 
 /**

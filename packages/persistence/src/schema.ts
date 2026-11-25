@@ -36,12 +36,14 @@ const RELATION_KINDS = vocabulary(RelationKindSchema);
 const FILE_ROLES = vocabulary(FileRoleSchema);
 const IMPORT_STATUSES = vocabulary(ImportStatusSchema);
 const STEP_STATES = vocabulary(WorkflowStepStateSchema);
+const TAG_ORIGINS = ['manual', 'ai'] as const;
 
 export const workspace = sqliteTable('workspace', {
   id: text('id').primaryKey(),
   formatVersion: integer('format_version').notNull(),
   name: text('name').notNull(),
   createdAt: text('created_at').notNull(),
+  derivedDataVersion: integer('derived_data_version'),
 });
 
 export const storage = sqliteTable(
@@ -155,6 +157,7 @@ export const file = sqliteTable(
     mimeType: text('mime_type').notNull(),
     sizeBytes: integer('size_bytes'),
     sha256: text('sha256'),
+    kind: text('kind').notNull().default('other'),
     status: text('status', { enum: IMPORT_STATUSES }).notNull(),
     error: text('error'),
     importedAt: text('imported_at').notNull(),
@@ -165,6 +168,9 @@ export const file = sqliteTable(
     index('file_status_idx').on(t.status),
     index('file_imported_at_idx').on(t.importedAt),
     index('file_asset_id_role_idx').on(t.assetId, t.role),
+    index('file_asset_id_kind_idx').on(t.assetId, t.kind),
+    // The complete files of one asset (search reindex); without it `file_status_idx` wins and reads every complete file.
+    index('file_asset_id_status_idx').on(t.assetId, t.status),
     check('file_status_check', oneOf(t.status, IMPORT_STATUSES)),
     check('file_role_check', oneOf(t.role, FILE_ROLES)),
     check('file_asset_role_check', sql`(${t.assetId} is null) = (${t.role} is null)`),
@@ -262,3 +268,57 @@ export const assetWorkflowStep = sqliteTable(
     check('asset_workflow_step_completed_check', sql`(${t.state} = 'done') = (${t.completedAt} is not null)`),
   ],
 );
+
+export const tag = sqliteTable('tag', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const assetTag = sqliteTable(
+  'asset_tag',
+  {
+    assetId: text('asset_id')
+      .notNull()
+      .references(() => asset.id),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id),
+    origin: text('origin', { enum: TAG_ORIGINS }).notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.assetId, t.tagId, t.origin] }),
+    index('asset_tag_tag_id_idx').on(t.tagId),
+    check('asset_tag_origin_check', oneOf(t.origin, TAG_ORIGINS)),
+  ],
+);
+
+export const fileTag = sqliteTable(
+  'file_tag',
+  {
+    fileId: text('file_id')
+      .notNull()
+      .references(() => file.id),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id),
+    origin: text('origin', { enum: TAG_ORIGINS }).notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.fileId, t.tagId, t.origin] }),
+    index('file_tag_tag_id_idx').on(t.tagId),
+    check('file_tag_origin_check', oneOf(t.origin, TAG_ORIGINS)),
+  ],
+);
+
+/** Maps an asset to the integer rowid of its row in the hand-written FTS5 table `asset_search`. */
+export const assetSearchMap = sqliteTable('asset_search_map', {
+  rowid: integer('rowid').primaryKey(),
+  assetId: text('asset_id')
+    .notNull()
+    .unique()
+    .references(() => asset.id),
+});

@@ -5,14 +5,14 @@ export interface AssetFilters {
   typeId: string;
   status: string;
   projectId: string;
-  nameContains: string;
+  query: string;
 }
 
-export const NO_FILTERS: AssetFilters = { typeId: '', status: '', projectId: '', nameContains: '' };
+export const NO_FILTERS: AssetFilters = { typeId: '', status: '', projectId: '', query: '' };
 
 /** JSON of a fixed-order tuple: equal filters give equal keys and values containing any character stay unambiguous. */
 export function filterKey(filters: AssetFilters): string {
-  return JSON.stringify([filters.typeId, filters.status, filters.projectId, filters.nameContains]);
+  return JSON.stringify([filters.typeId, filters.status, filters.projectId, filters.query]);
 }
 
 export interface AssetListState {
