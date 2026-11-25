@@ -152,7 +152,7 @@ export class LocalFileSystemStorage implements Storage {
   }
 
   async exists(relPath: string): Promise<boolean> {
-    return this.pathExists(await this.resolve(relPath));
+    return this.pathExists(await this.resolve(relPath, true));
   }
 
   async remove(relPath: string): Promise<void> {
@@ -160,7 +160,7 @@ export class LocalFileSystemStorage implements Storage {
   }
 
   async list(relDir: string): Promise<string[]> {
-    const abs = await this.resolve(relDir);
+    const abs = await this.resolve(relDir, true);
     try {
       return await fs.readdir(abs);
     } catch (err) {
@@ -182,9 +182,10 @@ export class LocalFileSystemStorage implements Storage {
   /**
    * The single gate for all workspace paths: rejects absolute forms and `..`
    * segments lexically, then verifies via realpath of the deepest existing
-   * ancestor that links/junctions do not lead outside the real root.
+   * ancestor that links/junctions do not lead outside the real root. Paths that
+   * reduce to the root itself are only accepted with `allowRoot` (list, exists).
    */
-  private async resolve(relPath: string): Promise<string> {
+  private async resolve(relPath: string, allowRoot = false): Promise<string> {
     if (
       relPath.includes('\0') ||
       relPath.startsWith('/') ||
@@ -196,6 +197,9 @@ export class LocalFileSystemStorage implements Storage {
     const segments = relPath.split(/[\\/]/).filter((s) => s !== '' && s !== '.');
     if (segments.includes('..')) {
       throw new PathEscapeError(`Path escapes the workspace: ${relPath}`);
+    }
+    if (segments.length === 0 && !allowRoot) {
+      throw new PathEscapeError(`Path resolves to the workspace root: ${JSON.stringify(relPath)}`);
     }
     const target = path.join(this.root, ...segments);
     const realRoot = await realpathOfDeepestAncestor(this.root);

@@ -152,6 +152,28 @@ describe('path escape', () => {
     expect(await fs.readFile(path.join(outside, 'secret.txt'), 'utf8')).toBe('secret');
   });
 
+  for (const rootish of ['', '.', './']) {
+    it(`rejects root-equivalent path ${JSON.stringify(rootish)} for file operations`, async () => {
+      const before = (await fs.readdir(tmp)).sort();
+      await expect(storage.readText(rootish)).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.writeText(rootish, 'x')).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(
+        storage.writeStream(rootish, Readable.from(Buffer.from('x'))),
+      ).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.hashFile(rootish)).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.remove(rootish)).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.move(rootish, 'inbox/x')).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.move('inbox/x', rootish)).rejects.toBeInstanceOf(PathEscapeError);
+      expect((await fs.readdir(tmp)).sort()).toEqual(before);
+      expect((await fs.stat(root)).isDirectory()).toBe(true);
+    });
+
+    it(`still allows root-equivalent path ${JSON.stringify(rootish)} for list and exists`, async () => {
+      expect(await storage.exists(rootish)).toBe(true);
+      expect(await storage.list(rootish)).toContain('inbox');
+    });
+  }
+
   it('allows a junction that stays inside the root', async () => {
     await storage.writeText('inbox/a.txt', 'A');
     await fs.symlink(path.join(root, 'inbox'), path.join(root, 'assets', 'alias'), 'junction');
