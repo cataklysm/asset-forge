@@ -22,6 +22,8 @@ import { importFile, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
 import type { Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+import { SerialQueue } from './serial-queue.js';
+import type { WorkspaceSession } from './session.js';
 
 /**
  * Roots that differ only by a trailing separator, `.` segments or (on Windows) letter
@@ -42,8 +44,15 @@ interface OpenWorkspace {
   database: WorkspaceDatabase;
 }
 
+/**
+ * Lifecycle and mutating operations (`create`, `open`, `close`, `remove`, `importFiles`,
+ * `exclusive`) run one at a time through a single queue, so a close never lands in the
+ * middle of a write. Reads (`list`, `current`, `listFiles`, `read`) do not queue. Public
+ * methods only enqueue; the work lives in private unqueued methods that call each other.
+ */
 export class WorkspaceManager {
   private open_: OpenWorkspace | null = null;
+  private readonly queue = new SerialQueue();
 
   constructor(private readonly host: WorkspaceHost) {}
 
@@ -55,7 +64,62 @@ export class WorkspaceManager {
     return this.open_?.summary ?? null;
   }
 
-  async create(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
+  create(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
+    return this.queue.run(() => this.doCreate(input));
+  }
+
+  open(input: { rootPath: string }): Promise<WorkspaceSummary> {
+    return this.queue.run(() => this.doOpen(input));
+  }
+
+  close(): Promise<void> {
+    return this.queue.run(() => this.doClose());
+  }
+
+  /**
+   * Forgets a workspace: its registry entry and its local database. With `trashFolder` the
+   * workspace folder goes to the operating system's trash first, so a failure there leaves
+   * everything untouched. A folder that no longer holds this workspace is never trashed.
+   */
+  remove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
+    return this.queue.run(() => this.doRemove(input));
+  }
+
+  importFiles(sourcePaths: string[]): Promise<ImportResult[]> {
+    return this.queue.run(() => this.doImportFiles(sourcePaths));
+  }
+
+  listFiles(q: { limit: number; offset: number }): Promise<FileList> {
+    try {
+      return this.requireOpen().database.files.list(q);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /** Runs `fn` with the open workspace's session, without waiting for queued operations. */
+  async read<T>(fn: (session: WorkspaceSession) => Promise<T>): Promise<T> {
+    return fn(this.session());
+  }
+
+  /** Runs `fn` with the open workspace's session once every earlier queued operation has settled. */
+  exclusive<T>(fn: (session: WorkspaceSession) => Promise<T>): Promise<T> {
+    return this.queue.run(() => fn(this.session()));
+  }
+
+  private session(): WorkspaceSession {
+    const { summary, storage, storageId, database } = this.requireOpen();
+    return {
+      summary,
+      storage,
+      storageId,
+      database,
+      newId: () => this.host.newId(),
+      now: () => this.host.now(),
+    };
+  }
+
+  private async doCreate(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
     const storage = this.host.createStorage(input.rootPath);
     if (!(await storage.isReachable())) {
       throw new StorageUnreachableError(`Storage is not reachable: ${input.rootPath}`);
@@ -71,11 +135,11 @@ export class WorkspaceManager {
       createdAt: this.host.now().toISOString(),
     };
     await storage.writeText(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
-    return this.open({ rootPath: input.rootPath });
+    return this.doOpen({ rootPath: input.rootPath });
   }
 
-  async open(input: { rootPath: string }): Promise<WorkspaceSummary> {
-    await this.close();
+  private async doOpen(input: { rootPath: string }): Promise<WorkspaceSummary> {
+    await this.doClose();
     const storage = this.host.createStorage(input.rootPath);
     if (!(await storage.isReachable())) {
       throw new StorageUnreachableError(`Storage is not reachable: ${input.rootPath}`);
@@ -118,22 +182,17 @@ export class WorkspaceManager {
     }
   }
 
-  async close(): Promise<void> {
+  private async doClose(): Promise<void> {
     const open = this.open_;
     if (!open) return;
     this.open_ = null;
     await open.database.close();
   }
 
-  /**
-   * Forgets a workspace: its registry entry and its local database. With `trashFolder` the
-   * workspace folder goes to the operating system's trash first, so a failure there leaves
-   * everything untouched. A folder that no longer holds this workspace is never trashed.
-   */
-  async remove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
+  private async doRemove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
     const entry = await this.host.registry.get(input.id);
     if (entry === null) return { folderTrashed: false };
-    if (this.open_?.summary.id === input.id) await this.close();
+    if (this.open_?.summary.id === input.id) await this.doClose();
 
     let folderTrashed = false;
     if (input.trashFolder && (await this.holdsWorkspace(entry.rootPath, input.id))) {
@@ -149,7 +208,7 @@ export class WorkspaceManager {
     return { folderTrashed };
   }
 
-  async importFiles(sourcePaths: string[]): Promise<ImportResult[]> {
+  private async doImportFiles(sourcePaths: string[]): Promise<ImportResult[]> {
     const { storage, storageId, database } = this.requireOpen();
     const ctx: ImportContext = {
       storage,
@@ -162,14 +221,6 @@ export class WorkspaceManager {
     const results: ImportResult[] = [];
     for (const sourcePath of sourcePaths) results.push(await importFile(ctx, sourcePath));
     return results;
-  }
-
-  listFiles(q: { limit: number; offset: number }): Promise<FileList> {
-    try {
-      return this.requireOpen().database.files.list(q);
-    } catch (error) {
-      return Promise.reject(error);
-    }
   }
 
   private requireOpen(): OpenWorkspace {

@@ -1,0 +1,13 @@
+import type { WorkspaceSummary } from '@assetforge/contracts';
+import type { Storage, WorkspaceDatabase } from './ports.js';
+
+/** What a use case gets to work with while a workspace is open. */
+export interface WorkspaceSession {
+  readonly summary: WorkspaceSummary;
+  readonly storage: Storage;
+  /** ID of the workspace's primary storage row. */
+  readonly storageId: string;
+  readonly database: WorkspaceDatabase;
+  newId(): string;
+  now(): Date;
+}
