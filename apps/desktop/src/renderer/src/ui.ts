@@ -28,6 +28,9 @@ export const CHIP = `${CHIP_BASE} border-line-strong text-text`;
 
 export const FILTER_CHIP = `${CHIP_BASE} border-accent text-accent`;
 
+/** A tag that matched the active tag filter: accent border, normal text. */
+export const MATCHED_CHIP = `${CHIP_BASE} border-accent text-text`;
+
 export const MUTED = 'text-muted';
 
 export const BORDER = 'border-line';

@@ -29,6 +29,14 @@ HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
   this.open = false;
   this.dispatchEvent(new Event('close'));
 };
+// Like a browser, Esc that nobody handled fires a cancelable `cancel` on the topmost open dialog
+// and closes it unless `cancel` is prevented.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.defaultPrevented) return;
+  const dialog = [...document.querySelectorAll('dialog')].filter((d) => d.open).at(-1);
+  if (dialog === undefined) return;
+  if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();
+});
 Element.prototype.scrollTo = () => {};
 
 afterEach(() => cleanup());
