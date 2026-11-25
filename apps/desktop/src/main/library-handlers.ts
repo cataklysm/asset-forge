@@ -5,9 +5,9 @@ import {
   createProject,
   getAsset,
   getAssetDetail,
-  InvalidOperationError,
   getProject,
   getWorkflow,
+  InvalidOperationError,
   listAssets,
   listAssetTypes,
   listAssignmentsOfAsset,
@@ -99,7 +99,9 @@ export function createLibraryHandlers(
     'files:openExternal': async (r) => {
       const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));
       // The shell's text may contain paths; it is never forwarded.
-      if ((await host.openPath(path)) !== '') throw new InvalidOperationError('No application could open this file');
+      if ((await host.openPath(path)) !== '') {
+        throw new InvalidOperationError('No application could open this file');
+      }
       return null;
     },
     'files:showInFolder': async (r) => {

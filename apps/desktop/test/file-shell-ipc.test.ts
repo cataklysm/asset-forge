@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,12 +7,6 @@ import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
-
-interface WritableRawDatabase {
-  prepare(sql: string): { run(...params: unknown[]): unknown };
-  close(): void;
-}
-const Database = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => WritableRawDatabase;
 
 let base: string;
 let root: string;
@@ -55,9 +48,9 @@ async function ok<T = any>(channel: IpcChannel, request: unknown): Promise<T> {
 }
 
 async function setup(name: string) {
-  const summary = await ok('workspace:create', { name: 'Test', rootPath: root });
+  const summary = await ok<{ id: string }>('workspace:create', { name: 'Test', rootPath: root });
   const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
-  const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
+  const asset = await ok<{ id: string }>('assets:create', { name: 'A', typeId: type!.id });
   const source = join(base, name);
   await writeFile(source, 'data');
   const [result] = await ok<{ file: { id: string; relativePath: string } }[]>('files:import', {
@@ -82,16 +75,9 @@ describe('file shell IPC', () => {
   });
 
   it('a blocked file is never handed to the shell', async () => {
-    const { summary, file } = await setup('Setup.EXE');
-    // Windows cannot create a file named "Setup.EXE." (it strips the trailing dot), so the
-    // stored original name is rewritten in the database while the workspace is closed. The
-    // on-disk name stays the sanitised one, as an import would have produced it.
-    await ok('workspace:close', {});
-    const db = new Database(join(base, 'userData', 'workspaces', summary.id, 'assetforge.sqlite'));
-    db.prepare('UPDATE file SET original_name = ? WHERE id = ?').run('Setup.EXE.', file.id);
-    db.close();
-    await ok('workspace:open', { rootPath: root });
-
+    const { file } = await setup('Setup.EXE');
+    // Upper case exercises the case-insensitive check. Trailing dots and spaces ("Setup.EXE.")
+    // are covered by the core isOpenable tests: Windows cannot create such a name on disk.
     const result = await call('files:openExternal', { fileId: file.id });
     expect(result).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
     expect(openPath).not.toHaveBeenCalled();
@@ -159,6 +145,29 @@ describe('file shell IPC', () => {
     await ok('workspace:close', {});
     await ok('workspace:open', { rootPath: root });
     expect(workspaceOpened).toHaveBeenCalledTimes(2);
+  });
+
+  it('a throwing workspaceOpened hook does not fail open or create', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    workspaceOpened.mockImplementation(() => {
+      throw new Error('cleanup failed');
+    });
+    expect(await call('workspace:create', { name: 'Test', rootPath: root })).toMatchObject({ ok: true });
+    await ok('workspace:close', {});
+    expect(await call('workspace:open', { rootPath: root })).toMatchObject({ ok: true });
+    expect(workspaceOpened).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledTimes(2);
+    log.mockRestore();
+  });
+
+  it('workspaceOpened is not called when open or create fails', async () => {
+    expect(await call('workspace:open', { rootPath: join(base, 'does-not-exist') })).toMatchObject({ ok: false });
+    await mkdir(join(base, 'not-a-workspace', 'sub'), { recursive: true });
+    await writeFile(join(base, 'not-a-workspace', 'file.txt'), 'x');
+    expect(await call('workspace:create', { name: 'Test', rootPath: join(base, 'not-a-workspace') })).toMatchObject({
+      ok: false,
+    });
+    expect(workspaceOpened).not.toHaveBeenCalled();
   });
 
   it('assets:setCover returns the detail and rejects a foreign file', async () => {

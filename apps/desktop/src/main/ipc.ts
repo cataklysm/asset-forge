@@ -48,14 +48,14 @@ export function createWorkspaceHandlers(
     'workspace:current': async () => manager.current(),
     'workspace:create': async (request) => {
       const summary = await manager.create(request);
-      host.workspaceOpened();
+      notifyWorkspaceOpened(host);
       return summary;
     },
     'workspace:resolveCreatePath': async (request) =>
       join(request.parentPath, workspaceFolderName(request.name)),
     'workspace:open': async (request) => {
       const summary = await manager.open(request);
-      host.workspaceOpened();
+      notifyWorkspaceOpened(host);
       return summary;
     },
     'workspace:remove': async ({ id }) => {
@@ -77,6 +77,15 @@ export function createWorkspaceHandlers(
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };
+}
+
+/** The workspace is already open here, so a failing hook must not fail the channel. */
+function notifyWorkspaceOpened(host: HostActions): void {
+  try {
+    host.workspaceOpened();
+  } catch (error) {
+    console.error('The workspace-opened hook failed', error);
+  }
 }
 
 export function isIpcChannel(channel: string): channel is IpcChannel {
