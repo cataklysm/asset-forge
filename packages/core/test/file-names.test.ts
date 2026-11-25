@@ -7,7 +7,8 @@ describe('sanitizeFileName', () => {
     expect(sanitizeFileName('Größe über alles.JPG')).toBe('Gr_e_ber_alles.JPG');
   });
   it('keeps the base name only', () => {
-    expect(sanitizeFileName('..\..\evil/../x.png')).toBe('x.png');
+    expect(sanitizeFileName('..\\..\\evil/../x.png')).toBe('x.png');
+    expect(sanitizeFileName('C:\\dir\\x.png')).toBe('x.png');
   });
   it('strips leading dots', () => {
     expect(sanitizeFileName('..hidden')).toBe('hidden');
