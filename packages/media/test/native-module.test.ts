@@ -19,8 +19,7 @@ afterEach(async () => {
 
 it('sharp loads under the Electron ABI and resizes', async () => {
   expect(process.versions.electron).toBeDefined();
-  const { default: sharpModule } = await import('sharp');
-  const out = await sharpModule({
+  const out = await sharp({
     create: { width: 40, height: 20, channels: 3, background: '#f00' },
   })
     .resize({ width: 10 })
