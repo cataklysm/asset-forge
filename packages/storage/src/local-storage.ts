@@ -4,11 +4,36 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform, type Readable } from 'node:stream';
-import { LAYOUT_DIRS, PathEscapeError, type Storage } from '@assetforge/core';
+import {
+  LAYOUT_DIRS,
+  PathEscapeError,
+  StorageAccessDeniedError,
+  StorageFullError,
+  type Storage,
+} from '@assetforge/core';
 
 function isNotFound(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | undefined)?.code;
   return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+const ACCESS_DENIED_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+/**
+ * Maps permission and disk-full failures to domain errors that the UI can explain.
+ * Node's own messages contain absolute paths, so the message names only the relative
+ * path; the original error stays available as `cause`. Everything else is returned as is.
+ */
+function translateFsError(err: unknown, relPath: string): unknown {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  const target = relPath === '' ? 'the workspace folder' : relPath;
+  if (code !== undefined && ACCESS_DENIED_CODES.has(code)) {
+    return new StorageAccessDeniedError(`No permission to access ${target}`, { cause: err });
+  }
+  if (code === 'ENOSPC') {
+    return new StorageFullError(`Not enough free space to write ${target}`, { cause: err });
+  }
+  return err;
 }
 
 const WINDOWS = process.platform === 'win32';
@@ -67,105 +92,142 @@ export class LocalFileSystemStorage implements Storage {
     return false;
   }
 
-  async isEmptyOrMissing(): Promise<boolean> {
-    try {
-      return (await fs.readdir(this.root)).length === 0;
-    } catch (err) {
-      if (isNotFound(err)) return true;
-      throw err;
-    }
-  }
-
-  async ensureLayout(): Promise<void> {
-    await fs.mkdir(this.root, { recursive: true });
-    for (const dir of LAYOUT_DIRS) {
-      await fs.mkdir(await this.resolve(dir), { recursive: true });
-    }
-  }
-
-  async readText(relPath: string): Promise<string | null> {
-    const abs = await this.resolve(relPath);
-    try {
-      return await fs.readFile(abs, 'utf8');
-    } catch (err) {
-      if (isNotFound(err)) return null;
-      throw err;
-    }
-  }
-
-  async writeText(relPath: string, text: string): Promise<void> {
-    const abs = await this.resolve(relPath);
-    await fs.mkdir(path.dirname(abs), { recursive: true });
-    const tmp = path.join(path.dirname(abs), `${path.basename(abs)}.${randomUUID()}.tmp`);
-    try {
-      await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx' });
-      await fs.rename(tmp, abs);
-    } catch (err) {
-      await fs.rm(tmp, { force: true }).catch(() => undefined);
-      throw err;
-    }
-  }
-
-  async writeStream(
-    relPath: string,
-    source: Readable,
-  ): Promise<{ sizeBytes: number; sha256: string }> {
-    const abs = await this.resolve(relPath);
-    await fs.mkdir(path.dirname(abs), { recursive: true });
-    // 'wx' fails if the target exists, so an existing file is never touched
-    // (and never removed by the cleanup below).
-    const handle = await fs.open(abs, 'wx');
-    const hash = createHash('sha256');
-    let sizeBytes = 0;
-    const hasher = new Transform({
-      transform(chunk: Buffer, _enc, cb) {
-        hash.update(chunk);
-        sizeBytes += chunk.length;
-        cb(null, chunk);
-      },
+  isEmptyOrMissing(): Promise<boolean> {
+    return this.guarded('', async () => {
+      try {
+        return (await fs.readdir(this.root)).length === 0;
+      } catch (err) {
+        if (isNotFound(err)) return true;
+        throw err;
+      }
     });
+  }
+
+  ensureLayout(): Promise<void> {
+    return this.guarded('', async () => {
+      await fs.mkdir(this.root, { recursive: true });
+      for (const dir of LAYOUT_DIRS) {
+        await fs.mkdir(await this.resolve(dir), { recursive: true });
+      }
+    });
+  }
+
+  readText(relPath: string): Promise<string | null> {
+    return this.guarded(relPath, async () => {
+      const abs = await this.resolve(relPath);
+      try {
+        return await fs.readFile(abs, 'utf8');
+      } catch (err) {
+        if (isNotFound(err)) return null;
+        throw err;
+      }
+    });
+  }
+
+  writeText(relPath: string, text: string): Promise<void> {
+    return this.guarded(relPath, async () => {
+      const abs = await this.resolve(relPath);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      const tmp = path.join(path.dirname(abs), `${path.basename(abs)}.${randomUUID()}.tmp`);
+      try {
+        await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx' });
+        await fs.rename(tmp, abs);
+      } catch (err) {
+        await fs.rm(tmp, { force: true }).catch(() => undefined);
+        throw err;
+      }
+    });
+  }
+
+  writeStream(relPath: string, source: Readable): Promise<{ sizeBytes: number; sha256: string }> {
+    // A failing source is the source's problem, not the workspace storage's: pass it through.
+    let sourceError: unknown;
+    source.once('error', (err) => {
+      sourceError = err;
+    });
+    return this.guarded(
+      relPath,
+      async () => {
+        const abs = await this.resolve(relPath);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        // 'wx' fails if the target exists, so an existing file is never touched
+        // (and never removed by the cleanup below).
+        const handle = await fs.open(abs, 'wx');
+        const hash = createHash('sha256');
+        let sizeBytes = 0;
+        const hasher = new Transform({
+          transform(chunk: Buffer, _enc, cb) {
+            hash.update(chunk);
+            sizeBytes += chunk.length;
+            cb(null, chunk);
+          },
+        });
+        try {
+          await pipeline(source, hasher, handle.createWriteStream());
+        } catch (err) {
+          await handle.close().catch(() => undefined);
+          await fs.rm(abs, { force: true }).catch(() => undefined);
+          throw err;
+        }
+        return { sizeBytes, sha256: hash.digest('hex') };
+      },
+      (err) => err === sourceError,
+    );
+  }
+
+  hashFile(relPath: string): Promise<string> {
+    return this.guarded(relPath, async () => {
+      const abs = await this.resolve(relPath);
+      const hash = createHash('sha256');
+      await pipeline(createReadStream(abs), hash);
+      return hash.digest('hex');
+    });
+  }
+
+  move(from: string, to: string): Promise<void> {
+    return this.guarded(to, async () => {
+      const src = await this.resolve(from);
+      const dst = await this.resolve(to);
+      if (await this.pathExists(dst)) {
+        throw Object.assign(new Error(`Target already exists: ${to}`), { code: 'EEXIST' });
+      }
+      await fs.mkdir(path.dirname(dst), { recursive: true });
+      await fs.rename(src, dst);
+    });
+  }
+
+  exists(relPath: string): Promise<boolean> {
+    return this.guarded(relPath, async () => this.pathExists(await this.resolve(relPath, true)));
+  }
+
+  remove(relPath: string): Promise<void> {
+    return this.guarded(relPath, async () => {
+      await fs.rm(await this.resolve(relPath), { force: true });
+    });
+  }
+
+  list(relDir: string): Promise<string[]> {
+    return this.guarded(relDir, async () => {
+      const abs = await this.resolve(relDir, true);
+      try {
+        return await fs.readdir(abs);
+      } catch (err) {
+        if (isNotFound(err)) return [];
+        throw err;
+      }
+    });
+  }
+
+  /** The single place where file-system failures are translated (see `translateFsError`). */
+  private async guarded<T>(
+    relPath: string,
+    op: () => Promise<T>,
+    passThrough: (err: unknown) => boolean = () => false,
+  ): Promise<T> {
     try {
-      await pipeline(source, hasher, handle.createWriteStream());
+      return await op();
     } catch (err) {
-      await handle.close().catch(() => undefined);
-      await fs.rm(abs, { force: true }).catch(() => undefined);
-      throw err;
-    }
-    return { sizeBytes, sha256: hash.digest('hex') };
-  }
-
-  async hashFile(relPath: string): Promise<string> {
-    const abs = await this.resolve(relPath);
-    const hash = createHash('sha256');
-    await pipeline(createReadStream(abs), hash);
-    return hash.digest('hex');
-  }
-
-  async move(from: string, to: string): Promise<void> {
-    const src = await this.resolve(from);
-    const dst = await this.resolve(to);
-    if (await this.pathExists(dst)) {
-      throw Object.assign(new Error(`Target already exists: ${to}`), { code: 'EEXIST' });
-    }
-    await fs.mkdir(path.dirname(dst), { recursive: true });
-    await fs.rename(src, dst);
-  }
-
-  async exists(relPath: string): Promise<boolean> {
-    return this.pathExists(await this.resolve(relPath, true));
-  }
-
-  async remove(relPath: string): Promise<void> {
-    await fs.rm(await this.resolve(relPath), { force: true });
-  }
-
-  async list(relDir: string): Promise<string[]> {
-    const abs = await this.resolve(relDir, true);
-    try {
-      return await fs.readdir(abs);
-    } catch (err) {
-      if (isNotFound(err)) return [];
-      throw err;
+      throw passThrough(err) ? err : translateFsError(err, relPath);
     }
   }
 

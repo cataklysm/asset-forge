@@ -1,6 +1,15 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { importFile, inboxPath, STAGING_DIR, WorkspaceManager, type ImportContext, type SourceFiles } from '../src/index.js';
+import {
+  importFile,
+  inboxPath,
+  SourceNotReadableError,
+  STAGING_DIR,
+  StorageFullError,
+  WorkspaceManager,
+  type ImportContext,
+  type SourceFiles,
+} from '../src/index.js';
 import { createFakeHost, type InMemoryStorage } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -111,9 +120,9 @@ describe('importFile', () => {
     storage.failNext('writeStream', new Error('disk full'));
     const result = await importFile(ctx, '/src/a.png');
 
-    expect(result.error).toBe('disk full');
+    expect(result.error).toBe('Import failed');
     expect(result.file!.status).toBe('failed');
-    expect(result.file!.error).toBe('disk full');
+    expect(result.file!.error).toBe('Import failed');
     expect(stagingEntries(storage)).toEqual([]);
     expect(inboxEntries(storage)).toEqual([]);
   });
@@ -138,7 +147,7 @@ describe('importFile', () => {
     const result = await importFile(ctx, '/src/a.png');
 
     expect(result.file!.status).toBe('failed');
-    expect(result.error).toBe('rename failed');
+    expect(result.error).toBe('Import failed');
     expect(stagingEntries(storage)).toEqual([]);
     expect(inboxEntries(storage)).toEqual([]);
   });
@@ -164,7 +173,7 @@ describe('importFile', () => {
     const result = await importFile({ ...ctx, sources, files }, '/src/a.png');
 
     expect(result.file).toBeNull();
-    expect(result.error).toBe('db locked');
+    expect(result.error).toBe('Import failed');
     expect(stream.destroyed).toBe(true);
     expect(stagingEntries(storage)).toEqual([]);
   });
@@ -206,9 +215,67 @@ describe('importFile', () => {
     const result = await importFile({ ...ctx, files }, '/src/a.png');
 
     expect(result.file!.status).toBe('failed');
-    expect(result.error).toBe('commit failed');
+    expect(result.error).toBe('Import failed');
     expect(inboxEntries(storage)).toEqual([]);
     expect([...db.files.records.values()].map((r) => r.status)).toEqual(['failed']);
+  });
+
+  describe('error text', () => {
+    const ABSOLUTE = 'C:\\Users\\someone\\workspace\\.assetforge\\staging\\x.part';
+    const errnoError = (code: unknown) =>
+      Object.assign(new Error(`${String(code)}: operation failed, open '${ABSOLUTE}'`), { code });
+
+    it('replaces a non-domain error by "Import failed (<code>)" in the result and the record', async () => {
+      const { ctx, sources, storage, db } = await setup();
+      sources.set('/src/a.png', Buffer.from('x'));
+      storage.failNext('writeStream', errnoError('EBUSY'));
+      const result = await importFile(ctx, '/src/a.png');
+
+      expect(result.error).toBe('Import failed (EBUSY)');
+      expect(result.file!.error).toBe('Import failed (EBUSY)');
+      expect(db.files.records.get(result.file!.id)!.error).toBe('Import failed (EBUSY)');
+    });
+
+    it('drops a code that is not a short identifier', async () => {
+      for (const code of [42, ABSOLUTE, 'E'.repeat(40)]) {
+        const { ctx, sources, storage, db } = await setup();
+        sources.set('/src/a.png', Buffer.from('x'));
+        storage.failNext('move', errnoError(code));
+        const result = await importFile(ctx, '/src/a.png');
+
+        expect(result.error).toBe('Import failed');
+        expect(db.files.records.get(result.file!.id)!.error).toBe('Import failed');
+      }
+    });
+
+    it('keeps the message of a domain error', async () => {
+      const { ctx, sources, storage, db } = await setup();
+      sources.set('/src/a.png', Buffer.from('x'));
+      storage.failNext('writeStream', new StorageFullError('Not enough free space to write .assetforge/staging/x.part'));
+      const result = await importFile(ctx, '/src/a.png');
+
+      expect(result.error).toBe('Not enough free space to write .assetforge/staging/x.part');
+      expect(db.files.records.get(result.file!.id)!.error).toBe(result.error);
+    });
+
+    it('applies the same rule to errors from opening the source', async () => {
+      const { ctx } = await setup();
+      const raw: SourceFiles = {
+        open: async () => {
+          throw errnoError('EBUSY');
+        },
+      };
+      expect((await importFile({ ...ctx, sources: raw }, '/src/a.png')).error).toBe('Import failed (EBUSY)');
+
+      const domain: SourceFiles = {
+        open: async () => {
+          throw new SourceNotReadableError('Cannot read source file: /src/a.png');
+        },
+      };
+      expect((await importFile({ ...ctx, sources: domain }, '/src/a.png')).error).toBe(
+        'Cannot read source file: /src/a.png',
+      );
+    });
   });
 
   it('does not reject when markFailed itself throws', async () => {
@@ -221,7 +288,7 @@ describe('importFile', () => {
     };
     const result = await importFile({ ...ctx, files }, '/src/a.png');
 
-    expect(result.error).toBe('rename failed');
+    expect(result.error).toBe('Import failed');
     expect(result.file?.status).toBe('failed');
     expect([...db.files.records.values()].map((r) => r.status)).toEqual(['pending']);
   });

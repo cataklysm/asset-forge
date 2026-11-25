@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { PathEscapeError } from '@assetforge/core';
+import { PathEscapeError, StorageAccessDeniedError, StorageFullError } from '@assetforge/core';
 import { LocalFileSystemStorage } from '../src/index.js';
 
 const HELLO_SHA = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
@@ -99,6 +99,83 @@ describe('files', () => {
     expect(await storage.list('inbox')).toEqual(['a.txt']);
     await storage.remove('inbox/a.txt');
     expect(await storage.exists('inbox/a.txt')).toBe(false);
+  });
+});
+
+describe('file-system error mapping', () => {
+  beforeEach(async () => {
+    await storage.ensureLayout();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const errno = (code: string, target: string) =>
+    Object.assign(new Error(`${code}: operation failed, open '${target}'`), { code });
+
+  it.skipIf(process.platform !== 'win32')(
+    'maps a real EPERM (rename over a read-only file on Windows) to StorageAccessDeniedError',
+    async () => {
+      await storage.writeText('workspace.json', 'original');
+      await fs.chmod(path.join(root, 'workspace.json'), 0o444);
+      try {
+        const error = await storage.writeText('workspace.json', 'new').catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(StorageAccessDeniedError);
+        expect((error as StorageAccessDeniedError).code).toBe('storage_access_denied');
+        expect((error as Error).message).not.toContain(tmp);
+        expect(((error as Error).cause as NodeJS.ErrnoException).code).toBe('EPERM');
+        expect(await storage.readText('workspace.json')).toBe('original');
+        expect((await storage.list('.')).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+      } finally {
+        await fs.chmod(path.join(root, 'workspace.json'), 0o666);
+      }
+    },
+  );
+
+  for (const code of ['EACCES', 'EPERM', 'EROFS']) {
+    it(`maps ${code} to StorageAccessDeniedError without an absolute path`, async () => {
+      const cause = errno(code, path.join(root, 'inbox'));
+      vi.spyOn(fs, 'mkdir').mockRejectedValueOnce(cause);
+      const error = await storage.ensureLayout().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(StorageAccessDeniedError);
+      expect((error as Error).cause).toBe(cause);
+      expect((error as Error).message).not.toContain(tmp);
+    });
+  }
+
+  it('maps ENOSPC to StorageFullError with the relative path', async () => {
+    const cause = errno('ENOSPC', path.join(root, 'inbox', 'a.txt'));
+    vi.spyOn(fs, 'open').mockRejectedValueOnce(cause);
+    const error = await storage
+      .writeStream('inbox/a.txt', Readable.from(Buffer.from('x')))
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StorageFullError);
+    expect((error as StorageFullError).code).toBe('storage_full');
+    expect((error as Error).cause).toBe(cause);
+    expect((error as Error).message).toContain('inbox/a.txt');
+    expect((error as Error).message).not.toContain(tmp);
+  });
+
+  it('maps ENOSPC from the atomic text write', async () => {
+    vi.spyOn(fs, 'writeFile').mockRejectedValueOnce(errno('ENOSPC', path.join(root, 'x')));
+    await expect(storage.writeText('workspace.json', 'x')).rejects.toBeInstanceOf(StorageFullError);
+  });
+
+  it('passes other errors through unchanged', async () => {
+    const cause = errno('EBUSY', path.join(root, 'inbox', 'a.txt'));
+    await storage.writeText('inbox/a.txt', 'A');
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(cause);
+    await expect(storage.move('inbox/a.txt', 'inbox/b.txt')).rejects.toBe(cause);
+  });
+
+  it('does not attribute a failing source stream to the workspace storage', async () => {
+    const cause = errno('EACCES', 'C:\\elsewhere\\source.png');
+    async function* broken() {
+      yield Buffer.from('part');
+      throw cause;
+    }
+    await expect(storage.writeStream('inbox/b.txt', Readable.from(broken()))).rejects.toBe(cause);
+    expect(await storage.exists('inbox/b.txt')).toBe(false);
   });
 });
 

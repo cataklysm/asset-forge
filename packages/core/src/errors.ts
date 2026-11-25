@@ -26,3 +26,5 @@ export class NoWorkspaceOpenError extends define('no_workspace_open') {}
 export class PathEscapeError extends define('path_escape') {}
 export class SourceNotReadableError extends define('source_not_readable') {}
 export class ChecksumMismatchError extends define('checksum_mismatch') {}
+export class StorageAccessDeniedError extends define('storage_access_denied') {}
+export class StorageFullError extends define('storage_full') {}

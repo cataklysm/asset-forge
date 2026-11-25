@@ -1,5 +1,5 @@
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
-import { ChecksumMismatchError } from './errors.js';
+import { AssetForgeError, ChecksumMismatchError } from './errors.js';
 import { mimeFromFileName } from './file-names.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, SourceFiles, Storage } from './ports.js';
@@ -12,8 +12,17 @@ export interface ImportContext {
   now(): Date;
 }
 
+/**
+ * The text stored in `file.error` and returned to the renderer. Domain errors carry a
+ * message written for that purpose; any other error (typically a Node fs error) may
+ * contain absolute paths, so only its short error code survives.
+ */
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof AssetForgeError) return error.message;
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code)
+    ? `Import failed (${code})`
+    : 'Import failed';
 }
 
 /**
