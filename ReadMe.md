@@ -247,10 +247,10 @@ AssetForge-Workspace/
 │       │   ├── <file-uuid>_front.png
 │       │   └── <file-uuid>_back.png
 │       ├── models/
-│       │   └── character.blend
+│       │   └── <file-uuid>_character.blend
 │       ├── textures/
-│       │   ├── albedo.png
-│       │   └── normal.png
+│       │   ├── <file-uuid>_albedo.png
+│       │   └── <file-uuid>_normal.png
 │       └── miscellaneous/
 ├── inbox/                          # Files not yet assigned
 ├── exports/
@@ -258,7 +258,19 @@ AssetForge-Workspace/
     └── staging/                    # Temporary, recoverable transfers
 ```
 
-Asset directories have stable IDs; renaming an asset or project does not change any paths. File names can contain human-readable suffixes. Related 3D working files keep a sensible internal directory structure. File name and role changes are handled as controlled operations, not through uncoordinated file moves.
+Asset directories have stable IDs; renaming an asset or project does not change any paths. Every managed file is named `<file-uuid>_<sanitized original name>`, in the inbox as well as inside an asset directory, so two files with the same original name never collide. Related 3D working files keep a sensible internal directory structure. File name and role changes are handled as controlled operations, not through uncoordinated file moves.
+
+The role of a file decides its directory inside the asset folder:
+
+| File role | Directory |
+| --- | --- |
+| `reference`, `concept` | `references/` |
+| `generated` | `generations/` |
+| `model`, `working` | `models/` |
+| `texture` | `textures/` |
+| `final`, `other` | `miscellaneous/` |
+
+A file without an asset lies in `inbox/` and has no role. Attaching a file to an asset, changing its role and detaching it back to the inbox each move the file to the path that follows from this table (§9.4).
 
 A storage abstraction encapsulates resolving, reading/writing as streams, listing, moving, existence checks and deletion. File system adapters (local/SMB) are sufficient for the MVP. A future object storage adapter must support downloads into a local working directory; an object storage key is not a local Blender file path.
 
@@ -286,6 +298,8 @@ For later multi-user operation, a central API server takes over write coordinati
 ### 9.4 Consistency and Backup
 
 File system and database do not form a joint atomic transaction. Import and generation operations therefore need a restartable flow: database entry in pending state, write to staging, checksum verification, transfer within the same storage volume, then commit of the final state. Incomplete transfers are detected at the next start and either resumed or deliberately cleaned up.
+
+Moving a managed file (attach to an asset, role change, detach) follows the same idea with a move intent: a `file_move` row with the target path, asset and role is written first, then the file is moved within the storage, then the file row is updated and the intent deleted in one transaction. An existing target is never overwritten. When a workspace is opened, every remaining intent is repaired: if the target exists, the move happened and is committed; otherwise it never happened and the intent is discarded.
 
 Deletion is initially logical or goes through a trash. Physical deletion checks all references and happens only after a successful metadata update and a defined recovery period. Unreachable storage must be distinguished from files that are actually missing.
 
@@ -319,6 +333,8 @@ The following model is a starting point and not a finished SQL schema. IDs are m
 | Generation / GenerationInput / GenerationOutput | Generation, inputs used and result files |
 | Job / JobAttempt | Persistent tasks, execution attempts and external job IDs |
 | ActivityEvent | Domain change history |
+
+Implemented so far (phases 1 and 2a), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types, no metadata schema or default workflow yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum) and `file_move` (move intents, §9.4). Everything else in the table above does not exist yet.
 
 Particularly important indexes: project assignments, asset type and status, file-to-asset assignment, tags, checksums, job status and job start time. Project-asset assignments and normalized tag assignments must not contain unintended duplicates. Type-dependent metadata can additionally be stored as validated JSON; regularly filtered core fields remain relational columns.
 
