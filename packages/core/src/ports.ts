@@ -1,5 +1,16 @@
 import type { Readable } from 'node:stream';
-import type { FileRecord, ImportStatus, FileList, WorkspaceSummary } from '@assetforge/contracts';
+import type {
+  Asset,
+  AssetList,
+  AssetStatus,
+  AssetType,
+  FileList,
+  FileRecord,
+  ImportStatus,
+  Project,
+  ProjectList,
+  WorkspaceSummary,
+} from '@assetforge/contracts';
 
 export interface Storage {
   isReachable(): Promise<boolean>; // root's parent volume/dir is accessible
@@ -47,6 +58,44 @@ export interface FileRepository {
   list(q: { limit: number; offset: number }): Promise<FileList>; // newest importedAt first
 }
 
+export interface Page {
+  limit: number;
+  offset: number;
+}
+
+export interface AssetTypeRepository {
+  list(): Promise<AssetType[]>; // by sortOrder, then name
+  get(id: string): Promise<AssetType | null>;
+  insertMissing(types: AssetType[]): Promise<void>; // skips rows whose key already exists
+}
+
+export interface ProjectRepository {
+  insert(project: Project): Promise<void>;
+  get(id: string): Promise<Project | null>;
+  update(
+    id: string,
+    patch: Partial<Pick<Project, 'name' | 'description' | 'status'>> & { updatedAt: string },
+  ): Promise<Project | null>;
+  list(q: Page): Promise<ProjectList>; // by name (case-insensitive), then id
+}
+
+export interface AssetQuery extends Page {
+  typeId?: string;
+  status?: AssetStatus;
+  projectId?: string;
+  nameContains?: string;
+}
+
+export interface AssetRepository {
+  insert(asset: Asset): Promise<void>;
+  get(id: string): Promise<Asset | null>;
+  update(
+    id: string,
+    patch: Partial<Pick<Asset, 'name' | 'description' | 'typeId' | 'status'>> & { updatedAt: string },
+  ): Promise<Asset | null>;
+  list(q: AssetQuery): Promise<AssetList>; // by name (case-insensitive), then id
+}
+
 export interface WorkspaceMeta {
   id: string;
   formatVersion: number;
@@ -63,6 +112,9 @@ export interface WorkspaceDatabase {
   meta: WorkspaceMetaRepository;
   storages: StorageRepository;
   files: FileRepository;
+  assetTypes: AssetTypeRepository;
+  projects: ProjectRepository;
+  assets: AssetRepository;
   close(): Promise<void>;
 }
 

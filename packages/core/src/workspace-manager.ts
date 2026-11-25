@@ -18,6 +18,7 @@ import {
   WorkspaceMismatchError,
   WorkspaceNotFoundError,
 } from './errors.js';
+import { ensureBuiltInAssetTypes } from './asset-types.js';
 import { importFile, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
@@ -161,6 +162,7 @@ export class WorkspaceManager {
         id: this.host.newId(),
         createdAt: this.host.now().toISOString(),
       });
+      await ensureBuiltInAssetTypes({ database, newId: () => this.host.newId() });
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       const summary: WorkspaceSummary = {

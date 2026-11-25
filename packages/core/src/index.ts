@@ -1,7 +1,10 @@
+export * from './asset-types.js';
+export * from './assets.js';
 export * from './errors.js';
 export * from './file-names.js';
 export * from './import-file.js';
 export * from './paths.js';
+export * from './projects.js';
 export * from './recover-imports.js';
 export type * from './ports.js';
 export * from './serial-queue.js';

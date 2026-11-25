@@ -1,10 +1,25 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
-import type { FileList, FileRecord, ImportStatus, WorkspaceSummary } from '@assetforge/contracts';
+import type {
+  Asset,
+  AssetList,
+  AssetType,
+  FileList,
+  FileRecord,
+  ImportStatus,
+  Project,
+  ProjectList,
+  WorkspaceSummary,
+} from '@assetforge/contracts';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { InvalidOperationError, NotFoundError, SourceNotReadableError } from '../src/errors.js';
 import type {
+  AssetQuery,
+  AssetRepository,
+  AssetTypeRepository,
   FileRepository,
+  Page,
+  ProjectRepository,
   SourceFiles,
   Storage,
   StorageRef,
@@ -214,10 +229,101 @@ class InMemoryFiles implements FileRepository {
   }
 }
 
+class InMemoryAssetTypes implements AssetTypeRepository {
+  readonly rows = new Map<string, AssetType>();
+
+  async list(): Promise<AssetType[]> {
+    return [...this.rows.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
+  async get(id: string): Promise<AssetType | null> {
+    return this.rows.get(id) ?? null;
+  }
+
+  async insertMissing(types: AssetType[]): Promise<void> {
+    for (const t of types) {
+      if (![...this.rows.values()].some((r) => r.key === t.key)) this.rows.set(t.id, t);
+    }
+  }
+}
+
+const byNameThenId = <T extends { name: string; id: string }>(a: T, b: T) =>
+  a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+function definedOnly<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+class InMemoryProjects implements ProjectRepository {
+  readonly rows = new Map<string, Project>();
+
+  async insert(project: Project): Promise<void> {
+    this.rows.set(project.id, project);
+  }
+
+  async get(id: string): Promise<Project | null> {
+    return this.rows.get(id) ?? null;
+  }
+
+  async update(
+    id: string,
+    patch: Partial<Pick<Project, 'name' | 'description' | 'status'>> & { updatedAt: string },
+  ): Promise<Project | null> {
+    const row = this.rows.get(id);
+    if (!row) return null;
+    const next = { ...row, ...definedOnly(patch) };
+    this.rows.set(id, next);
+    return next;
+  }
+
+  async list(q: Page): Promise<ProjectList> {
+    const sorted = [...this.rows.values()].sort(byNameThenId);
+    const items = sorted.slice(q.offset, q.offset + q.limit).map((p) => ({ ...p, assetCount: 0 }));
+    return { items, total: sorted.length };
+  }
+}
+
+class InMemoryAssets implements AssetRepository {
+  readonly rows = new Map<string, Asset>();
+
+  async insert(asset: Asset): Promise<void> {
+    this.rows.set(asset.id, asset);
+  }
+
+  async get(id: string): Promise<Asset | null> {
+    return this.rows.get(id) ?? null;
+  }
+
+  async update(
+    id: string,
+    patch: Partial<Pick<Asset, 'name' | 'description' | 'typeId' | 'status'>> & { updatedAt: string },
+  ): Promise<Asset | null> {
+    const row = this.rows.get(id);
+    if (!row) return null;
+    const next = { ...row, ...definedOnly(patch) };
+    this.rows.set(id, next);
+    return next;
+  }
+
+  async list(q: AssetQuery): Promise<AssetList> {
+    const needle = q.nameContains?.toLowerCase();
+    const matching = [...this.rows.values()]
+      .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
+      .filter((a) => q.status === undefined || a.status === q.status)
+      .filter((a) => needle === undefined || a.name.toLowerCase().includes(needle))
+      .sort(byNameThenId);
+    const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({ ...a, projectCount: 0, fileCount: 0 }));
+    return { items, total: matching.length };
+  }
+}
+
 export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
   readonly files = new InMemoryFiles();
+  readonly assetTypes = new InMemoryAssetTypes();
+  readonly projects = new InMemoryProjects();
+  readonly assets = new InMemoryAssets();
   closed = false;
 
   async close(): Promise<void> {
