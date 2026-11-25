@@ -1,4 +1,5 @@
 export * from './asset-types.js';
+export * from './assignments.js';
 export * from './assets.js';
 export * from './errors.js';
 export * from './file-names.js';
@@ -6,6 +7,7 @@ export * from './import-file.js';
 export * from './paths.js';
 export * from './projects.js';
 export * from './recover-imports.js';
+export * from './relations.js';
 export type * from './ports.js';
 export * from './serial-queue.js';
 export type * from './session.js';

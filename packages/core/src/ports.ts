@@ -2,13 +2,19 @@ import type { Readable } from 'node:stream';
 import type {
   Asset,
   AssetList,
+  AssetAssignment,
+  AssetRelation,
+  AssetRelationView,
   AssetStatus,
   AssetType,
   FileList,
   FileRecord,
   ImportStatus,
   Project,
+  ProjectAssignment,
   ProjectList,
+  ProjectMemberList,
+  RelationKind,
   WorkspaceSummary,
 } from '@assetforge/contracts';
 
@@ -96,6 +102,37 @@ export interface AssetRepository {
   list(q: AssetQuery): Promise<AssetList>; // by name (case-insensitive), then id
 }
 
+export interface AssignmentKey {
+  projectId: string;
+  assetId: string;
+}
+
+export interface ProjectAssetRepository {
+  insert(a: ProjectAssignment): Promise<void>;
+  get(key: AssignmentKey): Promise<ProjectAssignment | null>;
+  update(
+    key: AssignmentKey,
+    patch: Partial<Pick<ProjectAssignment, 'priority' | 'intendedUse' | 'approvalStatus' | 'notes'>> & {
+      updatedAt: string;
+    },
+  ): Promise<ProjectAssignment | null>;
+  remove(key: AssignmentKey): Promise<boolean>; // false if there was none
+  listByAsset(assetId: string): Promise<AssetAssignment[]>; // by project name, then id
+  listByProject(projectId: string, q: Page): Promise<ProjectMemberList>; // by asset name, then id
+}
+
+export interface RelationKey {
+  fromAssetId: string;
+  toAssetId: string;
+  kind: RelationKind;
+}
+
+export interface AssetRelationRepository {
+  insert(r: AssetRelation): Promise<boolean>; // false if it already exists
+  remove(key: RelationKey): Promise<boolean>;
+  listForAsset(assetId: string): Promise<AssetRelationView[]>; // outgoing first, then incoming; each by kind, then other.name
+}
+
 export interface WorkspaceMeta {
   id: string;
   formatVersion: number;
@@ -115,6 +152,8 @@ export interface WorkspaceDatabase {
   assetTypes: AssetTypeRepository;
   projects: ProjectRepository;
   assets: AssetRepository;
+  projectAssets: ProjectAssetRepository;
+  relations: AssetRelationRepository;
   close(): Promise<void>;
 }
 

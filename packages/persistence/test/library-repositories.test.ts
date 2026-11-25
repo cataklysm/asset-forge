@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { Asset, AssetType, Project } from '@assetforge/contracts';
+import type { Asset, AssetType, Project, ProjectAssignment } from '@assetforge/contracts';
 import { BUILT_IN_ASSET_TYPES, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
@@ -123,5 +123,186 @@ describe('asset repository', () => {
 
   test('rejects an asset with an unknown type', async () => {
     await expect(db.assets.insert(asset(1, 'Orphan', uuid(999)))).rejects.toThrow(/FOREIGN KEY/i);
+  });
+});
+
+describe('project assignments', () => {
+  const assignment = (projectN: number, assetN: number, patch: Partial<ProjectAssignment> = {}): ProjectAssignment => ({
+    projectId: uuid(projectN),
+    assetId: uuid(assetN),
+    priority: 'normal',
+    intendedUse: '',
+    approvalStatus: 'pending',
+    notes: '',
+    assignedAt: TS,
+    updatedAt: TS,
+    ...patch,
+  });
+  const seed = async () => {
+    await db.assetTypes.insertMissing(typeRows(100));
+    const typeId = uuid(105);
+    await db.projects.insert(project(1, 'Zeta'));
+    await db.projects.insert(project(2, 'alpha'));
+    await db.assets.insert(asset(11, 'Pump', typeId));
+    await db.assets.insert(asset(12, 'Motel', typeId));
+    await db.assets.insert(asset(13, 'Unassigned', typeId));
+  };
+
+  test('an asset can be assigned to several projects', async () => {
+    await seed();
+    await db.projectAssets.insert(assignment(1, 11, { priority: 'high', notes: 'n' }));
+    await db.projectAssets.insert(assignment(2, 11));
+    const list = await db.projectAssets.listByAsset(uuid(11));
+    expect(list.map((a) => a.project.name)).toEqual(['alpha', 'Zeta']);
+    expect(list[1]).toEqual({ ...assignment(1, 11, { priority: 'high', notes: 'n' }), project: project(1, 'Zeta') });
+    await expect(db.projectAssets.listByAsset(uuid(13))).resolves.toEqual([]);
+  });
+
+  test('the same assignment cannot be inserted twice', async () => {
+    await seed();
+    await db.projectAssets.insert(assignment(1, 11));
+    await expect(db.projectAssets.insert(assignment(1, 11))).rejects.toThrow(/UNIQUE|PRIMARY KEY/i);
+  });
+
+  test('get and update change only the given fields and report a missing row', async () => {
+    await seed();
+    const key = { projectId: uuid(1), assetId: uuid(11) };
+    await expect(db.projectAssets.get(key)).resolves.toBeNull();
+    await expect(db.projectAssets.update(key, { notes: 'x', updatedAt: TS })).resolves.toBeNull();
+    await db.projectAssets.insert(assignment(1, 11));
+    const updated = await db.projectAssets.update(key, {
+      approvalStatus: 'approved',
+      intendedUse: 'hero',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    });
+    expect(updated).toEqual(
+      assignment(1, 11, { approvalStatus: 'approved', intendedUse: 'hero', updatedAt: '2026-02-01T00:00:00.000Z' }),
+    );
+    await expect(db.projectAssets.get(key)).resolves.toEqual(updated);
+  });
+
+  test('removing an assignment leaves the asset, its file rows and its other assignments', async () => {
+    await seed();
+    const storage = await db.storages.ensurePrimary({ id: uuid(500), createdAt: TS });
+    await db.files.insertPending({
+      id: uuid(600),
+      storageId: storage.id,
+      originalName: 'pump.png',
+      relativePath: 'files/pump.png',
+      mimeType: 'image/png',
+      importedAt: TS,
+    });
+    await db.projectAssets.insert(assignment(1, 11));
+    await db.projectAssets.insert(assignment(2, 11));
+    await expect(db.projectAssets.remove({ projectId: uuid(1), assetId: uuid(11) })).resolves.toBe(true);
+    await expect(db.projectAssets.remove({ projectId: uuid(1), assetId: uuid(11) })).resolves.toBe(false);
+    await expect(db.assets.get(uuid(11))).resolves.not.toBeNull();
+    await expect(db.projects.get(uuid(1))).resolves.not.toBeNull();
+    await expect(db.files.listByStatus('pending')).resolves.toHaveLength(1);
+    expect((await db.projectAssets.listByAsset(uuid(11))).map((a) => a.projectId)).toEqual([uuid(2)]);
+  });
+
+  test('listByProject pages members with their asset', async () => {
+    await seed();
+    await db.projectAssets.insert(assignment(1, 11));
+    await db.projectAssets.insert(assignment(1, 12));
+    await db.projectAssets.insert(assignment(2, 12));
+    const first = await db.projectAssets.listByProject(uuid(1), { limit: 1, offset: 0 });
+    expect(first.total).toBe(2);
+    expect(first.items).toEqual([{ ...assignment(1, 12), asset: asset(12, 'Motel', uuid(105)) }]);
+    const second = await db.projectAssets.listByProject(uuid(1), { limit: 1, offset: 1 });
+    expect(second.items.map((m) => m.asset.name)).toEqual(['Pump']);
+    await expect(db.projectAssets.listByProject(uuid(9), { limit: 5, offset: 0 })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  test('project and asset lists report assignment counts', async () => {
+    await seed();
+    await db.projectAssets.insert(assignment(1, 11));
+    await db.projectAssets.insert(assignment(1, 12));
+    await db.projectAssets.insert(assignment(2, 12));
+    const projects = await db.projects.list({ limit: 10, offset: 0 });
+    expect(projects.items.map((p) => [p.name, p.assetCount])).toEqual([
+      ['alpha', 1],
+      ['Zeta', 2],
+    ]);
+    const all = await db.assets.list({ limit: 10, offset: 0 });
+    expect(all.items.map((a) => [a.name, a.projectCount])).toEqual([
+      ['Motel', 2],
+      ['Pump', 1],
+      ['Unassigned', 0],
+    ]);
+    const inZeta = await db.assets.list({ limit: 10, offset: 0, projectId: uuid(1) });
+    expect(inZeta.items.map((a) => a.name)).toEqual(['Motel', 'Pump']);
+    expect(inZeta.total).toBe(2);
+    const inAlpha = await db.assets.list({ limit: 1, offset: 0, projectId: uuid(2) });
+    expect(inAlpha.items.map((a) => a.name)).toEqual(['Motel']);
+    expect(inAlpha.total).toBe(1);
+    await expect(db.assets.list({ limit: 10, offset: 0, projectId: uuid(9) })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+});
+
+describe('asset relations', () => {
+  const seed = async () => {
+    await db.assetTypes.insertMissing(typeRows(100));
+    const typeId = uuid(105);
+    await db.assets.insert(asset(1, 'Pump', typeId));
+    await db.assets.insert(asset(2, 'Station', typeId));
+    await db.assets.insert(asset(3, 'Alpha', typeId));
+  };
+  const relation = (from: number, to: number, kind: 'uses' | 'part_of' | 'variant_of' = 'uses') => ({
+    fromAssetId: uuid(from),
+    toAssetId: uuid(to),
+    kind,
+    createdAt: TS,
+  });
+
+  test('insert returns false for an existing relation', async () => {
+    await seed();
+    await expect(db.relations.insert(relation(1, 2))).resolves.toBe(true);
+    await expect(db.relations.insert({ ...relation(1, 2), createdAt: '2027-01-01T00:00:00.000Z' })).resolves.toBe(false);
+    await expect(db.relations.insert(relation(1, 2, 'part_of'))).resolves.toBe(true);
+    await expect(db.relations.insert(relation(2, 1))).resolves.toBe(true);
+    const outgoing = (await db.relations.listForAsset(uuid(1))).filter((r) => r.direction === 'outgoing');
+    expect(outgoing.find((r) => r.kind === 'uses')?.createdAt).toBe(TS);
+  });
+
+  test('listForAsset returns outgoing and incoming relations with the other asset', async () => {
+    await seed();
+    await db.relations.insert(relation(1, 2, 'uses'));
+    await db.relations.insert(relation(1, 3, 'uses'));
+    await db.relations.insert(relation(1, 2, 'part_of'));
+    await db.relations.insert(relation(3, 1, 'variant_of'));
+    const list = await db.relations.listForAsset(uuid(1));
+    expect(list.map((r) => [r.direction, r.kind, r.other.name])).toEqual([
+      ['outgoing', 'part_of', 'Station'],
+      ['outgoing', 'uses', 'Alpha'],
+      ['outgoing', 'uses', 'Station'],
+      ['incoming', 'variant_of', 'Alpha'],
+    ]);
+    expect(list[1]).toEqual({ ...relation(1, 3), direction: 'outgoing', other: asset(3, 'Alpha', uuid(105)) });
+    const incoming = await db.relations.listForAsset(uuid(2));
+    expect(incoming.map((r) => [r.direction, r.kind, r.other.name])).toEqual([
+      ['incoming', 'part_of', 'Pump'],
+      ['incoming', 'uses', 'Pump'],
+    ]);
+  });
+
+  test('remove reports whether a relation existed', async () => {
+    await seed();
+    await db.relations.insert(relation(1, 2));
+    await expect(db.relations.remove(relation(1, 2, 'part_of'))).resolves.toBe(false);
+    await expect(db.relations.remove(relation(1, 2))).resolves.toBe(true);
+    await expect(db.relations.listForAsset(uuid(1))).resolves.toEqual([]);
+  });
+
+  test('rejects a relation of an asset to itself', async () => {
+    await seed();
+    await expect(db.relations.insert(relation(1, 1))).rejects.toThrow(/CHECK/i);
   });
 });

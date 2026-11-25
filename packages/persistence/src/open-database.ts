@@ -9,6 +9,8 @@ import { createAssetRepository } from './asset-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
 import { createFileRepository } from './file-repository.js';
 import { createMetaRepository } from './meta-repository.js';
+import { createAssetRelationRepository } from './asset-relation-repository.js';
+import { createProjectAssetRepository } from './project-asset-repository.js';
 import { createProjectRepository } from './project-repository.js';
 import { createStorageRepository } from './storage-repository.js';
 
@@ -32,6 +34,8 @@ export async function openWorkspaceDatabase(
       assetTypes: createAssetTypeRepository(db),
       projects: createProjectRepository(db),
       assets: createAssetRepository(db),
+      projectAssets: createProjectAssetRepository(db),
+      relations: createAssetRelationRepository(db),
       async close() {
         if (sqlite.open) sqlite.close();
       },

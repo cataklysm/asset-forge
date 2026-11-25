@@ -2,24 +2,33 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type {
   Asset,
+  AssetAssignment,
   AssetList,
+  AssetRelation,
+  AssetRelationView,
   AssetType,
   FileList,
   FileRecord,
   ImportStatus,
   Project,
+  ProjectAssignment,
   ProjectList,
+  ProjectMemberList,
   WorkspaceSummary,
 } from '@assetforge/contracts';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { InvalidOperationError, NotFoundError, SourceNotReadableError } from '../src/errors.js';
 import type {
   AssetQuery,
+  AssetRelationRepository,
   AssetRepository,
+  AssignmentKey,
   AssetTypeRepository,
   FileRepository,
   Page,
+  ProjectAssetRepository,
   ProjectRepository,
+  RelationKey,
   SourceFiles,
   Storage,
   StorageRef,
@@ -254,8 +263,14 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+/** Assignments keyed by `projectId|assetId`; shared so project and asset lists can derive their counts. */
+class AssignmentRows extends Map<string, ProjectAssignment> {}
+const assignmentKey = (k: AssignmentKey) => `${k.projectId}|${k.assetId}`;
+
 class InMemoryProjects implements ProjectRepository {
   readonly rows = new Map<string, Project>();
+
+  constructor(private readonly links: AssignmentRows) {}
 
   async insert(project: Project): Promise<void> {
     this.rows.set(project.id, project);
@@ -278,13 +293,18 @@ class InMemoryProjects implements ProjectRepository {
 
   async list(q: Page): Promise<ProjectList> {
     const sorted = [...this.rows.values()].sort(byNameThenId);
-    const items = sorted.slice(q.offset, q.offset + q.limit).map((p) => ({ ...p, assetCount: 0 }));
+    const items = sorted.slice(q.offset, q.offset + q.limit).map((p) => ({
+      ...p,
+      assetCount: [...this.links.values()].filter((l) => l.projectId === p.id).length,
+    }));
     return { items, total: sorted.length };
   }
 }
 
 class InMemoryAssets implements AssetRepository {
   readonly rows = new Map<string, Asset>();
+
+  constructor(private readonly links: AssignmentRows) {}
 
   async insert(asset: Asset): Promise<void> {
     this.rows.set(asset.id, asset);
@@ -310,10 +330,102 @@ class InMemoryAssets implements AssetRepository {
     const matching = [...this.rows.values()]
       .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
       .filter((a) => q.status === undefined || a.status === q.status)
+      .filter((a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })))
       .filter((a) => needle === undefined || a.name.toLowerCase().includes(needle))
       .sort(byNameThenId);
-    const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({ ...a, projectCount: 0, fileCount: 0 }));
+    const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({
+      ...a,
+      projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
+      fileCount: 0,
+    }));
     return { items, total: matching.length };
+  }
+}
+
+class InMemoryProjectAssets implements ProjectAssetRepository {
+  constructor(
+    private readonly links: AssignmentRows,
+    private readonly projects: InMemoryProjects,
+    private readonly assets: InMemoryAssets,
+  ) {}
+
+  async insert(a: ProjectAssignment): Promise<void> {
+    if (this.links.has(assignmentKey(a))) throw new Error('UNIQUE constraint failed: project_asset');
+    this.links.set(assignmentKey(a), a);
+  }
+
+  async get(key: AssignmentKey): Promise<ProjectAssignment | null> {
+    return this.links.get(assignmentKey(key)) ?? null;
+  }
+
+  async update(
+    key: AssignmentKey,
+    patch: Partial<Pick<ProjectAssignment, 'priority' | 'intendedUse' | 'approvalStatus' | 'notes'>> & {
+      updatedAt: string;
+    },
+  ): Promise<ProjectAssignment | null> {
+    const row = this.links.get(assignmentKey(key));
+    if (!row) return null;
+    const next = { ...row, ...definedOnly(patch) };
+    this.links.set(assignmentKey(key), next);
+    return next;
+  }
+
+  async remove(key: AssignmentKey): Promise<boolean> {
+    return this.links.delete(assignmentKey(key));
+  }
+
+  async listByAsset(assetId: string): Promise<AssetAssignment[]> {
+    return [...this.links.values()]
+      .filter((l) => l.assetId === assetId)
+      .map((l) => ({ ...l, project: this.projects.rows.get(l.projectId)! }))
+      .sort((a, b) => byNameThenId(a.project, b.project));
+  }
+
+  async listByProject(projectId: string, q: Page): Promise<ProjectMemberList> {
+    const members = [...this.links.values()]
+      .filter((l) => l.projectId === projectId)
+      .map((l) => ({ ...l, asset: this.assets.rows.get(l.assetId)! }))
+      .sort((a, b) => byNameThenId(a.asset, b.asset));
+    return { items: members.slice(q.offset, q.offset + q.limit), total: members.length };
+  }
+}
+
+class InMemoryRelations implements AssetRelationRepository {
+  readonly rows: AssetRelation[] = [];
+
+  constructor(private readonly assets: InMemoryAssets) {}
+
+  private find(k: RelationKey): number {
+    return this.rows.findIndex(
+      (r) => r.fromAssetId === k.fromAssetId && r.toAssetId === k.toAssetId && r.kind === k.kind,
+    );
+  }
+
+  async insert(r: AssetRelation): Promise<boolean> {
+    if (this.find(r) >= 0) return false;
+    this.rows.push(r);
+    return true;
+  }
+
+  async remove(key: RelationKey): Promise<boolean> {
+    const idx = this.find(key);
+    if (idx < 0) return false;
+    this.rows.splice(idx, 1);
+    return true;
+  }
+
+  async listForAsset(assetId: string): Promise<AssetRelationView[]> {
+    const view = (r: AssetRelation, direction: 'outgoing' | 'incoming', otherId: string): AssetRelationView => ({
+      ...r,
+      direction,
+      other: this.assets.rows.get(otherId)!,
+    });
+    const order = (a: AssetRelationView, b: AssetRelationView) =>
+      (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0) || byNameThenId(a.other, b.other);
+    const outgoing = this.rows.filter((r) => r.fromAssetId === assetId).map((r) => view(r, 'outgoing', r.toAssetId));
+    const incoming = this.rows.filter((r) => r.toAssetId === assetId).map((r) => view(r, 'incoming', r.fromAssetId));
+    return [...outgoing.sort(order), ...incoming.sort(order)];
   }
 }
 
@@ -322,8 +434,11 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly storages = new InMemoryStorages();
   readonly files = new InMemoryFiles();
   readonly assetTypes = new InMemoryAssetTypes();
-  readonly projects = new InMemoryProjects();
-  readonly assets = new InMemoryAssets();
+  private readonly links = new AssignmentRows();
+  readonly projects = new InMemoryProjects(this.links);
+  readonly assets = new InMemoryAssets(this.links);
+  readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
+  readonly relations = new InMemoryRelations(this.assets);
   closed = false;
 
   async close(): Promise<void> {
