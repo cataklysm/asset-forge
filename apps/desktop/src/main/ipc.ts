@@ -23,6 +23,8 @@ export interface Dialogs {
   pickFiles(): Promise<string[]>;
   /** Asks the user how to remove a workspace; the renderer cannot answer this itself. */
   confirmRemoveWorkspace(workspace: WorkspaceSummary): Promise<RemoveChoice>;
+  /** Asks whether the workflow of an asset may be removed. */
+  confirmRemoveWorkflow(assetName: string): Promise<boolean>;
 }
 
 export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
@@ -50,7 +52,7 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
       await manager.close();
       return null;
     },
-    ...createLibraryHandlers(manager),
+    ...createLibraryHandlers(manager, dialogs),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };

@@ -11,16 +11,19 @@ import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main
 let base: string;
 let manager: WorkspaceManager;
 let handlers: IpcHandlers;
+const confirmWorkflow = vi.fn(async (_assetName: string) => false);
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 
 beforeEach(async () => {
+  confirmWorkflow.mockClear();
   base = await mkdtemp(join(tmpdir(), 'af-lib-ipc-'));
   manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
   handlers = createWorkspaceHandlers(manager, {
     pickDirectory: async () => null,
     pickFiles: async () => [],
     confirmRemoveWorkspace: async () => 'cancel',
+    confirmRemoveWorkflow: confirmWorkflow,
   });
 });
 afterEach(async () => {
@@ -141,5 +144,79 @@ describe('library IPC', () => {
       ok: false,
       error: { code: 'invalid_request' },
     });
+  });
+});
+
+describe('workflow IPC', () => {
+  async function createAsset(key: string) {
+    const types = await ok<{ id: string; key: string }[]>('assetTypes:list', {});
+    return ok<{ id: string; name: string }>('assets:create', {
+      name: 'Hill',
+      typeId: types.find((t) => t.key === key)!.id,
+    });
+  }
+
+  it('returns no_workspace_open for the workflow channels', async () => {
+    const requests: Partial<Record<IpcChannel, unknown>> = {
+      'workflowTemplates:list': {},
+      'workflows:get': { assetId: uuid },
+      'workflows:start': { assetId: uuid },
+      'workflows:updateStep': { stepId: uuid, patch: { state: 'done' } },
+      'workflows:remove': { assetId: uuid },
+    };
+    for (const [channel, request] of Object.entries(requests)) {
+      expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
+      expect(await call(channel as IpcChannel, request), channel).toMatchObject({
+        ok: false,
+        error: { code: 'no_workspace_open' },
+      });
+    }
+  });
+
+  it('skipping a mandatory step maps to invalid_operation', async () => {
+    await openWorkspace();
+    const asset = await createAsset('landscape');
+    const workflow = await ok('workflows:get', { assetId: asset.id });
+    const result = await call('workflows:updateStep', {
+      stepId: workflow.steps[0].id,
+      patch: { state: 'skipped' },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+  });
+
+  it('workflows:remove does nothing when the dialog is declined', async () => {
+    await openWorkspace();
+    const asset = await createAsset('landscape');
+    confirmWorkflow.mockResolvedValue(false);
+    expect(await ok('workflows:remove', { assetId: asset.id })).toEqual({ removed: false });
+    expect(confirmWorkflow).toHaveBeenCalledWith('Hill');
+    expect(await ok('workflows:get', { assetId: asset.id })).not.toBeNull();
+  });
+
+  it('workflows:remove removes the workflow after confirmation', async () => {
+    await openWorkspace();
+    const asset = await createAsset('landscape');
+    confirmWorkflow.mockResolvedValue(true);
+    expect(await ok('workflows:remove', { assetId: asset.id })).toEqual({ removed: true });
+    expect(await ok('workflows:get', { assetId: asset.id })).toBeNull();
+  });
+
+  it('workflows:remove does not ask when there is no workflow', async () => {
+    await openWorkspace();
+    const asset = await createAsset('landscape');
+    confirmWorkflow.mockResolvedValue(true);
+    await ok('workflows:remove', { assetId: asset.id });
+    confirmWorkflow.mockClear();
+    expect(await ok('workflows:remove', { assetId: asset.id })).toEqual({ removed: false });
+    expect(confirmWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('workflows:updateStep rejects unknown patch keys as invalid_request', async () => {
+    await openWorkspace();
+    const asset = await createAsset('landscape');
+    const workflow = await ok('workflows:get', { assetId: asset.id });
+    expect(
+      await call('workflows:updateStep', { stepId: workflow.steps[0].id, patch: { mandatory: false } }),
+    ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 });

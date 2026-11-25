@@ -5,21 +5,26 @@ import {
   createProject,
   getAsset,
   getProject,
+  getWorkflow,
   listAssets,
   listAssetTypes,
   listAssignmentsOfAsset,
   listMembersOfProject,
   listProjects,
   listRelations,
+  listWorkflowTemplates,
   relocateFile,
   removeAssignment,
   removeRelation,
+  removeWorkflow,
+  startWorkflow,
   updateAsset,
   updateAssignment,
   updateProject,
+  updateWorkflowStep,
   type WorkspaceManager,
 } from '@assetforge/core';
-import type { IpcHandlers } from './ipc.js';
+import type { Dialogs, IpcHandlers } from './ipc.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
@@ -47,9 +52,17 @@ export type LibraryHandlers = Pick<
   | 'relations:list'
   | 'relations:add'
   | 'relations:remove'
+  | 'workflowTemplates:list'
+  | 'workflows:get'
+  | 'workflows:start'
+  | 'workflows:updateStep'
+  | 'workflows:remove'
 >;
 
-export function createLibraryHandlers(manager: WorkspaceManager): LibraryHandlers {
+export function createLibraryHandlers(
+  manager: WorkspaceManager,
+  dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
+): LibraryHandlers {
   return {
     'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null),
     'files:list': (r) => manager.listFiles(r),
@@ -85,6 +98,20 @@ export function createLibraryHandlers(manager: WorkspaceManager): LibraryHandler
     'relations:remove': async (r) => {
       await manager.exclusive((s) => removeRelation(s, r));
       return null;
+    },
+
+    'workflowTemplates:list': () => manager.read((s) => listWorkflowTemplates(s)),
+    'workflows:get': (r) => manager.read((s) => getWorkflow(s, r.assetId)),
+    'workflows:start': (r) => manager.exclusive((s) => startWorkflow(s, r.assetId, r.templateId)),
+    'workflows:updateStep': (r) => manager.exclusive((s) => updateWorkflowStep(s, r.stepId, r.patch)),
+    'workflows:remove': async (r) => {
+      const { name, hasWorkflow } = await manager.read(async (s) => ({
+        name: (await getAsset(s, r.assetId)).name,
+        hasWorkflow: (await getWorkflow(s, r.assetId)) !== null,
+      }));
+      if (!hasWorkflow) return { removed: false };
+      if (!(await dialogs.confirmRemoveWorkflow(name))) return { removed: false };
+      return { removed: await manager.exclusive((s) => removeWorkflow(s, r.assetId)) };
     },
   };
 }

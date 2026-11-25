@@ -24,6 +24,7 @@ const dialogs: Dialogs = {
   pickDirectory: async () => null,
   pickFiles: async () => [],
   confirmRemoveWorkspace: async () => choice,
+  confirmRemoveWorkflow: async () => false,
 };
 
 beforeEach(async () => {
@@ -83,6 +84,7 @@ describe('dispatch', () => {
       pickDirectory: async () => 'D:\\picked',
       pickFiles: async () => ['D:\\a.png'],
       confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
     });
     expect(await dispatch(picked, 'dialog:pickDirectory', {})).toEqual({ ok: true, value: 'D:\\picked' });
     expect(await dispatch(picked, 'dialog:pickFiles', {})).toEqual({ ok: true, value: ['D:\\a.png'] });

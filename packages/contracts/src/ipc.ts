@@ -30,6 +30,12 @@ import {
   ProjectStatusSchema,
   RelationKindSchema,
 } from './library';
+import {
+  AssetWorkflowSchema,
+  StepNotesInputSchema,
+  WorkflowStepStateSchema,
+  WorkflowTemplateSchema,
+} from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
 
 export const IpcErrorSchema = z.object({
@@ -207,6 +213,35 @@ export const ipcContract = {
   'relations:remove': {
     request: RelationKeySchema,
     response: z.null(),
+  },
+  'workflowTemplates:list': {
+    request: EmptyRequestSchema,
+    response: z.array(WorkflowTemplateSchema),
+  },
+  'workflows:get': {
+    request: z.object({ assetId: IdSchema }),
+    response: AssetWorkflowSchema.nullable(),
+  },
+  'workflows:start': {
+    request: z.object({ assetId: IdSchema, templateId: IdSchema.optional() }),
+    response: AssetWorkflowSchema,
+  },
+  'workflows:updateStep': {
+    request: z.object({
+      stepId: IdSchema,
+      patch: z
+        .object({
+          state: WorkflowStepStateSchema.optional(),
+          notes: StepNotesInputSchema.optional(),
+        })
+        .strict(),
+    }),
+    response: AssetWorkflowSchema,
+  },
+  /** Removes the workflow of an asset after a native confirmation; `removed` is false when declined. */
+  'workflows:remove': {
+    request: z.object({ assetId: IdSchema }),
+    response: z.object({ removed: z.boolean() }),
   },
   'dialog:pickDirectory': {
     request: EmptyRequestSchema,

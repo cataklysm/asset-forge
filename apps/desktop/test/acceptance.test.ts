@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -189,6 +189,12 @@ const Database = createRequire(import.meta.url)('better-sqlite3') as new (
   path: string,
   options: { readonly: boolean },
 ) => RawDatabase;
+interface WritableRawDatabase {
+  prepare(sql: string): { all(): unknown[]; run(...params: unknown[]): unknown };
+  exec(sql: string): void;
+  close(): void;
+}
+const WritableDatabase = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => WritableRawDatabase;
 
 describe('phase 2a acceptance', () => {
   const page = { limit: 50, offset: 0 };
@@ -198,6 +204,7 @@ describe('phase 2a acceptance', () => {
       pickDirectory: async () => null,
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
     });
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
@@ -397,6 +404,143 @@ describe('phase 2a acceptance', () => {
       }
     } finally {
       raw.close();
+    }
+  });
+});
+
+describe('phase 2b acceptance', () => {
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    });
+    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await dispatch(handlers, channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+  }
+
+  it('traces production progress across a restart', async () => {
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let before: IpcResponse<'workflows:get'>;
+    let assetId: string;
+    try {
+      const call = handlersFor(first);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const types = await call('assetTypes:list', {});
+      const asset = await call('assets:create', {
+        name: 'Hill',
+        typeId: types.find((t) => t.key === 'landscape')!.id,
+      });
+      assetId = asset.id;
+
+      const initial = (await call('workflows:get', { assetId }))!;
+      expect(initial).toMatchObject({ templateName: 'Landscape', templateVersion: 1 });
+      expect(initial.steps).toHaveLength(6);
+      const mandatory = initial.steps.filter((s) => s.mandatory);
+      const optional = initial.steps.find((s) => !s.mandatory)!;
+      await call('workflows:updateStep', { stepId: mandatory[0]!.id, patch: { state: 'done' } });
+      await call('workflows:updateStep', { stepId: mandatory[1]!.id, patch: { state: 'done' } });
+      await call('workflows:updateStep', {
+        stepId: mandatory[2]!.id,
+        patch: { state: 'in_progress', notes: 'blocking out terrain' },
+      });
+      await call('workflows:updateStep', { stepId: optional.id, patch: { state: 'skipped' } });
+
+      before = (await call('workflows:get', { assetId }))!;
+      expect(before!.progress).toEqual({ done: 2, total: 5 });
+      const listed = await call('assets:list', { limit: 50, offset: 0 });
+      expect(listed.items.find((a) => a.id === assetId)!.workflowProgress).toEqual({ done: 2, total: 5 });
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(second);
+      await call('workspace:open', { rootPath: workspaceRoot });
+      expect(await call('workflows:get', { assetId })).toEqual(before);
+      expect(await call('workflowTemplates:list', {})).toHaveLength(5);
+    } finally {
+      await second.close();
+    }
+  });
+
+  /**
+   * Replaces the workspace database with one a phase 2a build left behind: only migrations 0000
+   * and 0001 applied, one landscape asset. The current core cannot create such a workspace itself
+   * (it seeds the column added by 0002), so the schema is built from the migration files.
+   */
+  async function downgradeToPhase2a(workspaceId: string, assetId: string): Promise<void> {
+    const dbPath = join(userDataPath, 'workspaces', workspaceId, 'assetforge.sqlite');
+    const current = new WritableDatabase(dbPath);
+    const workspace = current.prepare('SELECT * FROM workspace').all() as Record<string, unknown>[];
+    const storage = current.prepare('SELECT * FROM storage').all() as Record<string, unknown>[];
+    current.close();
+    for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true });
+
+    const journal = JSON.parse(await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')) as {
+      entries: { tag: string; when: number }[];
+    };
+    const old = new WritableDatabase(dbPath);
+    try {
+      old.exec(
+        'CREATE TABLE "__drizzle_migrations" (id INTEGER PRIMARY KEY AUTOINCREMENT, hash text NOT NULL, created_at numeric)',
+      );
+      for (const entry of journal.entries.slice(0, 2)) {
+        const sql = await readFile(join(MIGRATIONS_FOLDER, `${entry.tag}.sql`), 'utf8');
+        for (const statement of sql.split('--> statement-breakpoint')) old.exec(statement);
+        old
+          .prepare('INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)')
+          .run(createHash('sha256').update(sql).digest('hex'), entry.when);
+      }
+      const insert = (table: string, row: Record<string, unknown>) => {
+        const columns = Object.keys(row);
+        old
+          .prepare(
+            `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+          )
+          .run(...Object.values(row));
+      };
+      for (const row of storage) insert('storage', row);
+      for (const row of workspace) insert('workspace', row);
+      const typeId = randomUUID();
+      const now = new Date().toISOString();
+      old
+        .prepare('INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, ?, ?, ?, 1)')
+        .run(typeId, 'landscape', 'Landscape', 0);
+      old
+        .prepare(
+          `INSERT INTO asset (id, name, type_id, description, status, created_at, updated_at)
+           VALUES (?, 'Hill', ?, '', 'draft', ?, ?)`,
+        )
+        .run(assetId, typeId, now, now);
+    } finally {
+      old.close();
+    }
+  }
+
+  it('upgrades a workspace created before workflows existed', async () => {
+    const assetId = randomUUID();
+    const creator = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    const ws = await creator.create({ name: 'Old', rootPath: workspaceRoot });
+    await creator.close();
+    await downgradeToPhase2a(ws.id, assetId);
+
+    const upgraded = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(upgraded);
+      await call('workspace:open', { rootPath: workspaceRoot });
+      expect(await call('workflows:get', { assetId })).toBeNull();
+      const listed = await call('assets:list', { limit: 50, offset: 0 });
+      expect(listed.items.find((a) => a.id === assetId)!.workflowProgress).toBeNull();
+      const started = await call('workflows:start', { assetId });
+      expect(started).toMatchObject({ assetId, templateName: 'Landscape', templateVersion: 1 });
+    } finally {
+      await upgraded.close();
     }
   });
 });

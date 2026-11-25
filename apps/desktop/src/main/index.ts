@@ -66,6 +66,22 @@ function start(): void {
         : await dialog.showMessageBox(options);
       return (['cancel', 'forget', 'forget_and_trash_folder'] as const)[response] ?? 'cancel';
     },
+    async confirmRemoveWorkflow(assetName) {
+      const options: MessageBoxOptions = {
+        type: 'warning',
+        title: 'Remove workflow',
+        message: `Remove the workflow from "${assetName}"?`,
+        detail: 'Step states and notes are deleted. The asset and its files are kept.',
+        buttons: ['Remove workflow', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      };
+      const { response } = mainWindow
+        ? await dialog.showMessageBox(mainWindow, options)
+        : await dialog.showMessageBox(options);
+      return response === 0;
+    },
   };
   function showOpenDialog(options: OpenDialogOptions) {
     return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options);
