@@ -3,7 +3,9 @@ import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import type { View } from '../nav';
 import { AssetsScreen } from '../screens/AssetsScreen';
+import { AssetScreen } from '../screens/AssetScreen';
 import { FilesScreen } from '../screens/FilesScreen';
+import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { ALERT, BORDER, BUTTON, MUTED } from '../ui';
 
@@ -23,7 +25,6 @@ function sectionOf(view: View): string {
 }
 
 export function WorkspaceShell({ workspace, onClosed }: Props) {
-  // Until the detail screens exist, `asset` and `project` render the list screens.
   const [view, setView] = useState<View>({ name: 'assets' });
   const [error, setError] = useState<string | null>(null);
   // The inbox reports a running import so closing cannot interrupt the batch.
@@ -79,7 +80,11 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
 
       {view.name === 'inbox' ? (
         <FilesScreen onBusyChange={setBusy} />
-      ) : view.name === 'projects' || view.name === 'project' ? (
+      ) : view.name === 'asset' ? (
+        <AssetScreen key={view.id} id={view.id} onNavigate={setView} onBusyChange={setBusy} />
+      ) : view.name === 'project' ? (
+        <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+      ) : view.name === 'projects' ? (
         <ProjectsScreen onOpen={(id) => setView({ name: 'project', id })} />
       ) : (
         <AssetsScreen onOpen={(id) => setView({ name: 'asset', id })} />

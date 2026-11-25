@@ -126,7 +126,7 @@ export function FilesScreen({ onBusyChange }: { onBusyChange?(busy: boolean): vo
                   <td className="py-1 pr-3">{file.originalName}</td>
                   <td className="py-1 pr-3">{file.mimeType}</td>
                   <td className="py-1 pr-3">{formatBytes(file.sizeBytes)}</td>
-                  <td className="py-1 pr-3">{file.status}</td>
+                  <td className="py-1 pr-3">{label(file.status)}</td>
                   <td className="py-1 pr-3">{formatDateTime(file.importedAt)}</td>
                   <td className="py-1">
                     {file.status === 'complete' &&
@@ -144,7 +144,7 @@ export function FilesScreen({ onBusyChange }: { onBusyChange?(busy: boolean): vo
                               </option>
                             ))}
                           </select>
-                          <AssetPicker onPick={(asset) => void assign(file, asset.id)} />
+                          <AssetPicker onPick={(asset) => assign(file, asset.id)} />
                         </div>
                       ) : (
                         <button
