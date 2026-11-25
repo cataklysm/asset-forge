@@ -35,6 +35,8 @@ export interface Storage {
   exists(relPath: string): Promise<boolean>;
   remove(relPath: string): Promise<void>; // no-op if missing
   list(relDir: string): Promise<string[]>; // entry names; [] if dir missing
+  /** Absolute path of a path inside the storage root; validated like every other operation. Never sent to the renderer. */
+  absolutePath(relativePath: string): Promise<string>;
 }
 
 export interface SourceFiles {

@@ -340,3 +340,20 @@ describe('path escape', () => {
     expect(await storage.readText('assets/alias/a.txt')).toBe('A');
   });
 });
+
+describe('absolutePath', () => {
+  it('resolves inside the root and rejects escapes', async () => {
+    await storage.ensureLayout();
+    expect(await storage.absolutePath('inbox/a.png')).toBe(path.join(root, 'inbox', 'a.png'));
+    await expect(storage.absolutePath('../x')).rejects.toBeInstanceOf(PathEscapeError);
+    await expect(storage.absolutePath('')).rejects.toBeInstanceOf(PathEscapeError);
+  });
+
+  it('rejects a path through a junction that points outside the root', async () => {
+    await storage.ensureLayout();
+    const outside = path.join(tmp, 'outside');
+    await fs.mkdir(outside);
+    await fs.symlink(outside, path.join(root, 'inbox', 'link'), 'junction');
+    await expect(storage.absolutePath('inbox/link/a.png')).rejects.toBeInstanceOf(PathEscapeError);
+  });
+});

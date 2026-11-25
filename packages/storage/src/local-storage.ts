@@ -239,6 +239,10 @@ export class LocalFileSystemStorage implements Storage {
     });
   }
 
+  absolutePath(relPath: string): Promise<string> {
+    return this.guarded(relPath, () => this.resolve(relPath, false));
+  }
+
   /** The single place where file-system failures are translated (see `translateFsError`). */
   private async guarded<T>(
     relPath: string,

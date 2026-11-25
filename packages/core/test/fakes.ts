@@ -24,7 +24,7 @@ import type {
 } from '@assetforge/contracts';
 import { isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
-import { InvalidOperationError, NotFoundError, SourceNotReadableError } from '../src/errors.js';
+import { InvalidOperationError, NotFoundError, SourceNotReadableError, StorageUnreachableError } from '../src/errors.js';
 import type {
   AssetQuery,
   AssetRelationRepository,
@@ -154,6 +154,12 @@ export class InMemoryStorage implements Storage {
       names.add(path.slice(prefix.length).split('/')[0]!);
     }
     return [...names];
+  }
+
+  async absolutePath(relPath: string): Promise<string> {
+    await this.guard('absolutePath');
+    if (!this.reachable) throw new StorageUnreachableError('The storage is not reachable');
+    return `/memory/${relPath}`;
   }
 
   private addDir(dir: string): void {
