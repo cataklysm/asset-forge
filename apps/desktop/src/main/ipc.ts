@@ -50,7 +50,7 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
       return null;
     },
     'files:import': (request) => manager.importFiles(request.sourcePaths),
-    'files:list': (request) => manager.listFiles(request),
+    'files:list': (request) => manager.listFiles({ ...request, scope: { kind: 'all' } }),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };

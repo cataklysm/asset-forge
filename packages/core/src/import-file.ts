@@ -18,13 +18,13 @@ export interface ImportContext {
  * message written for that purpose; any other error (typically a Node fs error) may
  * contain absolute paths, so only its short error code survives.
  */
-function messageOf(error: unknown): string {
+export function safeErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AssetForgeError) return error.message;
   const code = (error as { code?: unknown } | null | undefined)?.code;
-  return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code)
-    ? `Import failed (${code})`
-    : 'Import failed';
+  return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${fallback} (${code})` : fallback;
 }
+
+const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
 
 /**
  * Imports one source file. The step order is the crash-safety contract:

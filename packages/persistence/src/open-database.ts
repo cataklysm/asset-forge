@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
+import { createFileMoveRepository } from './file-move-repository.js';
 import { createFileRepository } from './file-repository.js';
 import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
@@ -31,6 +32,7 @@ export async function openWorkspaceDatabase(
       meta: createMetaRepository(db),
       storages: createStorageRepository(db),
       files: createFileRepository(db),
+      fileMoves: createFileMoveRepository(db),
       assetTypes: createAssetTypeRepository(db),
       projects: createProjectRepository(db),
       assets: createAssetRepository(db),

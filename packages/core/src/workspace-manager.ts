@@ -3,6 +3,8 @@ import {
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
   type FileList,
+  type FileScope,
+  type FileTarget,
   type ImportResult,
   type WorkspaceManifest,
   type WorkspaceSummary,
@@ -10,6 +12,7 @@ import {
 import {
   DirectoryNotEmptyError,
   InvalidManifestError,
+  NotFoundError,
   NoWorkspaceOpenError,
   StorageUnreachableError,
   TrashFailedError,
@@ -18,11 +21,12 @@ import {
   WorkspaceMismatchError,
   WorkspaceNotFoundError,
 } from './errors.js';
+import { listFiles, recoverFileMoves, relocateFile } from './asset-files.js';
 import { ensureBuiltInAssetTypes } from './asset-types.js';
-import { importFile, type ImportContext } from './import-file.js';
+import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
-import type { Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+import type { Page, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -86,16 +90,13 @@ export class WorkspaceManager {
     return this.queue.run(() => this.doRemove(input));
   }
 
-  importFiles(sourcePaths: string[]): Promise<ImportResult[]> {
-    return this.queue.run(() => this.doImportFiles(sourcePaths));
+  /** Imports into the inbox, or with `target` into that asset (which must exist before anything is imported). */
+  importFiles(sourcePaths: string[], target: FileTarget | null = null): Promise<ImportResult[]> {
+    return this.queue.run(() => this.doImportFiles(sourcePaths, target));
   }
 
-  listFiles(q: { limit: number; offset: number }): Promise<FileList> {
-    try {
-      return this.requireOpen().database.files.list(q);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+  listFiles(q: Page & { scope: FileScope }): Promise<FileList> {
+    return this.read((s) => listFiles(s, q));
   }
 
   /** Runs `fn` with the open workspace's session, without waiting for queued operations. */
@@ -165,6 +166,7 @@ export class WorkspaceManager {
       await ensureBuiltInAssetTypes({ database, newId: () => this.host.newId() });
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
+      await recoverFileMoves({ storage, fileMoves: database.fileMoves });
       const summary: WorkspaceSummary = {
         id: manifest.id,
         name: manifest.name,
@@ -210,18 +212,32 @@ export class WorkspaceManager {
     return { folderTrashed };
   }
 
-  private async doImportFiles(sourcePaths: string[]): Promise<ImportResult[]> {
-    const { storage, storageId, database } = this.requireOpen();
+  private async doImportFiles(sourcePaths: string[], target: FileTarget | null): Promise<ImportResult[]> {
+    const session = this.session();
+    if (target !== null && (await session.database.assets.get(target.assetId)) === null) {
+      throw new NotFoundError(`Asset ${target.assetId} does not exist`);
+    }
     const ctx: ImportContext = {
-      storage,
-      storageId,
-      files: database.files,
+      storage: session.storage,
+      storageId: session.storageId,
+      files: session.database.files,
       sources: this.host.sources,
-      newId: () => this.host.newId(),
-      now: () => this.host.now(),
+      newId: session.newId,
+      now: session.now,
     };
     const results: ImportResult[] = [];
-    for (const sourcePath of sourcePaths) results.push(await importFile(ctx, sourcePath));
+    for (const sourcePath of sourcePaths) {
+      const result = await importFile(ctx, sourcePath);
+      if (target !== null && result.file?.status === 'complete') {
+        try {
+          result.file = await relocateFile(session, result.file.id, target);
+        } catch (error) {
+          // The file stays in the inbox; the result reports why it was not placed.
+          result.error = safeErrorMessage(error, 'Placing the file failed');
+        }
+      }
+      results.push(result);
+    }
     return results;
   }
 

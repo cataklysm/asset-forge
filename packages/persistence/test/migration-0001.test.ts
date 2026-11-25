@@ -114,7 +114,7 @@ describe('migration 0001', () => {
     expect(primary!.kind).toBe('workspace_root');
     expect(primary!.createdAt).toBe(WORKSPACE_CREATED_AT);
 
-    const list = await db.files.list({ limit: 10, offset: 0 });
+    const list = await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(list.total).toBe(3);
     for (const f of phase1Files) {
       const item = list.items.find((i) => i.id === f.id);
@@ -149,7 +149,7 @@ describe('migration 0001', () => {
     const primary = await db.storages.getPrimary();
     expect(primary!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(Date.parse(primary!.createdAt)).toBeGreaterThanOrEqual(before - 1000);
-    expect((await db.files.list({ limit: 10, offset: 0 })).items[0]!.storageId).toBe(primary!.id);
+    expect((await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } })).items[0]!.storageId).toBe(primary!.id);
   });
 
   test('leaves a database without rows without a storage', async () => {

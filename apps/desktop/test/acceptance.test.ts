@@ -4,6 +4,16 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'no
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  assetFilePath,
+  assignAsset,
+  createAsset,
+  createProject,
+  inboxPath,
+  listAssets,
+  relocateFile,
+  removeAssignment,
+} from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
 
@@ -45,7 +55,7 @@ describe('phase 1 acceptance', () => {
     expect(await second.list()).toMatchObject([{ id: ws.id, name: 'Gilded Hour', rootPath: workspaceRoot }]);
     const reopened = await second.open({ rootPath: workspaceRoot });
     expect(reopened.id).toBe(ws.id);
-    const { items, total } = await second.listFiles({ limit: 50, offset: 0 });
+    const { items, total } = await second.listFiles({ limit: 50, offset: 0, scope: { kind: 'all' } });
     expect(total).toBe(2);
     for (const item of items) {
       const onDisk = await readFile(join(workspaceRoot, item.relativePath));
@@ -68,7 +78,7 @@ describe('phase 1 acceptance', () => {
     try {
       const reopened = await manager.open({ rootPath: moved });
       expect(reopened.id).toBe(ws.id);
-      expect((await manager.listFiles({ limit: 50, offset: 0 })).total).toBe(2);
+      expect((await manager.listFiles({ limit: 50, offset: 0, scope: { kind: 'all' } })).total).toBe(2);
       const listed = await manager.list();
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({ id: ws.id, rootPath: moved });
@@ -90,7 +100,7 @@ describe('phase 1 acceptance', () => {
 
       const original = await manager.open({ rootPath: workspaceRoot });
       expect(original.id).toBe(ws.id);
-      expect((await manager.listFiles({ limit: 50, offset: 0 })).total).toBe(2);
+      expect((await manager.listFiles({ limit: 50, offset: 0, scope: { kind: 'all' } })).total).toBe(2);
     } finally {
       await manager.close();
     }
@@ -104,7 +114,45 @@ describe('phase 1 acceptance', () => {
     try {
       const reopened = await manager.open({ rootPath: workspaceRoot });
       expect(reopened.id).toBe(ws.id);
-      expect((await manager.listFiles({ limit: 50, offset: 0 })).total).toBe(0);
+      expect((await manager.listFiles({ limit: 50, offset: 0, scope: { kind: 'all' } })).total).toBe(0);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it('places a file in an asset; removing a project assignment leaves the file untouched', async () => {
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      await manager.create({ name: 'Gilded Hour', rootPath: workspaceRoot });
+      const { asset, project } = await manager.exclusive(async (s) => {
+        const typeId = (await s.database.assetTypes.list())[0]!.id;
+        return {
+          asset: await createAsset(s, { name: 'Pump', typeId }),
+          project: await createProject(s, { name: 'Game' }),
+        };
+      });
+      const [result] = await manager.importFiles([pngPath], { assetId: asset.id, role: 'reference' });
+      const placed = result!.file!;
+      expect(result!.error).toBeNull();
+      expect(placed).toMatchObject({ assetId: asset.id, role: 'reference' });
+      expect(placed.relativePath).toBe(assetFilePath(asset.id, 'reference', placed.id, 'a.png'));
+      expect(await readFile(join(workspaceRoot, placed.relativePath), 'utf8')).toBe('hello');
+      expect(await readdir(join(workspaceRoot, 'inbox'))).toEqual([]);
+
+      const key = { projectId: project.id, assetId: asset.id };
+      await manager.exclusive((s) => assignAsset(s, key));
+      await manager.exclusive((s) => removeAssignment(s, key));
+
+      const files = await manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'asset', assetId: asset.id } });
+      expect(files.items).toEqual([placed]);
+      expect(await readFile(join(workspaceRoot, placed.relativePath), 'utf8')).toBe('hello');
+      const assets = await manager.read((s) => listAssets(s, { limit: 10, offset: 0 }));
+      expect(assets.items).toMatchObject([{ id: asset.id, fileCount: 1, projectCount: 0 }]);
+
+      const detached = await manager.exclusive((s) => relocateFile(s, placed.id, null));
+      expect(detached).toMatchObject({ assetId: null, role: null, relativePath: inboxPath(placed.id, 'a.png') });
+      expect(existsSync(join(workspaceRoot, placed.relativePath))).toBe(false);
+      expect(await readFile(join(workspaceRoot, detached.relativePath), 'utf8')).toBe('hello');
     } finally {
       await manager.close();
     }

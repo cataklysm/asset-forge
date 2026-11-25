@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { Asset, AssetType, Project, ProjectAssignment } from '@assetforge/contracts';
-import { BUILT_IN_ASSET_TYPES, type WorkspaceDatabase } from '@assetforge/core';
+import {
+  BUILT_IN_ASSET_TYPES,
+  InvalidOperationError,
+  NotFoundError,
+  type FileMove,
+  type WorkspaceDatabase,
+} from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const TS = '2026-01-01T00:00:00.000Z';
@@ -244,6 +250,157 @@ describe('project assignments', () => {
       items: [],
       total: 0,
     });
+  });
+});
+
+describe('file placement and moves', () => {
+  const STORAGE = uuid(500);
+  const fileId = (n: number) => uuid(600 + n);
+  const seed = async () => {
+    await db.assetTypes.insertMissing(typeRows(100));
+    await db.storages.ensurePrimary({ id: STORAGE, createdAt: TS });
+    await db.assets.insert(asset(1, 'Pump', uuid(105)));
+    await db.assets.insert(asset(2, 'Motel', uuid(105)));
+    for (const n of [1, 2, 3]) {
+      await db.files.insertPending({
+        id: fileId(n),
+        storageId: STORAGE,
+        originalName: `f${n}.png`,
+        relativePath: `inbox/f${n}.png`,
+        mimeType: 'image/png',
+        importedAt: `2026-01-0${n}T00:00:00.000Z`,
+      });
+      await db.files.markComplete(fileId(n), { sizeBytes: n, sha256: String(n).repeat(64) });
+    }
+  };
+  const move = (n: number, patch: Partial<FileMove> = {}): FileMove => ({
+    fileId: fileId(n),
+    targetRelativePath: `assets/${uuid(1)}/references/f${n}.png`,
+    targetAssetId: uuid(1),
+    targetRole: 'reference',
+    createdAt: TS,
+    ...patch,
+  });
+
+  test('get returns the record or null', async () => {
+    await seed();
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ id: fileId(1), relativePath: 'inbox/f1.png' });
+    await expect(db.files.get(uuid(999))).resolves.toBeNull();
+  });
+
+  test('commit applies the target and deletes the move row atomically', async () => {
+    await seed();
+    await db.fileMoves.begin(move(1));
+    await expect(db.fileMoves.list()).resolves.toEqual([move(1)]);
+    const before = await db.files.get(fileId(1));
+    const committed = await db.fileMoves.commit(fileId(1));
+    expect(committed).toEqual({
+      ...before,
+      relativePath: move(1).targetRelativePath,
+      assetId: uuid(1),
+      role: 'reference',
+    });
+    await expect(db.files.get(fileId(1))).resolves.toEqual(committed);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+
+    // A commit whose update fails (the target path belongs to another file) changes nothing.
+    await db.fileMoves.begin(move(2, { targetRelativePath: 'inbox/f3.png', targetAssetId: null, targetRole: null }));
+    const two = await db.files.get(fileId(2));
+    await expect(db.fileMoves.commit(fileId(2))).rejects.toThrow(/UNIQUE/i);
+    await expect(db.files.get(fileId(2))).resolves.toEqual(two);
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
+  });
+
+  test('commit rejects with not_found when there is no move row', async () => {
+    await seed();
+    await expect(db.fileMoves.commit(fileId(1))).rejects.toBeInstanceOf(NotFoundError);
+    await expect(db.fileMoves.commit(fileId(1))).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  test('begin rejects a second move for the same file', async () => {
+    await seed();
+    await db.fileMoves.begin(move(1));
+    await expect(db.fileMoves.begin(move(1, { targetRole: 'concept' }))).rejects.toBeInstanceOf(InvalidOperationError);
+    await expect(db.fileMoves.list()).resolves.toEqual([move(1)]);
+  });
+
+  test('abort removes the move row and is a no-op when missing', async () => {
+    await seed();
+    await db.fileMoves.begin(move(1));
+    await db.fileMoves.abort(fileId(1));
+    await expect(db.fileMoves.abort(fileId(1))).resolves.toBeUndefined();
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ relativePath: 'inbox/f1.png', assetId: null });
+  });
+
+  test('lists move rows by createdAt, then fileId', async () => {
+    await seed();
+    await db.fileMoves.begin(move(3, { createdAt: '2026-01-02T00:00:00.000Z' }));
+    await db.fileMoves.begin(move(2));
+    await db.fileMoves.begin(move(1));
+    expect((await db.fileMoves.list()).map((m) => m.fileId)).toEqual([fileId(1), fileId(2), fileId(3)]);
+  });
+
+  test('lists files by scope', async () => {
+    await seed();
+    await db.files.setPlacement(fileId(1), { relativePath: 'assets/a/references/f1.png', assetId: uuid(1), role: 'reference' });
+    await db.files.setPlacement(fileId(2), { relativePath: 'assets/b/models/f2.png', assetId: uuid(2), role: 'model' });
+    const page = { limit: 10, offset: 0 };
+    const all = await db.files.list({ ...page, scope: { kind: 'all' } });
+    expect(all.items.map((f) => f.id)).toEqual([fileId(3), fileId(2), fileId(1)]);
+    expect(all.total).toBe(3);
+    const inbox = await db.files.list({ ...page, scope: { kind: 'inbox' } });
+    expect(inbox).toMatchObject({ total: 1, items: [{ id: fileId(3), assetId: null, role: null }] });
+    const pump = await db.files.list({ limit: 1, offset: 0, scope: { kind: 'asset', assetId: uuid(1) } });
+    expect(pump).toMatchObject({ total: 1, items: [{ id: fileId(1), assetId: uuid(1), role: 'reference' }] });
+    await expect(db.files.list({ ...page, scope: { kind: 'asset', assetId: uuid(9) } })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+    const counts = (await db.assets.list(page)).items.map((a) => [a.name, a.fileCount]);
+    expect(counts).toEqual([
+      ['Motel', 1],
+      ['Pump', 1],
+    ]);
+  });
+
+  test('setPlacement rejects for an unknown id', async () => {
+    await seed();
+    await expect(
+      db.files.setPlacement(uuid(999), { relativePath: 'inbox/x.png', assetId: null, role: null }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test('a file cannot reference an unknown asset', async () => {
+    await seed();
+    await expect(
+      db.files.setPlacement(fileId(1), { relativePath: 'assets/x/references/f1.png', assetId: uuid(9), role: 'reference' }),
+    ).rejects.toThrow(/FOREIGN KEY/i);
+    await expect(db.fileMoves.begin(move(1, { targetAssetId: uuid(9) }))).rejects.toThrow(/FOREIGN KEY/i);
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ assetId: null, relativePath: 'inbox/f1.png' });
+  });
+
+  test('removing an assignment leaves the files of the asset unchanged', async () => {
+    await seed();
+    await db.projects.insert(project(1, 'Game'));
+    const placed = await db.files.setPlacement(fileId(1), {
+      relativePath: `assets/${uuid(1)}/references/f1.png`,
+      assetId: uuid(1),
+      role: 'reference',
+    });
+    await db.projectAssets.insert({
+      projectId: uuid(1),
+      assetId: uuid(1),
+      priority: 'normal',
+      intendedUse: '',
+      approvalStatus: 'pending',
+      notes: '',
+      assignedAt: TS,
+      updatedAt: TS,
+    });
+    await db.projectAssets.remove({ projectId: uuid(1), assetId: uuid(1) });
+    await expect(db.files.get(fileId(1))).resolves.toEqual(placed);
+    expect((await db.assets.list({ limit: 10, offset: 0 })).items.find((a) => a.id === uuid(1))?.fileCount).toBe(1);
   });
 });
 

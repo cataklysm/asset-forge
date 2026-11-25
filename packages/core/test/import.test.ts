@@ -122,7 +122,7 @@ describe('importFile', () => {
     expect(results[2]!.file!.status).toBe('complete');
     const primary = await db.storages.getPrimary();
     expect(results[2]!.file!.storageId).toBe(primary!.id);
-    expect((await manager.listFiles({ limit: 10, offset: 0 })).total).toBe(1);
+    expect((await manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'all' } })).total).toBe(1);
   });
 
   it('neutralizes path components in the source name', async () => {

@@ -9,6 +9,7 @@ import type {
   AssetType,
   FileList,
   FileRecord,
+  FileScope,
   ImportStatus,
   Project,
   ProjectAssignment,
@@ -24,6 +25,9 @@ import type {
   AssetRepository,
   AssignmentKey,
   AssetTypeRepository,
+  FileMove,
+  FileMoveRepository,
+  FilePlacement,
   FileRepository,
   Page,
   ProjectAssetRepository,
@@ -226,8 +230,21 @@ class InMemoryFiles implements FileRepository {
     return [...this.records.values()].filter((r) => r.status === status);
   }
 
-  async list(q: { limit: number; offset: number }): Promise<FileList> {
-    const sorted = [...this.records.values()].sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0));
+  async get(id: string): Promise<FileRecord | null> {
+    return this.records.get(id) ?? null;
+  }
+
+  async setPlacement(id: string, placement: FilePlacement): Promise<FileRecord> {
+    const next = { ...this.require(id), ...placement };
+    this.records.set(id, next);
+    return next;
+  }
+
+  async list(q: Page & { scope: FileScope }): Promise<FileList> {
+    const { scope } = q;
+    const sorted = [...this.records.values()]
+      .filter((r) => scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null))
+      .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return { items: sorted.slice(q.offset, q.offset + q.limit), total: sorted.length };
   }
 
@@ -235,6 +252,39 @@ class InMemoryFiles implements FileRepository {
     const rec = this.records.get(id);
     if (!rec) throw new NotFoundError(`Unknown file id: ${id}`);
     return rec;
+  }
+}
+
+class InMemoryFileMoves implements FileMoveRepository {
+  readonly rows = new Map<string, FileMove>();
+
+  constructor(private readonly files: InMemoryFiles) {}
+
+  async begin(move: FileMove): Promise<void> {
+    if (this.rows.has(move.fileId)) throw new InvalidOperationError(`File ${move.fileId} is already being moved`);
+    this.rows.set(move.fileId, move);
+  }
+
+  async commit(fileId: string): Promise<FileRecord> {
+    const move = this.rows.get(fileId);
+    if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
+    const next = await this.files.setPlacement(fileId, {
+      relativePath: move.targetRelativePath,
+      assetId: move.targetAssetId,
+      role: move.targetRole,
+    });
+    this.rows.delete(fileId);
+    return next;
+  }
+
+  async abort(fileId: string): Promise<void> {
+    this.rows.delete(fileId);
+  }
+
+  async list(): Promise<FileMove[]> {
+    return [...this.rows.values()].sort(
+      (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) || (a.fileId < b.fileId ? -1 : a.fileId > b.fileId ? 1 : 0),
+    );
   }
 }
 
@@ -304,7 +354,10 @@ class InMemoryProjects implements ProjectRepository {
 class InMemoryAssets implements AssetRepository {
   readonly rows = new Map<string, Asset>();
 
-  constructor(private readonly links: AssignmentRows) {}
+  constructor(
+    private readonly links: AssignmentRows,
+    private readonly files: InMemoryFiles,
+  ) {}
 
   async insert(asset: Asset): Promise<void> {
     this.rows.set(asset.id, asset);
@@ -336,7 +389,7 @@ class InMemoryAssets implements AssetRepository {
     const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({
       ...a,
       projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
-      fileCount: 0,
+      fileCount: [...this.files.records.values()].filter((f) => f.assetId === a.id).length,
     }));
     return { items, total: matching.length };
   }
@@ -433,10 +486,11 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
   readonly files = new InMemoryFiles();
+  readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
   readonly projects = new InMemoryProjects(this.links);
-  readonly assets = new InMemoryAssets(this.links);
+  readonly assets = new InMemoryAssets(this.links, this.files);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;

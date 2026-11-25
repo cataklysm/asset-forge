@@ -9,6 +9,8 @@ import type {
   AssetType,
   FileList,
   FileRecord,
+  FileRole,
+  FileScope,
   ImportStatus,
   Project,
   ProjectAssignment,
@@ -61,12 +63,38 @@ export interface FileRepository {
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;
-  list(q: { limit: number; offset: number }): Promise<FileList>; // newest importedAt first
+  get(id: string): Promise<FileRecord | null>;
+  setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>; // rejects with NotFoundError for an unknown id
+  list(q: Page & { scope: FileScope }): Promise<FileList>; // newest importedAt first
 }
 
 export interface Page {
   limit: number;
   offset: number;
+}
+
+/** Where a file row points: its path and, unless it is in the inbox, its asset and role. */
+export interface FilePlacement {
+  relativePath: string;
+  assetId: string | null;
+  role: FileRole | null;
+}
+
+/** Journal entry of a file move in progress: written before the file moves, removed with the commit. */
+export interface FileMove {
+  fileId: string;
+  targetRelativePath: string;
+  targetAssetId: string | null;
+  targetRole: FileRole | null;
+  createdAt: string;
+}
+
+export interface FileMoveRepository {
+  begin(move: FileMove): Promise<void>; // rejects with InvalidOperationError if the file already has a move row
+  /** One transaction: copy the target into the file row, delete the move row. NotFoundError if there is no move row. */
+  commit(fileId: string): Promise<FileRecord>;
+  abort(fileId: string): Promise<void>; // no-op if missing
+  list(): Promise<FileMove[]>; // by createdAt, then fileId
 }
 
 export interface AssetTypeRepository {
@@ -149,6 +177,7 @@ export interface WorkspaceDatabase {
   meta: WorkspaceMetaRepository;
   storages: StorageRepository;
   files: FileRepository;
+  fileMoves: FileMoveRepository;
   assetTypes: AssetTypeRepository;
   projects: ProjectRepository;
   assets: AssetRepository;

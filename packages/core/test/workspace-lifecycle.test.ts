@@ -267,14 +267,14 @@ describe('WorkspaceManager lifecycle', () => {
 
   it('listFiles and importFiles without an open workspace throw NoWorkspaceOpenError', async () => {
     const { manager } = setup();
-    await expect(manager.listFiles({ limit: 10, offset: 0 })).rejects.toBeInstanceOf(NoWorkspaceOpenError);
+    await expect(manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'all' } })).rejects.toBeInstanceOf(NoWorkspaceOpenError);
     await expect(manager.importFiles(['/x'])).rejects.toBeInstanceOf(NoWorkspaceOpenError);
   });
 
   it('listFiles delegates to the open database', async () => {
     const { manager } = setup();
     await manager.create({ name: 'Demo', rootPath: ROOT });
-    await expect(manager.listFiles({ limit: 10, offset: 0 })).resolves.toEqual({ items: [], total: 0 });
+    await expect(manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'all' } })).resolves.toEqual({ items: [], total: 0 });
   });
 });
 

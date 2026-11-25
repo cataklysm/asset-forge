@@ -1,11 +1,11 @@
-import type { FileList, FileRecord, ImportStatus } from '@assetforge/contracts';
+import type { FileList, FileRecord, FileScope, ImportStatus } from '@assetforge/contracts';
 import { NotFoundError, type FileRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { file } from './schema.js';
 
 // Row shape equals FileRecord; spelled out so schema drift fails at compile time.
-const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
+export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   id: row.id,
   storageId: row.storageId,
   assetId: row.assetId,
@@ -19,6 +19,17 @@ const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   error: row.error,
   importedAt: row.importedAt,
 });
+
+const scopeMatches = (scope: FileScope) => {
+  switch (scope.kind) {
+    case 'all':
+      return undefined;
+    case 'inbox':
+      return isNull(file.assetId);
+    case 'asset':
+      return eq(file.assetId, scope.assetId);
+  }
+};
 
 export function createFileRepository(db: BetterSQLite3Database): FileRepository {
   const requireChanged = (changes: number, id: string) => {
@@ -69,19 +80,35 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         .all()
         .map(toRecord);
     },
-    async list({ limit, offset }): Promise<FileList> {
+    async get(id) {
+      const row = db.select().from(file).where(eq(file.id, id)).get();
+      return row ? toRecord(row) : null;
+    },
+    async setPlacement(id, placement) {
+      const row = db
+        .update(file)
+        .set({ relativePath: placement.relativePath, assetId: placement.assetId, role: placement.role })
+        .where(eq(file.id, id))
+        .returning()
+        .get();
+      if (!row) throw new NotFoundError(`File ${id} does not exist`);
+      return toRecord(row);
+    },
+    async list({ limit, offset, scope }): Promise<FileList> {
+      const where = scopeMatches(scope);
       // One read transaction, so the page and the total describe the same snapshot.
       return db.transaction(
         (tx) => {
           const items = tx
             .select()
             .from(file)
+            .where(where)
             .orderBy(desc(file.importedAt), desc(file.id))
             .limit(limit)
             .offset(offset)
             .all()
             .map(toRecord);
-          const total = tx.select({ n: count() }).from(file).get()?.n ?? 0;
+          const total = tx.select({ n: count() }).from(file).where(where).get()?.n ?? 0;
           return { items, total };
         },
         { behavior: 'deferred' },

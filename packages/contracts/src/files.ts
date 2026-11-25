@@ -31,6 +31,18 @@ export const ImportResultSchema = z.object({
 });
 export type ImportResult = z.infer<typeof ImportResultSchema>;
 
+/** Which files a list covers: every file, the unassigned inbox, or the files of one asset. */
+export const FileScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('all') }),
+  z.object({ kind: z.literal('inbox') }),
+  z.object({ kind: z.literal('asset'), assetId: z.uuid() }),
+]);
+export type FileScope = z.infer<typeof FileScopeSchema>;
+
+/** Where a file is placed: an asset and the role the file plays for it. */
+export const FileTargetSchema = z.object({ assetId: z.uuid(), role: FileRoleSchema });
+export type FileTarget = z.infer<typeof FileTargetSchema>;
+
 export const FileListSchema = z.object({
   items: z.array(FileRecordSchema),
   total: z.number().int().min(0),

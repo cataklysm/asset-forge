@@ -1,0 +1,326 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  assetFilePath,
+  assignAsset,
+  createAsset,
+  createProject,
+  inboxPath,
+  InvalidOperationError,
+  listAssets,
+  listFiles,
+  NotFoundError,
+  recoverFileMoves,
+  relocateFile,
+  removeAssignment,
+  WorkspaceManager,
+  type WorkspaceSession,
+} from '../src/index.js';
+import { createFakeHost } from './fakes.js';
+
+const ROOT = '/ws/a';
+const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
+const TS = '2026-01-01T00:00:00.000Z';
+
+async function setup() {
+  const fake = createFakeHost();
+  const manager = new WorkspaceManager(fake.host);
+  const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
+  const storage = fake.storages.get(ROOT)!;
+  const db = fake.databases.get(summary.id)!;
+  const session: WorkspaceSession = await manager.read(async (s) => s);
+  const typeId = (await db.assetTypes.list())[0]!.id;
+  const asset = await createAsset(session, { name: 'Pump', typeId });
+  const other = await createAsset(session, { name: 'Motel', typeId });
+  fake.sources.set('/src/pump.png', Buffer.from('pump'));
+  fake.sources.set('/src/motel.png', Buffer.from('motel'));
+  const [imported] = await manager.importFiles(['/src/pump.png']);
+  const file = imported!.file!;
+  return { ...fake, manager, summary, storage, db, session, typeId, asset, other, file };
+}
+
+describe('relocateFile', () => {
+  it("assigning an inbox file moves it into the asset's role directory", async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+
+    const target = assetFilePath(asset.id, 'reference', file.id, 'pump.png');
+    expect(placed).toEqual({ ...file, relativePath: target, assetId: asset.id, role: 'reference' });
+    expect(storage.files.has(file.relativePath)).toBe(false);
+    expect(storage.files.get(target)?.toString()).toBe('pump');
+    expect(db.files.records.get(file.id)).toEqual(placed);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('changing the role inside one directory only updates the row', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+    const move = vi.spyOn(storage, 'move');
+    const begin = vi.spyOn(db.fileMoves, 'begin');
+
+    const changed = await relocateFile(session, file.id, { assetId: asset.id, role: 'concept' });
+
+    expect(changed).toEqual({ ...placed, role: 'concept' });
+    expect(move).not.toHaveBeenCalled();
+    expect(begin).not.toHaveBeenCalled();
+    expect(storage.files.has(placed.relativePath)).toBe(true);
+    expect(db.files.records.get(file.id)).toEqual(changed);
+  });
+
+  it('changing the role across directories moves the file', async () => {
+    const { session, storage, asset, file } = await setup();
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+    const changed = await relocateFile(session, file.id, { assetId: asset.id, role: 'texture' });
+
+    const target = assetFilePath(asset.id, 'texture', file.id, 'pump.png');
+    expect(changed).toMatchObject({ relativePath: target, assetId: asset.id, role: 'texture' });
+    expect(storage.files.has(placed.relativePath)).toBe(false);
+    expect(storage.files.has(target)).toBe(true);
+  });
+
+  it('moving a file to another asset moves it into that asset', async () => {
+    const { session, storage, asset, other, file } = await setup();
+    await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+    const moved = await relocateFile(session, file.id, { assetId: other.id, role: 'reference' });
+    expect(moved).toMatchObject({ relativePath: assetFilePath(other.id, 'reference', file.id, 'pump.png'), assetId: other.id });
+    expect(storage.files.has(moved.relativePath)).toBe(true);
+  });
+
+  it('detaching moves the file back to its inbox path', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'model' });
+    const detached = await relocateFile(session, file.id, null);
+
+    expect(detached).toEqual(file);
+    expect(detached.relativePath).toBe(inboxPath(file.id, 'pump.png'));
+    expect(storage.files.has(placed.relativePath)).toBe(false);
+    expect(storage.files.get(file.relativePath)?.toString()).toBe('pump');
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('relocating to the current placement does nothing', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const move = vi.spyOn(storage, 'move');
+    const setPlacement = vi.spyOn(db.files, 'setPlacement');
+    await expect(relocateFile(session, file.id, null)).resolves.toEqual(file);
+    expect(move).not.toHaveBeenCalled();
+    expect(setPlacement).not.toHaveBeenCalled();
+
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'final' });
+    move.mockClear();
+    setPlacement.mockClear();
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'final' })).resolves.toEqual(placed);
+    expect(move).not.toHaveBeenCalled();
+    expect(setPlacement).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pending or failed file with invalid_operation', async () => {
+    const { session, db, asset } = await setup();
+    const storageId = session.storageId;
+    const pendingId = '33333333-3333-4333-8333-333333333333';
+    const failedId = '44444444-4444-4444-8444-444444444444';
+    for (const id of [pendingId, failedId]) {
+      await db.files.insertPending({
+        id,
+        storageId,
+        originalName: 'x.png',
+        relativePath: inboxPath(id, 'x.png'),
+        mimeType: 'image/png',
+        importedAt: TS,
+      });
+    }
+    await db.files.markFailed(failedId, 'Import failed');
+    for (const id of [pendingId, failedId]) {
+      await expect(relocateFile(session, id, { assetId: asset.id, role: 'reference' })).rejects.toBeInstanceOf(
+        InvalidOperationError,
+      );
+    }
+    await expect(relocateFile(session, UNKNOWN_ID, null)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rejects an unknown asset with not_found and leaves the file untouched', async () => {
+    const { session, storage, db, file } = await setup();
+    await expect(relocateFile(session, file.id, { assetId: UNKNOWN_ID, role: 'reference' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    expect(db.files.records.get(file.id)).toEqual(file);
+    expect(storage.files.has(file.relativePath)).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('a failed move leaves row and file unchanged and no move row', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    storage.failNext('move', new Error('EBUSY'));
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow('EBUSY');
+    expect(db.files.records.get(file.id)).toEqual(file);
+    expect(storage.files.has(file.relativePath)).toBe(true);
+    expect(storage.files.has(assetFilePath(asset.id, 'reference', file.id, 'pump.png'))).toBe(false);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('never overwrites an existing target', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const target = assetFilePath(asset.id, 'reference', file.id, 'pump.png');
+    storage.files.set(target, Buffer.from('existing'));
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow();
+    expect(storage.files.get(target)?.toString()).toBe('existing');
+    expect(storage.files.get(file.relativePath)?.toString()).toBe('pump');
+    expect(db.files.records.get(file.id)).toEqual(file);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('a second move for a file with an open move row is rejected', async () => {
+    const { session, db, asset, file } = await setup();
+    await db.fileMoves.begin({
+      fileId: file.id,
+      targetRelativePath: assetFilePath(asset.id, 'reference', file.id, 'pump.png'),
+      targetAssetId: asset.id,
+      targetRole: 'reference',
+      createdAt: TS,
+    });
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'texture' })).rejects.toBeInstanceOf(
+      InvalidOperationError,
+    );
+    expect(db.files.records.get(file.id)).toEqual(file);
+  });
+});
+
+describe('recoverFileMoves', () => {
+  const journal = async (ctx: Awaited<ReturnType<typeof setup>>, moved: boolean) => {
+    const target = assetFilePath(ctx.asset.id, 'reference', ctx.file.id, 'pump.png');
+    await ctx.db.fileMoves.begin({
+      fileId: ctx.file.id,
+      targetRelativePath: target,
+      targetAssetId: ctx.asset.id,
+      targetRole: 'reference',
+      createdAt: TS,
+    });
+    if (moved) await ctx.storage.move(ctx.file.relativePath, target);
+    return target;
+  };
+
+  it('recovery completes a move whose target exists', async () => {
+    const ctx = await setup();
+    const target = await journal(ctx, true);
+    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    expect(result).toEqual({ completed: [ctx.file.id], discarded: [] });
+    expect(ctx.db.files.records.get(ctx.file.id)).toEqual({
+      ...ctx.file,
+      relativePath: target,
+      assetId: ctx.asset.id,
+      role: 'reference',
+    });
+    await expect(ctx.db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('recovery discards a move whose target is missing', async () => {
+    const ctx = await setup();
+    await journal(ctx, false);
+    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    expect(result).toEqual({ completed: [], discarded: [ctx.file.id] });
+    expect(ctx.db.files.records.get(ctx.file.id)).toEqual(ctx.file);
+    expect(ctx.storage.files.has(ctx.file.relativePath)).toBe(true);
+    await expect(ctx.db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('skips a row whose check fails and keeps it for the next open', async () => {
+    const ctx = await setup();
+    await journal(ctx, true);
+    ctx.storage.failNext('exists', new Error('EIO'));
+    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    expect(result).toEqual({ completed: [], discarded: [] });
+    await expect(ctx.db.fileMoves.list()).resolves.toHaveLength(1);
+    expect(ctx.db.files.records.get(ctx.file.id)).toEqual(ctx.file);
+  });
+
+  it('recovery runs when the workspace is opened', async () => {
+    const ctx = await setup();
+    const target = await journal(ctx, true);
+    await ctx.manager.close();
+    await ctx.manager.open({ rootPath: ROOT });
+    const list = await ctx.manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'asset', assetId: ctx.asset.id } });
+    expect(list.items).toEqual([{ ...ctx.file, relativePath: target, assetId: ctx.asset.id, role: 'reference' }]);
+    await expect(ctx.db.fileMoves.list()).resolves.toEqual([]);
+  });
+});
+
+describe('importing into an asset', () => {
+  it('importing into an asset places the files and reports the placed records', async () => {
+    const { manager, storage, db, asset } = await setup();
+    const results = await manager.importFiles(['/src/motel.png', '/src/missing.png'], { assetId: asset.id, role: 'texture' });
+
+    expect(results).toHaveLength(2);
+    const placed = results[0]!;
+    expect(placed.error).toBeNull();
+    expect(placed.file).toMatchObject({
+      status: 'complete',
+      assetId: asset.id,
+      role: 'texture',
+      relativePath: assetFilePath(asset.id, 'texture', placed.file!.id, 'motel.png'),
+    });
+    expect(storage.files.get(placed.file!.relativePath)?.toString()).toBe('motel');
+    expect(db.files.records.get(placed.file!.id)).toEqual(placed.file);
+    expect(results[1]).toMatchObject({ file: null });
+    expect(results[1]!.error).not.toBeNull();
+  });
+
+  it('keeps the inbox record and reports the error when the placement fails', async () => {
+    const { manager, storage, db, asset } = await setup();
+    // The first move is the import's staging -> inbox move; the placement is the second.
+    const move = storage.move.bind(storage);
+    let calls = 0;
+    vi.spyOn(storage, 'move').mockImplementation(async (from, to) => {
+      if (++calls === 2) throw new NotFoundError('Placement target is not available');
+      return move(from, to);
+    });
+
+    const [result] = await manager.importFiles(['/src/motel.png'], { assetId: asset.id, role: 'texture' });
+
+    expect(result!.file).toMatchObject({ status: 'complete', assetId: null, role: null });
+    expect(result!.file!.relativePath).toBe(inboxPath(result!.file!.id, 'motel.png'));
+    expect(result!.error).toBe('Placement target is not available');
+    expect(db.files.records.get(result!.file!.id)).toEqual(result!.file);
+    expect(storage.files.has(result!.file!.relativePath)).toBe(true);
+  });
+
+  it('importing into an unknown asset imports nothing', async () => {
+    const { manager, storage, db } = await setup();
+    const before = db.files.records.size;
+    const filesBefore = storage.files.size;
+    await expect(
+      manager.importFiles(['/src/motel.png'], { assetId: UNKNOWN_ID, role: 'texture' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(db.files.records.size).toBe(before);
+    expect(storage.files.size).toBe(filesBefore);
+  });
+});
+
+describe('listing files', () => {
+  it('lists files by scope and counts the files of an asset', async () => {
+    const { manager, session, asset, other, file } = await setup();
+    const [second] = await manager.importFiles(['/src/motel.png']);
+    await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+
+    const page = { limit: 10, offset: 0 };
+    const ids = async (scope: Parameters<typeof listFiles>[1]['scope']) =>
+      (await listFiles(session, { ...page, scope })).items.map((f) => f.id);
+    await expect(ids({ kind: 'inbox' })).resolves.toEqual([second!.file!.id]);
+    await expect(ids({ kind: 'asset', assetId: asset.id })).resolves.toEqual([file.id]);
+    await expect(ids({ kind: 'asset', assetId: other.id })).resolves.toEqual([]);
+    expect((await listFiles(session, { ...page, scope: { kind: 'all' } })).total).toBe(2);
+    const counts = (await listAssets(session, page)).items.map((a) => [a.name, a.fileCount]);
+    expect(counts).toEqual([
+      ['Motel', 0],
+      ['Pump', 1],
+    ]);
+  });
+
+  it('removing a project assignment leaves the files of the asset untouched', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const project = await createProject(session, { name: 'Game' });
+    const placed = await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+    await assignAsset(session, { projectId: project.id, assetId: asset.id });
+    await removeAssignment(session, { projectId: project.id, assetId: asset.id });
+    expect(db.files.records.get(file.id)).toEqual(placed);
+    expect(storage.files.get(placed.relativePath)?.toString()).toBe('pump');
+  });
+});

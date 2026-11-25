@@ -1,7 +1,8 @@
 import type { Asset, AssetList, AssetSummary } from '@assetforge/contracts';
 import type { AssetRepository } from '@assetforge/core';
-import { and, asc, count, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, getTableName, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { AnySQLiteColumn, AnySQLiteTable } from 'drizzle-orm/sqlite-core';
 import { containsPattern } from './like.js';
 import { asset, file, projectAsset } from './schema.js';
 
@@ -14,6 +15,14 @@ const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
+
+/**
+ * `"table"."column"`. Drizzle renders columns unqualified in a single-table select, and an
+ * unqualified `"id"` inside a correlated subquery binds to the subquery's own table.
+ */
+const qualified = (table: AnySQLiteTable, column: AnySQLiteColumn) =>
+  sql`${sql.identifier(getTableName(table))}.${sql.identifier(column.name)}`;
+const outerAssetId = qualified(asset, asset.id);
 
 export function createAssetRepository(db: BetterSQLite3Database): AssetRepository {
   return {
@@ -49,7 +58,7 @@ export function createAssetRepository(db: BetterSQLite3Database): AssetRepositor
       if (q.status !== undefined) conditions.push(eq(asset.status, q.status));
       if (q.projectId !== undefined) {
         conditions.push(
-          sql`exists (select 1 from ${projectAsset} where ${projectAsset.assetId} = ${asset.id} and ${projectAsset.projectId} = ${q.projectId})`,
+          sql`exists (select 1 from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId} and ${qualified(projectAsset, projectAsset.projectId)} = ${q.projectId})`,
         );
       }
       if (q.nameContains !== undefined) {
@@ -68,8 +77,8 @@ export function createAssetRepository(db: BetterSQLite3Database): AssetRepositor
               status: asset.status,
               createdAt: asset.createdAt,
               updatedAt: asset.updatedAt,
-              projectCount: sql<number>`(select count(*) from ${projectAsset} where ${projectAsset.assetId} = ${asset.id})`,
-              fileCount: sql<number>`(select count(*) from ${file} where ${file.assetId} = ${asset.id})`,
+              projectCount: sql<number>`(select count(*) from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId})`,
+              fileCount: sql<number>`(select count(*) from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId})`,
             })
             .from(asset)
             .where(where)

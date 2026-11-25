@@ -146,7 +146,7 @@ describe('recovery on open', () => {
 
     await manager.open({ rootPath: ROOT });
 
-    const list = await manager.listFiles({ limit: 10, offset: 0 });
+    const list = await manager.listFiles({ limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ id: ID1, status: 'failed', error: 'Import was interrupted' });
     expect(await storage.list(STAGING_DIR)).toEqual([]);

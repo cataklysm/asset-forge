@@ -63,13 +63,13 @@ describe('workspace database', () => {
     await d.close();
     d = await open();
     expect(await d.meta.get()).toEqual(meta);
-    expect((await d.files.list({ limit: 10, offset: 0 })).total).toBe(1);
+    expect((await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } })).total).toBe(1);
   });
 
   test('insertPending yields a pending record', async () => {
     const d = await open();
     await d.files.insertPending(pending(1));
-    const list = await d.files.list({ limit: 10, offset: 0 });
+    const list = await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(list.total).toBe(1);
     expect(list.items[0]).toEqual({
       ...pending(1),
@@ -89,7 +89,7 @@ describe('workspace database', () => {
     await d.files.insertPending(pending(2));
     await d.files.markComplete(uuid(1), { sizeBytes: 42, sha256: HASH_A });
     await d.files.markFailed(uuid(2), 'disk full');
-    const { items } = await d.files.list({ limit: 10, offset: 0 });
+    const { items } = await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     const one = items.find((i) => i.id === uuid(1));
     const two = items.find((i) => i.id === uuid(2));
     expect(one).toMatchObject({ status: 'complete', sizeBytes: 42, sha256: HASH_A, error: null });
@@ -122,14 +122,14 @@ describe('workspace database', () => {
     await d.files.insertPending(pending(1, '2026-01-01T00:00:00.000Z'));
     await d.files.insertPending(pending(2, '2026-01-03T00:00:00.000Z'));
     await d.files.insertPending(pending(3, '2026-01-02T00:00:00.000Z'));
-    const all = await d.files.list({ limit: 10, offset: 0 });
+    const all = await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(all.items.map((f) => f.id)).toEqual([uuid(2), uuid(3), uuid(1)]);
-    const page = await d.files.list({ limit: 2, offset: 1 });
+    const page = await d.files.list({ limit: 2, offset: 1, scope: { kind: 'all' } });
     expect(page.items.map((f) => f.id)).toEqual([uuid(3), uuid(1)]);
     expect(page.total).toBe(3);
 
     await d.files.insertPending(pending(4, '2026-01-03T00:00:00.000Z'));
-    const tied = await d.files.list({ limit: 10, offset: 0 });
+    const tied = await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(tied.items.slice(0, 2).map((f) => f.id)).toEqual([uuid(4), uuid(2)]);
   });
 
@@ -156,9 +156,9 @@ describe('workspace database', () => {
     const d = await open();
     for (const n of [1, 2, 3, 4, 5]) await d.files.insertPending(pending(n, `2026-01-0${n}T00:00:00.000Z`));
     const pages = [
-      await d.files.list({ limit: 2, offset: 0 }),
-      await d.files.list({ limit: 2, offset: 2 }),
-      await d.files.list({ limit: 2, offset: 4 }),
+      await d.files.list({ limit: 2, offset: 0, scope: { kind: 'all' } }),
+      await d.files.list({ limit: 2, offset: 2, scope: { kind: 'all' } }),
+      await d.files.list({ limit: 2, offset: 4, scope: { kind: 'all' } }),
     ];
     expect(pages.map((p) => p.total)).toEqual([5, 5, 5]);
     expect(pages.flatMap((p) => p.items.map((f) => f.id))).toEqual([uuid(5), uuid(4), uuid(3), uuid(2), uuid(1)]);
