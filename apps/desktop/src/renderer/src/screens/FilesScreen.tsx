@@ -25,6 +25,7 @@ export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<ImportResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<FileRole>('reference');
   const list = useLoad(
     () => call('files:list', { limit: PAGE_SIZE, offset, scope: { kind: 'inbox' } }),
     [offset],
@@ -114,7 +115,12 @@ export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
               cover={null}
               extraControls={
                 detail.file.status === 'complete' ? (
-                  <AssignControl file={detail.file} onAssigned={list.reload} />
+                  <AssignControl
+                    file={detail.file}
+                    role={role}
+                    onRoleChange={setRole}
+                    onAssigned={list.reload}
+                  />
                 ) : undefined
               }
               onClose={detail.close}
@@ -129,9 +135,14 @@ export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
 }
 
 /** The assign control of the file detail dialog; the file leaves the inbox once it is assigned. */
-function AssignControl({ file, onAssigned }: { file: FileRecord; onAssigned(): void }) {
+function AssignControl(props: {
+  file: FileRecord;
+  role: FileRole;
+  onRoleChange(role: FileRole): void;
+  onAssigned(): void;
+}) {
+  const { file, role, onRoleChange: setRole, onAssigned } = props;
   const [assigning, setAssigning] = useState(false);
-  const [role, setRole] = useState<FileRole>('reference');
   const [error, setError] = useState<string | null>(null);
 
   async function assign(assetId: string) {

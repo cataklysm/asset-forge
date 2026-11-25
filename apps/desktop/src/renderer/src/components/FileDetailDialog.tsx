@@ -68,6 +68,8 @@ export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClo
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className={MUTED}>Role</dt>
           <dd>{file.role === null ? '–' : label(file.role)}</dd>
+          <dt className={MUTED}>Type</dt>
+          <dd>{file.mimeType}</dd>
           <dt className={MUTED}>Size</dt>
           <dd>{formatBytes(file.sizeBytes)}</dd>
           <dt className={MUTED}>Imported</dt>
@@ -90,7 +92,7 @@ export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClo
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {file.openable && (
+          {complete && file.openable && (
             <button
               type="button"
               className={BUTTON}
