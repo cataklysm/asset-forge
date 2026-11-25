@@ -74,10 +74,10 @@ describe('file shell IPC', () => {
     expect(openPath.mock.calls[0]![0].startsWith(root)).toBe(true);
   });
 
-  it('a blocked file is never handed to the shell', async () => {
-    const { file } = await setup('Setup.EXE');
-    // Upper case exercises the case-insensitive check. Trailing dots and spaces ("Setup.EXE.")
-    // are covered by the core isOpenable tests: Windows cannot create such a name on disk.
+  it('a file outside the allow-list is never handed to the shell', async () => {
+    const { file } = await setup('Archive.ZIP');
+    // Programs and installers cannot be imported at all (core import tests); an archive imports
+    // but is not openable. Upper case exercises the case-insensitive check.
     const result = await call('files:openExternal', { fileId: file.id });
     expect(result).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
     expect(openPath).not.toHaveBeenCalled();

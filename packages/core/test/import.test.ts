@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   importFile,
   inboxPath,
+  REFUSED_IMPORT_MESSAGE,
   SourceNotReadableError,
   STAGING_DIR,
   StorageFullError,
@@ -316,5 +317,39 @@ describe('importFile', () => {
     expect(result.error).toBe('Import failed');
     expect(result.file?.status).toBe('failed');
     expect([...db.files.records.values()].map((r) => r.status)).toEqual(['pending']);
+  });
+});
+
+describe('refused imports', () => {
+  it('a refused extension fails only its own file and leaves nothing behind', async () => {
+    const { manager, sources, storage, db } = await setup();
+    const refused = ['/src/Setup.EXE.', '/src/a.txt.exe', '/src/.bat'];
+    for (const p of [...refused, '/src/ok.png']) sources.set(p, Buffer.from('hello'));
+    const results = await manager.importFiles([...refused, '/src/ok.png']);
+
+    for (const result of results.slice(0, 3)) {
+      expect(result.file).toBeNull();
+      expect(result.error).toBe(REFUSED_IMPORT_MESSAGE);
+      expect(result.error).not.toContain('/src');
+    }
+    expect(results[3]!.file?.status).toBe('complete');
+    expect(db.files.records.size).toBe(1);
+    expect(stagingEntries(storage)).toEqual([]);
+    expect(sources.opened).toEqual(['/src/ok.png']);
+  });
+
+  it('importFile refuses before opening the source', async () => {
+    const { ctx, sources } = await setup();
+    sources.set('/src/tool.exe', Buffer.from('x'));
+    let inserted = 0;
+    const files = Object.create(ctx.files) as ImportContext['files'];
+    files.insertPending = async (r) => {
+      inserted += 1;
+      return ctx.files.insertPending(r);
+    };
+    const result = await importFile({ ...ctx, files }, '/src/tool.exe');
+    expect(result).toEqual({ sourcePath: '/src/tool.exe', file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(sources.opened).toEqual([]);
+    expect(inserted).toBe(0);
   });
 });

@@ -1,7 +1,7 @@
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
-import { AssetForgeError, ChecksumMismatchError } from './errors.js';
+import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
 import { mimeFromFileName } from './file-names.js';
-import { isOpenable, isPreviewable } from './media-types.js';
+import { isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, SourceFiles, Storage } from './ports.js';
 
@@ -25,6 +25,9 @@ export function safeErrorMessage(error: unknown, fallback: string): string {
   return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${fallback} (${code})` : fallback;
 }
 
+/** Message of the result for a file whose type is never imported; contains no path. */
+export const REFUSED_IMPORT_MESSAGE: string = new ValidationFailedError('This file type cannot be imported').message;
+
 const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
 
 /**
@@ -33,6 +36,11 @@ const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
  * Per-file failures never reject; they are reported in the result.
  */
 export async function importFile(ctx: ImportContext, sourcePath: string): Promise<ImportResult> {
+  const sourceName = sourcePath.slice(Math.max(sourcePath.lastIndexOf('/'), sourcePath.lastIndexOf('\\')) + 1);
+  if (isRefusedImport(sourceName)) {
+    return { sourcePath, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
+  }
+
   let opened;
   try {
     opened = await ctx.sources.open(sourcePath);

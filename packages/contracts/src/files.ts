@@ -4,6 +4,9 @@ import { FileRoleSchema } from './library';
 export const ImportStatusSchema = z.enum(['pending', 'complete', 'failed']);
 export type ImportStatus = z.infer<typeof ImportStatusSchema>;
 
+export const FileKindSchema = z.enum(['image', 'model', 'document', 'other']);
+export type FileKind = z.infer<typeof FileKindSchema>;
+
 export const FileRecordSchema = z.object({
   id: z.uuid(),
   storageId: z.uuid(),

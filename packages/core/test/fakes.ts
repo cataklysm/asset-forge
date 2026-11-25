@@ -787,8 +787,11 @@ export class InMemoryRegistry implements WorkspaceRegistry {
 export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles {
   /** Paths that exist but cannot be read (e.g. directories). */
   readonly unreadable = new Set<string>();
+  /** Every path `open` was called with. */
+  readonly opened: string[] = [];
 
   async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
+    this.opened.push(absolutePath);
     const data = this.get(absolutePath);
     if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
