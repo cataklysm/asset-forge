@@ -37,6 +37,8 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
 - The search path without a query still orders by `lower(name)` over all assets.
 - Unused tag rows are never deleted and there is no tag rename or merge.
+- A drive-relative source path without a backslash (`C:a.exe::$DATA`) still passes the refused-import check; no file dialog produces such a path.
+- The 200-character limit of the search query counts UTF-16 code units, not characters.
 - `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
 
 ## IPC and security
@@ -68,6 +70,7 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - A paged loader re-activated after an inactive settle would keep stale loading entries.
 - Focus is lost when a focused placeholder becomes a Retry button.
 - "Loading…" flashes on every keystroke in the search field.
+- The search field still carries the label "Filter by name" and the placeholder "Name" from the old name filter.
 - The search, filter and tag-row UI does not exist yet (UI phase): search field with the 250 ms debounce and request superseding, tag filter, role and kind selects, tag rows on the asset screen and in the file detail dialog. Asset tags and file tags must be visually distinct there.
 
 ## Code structure
