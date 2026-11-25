@@ -1,0 +1,14 @@
+{
+  "name": "assetforge",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "typescript": "^7.0.2"
+  }
+}
