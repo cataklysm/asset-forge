@@ -1,18 +1,22 @@
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   app,
   dialog,
   ipcMain,
+  protocol,
   type BrowserWindow,
   shell,
   type MessageBoxOptions,
   type OpenDialogOptions,
 } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
+import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from '@assetforge/media';
 import { createWorkspaceManager } from './composition.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
+import { findSourceIn, handleMediaRequest, MEDIA_SCHEME } from './media-protocol.js';
 import { isTrustedSender } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 
@@ -23,6 +27,10 @@ const outMainDir = dirname(fileURLToPath(import.meta.url));
 // Pin the name before anything reads `userData` (including the single-instance lock), so the
 // data directory does not depend on the package name.
 app.setName('AssetForge');
+
+// Privileges must be registered before the app is ready: `standard` gives preview URLs a host,
+// `secure` lets the renderer's CSP allow them.
+protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true } }]);
 
 // One writing client per machine: a second instance hands over to the first and quits.
 if (!app.requestSingleInstanceLock()) {
@@ -39,6 +47,15 @@ function start(): void {
     userDataPath: app.getPath('userData'),
     migrationsFolder: __ASSETFORGE_DEV_MIGRATIONS_FOLDER__ ?? join(outMainDir, 'migrations'),
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
+  });
+
+  const previews = createPreviewService({
+    cacheDir: join(app.getPath('userData'), 'cache'),
+    pool: createWorkerPool({
+      workerUrl: new URL('./preview-worker.js', import.meta.url),
+      size: POOL_SIZE,
+      timeoutMs: JOB_TIMEOUT_MS,
+    }),
   });
 
   const dialogs: Dialogs = {
@@ -99,7 +116,10 @@ function start(): void {
   const handlers = createWorkspaceHandlers(manager, dialogs, {
     openPath: (path) => shell.openPath(path),
     showItemInFolder: (path) => shell.showItemInFolder(path),
-    workspaceOpened: () => {},
+    // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
+    workspaceOpened: () => {
+      void previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
+    },
   });
   for (const channel of Object.keys(ipcContract)) {
     ipcMain.handle(channel, (event, request: unknown): Promise<IpcResult<unknown>> => {
@@ -135,6 +155,8 @@ function start(): void {
     manager
       .close()
       .catch((error: unknown) => console.error('Closing the workspace failed', error))
+      .then(() => previews.close())
+      .catch((error: unknown) => console.error('Closing the preview service failed', error))
       .finally(() => {
         shutdown = 'closed';
         app.quit();
@@ -144,6 +166,9 @@ function start(): void {
   app
     .whenReady()
     .then(() => {
+      protocol.handle(MEDIA_SCHEME, (request) =>
+        handleMediaRequest(request, { findSource: findSourceIn(manager), previews, readFile }),
+      );
       mainWindow = createMainWindow(windowOptions);
       mainWindow.on('closed', () => {
         mainWindow = null;
