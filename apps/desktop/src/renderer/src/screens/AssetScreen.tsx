@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AssetStatusSchema,
   FileRoleSchema,
@@ -12,9 +12,11 @@ import { call, describeError } from '../api';
 import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
+import { FileDetailDialog } from '../components/FileDetailDialog';
+import { FileGrid } from '../components/FileGrid';
+import { useFileDetail } from '../components/useFileDetail';
 import { Pager } from '../components/Pager';
 import { WorkflowSection } from '../components/WorkflowSection';
-import { formatBytes } from '../format';
 import { useLoad } from '../hooks/useLoad';
 import { label, relationLabel } from '../labels';
 import type { View } from '../nav';
@@ -90,6 +92,8 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
   }
 
   const data = asset.data;
+  const filesSection = useRef<HTMLElement>(null);
+  const importButton = useRef<HTMLButtonElement>(null);
   const typeItems = types.data ?? [];
   const assigned = assignments.data ?? [];
   const assignedIds = new Set(assigned.map((a) => a.projectId));
@@ -104,61 +108,19 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
     items: fileItems.filter((f) => f.role === role),
   })).filter((g) => g.items.length > 0);
 
+  async function setCover(fileId: string | null) {
+    await call('assets:setCover', { assetId: id, fileId });
+    asset.reload();
+  }
+
+  const detail = useFileDetail(files.data?.items ?? null, filesSection, importButton);
+
   const loadErrors = [asset, types, assignments, projects, relations, files]
     .map((l) => l.error)
     .filter((e): e is string => e !== null);
 
   const failed = results?.filter((r) => r.error !== null) ?? [];
   const imported = results?.filter((r) => r.file !== null && r.error === null).length ?? 0;
-
-  function fileRow(file: FileRecord) {
-    return (
-      <tr key={file.id} className={`border-b ${BORDER}`}>
-        <td className="py-1 pr-3">{file.originalName}</td>
-        <td className="py-1 pr-3">{formatBytes(file.sizeBytes)}</td>
-        <td className="py-1 pr-3">{file.status !== 'complete' ? label(file.status) : ''}</td>
-        <td className="py-1 pr-3">
-          <select
-            className={INPUT}
-            aria-label={`Role of ${file.originalName}`}
-            value={file.role ?? 'other'}
-            onChange={(e) =>
-              void run(async () => {
-                await call('files:assign', {
-                  fileId: file.id,
-                  assetId: id,
-                  role: FileRoleSchema.parse(e.target.value),
-                });
-                files.reload();
-              })
-            }
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {label(r)}
-              </option>
-            ))}
-          </select>
-        </td>
-        <td className="py-1">
-          <button
-            type="button"
-            className={BUTTON}
-            aria-label={`Detach ${file.originalName} from ${data?.name ?? 'asset'}`}
-            title="The file is kept and moves to the inbox"
-            onClick={() =>
-              void run(async () => {
-                await call('files:unassign', { fileId: file.id });
-                files.reload();
-              })
-            }
-          >
-            Detach
-          </button>
-        </td>
-      </tr>
-    );
-  }
 
   return (
     <section className="space-y-6" aria-label="Asset">
@@ -300,17 +262,38 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
             </div>
           </section>
 
-          <section className="space-y-2" aria-label="Files">
+          <section className="space-y-2" aria-label="Files" ref={filesSection}>
             <h2 className="text-lg font-semibold">Files</h2>
             {files.data !== null && files.data.total === 0 && <p className={MUTED}>No files</p>}
             {groups.map((g) => (
               <div key={g.role}>
                 <h3 className={`font-medium ${MUTED}`}>{label(g.role)}</h3>
-                <table className="w-full text-left text-sm">
-                  <tbody>{g.items.map(fileRow)}</tbody>
-                </table>
+                <FileGrid
+                  files={g.items}
+                  coverFileId={data?.coverFileId ?? null}
+                  onSelect={detail.select}
+                />
               </div>
             ))}
+            {detail.file !== null && (
+              <FileDetailDialog
+                file={detail.file}
+                cover={data}
+                onSetCover={setCover}
+                extraControls={
+                  <FileControls
+                    file={detail.file}
+                    assetId={id}
+                    assetName={data?.name ?? 'asset'}
+                    onChanged={() => {
+                      files.reload();
+                      asset.reload();
+                    }}
+                  />
+                }
+                onClose={detail.close}
+              />
+            )}
             {files.data !== null && files.data.total > PAGE_SIZE && (
               <Pager
                 offset={offset}
@@ -333,6 +316,7 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
                 ))}
               </select>
               <button
+                ref={importButton}
                 type="button"
                 className={BUTTON}
                 disabled={importing}
@@ -432,5 +416,65 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
         </>
       )}
     </section>
+  );
+}
+
+/** Role and detach controls of the file detail dialog; reports its own errors inside the dialog. */
+function FileControls(props: {
+  file: FileRecord;
+  assetId: string;
+  assetName: string;
+  onChanged(): void;
+}) {
+  const { file, assetId, assetName, onChanged } = props;
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(action: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await action();
+      onChanged();
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }
+
+  return (
+    <>
+      <select
+        className={INPUT}
+        aria-label={`Role of ${file.originalName}`}
+        value={file.role ?? 'other'}
+        onChange={(e) =>
+          void run(() =>
+            call('files:assign', {
+              fileId: file.id,
+              assetId,
+              role: FileRoleSchema.parse(e.target.value),
+            }),
+          )
+        }
+      >
+        {ROLES.map((r) => (
+          <option key={r} value={r}>
+            {label(r)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className={BUTTON}
+        aria-label={`Detach ${file.originalName} from ${assetName}`}
+        title="The file is kept and moves to the inbox"
+        onClick={() => void run(() => call('files:unassign', { fileId: file.id }))}
+      >
+        Detach
+      </button>
+      {error !== null && (
+        <p role="alert" className={`basis-full ${ALERT}`}>
+          {error}
+        </p>
+      )}
+    </>
   );
 }
