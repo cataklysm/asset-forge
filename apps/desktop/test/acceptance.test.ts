@@ -479,7 +479,7 @@ describe('phase 2b acceptance', () => {
   async function downgradeToPhase2a(workspaceId: string, assetId: string): Promise<void> {
     const dbPath = join(userDataPath, 'workspaces', workspaceId, 'assetforge.sqlite');
     const current = new WritableDatabase(dbPath);
-    const workspace = current.prepare('SELECT * FROM workspace').all() as Record<string, unknown>[];
+    const workspace = current.prepare('SELECT id, format_version, name, created_at FROM workspace').all() as Record<string, unknown>[];
     const storage = current.prepare('SELECT * FROM storage').all() as Record<string, unknown>[];
     current.close();
     for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true });
