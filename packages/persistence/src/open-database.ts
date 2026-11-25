@@ -14,6 +14,7 @@ import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
 import { createProjectAssetRepository } from './project-asset-repository.js';
 import { createProjectRepository } from './project-repository.js';
+import { registerSqlFunctions } from './sql-functions.js';
 import { createStorageRepository } from './storage-repository.js';
 import { createTagRepository } from './tag-repository.js';
 import { createAssetWorkflowRepository } from './asset-workflow-repository.js';
@@ -31,6 +32,7 @@ export async function openWorkspaceDatabase(
   try {
     sqlite.pragma('journal_mode = WAL');
     sqlite.pragma('foreign_keys = ON');
+    registerSqlFunctions(sqlite);
     const db = drizzle(sqlite);
     migrate(db, { migrationsFolder });
     return {

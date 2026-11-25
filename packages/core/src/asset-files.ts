@@ -1,7 +1,9 @@
-import type { FileList, FileRecord, FileScope, FileTarget } from '@assetforge/contracts';
+import type { FileList, FileRecord, FileTarget } from '@assetforge/contracts';
 import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
 import { assetFilePath, inboxPath } from './paths.js';
-import type { FileMoveRepository, FileRepository, Page, Storage } from './ports.js';
+import type { FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
+import { searchWords } from './search.js';
+import { tagName } from './tags.js';
 import type { WorkspaceSession } from './session.js';
 
 /**
@@ -100,6 +102,12 @@ export async function recoverFileMoves(ctx: {
   return result;
 }
 
-export function listFiles(s: WorkspaceSession, q: Page & { scope: FileScope }): Promise<FileList> {
-  return s.database.files.list(q);
+export function listFiles(s: WorkspaceSession, q: FileQuery): Promise<FileList> {
+  const { query, tagNames, ...rest } = q;
+  const names = tagNames === undefined ? [] : [...new Set(tagNames.map((t) => tagName(t).name))];
+  return s.database.files.list({
+    ...rest,
+    ...(query !== undefined && searchWords(query).length > 0 && { query }),
+    ...(names.length > 0 && { tagNames: names }),
+  });
 }

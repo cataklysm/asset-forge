@@ -3,7 +3,6 @@ import {
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
   type FileList,
-  type FileScope,
   type FileTarget,
   type ImportResult,
   type WorkspaceManifest,
@@ -27,7 +26,7 @@ import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
-import type { Page, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+import type { FileQuery, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -96,7 +95,7 @@ export class WorkspaceManager {
     return this.queue.run(() => this.doImportFiles(sourcePaths, target));
   }
 
-  listFiles(q: Page & { scope: FileScope }): Promise<FileList> {
+  listFiles(q: FileQuery): Promise<FileList> {
     return this.read((s) => listFiles(s, q));
   }
 

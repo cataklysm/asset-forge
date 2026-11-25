@@ -7,16 +7,27 @@ import { sql, type SQL } from 'drizzle-orm';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import type { AssetStatus, AssetType, FileKind, FileRole } from '@assetforge/contracts';
-import { BUILT_IN_ASSET_TYPES, fileKind, searchWords, type AssetQuery, type WorkspaceDatabase } from '@assetforge/core';
+import {
+  BUILT_IN_ASSET_TYPES,
+  fileKind,
+  foldSearchWord,
+  searchWords,
+  type AssetQuery,
+  type FileQuery,
+  type WorkspaceDatabase,
+} from '@assetforge/core';
+import { fileListSql } from '../src/file-repository.js';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 import { assetTagsSql, matchedTagsSql } from '../src/list-tags.js';
 import { searchStatements } from '../src/search-index.js';
+import { registerSqlFunctions } from '../src/sql-functions.js';
 
 const ASSET_COUNT = 10_000;
 const TAG_COUNT = 200;
 /** Tags `0 .. ASSET_TAG_COUNT - 1` go on assets, the rest only on files. */
 const ASSET_TAG_COUNT = 150;
 const PROJECT_COUNT = 5;
+const INBOX_FILE_COUNT = 2_000;
 
 const TS = '2026-01-01T00:00:00.000Z';
 const uuid = (prefix: number, n: number) =>
@@ -30,10 +41,11 @@ const ROLES: readonly FileRole[] = ['reference', 'concept', 'generated', 'workin
 const EXTENSIONS = ['png', 'jpg', 'blend', 'glb', 'pdf', 'txt', 'zip'];
 const STATUSES: readonly AssetStatus[] = ['draft', 'in_progress', 'in_review', 'completed', 'archived'];
 
-/** Tables the search must reach only through an index; `m` is the alias of `asset_search_map`. */
 /**
  * For each table the search may touch, the columns that key it on the row the outer loop holds:
  * the FTS rowid, the asset id, or the file id. A lookup must have an equality on one of them.
+ * `m` is the alias of `asset_search_map`, `ft` of `file_tag` and `t` of `tag`. The file
+ * list's scope key `asset_id` (an inbox's `is null` is planned as `asset_id=?`) keys `file`.
  */
 const KEY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   m: ['rowid'],
@@ -43,6 +55,8 @@ const KEY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   asset_tag: ['asset_id'],
   file: ['asset_id', 'id'],
   file_tag: ['file_id'],
+  ft: ['file_id'],
+  t: ['id'],
   project_asset: ['asset_id'],
   asset_workflow: ['asset_id'],
 };
@@ -58,6 +72,11 @@ interface SeededFile {
   kind: FileKind;
   name: string;
   complete: boolean;
+  tag: number;
+}
+interface SeededInboxFile {
+  name: string;
+  kind: FileKind;
   tag: number;
 }
 interface SeededAsset {
@@ -90,6 +109,7 @@ let sqlite: Database.Database;
 let orm: BetterSQLite3Database;
 let typeIds: string[];
 const seeded: SeededAsset[] = [];
+const seededInbox: SeededInboxFile[] = [];
 
 /** Seeds the workspace with prepared statements in one transaction. */
 function seed(): void {
@@ -153,6 +173,19 @@ function seed(): void {
       }
       if (a.projectId !== null) insertProjectAsset.run(a.projectId, a.id, TS, TS);
       seeded.push(a);
+    }
+    // Inbox files: no asset, two kinds, one file-only tag each, distinct import times.
+    for (let i = 0; i < INBOX_FILE_COUNT; i++) {
+      const id = uuid(5, i);
+      const f: SeededInboxFile = {
+        name: `${pick(DESCRIPTION_WORDS)}-${pick(NOUNS)}-${i}.${i % 2 === 0 ? 'png' : 'glb'}`,
+        kind: i % 2 === 0 ? 'image' : 'model',
+        tag: ASSET_TAG_COUNT + Math.floor(next() * (TAG_COUNT - ASSET_TAG_COUNT)),
+      };
+      const importedAt = new Date(Date.UTC(2026, 0, 2, 0, 0, i)).toISOString();
+      insertFile.run(id, STORAGE, null, null, f.name, `inbox/${id}/${f.name}`, 'a'.repeat(64), f.kind, 'complete', importedAt);
+      insertFileTag.run(id, uuid(2, f.tag), 'manual', TS);
+      seededInbox.push(f);
     }
   })();
 }
@@ -225,6 +258,7 @@ beforeAll(async () => {
   await db.assetTypes.insertMissing(types);
   await db.storages.ensurePrimary({ id: STORAGE, createdAt: TS });
   sqlite = new Database(path);
+  registerSqlFunctions(sqlite);
   orm = drizzle(sqlite);
 
   const seedStart = performance.now();
@@ -354,5 +388,52 @@ describe('search scale', () => {
       expect(result.items.length).toBeGreaterThan(0);
       expect(result.total).toBe(bruteForceCount(q));
     }
+  });
+});
+
+describe('file list plans', () => {
+  const seededTag = () => tagLabel(seededInbox[0]!.tag);
+  const queries = (): Omit<FileQuery, 'scope' | 'limit' | 'offset'>[] => [
+    {},
+    { query: 'oak' },
+    { tagNames: [seededTag()] },
+    { role: 'texture' },
+    { kind: 'image' },
+    { query: 'oak', tagNames: [seededTag()], role: 'reference', kind: 'image' },
+  ];
+
+  test.each([
+    ['inbox', { kind: 'inbox' }],
+    ['asset', { kind: 'asset', assetId: uuid(3, 7) }],
+  ] as const)('the %s scope with every filter reads file, file_tag and tag only by key', (_, scope) => {
+    for (const q of queries()) {
+      const statements = fileListSql(orm, { scope, limit: 60, offset: 0, ...q });
+      expect(statements).not.toBeNull();
+      for (const [name, statement] of Object.entries(statements!)) {
+        // The statement and query are in the compared value, so a failure names the offending case.
+        expect({ name, q, violations: violations(plan(statement)) }).toEqual({ name, q, violations: [] });
+      }
+    }
+  });
+
+  test('inbox totals over 2 000 files match a brute-force count', async () => {
+    const totals: number[] = [];
+    for (const q of queries()) {
+      const words = searchWords(q.query ?? '').map(foldSearchWord);
+      const expected = seededInbox.filter(
+        (f) =>
+          q.role === undefined &&
+          (q.kind === undefined || f.kind === q.kind) &&
+          (q.tagNames ?? []).every((name) => tagLabel(f.tag) === name) &&
+          words.every((w) => f.name.includes(w) || tagLabel(f.tag).startsWith(w)),
+      ).length;
+      const result = await db.files.list({ scope: { kind: 'inbox' }, limit: 60, offset: 0, ...q });
+      expect(result.total).toBe(expected);
+      expect(result.items).toHaveLength(Math.min(60, expected));
+      totals.push(expected);
+    }
+    // The unfiltered, query, tag and kind cases select real subsets of the inbox.
+    expect(totals[0]).toBe(INBOX_FILE_COUNT);
+    expect([totals[1], totals[2], totals[4]].every((n) => n! > 0 && n! < INBOX_FILE_COUNT)).toBe(true);
   });
 });

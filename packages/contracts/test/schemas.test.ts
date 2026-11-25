@@ -178,6 +178,18 @@ describe('library IPC requests', () => {
     expect(request.safeParse({ limit: 10, offset: 0 }).success).toBe(false);
     expect(request.safeParse({ limit: 10, offset: 0, scope: { kind: 'inbox' } }).success).toBe(true);
   });
+
+  it('files:list accepts query, tagNames, role and kind within their limits', () => {
+    const request = ipcContract['files:list'].request;
+    const base = { limit: 10, offset: 0, scope: { kind: 'inbox' } };
+    const full = { ...base, query: 'x'.repeat(200), tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`), role: 'texture', kind: 'model' };
+    expect(request.parse(full)).toEqual(full);
+    expect(request.safeParse({ ...base, query: 'x'.repeat(201) }).success).toBe(false);
+    expect(request.safeParse({ ...base, tagNames: Array.from({ length: 11 }, (_, i) => `t${i}`) }).success).toBe(false);
+    expect(request.safeParse({ ...base, tagNames: ['x'.repeat(201)] }).success).toBe(false);
+    expect(request.safeParse({ ...base, role: 'nope' }).success).toBe(false);
+    expect(request.safeParse({ ...base, kind: 'nope' }).success).toBe(false);
+  });
 });
 
 describe('workflows', () => {

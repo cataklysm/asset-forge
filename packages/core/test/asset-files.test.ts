@@ -13,8 +13,10 @@ import {
   relocateFile,
   removeAssignment,
   WorkspaceManager,
+  type FileQuery,
   type WorkspaceSession,
 } from '../src/index.js';
+import type { FileKind, FileList, FileRole, FileScope } from '@assetforge/contracts';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -350,5 +352,83 @@ describe('listing files', () => {
     await removeAssignment(session, { projectId: project.id, assetId: asset.id });
     expect(db.files.records.get(file.id)).toEqual(placed);
     expect(storage.files.get(placed.relativePath)?.toString()).toBe('pump');
+  });
+});
+
+describe('file list filters', () => {
+  async function seed() {
+    const fake = createFakeHost();
+    const manager = new WorkspaceManager(fake.host);
+    await manager.create({ name: 'Demo', rootPath: ROOT });
+    const s: WorkspaceSession = await manager.read(async (x) => x);
+    const db = s.database;
+    const typeId = (await db.assetTypes.list())[0]!.id;
+    const asset = await createAsset(s, { name: 'Tree', typeId });
+    let n = 0;
+    const addFile = async (originalName: string, kind: FileKind, placement?: { assetId: string; role: FileRole }) => {
+      const id = `f0000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+      const relativePath = `inbox/${id}/${originalName}`;
+      await db.files.insertPending({ id, storageId: 's', originalName, relativePath, mimeType: 'image/png', importedAt: TS, kind });
+      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
+      return id;
+    };
+    const tag = (name: string) => ({ name, displayName: name, origin: 'manual' as const, newId: `t-${name}`, now: TS });
+    const tagFile = (fileId: string, name: string) => db.tags.addToFile({ fileId, ...tag(name) });
+    const tagAsset = (assetId: string, name: string) => db.tags.addToAsset({ assetId, ...tag(name) });
+    return { s, asset, addFile, tagFile, tagAsset };
+  }
+
+  const page = (q: Omit<FileQuery, 'limit' | 'offset'>): FileQuery => ({ limit: 60, offset: 0, ...q });
+  const names = (list: FileList) => list.items.map((f) => f.originalName).sort();
+  const inbox: FileScope = { kind: 'inbox' };
+  const all: FileScope = { kind: 'all' };
+
+  it('query folds case and diacritics and matches tag word prefixes', async () => {
+    const { s, addFile, tagFile } = await seed();
+    await addFile('Säule-01.png', 'image');
+    await tagFile(await addFile('wall.png', 'image'), 'sci-fi');
+    await addFile('other.png', 'image');
+
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'saule' })))).toEqual(['Säule-01.png']);
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'SÄU' })))).toEqual(['Säule-01.png']);
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'sci-fi' })))).toEqual(['wall.png']);
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'fi' })))).toEqual(['wall.png']);
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'all sci' })))).toEqual(['wall.png']); // every word
+    expect(names(await listFiles(s, page({ scope: inbox, query: 'ci' })))).toEqual([]); // tags match word prefixes only
+    expect((await listFiles(s, page({ scope: inbox, query: ' -* ' }))).total).toBe(3); // no words: no filter
+  });
+
+  it('tagNames require every tag on the file itself', async () => {
+    const { s, asset, addFile, tagFile, tagAsset } = await seed();
+    await tagAsset(asset.id, 'oak');
+    await tagFile(await addFile('f.png', 'image', { assetId: asset.id, role: 'texture' }), 'bark');
+    await addFile('g.png', 'image', { assetId: asset.id, role: 'texture' });
+    const assetScope: FileScope = { kind: 'asset', assetId: asset.id };
+
+    expect(names(await listFiles(s, page({ scope: assetScope, tagNames: ['bark'] })))).toEqual(['f.png']);
+    expect(names(await listFiles(s, page({ scope: assetScope, tagNames: [' BARK ', 'bark'] })))).toEqual(['f.png']);
+    expect((await listFiles(s, page({ scope: assetScope, tagNames: ['bark', 'oak'] }))).total).toBe(0);
+  });
+
+  it('an unknown tag gives an empty page', async () => {
+    const { s, addFile } = await seed();
+    await addFile('a.png', 'image');
+    expect(await listFiles(s, page({ scope: all, tagNames: ['nope'] }))).toEqual({ items: [], total: 0 });
+  });
+
+  it('role and kind filter within the scope', async () => {
+    const { s, asset, addFile } = await seed();
+    await addFile('tex.png', 'image', { assetId: asset.id, role: 'texture' });
+    await addFile('ref.png', 'image', { assetId: asset.id, role: 'reference' });
+    await addFile('mesh.glb', 'model', { assetId: asset.id, role: 'texture' });
+    await addFile('inbox.glb', 'model');
+    await addFile('inbox.png', 'image');
+    const assetScope: FileScope = { kind: 'asset', assetId: asset.id };
+
+    expect(names(await listFiles(s, page({ scope: assetScope, role: 'texture' })))).toEqual(['mesh.glb', 'tex.png']);
+    expect(names(await listFiles(s, page({ scope: assetScope, role: 'texture', kind: 'image' })))).toEqual(['tex.png']);
+    expect(names(await listFiles(s, page({ scope: inbox, kind: 'model' })))).toEqual(['inbox.glb']);
+    expect(names(await listFiles(s, page({ scope: all, kind: 'model' })))).toEqual(['inbox.glb', 'mesh.glb']);
   });
 });

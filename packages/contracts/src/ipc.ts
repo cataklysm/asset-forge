@@ -102,7 +102,13 @@ export const ipcContract = {
     response: z.array(ImportResultSchema),
   },
   'files:list': {
-    request: PageRequestSchema.extend({ scope: FileScopeSchema }),
+    request: PageRequestSchema.extend({
+      scope: FileScopeSchema,
+      query: z.string().max(200).optional(),
+      tagNames: z.array(z.string().max(200)).max(10).optional(),
+      role: FileRoleSchema.optional(),
+      kind: FileKindSchema.optional(),
+    }),
     response: FileListSchema,
   },
   'files:assign': {

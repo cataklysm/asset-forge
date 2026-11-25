@@ -10,7 +10,6 @@ import type {
   FileKind,
   FileList,
   FileRecord,
-  FileScope,
   ImportStatus,
   MatchedTag,
   Project,
@@ -53,6 +52,7 @@ import type {
   FileMove,
   FileMoveRepository,
   FilePlacement,
+  FileQuery,
   FileRepository,
   Page,
   ProjectAssetRepository,
@@ -358,10 +358,20 @@ class InMemoryFiles implements FileRepository {
     return this.withTags(next);
   }
 
-  async list(q: Page & { scope: FileScope }): Promise<FileList> {
+  async list(q: FileQuery): Promise<FileList> {
     const { scope } = q;
+    const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
+    const tagsOf = (fileId: string) => this.tags.fileAssignments.filter((a) => a.fileId === fileId).map((a) => a.name);
+    // Plan decision 1/2: a word is a substring of the folded name or a word prefix of a tag name.
+    const matchesWord = (r: FileRecord, w: string) =>
+      foldSearchWord(r.originalName).includes(w) ||
+      tagsOf(r.id).some((name) => startsWithToken(textWords(name).map(foldSearchWord), w));
     const sorted = [...this.records.values()]
       .filter((r) => scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null))
+      .filter((r) => q.role === undefined || r.role === q.role)
+      .filter((r) => q.kind === undefined || r.kind === q.kind)
+      .filter((r) => (q.tagNames ?? []).every((name) => tagsOf(r.id).includes(name)))
+      .filter((r) => words.every((w) => matchesWord(r, w)))
       .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }

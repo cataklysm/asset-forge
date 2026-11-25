@@ -176,6 +176,32 @@ describe('library IPC', () => {
       expect((await ok('assets:list', { limit: 10, offset: 0 })).items[0].matchedTags).toBeUndefined();
     });
 
+    it('files:list rejects 11 tag names and a query over 200 characters', async () => {
+      await openWorkspace();
+      const tagNames = Array.from({ length: 11 }, (_, i) => `t${i}`);
+      const invalid = { ok: false, error: { code: 'invalid_request' } };
+      expect(await call('files:list', { ...page, scope: { kind: 'all' }, tagNames })).toMatchObject(invalid);
+      expect(await call('files:list', { ...page, scope: { kind: 'all' }, query: 'x'.repeat(201) })).toMatchObject(invalid);
+    });
+
+    it('files:list filters the inbox by query, tag and kind', async () => {
+      await openWorkspace();
+      const sources = [join(base, 'Oak-Bark.png'), join(base, 'oak-trunk.glb')];
+      for (const source of sources) await writeFile(source, source);
+      const imported = await ok<any[]>('files:import', { sourcePaths: sources });
+      const [bark, trunk] = imported.map((r) => r.file);
+      await ok('files:addTag', { fileId: bark.id, name: 'Sci-Fi' });
+      const inbox = { ...page, scope: { kind: 'inbox' } };
+
+      const listed = await ok('files:list', { ...inbox, query: 'OAK', tagNames: ['SCI-FI', 'sci-fi'], kind: 'image' });
+      expect(ipcContract['files:list'].response.safeParse(listed).success).toBe(true);
+      expect(listed).toMatchObject({ total: 1, items: [{ id: bark.id, tags: [{ name: 'sci-fi' }] }] });
+      expect(await ok('files:list', { ...inbox, query: 'oak', kind: 'model' })).toMatchObject({ total: 1, items: [{ id: trunk.id }] });
+      expect(await ok('files:list', { ...inbox, query: 'fi' })).toMatchObject({ total: 1, items: [{ id: bark.id }] });
+      expect(await ok('files:list', { ...inbox, tagNames: ['unknown'] })).toEqual({ items: [], total: 0 });
+      expect((await ok('files:list', { ...inbox, query: '%' })).total).toBe(2); // no words: no filter
+    });
+
     it('a too long tag answers validation_failed without echoing the input', async () => {
       const { asset, file } = await assetWithFile();
       const name = 'x'.repeat(65);

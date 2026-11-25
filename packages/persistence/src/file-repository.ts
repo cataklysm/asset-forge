@@ -1,8 +1,17 @@
 import { FileKindSchema } from '@assetforge/contracts';
 import type { FileList, FileRecord, FileScope, ImportStatus, TagAssignment } from '@assetforge/contracts';
-import { NotFoundError, isOpenable, isPreviewable, type FileRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  NotFoundError,
+  foldSearchWord,
+  isOpenable,
+  isPreviewable,
+  searchWords,
+  type FileQuery,
+  type FileRepository,
+} from '@assetforge/core';
+import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { qualified } from './qualified.js';
 import { asset, file, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
@@ -75,6 +84,50 @@ const scopeMatches = (scope: FileScope) => {
       return eq(file.assetId, scope.assetId);
   }
 };
+
+type ListTx = Pick<BetterSQLite3Database, 'select'>;
+
+/**
+ * The WHERE of a file list: scope, role, kind, every tag on the file itself, and every query word
+ * a substring of the folded file name or a word prefix of one of the file's tags (Plan decision 2).
+ * Null when a requested tag does not exist, so nothing can match.
+ */
+function fileListWhere(tx: ListTx, q: Omit<FileQuery, 'limit' | 'offset'>): { where: SQL | undefined } | null {
+  const fileId = qualified(file, file.id);
+  const conditions: (SQL | undefined)[] = [scopeMatches(q.scope)];
+  if (q.role !== undefined) conditions.push(eq(file.role, q.role));
+  if (q.kind !== undefined) conditions.push(eq(file.kind, q.kind));
+  const names = [...new Set(q.tagNames ?? [])];
+  if (names.length > 0) {
+    const tagIds = tx.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
+    if (tagIds.length < names.length) return null;
+    for (const { id } of tagIds) {
+      conditions.push(
+        sql`exists (select 1 from ${fileTag} where ${qualified(fileTag, fileTag.fileId)} = ${fileId} and ${qualified(fileTag, fileTag.tagId)} = ${id})`,
+      );
+    }
+  }
+  for (const word of (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord)) {
+    conditions.push(
+      sql`(instr(af_fold(${qualified(file, file.originalName)}), ${word}) > 0 or exists (
+        select 1 from ${fileTag} ft join ${tag} t on t.id = ft.tag_id
+        where ft.file_id = ${fileId} and af_word_prefix(t.name, ${word})))`,
+    );
+  }
+  return { where: and(...conditions) };
+}
+
+const pageQuery = (tx: ListTx, q: FileQuery, where: SQL | undefined) =>
+  tx.select().from(file).where(where).orderBy(desc(file.importedAt), desc(file.id)).limit(q.limit).offset(q.offset);
+
+const countQuery = (tx: ListTx, where: SQL | undefined) => tx.select({ n: count() }).from(file).where(where);
+
+/** The page and count statements of a file list; null when a requested tag does not exist. Exported for the query plan test. */
+export function fileListSql(tx: ListTx, q: FileQuery): { page: SQL; count: SQL } | null {
+  const filter = fileListWhere(tx, q);
+  if (filter === null) return null;
+  return { page: pageQuery(tx, q, filter.where).getSQL(), count: countQuery(tx, filter.where).getSQL() };
+}
 
 export function createFileRepository(db: BetterSQLite3Database): FileRepository {
   return {
@@ -171,23 +224,14 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         return toRecordWithTags(tx, row);
       });
     },
-    async list({ limit, offset, scope }): Promise<FileList> {
-      const where = scopeMatches(scope);
-      // One read transaction, so the page and the total describe the same snapshot.
+    async list(q): Promise<FileList> {
+      // One read transaction, so the tag ids, the page and the total describe the same snapshot.
       return db.transaction(
         (tx) => {
-          const items = toRecords(
-            tx,
-            tx
-              .select()
-              .from(file)
-              .where(where)
-              .orderBy(desc(file.importedAt), desc(file.id))
-              .limit(limit)
-              .offset(offset)
-              .all(),
-          );
-          const total = tx.select({ n: count() }).from(file).where(where).get()?.n ?? 0;
+          const filter = fileListWhere(tx, q);
+          if (filter === null) return { items: [], total: 0 };
+          const items = toRecords(tx, pageQuery(tx, q, filter.where).all());
+          const total = countQuery(tx, filter.where).get()?.n ?? 0;
           return { items, total };
         },
         { behavior: 'deferred' },

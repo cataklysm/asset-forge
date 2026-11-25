@@ -2,12 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { Asset, AssetType, FileKind, FileRole, Project, ProjectAssignment } from '@assetforge/contracts';
+import type { Asset, AssetType, FileKind, FileRole, FileScope, Project, ProjectAssignment } from '@assetforge/contracts';
 import {
   BUILT_IN_ASSET_TYPES,
   InvalidOperationError,
   NotFoundError,
   type FileMove,
+  type FileQuery,
   type WorkspaceDatabase,
 } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
@@ -594,5 +595,96 @@ describe('asset repository filters', () => {
     await expect(names({ query: 'iron', tagNames: ['metal'], fileKind: 'image', typeId })).resolves.toEqual([
       'Iron sword',
     ]);
+  });
+});
+
+describe('file repository filters', () => {
+  let nextId = 3000;
+  const newId = () => uuid(nextId++);
+
+  const setup = async () => {
+    await db.storages.ensurePrimary({ id: uuid(900), createdAt: TS });
+    await db.assetTypes.insertMissing(typeRows(100));
+    await db.assets.insert(asset(1, 'Tree', uuid(100)));
+    let minute = 0;
+    const addFile = async (originalName: string, kind: FileKind, placement?: { assetId: string; role: FileRole }) => {
+      const id = newId();
+      const relativePath = `inbox/${id}/${originalName}`;
+      // Later files are newer, so the newest-first order is the reverse of insertion.
+      const importedAt = new Date(Date.UTC(2026, 0, 1, 0, minute++)).toISOString();
+      await db.files.insertPending({ id, storageId: uuid(900), originalName, relativePath, mimeType: 'image/png', importedAt, kind });
+      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
+      return id;
+    };
+    const tagFile = (fileId: string, name: string) =>
+      db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    const tagAsset = (assetId: string, name: string) =>
+      db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    const names = async (q: Partial<FileQuery> & Pick<FileQuery, 'scope'>) =>
+      (await db.files.list({ limit: 60, offset: 0, ...q })).items.map((f) => f.originalName);
+    return { addFile, tagFile, tagAsset, names };
+  };
+  const inbox: FileScope = { kind: 'inbox' };
+  const all: FileScope = { kind: 'all' };
+  const tree: FileScope = { kind: 'asset', assetId: uuid(1) };
+
+  test('query folds case and diacritics and matches tag word prefixes', async () => {
+    const { addFile, tagFile, names } = await setup();
+    await addFile('Säule-01.png', 'image');
+    await tagFile(await addFile('wall.png', 'image'), 'sci-fi');
+    await addFile('other.png', 'image');
+
+    await expect(names({ scope: inbox, query: 'saule' })).resolves.toEqual(['Säule-01.png']);
+    await expect(names({ scope: inbox, query: 'SÄU' })).resolves.toEqual(['Säule-01.png']);
+    await expect(names({ scope: inbox, query: 'sci-fi' })).resolves.toEqual(['wall.png']);
+    await expect(names({ scope: inbox, query: 'fi' })).resolves.toEqual(['wall.png']);
+    await expect(names({ scope: inbox, query: 'all sci' })).resolves.toEqual(['wall.png']); // every word
+    await expect(names({ scope: inbox, query: 'ci' })).resolves.toEqual([]); // tags match word prefixes only
+    await expect(names({ scope: inbox, query: 'png' })).resolves.toEqual(['other.png', 'wall.png', 'Säule-01.png']);
+    await expect(db.files.list({ limit: 1, offset: 1, scope: inbox, query: 'png' })).resolves.toMatchObject({
+      items: [{ originalName: 'wall.png' }],
+      total: 3,
+    });
+  });
+
+  test('tagNames require every tag on the file itself', async () => {
+    const { addFile, tagFile, tagAsset, names } = await setup();
+    await tagAsset(uuid(1), 'oak');
+    const f = await addFile('f.png', 'image', { assetId: uuid(1), role: 'texture' });
+    await tagFile(f, 'bark');
+    await tagFile(f, 'rough');
+    await tagFile(await addFile('g.png', 'image', { assetId: uuid(1), role: 'texture' }), 'rough');
+
+    await expect(names({ scope: tree, tagNames: ['bark'] })).resolves.toEqual(['f.png']);
+    await expect(names({ scope: tree, tagNames: ['rough'] })).resolves.toEqual(['g.png', 'f.png']);
+    await expect(names({ scope: tree, tagNames: ['bark', 'rough'] })).resolves.toEqual(['f.png']);
+    await expect(db.files.list({ limit: 60, offset: 0, scope: tree, tagNames: ['bark', 'oak'] })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  test('an unknown tag gives an empty page', async () => {
+    const { addFile, tagFile } = await setup();
+    await tagFile(await addFile('a.png', 'image'), 'known');
+    await expect(db.files.list({ limit: 60, offset: 0, scope: all, tagNames: ['known', 'nope'] })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  test('role and kind filter within the scope', async () => {
+    const { addFile, names } = await setup();
+    await addFile('tex.png', 'image', { assetId: uuid(1), role: 'texture' });
+    await addFile('ref.png', 'image', { assetId: uuid(1), role: 'reference' });
+    await addFile('mesh.glb', 'model', { assetId: uuid(1), role: 'texture' });
+    await addFile('inbox.glb', 'model');
+    await addFile('inbox.png', 'image');
+
+    await expect(names({ scope: tree, role: 'texture' })).resolves.toEqual(['mesh.glb', 'tex.png']);
+    await expect(names({ scope: tree, role: 'texture', kind: 'image' })).resolves.toEqual(['tex.png']);
+    await expect(names({ scope: inbox, kind: 'model' })).resolves.toEqual(['inbox.glb']);
+    await expect(names({ scope: all, kind: 'model' })).resolves.toEqual(['inbox.glb', 'mesh.glb']);
   });
 });

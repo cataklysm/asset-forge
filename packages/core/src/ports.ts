@@ -76,12 +76,22 @@ export interface FileRepository {
   get(id: string): Promise<FileRecord | null>;
   /** Rejects with NotFoundError for an unknown id. Clears the chosen cover of any other asset than `placement.assetId` that uses this file. */
   setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>;
-  list(q: Page & { scope: FileScope }): Promise<FileList>; // newest importedAt first
+  list(q: FileQuery): Promise<FileList>; // newest importedAt first
 }
 
 export interface Page {
   limit: number;
   offset: number;
+}
+
+export interface FileQuery extends Page {
+  scope: FileScope;
+  /** Free text; every word must be a substring of the folded file name or a word prefix of one of its tags. Absent when the text has no words. */
+  query?: string;
+  /** Normalised, distinct tag names; each must be on the file itself. */
+  tagNames?: string[];
+  role?: FileRole;
+  kind?: FileKind;
 }
 
 /** Where a file row points: its path and, unless it is in the inbox, its asset and role. */
