@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceManager } from '@assetforge/core';
+import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 
@@ -17,7 +18,7 @@ const dialogs = {
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-ipc-'));
-  manager = createWorkspaceManager({ userDataPath: join(base, 'userData') });
+  manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
   handlers = createWorkspaceHandlers(manager, dialogs);
 });
 afterEach(async () => {

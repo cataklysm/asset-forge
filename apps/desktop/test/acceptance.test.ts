@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'no
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
 
 let base: string;
@@ -28,7 +29,7 @@ afterEach(async () => {
 });
 
 async function createAndImport() {
-  const first = createWorkspaceManager({ userDataPath });
+  const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
   const ws = await first.create({ name: 'Gilded Hour', rootPath: workspaceRoot });
   const results = await first.importFiles([pngPath, blendPath]);
   expect(results.map((r) => r.file?.status)).toEqual(['complete', 'complete']);
@@ -40,7 +41,7 @@ describe('phase 1 acceptance', () => {
   it('survives a restart with files intact and consistent', async () => {
     const ws = await createAndImport();
 
-    const second = createWorkspaceManager({ userDataPath });
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     expect(await second.list()).toMatchObject([{ id: ws.id, name: 'Gilded Hour', rootPath: workspaceRoot }]);
     const reopened = await second.open({ rootPath: workspaceRoot });
     expect(reopened.id).toBe(ws.id);
@@ -63,7 +64,7 @@ describe('phase 1 acceptance', () => {
     const moved = join(base, 'moved');
     await rename(workspaceRoot, moved);
 
-    const manager = createWorkspaceManager({ userDataPath });
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
       const reopened = await manager.open({ rootPath: moved });
       expect(reopened.id).toBe(ws.id);
@@ -81,7 +82,7 @@ describe('phase 1 acceptance', () => {
     const copy = join(base, 'copy');
     await cp(workspaceRoot, copy, { recursive: true });
 
-    const manager = createWorkspaceManager({ userDataPath });
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
       await expect(manager.open({ rootPath: copy })).rejects.toMatchObject({ code: 'workspace_duplicate' });
       expect(manager.current()).toBeNull();
@@ -99,7 +100,7 @@ describe('phase 1 acceptance', () => {
     const ws = await createAndImport();
     await rm(join(userDataPath, 'workspaces', ws.id), { recursive: true, force: true });
 
-    const manager = createWorkspaceManager({ userDataPath });
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
       const reopened = await manager.open({ rootPath: workspaceRoot });
       expect(reopened.id).toBe(ws.id);
@@ -110,11 +111,19 @@ describe('phase 1 acceptance', () => {
   });
 
   it('refuses to open a database for an id that is not a UUID', async () => {
-    const host = createWorkspaceHost({ userDataPath });
+    const host = createWorkspaceHost({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     for (const bad of ['../../evil', '..', '', 'abc', 'C:\\evil']) {
       await expect(host.openDatabase(bad)).rejects.toThrow(/workspace id/i);
     }
     expect(existsSync(join(base, 'evil'))).toBe(false);
     expect(existsSync(join(userDataPath, 'workspaces'))).toBe(false);
+  });
+
+  it('requires an explicit migrations folder (a package-relative default breaks in the bundle)', () => {
+    // Never called: this only fails typecheck if the option becomes optional again.
+    const withoutFolder = () =>
+      // @ts-expect-error migrationsFolder is required
+      createWorkspaceHost({ userDataPath });
+    expect(typeof withoutFolder).toBe('function');
   });
 });
