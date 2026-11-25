@@ -102,6 +102,31 @@ describe('files', () => {
   });
 });
 
+describe('flush before commit', () => {
+  // Durability itself cannot be unit-tested; these only check that a flush is requested.
+  let syncSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(async () => {
+    await storage.ensureLayout();
+    const probe = await fs.open(path.join(tmp, 'probe'), 'w');
+    const proto = Object.getPrototypeOf(probe) as fs.FileHandle;
+    await probe.close();
+    syncSpy = vi.spyOn(proto, 'sync');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('flushes a streamed file before writeStream resolves', async () => {
+    await storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('hello')));
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes the temp file of an atomic text write', async () => {
+    await storage.writeText('workspace.json', '{}');
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('file-system error mapping', () => {
   beforeEach(async () => {
     await storage.ensureLayout();

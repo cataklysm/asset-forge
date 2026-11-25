@@ -130,7 +130,9 @@ export class LocalFileSystemStorage implements Storage {
       await fs.mkdir(path.dirname(abs), { recursive: true });
       const tmp = path.join(path.dirname(abs), `${path.basename(abs)}.${randomUUID()}.tmp`);
       try {
-        await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx' });
+        // Flush before the rename: otherwise a crash can leave the renamed file
+        // (e.g. workspace.json) truncated or zeroed.
+        await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx', flush: true });
         await fs.rename(tmp, abs);
       } catch (err) {
         await fs.rm(tmp, { force: true }).catch(() => undefined);
@@ -163,7 +165,10 @@ export class LocalFileSystemStorage implements Storage {
           },
         });
         try {
-          await pipeline(source, hasher, handle.createWriteStream());
+          // `flush` fsyncs before the handle closes. The caller verifies, moves and marks
+          // the file complete right after this resolves; without the flush a power loss
+          // could leave a `complete` row pointing at a truncated or zeroed file.
+          await pipeline(source, hasher, handle.createWriteStream({ flush: true }));
         } catch (err) {
           await handle.close().catch(() => undefined);
           await fs.rm(abs, { force: true }).catch(() => undefined);
