@@ -4,7 +4,35 @@ import { inboxPath, mimeFromFileName, sanitizeFileName, stagingPath } from '../s
 describe('sanitizeFileName', () => {
   it('replaces unsafe characters', () => {
     expect(sanitizeFileName('Gabriella front.png')).toBe('Gabriella_front.png');
-    expect(sanitizeFileName('Größe über alles.JPG')).toBe('Gr_e_ber_alles.JPG');
+    expect(sanitizeFileName('Größe über alles.JPG')).toBe('Größe_über_alles.JPG');
+  });
+  it('keeps Unicode letters and digits', () => {
+    expect(sanitizeFileName('Портрет.png')).toBe('Портрет.png');
+    expect(sanitizeFileName('资产.png')).toBe('资产.png');
+    expect(sanitizeFileName('٣ drafts.txt')).toBe('٣_drafts.txt');
+  });
+  it('keeps the extension behind a placeholder when the stem has no allowed character', () => {
+    expect(sanitizeFileName('???.png')).toBe('file.png');
+    expect(sanitizeFileName('<>|.png')).toBe('file.png');
+    expect(sanitizeFileName('_.png')).toBe('file.png');
+  });
+  it('strips trailing dots and spaces, which Windows drops when creating the file', () => {
+    expect(sanitizeFileName('a.')).toBe('a');
+    expect(sanitizeFileName('a. ')).toBe('a');
+    expect(sanitizeFileName('a . .')).toBe('a');
+    expect(sanitizeFileName('a.png.')).toBe('a.png');
+    expect(sanitizeFileName('. .')).toBe('file');
+  });
+  it('never ends in a dot after truncation', () => {
+    const r = sanitizeFileName(`${'a'.repeat(99)}.${'b'.repeat(20)}`);
+    expect(r).toBe('a'.repeat(99));
+  });
+  it('never keeps separators, parent segments or reserved characters', () => {
+    for (const name of ['a:b*c?.png', 'x"y<z>|.txt', '..\\..\\Портрет.png', 'a/../b.png']) {
+      const r = sanitizeFileName(name);
+      expect(r).not.toMatch(/[\\/:*?"<>|]/);
+      expect(r).not.toContain('..');
+    }
   });
   it('keeps the base name only', () => {
     expect(sanitizeFileName('..\\..\\evil/../x.png')).toBe('x.png');

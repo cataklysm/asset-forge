@@ -1,15 +1,34 @@
 const MAX_LENGTH = 100;
 const MAX_EXTENSION_LENGTH = 10;
 
+const PLACEHOLDER_STEM = 'file';
+
+/**
+ * Turns an arbitrary source name into a single safe path segment: Unicode letters and
+ * digits plus `.`, `_` and `-` survive, everything else becomes `_`. Trailing dots and
+ * spaces are dropped because Windows drops them when creating the file, which would make
+ * the stored relative path differ from the on-disk name.
+ */
 export function sanitizeFileName(name: string): string {
   const base = name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
-  const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '');
-  if (cleaned === '') return 'file';
-  if (cleaned.length <= MAX_LENGTH) return cleaned;
+  const replaced = base.replace(/[. ]+$/, '').replace(/[^\p{L}\p{N}._-]+/gu, '_');
 
-  const dot = cleaned.lastIndexOf('.');
-  const ext = dot > 0 && cleaned.length - dot - 1 <= MAX_EXTENSION_LENGTH ? cleaned.slice(dot) : '';
-  return cleaned.slice(0, MAX_LENGTH - ext.length) + ext;
+  // A stem made only of replacement characters (e.g. `???.png`) gets a placeholder so the
+  // extension survives; a stem of dots only (e.g. `..hidden`) is a leading-dot name.
+  const dot = replaced.lastIndexOf('.');
+  const stem = dot > 0 ? replaced.slice(0, dot) : '';
+  const cleaned =
+    /^[._]+$/.test(stem) && stem.includes('_')
+      ? PLACEHOLDER_STEM + replaced.slice(dot)
+      : replaced.replace(/^[._]+/, '');
+  if (cleaned === '') return PLACEHOLDER_STEM;
+
+  // Count code points so truncation never splits a surrogate pair.
+  const chars = [...cleaned];
+  if (chars.length <= MAX_LENGTH) return cleaned;
+  const extDot = cleaned.lastIndexOf('.');
+  const ext = extDot > 0 && [...cleaned.slice(extDot + 1)].length <= MAX_EXTENSION_LENGTH ? cleaned.slice(extDot) : '';
+  return chars.slice(0, MAX_LENGTH - [...ext].length).join('').replace(/\.+$/, '') + ext;
 }
 
 const MIME_BY_EXTENSION: Record<string, string> = {
