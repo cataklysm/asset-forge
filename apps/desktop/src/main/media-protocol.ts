@@ -15,8 +15,15 @@ const SIZES: readonly PreviewSize[] = ['thumb', 'detail'];
 const FILE_ID = z.uuid();
 
 /**
- * Accepts only `assetforge-media://preview/<file uuid>?size=thumb|detail`: one path segment, one
- * query parameter, no credentials, port or fragment. Anything else is null.
+ * Accepts only `assetforge-media://preview/<file uuid>?size=thumb|detail`, spelled exactly like
+ * that: one path segment, one query parameter, no credentials, no port, no fragment (not even an
+ * empty `#`), no dot segments. Anything else is null.
+ *
+ * The final comparison against the canonical spelling rejects every form the URL parser would
+ * otherwise normalise away (dot segments, an empty fragment). The host is compared case-sensitively:
+ * Node keeps the case of a non-special scheme's host, so `PREVIEW` is rejected here; under Electron's
+ * standard-scheme registration Chromium lowercases the host before the handler sees it, which only
+ * ever addresses the same preview. Chromium also never forwards a fragment to a protocol handler.
  */
 export function parsePreviewUrl(url: string): { fileId: string; size: PreviewSize } | null {
   let parsed: URL;
@@ -25,7 +32,8 @@ export function parsePreviewUrl(url: string): { fileId: string; size: PreviewSiz
   } catch {
     return null;
   }
-  if (parsed.protocol !== `${MEDIA_SCHEME}:` || parsed.host !== 'preview') return null;
+  if (parsed.protocol !== `${MEDIA_SCHEME}:` || parsed.hostname !== 'preview') return null;
+  if (parsed.port !== '') return null;
   if (parsed.username !== '' || parsed.password !== '' || parsed.hash !== '') return null;
   const segments = parsed.pathname.split('/');
   if (segments.length !== 2 || segments[0] !== '') return null;
@@ -35,6 +43,7 @@ export function parsePreviewUrl(url: string): { fileId: string; size: PreviewSiz
   if (params.length !== 1) return null;
   const [name, value] = params[0]!;
   if (name !== 'size' || !SIZES.includes(value as PreviewSize)) return null;
+  if (url !== `${MEDIA_SCHEME}://preview/${fileId}?size=${value}`) return null;
   return { fileId, size: value as PreviewSize };
 }
 

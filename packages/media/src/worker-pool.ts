@@ -3,8 +3,11 @@ import type { PreviewJob, PreviewResult, WorkerRequest, WorkerResponse } from '.
 
 export interface WorkerPoolOptions {
   workerUrl: URL;
+  /** Maximum number of worker threads; a positive integer. */
   size: number;
   timeoutMs: number;
+  /** Receives one line per worker failure, never a path or an error message. Default: console.error. */
+  log?: (line: string) => void;
 }
 
 export interface WorkerPool {
@@ -27,13 +30,29 @@ interface Slot {
   current?: { id: number; task: Task; timer: NodeJS.Timeout };
 }
 
+/** Error code or class name of a worker failure; messages are left out because they may hold paths. */
+function failureKind(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /^[A-Z0-9_]+$/.test(code)) return code;
+  const name = (error as { name?: unknown } | null)?.name;
+  return typeof name === 'string' && /^[A-Za-z]+$/.test(name) ? name : 'unknown';
+}
+
+function isResponse(message: unknown): message is WorkerResponse {
+  return typeof message === 'object' && message !== null && typeof (message as WorkerResponse).id === 'number';
+}
+
 /**
  * Runs preview jobs in at most `size` worker threads, one job per worker at a time. Workers
- * start lazily; further jobs wait in FIFO order. A worker that crashes or exceeds `timeoutMs`
- * fails its job as `none` and is dropped, so the next job gets a fresh worker.
+ * start lazily; further jobs wait and are served newest first, so the tiles requested last (the
+ * ones in view after a fast scroll) are generated before those scrolled past. A worker that
+ * fails, crashes or exceeds `timeoutMs` fails its job as `none` and is dropped, so the next job
+ * gets a fresh worker; a worker error or a failed start is logged as one line.
  */
 export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
   const { workerUrl, size, timeoutMs } = options;
+  if (!Number.isInteger(size) || size < 1) throw new RangeError('The worker pool size must be a positive integer');
+  const log = options.log ?? ((line: string) => console.error(line));
   const slots = new Set<Slot>();
   const queue: Task[] = [];
   const terminations = new Set<Promise<unknown>>();
@@ -65,16 +84,21 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     let worker: Worker;
     try {
       worker = new Worker(workerUrl);
-    } catch {
+    } catch (error) {
+      log(`Preview worker failed to start (${failureKind(error)})`);
       return undefined;
     }
     const slot: Slot = { worker };
-    worker.on('message', (response: WorkerResponse) => {
-      if (!slots.has(slot) || slot.current?.id !== response?.id) return;
-      finish(slot, response.result === 'ok' ? 'ok' : 'none');
+    worker.on('message', (message: unknown) => {
+      if (!isResponse(message) || !slots.has(slot) || slot.current?.id !== message.id) return;
+      finish(slot, message.result === 'ok' ? 'ok' : 'none');
       pump();
     });
-    worker.on('error', () => drop(slot, true));
+    worker.on('error', (error: unknown) => {
+      // A failed start arrives here as well; only the first failure of a slot is logged.
+      if (slots.has(slot)) log(`Preview worker failed (${failureKind(error)})`);
+      drop(slot, true);
+    });
     worker.on('exit', () => drop(slot, false));
     slots.add(slot);
     return slot;
@@ -99,11 +123,11 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
         if (slots.size >= size) return;
         slot = spawn();
         if (!slot) {
-          queue.shift()?.resolve('none');
+          queue.pop()?.resolve('none');
           continue;
         }
       }
-      dispatch(slot, queue.shift() as Task);
+      dispatch(slot, queue.pop() as Task);
     }
   }
 

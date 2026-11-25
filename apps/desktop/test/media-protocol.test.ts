@@ -71,6 +71,12 @@ async function inspect(response: Response) {
   return { status: response.status, headers: [...response.headers.entries()], body };
 }
 
+/** Headers and body as plain text, so a raw Windows path (backslashes) is found as written. */
+function plainText(seen: { headers: [string, string][]; body: Uint8Array }): string {
+  const headers = seen.headers.map(([name, value]) => `${name}: ${value}`).join('\n');
+  return `${headers}\n${Buffer.from(seen.body).toString('latin1')}`;
+}
+
 async function expectBare404(response: Response) {
   const seen = await inspect(response);
   expect(seen.status).toBe(404);
@@ -92,8 +98,10 @@ describe('media protocol', () => {
     const response = await handleMediaRequest({ url: url(file.id), method: 'GET' }, realDeps());
     const seen = await inspect(response);
     expect(seen.status).toBe(200);
-    expect(response.headers.get('content-type')).toBe('image/webp');
-    expect(response.headers.get('cache-control')).toBe('private, max-age=31536000');
+    expect(seen.headers).toEqual([
+      ['cache-control', 'private, max-age=31536000'],
+      ['content-type', 'image/webp'],
+    ]);
     expect(seen.body).toEqual(WEBP);
     expect(get).toHaveBeenCalledTimes(1);
     const request = get.mock.calls[0]![0];
@@ -110,6 +118,18 @@ describe('media protocol', () => {
     `${MEDIA_SCHEME}://preview/not-a-uuid?size=thumb`,
     `${MEDIA_SCHEME}://preview/${ID}?size=thumb&path=C:/x`,
     'file:///C:/x.png',
+    `${MEDIA_SCHEME}://preview:8080/${ID}?size=thumb`,
+    `${MEDIA_SCHEME}://preview/${ID}?size=thumb&size=thumb`,
+    `${MEDIA_SCHEME}://preview/${ID}?size=`,
+    `${MEDIA_SCHEME}://preview/${ID}/?size=thumb`,
+    `${MEDIA_SCHEME}://user:pw@preview/${ID}?size=thumb`,
+    `${MEDIA_SCHEME}://preview/x/../${ID}?size=thumb`,
+    `${MEDIA_SCHEME}://preview/./${ID}?size=thumb`,
+    `${MEDIA_SCHEME}://preview/%2E%2E/${ID}?size=thumb`,
+    // Node keeps the case of a non-special scheme's host; see parsePreviewUrl.
+    `${MEDIA_SCHEME}://PREVIEW/${ID}?size=thumb`,
+    `${MEDIA_SCHEME}://preview/${ID}?size=thumb#frag`,
+    `${MEDIA_SCHEME}://preview/${ID}?size=thumb#`,
   ])('answers %s with a bare 404', async (requestUrl) => {
     expect(parsePreviewUrl(requestUrl)).toBeNull();
     const findSource = vi.fn(fakeDeps().findSource);
@@ -164,7 +184,7 @@ describe('media protocol', () => {
   it('a cached file removed before it is read answers 404', async () => {
     await rm(cachedPath);
     const seen = await expectBare404(await handleMediaRequest({ url: url(ID), method: 'GET' }, fakeDeps()));
-    expect(JSON.stringify(seen.headers)).not.toContain(cacheDir);
+    expect(plainText(seen)).not.toContain(cacheDir);
   });
 
   it('no response carries a path', async () => {
@@ -187,7 +207,7 @@ describe('media protocol', () => {
     const roots = [root, cacheDir, root.replaceAll('\\', '/'), cacheDir.replaceAll('\\', '/')];
     for (const [request, deps] of cases) {
       const seen = await inspect(await handleMediaRequest(request, deps));
-      const text = JSON.stringify(seen.headers) + Buffer.from(seen.body).toString('latin1');
+      const text = plainText(seen);
       for (const path of roots) expect(text).not.toContain(path);
     }
   });

@@ -24,9 +24,63 @@ describe('media types', () => {
   });
 
   it('the block list is the spec list', () => {
-    expect(BLOCKED_OPEN_EXTENSIONS).toHaveLength(42);
-    expect(new Set(BLOCKED_OPEN_EXTENSIONS).size).toBe(42);
-    for (const entry of BLOCKED_OPEN_EXTENSIONS) expect(entry).toMatch(/^[a-z0-9-]+$/);
+    // Literal list from the phase 3a design spec ("Open externally / show in folder").
+    expect(BLOCKED_OPEN_EXTENSIONS).toEqual([
+      'exe',
+      'com',
+      'bat',
+      'cmd',
+      'msi',
+      'scr',
+      'pif',
+      'lnk',
+      'ps1',
+      'vbs',
+      'vbe',
+      'js',
+      'jse',
+      'wsf',
+      'wsh',
+      'hta',
+      'jar',
+      'sh',
+      'app',
+      'command',
+      'desktop',
+      'html',
+      'htm',
+      'svg',
+      'url',
+      'reg',
+      'py',
+      'pyw',
+      'psm1',
+      'chm',
+      'jnlp',
+      'application',
+      'appref-ms',
+      'settingcontent-ms',
+      'library-ms',
+      'msc',
+      'cpl',
+      'msp',
+      'scf',
+      'inf',
+      'website',
+      'diagcab',
+    ]);
+  });
+
+  it.each([
+    ['a.txt.exe', false],
+    ['a.exe.txt', true],
+    ['.bat', false],
+    ['a.bat.', false],
+    ['a.BAT ', false],
+    ['README', false],
+  ])('isOpenable(%j) is %s', (name, expected) => {
+    expect(isOpenable(name)).toBe(expected);
+    expect(isOpenable(`inbox/${name}`)).toBe(expected);
   });
 
   it('isOpenable normalises case and trailing dots and spaces', () => {

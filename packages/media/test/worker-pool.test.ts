@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import sharp from 'sharp';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewJob } from '../src/messages.js';
 import { createWorkerPool, POOL_SIZE, type WorkerPool } from '../src/worker-pool.js';
 import { TEST_WORKER_URL } from './worker-url.js';
 
 const crashUrl = new URL('./fixtures/crash-worker.mjs', import.meta.url);
 const hangUrl = new URL('./fixtures/hang-worker.mjs', import.meta.url);
+const brokenUrl = new URL('./fixtures/broken-worker.mjs', import.meta.url);
 
 const pools: WorkerPool[] = [];
 const dirs: string[] = [];
@@ -81,6 +82,51 @@ describe('createWorkerPool', () => {
     expect(await running).toBe('none');
     expect(await queued).toBe('none');
     expect(await p.run(job('c'))).toBe('none');
+  });
+
+  it('serves queued jobs newest first', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    const order: string[] = [];
+    const runs = ['a', 'b', 'c', 'd'].map((name) => p.run(job(name)).then(() => order.push(name)));
+    await Promise.all(runs);
+    // 'a' starts at once; the others wait and the last requested runs first.
+    expect(order).toEqual(['a', 'd', 'c', 'b']);
+  });
+
+  it('ignores null and foreign messages from a worker', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    expect(await p.run(job('a-noise'))).toBe('none');
+    expect(await p.run(job('b'))).toBe('ok');
+  });
+
+  it('a worker error fails its job, logs one line without the path and the pool recovers', async () => {
+    const log = vi.fn<(line: string) => void>();
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000, log });
+    const secret = join(tmpdir(), 'secret-dir', 'a-throw');
+    expect(await p.run(job(secret))).toBe('none');
+    expect(log).toHaveBeenCalledTimes(1);
+    const [line] = log.mock.calls[0]!;
+    expect(line).not.toContain('\n');
+    expect(line).not.toContain('secret-dir');
+    expect(line).not.toContain(tmpdir());
+    expect(await p.run(job('b'))).toBe('ok');
+  });
+
+  it('a worker that fails to start fails its job and logs one line without the path', async () => {
+    const log = vi.fn<(line: string) => void>();
+    const p = pool({ workerUrl: brokenUrl, size: 1, timeoutMs: 5_000, log });
+    expect(await p.run(job('a'))).toBe('none');
+    expect(await p.run(job('b'))).toBe('none');
+    expect(log).toHaveBeenCalledTimes(2);
+    for (const [line] of log.mock.calls) {
+      expect(line).not.toContain('\n');
+      expect(line).not.toContain('broken-worker');
+      expect(line).not.toContain('fixtures');
+    }
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('rejects a pool size of %s at once', (size) => {
+    expect(() => createWorkerPool({ workerUrl: crashUrl, size, timeoutMs: 1_000 })).toThrow(RangeError);
   });
 
   it('POOL_SIZE is 2', () => expect(POOL_SIZE).toBe(2));
