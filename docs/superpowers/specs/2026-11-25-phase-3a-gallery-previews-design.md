@@ -14,7 +14,8 @@ Browse a large library without loading all originals; open a BLEND file external
 
 - **Previews.** For image files, a thumbnail (longest edge 256 px) and a detail preview (longest edge 1024 px), generated on request, cached persistently, never enlarged beyond the original.
 - **Media protocol.** The renderer gets previews through an internal protocol that serves nothing but cached previews of files of the open workspace.
-- **Asset gallery.** The asset list becomes a grid of tiles: cover image, name, type, status, workflow progress. Same filters and pager as today, with 60 tiles per page.
+- **Asset gallery.** The asset list gets two views the user switches between: a grid of tiles (cover image, name, type, status, workflow progress) and a table (small cover, name, type, status, progress, last change). Same filters as today.
+- **Endless scrolling.** Both views scroll through the whole result without a pager. Only the rows near the viewport exist in the DOM, and data is fetched in pages of 60 as the user approaches them (ReadMe §15.1: virtualized and paginated).
 - **Cover image.** By default the first image of the asset; the user can choose any image file of the asset as the cover and can go back to the automatic choice.
 - **Files as pictures.** On the asset screen and in the inbox, files show their thumbnail (or a tile with the format for files without a preview). Selecting a file opens a detail view with the 1024 px preview and the file's data.
 - **External applications.** "Open externally" opens a file with the application the operating system associates with it; "Show in folder" reveals it in the file manager.
@@ -29,7 +30,8 @@ Browse a large library without loading all originals; open a BLEND file external
 - Persistent jobs. Preview generation is on-demand cache filling, not a job (jobs arrive in phase 4); a lost request is simply repeated.
 - Settings UI for cache size or location; the limits are constants for now.
 - Storing image dimensions on the file row.
-- A table view next to the grid, drag & drop, multi-selection.
+- Drag & drop, multi-selection, sortable or configurable table columns.
+- Endless scrolling for the project list, the inbox and the file grids of an asset; they keep their current paging.
 
 ## Anti-goals
 
@@ -63,8 +65,9 @@ Browse a large library without loading all originals; open a BLEND file external
 
 **Bounding the gallery**
 
-1. **Pages of tiles with lazily loaded images — chosen.** The existing pager already bounds the DOM and the number of requests per screen; no new renderer dependency and no untestable scroll logic.
-2. Endless scrolling with a windowing library. Deferred: nicer to browse, but the renderer has no DOM test environment yet (backlog); revisit when it has.
+1. **Endless scrolling with windowing (`@tanstack/react-virtual`) over data fetched in pages — chosen.** The DOM holds only the visible rows plus a small overscan, whatever the library size; the headless library fits the existing Tailwind markup and serves grid and table alike. Because the renderer has no DOM test environment yet, everything that decides something — which pages a visible range needs, how many columns fit a width, which rows a range maps to — is written as pure functions with unit tests, and the scrolling itself is covered end to end.
+2. A pager with lazily loaded images. Rejected: bounded, but browsing a library page by page is not what a gallery is for.
+3. Hand-written windowing. Rejected: measuring, overscan and scroll restoration are solved problems.
 
 **Where the cover choice lives**
 
@@ -89,12 +92,16 @@ Browse a large library without loading all originals; open a BLEND file external
 
 **Renderer.**
 
-- *Assets screen:* a responsive grid of tiles (page size 60). A tile is one link to the asset: cover thumbnail in a fixed 1:1 frame (image contained, not cropped), below it name, type, status and progress. An asset without a cover shows its type name in the frame.
+- *Assets screen:* a view switch (grid / table) next to the filters; the choice is remembered on this device across restarts. Both views show the same filtered result, its total, and scroll endlessly.
+  - *Grid:* responsive columns of tiles. A tile is one link to the asset: cover thumbnail in a fixed 1:1 frame (image contained, not cropped), below it name, type, status and progress. An asset without a cover shows its type name in the frame.
+  - *Table:* one row per asset with a small cover, name, type, status, progress and last change; the header stays visible; a row is one link to the asset.
+  - *Loading:* the list knows the total from the first page and reserves the full scroll height. Pages of 60 are fetched when their rows come near the viewport, at most two requests at a time; rows not loaded yet show an empty placeholder of the final size, so nothing jumps. Loaded pages are kept while the filters stay the same and dropped when they change; a response for filters that are no longer current is ignored. A failed page shows a retry control in its place.
+  - Keyboard: tiles and rows are reachable with Tab and the arrow keys; moving focus scrolls it into view.
 - *Asset screen:* the file lists per role become thumbnail grids. A file tile shows the thumbnail or, for files without a preview, the upper-cased extension; the cover carries a "Cover" marker. Selecting a tile opens the file detail.
 - *File detail:* a modal dialog (focus trapped, closes with Escape, returns focus to the tile) with the 1024 px preview or the format tile, original name, role, size, import date, and the actions "Open externally", "Show in folder", "Use as cover" / "Use automatic cover" (images of an asset only) plus the existing role and detach controls.
 - *Inbox:* the same file tiles and the same detail dialog, without cover actions.
 - An image that fails to load falls back to the format tile; it never shows a broken-image icon.
-- *Navigation:* each list keeps its filters and page while the workspace is open; returning from a detail screen shows the list as it was left.
+- *Navigation:* each list keeps its filters and its position (scroll offset for the assets screen, page for the others) while the workspace is open; returning from a detail screen shows the list as it was left, with the asset that was opened in view.
 
 ## Testing
 
@@ -102,8 +109,10 @@ Browse a large library without loading all originals; open a BLEND file external
 - Cache: key changes with content hash and size, LRU eviction down to the target, cleanup tolerates files vanishing underneath it.
 - Core / persistence: effective cover (chosen, automatic, none; ordering ties), `setCover` validation, cover cleared on detach, on move to another asset and on move repair; migration `0003` on a phase 2 database.
 - Desktop: the protocol handler as a function — only `preview` host, only known complete files of the open workspace, every failure a bare `404`, no path in any response; block list for open externally; IPC contract tests for the new channels; no absolute path in forwarded errors.
+- Renderer logic as pure functions: pages needed for a visible range, columns for a width, row mapping in grid and table, stale-response rejection, placeholder versus loaded state.
+- End to end on the built app with a seeded workspace of 2 000 assets: scroll to the end in grid and in table view, the number of tile or row elements in the DOM stays bounded, only the pages scrolled through were requested, switching the view keeps the filters, opening an asset and going back restores the position, the view choice survives a restart.
 - End to end on the built app: import images and a `.blend`, browse the gallery, choose and reset a cover, detach the cover file, open the `.blend` externally, confirm the renderer requested only `assetforge-media://` image URLs.
 
 ## Left to the builder
 
-Internal structure of the worker pool and of the cache index (file-system times or an in-memory map), exact tile sizes and breakpoints, the ports through which `core` asks for a preview, how the worker entry is bundled by electron-vite, and where the list state is kept in the renderer.
+Internal structure of the worker pool and of the cache index (file-system times or an in-memory map), exact tile sizes, row heights, breakpoints and overscan, how the view choice is stored on the device, the ports through which `core` asks for a preview, how the worker entry is bundled by electron-vite, and where the list state is kept in the renderer.

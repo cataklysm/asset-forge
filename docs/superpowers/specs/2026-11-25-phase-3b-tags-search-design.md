@@ -87,7 +87,7 @@ Search a large library: with ten thousand assets, typing a word narrows the gall
 
 **Renderer.**
 
-- *Assets screen:* the name filter becomes the search field; next to the existing filters a tag filter (type to add, chips to remove), a file role select and a file kind select. All of it is part of the list state that survives navigation (3a).
+- *Assets screen:* the name filter becomes the search field; next to the existing filters a tag filter (type to add, chips to remove), a file role select and a file kind select. All of it is part of the list state that survives navigation (3a), and it applies to the grid and the table view alike; search results scroll endlessly like the unfiltered list.
 - *Asset screen:* a tag row under the fields — chips with a remove control, an input that adds on Enter and offers suggestions. AI-origin tags will render differently in phase 4; the component takes the origin already.
 - *File detail dialog:* the same tag row for the file.
 - Everything is reachable by keyboard; removing a chip keeps focus in the row.
