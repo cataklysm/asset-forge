@@ -6,6 +6,7 @@ import {
   markLoading,
   pagesToRequest,
   rejectPage,
+  retryIndex,
   retryPage,
   slotAt,
 } from '../src/renderer/src/paged-list.js';
@@ -112,5 +113,16 @@ describe('slotAt', () => {
     expect(slotAt(loaded, Number.NaN)).toEqual({ kind: 'placeholder' });
     const short = acceptPage(emptyPaged<number>('k'), 'k', 0, items(0, 5), 100);
     expect(slotAt(short, 7)).toEqual({ kind: 'placeholder' });
+  });
+});
+
+describe('retryIndex', () => {
+  it('is the first slot of the page when that slot is rendered', () => {
+    expect(retryIndex(2, 100)).toBe(120);
+    expect(retryIndex(0, 0)).toBe(0);
+  });
+
+  it('moves to the first visible slot when the page starts above the viewport', () => {
+    expect(retryIndex(1, 75)).toBe(75);
   });
 });

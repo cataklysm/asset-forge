@@ -98,3 +98,11 @@ export function slotAt<T>(state: PagedState<T>, index: number, pageSize: number 
   const item = entry.items[index - page * pageSize];
   return item === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item };
 }
+
+/**
+ * The slot of a failed page that carries its one retry control: the page's first slot, or the
+ * first visible slot when the page begins above the viewport (so the control stays visible).
+ */
+export function retryIndex(page: number, firstVisibleIndex: number, pageSize: number = PAGE_SIZE): number {
+  return Math.max(page * pageSize, firstVisibleIndex);
+}

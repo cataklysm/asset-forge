@@ -13,8 +13,13 @@ const PAGE_SIZE = 50;
 const ROLES = FileRoleSchema.options;
 
 /** The inbox: imported files that are not placed in an asset yet. */
-export function FilesScreen({ onBusyChange }: { onBusyChange?(busy: boolean): void }) {
-  const [offset, setOffset] = useState(0);
+interface Props {
+  offset: number;
+  onOffsetChange(offset: number): void;
+  onBusyChange?(busy: boolean): void;
+}
+
+export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<ImportResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +43,7 @@ export function FilesScreen({ onBusyChange }: { onBusyChange?(busy: boolean): vo
       if (sourcePaths.length === 0) return;
       setResults(await call('files:import', { sourcePaths }));
       if (offset === 0) list.reload();
-      else setOffset(0);
+      else onOffsetChange(0);
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -161,7 +166,7 @@ export function FilesScreen({ onBusyChange }: { onBusyChange?(busy: boolean): vo
             </tbody>
           </table>
           {data.total === 0 && <p className={MUTED}>No files yet.</p>}
-          <Pager offset={offset} limit={PAGE_SIZE} total={data.total} onChange={setOffset} />
+          <Pager offset={offset} limit={PAGE_SIZE} total={data.total} onChange={onOffsetChange} />
         </>
       )}
     </section>

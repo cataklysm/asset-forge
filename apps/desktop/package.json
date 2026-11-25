@@ -17,6 +17,7 @@
     "@assetforge/media": "workspace:*",
     "@assetforge/persistence": "workspace:*",
     "@assetforge/storage": "workspace:*",
+    "@tanstack/react-virtual": "^3.14.28",
     "better-sqlite3": "^13.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

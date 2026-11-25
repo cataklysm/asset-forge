@@ -7,8 +7,13 @@ import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
 
 const PAGE_SIZE = 50;
 
-export function ProjectsScreen({ onOpen }: { onOpen(id: string): void }) {
-  const [offset, setOffset] = useState(0);
+interface Props {
+  offset: number;
+  onOffsetChange(offset: number): void;
+  onOpen(id: string): void;
+}
+
+export function ProjectsScreen({ offset, onOffsetChange, onOpen }: Props) {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -84,7 +89,7 @@ export function ProjectsScreen({ onOpen }: { onOpen(id: string): void }) {
             </tbody>
           </table>
           {data.total === 0 && <p className={MUTED}>No projects yet.</p>}
-          <Pager offset={offset} limit={PAGE_SIZE} total={data.total} onChange={setOffset} />
+          <Pager offset={offset} limit={PAGE_SIZE} total={data.total} onChange={onOffsetChange} />
         </>
       )}
     </section>

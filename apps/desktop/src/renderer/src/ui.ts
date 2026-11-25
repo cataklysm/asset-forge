@@ -1,6 +1,6 @@
 // Shared class strings, so both screens look the same in light and dark mode.
 
-const FOCUS =
+export const FOCUS =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500';
 
 /** The one button style: every button in the application looks the same. */
