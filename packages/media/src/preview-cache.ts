@@ -29,7 +29,10 @@ export interface PreviewRequest {
 export interface PreviewService {
   /** Absolute path of the cached WebP, or null for "no preview". Never throws. */
   get(request: PreviewRequest): Promise<string | null>;
-  /** LRU cleanup of both directories; concurrent calls share one run. Never throws. */
+  /**
+   * Evicts least recently used entries from `thumbnails` and from `previews`, each directory
+   * separately against `limitBytes`; concurrent calls share one run. Never throws.
+   */
   cleanup(): Promise<void>;
   close(): Promise<void>;
 }
@@ -93,8 +96,12 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
 
   function cleanup(): Promise<void> {
     cleaning ??= (async () => {
-      // Both directories form one LRU set against the whole-cache limit.
-      await evictLeastRecentlyUsed(cacheDir, limitBytes, CACHE_TARGET_RATIO).catch(() => undefined);
+      // Each directory has its own budget (ReadMe §15.3).
+      for (const directory of Object.values(DIRECTORIES)) {
+        await evictLeastRecentlyUsed(join(cacheDir, directory), limitBytes, CACHE_TARGET_RATIO).catch(
+          () => undefined,
+        );
+      }
     })().finally(() => {
       cleaning = undefined;
     });
@@ -151,8 +158,8 @@ async function removeIfPresent(path: string): Promise<boolean> {
 }
 
 /**
- * Walks `dir` recursively as one LRU set (the service passes the cache root, so thumbnails
- * and previews share one budget). Deletes temporary files older than one
+ * Walks `dir` recursively (including its two-character shard directories) as one LRU set.
+ * Deletes temporary files older than one
  * hour, then, if the remaining entries exceed `limitBytes`, deletes the least recently used
  * (oldest mtime) until the total is at most `limitBytes * targetRatio`. Temporary files never
  * count towards the total. Files that vanish during the walk are skipped.

@@ -256,32 +256,33 @@ describe('preview cache', () => {
     expect(left).toBe(2);
   });
 
-  it('treats thumbnails and previews as one LRU set against the limit', async () => {
-    // Ten 100-byte entries, mtimes interleaved: even ages in thumbnails, odd ages in previews.
-    // Each directory holds 500 bytes (under the 600-byte limit), together 1000 bytes.
-    const paths: string[] = [];
-    for (let age = 0; age < 10; age++) {
-      const path = join(cacheDir, age % 2 === 0 ? 'thumbnails' : 'previews', 'aa', `${age}.webp`);
+  it('limits thumbnails and previews separately', async () => {
+    // previews: 1000 bytes, older than every thumbnail; thumbnails: 500 bytes, newest.
+    const previews = await fillShards(join(cacheDir, 'previews'));
+    const thumbs: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const path = join(cacheDir, 'thumbnails', 'aa', `${i}.webp`);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, Buffer.alloc(100));
-      await utimes(path, 1_600_000_000 + age, 1_600_000_000 + age);
-      paths.push(path);
+      await utimes(path, 1_700_000_000 + i, 1_700_000_000 + i);
+      thumbs.push(path);
     }
     const s = service(fakePool(), { limitBytes: 600 });
     await s.cleanup();
-    // Down to at most 540 bytes: the five oldest go, whichever directory they are in.
-    expect(await Promise.all(paths.map(exists))).toEqual([
+    // Only previews exceed the limit and shrink to at most 540 bytes; thumbnails stay whole.
+    expect(await Promise.all(previews.map(exists))).toEqual([
       false, false, false, false, false, true, true, true, true, true,
     ]);
+    expect((await Promise.all(thumbs.map(exists))).every(Boolean)).toBe(true);
   });
 
   it('runs cleanup after every `cleanupEvery` new entries', async () => {
     const pool = fakePool();
     const s = service(pool, { cleanupEvery: 3, limitBytes: 150 });
-    // A cleanup run starts by listing the cache root, synchronously within the triggering get.
+    // A cleanup run starts by listing `thumbnails`, synchronously within the triggering get.
     let cleanupRuns = 0;
     hooks.beforeReaddir = (path) => {
-      if (path === cacheDir) cleanupRuns++;
+      if (path === join(cacheDir, 'thumbnails')) cleanupRuns++;
     };
     const sourcePath = await source('a.png');
     const first = (await s.get({ sha256: A, sourcePath, size: 'thumb' })) as string;
