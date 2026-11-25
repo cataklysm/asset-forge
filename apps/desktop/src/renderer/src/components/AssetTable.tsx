@@ -5,8 +5,8 @@ import { useElementSize, useVirtualRows } from '../hooks/useVirtualRows';
 import { label } from '../labels';
 import { retryIndex, slotAt } from '../paged-list';
 import { formatProgress } from '../progress';
-import { BORDER, BUTTON, MUTED } from '../ui';
-import { ITEM_HOVER, type AssetViewProps } from './AssetGrid';
+import { BORDER, BUTTON, ITEM_HOVER, MUTED } from '../ui';
+import type { AssetViewProps } from './AssetGrid';
 import { CoverImage } from './CoverImage';
 
 const HEADER_HEIGHT = 32;
@@ -123,7 +123,9 @@ function TableRows({
                       className="h-10 w-10"
                     />
                   </span>
-                  <span className="truncate font-medium">{asset.name}</span>
+                  <span className="truncate font-medium" title={asset.name}>
+                    {asset.name}
+                  </span>
                   <span className="truncate">{typeName(asset.typeId)}</span>
                   <span className="truncate">{label(asset.status)}</span>
                   <span>{formatProgress(asset.workflowProgress)}</span>

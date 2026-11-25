@@ -27,13 +27,18 @@ function countLoading<T>(state: PagedState<T>): number {
   return n;
 }
 
-/** Pages from `wanted` that are neither loaded, loading nor failed, limited so loading ≤ maxInFlight. */
+/**
+ * Pages from `wanted` that are neither loaded, loading nor failed, limited so the requests in
+ * flight stay ≤ maxInFlight. `outstanding` counts every unsettled request, including those of an
+ * earlier key or pages a shrunk total dropped, which the state itself no longer shows.
+ */
 export function pagesToRequest<T>(
   state: PagedState<T>,
   wanted: readonly number[],
   maxInFlight: number = MAX_IN_FLIGHT,
+  outstanding: number = 0,
 ): number[] {
-  let free = maxInFlight - countLoading(state);
+  let free = maxInFlight - Math.max(countLoading(state), outstanding);
   const result: number[] = [];
   for (const page of wanted) {
     if (free <= 0) break;

@@ -5,7 +5,7 @@ import { useElementSize, useVirtualRows, type ViewPosition, type ViewRestore, ty
 import { label } from '../labels';
 import { retryIndex, slotAt, type PagedState } from '../paged-list';
 import { formatProgress } from '../progress';
-import { BUTTON, FOCUS, MUTED } from '../ui';
+import { BUTTON, FOCUS, ITEM_HOVER, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
 
 /** Props shared by the grid and the table view of the assets screen. */
@@ -28,8 +28,6 @@ const TILE_HEIGHT = TILE + 60;
 const ROW_HEIGHT = TILE_HEIGHT + GAP;
 // Room for the focus ring of the first row and column.
 const EDGE = 4;
-
-export const ITEM_HOVER = 'hover:bg-slate-100 dark:hover:bg-slate-800';
 
 export function AssetGrid(props: AssetViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);

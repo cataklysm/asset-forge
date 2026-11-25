@@ -140,7 +140,8 @@ export function useVirtualRows({
 
   const activeRow = Math.floor(activeIndex / columns);
   const activeRendered = items.some((item) => item.index === activeRow);
-  const tabbableIndex = activeRendered ? activeIndex : clampIndex(firstVisibleRow() * columns);
+  // After the total shrinks the active item may no longer exist; a tab stop must remain.
+  const tabbableIndex = activeRendered && activeIndex < total ? activeIndex : clampIndex(firstVisibleRow() * columns);
 
   function onItemKeyDown(index: number, event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;

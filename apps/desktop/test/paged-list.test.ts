@@ -17,6 +17,12 @@ const stateWithLoaded = (pages: number[]) =>
   pages.reduce((s, p) => acceptPage(s, 'k', p, items(p), 2000), emptyPaged<number>('k'));
 
 describe('pagesToRequest', () => {
+  it('counts outstanding requests the state does not show against the cap', () => {
+    expect(pagesToRequest(emptyPaged<number>('k'), [0, 1], 2, 2)).toEqual([]);
+    expect(pagesToRequest(emptyPaged<number>('k'), [0, 1], 2, 1)).toEqual([0]);
+    expect(pagesToRequest(stateWithLoading([3]), [4, 5], 2, 0)).toEqual([4]);
+  });
+
   it('respects the in-flight limit', () => {
     expect(pagesToRequest(stateWithLoading([3]), [3, 4, 5, 6])).toEqual([4]);
     expect(pagesToRequest(stateWithLoading([3, 4]), [5])).toEqual([]);

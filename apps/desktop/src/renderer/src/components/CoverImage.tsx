@@ -26,7 +26,8 @@ export function CoverImage({ fileId, size, fallback, className = '' }: Props) {
           loading="lazy"
           decoding="async"
           draggable={false}
-          className="h-full w-full object-contain"
+          // Never upscaled; larger images shrink to fit, uncropped.
+          className="max-h-full max-w-full object-contain"
           onError={() => setFailed(fileId)}
         />
       ) : (
