@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "96306b76-fe92-4a33-a101-e3d3435acd0a",
+  "id": "1e7ff264-eebc-40dd-913b-f65446991e34",
   "prevId": "41a01e73-6702-409d-aef3-87ca0e92e0b9",
   "tables": {
     "asset": {
@@ -734,6 +734,14 @@
           "columns": [
             "asset_id",
             "kind"
+          ],
+          "isUnique": false
+        },
+        "file_asset_id_status_idx": {
+          "name": "file_asset_id_status_idx",
+          "columns": [
+            "asset_id",
+            "status"
           ],
           "isUnique": false
         }

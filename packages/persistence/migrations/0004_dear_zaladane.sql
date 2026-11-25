@@ -39,6 +39,7 @@ CREATE TABLE `tag` (
 CREATE UNIQUE INDEX `tag_name_unique` ON `tag` (`name`);--> statement-breakpoint
 ALTER TABLE `file` ADD `kind` text DEFAULT 'other' NOT NULL;--> statement-breakpoint
 CREATE INDEX `file_asset_id_kind_idx` ON `file` (`asset_id`,`kind`);--> statement-breakpoint
+CREATE INDEX `file_asset_id_status_idx` ON `file` (`asset_id`,`status`);--> statement-breakpoint
 ALTER TABLE `workspace` ADD `derived_data_version` integer;
 --> statement-breakpoint
 CREATE VIRTUAL TABLE `asset_search` USING fts5(name, description, tags, file_names, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
