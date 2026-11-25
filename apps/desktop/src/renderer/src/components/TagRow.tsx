@@ -16,7 +16,7 @@ interface Props {
   inputRef?: Ref<HTMLInputElement>;
 }
 
-const INVALID_TAG = 'Tags need a letter or digit and at most 64 characters.';
+export const INVALID_TAG = 'Tags need a letter or digit and at most 64 characters.';
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
   if (typeof ref === 'function') ref(value);

@@ -279,7 +279,10 @@ it('the tag filter stops at 10 tags', async () => {
   await user.type(input, '!!!{Enter}');
   expect(onChange).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('button', { name: 'Remove !!!' })).toBeNull();
+  expect(screen.getByRole('alert').textContent).toBe(INVALID);
+  expect(input.value).toBe('!!!');
   await user.clear(input);
+  expect(screen.queryByRole('alert')).toBeNull();
 
   for (let i = 1; i < 10; i += 1) await user.type(input, `t${i}{Enter}`);
   expect(onChange).toHaveBeenLastCalledWith(['oak', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);

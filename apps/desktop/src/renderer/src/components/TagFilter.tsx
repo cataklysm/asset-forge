@@ -1,7 +1,9 @@
 import { normalizeTagName } from '@assetforge/contracts';
 import { useEffect, useRef, useState } from 'react';
+import { ALERT } from '../ui';
 import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
+import { INVALID_TAG } from './TagRow';
 
 interface Props {
   value: readonly string[];
@@ -14,6 +16,7 @@ const MAX_FILTER_TAGS = 10;
 /** A tag combobox that adds normalised tag names to a filter, with a removable chip per name. */
 export function TagFilter({ value, onChange, title }: Props) {
   const [text, setText] = useState('');
+  const [invalid, setInvalid] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   // After a chip is removed, focus goes to the input once it is enabled again.
   const focusInput = useRef(false);
@@ -26,35 +29,50 @@ export function TagFilter({ value, onChange, title }: Props) {
   }, [value]);
 
   function add(raw: string) {
+    if (raw.trim() === '') return;
     const name = normalizeTagName(raw);
-    if (name === null) return;
+    if (name === null) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
     setText('');
     if (!value.includes(name)) onChange([...value, name]);
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <TagCombobox
-        value={text}
-        onValueChange={setText}
-        onCommit={add}
-        placeholder="Tags"
-        label="Tags"
-        title={full ? `At most ${MAX_FILTER_TAGS} tags` : title}
-        inputRef={input}
-        disabled={full}
-      />
-      {value.map((name) => (
-        <TagChip
-          key={name}
-          tag={{ name, displayName: name }}
-          filter
-          onRemove={() => {
-            focusInput.current = true;
-            onChange(value.filter((other) => other !== name));
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <TagCombobox
+          value={text}
+          onValueChange={(next) => {
+            setText(next);
+            setInvalid(false);
           }}
+          onCommit={add}
+          placeholder="Tags"
+          label="Tags"
+          title={full ? `At most ${MAX_FILTER_TAGS} tags` : title}
+          inputRef={input}
+          disabled={full}
         />
-      ))}
+        {value.map((name) => (
+          <TagChip
+            key={name}
+            tag={{ name, displayName: name }}
+            filter
+            onRemove={() => {
+              focusInput.current = true;
+              onChange(value.filter((other) => other !== name));
+            }}
+          />
+        ))}
+      </div>
+      {invalid && (
+        <p role="alert" className={`mt-2 ${ALERT}`}>
+          {INVALID_TAG}
+        </p>
+      )}
     </div>
   );
 }
