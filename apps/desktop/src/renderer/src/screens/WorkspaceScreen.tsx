@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { formatDateTime } from '../format';
-import { ALERT, BORDER, BUTTON, BUTTON_SECONDARY, INPUT, MUTED } from '../ui';
+import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
 
 interface Props {
   onOpened(workspace: WorkspaceSummary): void;
@@ -134,9 +134,10 @@ export function WorkspaceScreen({ onOpened }: Props) {
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
-                    className={BUTTON_SECONDARY}
+                    className={BUTTON}
                     disabled={busy}
                     aria-label={`Remove workspace ${workspace.name}`}
+                    title="Remove this workspace from AssetForge; asks before anything is removed"
                     onClick={() => void remove(workspace)}
                   >
                     Remove
@@ -166,7 +167,7 @@ export function WorkspaceScreen({ onOpened }: Props) {
             <input
               autoFocus
               aria-label="Workspace name"
-              aria-describedby="create-location"
+              aria-describedby={parentPath === null ? undefined : 'create-location'}
               placeholder="Workspace name"
               maxLength={200}
               className={`flex-1 ${INPUT}`}
@@ -175,8 +176,9 @@ export function WorkspaceScreen({ onOpened }: Props) {
             />
             <button
               type="button"
-              className={BUTTON_SECONDARY}
+              className={BUTTON}
               disabled={busy}
+              title="A folder named after the workspace is created inside the chosen location"
               onClick={() => void chooseParent()}
             >
               {parentPath === null ? 'Choose location' : 'Change location'}
@@ -186,11 +188,16 @@ export function WorkspaceScreen({ onOpened }: Props) {
               Create
             </button>
           </div>
-          <p id="create-location" className={`text-sm break-all ${MUTED}`}>
-            {parentPath === null
-              ? 'Choose a location. A folder named after the workspace is created inside it.'
-              : `Will be created in: ${targetPath ?? parentPath}`}
-          </p>
+          {/* Only the path itself; explanations live in tooltips, not in the layout. */}
+          {parentPath !== null && (
+            <p
+              id="create-location"
+              title="Folder the workspace will be created in"
+              className={`text-sm break-all ${MUTED}`}
+            >
+              {targetPath ?? parentPath}
+            </p>
+          )}
         </form>
       </section>
 
@@ -198,7 +205,7 @@ export function WorkspaceScreen({ onOpened }: Props) {
         <h2 className="text-lg font-medium">Existing workspace</h2>
         <button
           type="button"
-          className={BUTTON_SECONDARY}
+          className={BUTTON}
           disabled={busy}
           onClick={() => void openExisting()}
         >

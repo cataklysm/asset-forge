@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { FileList, ImportResult, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { formatBytes, formatDateTime } from '../format';
-import { ALERT, BORDER, BUTTON, BUTTON_SECONDARY, MUTED } from '../ui';
+import { ALERT, BORDER, BUTTON, MUTED } from '../ui';
 
 interface Props {
   workspace: WorkspaceSummary;
@@ -71,7 +71,7 @@ export function FilesScreen({ workspace, onClosed }: Props) {
         {/* Closing mid-batch would fail the remaining files and leave a pending row. */}
         <button
           type="button"
-          className={BUTTON_SECONDARY}
+          className={BUTTON}
           disabled={importing}
           onClick={() => void closeWorkspace()}
         >
