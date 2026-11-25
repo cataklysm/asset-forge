@@ -6,6 +6,13 @@ export interface MainWindowOptions {
   /** Dev server URL (`ELECTRON_RENDERER_URL`) or `undefined` to load the built renderer. */
   devServerUrl: string | undefined;
   rendererHtmlPath: string;
+  /** Called when the initial load of the app page fails; the window cannot show anything useful. */
+  onLoadFailure(error: unknown): void;
+}
+
+/** The URL the main window loads; navigation is only allowed within it. */
+export function getAppUrl(opts: Pick<MainWindowOptions, 'devServerUrl' | 'rendererHtmlPath'>): string {
+  return opts.devServerUrl ?? pathToFileURL(opts.rendererHtmlPath).href;
 }
 
 export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
@@ -22,7 +29,7 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     },
   });
 
-  const appUrl = opts.devServerUrl ?? pathToFileURL(opts.rendererHtmlPath).href;
+  const appUrl = getAppUrl(opts);
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', (event, url) => {
@@ -31,13 +38,27 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
   contents.on('will-attach-webview', (event) => event.preventDefault());
   window.once('ready-to-show', () => window.show());
 
-  if (opts.devServerUrl) void window.loadURL(opts.devServerUrl);
-  else void window.loadFile(opts.rendererHtmlPath);
+  // Only the initial load is fatal; later failures (e.g. a dev-server restart) are left to the user.
+  let initialLoadDone = false;
+  contents.once('did-finish-load', () => {
+    initialLoadDone = true;
+  });
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    // -3 (ERR_ABORTED) is a superseded or cancelled navigation, not a failed load.
+    if (isMainFrame && !initialLoadDone && errorCode !== -3) {
+      opts.onLoadFailure(new Error(`Loading the app page failed: ${errorDescription} (${errorCode})`));
+    }
+  });
+
+  const loading = opts.devServerUrl
+    ? window.loadURL(opts.devServerUrl)
+    : window.loadFile(opts.rendererHtmlPath);
+  loading.catch(opts.onLoadFailure);
   return window;
 }
 
 /** Same origin for http(s); for the built `file:` renderer, the same document only. */
-function isAppUrl(target: string, appUrl: string): boolean {
+export function isAppUrl(target: string, appUrl: string): boolean {
   let next: URL;
   let app: URL;
   try {
