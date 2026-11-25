@@ -32,6 +32,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     'The folder cannot be reached. Check that the drive or network share is available.',
   unsupported_format_version: 'This workspace was created by a newer version of AssetForge.',
   workspace_mismatch: 'The local database does not belong to this workspace.',
+  workspace_duplicate:
+    'This folder is a copy of a workspace that still exists in its original location. Open the original, or remove it before opening the copy.',
   storage_access_denied: 'AssetForge has no permission to write to this folder.',
   storage_full: 'There is not enough free space in this folder.',
 };

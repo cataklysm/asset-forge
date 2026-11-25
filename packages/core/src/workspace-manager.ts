@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
@@ -12,6 +13,7 @@ import {
   NoWorkspaceOpenError,
   StorageUnreachableError,
   UnsupportedFormatVersionError,
+  WorkspaceDuplicateError,
   WorkspaceMismatchError,
   WorkspaceNotFoundError,
 } from './errors.js';
@@ -19,6 +21,18 @@ import { importFile, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
 import type { Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+
+/**
+ * Roots that differ only by a trailing separator, `.` segments or (on Windows) letter
+ * case name the same folder. Links or different drive mappings are not resolved here.
+ */
+function isSameRoot(a: string, b: string): boolean {
+  const normalize = (p: string) => {
+    const resolved = path.resolve(p);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(a) === normalize(b);
+}
 
 interface OpenWorkspace {
   summary: WorkspaceSummary;
@@ -65,6 +79,7 @@ export class WorkspaceManager {
       throw new StorageUnreachableError(`Storage is not reachable: ${input.rootPath}`);
     }
     const manifest = await this.readManifest(storage, input.rootPath);
+    await this.rejectCopy(manifest.id, input.rootPath);
 
     const database = await this.host.openDatabase(manifest.id);
     try {
@@ -146,6 +161,35 @@ export class WorkspaceManager {
       );
     }
     return parsed.data;
+  }
+
+  /**
+   * A workspace id is known under one root. Opening it under another root is a move when
+   * the old root no longer holds this workspace, and a copy when it still does; a copy
+   * would share the database of the original, so it is rejected before anything changes.
+   */
+  private async rejectCopy(id: string, rootPath: string): Promise<void> {
+    const known = await this.host.registry.get(id);
+    if (known === null || isSameRoot(known.rootPath, rootPath)) return;
+    if (await this.holdsWorkspace(known.rootPath, id)) {
+      throw new WorkspaceDuplicateError(
+        `This folder is a copy of the workspace at ${known.rootPath}, which still exists`,
+      );
+    }
+  }
+
+  /** True only if `rootPath` is reachable and has a valid manifest with this id. */
+  private async holdsWorkspace(rootPath: string, id: string): Promise<boolean> {
+    try {
+      const storage = this.host.createStorage(rootPath);
+      if (!(await storage.isReachable())) return false;
+      const text = await storage.readText(MANIFEST_PATH);
+      if (text === null) return false;
+      const parsed = WorkspaceManifestSchema.safeParse(JSON.parse(text));
+      return parsed.success && parsed.data.id === id;
+    } catch {
+      return false;
+    }
   }
 
   private async recoverImports(storage: Storage, database: WorkspaceDatabase): Promise<void> {

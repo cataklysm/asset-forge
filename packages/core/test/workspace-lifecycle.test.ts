@@ -8,11 +8,12 @@ import {
   NoWorkspaceOpenError,
   StorageUnreachableError,
   UnsupportedFormatVersionError,
+  WorkspaceDuplicateError,
   WorkspaceManager,
   WorkspaceMismatchError,
   WorkspaceNotFoundError,
 } from '../src/index.js';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, InMemoryStorage } from './fakes.js';
 
 const ROOT = '/ws/a';
 
@@ -109,21 +110,101 @@ describe('WorkspaceManager lifecycle', () => {
     expect(await host.registry.list()).toHaveLength(1);
   });
 
+  function copyStorage(storages: Map<string, InMemoryStorage>, from: string, to: string): InMemoryStorage {
+    const a = storages.get(from)!;
+    const b = new InMemoryStorage();
+    for (const [k, v] of a.files) b.files.set(k, Buffer.from(v));
+    for (const d of a.dirs) b.dirs.add(d);
+    storages.set(to, b);
+    return a;
+  }
+
   it('a moved workspace keeps its id and gets the new rootPath', async () => {
     const { manager, storages, host } = setup();
     const created = await manager.create({ name: 'Demo', rootPath: '/ws/a' });
     await manager.close();
-    const a = storages.get('/ws/a')!;
-    host.createStorage('/ws/b');
-    const b = storages.get('/ws/b')!;
-    for (const [k, v] of a.files) b.files.set(k, Buffer.from(v));
-    for (const d of a.dirs) b.dirs.add(d);
+    const a = copyStorage(storages, '/ws/a', '/ws/b');
+    a.files.clear();
+    a.dirs.clear();
 
     const opened = await manager.open({ rootPath: '/ws/b' });
     expect(opened.id).toBe(created.id);
     const entries = await host.registry.list();
     expect(entries).toHaveLength(1);
     expect(entries[0]!.rootPath).toBe('/ws/b');
+  });
+
+  describe('copied workspace', () => {
+    async function createAndCopy() {
+      const fake = setup();
+      const created = await fake.manager.create({ name: 'Demo', rootPath: '/ws/a' });
+      await fake.manager.close();
+      const original = copyStorage(fake.storages, '/ws/a', '/ws/b');
+      let databaseOpens = 0;
+      const openDatabase = fake.host.openDatabase.bind(fake.host);
+      fake.host.openDatabase = (id) => {
+        databaseOpens++;
+        return openDatabase(id);
+      };
+      return { ...fake, created, original, databaseOpens: () => databaseOpens };
+    }
+
+    it('rejects a copy while the original still exists, touching neither registry nor database', async () => {
+      const { manager, host, created, databaseOpens } = await createAndCopy();
+      const error = await manager.open({ rootPath: '/ws/b' }).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(WorkspaceDuplicateError);
+      expect((error as WorkspaceDuplicateError).code).toBe('workspace_duplicate');
+      expect(await host.registry.list()).toEqual([expect.objectContaining({ id: created.id, rootPath: '/ws/a' })]);
+      expect(manager.current()).toBeNull();
+      expect(databaseOpens()).toBe(0);
+    });
+
+    it('still opens the original', async () => {
+      const { manager, created } = await createAndCopy();
+      await expect(manager.open({ rootPath: '/ws/b' })).rejects.toBeInstanceOf(WorkspaceDuplicateError);
+      expect((await manager.open({ rootPath: '/ws/a' })).id).toBe(created.id);
+    });
+
+    it('opens the copy as moved when the original is unreachable, gone or no longer this workspace', async () => {
+      const cases: Array<[string, (original: InMemoryStorage) => void]> = [
+        ['unreachable', (s) => (s.reachable = false)],
+        ['manifest missing', (s) => s.files.delete(MANIFEST_PATH)],
+        ['manifest unreadable', (s) => s.failNext('readText', new Error('EIO'))],
+        ['manifest invalid', (s) => s.files.set(MANIFEST_PATH, Buffer.from('{not json'))],
+        [
+          'different id',
+          (s) => {
+            const m = JSON.parse(s.files.get(MANIFEST_PATH)!.toString('utf8'));
+            s.files.set(MANIFEST_PATH, Buffer.from(JSON.stringify({ ...m, id: crypto.randomUUID() })));
+          },
+        ],
+      ];
+      for (const [label, mutate] of cases) {
+        const { manager, host, created, original } = await createAndCopy();
+        mutate(original);
+        const opened = await manager.open({ rootPath: '/ws/b' }).catch((e: unknown) => e);
+        expect(opened, label).toMatchObject({ id: created.id, rootPath: '/ws/b' });
+        expect((await host.registry.list())[0]!.rootPath, label).toBe('/ws/b');
+        await manager.close();
+      }
+    });
+
+    it('treats a root that differs only by a trailing separator as the same root', async () => {
+      const { manager, storages } = setup();
+      const ws = await manager.create({ name: 'Demo', rootPath: '/ws/a' });
+      await manager.close();
+      storages.set('/ws/a/', storages.get('/ws/a')!);
+      expect((await manager.open({ rootPath: '/ws/a/' })).id).toBe(ws.id);
+    });
+
+    it.skipIf(process.platform !== 'win32')('treats roots that differ only by letter case as the same root on Windows', async () => {
+      const { manager, storages } = setup();
+      const ws = await manager.create({ name: 'Demo', rootPath: 'C:\\WS\\a' });
+      await manager.close();
+      storages.set('c:\\ws\\A', storages.get('C:\\WS\\a')!);
+      expect((await manager.open({ rootPath: 'c:\\ws\\A' })).id).toBe(ws.id);
+    });
   });
 
   it('a database with a different meta id causes WorkspaceMismatchError and is closed', async () => {

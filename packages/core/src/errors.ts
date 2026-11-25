@@ -21,6 +21,7 @@ export class StorageUnreachableError extends define('storage_unreachable') {}
 export class DirectoryNotEmptyError extends define('directory_not_empty') {}
 export class UnsupportedFormatVersionError extends define('unsupported_format_version') {}
 export class WorkspaceMismatchError extends define('workspace_mismatch') {}
+export class WorkspaceDuplicateError extends define('workspace_duplicate') {}
 export class InvalidManifestError extends define('invalid_manifest') {}
 export class NoWorkspaceOpenError extends define('no_workspace_open') {}
 export class PathEscapeError extends define('path_escape') {}

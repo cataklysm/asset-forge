@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -71,6 +71,25 @@ describe('phase 1 acceptance', () => {
       const listed = await manager.list();
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({ id: ws.id, rootPath: moved });
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it('rejects a copied workspace directory while the original still exists', async () => {
+    const ws = await createAndImport();
+    const copy = join(base, 'copy');
+    await cp(workspaceRoot, copy, { recursive: true });
+
+    const manager = createWorkspaceManager({ userDataPath });
+    try {
+      await expect(manager.open({ rootPath: copy })).rejects.toMatchObject({ code: 'workspace_duplicate' });
+      expect(manager.current()).toBeNull();
+      expect(await manager.list()).toMatchObject([{ id: ws.id, rootPath: workspaceRoot }]);
+
+      const original = await manager.open({ rootPath: workspaceRoot });
+      expect(original.id).toBe(ws.id);
+      expect((await manager.listFiles({ limit: 50, offset: 0 })).total).toBe(2);
     } finally {
       await manager.close();
     }
