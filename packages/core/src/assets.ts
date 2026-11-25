@@ -1,19 +1,20 @@
-import type { Asset, AssetList, AssetStatus } from '@assetforge/contracts';
+import type { Asset, AssetList, AssetStatus, AssetType } from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
 import type { AssetQuery } from './ports.js';
 import type { WorkspaceSession } from './session.js';
+import { startWorkflow } from './workflows.js';
 
-async function requireType(s: WorkspaceSession, typeId: string): Promise<void> {
-  if ((await s.database.assetTypes.get(typeId)) === null) {
-    throw new NotFoundError(`Asset type ${typeId} does not exist`);
-  }
+async function requireType(s: WorkspaceSession, typeId: string): Promise<AssetType> {
+  const type = await s.database.assetTypes.get(typeId);
+  if (type === null) throw new NotFoundError(`Asset type ${typeId} does not exist`);
+  return type;
 }
 
 export async function createAsset(
   s: WorkspaceSession,
   input: { name: string; typeId: string; description?: string },
 ): Promise<Asset> {
-  await requireType(s, input.typeId);
+  const type = await requireType(s, input.typeId);
   const now = s.now().toISOString();
   const asset: Asset = {
     id: s.newId(),
@@ -25,6 +26,7 @@ export async function createAsset(
     updatedAt: now,
   };
   await s.database.assets.insert(asset);
+  if (type.defaultWorkflowTemplateId !== null) await startWorkflow(s, asset.id);
   return asset;
 }
 

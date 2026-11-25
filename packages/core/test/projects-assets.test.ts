@@ -6,6 +6,7 @@ import {
   createAsset,
   createProject,
   getAsset,
+  getWorkflow,
   listAssetTypes,
   updateAsset,
   updateProject,
@@ -83,6 +84,17 @@ describe('assets', () => {
     const asset = await createAsset(session, { name: 'Hero', typeId: type!.id });
     expect(asset).toMatchObject({ name: 'Hero', typeId: type!.id, description: '', status: 'draft' });
     expect(asset.createdAt).toBe(asset.updatedAt);
+  });
+
+  it('createAsset starts the default workflow of the type; updateAsset leaves it alone', async () => {
+    const { session } = await openSession();
+    const types = await listAssetTypes(session);
+    const material = types.find((t) => t.key === 'material')!;
+    const asset = await createAsset(session, { name: 'Rust', typeId: material.id });
+    const workflow = await getWorkflow(session, asset.id);
+    expect(workflow).toMatchObject({ assetId: asset.id, templateId: material.defaultWorkflowTemplateId });
+    await updateAsset(session, asset.id, { name: 'Old rust', typeId: types[0]!.id, status: 'in_review' });
+    expect(await getWorkflow(session, asset.id)).toEqual(workflow);
   });
 
   it('updateAsset changes only the given fields and bumps updatedAt', async () => {
