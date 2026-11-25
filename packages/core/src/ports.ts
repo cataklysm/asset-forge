@@ -189,7 +189,14 @@ export interface AssetQuery extends Page {
   typeId?: string;
   status?: AssetStatus;
   projectId?: string;
-  nameContains?: string;
+  /** Free text; the repository matches word prefixes. Absent when the text has no words. */
+  query?: string;
+  /** Normalised, distinct tag names; each must be carried by the asset or by one of its complete files. */
+  tagNames?: string[];
+  /** Has at least one complete file with this role. */
+  fileRole?: FileRole;
+  /** Has at least one complete file of this kind. */
+  fileKind?: FileKind;
 }
 
 /** Effective cover of an asset: the chosen file, else the automatic one (see `automaticCover`), else null. */

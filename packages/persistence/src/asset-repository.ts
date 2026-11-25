@@ -4,7 +4,17 @@ import { and, asc, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { containsPattern } from './like.js';
 import { qualified } from './qualified.js';
-import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, workflowStepDefinition } from './schema.js';
+import {
+  asset,
+  assetTag,
+  assetWorkflow,
+  assetWorkflowStep,
+  file,
+  fileTag,
+  projectAsset,
+  tag,
+  workflowStepDefinition,
+} from './schema.js';
 
 const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   id: row.id,
@@ -24,6 +34,16 @@ const mandatoryStepsOfOuterAsset = sql`from ${assetWorkflowStep}
   join ${assetWorkflow} on ${qualified(assetWorkflow, assetWorkflow.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.assetWorkflowId)}
   join ${workflowStepDefinition} on ${qualified(workflowStepDefinition, workflowStepDefinition.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.stepDefinitionId)}
   where ${workflowAssetId} = ${outerAssetId} and ${qualified(workflowStepDefinition, workflowStepDefinition.mandatory)} = 1`;
+
+/** The outer asset has a complete file that satisfies `predicate` (written against the `file` table). */
+const hasCompleteFile = (predicate: SQL): SQL =>
+  sql`exists (select 1 from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${predicate})`;
+
+/** The outer asset carries the tag itself or through one of its complete files. */
+const carriesTag = (tagId: string): SQL =>
+  sql`(exists (select 1 from ${assetTag} where ${qualified(assetTag, assetTag.assetId)} = ${outerAssetId} and ${qualified(assetTag, assetTag.tagId)} = ${tagId})
+    or exists (select 1 from ${fileTag} join ${file} on ${qualified(file, file.id)} = ${qualified(fileTag, fileTag.fileId)}
+      where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${qualified(fileTag, fileTag.tagId)} = ${tagId}))`;
 
 /**
  * Automatic cover of each given asset in one statement: its complete, previewable file with the
@@ -87,13 +107,19 @@ export function createAssetRepository(db: BetterSQLite3Database): AssetRepositor
           sql`exists (select 1 from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId} and ${qualified(projectAsset, projectAsset.projectId)} = ${q.projectId})`,
         );
       }
-      if (q.nameContains !== undefined) {
-        conditions.push(sql`${asset.name} like ${containsPattern(q.nameContains)} escape '\\'`);
+      // Temporary bridge until the full-text index answers `query`: substring match on the name.
+      if (q.query !== undefined) {
+        conditions.push(sql`${asset.name} like ${containsPattern(q.query)} escape '\\'`);
       }
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
-      // One read transaction, so the page and the total describe the same snapshot.
+      if (q.fileRole !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.role)} = ${q.fileRole}`));
+      if (q.fileKind !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.kind)} = ${q.fileKind}`));
+      // One read transaction, so the tag ids, the page and the total describe the same snapshot.
       return db.transaction(
         (tx) => {
+          const names = q.tagNames ?? [];
+          const tagIds = names.length === 0 ? [] : tx.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
+          if (tagIds.length < names.length) return { items: [], total: 0 };
+          const where = and(...conditions, ...tagIds.map(({ id }) => carriesTag(id)));
           const rows = tx
             .select({
               id: asset.id,

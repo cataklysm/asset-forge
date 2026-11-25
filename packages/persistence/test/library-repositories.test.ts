@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { Asset, AssetType, Project, ProjectAssignment } from '@assetforge/contracts';
+import type { Asset, AssetType, FileKind, FileRole, Project, ProjectAssignment } from '@assetforge/contracts';
 import {
   BUILT_IN_ASSET_TYPES,
   InvalidOperationError,
@@ -109,12 +109,12 @@ describe('asset repository', () => {
   test('filters assets by type, status and name', async () => {
     const { prop, building } = await seed();
     const page = { limit: 10, offset: 0 };
-    await expect(names({ ...page, nameContains: 'GAS' })).resolves.toEqual(['Gas station', 'gas_pump']);
-    await expect(names({ ...page, nameContains: '_' })).resolves.toEqual(['gas_pump']);
-    await expect(names({ ...page, nameContains: '%' })).resolves.toEqual(['100% wool']);
+    await expect(names({ ...page, query: 'GAS' })).resolves.toEqual(['Gas station', 'gas_pump']);
+    await expect(names({ ...page, query: '_' })).resolves.toEqual(['gas_pump']);
+    await expect(names({ ...page, query: '%' })).resolves.toEqual(['100% wool']);
     await expect(names({ ...page, typeId: building })).resolves.toEqual(['Gas station', 'Motel']);
     await expect(names({ ...page, typeId: building, status: 'completed' })).resolves.toEqual(['Motel']);
-    await expect(names({ ...page, typeId: prop, nameContains: 'gas' })).resolves.toEqual(['gas_pump']);
+    await expect(names({ ...page, typeId: prop, query: 'gas' })).resolves.toEqual(['gas_pump']);
 
     const filtered = await db.assets.list({ limit: 1, offset: 0, typeId: building });
     expect(filtered.items).toHaveLength(1);
@@ -487,5 +487,100 @@ describe('asset relations', () => {
   test('rejects a relation of an asset to itself', async () => {
     await seed();
     await expect(db.relations.insert(relation(1, 1))).rejects.toThrow(/CHECK/i);
+  });
+});
+
+describe('asset repository filters', () => {
+  let nextId = 2000;
+  const newId = () => uuid(nextId++);
+
+  const setup = async () => {
+    await db.storages.ensurePrimary({ id: uuid(900), createdAt: TS });
+    await db.assetTypes.insertMissing(typeRows(100));
+    const typeId = uuid(100);
+    const names = async (q: Partial<Parameters<WorkspaceDatabase['assets']['list']>[0]>) =>
+      (await db.assets.list({ limit: 50, offset: 0, ...q })).items.map((a) => a.name);
+    const addFile = async (
+      assetId: string,
+      role: FileRole,
+      kind: FileKind,
+      status: 'complete' | 'pending' | 'failed' = 'complete',
+    ) => {
+      const id = newId();
+      const relativePath = `assets/${assetId}/${id}.bin`;
+      await db.files.insertPending({
+        id,
+        storageId: uuid(900),
+        originalName: `${id}.bin`,
+        relativePath,
+        mimeType: 'application/octet-stream',
+        importedAt: TS,
+        kind,
+      });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (status === 'failed') await db.files.markFailed(id, 'x');
+      await db.files.setPlacement(id, { relativePath, assetId, role });
+      return id;
+    };
+    const tagAsset = (assetId: string, name: string) =>
+      db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    const tagFile = (fileId: string, name: string) =>
+      db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
+    return { typeId, names, addFile, tagAsset, tagFile };
+  };
+
+  test('tag filter matches tags on the asset or on its complete files, from different owners', async () => {
+    const { typeId, names, addFile, tagAsset, tagFile } = await setup();
+    await db.assets.insert(asset(1, 'A', typeId));
+    await db.assets.insert(asset(2, 'B', typeId));
+    await db.assets.insert(asset(3, 'C', typeId));
+    await tagAsset(uuid(1), 'metal');
+    await tagFile(await addFile(uuid(1), 'reference', 'image'), 'rusty');
+    await tagAsset(uuid(2), 'metal');
+    await tagFile(await addFile(uuid(2), 'reference', 'image', 'failed'), 'rusty');
+    await tagFile(await addFile(uuid(3), 'reference', 'image'), 'metal');
+
+    await expect(names({ tagNames: ['metal', 'rusty'] })).resolves.toEqual(['A']);
+    await expect(names({ tagNames: ['metal'] })).resolves.toEqual(['A', 'B', 'C']);
+    await expect(names({ tagNames: ['rusty'] })).resolves.toEqual(['A']);
+    const page = await db.assets.list({ limit: 1, offset: 0, tagNames: ['metal'] });
+    expect(page.total).toBe(3);
+  });
+
+  test('an unknown tag yields an empty page', async () => {
+    const { typeId, tagAsset } = await setup();
+    await db.assets.insert(asset(1, 'A', typeId));
+    await tagAsset(uuid(1), 'metal');
+    await expect(db.assets.list({ limit: 10, offset: 0, tagNames: ['metal', 'nope'] })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
+  });
+
+  test('fileRole and fileKind each need one complete file and are independent', async () => {
+    const { typeId, names, addFile } = await setup();
+    await db.assets.insert(asset(1, 'A', typeId));
+    await db.assets.insert(asset(2, 'B', typeId));
+    await addFile(uuid(1), 'reference', 'image');
+    await addFile(uuid(1), 'working', 'model');
+    await addFile(uuid(2), 'reference', 'image', 'pending');
+    await addFile(uuid(2), 'working', 'model');
+
+    await expect(names({ fileRole: 'working', fileKind: 'image' })).resolves.toEqual(['A']);
+    await expect(names({ fileKind: 'image' })).resolves.toEqual(['A']);
+    await expect(names({ fileRole: 'working' })).resolves.toEqual(['A', 'B']);
+    await expect(names({ fileRole: 'final' })).resolves.toEqual([]);
+  });
+
+  test('filters combine with the query and the type', async () => {
+    const { typeId, names, addFile, tagAsset } = await setup();
+    await db.assets.insert(asset(1, 'Iron sword', typeId));
+    await db.assets.insert(asset(2, 'Iron shield', typeId));
+    await tagAsset(uuid(1), 'metal');
+    await tagAsset(uuid(2), 'metal');
+    await addFile(uuid(1), 'reference', 'image');
+    await expect(names({ query: 'iron', tagNames: ['metal'], fileKind: 'image', typeId })).resolves.toEqual([
+      'Iron sword',
+    ]);
   });
 });

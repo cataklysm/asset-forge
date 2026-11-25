@@ -93,12 +93,30 @@ describe('library IPC', () => {
     const created = await ok('assets:create', { name: ' Pump ', typeId });
     expect(created).toMatchObject({ name: 'Pump', typeId, status: 'draft' });
 
-    const listed = await ok('assets:list', { ...page, nameContains: 'pum' });
+    const listed = await ok('assets:list', { ...page, query: 'pum' });
     expect(ipcContract['assets:list'].response.safeParse(listed).success).toBe(true);
     expect(listed.items).toMatchObject([{ id: created.id, projectCount: 0, fileCount: 0 }]);
 
-    const percent = await ok('assets:list', { ...page, nameContains: '%' });
-    expect(percent).toEqual({ items: [], total: 0 });
+    // A query without words is dropped, so it does not narrow the list.
+    const symbols = await ok('assets:list', { ...page, query: '%' });
+    expect(symbols.total).toBe(1);
+  });
+
+  it('assets:list rejects more than 10 tag names', async () => {
+    await openWorkspace();
+    const tagNames = Array.from({ length: 11 }, (_, i) => `t${i}`);
+    expect(await call('assets:list', { ...page, tagNames })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+  });
+
+  it('assets:list rejects an unknown file kind', async () => {
+    await openWorkspace();
+    expect(await call('assets:list', { ...page, fileKind: 'spreadsheet' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
   });
 
   it('maps an unknown asset to not_found', async () => {

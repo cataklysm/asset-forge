@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ErrorCodeSchema } from './errors';
 import {
+  FileKindSchema,
   FileListSchema,
   FileRecordSchema,
   FileScopeSchema,
@@ -145,7 +146,10 @@ export const ipcContract = {
       typeId: IdSchema.optional(),
       status: AssetStatusSchema.optional(),
       projectId: IdSchema.optional(),
-      nameContains: z.string().max(200).optional(),
+      query: z.string().max(200).optional(),
+      tagNames: z.array(z.string().max(200)).max(10).optional(),
+      fileRole: FileRoleSchema.optional(),
+      fileKind: FileKindSchema.optional(),
     }),
     response: AssetListSchema,
   },

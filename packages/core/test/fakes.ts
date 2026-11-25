@@ -29,6 +29,7 @@ import type {
 import { automaticCover } from '../src/asset-cover.js';
 import { isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
+import { foldSearchWord, searchWords } from '../src/search.js';
 import {
   InvalidOperationError,
   NotFoundError,
@@ -664,6 +665,18 @@ class InMemoryProjects implements ProjectRepository {
   }
 }
 
+const startsWithToken = (tokens: string[], word: string) => tokens.some((t) => t.startsWith(word));
+
+/** All words of a text, without the 16-word cap of a search query. */
+const allWords = (text: string) => text.normalize('NFC').toLowerCase().match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
+
+/** 1 when every query word is a prefix of some name word, else 0 (the fake's two-bucket ranking). */
+const nameMatches = (a: Asset, words: string[]) => {
+  if (words.length === 0) return 0;
+  const tokens = allWords(a.name).map(foldSearchWord);
+  return words.every((w) => startsWithToken(tokens, w)) ? 1 : 0;
+};
+
 class InMemoryAssets implements AssetRepository {
   readonly rows = new Map<string, Asset>();
 
@@ -672,6 +685,7 @@ class InMemoryAssets implements AssetRepository {
     private readonly files: InMemoryFiles,
     private readonly workflows: InMemoryAssetWorkflows,
     private readonly covers: CoverChoices,
+    private readonly tags: InMemoryTags,
   ) {}
 
   private coverOf(assetId: string): AssetCover {
@@ -712,14 +726,46 @@ class InMemoryAssets implements AssetRepository {
     return next;
   }
 
+  private completeFiles(assetId: string): FileRecord[] {
+    return [...this.files.records.values()].filter((f) => f.assetId === assetId && f.status === 'complete');
+  }
+
+  /** Each tag must be on the asset or on one of its complete files; different tags may have different owners. */
+  private hasTags(assetId: string, names: string[]): boolean {
+    if (names.length === 0) return true;
+    const fileIds = new Set(this.completeFiles(assetId).map((f) => f.id));
+    return names.every(
+      (name) =>
+        this.tags.assetAssignments.some((a) => a.assetId === assetId && a.name === name) ||
+        this.tags.fileAssignments.some((a) => fileIds.has(a.fileId) && a.name === name),
+    );
+  }
+
+  /** Folded word tokens per searchable field: name, description, tags and complete file names. */
+  private searchFields(a: Asset): string[][] {
+    const files = this.completeFiles(a.id);
+    const fileIds = new Set(files.map((f) => f.id));
+    const texts = [
+      a.name,
+      a.description,
+      ...this.tags.assetAssignments.filter((t) => t.assetId === a.id).map((t) => t.name),
+      ...this.tags.fileAssignments.filter((t) => fileIds.has(t.fileId)).map((t) => t.name),
+      ...files.map((f) => f.originalName),
+    ];
+    return texts.map((t) => allWords(t).map(foldSearchWord));
+  }
+
   async list(q: AssetQuery): Promise<AssetList> {
-    const needle = q.nameContains?.toLowerCase();
+    const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
     const matching = [...this.rows.values()]
       .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
       .filter((a) => q.status === undefined || a.status === q.status)
       .filter((a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })))
-      .filter((a) => needle === undefined || a.name.toLowerCase().includes(needle))
-      .sort(byNameThenId);
+      .filter((a) => this.hasTags(a.id, q.tagNames ?? []))
+      .filter((a) => q.fileRole === undefined || this.completeFiles(a.id).some((f) => f.role === q.fileRole))
+      .filter((a) => q.fileKind === undefined || this.completeFiles(a.id).some((f) => f.kind === q.fileKind))
+      .filter((a) => words.every((w) => this.searchFields(a).some((tokens) => startsWithToken(tokens, w))))
+      .sort((a, b) => nameMatches(b, words) - nameMatches(a, words) || byNameThenId(a, b));
     const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({
       ...a,
       projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
@@ -830,7 +876,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projects = new InMemoryProjects(this.links);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers);
+  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;

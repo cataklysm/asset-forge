@@ -28,7 +28,7 @@ describe('filterKey', () => {
     const split = { ...NO_FILTERS, typeId: 'a', status: 'b' };
     expect(filterKey(joined)).not.toBe(filterKey(split));
     expect(filterKey({ ...NO_FILTERS, typeId: 'a","b' })).not.toBe(filterKey(split));
-    expect(filterKey({ ...NO_FILTERS, nameContains: 'x' })).not.toBe(filterKey({ ...NO_FILTERS, projectId: 'x' }));
+    expect(filterKey({ ...NO_FILTERS, query: 'x' })).not.toBe(filterKey({ ...NO_FILTERS, projectId: 'x' }));
   });
 });
 
