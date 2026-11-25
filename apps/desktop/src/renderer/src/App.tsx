@@ -34,5 +34,5 @@ export function App() {
   if (current === undefined) return <p className="p-6 text-slate-600 dark:text-slate-400">Loading…</p>;
   if (current === null) return <WorkspaceScreen onOpened={setCurrent} />;
   // Keyed by workspace, so no list, scroll or loader state carries over to another workspace.
-  return <WorkspaceShell key={current.id} workspace={current}onClosed={() => setCurrent(null)} />;
+  return <WorkspaceShell key={current.id} workspace={current} onClosed={() => setCurrent(null)} />;
 }

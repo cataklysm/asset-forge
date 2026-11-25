@@ -25,7 +25,8 @@ Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately n
 - The asset list computes progress with two correlated subqueries per row.
 - Nothing guards against editing a built-in workflow template definition without raising its version; such an edit never reaches existing workspaces.
 - Workflow use cases assert that the workflow they just wrote can be read back; a failure there surfaces as `internal_error`.
-- Preview requests are not cancelled when a tile scrolls away; the worker queue is only served newest first.
+- Preview requests are not cancelled when a tile scrolls away; the worker queue is only served newest first. A tile that is revisited while its job is still queued keeps its old place at the bottom of that queue and is served after everything requested in between.
+- When the preview worker module cannot load, every queued job starts a fresh worker and logs its own failure line; one scroll can print hundreds of identical lines.
 - The session failure memory of the preview service also remembers worker timeouts and crashes, and it is unbounded.
 - No index on `asset.cover_file_id`.
 - `setCover` is not a guarded UPDATE and `getAssetDetail` reads in two steps; both are safe only under serialised writes.
