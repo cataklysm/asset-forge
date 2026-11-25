@@ -202,6 +202,64 @@ describe('file-system error mapping', () => {
     await expect(storage.writeStream('inbox/b.txt', Readable.from(broken()))).rejects.toBe(cause);
     expect(await storage.exists('inbox/b.txt')).toBe(false);
   });
+
+  describe('destination failing mid-stream', () => {
+    let proto: fs.FileHandle;
+    beforeEach(async () => {
+      const probe = await fs.open(path.join(tmp, 'probe'), 'w');
+      proto = Object.getPrototypeOf(probe) as fs.FileHandle;
+      await probe.close();
+    });
+
+    // A plain Readable emits 'error' when the pipeline destroys it because of a destination failure.
+    const pushing = (text: string) =>
+      new Readable({
+        read() {
+          this.push(Buffer.from(text));
+          this.push(null);
+        },
+      });
+
+    const failDestination = (code: string) => {
+      const reject = () => Promise.reject(Object.assign(new Error('x'), { code }));
+      vi.spyOn(proto, 'write').mockImplementation(reject);
+      vi.spyOn(proto, 'writev').mockImplementation(reject);
+    };
+
+    it('maps ENOSPC raised by the destination mid-stream to StorageFullError', async () => {
+      failDestination('ENOSPC');
+      const error = await storage
+        .writeStream('inbox/a.txt', pushing('hello'))
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(StorageFullError);
+      expect((error as Error).message).not.toContain(tmp);
+      vi.restoreAllMocks();
+      expect(await storage.exists('inbox/a.txt')).toBe(false);
+    });
+
+    it('maps EACCES raised by the destination mid-stream to StorageAccessDeniedError', async () => {
+      failDestination('EACCES');
+      const error = await storage
+        .writeStream('inbox/a.txt', pushing('hello'))
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(StorageAccessDeniedError);
+    });
+
+    it("still rejects with the source's own error when the source fails", async () => {
+      const cause = new Error('source broke');
+      const source = new Readable({ read() {} });
+      const result = storage.writeStream('inbox/a.txt', source);
+      source.destroy(cause);
+      await expect(result).rejects.toBe(cause);
+    });
+
+    it('destroys the source when the target cannot be opened', async () => {
+      await storage.writeText('inbox/a.txt', 'original');
+      const source = new Readable({ read() {} });
+      await expect(storage.writeStream('inbox/a.txt', source)).rejects.toThrow();
+      expect(source.destroyed).toBe(true);
+    });
+  });
 });
 
 describe('path escape', () => {

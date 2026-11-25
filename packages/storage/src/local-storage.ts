@@ -143,18 +143,28 @@ export class LocalFileSystemStorage implements Storage {
 
   writeStream(relPath: string, source: Readable): Promise<{ sizeBytes: number; sha256: string }> {
     // A failing source is the source's problem, not the workspace storage's: pass it through.
+    // A destination failure makes the pipeline destroy the source with that same error, so the
+    // destination's error is recorded separately and never counts as the source's.
     let sourceError: unknown;
+    let destinationError: unknown;
     source.once('error', (err) => {
       sourceError = err;
     });
     return this.guarded(
       relPath,
       async () => {
-        const abs = await this.resolve(relPath);
-        await fs.mkdir(path.dirname(abs), { recursive: true });
-        // 'wx' fails if the target exists, so an existing file is never touched
-        // (and never removed by the cleanup below).
-        const handle = await fs.open(abs, 'wx');
+        let handle: fs.FileHandle;
+        let abs: string;
+        try {
+          abs = await this.resolve(relPath);
+          await fs.mkdir(path.dirname(abs), { recursive: true });
+          // 'wx' fails if the target exists, so an existing file is never touched
+          // (and never removed by the cleanup below).
+          handle = await fs.open(abs, 'wx');
+        } catch (err) {
+          source.destroy();
+          throw err;
+        }
         const hash = createHash('sha256');
         let sizeBytes = 0;
         const hasher = new Transform({
@@ -168,7 +178,13 @@ export class LocalFileSystemStorage implements Storage {
           // `flush` fsyncs before the handle closes. The caller verifies, moves and marks
           // the file complete right after this resolves; without the flush a power loss
           // could leave a `complete` row pointing at a truncated or zeroed file.
-          await pipeline(source, hasher, handle.createWriteStream({ flush: true }));
+          const out = handle.createWriteStream({ flush: true });
+          out.once('error', (err) => {
+            // The pipeline also destroys `out` with the source's error; only an error that
+            // arrives before any source error is the destination's own.
+            if (sourceError === undefined) destinationError = err;
+          });
+          await pipeline(source, hasher, out);
         } catch (err) {
           await handle.close().catch(() => undefined);
           await fs.rm(abs, { force: true }).catch(() => undefined);
@@ -176,7 +192,7 @@ export class LocalFileSystemStorage implements Storage {
         }
         return { sizeBytes, sha256: hash.digest('hex') };
       },
-      (err) => err === sourceError,
+      (err) => err === sourceError && err !== destinationError,
     );
   }
 
