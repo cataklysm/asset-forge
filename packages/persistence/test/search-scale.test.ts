@@ -30,9 +30,27 @@ const EXTENSIONS = ['png', 'jpg', 'blend', 'glb', 'pdf', 'txt', 'zip'];
 const STATUSES: readonly AssetStatus[] = ['draft', 'in_progress', 'in_review', 'completed', 'archived'];
 
 /** Tables the search must reach only through an index; `m` is the alias of `asset_search_map`. */
-const INDEXED_TABLES = ['asset', 'm', 'asset_search_map', 'tag', 'asset_tag', 'file', 'file_tag', 'project_asset', 'asset_workflow'];
-/** `EXISTS` marks a semi-join SQLite flattened from an `exists (...)` subquery. */
-const INDEX_ACCESS = /^SEARCH (\S+)(?: EXISTS)? USING (COVERING INDEX \S+|INDEX \S+|INTEGER PRIMARY KEY|PRIMARY KEY) \(/;
+/**
+ * For each table the search may touch, the columns that key it on the row the outer loop holds:
+ * the FTS rowid, the asset id, or the file id. A lookup must have an equality on one of them.
+ */
+const KEY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  m: ['rowid'],
+  asset_search_map: ['rowid'],
+  asset: ['id'],
+  tag: ['id'],
+  asset_tag: ['asset_id'],
+  file: ['asset_id', 'id'],
+  file_tag: ['file_id'],
+  project_asset: ['asset_id'],
+  asset_workflow: ['asset_id'],
+};
+const INDEXED_TABLES = Object.keys(KEY_COLUMNS);
+/** `EXISTS` marks a semi-join SQLite flattened from an `exists (...)` subquery; group 2 is the constraint. */
+const INDEX_ACCESS =
+  /^SEARCH (\S+)(?: EXISTS)? USING (?:COVERING INDEX \S+|INDEX \S+|INTEGER PRIMARY KEY|PRIMARY KEY) \((.*)\)$/;
+/** The FTS table, driven by its MATCH constraint (`M` in the index string). */
+const FTS_MATCH_SCAN = /^SCAN asset_search VIRTUAL TABLE INDEX \d+:M/;
 
 interface SeededFile {
   role: FileRole;
@@ -176,10 +194,14 @@ const plan = (statement: SQL): string[] =>
  */
 function violations(lines: readonly string[]): string[] {
   return lines.filter((line) => {
-    if (line.startsWith('SCAN ')) return !line.startsWith('SCAN asset_search VIRTUAL TABLE');
-    const [, table] = /^(?:SEARCH|SCAN) (\S+)/.exec(line) ?? [];
+    if (line.startsWith('SCAN ')) return !FTS_MATCH_SCAN.test(line);
+    const [, table] = /^SEARCH (\S+)/.exec(line) ?? [];
     if (table === undefined || !INDEXED_TABLES.includes(table)) return false;
-    return !INDEX_ACCESS.test(line);
+    const access = INDEX_ACCESS.exec(line);
+    if (access === null) return true;
+    // The lookup must be keyed on the row the outer loop already holds, not on a selective-looking filter.
+    const constraint = access[2]!.split(' AND ');
+    return !KEY_COLUMNS[table]!.some((column) => constraint.includes(`${column}=?`));
   });
 }
 
@@ -212,7 +234,7 @@ beforeAll(async () => {
   const rebuildStart = performance.now();
   await db.ensureDerivedData();
   console.info(`ensureDerivedData rebuild over ${ASSET_COUNT} assets: ${Math.round(performance.now() - rebuildStart)} ms`);
-  sqlite.prepare('analyze').run();
+  // No ANALYZE: production never collects statistics, so the plans are asserted without them.
 }, 120_000);
 
 afterAll(async () => {
@@ -222,9 +244,21 @@ afterAll(async () => {
 });
 
 describe('search scale', () => {
-  test('the plan checker rejects a table scan', () => {
+  test('the plan checker rejects a table scan and lookups not keyed on the owner', () => {
     expect(violations(plan(sql`select id from asset where lower(name) = 'x'`))).toEqual(['SCAN asset']);
     expect(violations(plan(sql`select count(*) from file where original_name = 'x'`))).not.toEqual([]);
+    const notKeyed = [
+      sql`select 1 from file where status = 'complete'`,
+      sql`select 1 from file_tag where tag_id = 'x'`,
+      sql`select 1 from asset_tag where tag_id = 'x'`,
+      sql`select 1 from project_asset where project_id = 'x'`,
+    ];
+    for (const statement of notKeyed) {
+      const lines = plan(statement);
+      expect(lines.some((l) => l.startsWith('SEARCH '))).toBe(true);
+      expect(violations(lines)).toEqual(lines.filter((l) => l.startsWith('SEARCH ')));
+    }
+    expect(violations(['SCAN asset_search VIRTUAL TABLE INDEX 0:'])).toEqual(['SCAN asset_search VIRTUAL TABLE INDEX 0:']);
   });
 
   test('search over 10 000 assets is driven by the match and uses indexes only', async () => {
@@ -263,7 +297,7 @@ describe('search scale', () => {
       for (const [name, statement] of Object.entries(statements)) {
         const lines = plan(statement);
         console.info(`plan of ${name} for ${label}:\n  ${lines.join('\n  ')}`);
-        expect(firstAccess(lines)).toMatch(/^SCAN asset_search VIRTUAL TABLE/);
+        expect(firstAccess(lines)).toMatch(FTS_MATCH_SCAN);
         expect(violations(lines)).toEqual([]);
       }
 

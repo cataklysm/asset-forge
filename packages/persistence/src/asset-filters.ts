@@ -11,10 +11,14 @@ export const outerAssetId = qualified(asset, asset.id);
 const hasCompleteFile = (predicate: SQL): SQL =>
   sql`exists (select 1 from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${predicate})`;
 
-/** The outer asset carries the tag itself or through one of its complete files. */
+/**
+ * The outer asset carries the tag itself or through one of its complete files. `cross join` keeps
+ * `file` (keyed on the asset) as the outer loop; otherwise SQLite drives from `file_tag` by tag id
+ * and reads every file carrying the tag for each candidate asset.
+ */
 const carriesTag = (tagId: string): SQL =>
   sql`(exists (select 1 from ${assetTag} where ${qualified(assetTag, assetTag.assetId)} = ${outerAssetId} and ${qualified(assetTag, assetTag.tagId)} = ${tagId})
-    or exists (select 1 from ${fileTag} join ${file} on ${qualified(file, file.id)} = ${qualified(fileTag, fileTag.fileId)}
+    or exists (select 1 from ${file} cross join ${fileTag} on ${qualified(fileTag, fileTag.fileId)} = ${qualified(file, file.id)}
       where ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${qualified(fileTag, fileTag.tagId)} = ${tagId}))`;
 
 /**
