@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, nativeTheme } from 'electron';
 import { getAppUrl, isAppUrl, type AppUrlOptions } from './app-url.js';
 import { createLoadFailureHandler } from './load-failure.js';
 
@@ -13,6 +13,8 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     width: 1280,
     height: 800,
     show: false,
+    // Matches the renderer's page background, so the window does not flash white in dark mode.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#020617' : '#ffffff',
     webPreferences: {
       preload: opts.preloadPath,
       contextIsolation: true,

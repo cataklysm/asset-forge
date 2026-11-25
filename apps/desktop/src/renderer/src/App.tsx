@@ -26,12 +26,12 @@ export function App() {
 
   if (loadError !== null) {
     return (
-      <p role="alert" className="p-6 text-red-700">
+      <p role="alert" className="p-6 text-red-700 dark:text-red-300">
         {loadError}
       </p>
     );
   }
-  if (current === undefined) return <p className="p-6 text-slate-600">Loading…</p>;
+  if (current === undefined) return <p className="p-6 text-slate-600 dark:text-slate-400">Loading…</p>;
   if (current === null) return <WorkspaceScreen onOpened={setCurrent} />;
   return <FilesScreen workspace={current} onClosed={() => setCurrent(null)} />;
 }

@@ -1,1 +1,10 @@
 @import 'tailwindcss';
+
+/* Light or dark follows the operating system (`prefers-color-scheme`); there is no in-app switch. */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  @apply bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+}

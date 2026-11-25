@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { FileList, ImportResult, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { formatBytes, formatDateTime } from '../format';
+import { ALERT, BORDER, BUTTON, BUTTON_SECONDARY, MUTED } from '../ui';
 
 interface Props {
   workspace: WorkspaceSummary;
@@ -9,8 +10,6 @@ interface Props {
 }
 
 const PAGE_SIZE = 50;
-const BUTTON =
-  'rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50';
 
 export function FilesScreen({ workspace, onClosed }: Props) {
   const [offset, setOffset] = useState(0);
@@ -63,16 +62,16 @@ export function FilesScreen({ workspace, onClosed }: Props) {
   const total = list?.total ?? 0;
 
   return (
-    <main className="mx-auto max-w-5xl space-y-4 p-6 text-slate-900">
+    <main className="mx-auto max-w-5xl space-y-4 p-6">
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{workspace.name}</h1>
-          <p className="truncate text-sm text-slate-600">{workspace.rootPath}</p>
+          <p className={`truncate text-sm ${MUTED}`}>{workspace.rootPath}</p>
         </div>
         {/* Closing mid-batch would fail the remaining files and leave a pending row. */}
         <button
           type="button"
-          className={BUTTON}
+          className={BUTTON_SECONDARY}
           disabled={importing}
           onClick={() => void closeWorkspace()}
         >
@@ -89,11 +88,11 @@ export function FilesScreen({ workspace, onClosed }: Props) {
         >
           Import files
         </button>
-        {importing && <span className="text-sm text-slate-600">Importing…</span>}
+        {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
       </div>
 
       {error !== null && (
-        <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-red-800">
+        <p role="alert" className={ALERT}>
           {error}
         </p>
       )}
@@ -104,7 +103,7 @@ export function FilesScreen({ workspace, onClosed }: Props) {
             {imported} imported, {failed.length} failed, {duplicates} duplicates
           </p>
           {failed.length > 0 && (
-            <ul className="list-disc pl-5 text-sm text-red-800">
+            <ul className="list-disc pl-5 text-sm text-red-800 dark:text-red-300">
               {failed.map((result) => (
                 <li key={result.sourcePath}>
                   {result.sourcePath}: {result.error}
@@ -116,11 +115,11 @@ export function FilesScreen({ workspace, onClosed }: Props) {
       )}
 
       {list === null ? (
-        <p className="text-slate-600">Loading…</p>
+        <p className={MUTED}>Loading…</p>
       ) : (
         <>
           <table className="w-full text-left text-sm">
-            <thead className="border-b text-slate-600">
+            <thead className={`border-b ${BORDER} ${MUTED}`}>
               <tr>
                 <th className="py-1 pr-3">Name</th>
                 <th className="py-1 pr-3">Type</th>
@@ -131,7 +130,7 @@ export function FilesScreen({ workspace, onClosed }: Props) {
             </thead>
             <tbody>
               {list.items.map((file) => (
-                <tr key={file.id} className="border-b">
+                <tr key={file.id} className={`border-b ${BORDER}`}>
                   <td className="py-1 pr-3">{file.originalName}</td>
                   <td className="py-1 pr-3">{file.mimeType}</td>
                   <td className="py-1 pr-3">{formatBytes(file.sizeBytes)}</td>
@@ -141,7 +140,7 @@ export function FilesScreen({ workspace, onClosed }: Props) {
               ))}
             </tbody>
           </table>
-          {total === 0 && <p className="text-slate-600">No files yet.</p>}
+          {total === 0 && <p className={MUTED}>No files yet.</p>}
           <nav className="flex items-center gap-3 text-sm" aria-label="Pagination">
             <button
               type="button"
