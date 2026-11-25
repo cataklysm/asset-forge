@@ -220,10 +220,38 @@ describe('workflows', () => {
       projectCount: 0,
       fileCount: 0,
       coverFileId: null,
+      tags: [],
+      coverTags: [],
     };
     expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: null }).success).toBe(true);
     expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: { done: 2, total: 5 } }).success).toBe(true);
     expect(AssetSummarySchema.safeParse(summary).success).toBe(false);
+  });
+
+  it('an asset summary requires tags and coverTags and accepts matchedTags', () => {
+    const base = {
+      id: uuid,
+      name: 'A',
+      typeId: uuid,
+      description: '',
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      projectCount: 0,
+      fileCount: 0,
+      workflowProgress: null,
+      coverFileId: null,
+    };
+    expect(AssetSummarySchema.safeParse(base).success).toBe(false);
+    expect(AssetSummarySchema.safeParse({ ...base, tags: [], coverTags: [] }).success).toBe(true);
+    expect(
+      AssetSummarySchema.safeParse({
+        ...base,
+        tags: [],
+        coverTags: [],
+        matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }],
+      }).success,
+    ).toBe(true);
   });
 });
 
@@ -237,7 +265,7 @@ describe('asset cover', () => {
     createdAt: now,
     updatedAt: now,
   };
-  const summary = { ...asset, projectCount: 0, fileCount: 1, workflowProgress: null };
+  const summary = { ...asset, projectCount: 0, fileCount: 1, workflowProgress: null, tags: [], coverTags: [] };
 
   it('AssetSummarySchema requires coverFileId as a uuid or null', () => {
     expect(AssetSummarySchema.safeParse({ ...summary, coverFileId: uuid }).success).toBe(true);

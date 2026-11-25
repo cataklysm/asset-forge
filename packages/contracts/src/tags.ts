@@ -13,6 +13,15 @@ export const TagAssignmentSchema = z.object({
 });
 export type TagAssignment = z.infer<typeof TagAssignmentSchema>;
 
+/** Where a requested filter tag was found on a list item: on the asset itself, on one of its complete files, or both. */
+export const MatchedTagSchema = z.object({
+  name: z.string(),
+  displayName: z.string(),
+  onAsset: z.boolean(),
+  onFiles: z.boolean(),
+});
+export type MatchedTag = z.infer<typeof MatchedTagSchema>;
+
 export const TagSuggestionSchema = z.object({ name: z.string(), displayName: z.string() });
 export type TagSuggestion = z.infer<typeof TagSuggestionSchema>;
 

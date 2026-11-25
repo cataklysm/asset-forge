@@ -3,9 +3,10 @@ import { PREVIEWABLE_MIME_TYPES, searchWords, type AssetRepository } from '@asse
 import { and, asc, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetFilter, outerAssetId } from './asset-filters.js';
+import { assetTagsOf, matchedTagsOf } from './list-tags.js';
 import { qualified } from './qualified.js';
-import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, workflowStepDefinition } from './schema.js';
-import { reindexAsset, searchAssets } from './search-index.js';
+import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, tag, workflowStepDefinition } from './schema.js';
+import { reindexAsset, searchAssets, type Tx } from './search-index.js';
 
 const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   id: row.id,
@@ -50,6 +51,8 @@ function automaticCovers(tx: Pick<BetterSQLite3Database, 'select'>, assetIds: re
   return new Map(rows.flatMap((r) => (r.assetId === null ? [] : [[r.assetId, r.id] as const])));
 }
 
+type BareSummary = Omit<AssetSummary, 'tags' | 'coverTags' | 'matchedTags'>;
+
 /**
  * Summaries (project count, file count, workflow progress, cover) of the assets matching `where`,
  * ordered by name, then id; one page when `page` is given.
@@ -58,7 +61,7 @@ function summaries(
   tx: Pick<BetterSQLite3Database, 'select'>,
   where: SQL | undefined,
   page?: { limit: number; offset: number },
-): AssetSummary[] {
+): BareSummary[] {
   const query = tx
     .select({
       id: asset.id,
@@ -89,6 +92,34 @@ function summaries(
     workflowProgress: hasWorkflow ? { done: workflowDone, total: workflowTotal } : null,
     coverFileId: chosenCover ?? automatic.get(row.id) ?? null,
   }));
+}
+
+/**
+ * Attaches the asset tags, the tags of the effective cover and, when the list filtered by tags,
+ * the matched tags: one statement for the tags, and two more (tag ids, matches) with a tag filter,
+ * whatever the page size.
+ */
+function withTags(tx: Tx, items: BareSummary[], tagNames: readonly string[]): AssetSummary[] {
+  if (items.length === 0) return [];
+  const ids = items.map((s) => s.id);
+  const coverIds = items.flatMap((s) => (s.coverFileId === null ? [] : [s.coverFileId]));
+  const tags = assetTagsOf(tx, ids, coverIds);
+  const matched = tagNames.length > 0 ? matchedTagsOf(tx, ids, requestedTagIds(tx, tagNames)) : null;
+  return items.map((s) => ({
+    ...s,
+    tags: tags.asset.get(s.id) ?? [],
+    coverTags: s.coverFileId === null ? [] : (tags.file.get(s.coverFileId) ?? []),
+    ...(matched !== null && { matchedTags: matched.get(s.id) ?? [] }),
+  }));
+}
+
+/** The ids of the named tags in request order, in one statement like the tag filter; unknown names are left out. */
+function requestedTagIds(tx: Tx, names: readonly string[]): string[] {
+  const unique = [...new Set(names)];
+  const byName = new Map(
+    tx.select({ id: tag.id, name: tag.name }).from(tag).where(inArray(tag.name, unique)).all().map((t) => [t.name, t.id]),
+  );
+  return unique.flatMap((name) => byName.get(name) ?? []);
 }
 
 export function createAssetRepository(db: BetterSQLite3Database): AssetRepository {
@@ -131,15 +162,16 @@ export function createAssetRepository(db: BetterSQLite3Database): AssetRepositor
       // One read transaction, so the tag ids, the page and the total describe the same snapshot.
       return db.transaction(
         (tx) => {
+          const tagNames = q.tagNames ?? [];
           if (words.length > 0) {
             const { ids, total } = searchAssets(tx, { ...q, words });
             if (ids.length === 0) return { items: [], total };
             const byId = new Map(summaries(tx, inArray(asset.id, ids)).map((s) => [s.id, s]));
-            return { items: ids.flatMap((id) => byId.get(id) ?? []), total };
+            return { items: withTags(tx, ids.flatMap((id) => byId.get(id) ?? []), tagNames), total };
           }
           const filter = assetFilter(tx, q);
           if (filter === null) return { items: [], total: 0 };
-          const items = summaries(tx, filter.where, { limit: q.limit, offset: q.offset });
+          const items = withTags(tx, summaries(tx, filter.where, { limit: q.limit, offset: q.offset }), tagNames);
           const total = tx.select({ n: count() }).from(asset).where(filter.where).get()?.n ?? 0;
           return { items, total };
         },

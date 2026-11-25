@@ -5,10 +5,11 @@ import { performance } from 'node:perf_hooks';
 import Database from 'better-sqlite3';
 import { sql, type SQL } from 'drizzle-orm';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import type { AssetStatus, AssetType, FileKind, FileRole } from '@assetforge/contracts';
 import { BUILT_IN_ASSET_TYPES, fileKind, searchWords, type AssetQuery, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
+import { assetTagsSql, matchedTagsSql } from '../src/list-tags.js';
 import { searchStatements } from '../src/search-index.js';
 
 const ASSET_COUNT = 10_000;
@@ -259,6 +260,41 @@ describe('search scale', () => {
       expect(violations(lines)).toEqual(lines.filter((l) => l.startsWith('SEARCH ')));
     }
     expect(violations(['SCAN asset_search VIRTUAL TABLE INDEX 0:'])).toEqual(['SCAN asset_search VIRTUAL TABLE INDEX 0:']);
+  });
+
+  test('tag attachment does not grow with the page size', async () => {
+    const seededTag = tagLabel(seeded[0]!.tags[0]!);
+    const spy = vi.spyOn(Database.prototype, 'prepare');
+    try {
+      for (const query of [undefined, 'sword']) {
+        spy.mockClear();
+        const one = await db.assets.list({ limit: 1, offset: 0, tagNames: [seededTag], ...(query !== undefined && { query }) });
+        const oneCalls = spy.mock.calls.length;
+        spy.mockClear();
+        const sixty = await db.assets.list({ limit: 60, offset: 0, tagNames: [seededTag], ...(query !== undefined && { query }) });
+        const sixtyCalls = spy.mock.calls.length;
+        expect(one.items).toHaveLength(1);
+        expect(sixty.items.length).toBeGreaterThan(1);
+        expect(sixty.items.every((a) => a.tags.length > 0 && a.matchedTags?.length === 1)).toBe(true);
+        expect(oneCalls).toBeGreaterThan(0);
+        expect(sixtyCalls).toBe(oneCalls);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('the tag attachment statements use the tag keys', () => {
+    const page = seeded.slice(0, 60);
+    const fileIds = Array.from({ length: 60 }, (_, n) => uuid(4, n));
+    for (const [name, statement] of [
+      ['assetTagsSql', assetTagsSql(page.map((a) => a.id), fileIds)],
+      ['matchedTagsSql', matchedTagsSql(page.map((a) => a.id), [uuid(2, 0), uuid(2, ASSET_TAG_COUNT)])],
+    ] as const) {
+      const lines = plan(statement);
+      console.info(`plan of ${name} for 60 assets:\n  ${lines.join('\n  ')}`);
+      expect(violations(lines)).toEqual([]);
+    }
   });
 
   test('search over 10 000 assets is driven by the match and uses indexes only', async () => {

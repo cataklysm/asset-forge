@@ -161,6 +161,21 @@ describe('library IPC', () => {
       }
     });
 
+    it('assets:list returns tags, coverTags and matchedTags', async () => {
+      await openWorkspace();
+      const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+      const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
+      await ok('assets:addTag', { assetId: asset.id, name: 'Oak' });
+      const listed = await ok('assets:list', { limit: 10, offset: 0, tagNames: ['oak'] });
+      expect(ipcContract['assets:list'].response.safeParse(listed).success).toBe(true);
+      expect(listed.items[0]).toMatchObject({
+        tags: [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
+        coverTags: [],
+        matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }],
+      });
+      expect((await ok('assets:list', { limit: 10, offset: 0 })).items[0].matchedTags).toBeUndefined();
+    });
+
     it('a too long tag answers validation_failed without echoing the input', async () => {
       const { asset, file } = await assetWithFile();
       const name = 'x'.repeat(65);

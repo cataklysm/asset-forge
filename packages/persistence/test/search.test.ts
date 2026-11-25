@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { Asset, AssetType, FileKind, FileRole } from '@assetforge/contracts';
+import type { Asset, AssetSummary, AssetType, FileKind, FileRole } from '@assetforge/contracts';
 import { BUILT_IN_ASSET_TYPES, recoverFileMoves, type Storage, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
@@ -333,5 +333,91 @@ describe('search queries', () => {
       items: [],
       total: 0,
     });
+  });
+});
+
+describe('list item tags', () => {
+  const tagAs = (assetId: string, name: string, displayName: string) =>
+    db.tags.addToAsset({ assetId, name, displayName, origin: 'manual', newId: newId(), now: TS });
+  const tagFileAs = (fileId: string, name: string, displayName: string) =>
+    db.tags.addToFile({ fileId, name, displayName, origin: 'manual', newId: newId(), now: TS });
+  const list = async (q: Partial<Parameters<WorkspaceDatabase['assets']['list']>[0]> = {}) =>
+    (await db.assets.list({ limit: 60, offset: 0, ...q })).items;
+  const byName = (items: AssetSummary[], name: string) => items.find((a) => a.name === name)!;
+
+  /** A complete PNG on the asset, so it can be the automatic cover. */
+  const addImage = async (assetId: string, originalName: string) => {
+    const id = newId();
+    await db.files.insertPending({
+      id,
+      storageId: STORAGE,
+      originalName,
+      relativePath: `inbox/${id}.bin`,
+      mimeType: 'image/png',
+      importedAt: TS,
+      kind: 'image',
+    });
+    await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+    await place(id, assetId);
+    return id;
+  };
+
+  test('list items carry asset tags and the tags of the effective cover', async () => {
+    await db.assets.insert(asset(1, 'A'));
+    await tagAs(uuid(1), 'oak', 'Oak');
+    await db.tags.addToAsset({ assetId: uuid(1), name: 'oak', displayName: 'Oak', origin: 'ai', newId: newId(), now: TS });
+    const chosen = await addFile(uuid(1), 'a.png');
+    await tagFile(chosen, 'bark');
+    await tagFile(await addFile(uuid(1), 'b.png'), 'moss');
+    await db.assets.setCover(uuid(1), chosen, TS);
+    await db.assets.insert(asset(2, 'B'));
+    await db.assets.insert(asset(3, 'C'));
+    await tagFile(await addImage(uuid(3), 'c.png'), 'leaf');
+
+    const items = await list();
+    expect(byName(items, 'A').tags).toEqual([
+      { name: 'oak', displayName: 'Oak', origin: 'ai' },
+      { name: 'oak', displayName: 'Oak', origin: 'manual' },
+    ]);
+    expect(byName(items, 'A').coverTags.map((t) => t.name)).toEqual(['bark']);
+    expect(byName(items, 'B')).toMatchObject({ tags: [], coverTags: [] });
+    expect(byName(items, 'C').coverTags.map((t) => t.name)).toEqual(['leaf']);
+    expect(byName(items, 'A').matchedTags).toBeUndefined();
+    expect(byName(await list({ query: 'a' }), 'A')).toMatchObject({ tags: [{ name: 'oak' }, { name: 'oak' }] });
+  });
+
+  test('with tagNames every item reports where each requested tag was found', async () => {
+    await db.assets.insert(asset(1, 'A'));
+    await tagAs(uuid(1), 'oak', 'Oak');
+    await tagFile(await addFile(uuid(1), 'a.png'), 'bark');
+    await db.assets.insert(asset(2, 'C'));
+    await tagAs(uuid(2), 'oak', 'Oak');
+    await tagAsset(uuid(2), 'bark');
+    await tagFileAs(await addFile(uuid(2), 'c.png'), 'oak', 'Oak');
+
+    for (const query of [undefined, 'c']) {
+      const items = await list({ tagNames: ['oak', 'bark'], ...(query !== undefined && { query }) });
+      if (query === undefined) {
+        expect(byName(items, 'A').matchedTags).toEqual([
+          { name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false },
+          { name: 'bark', displayName: 'bark', onAsset: false, onFiles: true },
+        ]);
+      }
+      expect(byName(items, 'C').matchedTags).toEqual([
+        { name: 'oak', displayName: 'Oak', onAsset: true, onFiles: true },
+        { name: 'bark', displayName: 'bark', onAsset: true, onFiles: false },
+      ]);
+    }
+  });
+
+  test('a tag on a pending file does not count as onFiles', async () => {
+    await db.assets.insert(asset(1, 'A'));
+    await tagAsset(uuid(1), 'oak');
+    const pending = await addInboxFile('a.png', 'pending');
+    await place(pending, uuid(1));
+    await tagFile(pending, 'oak');
+    expect(byName(await list({ tagNames: ['oak'] }), 'A').matchedTags).toEqual([
+      { name: 'oak', displayName: 'oak', onAsset: true, onFiles: false },
+    ]);
   });
 });

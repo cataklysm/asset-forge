@@ -12,6 +12,7 @@ import type {
   FileRecord,
   FileScope,
   ImportStatus,
+  MatchedTag,
   Project,
   ProjectAssignment,
   ProjectList,
@@ -270,6 +271,10 @@ class InMemoryTags implements TagRepository {
   }
 
   async listForAsset(assetId: string): Promise<TagAssignment[]> {
+    return this.forAsset(assetId);
+  }
+
+  forAsset(assetId: string): TagAssignment[] {
     return InMemoryTags.sorted(this.assetAssignments.filter((a) => a.assetId === assetId), this.tags);
   }
 
@@ -766,14 +771,37 @@ class InMemoryAssets implements AssetRepository {
       .filter((a) => q.fileKind === undefined || this.completeFiles(a.id).some((f) => f.kind === q.fileKind))
       .filter((a) => words.every((w) => this.searchFields(a).some((tokens) => startsWithToken(tokens, w))))
       .sort((a, b) => nameMatches(b, words) - nameMatches(a, words) || byNameThenId(a, b));
-    const items = matching.slice(q.offset, q.offset + q.limit).map((a) => ({
-      ...a,
-      projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
-      fileCount: [...this.files.records.values()].filter((f) => f.assetId === a.id).length,
-      workflowProgress: this.workflows.progressOfAsset(a.id),
-      coverFileId: this.coverOf(a.id).coverFileId,
-    }));
+    const items = matching.slice(q.offset, q.offset + q.limit).map((a) => {
+      const coverFileId = this.coverOf(a.id).coverFileId;
+      return {
+        ...a,
+        projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
+        fileCount: [...this.files.records.values()].filter((f) => f.assetId === a.id).length,
+        workflowProgress: this.workflows.progressOfAsset(a.id),
+        coverFileId,
+        tags: this.tags.forAsset(a.id),
+        coverTags: coverFileId === null ? [] : this.tags.forFile(coverFileId),
+        ...(q.tagNames !== undefined && q.tagNames.length > 0 && { matchedTags: this.matchedTags(a.id, q.tagNames) }),
+      };
+    });
     return { items, total: matching.length };
+  }
+
+  /** One entry per requested tag, in request order, saying whether the asset or one of its complete files carries it. */
+  private matchedTags(assetId: string, names: string[]): MatchedTag[] {
+    const fileIds = new Set(this.completeFiles(assetId).map((f) => f.id));
+    return [...new Set(names)].flatMap((name) => {
+      const known = this.tags.tags.get(name);
+      if (known === undefined) return [];
+      return [
+        {
+          name,
+          displayName: known.displayName,
+          onAsset: this.tags.assetAssignments.some((t) => t.assetId === assetId && t.name === name),
+          onFiles: this.tags.fileAssignments.some((t) => fileIds.has(t.fileId) && t.name === name),
+        },
+      ];
+    });
   }
 }
 

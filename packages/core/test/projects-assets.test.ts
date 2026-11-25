@@ -14,7 +14,7 @@ import {
   type AssetQuery,
   type WorkspaceSession,
 } from '../src/index.js';
-import type { FileKind, FileRole } from '@assetforge/contracts';
+import type { AssetSummary, FileKind, FileRole } from '@assetforge/contracts';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -159,14 +159,16 @@ describe('asset list filters', () => {
       await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${originalName}`, assetId, role });
       return id;
     };
-    const tagAsset = (assetId: string, name: string) =>
-      db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: `t-${name}`, now: 'now' });
-    const tagFile = (fileId: string, name: string) =>
-      db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: `t-${name}`, now: 'now' });
-    const names = async (q: Partial<AssetQuery>) =>
-      (await listAssets(session, { limit: 50, offset: 0, ...q })).items.map((a) => a.name);
-    return { session, make, addFile, tagAsset, tagFile, names };
+    const tagAsset = (assetId: string, name: string, displayName = name) =>
+      db.tags.addToAsset({ assetId, name, displayName, origin: 'manual', newId: `t-${name}`, now: 'now' });
+    const tagFile = (fileId: string, name: string, displayName = name) =>
+      db.tags.addToFile({ fileId, name, displayName, origin: 'manual', newId: `t-${name}`, now: 'now' });
+    const list = async (q: Partial<AssetQuery>) => (await listAssets(session, { limit: 60, offset: 0, ...q })).items;
+    const names = async (q: Partial<AssetQuery>) => (await list({ limit: 50, ...q })).map((a) => a.name);
+    return { session, make, addFile, tagAsset, tagFile, list, names };
   }
+
+  const byName = (items: AssetSummary[], name: string): AssetSummary => items.find((a) => a.name === name)!;
 
   it('query matches word prefixes in name, description, tags and complete file names', async () => {
     const { make, addFile, tagAsset, tagFile, names } = await seed();
@@ -232,6 +234,54 @@ describe('asset list filters', () => {
     expect(await names({ tagNames: ['metal', 'rusty'] })).toEqual(['A']);
     expect(await names({ tagNames: ['metal'] })).toEqual(['A', 'B']);
     expect(await names({ tagNames: ['  METAL '] })).toEqual(['A', 'B']);
+  });
+
+  it('list items carry asset tags and the tags of the effective cover', async () => {
+    const { session, make, addFile, tagAsset, tagFile, list } = await seed();
+    const a = await make('A');
+    await tagAsset(a.id, 'oak', 'Oak');
+    const cover = await addFile(a.id, 'reference', 'image', 'a.png');
+    await tagFile(cover, 'bark');
+    await tagFile(await addFile(a.id, 'reference', 'image', 'b.png'), 'moss');
+    await session.database.assets.setCover(a.id, cover, 'now');
+    await make('B');
+
+    const items = await list({});
+    expect(byName(items, 'A').tags.map((t) => t.name)).toEqual(['oak']);
+    expect(byName(items, 'A').coverTags.map((t) => t.name)).toEqual(['bark']);
+    expect(byName(items, 'B')).toMatchObject({ tags: [], coverTags: [] });
+    expect(byName(items, 'A').matchedTags).toBeUndefined();
+  });
+
+  it('with tagNames every item reports where each requested tag was found', async () => {
+    const { make, addFile, tagAsset, tagFile, list } = await seed();
+    const a = await make('A');
+    await tagAsset(a.id, 'oak', 'Oak');
+    await tagFile(await addFile(a.id, 'reference', 'image', 'a.png'), 'bark');
+    const c = await make('C');
+    await tagAsset(c.id, 'oak', 'Oak');
+    await tagAsset(c.id, 'bark');
+    await tagFile(await addFile(c.id, 'reference', 'image', 'c.png'), 'oak', 'Oak');
+
+    const items = await list({ tagNames: ['OAK', 'bark', 'oak'] });
+    expect(byName(items, 'A').matchedTags).toEqual([
+      { name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false },
+      { name: 'bark', displayName: 'bark', onAsset: false, onFiles: true },
+    ]);
+    expect(byName(items, 'C').matchedTags).toEqual([
+      { name: 'oak', displayName: 'Oak', onAsset: true, onFiles: true },
+      { name: 'bark', displayName: 'bark', onAsset: true, onFiles: false },
+    ]);
+  });
+
+  it('a tag on a pending file does not count as onFiles', async () => {
+    const { make, addFile, tagAsset, tagFile, list } = await seed();
+    const a = await make('A');
+    await tagAsset(a.id, 'oak');
+    await tagFile(await addFile(a.id, 'reference', 'image', 'a.png', 'pending'), 'oak');
+    expect(byName(await list({ tagNames: ['oak'] }), 'A').matchedTags).toEqual([
+      { name: 'oak', displayName: 'oak', onAsset: true, onFiles: false },
+    ]);
   });
 
   it('an unknown tag yields no results', async () => {

@@ -83,6 +83,8 @@ describe('migration 0002', () => {
         fileCount: 0,
         workflowProgress: null,
         coverFileId: null,
+        tags: [],
+        coverTags: [],
       },
     ]);
     expect(await db.assetWorkflows.getByAsset(uuid(10))).toBeNull();
