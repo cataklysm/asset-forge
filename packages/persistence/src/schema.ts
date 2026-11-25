@@ -73,6 +73,7 @@ export const asset = sqliteTable(
       .references(() => assetType.id),
     description: text('description').notNull().default(''),
     status: text('status', { enum: ASSET_STATUSES }).notNull(),
+    coverFileId: text('cover_file_id').references((): AnySQLiteColumn => file.id, { onDelete: 'set null' }),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
