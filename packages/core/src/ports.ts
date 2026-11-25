@@ -285,6 +285,15 @@ export interface TagRepository {
   removeFromAsset(r: { assetId: string; name: string; origin: TagOrigin }): Promise<void>;
   addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void>;
   removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void>;
+  /**
+   * One transaction over a batch: throws `NotFoundError` for any unknown file and
+   * `ValidationFailedError` for any file that is not complete before it writes anything; then
+   * adds the assignment to every file (existing ones are left alone), reindexes each distinct
+   * asset once and returns the records in request order.
+   */
+  addToFiles(r: { fileIds: readonly string[]; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<FileRecord[]>;
+  /** Like `addToFiles`, deleting the assignment of that origin; a file without it is left alone. */
+  removeFromFiles(r: { fileIds: readonly string[]; name: string; origin: TagOrigin }): Promise<FileRecord[]>;
   listForAsset(assetId: string): Promise<TagAssignment[]>; // by name, then origin
 }
 

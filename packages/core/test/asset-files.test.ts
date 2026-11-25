@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assetFilePath,
   assignAsset,
+  assignFiles,
   createAsset,
   createProject,
   inboxPath,
@@ -197,6 +198,34 @@ describe('relocateFile', () => {
       InvalidOperationError,
     );
     expect(db.files.records.get(file.id)).toEqual(file);
+  });
+});
+
+describe('assignFiles', () => {
+  it('assignFiles moves every file it can and reports the one failure in the middle', async () => {
+    const ctx = await setup();
+    const { session, storage, asset, file } = ctx;
+    const [second] = await ctx.manager.importFiles(['/src/motel.png']);
+    const a = file.id;
+    const b = second!.file!.id;
+    const missing = UNKNOWN_ID;
+
+    const res = await assignFiles(session, { fileIds: [a, missing, b], assetId: asset.id, role: 'texture' });
+
+    expect(res.map((r) => r.fileId)).toEqual([a, missing, b]);
+    expect(res[0]!.file?.assetId).toBe(asset.id);
+    expect(res[0]!.error).toBeNull();
+    expect(res[1]).toMatchObject({ file: null });
+    expect(res[1]!.error).toBeInstanceOf(NotFoundError);
+    expect(res[2]!.file?.role).toBe('texture');
+    expect(storage.files.has(assetFilePath(asset.id, 'texture', b, 'motel.png'))).toBe(true);
+  });
+
+  it('an unknown asset fails every item with not_found and moves nothing', async () => {
+    const { session, storage, file } = await setup();
+    const res = await assignFiles(session, { fileIds: [file.id], assetId: UNKNOWN_ID, role: 'texture' });
+    expect(res).toEqual([{ fileId: file.id, file: null, error: expect.any(NotFoundError) }]);
+    expect(storage.files.has(file.relativePath)).toBe(true);
   });
 });
 

@@ -180,3 +180,104 @@ describe('tag repository', () => {
     expect((await db.files.findCompleteBySha256('a'.repeat(64))).find((f) => f.id === f1)!.tags).toHaveLength(3);
   });
 });
+
+describe('file tag batches', () => {
+  const batch = (fileIds: string[], name = 'oak') => ({ fileIds, name, displayName: 'Oak', origin: 'manual' as const, now: T1 });
+  const addMany = (fileIds: string[], name?: string) => db.tags.addToFiles({ ...batch(fileIds, name), newId: uuid(nextTagId++) });
+  const removeMany = (fileIds: string[], name = 'oak', origin: TagOrigin = 'manual') => db.tags.removeFromFiles({ fileIds, name, origin });
+
+  async function addPendingFile(n: number): Promise<string> {
+    const id = uuid(n);
+    await db.files.insertPending({
+      id,
+      storageId: STORAGE_ID,
+      originalName: `p${n}.png`,
+      relativePath: `inbox/${id}/p${n}.png`,
+      mimeType: 'image/png',
+      importedAt: T1,
+      kind: 'image',
+    });
+    return id;
+  }
+
+  const place = (fileId: string, assetId: string) =>
+    db.files.setPlacement(fileId, { relativePath: `assets/${assetId}/reference/${fileId}.png`, assetId, role: 'reference' });
+  const counts = () => ({
+    tags: handle.prepare('select count(*) as n from tag').get(),
+    fileTags: handle.prepare('select count(*) as n from file_tag').get(),
+  });
+
+  test('addToFiles is all or nothing and returns the records in request order', async () => {
+    const a = await addFile(20);
+    const b = await addFile(21);
+    const pending = await addPendingFile(22);
+    const before = counts();
+
+    await expect(addMany([a, pending])).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(addMany([a, uuid(999)])).rejects.toMatchObject({ code: 'not_found' });
+    expect(counts()).toEqual(before); // neither the tag nor an assignment was written
+
+    const records = await addMany([b, a]);
+    expect(records.map((r) => r.id)).toEqual([b, a]);
+    expect(records.map((r) => r.tags)).toEqual([
+      [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
+      [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
+    ]);
+    // Repeating the batch leaves the existing assignments alone.
+    expect((await addMany([a])).map((r) => r.tags)).toHaveLength(1);
+    expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 2 });
+  });
+
+  test('removeFromFiles is all or nothing, removes one origin and ignores files without the tag', async () => {
+    const a = await addFile(20);
+    const b = await addFile(21);
+    const c = await addFile(22);
+    const pending = await addPendingFile(23);
+    await addMany([a, b]);
+    await tagFile(a, 'oak', 'ai');
+
+    await expect(removeMany([a, pending])).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(removeMany([uuid(999), a])).rejects.toMatchObject({ code: 'not_found' });
+    expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 3 });
+
+    const records = await removeMany([c, a, b]);
+    expect(records.map((r) => r.id)).toEqual([c, a, b]);
+    expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([[], ['ai'], []]);
+    expect((await removeMany([a], 'unknown')).map((r) => r.tags)).toHaveLength(1);
+  });
+
+  test('a tag batch over 300 files of one asset reindexes the asset once', async () => {
+    // Spying on the `reindexAsset` export cannot see the calls made inside its own module, so the
+    // writes of full-text rows are counted on the connection instead.
+    const asset = await addAsset(10);
+    const ids: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      const id = await addFile(100 + i);
+      await place(id, asset.id);
+      ids.push(id);
+    }
+    const inbox = await addFile(500);
+    const prepare = vi.spyOn(Database.prototype, 'prepare');
+    const indexWrites = () => prepare.mock.calls.filter(([source]) => /^\s*insert into asset_search\b/i.test(String(source))).length;
+
+    await addMany([...ids, inbox]);
+    expect(indexWrites()).toBe(1);
+    prepare.mockClear();
+    await removeMany([...ids, inbox]);
+    expect(indexWrites()).toBe(1);
+  });
+
+  test('a tagged asset file is found by assets:list query afterwards', async () => {
+    const asset = await addAsset(10);
+    await addAsset(11);
+    const f = await addFile(20);
+    await place(f, asset.id);
+
+    await addMany([f], 'sci fi');
+    const found = await db.assets.list({ limit: 10, offset: 0, query: 'sci' });
+    expect(found.items.map((a) => a.id)).toEqual([asset.id]);
+
+    await removeMany([f], 'sci fi');
+    expect((await db.assets.list({ limit: 10, offset: 0, query: 'sci' })).items).toEqual([]);
+  });
+});

@@ -370,3 +370,31 @@ describe('tag channels', () => {
     expect(ipcContract['assets:addTag'].request.safeParse({ assetId: id, name: 'x'.repeat(201) }).success).toBe(false);
   });
 });
+
+describe('file batch channels', () => {
+  const uuidN = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+  it.each([[[]], [Array.from({ length: 1001 }, (_, i) => uuidN(i))], [[uuidN(1), uuidN(1)]]])(
+    'file id lists of length 0, 1001 or with duplicates are rejected',
+    (ids) => {
+      expect(ipcContract['files:assignMany'].request.safeParse({ fileIds: ids, assetId: uuidN(9), role: 'reference' }).success).toBe(false);
+      expect(ipcContract['files:addTagMany'].request.safeParse({ fileIds: ids, name: 'oak' }).success).toBe(false);
+      expect(ipcContract['files:removeTagMany'].request.safeParse({ fileIds: ids, name: 'oak' }).success).toBe(false);
+    },
+  );
+
+  it('accepts 1 and 1000 distinct ids and bounds the tag name', () => {
+    const many = Array.from({ length: 1000 }, (_, i) => uuidN(i));
+    expect(ipcContract['files:assignMany'].request.safeParse({ fileIds: many, assetId: uuidN(9), role: 'reference' }).success).toBe(true);
+    expect(ipcContract['files:addTagMany'].request.safeParse({ fileIds: [uuidN(1)], name: 'oak' }).success).toBe(true);
+    expect(ipcContract['files:removeTagMany'].request.safeParse({ fileIds: [uuidN(1)], name: 'x'.repeat(201) }).success).toBe(false);
+  });
+
+  it('an assignMany item carries either a file or an error', () => {
+    const response = ipcContract['files:assignMany'].response;
+    expect(
+      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'not_found', message: 'm' } }] }).success,
+    ).toBe(true);
+    expect(response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'bogus', message: 'm' } }] }).success).toBe(false);
+  });
+});

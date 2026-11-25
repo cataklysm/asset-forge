@@ -1,13 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addAssetTag,
   addFileTag,
+  addFileTags,
   createAsset,
   getAssetDetail,
   importFile,
   inboxPath,
+  NotFoundError,
   removeAssetTag,
   removeFileTag,
+  removeFileTags,
+  ValidationFailedError,
   suggestTags,
   tagName,
   WorkspaceManager,
@@ -114,6 +118,64 @@ describe('file tags', () => {
     const tagged = await addFileTag(ctx.session, { fileId: id, name: 'Hero' });
     expect(tagged.tags).toEqual([{ name: 'hero', displayName: 'Hero', origin: 'manual' }]);
     expect((await removeFileTag(ctx.session, { fileId: id, name: 'hero' })).tags).toEqual([]);
+  });
+});
+
+describe('file tag batches', () => {
+  it('addFileTags is all or nothing', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const b = await addFile(ctx, 2);
+    const pending = await addFile(ctx, 3, 'pending');
+    const missing = UNKNOWN_ID;
+    const getFile = async (id: string) => (await ctx.session.database.files.get(id))!;
+
+    await expect(addFileTags(ctx.session, { fileIds: [a, pending], name: 'Oak' })).rejects.toBeInstanceOf(ValidationFailedError);
+    expect((await getFile(a)).tags).toEqual([]);
+    await expect(addFileTags(ctx.session, { fileIds: [a, missing], name: 'Oak' })).rejects.toBeInstanceOf(NotFoundError);
+    expect((await getFile(a)).tags).toEqual([]);
+    const records = await addFileTags(ctx.session, { fileIds: [b, a], name: 'Oak' });
+    expect(records.map((r) => r.id)).toEqual([b, a]);
+    expect(records.every((r) => r.tags.some((t) => t.name === 'oak' && t.displayName === 'Oak' && t.origin === 'manual'))).toBe(true);
+    expect((await getFile(a)).tags).toEqual([{ name: 'oak', displayName: 'Oak', origin: 'manual' }]);
+  });
+
+  it('removeFileTags removes from all and ignores files without the tag', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const b = await addFile(ctx, 2);
+    const c = await addFile(ctx, 3);
+    await addFileTags(ctx.session, { fileIds: [a, b], name: 'Oak' });
+    await ctx.db.tags.addToFile({ fileId: a, name: 'oak', displayName: 'oak', origin: 'ai', newId: uuid(900), now: T1 });
+
+    const records = await removeFileTags(ctx.session, { fileIds: [c, a, b], name: 'OAK' });
+    expect(records.map((r) => r.id)).toEqual([c, a, b]);
+    // Only the manual assignment goes; the AI one stays distinguishable and untouched.
+    expect(records.map((r) => r.tags)).toEqual([[], [{ name: 'oak', displayName: 'Oak', origin: 'ai' }], []]);
+  });
+
+  it('removeFileTags is all or nothing', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const pending = await addFile(ctx, 2, 'pending');
+    await addFileTags(ctx.session, { fileIds: [a], name: 'Oak' });
+    await expect(removeFileTags(ctx.session, { fileIds: [a, pending], name: 'oak' })).rejects.toBeInstanceOf(ValidationFailedError);
+    await expect(removeFileTags(ctx.session, { fileIds: [a, UNKNOWN_ID], name: 'oak' })).rejects.toBeInstanceOf(NotFoundError);
+    expect((await ctx.session.database.files.get(a))!.tags).toHaveLength(1);
+  });
+
+  it('an invalid tag name fails with validation_failed before any lookup', async () => {
+    const ctx = await setup();
+    const get = vi.spyOn(ctx.db.files, 'get');
+    const add = vi.spyOn(ctx.db.tags, 'addToFiles');
+    const remove = vi.spyOn(ctx.db.tags, 'removeFromFiles');
+    await expect(addFileTags(ctx.session, { fileIds: [UNKNOWN_ID], name: '  ' })).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(removeFileTags(ctx.session, { fileIds: [UNKNOWN_ID], name: 'x'.repeat(65) })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
+    expect(get).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 });
 

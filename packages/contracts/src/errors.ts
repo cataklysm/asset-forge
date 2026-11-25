@@ -25,3 +25,9 @@ export const ErrorCodeSchema = z.enum([
   'forbidden_sender',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;
+
+export const IpcErrorSchema = z.object({
+  code: ErrorCodeSchema,
+  message: z.string(),
+});
+export type IpcError = z.infer<typeof IpcErrorSchema>;

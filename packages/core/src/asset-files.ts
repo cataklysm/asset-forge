@@ -1,4 +1,4 @@
-import type { FileList, FileRecord, FileTarget } from '@assetforge/contracts';
+import type { FileList, FileRecord, FileRole, FileTarget } from '@assetforge/contracts';
 import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
 import { assetFilePath, inboxPath } from './paths.js';
 import type { FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
@@ -61,6 +61,31 @@ export async function relocateFile(
   }
   // If the commit fails, the move row stays and recovery completes it on the next open.
   return s.database.fileMoves.commit(file.id);
+}
+
+/**
+ * Places several files on one asset with one role, one `relocateFile` after the other in request
+ * order. Each file succeeds or fails on its own: an error is caught and reported for that file, and
+ * the files before and after it are still placed.
+ */
+export async function assignFiles(
+  s: WorkspaceSession,
+  r: { fileIds: readonly string[]; assetId: string; role: FileRole },
+): Promise<{ fileId: string; file: FileRecord | null; error: Error | null }[]> {
+  const target: FileTarget = { assetId: r.assetId, role: r.role };
+  const results: { fileId: string; file: FileRecord | null; error: Error | null }[] = [];
+  for (const fileId of r.fileIds) {
+    try {
+      results.push({ fileId, file: await relocateFile(s, fileId, target), error: null });
+    } catch (error) {
+      results.push({
+        fileId,
+        file: null,
+        error: error instanceof Error ? error : new Error('Unexpected error', { cause: error }),
+      });
+    }
+  }
+  return results;
 }
 
 /**

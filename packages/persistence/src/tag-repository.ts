@@ -1,9 +1,42 @@
-import type { TagAssignment, TagSuggestion } from '@assetforge/contracts';
-import type { TagRepository } from '@assetforge/core';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import type { FileRecord, TagAssignment, TagSuggestion } from '@assetforge/contracts';
+import { NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { assetTag, fileTag, tag } from './schema.js';
-import { assetOfFile, reindexAsset, reindexAssets } from './search-index.js';
+import { toRecords } from './file-repository.js';
+import { assetTag, file, fileTag, tag } from './schema.js';
+import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
+
+/**
+ * The rows of a batch in request order; throws for an unknown file and then for a file that is
+ * not complete, before the caller writes anything.
+ */
+function completeFiles(tx: Pick<BetterSQLite3Database, 'select'>, fileIds: readonly string[]): (typeof file.$inferSelect)[] {
+  const byId = new Map(
+    tx
+      .select()
+      .from(file)
+      .where(inArray(file.id, [...fileIds]))
+      .all()
+      .map((row) => [row.id, row]),
+  );
+  const rows = fileIds.map((id) => {
+    const row = byId.get(id);
+    if (!row) throw new NotFoundError(`File ${id} does not exist`);
+    return row;
+  });
+  const incomplete = rows.find((row) => row.status !== 'complete');
+  if (incomplete) throw new ValidationFailedError(`File ${incomplete.id} is not completely imported`);
+  return rows;
+}
+
+/** Reindexes each asset of the batch once and returns the records with their current tags. */
+function finishBatch(tx: Tx, rows: (typeof file.$inferSelect)[]): FileRecord[] {
+  reindexAssets(
+    tx,
+    rows.map((row) => row.assetId),
+  );
+  return toRecords(tx, rows);
+}
 
 /** Highest code point; sorts after every character that can follow a prefix in a name. */
 const PREFIX_END = String.fromCodePoint(0x10ffff);
@@ -84,6 +117,32 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           )
           .run();
         reindexAssets(tx, [assetOfFile(tx, r.fileId)]);
+      });
+    },
+    async addToFiles(r): Promise<FileRecord[]> {
+      return db.transaction((tx) => {
+        const rows = completeFiles(tx, r.fileIds);
+        const tagId = ensureTag(tx, r);
+        tx.insert(fileTag)
+          .values(rows.map((row) => ({ fileId: row.id, tagId, origin: r.origin, createdAt: r.now })))
+          .onConflictDoNothing()
+          .run();
+        return finishBatch(tx, rows);
+      });
+    },
+    async removeFromFiles(r): Promise<FileRecord[]> {
+      return db.transaction((tx) => {
+        const rows = completeFiles(tx, r.fileIds);
+        tx.delete(fileTag)
+          .where(
+            and(
+              inArray(fileTag.fileId, [...r.fileIds]),
+              eq(fileTag.origin, r.origin),
+              eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
+            ),
+          )
+          .run();
+        return finishBatch(tx, rows);
       });
     },
     async listForAsset(assetId): Promise<TagAssignment[]> {

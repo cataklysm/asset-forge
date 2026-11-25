@@ -80,8 +80,11 @@ describe('library IPC', () => {
       'assets:removeTag': { assetId: uuid, name: 'metal' },
       'files:addTag': { fileId: uuid, name: 'metal' },
       'files:removeTag': { fileId: uuid, name: 'metal' },
+      'files:assignMany': { fileIds: [uuid], assetId: uuid, role: 'reference' },
+      'files:addTagMany': { fileIds: [uuid], name: 'metal' },
+      'files:removeTagMany': { fileIds: [uuid], name: 'metal' },
     };
-    expect(Object.keys(requests)).toHaveLength(29);
+    expect(Object.keys(requests)).toHaveLength(32);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({
@@ -329,6 +332,99 @@ describe('library IPC', () => {
     const message = result.ok ? '' : result.error.message;
     expect(message).not.toContain(base);
     expect(message).not.toMatch(/[A-Za-z]:\\|\/|\\/);
+  });
+
+  describe('file batches', () => {
+    async function inboxFiles(names: string[]) {
+      await openWorkspace();
+      const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+      const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
+      const sources = names.map((n) => join(base, n));
+      for (const source of sources) await writeFile(source, source);
+      const imported = await ok<{ file: { id: string } }[]>('files:import', { sourcePaths: sources });
+      return { assetId: asset.id as string, ids: imported.map((r) => r.file.id) };
+    }
+
+    async function insertPending() {
+      return manager.exclusive(async (s) => {
+        const storage = await s.database.storages.getPrimary();
+        const fileId = s.newId();
+        await s.database.files.insertPending({
+          id: fileId,
+          storageId: storage!.id,
+          originalName: 'pending.png',
+          relativePath: 'inbox/pending.png',
+          mimeType: 'image/png',
+          importedAt: s.now().toISOString(),
+          kind: 'image',
+        });
+        return fileId;
+      });
+    }
+
+    it('files:assignMany rejects 1001 ids and duplicate ids', async () => {
+      await openWorkspace();
+      const many = Array.from({ length: 1001 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+      const invalid = { ok: false, error: { code: 'invalid_request' } };
+      expect(await call('files:assignMany', { fileIds: many, assetId: uuid, role: 'reference' })).toMatchObject(invalid);
+      expect(await call('files:assignMany', { fileIds: [uuid, uuid], assetId: uuid, role: 'reference' })).toMatchObject(invalid);
+      expect(await call('files:addTagMany', { fileIds: [uuid, uuid], name: 'oak' })).toMatchObject(invalid);
+    });
+
+    it('files:assignMany returns per-item results in request order with mapped errors', async () => {
+      const { assetId, ids } = await inboxFiles(['a.png', 'b.png']);
+      const [f1, f2] = ids as [string, string];
+      const res = await ok('files:assignMany', { fileIds: [f1, uuid, f2], assetId, role: 'reference' });
+      expect(ipcContract['files:assignMany'].response.safeParse(res).success).toBe(true);
+      expect(res.items.map((i: any) => i.fileId)).toEqual([f1, uuid, f2]);
+      expect(res.items.map((i: any) => i.error?.code ?? null)).toEqual([null, 'not_found', null]);
+      expect(res.items[0].file).toMatchObject({ assetId, role: 'reference', relativePath: assetFilePath(assetId, 'reference', f1, 'a.png') });
+      expect(res.items[1].file).toBeNull();
+      expect(JSON.stringify(res)).not.toContain(base); // no absolute paths
+    });
+
+    it('files:assignMany maps an unexpected error to internal_error', async () => {
+      const { assetId, ids } = await inboxFiles(['a.png']);
+      const session = await manager.read(async (s) => s);
+      vi.spyOn(session.database.files, 'get').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const res = await ok('files:assignMany', { fileIds: ids, assetId, role: 'reference' });
+      expect(res.items).toEqual([{ fileId: ids[0], file: null, error: { code: 'internal_error', message: 'Unexpected error' } }]);
+    });
+
+    it('files:addTagMany and files:removeTagMany tag and untag every file', async () => {
+      const { ids } = await inboxFiles(['a.png', 'b.png']);
+      const reversed = [...ids].reverse();
+      const tagged = await ok('files:addTagMany', { fileIds: reversed, name: ' Oak ' });
+      expect(ipcContract['files:addTagMany'].response.safeParse(tagged).success).toBe(true);
+      expect(tagged.items.map((f: any) => f.id)).toEqual(reversed);
+      expect(tagged.items.map((f: any) => f.tags)).toEqual([
+        [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
+        [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
+      ]);
+      const listed = await ok('files:list', { ...page, scope: { kind: 'inbox' }, tagNames: ['oak'] });
+      expect(listed.total).toBe(2);
+
+      const untagged = await ok('files:removeTagMany', { fileIds: ids, name: 'OAK' });
+      expect(ipcContract['files:removeTagMany'].response.safeParse(untagged).success).toBe(true);
+      expect(untagged.items.map((f: any) => f.tags)).toEqual([[], []]);
+    });
+
+    it('files:addTagMany with a pending file fails with validation_failed and tags nothing', async () => {
+      const { ids } = await inboxFiles(['a.png']);
+      const pending = await insertPending();
+      expect(await call('files:addTagMany', { fileIds: [ids[0], pending], name: 'oak' })).toMatchObject({
+        ok: false,
+        error: { code: 'validation_failed' },
+      });
+      expect(await call('files:addTagMany', { fileIds: [ids[0], uuid], name: 'oak' })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found' },
+      });
+      const files = await ok('files:list', { ...page, scope: { kind: 'all' } });
+      expect(files.items.every((f: any) => f.tags.length === 0)).toBe(true);
+      expect(await ok('tags:suggest', { prefix: '', limit: 10 })).toEqual([]);
+    });
   });
 
   it('rejects a whitespace-only project name as invalid_request', async () => {

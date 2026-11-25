@@ -1,10 +1,13 @@
 import { z } from 'zod';
-import { ErrorCodeSchema } from './errors';
+import type { IpcError } from './errors';
 import { TagSuggestionSchema } from './tags';
 import {
+  AssignManyResultSchema,
+  FileIdsSchema,
   FileKindSchema,
   FileListSchema,
   FileRecordSchema,
+  FileRecordsSchema,
   FileScopeSchema,
   FileTargetSchema,
   ImportResultSchema,
@@ -41,12 +44,6 @@ import {
   WorkflowTemplateSchema,
 } from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
-
-export const IpcErrorSchema = z.object({
-  code: ErrorCodeSchema,
-  message: z.string(),
-});
-export type IpcError = z.infer<typeof IpcErrorSchema>;
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -118,6 +115,11 @@ export const ipcContract = {
   'files:unassign': {
     request: z.object({ fileId: IdSchema }),
     response: FileRecordSchema,
+  },
+  /** Assigns each file on its own, in request order; one failing file does not stop the others. */
+  'files:assignMany': {
+    request: z.object({ fileIds: FileIdsSchema, assetId: IdSchema, role: FileRoleSchema }),
+    response: AssignManyResultSchema,
   },
   'assetTypes:list': {
     request: EmptyRequestSchema,
@@ -213,6 +215,16 @@ export const ipcContract = {
   'files:removeTag': {
     request: z.object({ fileId: IdSchema, name: z.string().max(200) }),
     response: FileRecordSchema,
+  },
+  /** All or nothing: tags every file or, when one is unknown or not complete, none. */
+  'files:addTagMany': {
+    request: z.object({ fileIds: FileIdsSchema, name: z.string().max(200) }),
+    response: FileRecordsSchema,
+  },
+  /** All or nothing like `files:addTagMany`; a file without the tag is left alone. */
+  'files:removeTagMany': {
+    request: z.object({ fileIds: FileIdsSchema, name: z.string().max(200) }),
+    response: FileRecordsSchema,
   },
   'files:openExternal': {
     request: z.object({ fileId: IdSchema }),

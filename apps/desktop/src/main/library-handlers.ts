@@ -1,8 +1,10 @@
 import {
   addAssetTag,
   addFileTag,
+  addFileTags,
   addRelation,
   assignAsset,
+  assignFiles,
   createAsset,
   createProject,
   getAsset,
@@ -21,6 +23,7 @@ import {
   removeAssetTag,
   removeAssignment,
   removeFileTag,
+  removeFileTags,
   removeRelation,
   removeWorkflow,
   resolveFilePath,
@@ -33,7 +36,7 @@ import {
   updateWorkflowStep,
   type WorkspaceManager,
 } from '@assetforge/core';
-import type { Dialogs, HostActions, IpcHandlers } from './ipc.js';
+import { toIpcError, type Dialogs, type HostActions, type IpcHandlers } from './ipc.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
@@ -44,6 +47,7 @@ export type LibraryHandlers = Pick<
   | 'files:list'
   | 'files:assign'
   | 'files:unassign'
+  | 'files:assignMany'
   | 'assetTypes:list'
   | 'projects:list'
   | 'projects:get'
@@ -59,6 +63,8 @@ export type LibraryHandlers = Pick<
   | 'assets:removeTag'
   | 'files:addTag'
   | 'files:removeTag'
+  | 'files:addTagMany'
+  | 'files:removeTagMany'
   | 'files:openExternal'
   | 'files:showInFolder'
   | 'assignments:listByAsset'
@@ -87,6 +93,16 @@ export function createLibraryHandlers(
     'files:assign': (r) =>
       manager.exclusive((s) => relocateFile(s, r.fileId, { assetId: r.assetId, role: r.role })),
     'files:unassign': (r) => manager.exclusive((s) => relocateFile(s, r.fileId, null)),
+    'files:assignMany': async (r) => {
+      const results = await manager.exclusive((s) => assignFiles(s, r));
+      return {
+        items: results.map(({ fileId, file, error }) => ({
+          fileId,
+          file,
+          error: error === null ? null : toIpcError(error, 'files:assignMany'),
+        })),
+      };
+    },
 
     'assetTypes:list': () => manager.read((s) => listAssetTypes(s)),
 
@@ -111,6 +127,8 @@ export function createLibraryHandlers(
     'assets:removeTag': (r) => manager.exclusive((s) => removeAssetTag(s, r)),
     'files:addTag': (r) => manager.exclusive((s) => addFileTag(s, r)),
     'files:removeTag': (r) => manager.exclusive((s) => removeFileTag(s, r)),
+    'files:addTagMany': async (r) => ({ items: await manager.exclusive((s) => addFileTags(s, r)) }),
+    'files:removeTagMany': async (r) => ({ items: await manager.exclusive((s) => removeFileTags(s, r)) }),
 
     'files:openExternal': async (r) => {
       const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IpcErrorSchema } from './errors';
 import { FileRoleSchema } from './library';
 import { TagAssignmentSchema } from './tags';
 
@@ -56,3 +57,25 @@ export const FileListSchema = z.object({
   total: z.number().int().min(0),
 });
 export type FileList = z.infer<typeof FileListSchema>;
+
+/** The files of a batch: 1 to 1000 distinct ids. */
+export const FileIdsSchema = z
+  .array(z.uuid())
+  .min(1)
+  .max(1000)
+  .refine((ids) => new Set(ids).size === ids.length, 'duplicate ids');
+
+/** One result per requested file, in request order: the placed record or the error of that file. */
+export const AssignManyResultSchema = z.object({
+  items: z.array(
+    z.object({
+      fileId: z.uuid(),
+      file: FileRecordSchema.nullable(),
+      error: IpcErrorSchema.nullable(),
+    }),
+  ),
+});
+export type AssignManyResult = z.infer<typeof AssignManyResultSchema>;
+
+export const FileRecordsSchema = z.object({ items: z.array(FileRecordSchema) });
+export type FileRecords = z.infer<typeof FileRecordsSchema>;

@@ -80,6 +80,34 @@ export async function addFileTag(
   return requireFile(s, r.fileId);
 }
 
+/**
+ * Adds one manual tag to several files, all or nothing: an unknown file fails with `not_found`
+ * and a file that is not completely imported with `validation_failed`, and then no file is tagged.
+ * Returns the records in request order.
+ */
+export async function addFileTags(
+  s: WorkspaceSession,
+  r: { fileIds: readonly string[]; name: string },
+): Promise<FileRecord[]> {
+  const tag = tagName(r.name);
+  return s.database.tags.addToFiles({
+    fileIds: r.fileIds,
+    ...tag,
+    origin: 'manual',
+    newId: s.newId(),
+    now: s.now().toISOString(),
+  });
+}
+
+/** Removes one manual tag from several files, all or nothing like `addFileTags`; AI tags stay. */
+export async function removeFileTags(
+  s: WorkspaceSession,
+  r: { fileIds: readonly string[]; name: string },
+): Promise<FileRecord[]> {
+  const tag = tagName(r.name);
+  return s.database.tags.removeFromFiles({ fileIds: r.fileIds, name: tag.name, origin: 'manual' });
+}
+
 export async function removeFileTag(
   s: WorkspaceSession,
   r: { fileId: string; name: string },

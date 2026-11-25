@@ -35,6 +35,7 @@ import {
   NotFoundError,
   SourceNotReadableError,
   StorageUnreachableError,
+  ValidationFailedError,
 } from '../src/errors.js';
 import type {
   AssetCover,
@@ -269,6 +270,34 @@ class InMemoryTags implements TagRepository {
   async removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void> {
     const i = this.fileAssignments.findIndex((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin);
     if (i >= 0) this.fileAssignments.splice(i, 1);
+  }
+
+  /** Set by the database; the batches check and return file records. */
+  files: InMemoryFiles | null = null;
+
+  /** Throws for an unknown or incomplete file before anything is written, like one transaction. */
+  private async requireCompleteFiles(fileIds: readonly string[]): Promise<void> {
+    for (const id of fileIds) {
+      const rec = this.files!.records.get(id);
+      if (!rec) throw new NotFoundError(`File ${id} does not exist`);
+      if (rec.status !== 'complete') throw new ValidationFailedError(`File ${id} is not completely imported`);
+    }
+  }
+
+  private async recordsOf(fileIds: readonly string[]): Promise<FileRecord[]> {
+    return Promise.all(fileIds.map(async (id) => (await this.files!.get(id))!));
+  }
+
+  async addToFiles(r: { fileIds: readonly string[]; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<FileRecord[]> {
+    await this.requireCompleteFiles(r.fileIds);
+    for (const fileId of r.fileIds) await this.addToFile({ ...r, fileId });
+    return this.recordsOf(r.fileIds);
+  }
+
+  async removeFromFiles(r: { fileIds: readonly string[]; name: string; origin: TagOrigin }): Promise<FileRecord[]> {
+    await this.requireCompleteFiles(r.fileIds);
+    for (const fileId of r.fileIds) await this.removeFromFile({ ...r, fileId });
+    return this.recordsOf(r.fileIds);
   }
 
   async listForAsset(assetId: string): Promise<TagAssignment[]> {
@@ -948,6 +977,11 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;
+
+  constructor() {
+    this.tags.files = this.files;
+  }
+
   /** How often `ensureDerivedData` ran. */
   derivedDataCalls = 0;
 

@@ -2,6 +2,7 @@ import {
   type ErrorCode,
   ipcContract,
   type IpcChannel,
+  type IpcError,
   type IpcResult,
   type WorkspaceSummary,
 } from '@assetforge/contracts';
@@ -120,12 +121,20 @@ export async function dispatch(
     }
     return { ok: true, value: response.data };
   } catch (error) {
-    if (error instanceof AssetForgeError) {
-      return failure(error.code, error.message);
-    }
-    console.error(`IPC handler for ${channel} failed`, error);
-    return internalError();
+    return { ok: false, error: toIpcError(error, channel) };
   }
+}
+
+/**
+ * The error the renderer sees: a domain error keeps its code and message; anything else is
+ * logged here and becomes a generic `internal_error`, so cause messages and paths stay in main.
+ */
+export function toIpcError(error: unknown, channel?: string): IpcError {
+  if (error instanceof AssetForgeError) {
+    return { code: error.code, message: error.message };
+  }
+  console.error(channel === undefined ? 'IPC handler failed' : `IPC handler for ${channel} failed`, error);
+  return { code: 'internal_error', message: 'Unexpected error' };
 }
 
 function failure(code: ErrorCode, message: string): IpcResult<never> {
