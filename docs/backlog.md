@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2 and phase 3a reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -25,6 +25,11 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - The asset list computes progress with two correlated subqueries per row.
 - Nothing guards against editing a built-in workflow template definition without raising its version; such an edit never reaches existing workspaces.
 - Workflow use cases assert that the workflow they just wrote can be read back; a failure there surfaces as `internal_error`.
+- Preview requests are not cancelled when a tile scrolls away; the worker queue is only served newest first.
+- The session failure memory of the preview service also remembers worker timeouts and crashes, and it is unbounded.
+- No index on `asset.cover_file_id`.
+- `setCover` is not a guarded UPDATE and `getAssetDetail` reads in two steps; both are safe only under serialised writes.
+- `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
 
 ## IPC and security
 
@@ -32,6 +37,7 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - Track dialog-granted paths: `files:import` and `workspace:open` currently accept any absolute path sent by the renderer.
 - Permission request handler on the session.
 - `shutting_down` is returned before the sender check.
+- The open-externally block list is a deny-list of 42 extensions and omits other launchable types (e.g. `ws`, `wsc`, `sct`, `pyc`, `pyz`, `msix`, `appx`, `appinstaller`, `psd1`, `xhtml`, `mht`, `mhtml`, `pl`, `rb`, `iso`, `vhd`); open decision.
 
 ## Renderer
 
@@ -51,6 +57,10 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - Two saves of the same workflow step in flight: the response that arrives last wins.
 - A workflow without mandatory steps renders `<progress max="0">`.
 - Removing a workflow clears the local state instead of reloading it.
+- `CoverImage` keeps a failed id per instance, so non-virtualised tiles stay on the format tile after the storage returns until the user navigates away and back.
+- A paged loader re-activated after an inactive settle would keep stale loading entries.
+- Focus is lost when a focused placeholder becomes a Retry button.
+- "Loading…" flashes on every keystroke in the name filter.
 
 ## Code structure
 
@@ -72,8 +82,9 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - The in-memory `assetWorkflows.insert` checks fewer foreign keys than SQLite does.
 - A new template version next to workflows on the old one is only tested on the fakes, not on the SQL adapter.
 - No DOM test for the gallery, the file detail dialog and keyboard navigation (covered only end to end).
-- `check-sharp.mjs` is a manual gate and not part of `pnpm test`.
+- `check-sharp.mjs` is a manual gate and not part of `pnpm test`; it has no worker `exit` listener.
 - No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
+- `noopHost` is duplicated in three test files.
 
 ## Not covered by any automated check
 

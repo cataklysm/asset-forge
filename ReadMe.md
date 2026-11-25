@@ -553,6 +553,8 @@ For reproducible load tests, a synthetic workspace with many files and metadata 
 | 7 – Extensions | 3D preview, 3D providers, additional models, embeddings | Integrate optional features without changing existing assets or other providers. |
 | 8 – Server Mode | API, PostgreSQL, local Docker integration, multi-user concept | Several clients use the same central data set with controlled write access. |
 
+Implemented so far: phase 1, phase 2 (2a asset management, 2b workflows) and phase 3a (gallery, previews, cover, open externally). The rest of phase 3 (tags, search, filters) does not exist yet.
+
 Tests for storage consistency, migrations and job restart begin as early as phase 1. A rudimentary backup concept is required from the first persistent version onward; the full backup/restore workflow and failure-case tests are accepted in phase 6. Phases 7 and 8 are deliberately not part of the initial MVP.
 
 ## 18. Open Decisions
