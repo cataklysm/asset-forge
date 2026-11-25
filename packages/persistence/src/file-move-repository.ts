@@ -1,7 +1,7 @@
 import { InvalidOperationError, NotFoundError, type FileMove, type FileMoveRepository } from '@assetforge/core';
 import { asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { toRecord } from './file-repository.js';
+import { clearCoverOutside, toRecord } from './file-repository.js';
 import { file, fileMove } from './schema.js';
 
 const toMove = (row: typeof fileMove.$inferSelect): FileMove => ({
@@ -31,7 +31,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
       });
     },
     async commit(fileId) {
-      // Throwing inside the transaction rolls back both statements.
+      // Throwing inside the transaction rolls back every statement.
       return db.transaction((tx) => {
         const move = tx.select().from(fileMove).where(eq(fileMove.fileId, fileId)).get();
         if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
@@ -42,6 +42,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
           .returning()
           .get();
         if (!row) throw new NotFoundError(`File ${fileId} does not exist`);
+        clearCoverOutside(tx, fileId, move.targetAssetId);
         tx.delete(fileMove).where(eq(fileMove.fileId, fileId)).run();
         return toRecord(row);
       });

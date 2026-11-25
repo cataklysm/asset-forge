@@ -22,6 +22,7 @@ import type {
   WorkflowTemplate,
   WorkspaceSummary,
 } from '@assetforge/contracts';
+import { automaticCover } from '../src/asset-cover.js';
 import { isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import {
@@ -31,6 +32,7 @@ import {
   StorageUnreachableError,
 } from '../src/errors.js';
 import type {
+  AssetCover,
   AssetQuery,
   AssetRelationRepository,
   AssetRepository,
@@ -208,8 +210,13 @@ class InMemoryStorages implements StorageRepository {
   }
 }
 
+/** Chosen covers, assetId -> fileId; shared so a file placement can clear a cover like the database does. */
+class CoverChoices extends Map<string, string> {}
+
 class InMemoryFiles implements FileRepository {
   readonly records = new Map<string, FileRecord>();
+
+  constructor(private readonly covers: CoverChoices) {}
 
   async insertPending(r: {
     id: string;
@@ -262,6 +269,10 @@ class InMemoryFiles implements FileRepository {
   async setPlacement(id: string, placement: FilePlacement): Promise<FileRecord> {
     const next = { ...this.require(id), ...placement, openable: isOpenable(placement.relativePath) };
     this.records.set(id, next);
+    // Mirrors the database: a file that leaves an asset stops being that asset's chosen cover.
+    for (const [assetId, fileId] of this.covers) {
+      if (fileId === id && assetId !== placement.assetId) this.covers.delete(assetId);
+    }
     return next;
   }
 
@@ -584,7 +595,27 @@ class InMemoryAssets implements AssetRepository {
     private readonly links: AssignmentRows,
     private readonly files: InMemoryFiles,
     private readonly workflows: InMemoryAssetWorkflows,
+    private readonly covers: CoverChoices,
   ) {}
+
+  private coverOf(assetId: string): AssetCover {
+    const chosen = this.covers.get(assetId);
+    if (chosen !== undefined) return { coverFileId: chosen, coverIsChosen: true };
+    const files = [...this.files.records.values()].filter((f) => f.assetId === assetId);
+    return { coverFileId: automaticCover(files), coverIsChosen: false };
+  }
+
+  async getCover(assetId: string): Promise<AssetCover | null> {
+    return this.rows.has(assetId) ? this.coverOf(assetId) : null;
+  }
+
+  async setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<void> {
+    const row = this.rows.get(assetId);
+    if (!row) return;
+    if (fileId === null) this.covers.delete(assetId);
+    else this.covers.set(assetId, fileId);
+    this.rows.set(assetId, { ...row, updatedAt });
+  }
 
   async insert(asset: Asset): Promise<void> {
     this.rows.set(asset.id, asset);
@@ -618,6 +649,7 @@ class InMemoryAssets implements AssetRepository {
       projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
       fileCount: [...this.files.records.values()].filter((f) => f.assetId === a.id).length,
       workflowProgress: this.workflows.progressOfAsset(a.id),
+      coverFileId: this.coverOf(a.id).coverFileId,
     }));
     return { items, total: matching.length };
   }
@@ -713,14 +745,15 @@ class InMemoryRelations implements AssetRelationRepository {
 export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
-  readonly files = new InMemoryFiles();
+  private readonly covers = new CoverChoices();
+  readonly files = new InMemoryFiles(this.covers);
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
   readonly projects = new InMemoryProjects(this.links);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows);
+  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;

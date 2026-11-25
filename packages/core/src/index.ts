@@ -1,3 +1,4 @@
+export * from './asset-cover.js';
 export * from './asset-files.js';
 export * from './asset-types.js';
 export * from './assignments.js';
