@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1 and phase 2a reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -20,6 +20,10 @@ Findings from the phase 1 and phase 2a reviews that were deliberately not fixed.
 - Pre-migration database backup; migrations path for the packaged app.
 - Hashing moves off the main event loop once jobs exist.
 - The built-in asset type definitions generate fresh UUIDs on every open (only used when a type is missing).
+- `createAsset` inserts the asset and then starts its default workflow; the two are not atomic, so a failure in between leaves an asset without the workflow of its type.
+- A built-in template whose version row is missing is only repaired the next time the workspace is opened.
+- The asset list computes progress with two correlated subqueries per row.
+- Workflow use cases assert that the workflow they just wrote can be read back; a failure there surfaces as `internal_error`.
 
 ## IPC and security
 
@@ -40,6 +44,9 @@ Findings from the phase 1 and phase 2a reviews that were deliberately not fixed.
 - `formatBytes(1048575)` yields `1024.0 KiB`; no guard for NaN or negative values.
 - Asset detail groups files by role per loaded page; with more than one page a role shows up incompletely on several pages.
 - A file whose placement failed counts as failed on the asset screen although it was imported into the inbox (the inbox screen counts it as imported).
+- Two saves of the same workflow step in flight: the response that arrives last wins.
+- A workflow without mandatory steps renders `<progress max="0">`.
+- Removing a workflow clears the local state instead of reloading it.
 
 ## Code structure
 
@@ -57,7 +64,9 @@ Findings from the phase 1 and phase 2a reviews that were deliberately not fixed.
 - The in-memory fakes sort with `localeCompare`, SQLite with `lower()`; the orders can differ for non-ASCII names.
 - The IPC test hard-codes the number of channels; the absolute-path scan in the error tests only looks for the native separator.
 - The `EACCES` test of `writeStream` does not assert that the target is absent.
+- The in-memory `assetWorkflows.insert` checks fewer foreign keys than SQLite does.
+- No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
 
 ## Not covered by any automated check
 
-Native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `storage_unreachable`, `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation of the screens.
+The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `storage_unreachable`, `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation of the screens.

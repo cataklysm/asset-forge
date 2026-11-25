@@ -144,6 +144,15 @@ Steps can be mandatory or optional, skipped, reopened or worked on in parallel. 
 
 Workflow templates and their versions are kept separate from concrete workflow instances. A later change to a template must not silently alter running or completed workflows. Project-specific approvals remain independent of the global asset workflow; project-specific variants can be modeled as linked assets.
 
+Implemented so far (phase 2b):
+
+- **Step states:** `not_started`, `in_progress`, `done`, `skipped`. Only optional steps can be skipped. Any step can be reopened; steps have no enforced order, so they can be worked on in parallel. A step stores when it was completed; reopening clears that. Each step has free-text notes.
+- **Progress** is the number of done mandatory steps out of all mandatory steps. It is shown on the asset and in the asset list. Asset status and step states never change each other.
+- **Built-in templates** (Character, Landscape, Object, Material, Basic) are defined in code with a stable key and a version number. Opening a workspace adds missing templates and missing versions and sets the default template of asset types that have none; existing rows are never changed. A changed template therefore ships as a new version number in code.
+- **Instances** refer to one template version and get their steps copied from it when the workflow starts, so later template versions do not touch them. An asset has at most one workflow. A new asset starts the default workflow of its type; a workflow can also be started from any template and removed again (with confirmation), which deletes its step states and notes but nothing else.
+
+Not built yet: a template editor and user-defined templates, moving a running workflow to a newer template version, result files assigned to steps, and rules that complete a step automatically.
+
 ## 6. AI-Assisted Analysis and Tagging
 
 Image analysis is connected through an interchangeable vision provider. The first provider is intended to be **Ollama with a vision-capable model**. Ollama can be used both through a local Docker service and through a configurable external instance. Pure asset management does not require a running Ollama service.
@@ -334,7 +343,7 @@ The following model is a starting point and not a finished SQL schema. IDs are m
 | Job / JobAttempt | Persistent tasks, execution attempts and external job IDs |
 | ActivityEvent | Domain change history |
 
-Implemented so far (phases 1 and 2a), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types, no metadata schema or default workflow yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum) and `file_move` (move intents, §9.4). Everything else in the table above does not exist yet.
+Implemented so far (phases 1 and 2), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types with a default workflow template, no metadata schema yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum), `file_move` (move intents, §9.4), `workflow_template`, `workflow_template_version` and `workflow_step_definition` (the WorkflowTemplate / WorkflowStepDefinition entities), and `asset_workflow` and `asset_workflow_step` (one workflow per asset, steps copied from a template version). Everything else in the table above does not exist yet.
 
 Particularly important indexes: project assignments, asset type and status, file-to-asset assignment, tags, checksums, job status and job start time. Project-asset assignments and normalized tag assignments must not contain unintended duplicates. Type-dependent metadata can additionally be stored as validated JSON; regularly filtered core fields remain relational columns.
 
