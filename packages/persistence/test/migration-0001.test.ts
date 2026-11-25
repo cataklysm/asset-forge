@@ -125,8 +125,11 @@ describe('migration 0001', () => {
         role: null,
         originalName: f.original_name,
         relativePath: f.relative_path,
+        mimeType: f.mime_type,
+        sizeBytes: f.size_bytes,
         sha256: f.sha256,
         status: f.status,
+        error: f.error,
         importedAt: f.imported_at,
       });
     }

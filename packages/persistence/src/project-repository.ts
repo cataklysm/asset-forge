@@ -2,6 +2,7 @@ import type { Project, ProjectList, ProjectSummary } from '@assetforge/contracts
 import type { ProjectRepository } from '@assetforge/core';
 import { asc, count, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { qualified } from './qualified.js';
 import { project, projectAsset } from './schema.js';
 
 const toProject = (row: typeof project.$inferSelect): Project => ({
@@ -51,7 +52,7 @@ export function createProjectRepository(db: BetterSQLite3Database): ProjectRepos
               status: project.status,
               createdAt: project.createdAt,
               updatedAt: project.updatedAt,
-              assetCount: sql<number>`(select count(*) from ${projectAsset} where ${projectAsset.projectId} = ${project.id})`,
+              assetCount: sql<number>`(select count(*) from ${projectAsset} where ${qualified(projectAsset, projectAsset.projectId)} = ${qualified(project, project.id)})`,
             })
             .from(project)
             .orderBy(sql`lower(${project.name})`, asc(project.id))

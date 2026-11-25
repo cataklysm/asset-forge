@@ -74,9 +74,9 @@ describe('NameInputSchema', () => {
 
 describe('PageRequestSchema', () => {
   it('rejects limit 0, limit 201, a negative offset and fractions', () => {
-    expect(PageRequestSchema.safeParse({ limit: 1, offset: 0, scope: { kind: 'all' } }).success).toBe(true);
-    expect(PageRequestSchema.safeParse({ limit: 0, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
-    expect(PageRequestSchema.safeParse({ limit: 201, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 1, offset: 0 }).success).toBe(true);
+    expect(PageRequestSchema.safeParse({ limit: 0, offset: 0 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 201, offset: 0 }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 10, offset: -1 }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 1.5, offset: 0 }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 10, offset: 0.5 }).success).toBe(false);
