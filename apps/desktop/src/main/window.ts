@@ -1,19 +1,11 @@
-import { pathToFileURL } from 'node:url';
 import { BrowserWindow } from 'electron';
+import { getAppUrl, isAppUrl, type AppUrlOptions } from './app-url.js';
 import { createLoadFailureHandler } from './load-failure.js';
 
-export interface MainWindowOptions {
+export interface MainWindowOptions extends AppUrlOptions {
   preloadPath: string;
-  /** Dev server URL (`ELECTRON_RENDERER_URL`) or `undefined` to load the built renderer. */
-  devServerUrl: string | undefined;
-  rendererHtmlPath: string;
   /** Called when the initial load of the app page fails; the window cannot show anything useful. */
   onLoadFailure(error: unknown): void;
-}
-
-/** The URL the main window loads; navigation is only allowed within it. */
-export function getAppUrl(opts: Pick<MainWindowOptions, 'devServerUrl' | 'rendererHtmlPath'>): string {
-  return opts.devServerUrl ?? pathToFileURL(opts.rendererHtmlPath).href;
 }
 
 export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
@@ -51,18 +43,4 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     : window.loadFile(opts.rendererHtmlPath);
   loading.catch((error: unknown) => loadFailure.rejected(error));
   return window;
-}
-
-/** Same origin for http(s); for the built `file:` renderer, the same document only. */
-export function isAppUrl(target: string, appUrl: string): boolean {
-  let next: URL;
-  let app: URL;
-  try {
-    next = new URL(target);
-    app = new URL(appUrl);
-  } catch {
-    return false;
-  }
-  if (app.protocol === 'file:') return next.protocol === 'file:' && next.pathname === app.pathname;
-  return next.origin === app.origin;
 }

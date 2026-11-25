@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isAppUrl as isRealAppUrl } from '../src/main/app-url.js';
 import { isTrustedSender, type SenderEvent, type SenderWindow } from '../src/main/sender.js';
 
 const APP_URL = 'http://localhost:5173/';
@@ -44,5 +45,13 @@ describe('isTrustedSender', () => {
   it('rejects a foreign URL in the top frame', () => {
     const { window, event } = setup('https://example.com/');
     expect(isTrustedSender(event, window, isAppUrl)).toBe(false);
+  });
+
+  it('applies the real app-URL rule', () => {
+    const rule = (url: string) => isRealAppUrl(url, APP_URL);
+    const same = setup('http://localhost:5173/files#x');
+    expect(isTrustedSender(same.event, same.window, rule)).toBe(true);
+    const foreign = setup('http://localhost:5174/');
+    expect(isTrustedSender(foreign.event, foreign.window, rule)).toBe(false);
   });
 });

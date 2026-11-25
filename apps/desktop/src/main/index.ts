@@ -10,8 +10,9 @@ import {
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
 import { createWorkspaceManager } from './composition.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
+import { getAppUrl, isAppUrl } from './app-url.js';
 import { isTrustedSender } from './sender.js';
-import { createMainWindow, getAppUrl, isAppUrl, type MainWindowOptions } from './window.js';
+import { createMainWindow, type MainWindowOptions } from './window.js';
 
 declare const __ASSETFORGE_DEV_MIGRATIONS_FOLDER__: string | null;
 
