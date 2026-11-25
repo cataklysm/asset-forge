@@ -51,6 +51,8 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
               key={target.name}
               type="button"
               className={BUTTON}
+              disabled={busy}
+              title={busy ? "Import in progress" : undefined}
               aria-current={sectionOf(view) === target.name ? 'page' : undefined}
               onClick={() => setView(target)}
             >
@@ -61,6 +63,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
             type="button"
             className={BUTTON}
             disabled={busy}
+            title={busy ? "Import in progress" : undefined}
             onClick={() => void closeWorkspace()}
           >
             Close workspace
