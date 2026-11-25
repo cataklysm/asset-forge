@@ -9,12 +9,20 @@ import type { Plugin } from 'vite';
 const WORKSPACE_PACKAGES = [
   '@assetforge/contracts',
   '@assetforge/core',
+  '@assetforge/media',
   '@assetforge/persistence',
   '@assetforge/storage',
 ];
 
 const PERSISTENCE_MIGRATIONS = fileURLToPath(
   new URL('../../packages/persistence/migrations', import.meta.url),
+);
+
+const MAIN_ENTRY = fileURLToPath(new URL('src/main/index.ts', import.meta.url));
+
+// Worker thread entry; built next to index.js as out/main/preview-worker.js.
+const PREVIEW_WORKER_ENTRY = fileURLToPath(
+  new URL('../../packages/media/src/preview-worker.ts', import.meta.url),
 );
 
 /** Copies the SQL migrations next to the built main bundle (`out/main/migrations`). */
@@ -39,8 +47,11 @@ export default defineConfig(({ command }) => ({
     },
     plugins: command === 'build' ? [copyMigrations()] : [],
     build: {
-      // better-sqlite3 is a native module and must be loaded from node_modules at runtime.
-      externalizeDeps: { exclude: WORKSPACE_PACKAGES, include: ['better-sqlite3'] },
+      // Native modules (better-sqlite3, sharp) must be loaded from node_modules at runtime.
+      externalizeDeps: { exclude: WORKSPACE_PACKAGES, include: ['better-sqlite3', 'sharp'] },
+      rolldownOptions: {
+        input: { index: MAIN_ENTRY, 'preview-worker': PREVIEW_WORKER_ENTRY },
+      },
     },
   },
   preload: {

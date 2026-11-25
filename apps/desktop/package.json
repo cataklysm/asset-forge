@@ -14,11 +14,13 @@
   "dependencies": {
     "@assetforge/contracts": "workspace:*",
     "@assetforge/core": "workspace:*",
+    "@assetforge/media": "workspace:*",
     "@assetforge/persistence": "workspace:*",
     "@assetforge/storage": "workspace:*",
     "better-sqlite3": "^13.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sharp": "^0.35.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
