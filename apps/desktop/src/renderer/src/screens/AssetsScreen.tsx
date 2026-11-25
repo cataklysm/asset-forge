@@ -9,8 +9,9 @@ import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { label } from '../labels';
 import {
-  filterKey,
+  listKey,
   readView,
+  toAssetQuery,
   writeView,
   type AssetFilters,
   type AssetListState,
@@ -52,7 +53,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   const { filters } = state;
   const trimmed: AssetFilters = { ...filters, query: filters.query.trim() };
-  const key = filterKey(trimmed);
+  const key = listKey(trimmed);
   const viewKey = `${key}|${view}`;
 
   // Where the next mounted view starts; read once by each view when it mounts.
@@ -66,14 +67,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   const fetchPage = useCallback(
     (offset: number, limit: number) =>
-      call('assets:list', {
-        limit,
-        offset,
-        ...(trimmed.typeId !== '' && { typeId: trimmed.typeId }),
-        ...(trimmed.status !== '' && { status: AssetStatusSchema.parse(trimmed.status) }),
-        ...(trimmed.projectId !== '' && { projectId: trimmed.projectId }),
-        ...(trimmed.query !== '' && { query: trimmed.query }),
-      }),
+      call('assets:list', { limit, offset, ...toAssetQuery(trimmed) }),
     // `key` encodes every filter value used above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key],
@@ -112,7 +106,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   function setFilter(change: Partial<AssetFilters>) {
     restore.current = { scrollOffset: 0, index: null, focus: false };
-    onStateChange({ filters: { ...filters, ...change }, scrollOffset: 0, openedIndex: null });
+    onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0, openedIndex: null });
   }
 
   function switchView(next: AssetView) {
@@ -231,7 +225,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           className={INPUT}
           aria-label="Filter by status"
           value={filters.status}
-          onChange={(e) => setFilter({ status: e.target.value })}
+          onChange={(e) => setFilter({ status: STATUSES.find((s) => s === e.target.value) ?? '' })}
         >
           <option value="">All statuses</option>
           {STATUSES.map((s) => (

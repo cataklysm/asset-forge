@@ -35,6 +35,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
     filters: NO_FILTERS,
     scrollOffset: 0,
     openedIndex: null,
+    selectedId: null,
   });
   const [projectsOffset, setProjectsOffset] = useState(0);
   const [inboxOffset, setInboxOffset] = useState(0);

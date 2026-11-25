@@ -4,13 +4,14 @@ import { PagedLoader } from '../paged-loader';
 
 /**
  * Loads the pages of a list that are wanted right now, at most `MAX_IN_FLIGHT` at a time
- * (see `PagedLoader`). A new `key` starts from an empty state; earlier answers are ignored.
+ * (see `PagedLoader`). After a change of `key` the previous results stay in `state` while
+ * `pending`, until page 0 of the new key has settled; earlier answers are ignored.
  */
 export function usePagedList<T>(
   key: string,
   fetchPage: (offset: number, limit: number) => Promise<{ items: T[]; total: number }>,
   wantedPages: readonly number[],
-): { state: PagedState<T>; retry(page: number): void } {
+): { state: PagedState<T>; pending: boolean; retry(page: number): void; loadThrough(count: number): Promise<void> } {
   const [version, setVersion] = useState(0);
   const fetchRef = useRef(fetchPage);
   fetchRef.current = fetchPage;
@@ -20,6 +21,7 @@ export function usePagedList<T>(
     onChange: () => setVersion((n) => n + 1),
   });
   const loader = loaderRef.current;
+  // A new key requests its page 0 at once, through `fetchRef`, which already holds this render's fetcher.
   loader.setKey(key);
 
   // Inactive after unmount: no requests, no state updates.
@@ -36,5 +38,6 @@ export function usePagedList<T>(
   }, [loader, key, wantedKey, version]);
 
   const retry = useCallback((page: number) => loader.retry(page), [loader]);
-  return { state: loader.state, retry };
+  const loadThrough = useCallback((count: number) => loader.loadThrough(count), [loader]);
+  return { state: loader.displayed, pending: loader.pending, retry, loadThrough };
 }
