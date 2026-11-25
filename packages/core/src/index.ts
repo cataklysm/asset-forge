@@ -12,4 +12,5 @@ export * from './relations.js';
 export type * from './ports.js';
 export * from './serial-queue.js';
 export type * from './session.js';
+export * from './workflow-templates.js';
 export * from './workspace-manager.js';

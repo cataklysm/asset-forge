@@ -23,6 +23,7 @@ import {
 } from './errors.js';
 import { listFiles, recoverFileMoves, relocateFile } from './asset-files.js';
 import { ensureBuiltInAssetTypes } from './asset-types.js';
+import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
@@ -164,6 +165,11 @@ export class WorkspaceManager {
         createdAt: this.host.now().toISOString(),
       });
       await ensureBuiltInAssetTypes({ database, newId: () => this.host.newId() });
+      await ensureBuiltInWorkflowTemplates({
+        database,
+        newId: () => this.host.newId(),
+        now: () => this.host.now(),
+      });
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
