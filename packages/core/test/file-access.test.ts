@@ -41,6 +41,12 @@ describe('resolvePreviewSource', () => {
     expect(await resolvePreviewSource(session, UNKNOWN_ID)).toBeNull();
   });
 
+  it('propagates StorageUnreachableError when the storage is unreachable', async () => {
+    const { session, storage, file } = await setup();
+    storage.reachable = false;
+    await expect(resolvePreviewSource(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+  });
+
   it('ignores non-previewable files and rows without a checksum', async () => {
     const { session, db, file } = await setup();
     db.files.records.set(file.id, { ...file, mimeType: 'application/pdf' });

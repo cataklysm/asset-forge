@@ -24,7 +24,12 @@ import type {
 } from '@assetforge/contracts';
 import { isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
-import { InvalidOperationError, NotFoundError, SourceNotReadableError, StorageUnreachableError } from '../src/errors.js';
+import {
+  InvalidOperationError,
+  NotFoundError,
+  SourceNotReadableError,
+  StorageUnreachableError,
+} from '../src/errors.js';
 import type {
   AssetQuery,
   AssetRelationRepository,

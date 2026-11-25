@@ -60,7 +60,7 @@ async function realpathOfDeepestAncestor(p: string): Promise<string> {
       if (!isNotFound(err)) throw err;
       try {
         await fs.lstat(current);
-        throw new PathEscapeError(`Path crosses a dangling link: ${current}`);
+        throw new PathEscapeError('Path crosses a dangling link');
       } catch (lstatErr) {
         if (lstatErr instanceof PathEscapeError) throw lstatErr;
         if (!isNotFound(lstatErr)) throw lstatErr;

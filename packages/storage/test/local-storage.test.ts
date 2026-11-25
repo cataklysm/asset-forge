@@ -356,4 +356,13 @@ describe('absolutePath', () => {
     await fs.symlink(outside, path.join(root, 'inbox', 'link'), 'junction');
     await expect(storage.absolutePath('inbox/link/a.png')).rejects.toBeInstanceOf(PathEscapeError);
   });
+
+  it('rejects a dangling link without leaking the root path', async () => {
+    await storage.ensureLayout();
+    await fs.symlink(path.join(tmp, 'nowhere'), path.join(root, 'inbox', 'dangling'), 'junction');
+    const error = await storage.absolutePath('inbox/dangling/a.png').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PathEscapeError);
+    expect((error as Error).message).not.toContain(root);
+    expect((error as Error).message).not.toContain(tmp);
+  });
 });
