@@ -546,3 +546,83 @@ describe('phase 2b acceptance', () => {
     }
   });
 });
+
+describe('phase 3b acceptance', () => {
+  const page = { limit: 50, offset: 0 };
+
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    }, noopHost);
+    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await dispatch(handlers, channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+  }
+
+  it('finds an asset by name, file name, tags and file kind, also after a restart', async () => {
+    const sources = join(base, 'sources');
+    const swordPath = join(sources, 'sword.png');
+    const notesPath = join(sources, 'notes.txt');
+    const exePath = join(sources, 'Setup.exe');
+    await writeFile(swordPath, 'sword');
+    await writeFile(notesPath, 'notes');
+    await writeFile(exePath, 'MZ');
+
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let assetId: string;
+    try {
+      const call = handlersFor(first);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const types = await call('assetTypes:list', {});
+      const typeId = types.find((t) => t.key === 'prop')?.id ?? types[0]!.id;
+      const asset = await call('assets:create', { name: 'Rusty blade', typeId });
+      assetId = asset.id;
+      const results = await call('files:import', {
+        sourcePaths: [swordPath, notesPath],
+        target: { assetId, role: 'reference' },
+      });
+      expect(results.map((r) => r.file?.status)).toEqual(['complete', 'complete']);
+      const sword = results[0]!.file!;
+
+      await call('assets:addTag', { assetId, name: 'metal' });
+      await call('files:addTag', { fileId: sword.id, name: 'sci-fi' });
+
+      const ids = async (r: Partial<IpcRequest<'assets:list'>>) =>
+        (await call('assets:list', { ...page, ...r })).items.map((a) => a.id);
+      expect(await ids({ query: 'rust' })).toEqual([assetId]);
+      expect(await ids({ query: 'sword' })).toEqual([assetId]);
+      expect(await ids({ query: 'sci' })).toEqual([assetId]);
+      expect(await ids({ tagNames: ['metal', 'sci-fi'] })).toEqual([assetId]);
+      expect(await ids({ tagNames: ['metal', 'sci-fi'], fileKind: 'image', typeId })).toEqual([assetId]);
+      expect(await ids({ fileKind: 'model' })).toEqual([]);
+
+      await call('assets:update', { id: assetId, patch: { name: 'Old axe' } });
+      expect(await ids({ query: 'axe' })).toEqual([assetId]);
+      expect(await ids({ query: 'rusty' })).toEqual([]);
+
+      const [refused] = await call('files:import', { sourcePaths: [exePath] });
+      expect(refused!.file).toBeNull();
+      expect(refused!.error).toEqual(expect.any(String));
+      expect(refused!.error).not.toContain(base);
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(second);
+      await call('workspace:open', { rootPath: workspaceRoot });
+      const ids = async (r: Partial<IpcRequest<'assets:list'>>) =>
+        (await call('assets:list', { ...page, ...r })).items.map((a) => a.id);
+      expect(await ids({ query: 'axe' })).toEqual([assetId]);
+      expect(await ids({ tagNames: ['metal'] })).toEqual([assetId]);
+    } finally {
+      await second.close();
+    }
+  });
+});

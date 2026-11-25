@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ErrorCodeSchema } from './errors';
+import { TagSuggestionSchema } from './tags';
 import {
   FileKindSchema,
   FileListSchema,
@@ -182,6 +183,26 @@ export const ipcContract = {
   'assets:setCover': {
     request: SetCoverRequestSchema,
     response: AssetDetailSchema,
+  },
+  'tags:suggest': {
+    request: z.object({ prefix: z.string().max(200), limit: z.number().int().min(1).max(50) }),
+    response: z.array(TagSuggestionSchema),
+  },
+  'assets:addTag': {
+    request: z.object({ assetId: IdSchema, name: z.string().max(200) }),
+    response: AssetDetailSchema,
+  },
+  'assets:removeTag': {
+    request: z.object({ assetId: IdSchema, name: z.string().max(200) }),
+    response: AssetDetailSchema,
+  },
+  'files:addTag': {
+    request: z.object({ fileId: IdSchema, name: z.string().max(200) }),
+    response: FileRecordSchema,
+  },
+  'files:removeTag': {
+    request: z.object({ fileId: IdSchema, name: z.string().max(200) }),
+    response: FileRecordSchema,
   },
   'files:openExternal': {
     request: z.object({ fileId: IdSchema }),

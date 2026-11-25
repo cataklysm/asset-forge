@@ -282,3 +282,16 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName(String.fromCodePoint(0x1f600).repeat(65))).toBeNull();
   });
 });
+
+describe('tag channels', () => {
+  it('bounds the suggestion limit and the tag name length', () => {
+    const suggest = ipcContract['tags:suggest'].request;
+    expect(suggest.safeParse({ prefix: '', limit: 1 }).success).toBe(true);
+    expect(suggest.safeParse({ prefix: '', limit: 50 }).success).toBe(true);
+    expect(suggest.safeParse({ prefix: '', limit: 0 }).success).toBe(false);
+    expect(suggest.safeParse({ prefix: '', limit: 51 }).success).toBe(false);
+    expect(suggest.safeParse({ prefix: '', limit: 1.5 }).success).toBe(false);
+    const id = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
+    expect(ipcContract['assets:addTag'].request.safeParse({ assetId: id, name: 'x'.repeat(201) }).success).toBe(false);
+  });
+});
