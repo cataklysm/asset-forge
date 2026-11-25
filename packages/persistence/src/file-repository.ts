@@ -33,7 +33,7 @@ export function clearCoverOutside(tx: Pick<BetterSQLite3Database, 'update'>, fil
     .run();
 }
 
-const scopeMatches =(scope: FileScope) => {
+const scopeMatches = (scope: FileScope) => {
   switch (scope.kind) {
     case 'all':
       return undefined;

@@ -428,14 +428,23 @@ function FileControls(props: {
 }) {
   const { file, assetId, assetName, onChanged } = props;
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Synchronous guard: a second activation before the re-render must not send a second request.
+  const busyRef = useRef(false);
 
   async function run(action: () => Promise<unknown>) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setError(null);
     try {
       await action();
       onChanged();
     } catch (e) {
       setError(describeError(e));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
   }
 
@@ -443,6 +452,7 @@ function FileControls(props: {
     <>
       <select
         className={INPUT}
+        disabled={busy}
         aria-label={`Role of ${file.originalName}`}
         value={file.role ?? 'other'}
         onChange={(e) =>
@@ -464,6 +474,7 @@ function FileControls(props: {
       <button
         type="button"
         className={BUTTON}
+        disabled={busy}
         aria-label={`Detach ${file.originalName} from ${assetName}`}
         title="The file is kept and moves to the inbox"
         onClick={() => void run(() => call('files:unassign', { fileId: file.id }))}

@@ -78,6 +78,12 @@ describe('acceptPage', () => {
     expect(slotAt(s, 130)).toEqual({ kind: 'placeholder' });
   });
 
+  it('drops pages beyond the total by the given page size', () => {
+    const s = acceptPage(markLoading(emptyPaged<number>('k'), [1, 2, 3]), 'k', 0, [0, 1, 2], 25, 10);
+    expect([...s.pages.keys()].sort()).toEqual([0, 1, 2]);
+    expect(acceptPage(emptyPaged<number>('k'), 'k', 3, [30], 25, 10).pages.has(3)).toBe(false);
+  });
+
   it('handles a total of 0', () => {
     const s = acceptPage(stateWithLoading([0]), 'k', 0, [], 0);
     expect(s.total).toBe(0);
@@ -92,6 +98,17 @@ describe('rejectPage / retryPage', () => {
     expect(rejectPage(s, 'old', 1)).toBe(s);
     const loaded = stateWithLoaded([1]);
     expect(rejectPage(loaded, 'k', 1)).toBe(loaded);
+  });
+
+  it('records no failed entry for a page beyond the total', () => {
+    const known = acceptPage(emptyPaged<number>('k'), 'k', 0, items(0), 70);
+    const beyond = rejectPage(known, 'k', 2);
+    expect(beyond.pages.has(2)).toBe(false);
+    expect(slotAt(beyond, 125)).toEqual({ kind: 'placeholder' });
+    const loadingBeyond = rejectPage(markLoading(known, [2]), 'k', 2);
+    expect(loadingBeyond.pages.has(2)).toBe(false);
+    expect(rejectPage(known, 'k', 3, 10).pages.has(3)).toBe(true);
+    expect(rejectPage(known, 'k', 7, 10).pages.has(7)).toBe(false);
   });
 
   it('marks failed and retry clears only failed pages', () => {

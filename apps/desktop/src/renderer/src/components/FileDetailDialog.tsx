@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { formatBytes, formatDateTime } from '../format';
@@ -18,6 +18,7 @@ interface Props {
 
 export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const headingId = useId();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -45,7 +46,7 @@ export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClo
   return (
     <dialog
       ref={ref}
-      aria-label={file.originalName}
+      aria-labelledby={headingId}
       onClose={onClose}
       className={`m-auto w-[min(92vw,44rem)] rounded border bg-white p-4 text-slate-900 backdrop:bg-black/50 dark:bg-slate-900 dark:text-slate-100 ${BORDER}`}
     >
@@ -64,7 +65,7 @@ export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClo
             {complete ? formatLabel(file.originalName) : label(file.status)}
           </div>
         )}
-        <h2 className="break-all text-lg font-semibold">{file.originalName}</h2>
+        <h2 id={headingId} className="break-all text-lg font-semibold">{file.originalName}</h2>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className={MUTED}>Role</dt>
           <dd>{file.role === null ? '–' : label(file.role)}</dd>

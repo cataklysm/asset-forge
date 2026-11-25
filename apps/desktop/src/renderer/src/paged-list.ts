@@ -67,22 +67,33 @@ export function acceptPage<T>(
   page: number,
   items: readonly T[],
   total: number,
+  pageSize: number = PAGE_SIZE,
 ): PagedState<T> {
   if (key !== state.key) return state;
   const next = new Map<number, PageEntry<T>>();
   for (const [p, entry] of state.pages) {
     // Pages that start beyond the (possibly shrunk) total no longer exist.
-    if (p * PAGE_SIZE < total) next.set(p, entry);
+    if (p * pageSize < total) next.set(p, entry);
   }
-  if (page * PAGE_SIZE < total) next.set(page, { status: 'loaded', items });
+  if (page * pageSize < total) next.set(page, { status: 'loaded', items });
   return { ...state, total, pages: next };
 }
 
-export function rejectPage<T>(state: PagedState<T>, key: string, page: number): PagedState<T> {
+/** Marks `page` failed; a page that starts beyond the known total does not exist and is dropped instead. */
+export function rejectPage<T>(
+  state: PagedState<T>,
+  key: string,
+  page: number,
+  pageSize: number = PAGE_SIZE,
+): PagedState<T> {
   if (key !== state.key) return state;
   if (state.pages.get(page)?.status === 'loaded') return state;
   const next = new Map(state.pages);
-  next.set(page, { status: 'failed' });
+  if (state.total !== null && page * pageSize >= state.total) {
+    if (!next.delete(page)) return state;
+  } else {
+    next.set(page, { status: 'failed' });
+  }
   return { ...state, pages: next };
 }
 

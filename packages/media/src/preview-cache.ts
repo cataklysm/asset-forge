@@ -159,10 +159,10 @@ async function removeIfPresent(path: string): Promise<boolean> {
 
 /**
  * Walks `dir` recursively (including its two-character shard directories) as one LRU set.
- * Deletes temporary files older than one
- * hour, then, if the remaining entries exceed `limitBytes`, deletes the least recently used
- * (oldest mtime) until the total is at most `limitBytes * targetRatio`. Temporary files never
- * count towards the total. Files that vanish during the walk are skipped.
+ * Deletes temporary files older than one hour, then, if the remaining entries exceed
+ * `limitBytes`, deletes the least recently used (oldest mtime) until the total is at most
+ * `limitBytes * targetRatio`. Temporary files never count towards the total. Files that vanish
+ * during the walk are skipped.
  */
 export async function evictLeastRecentlyUsed(
   dir: string,

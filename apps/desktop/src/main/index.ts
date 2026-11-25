@@ -28,8 +28,10 @@ const outMainDir = dirname(fileURLToPath(import.meta.url));
 // data directory does not depend on the package name.
 app.setName('AssetForge');
 
-// Privileges must be registered before the app is ready: `standard` gives preview URLs a host,
-// `secure` lets the renderer's CSP allow them.
+// Privileges must be registered before the app is ready. `standard` makes preview URLs parse like
+// http URLs (host, path, canonical form); `secure` treats the scheme as a secure origin, so loading
+// previews into the page is not mixed content. The renderer's CSP admits them through its explicit
+// `img-src assetforge-media:` entry, not through either privilege.
 protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true } }]);
 
 // One writing client per machine: a second instance hands over to the first and quits.
