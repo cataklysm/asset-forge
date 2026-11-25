@@ -1,21 +1,47 @@
-import { useState, type FormEvent } from 'react';
-import { AssetStatusSchema } from '@assetforge/contracts';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { AssetStatusSchema, type AssetSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { Pager } from '../components/Pager';
+import { AssetGrid, type AssetViewProps } from '../components/AssetGrid';
+import { AssetTable } from '../components/AssetTable';
+import { pagesForRows } from '../gallery';
+import { usePagedList } from '../hooks/usePagedList';
 import { useLoad } from '../hooks/useLoad';
-import { formatProgress } from '../progress';
+import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { label } from '../labels';
-import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
+import {
+  filterKey,
+  readView,
+  writeView,
+  type AssetFilters,
+  type AssetListState,
+  type AssetView,
+} from '../list-state';
+import { PAGE_SIZE } from '../paged-list';
+import { ALERT, BUTTON, INPUT, MUTED } from '../ui';
 
-const PAGE_SIZE = 50;
 const STATUSES = AssetStatusSchema.options;
 
-export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
-  const [offset, setOffset] = useState(0);
-  const [typeId, setTypeId] = useState('');
-  const [status, setStatus] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [nameFilter, setNameFilter] = useState('');
+const VIEWS = [
+  { view: 'grid', title: 'Grid', tooltip: 'Show as tiles' },
+  { view: 'table', title: 'Table', tooltip: 'Show as table' },
+] satisfies { view: AssetView; title: string; tooltip: string }[];
+
+function deviceStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+interface Props {
+  state: AssetListState;
+  onStateChange(next: AssetListState): void;
+  onOpen(id: string): void;
+}
+
+export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
+  const [view, setView] = useState<AssetView>(() => readView(deviceStorage()));
   const [newName, setNewName] = useState('');
   const [newTypeId, setNewTypeId] = useState('');
   const [creating, setCreating] = useState(false);
@@ -23,26 +49,98 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
 
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
-  const list = useLoad(
-    () =>
+
+  const { filters } = state;
+  const trimmed: AssetFilters = { ...filters, nameContains: filters.nameContains.trim() };
+  const key = filterKey(trimmed);
+  const viewKey = `${key}|${view}`;
+
+  // Where the next mounted view starts; read once by each view when it mounts.
+  const restore = useRef<ViewRestore>({
+    scrollOffset: state.scrollOffset,
+    index: state.openedIndex,
+    focus: state.openedIndex !== null,
+  });
+  const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
+  const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
+
+  const fetchPage = useCallback(
+    (offset: number, limit: number) =>
       call('assets:list', {
-        limit: PAGE_SIZE,
+        limit,
         offset,
-        ...(typeId !== '' && { typeId }),
-        ...(status !== '' && { status: AssetStatusSchema.parse(status) }),
-        ...(projectId !== '' && { projectId }),
-        ...(nameFilter.trim() !== '' && { nameContains: nameFilter.trim() }),
+        ...(trimmed.typeId !== '' && { typeId: trimmed.typeId }),
+        ...(trimmed.status !== '' && { status: AssetStatusSchema.parse(trimmed.status) }),
+        ...(trimmed.projectId !== '' && { projectId: trimmed.projectId }),
+        ...(trimmed.nameContains !== '' && { nameContains: trimmed.nameContains }),
       }),
-    [offset, typeId, status, projectId, nameFilter],
+    // `key` encodes every filter value used above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
+  );
+
+  // Until the total is known only the page with the item to restore is needed; then the pages
+  // of the rows the mounted view renders. Rows reported by another view or filter do not count.
+  const bootPage = Math.floor((restore.current.index ?? 0) / PAGE_SIZE);
+  const [wanted, setWanted] = useState<readonly number[]>([bootPage]);
+  const paged = usePagedList<AssetSummary>(key, fetchPage, wanted);
+  const total = paged.state.total;
+  const nextWanted =
+    total === null
+      ? [bootPage]
+      : rows !== null && rows.viewKey === viewKey
+        ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
+        : [];
+  if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
+
+  // Leaving the screen another way than by opening an asset still keeps the position.
+  const opened = useRef(false);
+  const latest = useRef({ state, onStateChange, viewKey });
+  latest.current = { state, onStateChange, viewKey };
+  useEffect(
+    () => () => {
+      const current = latest.current;
+      if (opened.current || position.current?.viewKey !== current.viewKey) return;
+      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset, openedIndex: null });
+    },
+    [],
   );
 
   const typeItems = types.data ?? [];
   const typeName = (id: string) => typeItems.find((t) => t.id === id)?.name ?? '–';
   const effectiveNewType = newTypeId !== '' ? newTypeId : (typeItems[0]?.id ?? '');
 
-  function filter(apply: () => void) {
-    apply();
-    setOffset(0);
+  function setFilter(change: Partial<AssetFilters>) {
+    restore.current = { scrollOffset: 0, index: null, focus: false };
+    onStateChange({ filters: { ...filters, ...change }, scrollOffset: 0, openedIndex: null });
+  }
+
+  function switchView(next: AssetView) {
+    if (next === view) return;
+    const current = position.current?.viewKey === viewKey ? position.current.get() : null;
+    restore.current = { scrollOffset: 0, index: current?.firstIndex ?? null, focus: false };
+    writeView(deviceStorage(), next);
+    setView(next);
+  }
+
+  const onRows = useCallback(
+    (visible: VisibleRows) =>
+      setRows((old) =>
+        old !== null &&
+        old.viewKey === viewKey &&
+        old.firstRow === visible.firstRow &&
+        old.lastRow === visible.lastRow &&
+        old.columns === visible.columns
+          ? old
+          : { ...visible, viewKey },
+      ),
+    [viewKey],
+  );
+
+  function openAsset(index: number, asset: AssetSummary, scrollOffset: number) {
+    opened.current = true;
+    onStateChange({ ...state, scrollOffset, openedIndex: index });
+    onOpen(asset.id);
   }
 
   async function create(event: FormEvent) {
@@ -52,6 +150,7 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
     setCreateError(null);
     try {
       const asset = await call('assets:create', { name: newName.trim(), typeId: effectiveNewType });
+      opened.current = true;
       onOpen(asset.id);
     } catch (e) {
       setCreateError(describeError(e));
@@ -60,10 +159,25 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
     }
   }
 
-  const errors = [types.error, projects.error, list.error].filter((e): e is string => e !== null);
+  const errors = [types.error, projects.error].filter((e): e is string => e !== null);
+  const bootFailed = total === null && paged.state.pages.get(bootPage)?.status === 'failed';
+  const viewProps: AssetViewProps | null =
+    total === null || total === 0
+      ? null
+      : {
+          viewKey,
+          paged: paged.state,
+          total,
+          restore: restore.current,
+          typeName,
+          onOpen: openAsset,
+          onRows,
+          onRetry: paged.retry,
+          positionRef: position,
+        };
 
   return (
-    <section className="space-y-4" aria-label="Assets">
+    <section className="flex min-h-0 flex-1 flex-col gap-4" aria-label="Assets">
       <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => void create(e)}>
         <input
           className={INPUT}
@@ -103,8 +217,8 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
         <select
           className={INPUT}
           aria-label="Filter by type"
-          value={typeId}
-          onChange={(e) => filter(() => setTypeId(e.target.value))}
+          value={filters.typeId}
+          onChange={(e) => setFilter({ typeId: e.target.value })}
         >
           <option value="">All types</option>
           {typeItems.map((t) => (
@@ -116,8 +230,8 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
         <select
           className={INPUT}
           aria-label="Filter by status"
-          value={status}
-          onChange={(e) => filter(() => setStatus(e.target.value))}
+          value={filters.status}
+          onChange={(e) => setFilter({ status: e.target.value })}
         >
           <option value="">All statuses</option>
           {STATUSES.map((s) => (
@@ -129,8 +243,8 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
         <select
           className={INPUT}
           aria-label="Filter by project"
-          value={projectId}
-          onChange={(e) => filter(() => setProjectId(e.target.value))}
+          value={filters.projectId}
+          onChange={(e) => setFilter({ projectId: e.target.value })}
         >
           <option value="">All projects</option>
           {(projects.data?.items ?? []).map((p) => (
@@ -143,9 +257,28 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
           className={INPUT}
           aria-label="Filter by name"
           placeholder="Name"
-          value={nameFilter}
-          onChange={(e) => filter(() => setNameFilter(e.target.value))}
+          value={filters.nameContains}
+          onChange={(e) => setFilter({ nameContains: e.target.value })}
         />
+        <div className="ml-auto flex items-center gap-2">
+          {total !== null && (
+            <span className={`text-sm ${MUTED}`} aria-live="polite">
+              {total} {total === 1 ? 'asset' : 'assets'}
+            </span>
+          )}
+          {VIEWS.map((v) => (
+            <button
+              key={v.view}
+              type="button"
+              className={BUTTON}
+              title={v.tooltip}
+              aria-pressed={view === v.view}
+              onClick={() => switchView(v.view)}
+            >
+              {v.title}
+            </button>
+          ))}
+        </div>
       </div>
 
       {errors.map((message) => (
@@ -154,41 +287,20 @@ export function AssetsScreen({ onOpen }: { onOpen(id: string): void }) {
         </p>
       ))}
 
-      {list.data === null ? (
-        list.error === null && <p className={MUTED}>Loading…</p>
+      {bootFailed ? (
+        <div>
+          <button type="button" className={BUTTON} onClick={() => paged.retry(bootPage)}>
+            Retry
+          </button>
+        </div>
+      ) : total === null ? (
+        <p className={MUTED}>Loading…</p>
+      ) : viewProps === null ? (
+        <p className={MUTED}>No assets found.</p>
+      ) : view === 'grid' ? (
+        <AssetGrid key={viewKey} {...viewProps} />
       ) : (
-        <>
-          <table className="w-full text-left text-sm">
-            <thead className={`border-b ${BORDER} ${MUTED}`}>
-              <tr>
-                <th className="py-1 pr-3">Name</th>
-                <th className="py-1 pr-3">Type</th>
-                <th className="py-1 pr-3">Status</th>
-                <th className="py-1 pr-3">Progress</th>
-                <th className="py-1 pr-3">Projects</th>
-                <th className="py-1">Files</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.data.items.map((asset) => (
-                <tr key={asset.id} className={`border-b ${BORDER}`}>
-                  <td className="py-1 pr-3">
-                    <button type="button" className={BUTTON} onClick={() => onOpen(asset.id)}>
-                      {asset.name}
-                    </button>
-                  </td>
-                  <td className="py-1 pr-3">{typeName(asset.typeId)}</td>
-                  <td className="py-1 pr-3">{label(asset.status)}</td>
-                  <td className="py-1 pr-3">{formatProgress(asset.workflowProgress)}</td>
-                  <td className="py-1 pr-3">{asset.projectCount}</td>
-                  <td className="py-1">{asset.fileCount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {list.data.total === 0 && <p className={MUTED}>No assets found.</p>}
-          <Pager offset={offset} limit={PAGE_SIZE} total={list.data.total} onChange={setOffset} />
-        </>
+        <AssetTable key={viewKey} {...viewProps} />
       )}
     </section>
   );

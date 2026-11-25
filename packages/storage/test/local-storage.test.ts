@@ -340,3 +340,29 @@ describe('path escape', () => {
     expect(await storage.readText('assets/alias/a.txt')).toBe('A');
   });
 });
+
+describe('absolutePath', () => {
+  it('resolves inside the root and rejects escapes', async () => {
+    await storage.ensureLayout();
+    expect(await storage.absolutePath('inbox/a.png')).toBe(path.join(root, 'inbox', 'a.png'));
+    await expect(storage.absolutePath('../x')).rejects.toBeInstanceOf(PathEscapeError);
+    await expect(storage.absolutePath('')).rejects.toBeInstanceOf(PathEscapeError);
+  });
+
+  it('rejects a path through a junction that points outside the root', async () => {
+    await storage.ensureLayout();
+    const outside = path.join(tmp, 'outside');
+    await fs.mkdir(outside);
+    await fs.symlink(outside, path.join(root, 'inbox', 'link'), 'junction');
+    await expect(storage.absolutePath('inbox/link/a.png')).rejects.toBeInstanceOf(PathEscapeError);
+  });
+
+  it('rejects a dangling link without leaking the root path', async () => {
+    await storage.ensureLayout();
+    await fs.symlink(path.join(tmp, 'nowhere'), path.join(root, 'inbox', 'dangling'), 'junction');
+    const error = await storage.absolutePath('inbox/dangling/a.png').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PathEscapeError);
+    expect((error as Error).message).not.toContain(root);
+    expect((error as Error).message).not.toContain(tmp);
+  });
+});

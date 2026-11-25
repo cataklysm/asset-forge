@@ -24,7 +24,7 @@ beforeEach(async () => {
     pickFiles: async () => [],
     confirmRemoveWorkspace: async () => 'cancel',
     confirmRemoveWorkflow: confirmWorkflow,
-  });
+  }, { openPath: async () => '', showItemInFolder: () => {}, workspaceOpened: () => {} });
 });
 afterEach(async () => {
   await manager.close();
@@ -72,8 +72,11 @@ describe('library IPC', () => {
       'files:import': { sourcePaths: [join(base, 'x.png')] },
       'files:assign': { fileId: uuid, assetId: uuid, role: 'reference' },
       'files:unassign': { fileId: uuid },
+      'assets:setCover': { assetId: uuid, fileId: null },
+      'files:openExternal': { fileId: uuid },
+      'files:showInFolder': { fileId: uuid },
     };
-    expect(Object.keys(requests)).toHaveLength(21);
+    expect(Object.keys(requests)).toHaveLength(24);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({

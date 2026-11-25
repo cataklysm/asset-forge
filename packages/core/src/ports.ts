@@ -35,6 +35,8 @@ export interface Storage {
   exists(relPath: string): Promise<boolean>;
   remove(relPath: string): Promise<void>; // no-op if missing
   list(relDir: string): Promise<string[]>; // entry names; [] if dir missing
+  /** Absolute path of a path inside the storage root; validated like every other operation. Never sent to the renderer. */
+  absolutePath(relativePath: string): Promise<string>;
 }
 
 export interface SourceFiles {
@@ -67,7 +69,8 @@ export interface FileRepository {
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;
   get(id: string): Promise<FileRecord | null>;
-  setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>; // rejects with NotFoundError for an unknown id
+  /** Rejects with NotFoundError for an unknown id. Clears the chosen cover of any other asset than `placement.assetId` that uses this file. */
+  setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>;
   list(q: Page & { scope: FileScope }): Promise<FileList>; // newest importedAt first
 }
 
@@ -94,7 +97,10 @@ export interface FileMove {
 
 export interface FileMoveRepository {
   begin(move: FileMove): Promise<void>; // rejects with InvalidOperationError if the file already has a move row
-  /** One transaction: copy the target into the file row, delete the move row. NotFoundError if there is no move row. */
+  /**
+   * One transaction: copy the target into the file row, clear the chosen cover of any other asset
+   * than the target that uses this file, delete the move row. NotFoundError if there is no move row.
+   */
   commit(fileId: string): Promise<FileRecord>;
   abort(fileId: string): Promise<void>; // no-op if missing
   list(): Promise<FileMove[]>; // by createdAt, then fileId
@@ -181,6 +187,12 @@ export interface AssetQuery extends Page {
   nameContains?: string;
 }
 
+/** Effective cover of an asset: the chosen file, else the automatic one (see `automaticCover`), else null. */
+export interface AssetCover {
+  coverFileId: string | null;
+  coverIsChosen: boolean;
+}
+
 export interface AssetRepository {
   insert(asset: Asset): Promise<void>;
   get(id: string): Promise<Asset | null>;
@@ -188,7 +200,11 @@ export interface AssetRepository {
     id: string,
     patch: Partial<Pick<Asset, 'name' | 'description' | 'typeId' | 'status'>> & { updatedAt: string },
   ): Promise<Asset | null>;
-  list(q: AssetQuery): Promise<AssetList>; // by name (case-insensitive), then id
+  /** By name (case-insensitive), then id; every item carries its effective `coverFileId`. */
+  list(q: AssetQuery): Promise<AssetList>;
+  getCover(assetId: string): Promise<AssetCover | null>; // null when the asset does not exist
+  /** Stores the chosen cover (`null` returns to the automatic one) without validating it; no-op for an unknown asset. */
+  setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<void>;
 }
 
 export interface AssignmentKey {

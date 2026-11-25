@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AssetAssignmentSchema,
+  AssetDetailSchema,
   AssetRelationViewSchema,
   AssetSummarySchema,
   AssetWorkflowSchema,
@@ -9,6 +10,7 @@ import {
   NameInputSchema,
   PageRequestSchema,
   ProjectMemberSchema,
+  SetCoverRequestSchema,
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
   ipcContract,
@@ -48,8 +50,14 @@ describe('FileRecordSchema', () => {
       status: 'pending',
       error: null,
       importedAt: now,
+      previewable: true,
+      openable: true,
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);
+    const { previewable: _p, ...withoutPreviewable } = record;
+    const { openable: _o, ...withoutOpenable } = record;
+    expect(() => FileRecordSchema.parse(withoutPreviewable)).toThrow();
+    expect(() => FileRecordSchema.parse(withoutOpenable)).toThrow();
   });
 });
 
@@ -205,9 +213,44 @@ describe('workflows', () => {
       updatedAt: now,
       projectCount: 0,
       fileCount: 0,
+      coverFileId: null,
     };
     expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: null }).success).toBe(true);
     expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: { done: 2, total: 5 } }).success).toBe(true);
     expect(AssetSummarySchema.safeParse(summary).success).toBe(false);
+  });
+});
+
+describe('asset cover', () => {
+  const asset = {
+    id: uuid,
+    name: 'A',
+    typeId: uuid,
+    description: '',
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const summary = { ...asset, projectCount: 0, fileCount: 1, workflowProgress: null };
+
+  it('AssetSummarySchema requires coverFileId as a uuid or null', () => {
+    expect(AssetSummarySchema.safeParse({ ...summary, coverFileId: uuid }).success).toBe(true);
+    expect(AssetSummarySchema.safeParse({ ...summary, coverFileId: null }).success).toBe(true);
+    expect(AssetSummarySchema.safeParse({ ...summary, coverFileId: 'files/a.png' }).success).toBe(false);
+    expect(AssetSummarySchema.safeParse(summary).success).toBe(false);
+  });
+
+  it('AssetDetailSchema requires coverFileId and coverIsChosen', () => {
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false }).success).toBe(false);
+  });
+
+  it('SetCoverRequestSchema accepts a file id or null and requires both keys', () => {
+    expect(SetCoverRequestSchema.safeParse({ assetId: uuid, fileId: uuid }).success).toBe(true);
+    expect(SetCoverRequestSchema.safeParse({ assetId: uuid, fileId: null }).success).toBe(true);
+    expect(SetCoverRequestSchema.safeParse({ assetId: uuid }).success).toBe(false);
+    expect(SetCoverRequestSchema.safeParse({ assetId: 'x', fileId: null }).success).toBe(false);
   });
 });

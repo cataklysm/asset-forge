@@ -27,16 +27,37 @@ export interface Dialogs {
   confirmRemoveWorkflow(assetName: string): Promise<boolean>;
 }
 
+/** Actions only the host (Electron) can perform. */
+export interface HostActions {
+  /** Electron shell.openPath: resolves '' on success, an error text otherwise. */
+  openPath(absolutePath: string): Promise<string>;
+  showItemInFolder(absolutePath: string): void;
+  /** Called after workspace:open or workspace:create succeeded. Must not throw. */
+  workspaceOpened(): void;
+}
+
 export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
 
-export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dialogs): IpcHandlers {
+export function createWorkspaceHandlers(
+  manager: WorkspaceManager,
+  dialogs: Dialogs,
+  host: HostActions,
+): IpcHandlers {
   return {
     'workspace:list': () => manager.list(),
     'workspace:current': async () => manager.current(),
-    'workspace:create': (request) => manager.create(request),
+    'workspace:create': async (request) => {
+      const summary = await manager.create(request);
+      notifyWorkspaceOpened(host);
+      return summary;
+    },
     'workspace:resolveCreatePath': async (request) =>
       join(request.parentPath, workspaceFolderName(request.name)),
-    'workspace:open': (request) => manager.open(request),
+    'workspace:open': async (request) => {
+      const summary = await manager.open(request);
+      notifyWorkspaceOpened(host);
+      return summary;
+    },
     'workspace:remove': async ({ id }) => {
       const workspace = (await manager.list()).find((w) => w.id === id);
       if (!workspace) return { removed: false, folderTrashed: false };
@@ -52,10 +73,19 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
       await manager.close();
       return null;
     },
-    ...createLibraryHandlers(manager, dialogs),
+    ...createLibraryHandlers(manager, dialogs, host),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };
+}
+
+/** The workspace is already open here, so a failing hook must not fail the channel. */
+function notifyWorkspaceOpened(host: HostActions): void {
+  try {
+    host.workspaceOpened();
+  } catch (error) {
+    console.error('The workspace-opened hook failed', error);
+  }
 }
 
 export function isIpcChannel(channel: string): channel is IpcChannel {

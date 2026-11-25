@@ -57,6 +57,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   tiff: 'image/tiff',
   exr: 'image/x-exr',
   gif: 'image/gif',
+  avif: 'image/avif',
   blend: 'application/x-blender',
   glb: 'model/gltf-binary',
   gltf: 'model/gltf+json',

@@ -118,6 +118,8 @@ Working files, for example a BLEND file, can be deliberately mutable. They can b
 
 AssetForge does not have to natively edit or visualize every file. For unsupported formats, metadata, a generic preview and "Open in external application" are available. For Blender files and referenced textures, relative paths and related working files are taken into account; external dependencies must be made visible on export or backup.
 
+Implemented so far (phase 3a): previews (thumbnails and detail previews) exist for six raster MIME types: `image/png`, `image/jpeg`, `image/webp`, `image/tiff`, `image/gif` and `image/avif`. Every other format (for example EXR or BLEND) gets a format tile instead. "Open in external application" and "Show in folder" are offered in the file detail dialog. "Open externally" is refused for files without an extension and for extensions on a block list of programs, scripts and shell-launched document types (for example `exe`, `bat`, `cmd`, `ps1`, `js`, `sh`, `html`, `svg`, `url`, `py`, `lnk`); such files can only be shown in their folder. An asset has a cover file: by default its complete, previewable file with the earliest import (automatic cover), or a file chosen by the user ("Use as cover"; "Use automatic cover" returns to the default). Detaching the chosen file or moving it to another asset falls back to the automatic cover. The asset gallery scrolls endlessly, loads 60 assets per page and offers a grid view and a table view; the chosen view is remembered across restarts.
+
 ## 5. Workflows and Production Progress
 
 Workflows are templates configurable per asset type. The application distinguishes:
@@ -298,7 +300,7 @@ A storage abstraction encapsulates resolving, reading/writing as streams, listin
 └── logs/
 ```
 
-The application determines OS-conformant paths instead of hard-coding `%APPDATA%` or other platform-specific paths. Local caches can reside on a suitable fast drive. There is a separate database per workspace; this allows a workspace to be backed up independently.
+The application determines OS-conformant paths instead of hard-coding `%APPDATA%` or other platform-specific paths. Local caches can reside on a suitable fast drive. `cache/thumbnails` and `cache/previews` exist (phase 3a); their entries are keyed by the content checksum of the file (§15.1), so they can be deleted at any time and are regenerated on demand. There is a separate database per workspace; this allows a workspace to be backed up independently.
 
 SQLite stays on a **local file system**, even when the assets reside on a NAS share. A shared SQLite database on SMB is not intended. One active writing local client per workspace applies. A second workstation with a separate local database must not write to the same workspace in an uncoordinated way. NAS files alone are not database synchronization.
 
@@ -343,7 +345,7 @@ The following model is a starting point and not a finished SQL schema. IDs are m
 | Job / JobAttempt | Persistent tasks, execution attempts and external job IDs |
 | ActivityEvent | Domain change history |
 
-Implemented so far (phases 1 and 2), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types with a default workflow template, no metadata schema yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum), `file_move` (move intents, §9.4), `workflow_template`, `workflow_template_version` and `workflow_step_definition` (the WorkflowTemplate / WorkflowStepDefinition entities), and `asset_workflow` and `asset_workflow_step` (one workflow per asset, each step row references a step definition of the template version the workflow refers to). Everything else in the table above does not exist yet.
+Implemented so far (phases 1 and 2), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types with a default workflow template, no metadata schema yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum), `file_move` (move intents, §9.4), `workflow_template`, `workflow_template_version` and `workflow_step_definition` (the WorkflowTemplate / WorkflowStepDefinition entities), and `asset_workflow` and `asset_workflow_step` (one workflow per asset, each step row references a step definition of the template version the workflow refers to). Phase 3a adds `asset.cover_file_id` (the cover file chosen by the user, null for the automatic cover; cleared when the file is deleted, detached or moved to another asset). Everything else in the table above does not exist yet.
 
 Particularly important indexes: project assignments, asset type and status, file-to-asset assignment, tags, checksums, job status and job start time. Project-asset assignments and normalized tag assignments must not contain unintended duplicates. Type-dependent metadata can additionally be stored as validated JSON; regularly filtered core fields remain relational columns.
 
@@ -480,7 +482,7 @@ Resource consumption is an architectural characteristic and not merely a later o
 ### 15.1 UI and File System
 
 - Gallery and list views are virtualized and loaded page by page; never decode all original images of a library at once or transfer them to the renderer.
-- Preview images are generated on request, cached persistently and invalidated based on file ID, content version, size and preview format.
+- Preview images are generated on request, cached persistently and keyed by the file's SHA-256, the preview size and a preview format version — never by file ID — so identical content shares a preview and a changed file never shows a stale one.
 - By default, small gallery thumbnails (e.g. 256 px) and larger detail previews (e.g. 1024 px). Original images are loaded only for an explicit detail view or for processing.
 - Large imports, downloads, hash computations and exports use streams with backpressure. No unnecessary Base64 for large IPC transfers; encoding that a provider specifically requires stays confined to individual bounded jobs.
 - Media is provided to the renderer through a controlled internal protocol or suitable bounded streams. No unrestricted `file://` access.
@@ -504,13 +506,13 @@ These values are configurable development defaults and not measured performance 
 
 | Resource | Proposed default |
 | --- | --- |
-| CPU / thumbnail workers | 2 concurrent |
+| CPU / thumbnail workers | 2 concurrent (implemented constant; a job times out after 30 s) |
 | File imports / downloads | 2–4 concurrent, with a bounded buffer |
 | Local vision / GPU jobs | 1 concurrent per configured GPU resource pool |
 | Remote generations | 2 concurrent per provider, plus a global limit |
-| Thumbnail cache | 2 GiB, configurable, LRU cleanup |
-| Detail preview cache | 2 GiB, configurable, LRU cleanup |
-| Gallery page size | 50–100 entries |
+| Thumbnail cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
+| Detail preview cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
+| Gallery page size | 60 entries (implemented constant) |
 | API container in the server profile | Starting value 1 vCPU / 512 MiB RAM |
 | PostgreSQL in the server profile | Starting value 1 vCPU / 512 MiB–1 GiB RAM |
 | Mock provider | Starting value 0.5 vCPU / 256 MiB RAM |
@@ -530,6 +532,7 @@ For reproducible load tests, a synthetic workspace with many files and metadata 
 
 - Renderer with `contextIsolation`, disabled Node integration and sandbox, as far as compatible with the application. Preload exposes only narrowly scoped, typed IPC operations; arguments and senders are validated.
 - Paths, file names, archive imports, symlinks and junctions are checked. Storage operations must not break out of the intended workspace. External file contents and model responses are untrusted.
+- The `assetforge-media://` protocol serves only cached previews (`assetforge-media://preview/<file id>?size=thumb|detail`, WebP); every malformed or unknown request is a bare 404 and originals are never served through it. "Open externally" never opens files on the block list (§4).
 - Image decoders get size/pixel limits; large or corrupt files are rejected in a controlled manner. No automatic execution of imported scripts, HTML contents or programs.
 - API keys are stored via the OS-backed secret backend and decrypted only in the responsible host/provider layer. If no suitable secret backend is available, no silent plaintext fallback is used. Server mode uses separate server-side secret configuration.
 - Private provider base URLs (e.g. local Ollama) are explicitly configurable. Arbitrary internet reference downloads, by contrast, must not unintentionally reach internal services. Redirects, addresses, protocols and limits are checked accordingly.
@@ -549,6 +552,8 @@ For reproducible load tests, a synthetic workspace with many files and metadata 
 | 6 – Reliability & Export | Backup, restore, storage errors, versions, limits, tests | Consistent restore to a new local path; handle NAS outages and job restarts without silent data loss. |
 | 7 – Extensions | 3D preview, 3D providers, additional models, embeddings | Integrate optional features without changing existing assets or other providers. |
 | 8 – Server Mode | API, PostgreSQL, local Docker integration, multi-user concept | Several clients use the same central data set with controlled write access. |
+
+Implemented so far: phase 1, phase 2 (2a asset management, 2b workflows) and phase 3a (gallery, previews, cover, open externally). The rest of phase 3 (tags, search, filters) does not exist yet.
 
 Tests for storage consistency, migrations and job restart begin as early as phase 1. A rudimentary backup concept is required from the first persistent version onward; the full backup/restore workflow and failure-case tests are accepted in phase 6. Phases 7 and 8 are deliberately not part of the initial MVP.
 

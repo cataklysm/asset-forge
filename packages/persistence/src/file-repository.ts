@@ -1,8 +1,8 @@
 import type { FileList, FileRecord, FileScope, ImportStatus } from '@assetforge/contracts';
-import { NotFoundError, type FileRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { NotFoundError, isOpenable, isPreviewable, type FileRepository } from '@assetforge/core';
+import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { file } from './schema.js';
+import { asset, file } from './schema.js';
 
 // Row shape equals FileRecord; spelled out so schema drift fails at compile time.
 export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
@@ -18,7 +18,20 @@ export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   status: row.status,
   error: row.error,
   importedAt: row.importedAt,
+  previewable: isPreviewable(row.mimeType),
+  openable: isOpenable(row.relativePath),
 });
+
+/**
+ * Clears the chosen cover of every asset other than `assetId` (the file's new asset, or null for
+ * the inbox) that uses the file. Leaves `updated_at` alone: this is a side effect, not an edit.
+ */
+export function clearCoverOutside(tx: Pick<BetterSQLite3Database, 'update'>, fileId: string, assetId: string | null): void {
+  tx.update(asset)
+    .set({ coverFileId: null })
+    .where(and(eq(asset.coverFileId, fileId), sql`${asset.id} is not ${assetId}`))
+    .run();
+}
 
 const scopeMatches = (scope: FileScope) => {
   switch (scope.kind) {
@@ -85,14 +98,18 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
       return row ? toRecord(row) : null;
     },
     async setPlacement(id, placement) {
-      const row = db
-        .update(file)
-        .set({ relativePath: placement.relativePath, assetId: placement.assetId, role: placement.role })
-        .where(eq(file.id, id))
-        .returning()
-        .get();
-      if (!row) throw new NotFoundError(`File ${id} does not exist`);
-      return toRecord(row);
+      // Throwing inside the transaction rolls back both statements.
+      return db.transaction((tx) => {
+        const row = tx
+          .update(file)
+          .set({ relativePath: placement.relativePath, assetId: placement.assetId, role: placement.role })
+          .where(eq(file.id, id))
+          .returning()
+          .get();
+        if (!row) throw new NotFoundError(`File ${id} does not exist`);
+        clearCoverOutside(tx, id, placement.assetId);
+        return toRecord(row);
+      });
     },
     async list({ limit, offset, scope }): Promise<FileList> {
       const where = scopeMatches(scope);

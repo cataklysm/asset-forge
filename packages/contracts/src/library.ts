@@ -100,8 +100,19 @@ export const AssetSummarySchema = AssetSchema.extend({
   projectCount: count,
   fileCount: count,
   workflowProgress: WorkflowProgressSchema.nullable(), // null when the asset has no workflow
+  coverFileId: id.nullable(), // effective cover: the chosen one, else the first previewable image
 });
 export type AssetSummary = z.infer<typeof AssetSummarySchema>;
+
+export const AssetDetailSchema = AssetSchema.extend({
+  coverFileId: id.nullable(), // effective cover, as in AssetSummary
+  coverIsChosen: z.boolean(), // false when the cover is the automatic one or there is none
+});
+export type AssetDetail = z.infer<typeof AssetDetailSchema>;
+
+/** `fileId: null` returns to the automatic cover. */
+export const SetCoverRequestSchema = z.object({ assetId: id, fileId: id.nullable() });
+export type SetCoverRequest = z.infer<typeof SetCoverRequestSchema>;
 
 export const ProjectAssignmentSchema = z.object({
   projectId: id,

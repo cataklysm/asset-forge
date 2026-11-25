@@ -23,6 +23,7 @@ release/
 
 # Tests
 coverage/
+.test-build/
 
 # Logs
 logs/

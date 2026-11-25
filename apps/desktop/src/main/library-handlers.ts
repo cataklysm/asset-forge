@@ -4,8 +4,10 @@ import {
   createAsset,
   createProject,
   getAsset,
+  getAssetDetail,
   getProject,
   getWorkflow,
+  InvalidOperationError,
   listAssets,
   listAssetTypes,
   listAssignmentsOfAsset,
@@ -17,6 +19,8 @@ import {
   removeAssignment,
   removeRelation,
   removeWorkflow,
+  resolveFilePath,
+  setAssetCover,
   startWorkflow,
   updateAsset,
   updateAssignment,
@@ -24,7 +28,7 @@ import {
   updateWorkflowStep,
   type WorkspaceManager,
 } from '@assetforge/core';
-import type { Dialogs, IpcHandlers } from './ipc.js';
+import type { Dialogs, HostActions, IpcHandlers } from './ipc.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
@@ -44,6 +48,9 @@ export type LibraryHandlers = Pick<
   | 'assets:get'
   | 'assets:create'
   | 'assets:update'
+  | 'assets:setCover'
+  | 'files:openExternal'
+  | 'files:showInFolder'
   | 'assignments:listByAsset'
   | 'assignments:listByProject'
   | 'assignments:assign'
@@ -62,6 +69,7 @@ export type LibraryHandlers = Pick<
 export function createLibraryHandlers(
   manager: WorkspaceManager,
   dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
+  host: Pick<HostActions, 'openPath' | 'showItemInFolder'>,
 ): LibraryHandlers {
   return {
     'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null),
@@ -78,9 +86,28 @@ export function createLibraryHandlers(
     'projects:update': (r) => manager.exclusive((s) => updateProject(s, r.id, r.patch)),
 
     'assets:list': (r) => manager.read((s) => listAssets(s, r)),
-    'assets:get': (r) => manager.read((s) => getAsset(s, r.id)),
+    'assets:get': (r) => manager.read((s) => getAssetDetail(s, r.id)),
     'assets:create': (r) => manager.exclusive((s) => createAsset(s, r)),
-    'assets:update': (r) => manager.exclusive((s) => updateAsset(s, r.id, r.patch)),
+    'assets:update': (r) =>
+      manager.exclusive(async (s) => {
+        await updateAsset(s, r.id, r.patch);
+        return getAssetDetail(s, r.id);
+      }),
+    // Validation and the two-step write must not interleave with a file move.
+    'assets:setCover': (r) => manager.exclusive((s) => setAssetCover(s, r)),
+
+    'files:openExternal': async (r) => {
+      const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));
+      // The shell's text may contain paths; it is never forwarded.
+      if ((await host.openPath(path)) !== '') {
+        throw new InvalidOperationError('No application could open this file');
+      }
+      return null;
+    },
+    'files:showInFolder': async (r) => {
+      host.showItemInFolder(await manager.read((s) => resolveFilePath(s, r.fileId, 'reveal')));
+      return null;
+    },
 
     'assignments:listByAsset': (r) => manager.read((s) => listAssignmentsOfAsset(s, r.assetId)),
     'assignments:listByProject': ({ projectId, ...page }) =>
