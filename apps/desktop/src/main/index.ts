@@ -96,7 +96,11 @@ function start(): void {
 
   const appUrl = getAppUrl(windowOptions);
 
-  const handlers = createWorkspaceHandlers(manager, dialogs);
+  const handlers = createWorkspaceHandlers(manager, dialogs, {
+    openPath: (path) => shell.openPath(path),
+    showItemInFolder: (path) => shell.showItemInFolder(path),
+    workspaceOpened: () => {},
+  });
   for (const channel of Object.keys(ipcContract)) {
     ipcMain.handle(channel, (event, request: unknown): Promise<IpcResult<unknown>> => {
       if (shutdown !== 'running') {

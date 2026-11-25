@@ -9,6 +9,7 @@ import {
 } from './files';
 import {
   ApprovalStatusSchema,
+  AssetDetailSchema,
   AssetAssignmentSchema,
   AssetListSchema,
   AssetRelationSchema,
@@ -29,6 +30,7 @@ import {
   ProjectSchema,
   ProjectStatusSchema,
   RelationKindSchema,
+  SetCoverRequestSchema,
 } from './library';
 import {
   AssetWorkflowSchema,
@@ -149,7 +151,7 @@ export const ipcContract = {
   },
   'assets:get': {
     request: IdRequestSchema,
-    response: AssetSchema,
+    response: AssetDetailSchema,
   },
   'assets:create': {
     request: z.object({
@@ -171,7 +173,19 @@ export const ipcContract = {
         })
         .strict(),
     }),
-    response: AssetSchema,
+    response: AssetDetailSchema,
+  },
+  'assets:setCover': {
+    request: SetCoverRequestSchema,
+    response: AssetDetailSchema,
+  },
+  'files:openExternal': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.null(),
+  },
+  'files:showInFolder': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.null(),
   },
   'assignments:listByAsset': {
     request: z.object({ assetId: IdSchema }),

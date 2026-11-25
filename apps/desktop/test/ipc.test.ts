@@ -20,6 +20,8 @@ let handlers: IpcHandlers;
 
 let choice: RemoveChoice = 'cancel';
 
+const noopHost = { openPath: async () => '', showItemInFolder: () => {}, workspaceOpened: () => {} };
+
 const dialogs: Dialogs = {
   pickDirectory: async () => null,
   pickFiles: async () => [],
@@ -39,7 +41,7 @@ beforeEach(async () => {
       await rename(path, join(base, 'trash', basename(path)));
     },
   });
-  handlers = createWorkspaceHandlers(manager, dialogs);
+  handlers = createWorkspaceHandlers(manager, dialogs, noopHost);
 });
 afterEach(async () => {
   await manager.close();
@@ -85,7 +87,7 @@ describe('dispatch', () => {
       pickFiles: async () => ['D:\\a.png'],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    });
+    }, noopHost);
     expect(await dispatch(picked, 'dialog:pickDirectory', {})).toEqual({ ok: true, value: 'D:\\picked' });
     expect(await dispatch(picked, 'dialog:pickFiles', {})).toEqual({ ok: true, value: ['D:\\a.png'] });
   });
