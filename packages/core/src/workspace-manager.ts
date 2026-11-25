@@ -166,7 +166,7 @@ export class WorkspaceManager {
       await ensureBuiltInAssetTypes({ database, newId: () => this.host.newId() });
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
-      await recoverFileMoves({ storage, fileMoves: database.fileMoves });
+      await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
       const summary: WorkspaceSummary = {
         id: manifest.id,
         name: manifest.name,

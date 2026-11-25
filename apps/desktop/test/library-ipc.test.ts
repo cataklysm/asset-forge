@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcContract, type IpcChannel } from '@assetforge/contracts';
-import type { WorkspaceManager } from '@assetforge/core';
+import { assetFilePath, type WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
@@ -106,6 +106,33 @@ describe('library IPC', () => {
     const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
     const result = await call('relations:add', { fromAssetId: asset.id, toAssetId: asset.id, kind: 'uses' });
     expect(result).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+  });
+
+  it('assigns a file to an asset and reports a failing move as invalid_operation without paths', async () => {
+    await openWorkspace();
+    const root = join(base, 'workspace');
+    const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+    const asset = await ok('assets:create', { name: 'A', typeId: type!.id });
+    const sources = [join(base, 'a.png'), join(base, 'b.png')];
+    await writeFile(sources[0]!, 'a');
+    await writeFile(sources[1]!, 'b');
+    const [first, second] = await ok<{ file: { id: string } }[]>('files:import', { sourcePaths: sources });
+
+    const placed = await ok('files:assign', { fileId: first!.file.id, assetId: asset.id, role: 'reference' });
+    expect(placed).toMatchObject({
+      assetId: asset.id,
+      role: 'reference',
+      relativePath: assetFilePath(asset.id, 'reference', first!.file.id, 'a.png'),
+    });
+
+    const occupied = join(root, assetFilePath(asset.id, 'reference', second!.file.id, 'b.png'));
+    await mkdir(join(occupied, '..'), { recursive: true });
+    await writeFile(occupied, 'other');
+    const result = await call('files:assign', { fileId: second!.file.id, assetId: asset.id, role: 'reference' });
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+    const message = result.ok ? '' : result.error.message;
+    expect(message).not.toContain(base);
+    expect(message).not.toMatch(/[A-Za-z]:\\|\/|\\/);
   });
 
   it('rejects a whitespace-only project name as invalid_request', async () => {

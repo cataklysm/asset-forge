@@ -294,7 +294,8 @@ describe('phase 2a acceptance', () => {
     }
   });
 
-  async function interruptedMove(performMove: boolean) {
+  async function interruptedMove(state: 'moved' | 'not-moved' | 'both-exist') {
+    const performMove = state === 'moved';
     const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     let setup: { assetId: string; fileId: string; inboxFile: string; newPath: string; before: unknown };
     try {
@@ -315,6 +316,11 @@ describe('phase 2a acceptance', () => {
         });
         if (performMove) await s.storage.move(file.relativePath, newPath);
       });
+      if (state === 'both-exist') {
+        const occupied = join(workspaceRoot, newPath);
+        await mkdir(join(occupied, '..'), { recursive: true });
+        await writeFile(occupied, 'other');
+      }
       setup = { assetId: asset.id, fileId: file.id, inboxFile: file.relativePath, newPath, before: file };
     } finally {
       await first.close();
@@ -333,7 +339,7 @@ describe('phase 2a acceptance', () => {
   }
 
   it('completes an interrupted move on the next open', async () => {
-    const r = await interruptedMove(true);
+    const r = await interruptedMove('moved');
     expect(r.record).toMatchObject({ assetId: r.assetId, role: 'reference', relativePath: r.newPath });
     expect(r.pending).toEqual([]);
     expect(existsSync(join(workspaceRoot, r.newPath))).toBe(true);
@@ -341,10 +347,18 @@ describe('phase 2a acceptance', () => {
   });
 
   it('discards a move that never happened', async () => {
-    const r = await interruptedMove(false);
+    const r = await interruptedMove('not-moved');
     expect(r.record).toEqual(r.before);
     expect(r.pending).toEqual([]);
     expect(existsSync(join(workspaceRoot, r.inboxFile))).toBe(true);
+  });
+
+  it('discards a move when both source and target exist and touches neither file', async () => {
+    const r = await interruptedMove('both-exist');
+    expect(r.record).toEqual(r.before);
+    expect(r.pending).toEqual([]);
+    expect(existsSync(join(workspaceRoot, r.inboxFile))).toBe(true);
+    expect(await readFile(join(workspaceRoot, r.newPath), 'utf8')).toBe('other');
   });
 
   it('no absolute path is stored', async () => {

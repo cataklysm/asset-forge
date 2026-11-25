@@ -1,7 +1,7 @@
 import type { FileList, FileRecord, FileScope, FileTarget } from '@assetforge/contracts';
-import { InvalidOperationError, NotFoundError } from './errors.js';
+import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
 import { assetFilePath, inboxPath } from './paths.js';
-import type { FileMoveRepository, Page, Storage } from './ports.js';
+import type { FileMoveRepository, FileRepository, Page, Storage } from './ports.js';
 import type { WorkspaceSession } from './session.js';
 
 /**
@@ -49,21 +49,27 @@ export async function relocateFile(
     try {
       await s.database.fileMoves.abort(file.id);
     } catch {
-      // The target does not exist, so recovery discards the row on the next open.
+      // The source is still in place, so recovery discards the row on the next open.
     }
-    throw error;
+    if (error instanceof AssetForgeError) throw error;
+    throw new InvalidOperationError(
+      'The file could not be moved; it may be in use, missing, or the target already exists',
+      { cause: error },
+    );
   }
   // If the commit fails, the move row stays and recovery completes it on the next open.
   return s.database.fileMoves.commit(file.id);
 }
 
 /**
- * Startup recovery of interrupted moves: a move whose target exists happened and is
- * committed; any other move never happened and is discarded. Best effort: a row that
- * cannot be resolved now stays and is retried on the next open.
+ * Startup recovery of interrupted moves: a move whose target exists and whose source (the
+ * file row's current path) is gone happened and is committed. Every other move is discarded
+ * without touching the file row or either file. Best effort: a row that cannot be resolved
+ * now stays and is retried on the next open.
  */
 export async function recoverFileMoves(ctx: {
   storage: Storage;
+  files: Pick<FileRepository, 'get'>;
   fileMoves: FileMoveRepository;
 }): Promise<{ completed: string[]; discarded: string[] }> {
   const result = { completed: [] as string[], discarded: [] as string[] };
@@ -75,7 +81,12 @@ export async function recoverFileMoves(ctx: {
   }
   for (const move of moves) {
     try {
-      if (await ctx.storage.exists(move.targetRelativePath)) {
+      const file = await ctx.files.get(move.fileId);
+      const moved =
+        file !== null &&
+        (await ctx.storage.exists(move.targetRelativePath)) &&
+        !(await ctx.storage.exists(file.relativePath));
+      if (moved) {
         await ctx.fileMoves.commit(move.fileId);
         result.completed.push(move.fileId);
       } else {

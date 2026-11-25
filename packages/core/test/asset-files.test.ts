@@ -149,8 +149,11 @@ describe('relocateFile', () => {
 
   it('a failed move leaves row and file unchanged and no move row', async () => {
     const { session, storage, db, asset, file } = await setup();
-    storage.failNext('move', new Error('EBUSY'));
-    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow('EBUSY');
+    storage.failNext('move', Object.assign(new Error('EBUSY: /abs/path'), { code: 'EBUSY' }));
+    const failure = relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
+    await expect(failure).rejects.toBeInstanceOf(InvalidOperationError);
+    await expect(failure).rejects.toMatchObject({ code: 'invalid_operation' });
+    await expect(failure).rejects.not.toThrow(/abs|EBUSY/);
     expect(db.files.records.get(file.id)).toEqual(file);
     expect(storage.files.has(file.relativePath)).toBe(true);
     expect(storage.files.has(assetFilePath(asset.id, 'reference', file.id, 'pump.png'))).toBe(false);
@@ -161,10 +164,20 @@ describe('relocateFile', () => {
     const { session, storage, db, asset, file } = await setup();
     const target = assetFilePath(asset.id, 'reference', file.id, 'pump.png');
     storage.files.set(target, Buffer.from('existing'));
-    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow();
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toMatchObject({
+      code: 'invalid_operation',
+    });
     expect(storage.files.get(target)?.toString()).toBe('existing');
     expect(storage.files.get(file.relativePath)?.toString()).toBe('pump');
     expect(db.files.records.get(file.id)).toEqual(file);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('a domain error of the move is passed through unchanged', async () => {
+    const { session, storage, db, asset, file } = await setup();
+    const error = new NotFoundError('Storage is not available');
+    storage.failNext('move', error);
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toBe(error);
     await expect(db.fileMoves.list()).resolves.toEqual([]);
   });
 
@@ -185,6 +198,8 @@ describe('relocateFile', () => {
 });
 
 describe('recoverFileMoves', () => {
+  const recover = (ctx: Awaited<ReturnType<typeof setup>>) =>
+    recoverFileMoves({ storage: ctx.storage, files: ctx.db.files, fileMoves: ctx.db.fileMoves });
   const journal = async (ctx: Awaited<ReturnType<typeof setup>>, moved: boolean) => {
     const target = assetFilePath(ctx.asset.id, 'reference', ctx.file.id, 'pump.png');
     await ctx.db.fileMoves.begin({
@@ -201,7 +216,7 @@ describe('recoverFileMoves', () => {
   it('recovery completes a move whose target exists', async () => {
     const ctx = await setup();
     const target = await journal(ctx, true);
-    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    const result = await recover(ctx);
     expect(result).toEqual({ completed: [ctx.file.id], discarded: [] });
     expect(ctx.db.files.records.get(ctx.file.id)).toEqual({
       ...ctx.file,
@@ -215,10 +230,22 @@ describe('recoverFileMoves', () => {
   it('recovery discards a move whose target is missing', async () => {
     const ctx = await setup();
     await journal(ctx, false);
-    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    const result = await recover(ctx);
     expect(result).toEqual({ completed: [], discarded: [ctx.file.id] });
     expect(ctx.db.files.records.get(ctx.file.id)).toEqual(ctx.file);
     expect(ctx.storage.files.has(ctx.file.relativePath)).toBe(true);
+    await expect(ctx.db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('discards a move when both source and target exist: row unchanged, both files untouched', async () => {
+    const ctx = await setup();
+    const target = await journal(ctx, false);
+    ctx.storage.files.set(target, Buffer.from('other'));
+    const result = await recover(ctx);
+    expect(result).toEqual({ completed: [], discarded: [ctx.file.id] });
+    expect(ctx.db.files.records.get(ctx.file.id)).toEqual(ctx.file);
+    expect(ctx.storage.files.get(ctx.file.relativePath)?.toString()).toBe('pump');
+    expect(ctx.storage.files.get(target)?.toString()).toBe('other');
     await expect(ctx.db.fileMoves.list()).resolves.toEqual([]);
   });
 
@@ -226,7 +253,7 @@ describe('recoverFileMoves', () => {
     const ctx = await setup();
     await journal(ctx, true);
     ctx.storage.failNext('exists', new Error('EIO'));
-    const result = await recoverFileMoves({ storage: ctx.storage, fileMoves: ctx.db.fileMoves });
+    const result = await recover(ctx);
     expect(result).toEqual({ completed: [], discarded: [] });
     await expect(ctx.db.fileMoves.list()).resolves.toHaveLength(1);
     expect(ctx.db.files.records.get(ctx.file.id)).toEqual(ctx.file);
