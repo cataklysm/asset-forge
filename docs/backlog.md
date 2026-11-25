@@ -23,6 +23,7 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - `createAsset` inserts the asset and then starts its default workflow; the two are not atomic, so a failure in between leaves an asset without the workflow of its type.
 - A built-in template whose version row is missing is only repaired the next time the workspace is opened.
 - The asset list computes progress with two correlated subqueries per row.
+- Nothing guards against editing a built-in workflow template definition without raising its version; such an edit never reaches existing workspaces.
 - Workflow use cases assert that the workflow they just wrote can be read back; a failure there surfaces as `internal_error`.
 
 ## IPC and security
@@ -52,6 +53,7 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 
 - The asset row mapper is duplicated in three repositories.
 - `safeErrorMessage` lives in `import-file.ts` although file moves use it too.
+- The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
 - The session and the import context are built from near-identical lambdas in the workspace manager.
 
 ## Tooling and tests
@@ -65,6 +67,7 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - The IPC test hard-codes the number of channels; the absolute-path scan in the error tests only looks for the native separator.
 - The `EACCES` test of `writeStream` does not assert that the target is absent.
 - The in-memory `assetWorkflows.insert` checks fewer foreign keys than SQLite does.
+- A new template version next to workflows on the old one is only tested on the fakes, not on the SQL adapter.
 - No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
 
 ## Not covered by any automated check
