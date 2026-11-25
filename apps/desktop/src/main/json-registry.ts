@@ -26,6 +26,12 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
     await this.write(all);
   }
 
+  async remove(id: string): Promise<void> {
+    const all = await this.read();
+    const kept = all.filter((w) => w.id !== id);
+    if (kept.length !== all.length) await this.write(kept);
+  }
+
   private async read(): Promise<WorkspaceSummary[]> {
     let text: string;
     try {

@@ -219,6 +219,10 @@ export class InMemoryRegistry implements WorkspaceRegistry {
   async upsert(entry: WorkspaceSummary): Promise<void> {
     this.entries.set(entry.id, entry);
   }
+
+  async remove(id: string): Promise<void> {
+    this.entries.delete(id);
+  }
 }
 
 /** Maps absolute source paths to file contents. */
@@ -239,7 +243,9 @@ export function createFakeHost(): {
   storages: Map<string, InMemoryStorage>;
   databases: Map<string, InMemoryDatabase>;
   sources: FakeSourceFiles;
+  trash: { paths: string[]; failNext: boolean };
 } {
+  const trash = { paths: [] as string[], failNext: false };
   const storages = new Map<string, InMemoryStorage>();
   const databases = new Map<string, InMemoryDatabase>();
   const sources = new FakeSourceFiles();
@@ -263,8 +269,19 @@ export function createFakeHost(): {
       db.closed = false;
       return db;
     },
+    async deleteDatabase(workspaceId) {
+      databases.delete(workspaceId);
+    },
+    async moveToTrash(rootPath) {
+      if (trash.failNext) {
+        trash.failNext = false;
+        throw new Error(`EBUSY: resource busy, rmdir '${rootPath}'`);
+      }
+      storages.delete(rootPath);
+      trash.paths.push(rootPath);
+    },
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
-  return { host, storages, databases, sources };
+  return { host, storages, databases, sources, trash };
 }

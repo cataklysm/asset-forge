@@ -60,4 +60,21 @@ describe('JsonWorkspaceRegistry', () => {
     expect(await new JsonWorkspaceRegistry(file).list()).toEqual([]);
     expect((await readdir(dir)).some((n) => n.startsWith('settings.json.corrupt-'))).toBe(true);
   });
+
+  it('removes an entry by id and ignores unknown ids', async () => {
+    const file = join(dir, 'settings.json');
+    const reg = new JsonWorkspaceRegistry(file);
+    await reg.upsert(entry(ID_A, 'one', '2026-01-01T00:00:00.000Z'));
+    await reg.upsert(entry(ID_B, 'other', '2026-01-03T00:00:00.000Z'));
+    await reg.remove(ID_A);
+    await reg.remove('33333333-3333-4333-8333-333333333333');
+    expect(await new JsonWorkspaceRegistry(file).list()).toEqual([
+      entry(ID_B, 'other', '2026-01-03T00:00:00.000Z'),
+    ]);
+  });
+
+  it('remove on a missing file creates nothing', async () => {
+    await new JsonWorkspaceRegistry(join(dir, 'settings.json')).remove(ID_A);
+    expect(await readdir(dir)).toEqual([]);
+  });
 });

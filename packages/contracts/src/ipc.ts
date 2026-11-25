@@ -34,6 +34,14 @@ export const ipcContract = {
     request: z.object({ rootPath: z.string() }),
     response: WorkspaceSummarySchema,
   },
+  /**
+   * Removes a workspace from the application after the user confirmed it in a native
+   * dialog owned by the host. `removed` is false when the user cancelled.
+   */
+  'workspace:remove': {
+    request: z.object({ id: z.uuid() }),
+    response: z.object({ removed: z.boolean(), folderTrashed: z.boolean() }),
+  },
   'workspace:close': {
     request: EmptyRequestSchema,
     response: z.null(),

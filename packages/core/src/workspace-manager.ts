@@ -12,6 +12,7 @@ import {
   InvalidManifestError,
   NoWorkspaceOpenError,
   StorageUnreachableError,
+  TrashFailedError,
   UnsupportedFormatVersionError,
   WorkspaceDuplicateError,
   WorkspaceMismatchError,
@@ -113,6 +114,30 @@ export class WorkspaceManager {
     if (!open) return;
     this.open_ = null;
     await open.database.close();
+  }
+
+  /**
+   * Forgets a workspace: its registry entry and its local database. With `trashFolder` the
+   * workspace folder goes to the operating system's trash first, so a failure there leaves
+   * everything untouched. A folder that no longer holds this workspace is never trashed.
+   */
+  async remove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
+    const entry = await this.host.registry.get(input.id);
+    if (entry === null) return { folderTrashed: false };
+    if (this.open_?.summary.id === input.id) await this.close();
+
+    let folderTrashed = false;
+    if (input.trashFolder && (await this.holdsWorkspace(entry.rootPath, input.id))) {
+      try {
+        await this.host.moveToTrash(entry.rootPath);
+      } catch (cause) {
+        throw new TrashFailedError('The workspace folder could not be moved to the trash', { cause });
+      }
+      folderTrashed = true;
+    }
+    await this.host.deleteDatabase(input.id);
+    await this.host.registry.remove(input.id);
+    return { folderTrashed };
   }
 
   async importFiles(sourcePaths: string[]): Promise<ImportResult[]> {

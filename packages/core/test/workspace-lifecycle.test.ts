@@ -7,6 +7,7 @@ import {
   MANIFEST_PATH,
   NoWorkspaceOpenError,
   StorageUnreachableError,
+  TrashFailedError,
   UnsupportedFormatVersionError,
   WorkspaceDuplicateError,
   WorkspaceManager,
@@ -249,5 +250,86 @@ describe('WorkspaceManager lifecycle', () => {
     const { manager } = setup();
     await manager.create({ name: 'Demo', rootPath: ROOT });
     await expect(manager.listFiles({ limit: 10, offset: 0 })).resolves.toEqual({ items: [], total: 0 });
+  });
+});
+
+describe('WorkspaceManager remove', () => {
+  it('forgets the workspace and deletes its database but leaves the folder alone', async () => {
+    const { manager, host, storages, databases, trash } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    await manager.close();
+
+    expect(await manager.remove({ id, trashFolder: false })).toEqual({ folderTrashed: false });
+    expect(await host.registry.list()).toEqual([]);
+    expect(databases.has(id)).toBe(false);
+    expect(storages.get(ROOT)!.files.has(MANIFEST_PATH)).toBe(true);
+    expect(trash.paths).toEqual([]);
+  });
+
+  it('closes the workspace first when it is the open one', async () => {
+    const { manager, databases } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const database = databases.get(id)!;
+
+    await manager.remove({ id, trashFolder: false });
+    expect(database.closed).toBe(true);
+    expect(manager.current()).toBeNull();
+  });
+
+  it('keeps another open workspace open', async () => {
+    const { manager } = setup();
+    const first = await manager.create({ name: 'First', rootPath: ROOT });
+    const second = await manager.create({ name: 'Second', rootPath: '/ws/b' });
+
+    await manager.remove({ id: first.id, trashFolder: false });
+    expect(manager.current()).toEqual(second);
+  });
+
+  it('moves the folder to the trash on request', async () => {
+    const { manager, host, databases, trash } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+
+    expect(await manager.remove({ id, trashFolder: true })).toEqual({ folderTrashed: true });
+    expect(trash.paths).toEqual([ROOT]);
+    expect(await host.registry.list()).toEqual([]);
+    expect(databases.has(id)).toBe(false);
+  });
+
+  it('never trashes a folder that no longer holds this workspace', async () => {
+    const { manager, host, storages, trash } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    await manager.close();
+    // The workspace was moved away and something else now lives at the registered path.
+    const storage = storages.get(ROOT)!;
+    storage.files.clear();
+    storage.files.set('unrelated.txt', Buffer.from('x'));
+
+    expect(await manager.remove({ id, trashFolder: true })).toEqual({ folderTrashed: false });
+    expect(trash.paths).toEqual([]);
+    expect(storage.files.has('unrelated.txt')).toBe(true);
+    expect(await host.registry.list()).toEqual([]);
+  });
+
+  it('removes nothing when the folder cannot be moved to the trash', async () => {
+    const { manager, host, storages, databases, trash } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    trash.failNext = true;
+
+    const error = await manager.remove({ id, trashFolder: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TrashFailedError);
+    expect((error as Error).message).not.toContain(ROOT);
+    expect(await host.registry.list()).toHaveLength(1);
+    expect(databases.has(id)).toBe(true);
+    expect(storages.get(ROOT)!.files.has(MANIFEST_PATH)).toBe(true);
+  });
+
+  it('is a no-op for an unknown id', async () => {
+    const { manager, host } = setup();
+    const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
+    expect(await manager.remove({ id: crypto.randomUUID(), trashFolder: true })).toEqual({
+      folderTrashed: false,
+    });
+    expect(await host.registry.list()).toEqual([summary]);
+    expect(manager.current()).toEqual(summary);
   });
 });

@@ -90,6 +90,14 @@ export function WorkspaceScreen({ onOpened }: Props) {
     });
   }
 
+  /** The main process asks for confirmation in a native dialog before anything is removed. */
+  const remove = (workspace: WorkspaceSummary) =>
+    run(async () => {
+      const { removed } = await call('workspace:remove', { id: workspace.id });
+      if (removed) setKnown(await call('workspace:list', {}));
+      return null;
+    });
+
   const openExisting = () =>
     run(async () => {
       const rootPath = await call('dialog:pickDirectory', {});
@@ -123,14 +131,26 @@ export function WorkspaceScreen({ onOpened }: Props) {
                     Last opened {formatDateTime(workspace.lastOpenedAt)}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className={BUTTON}
-                  disabled={busy}
-                  onClick={() => void run(() => openPath(workspace.rootPath))}
-                >
-                  Open
-                </button>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    className={BUTTON_SECONDARY}
+                    disabled={busy}
+                    aria-label={`Remove workspace ${workspace.name}`}
+                    onClick={() => void remove(workspace)}
+                  >
+                    Remove
+                  </button>
+                  <button
+                    type="button"
+                    className={BUTTON}
+                    disabled={busy}
+                    aria-label={`Open workspace ${workspace.name}`}
+                    onClick={() => void run(() => openPath(workspace.rootPath))}
+                  >
+                    Open
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

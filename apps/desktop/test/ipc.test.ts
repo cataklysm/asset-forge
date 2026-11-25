@@ -1,24 +1,43 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
-import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import {
+  createWorkspaceHandlers,
+  dispatch,
+  type Dialogs,
+  type IpcHandlers,
+  type RemoveChoice,
+} from '../src/main/ipc.js';
 
 let base: string;
 let manager: WorkspaceManager;
 let handlers: IpcHandlers;
 
-const dialogs = {
+let choice: RemoveChoice = 'cancel';
+
+const dialogs: Dialogs = {
   pickDirectory: async () => null,
   pickFiles: async () => [],
+  confirmRemoveWorkspace: async () => choice,
 };
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-ipc-'));
-  manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
+  choice = 'cancel';
+  manager = createWorkspaceManager({
+    userDataPath: join(base, 'userData'),
+    migrationsFolder: MIGRATIONS_FOLDER,
+    // Stands in for the OS trash: the folder ends up next to the workspaces, not deleted.
+    moveToTrash: async (path) => {
+      await mkdir(join(base, 'trash'), { recursive: true });
+      await rename(path, join(base, 'trash', basename(path)));
+    },
+  });
   handlers = createWorkspaceHandlers(manager, dialogs);
 });
 afterEach(async () => {
@@ -63,6 +82,7 @@ describe('dispatch', () => {
     const picked = createWorkspaceHandlers(manager, {
       pickDirectory: async () => 'D:\\picked',
       pickFiles: async () => ['D:\\a.png'],
+      confirmRemoveWorkspace: async () => 'cancel',
     });
     expect(await dispatch(picked, 'dialog:pickDirectory', {})).toEqual({ ok: true, value: 'D:\\picked' });
     expect(await dispatch(picked, 'dialog:pickFiles', {})).toEqual({ ok: true, value: ['D:\\a.png'] });
@@ -122,5 +142,75 @@ describe('workspace:resolveCreatePath', () => {
       rootPath: resolved.value,
     });
     expect(created).toMatchObject({ ok: true, value: { name: 'Nested', rootPath: join(base, 'Nested') } });
+  });
+});
+
+describe('workspace:remove', () => {
+  async function createWorkspace(): Promise<{ id: string; rootPath: string }> {
+    const rootPath = join(base, 'Demo');
+    const created = await dispatch(handlers, 'workspace:create', { name: 'Demo', rootPath });
+    if (!created.ok) throw new Error('create failed');
+    return { id: (created.value as { id: string }).id, rootPath };
+  }
+
+  /** True while anything below userData still carries the workspace id in its name. */
+  async function hasLocalData(id: string): Promise<boolean> {
+    const names = await readdir(join(base, 'userData'), { recursive: true });
+    return names.some((name) => name.includes(id));
+  }
+
+  it('changes nothing when the user cancels', async () => {
+    const { id, rootPath } = await createWorkspace();
+    const result = await dispatch(handlers, 'workspace:remove', { id });
+    expect(result).toEqual({ ok: true, value: { removed: false, folderTrashed: false } });
+    expect(await manager.list()).toHaveLength(1);
+    expect(manager.current()?.id).toBe(id);
+    expect(await hasLocalData(id)).toBe(true);
+    expect(existsSync(rootPath)).toBe(true);
+  });
+
+  it('forgets the workspace and deletes its database but keeps the folder', async () => {
+    const { id, rootPath } = await createWorkspace();
+    choice = 'forget';
+    const result = await dispatch(handlers, 'workspace:remove', { id });
+    expect(result).toEqual({ ok: true, value: { removed: true, folderTrashed: false } });
+    expect(await manager.list()).toEqual([]);
+    expect(manager.current()).toBeNull();
+    expect(await hasLocalData(id)).toBe(false);
+    expect(existsSync(join(rootPath, 'workspace.json'))).toBe(true);
+  });
+
+  it('moves the folder to the trash when the user asks for it', async () => {
+    const { id, rootPath } = await createWorkspace();
+    choice = 'forget_and_trash_folder';
+    const result = await dispatch(handlers, 'workspace:remove', { id });
+    expect(result).toEqual({ ok: true, value: { removed: true, folderTrashed: true } });
+    expect(existsSync(rootPath)).toBe(false);
+    expect(existsSync(join(base, 'trash', 'Demo', 'workspace.json'))).toBe(true);
+    expect(await hasLocalData(id)).toBe(false);
+    expect(await manager.list()).toEqual([]);
+  });
+
+  it('lets the same folder be used for a new workspace afterwards', async () => {
+    const { id, rootPath } = await createWorkspace();
+    choice = 'forget_and_trash_folder';
+    await dispatch(handlers, 'workspace:remove', { id });
+    const again = await dispatch(handlers, 'workspace:create', { name: 'Demo', rootPath });
+    expect(again).toMatchObject({ ok: true, value: { name: 'Demo' } });
+  });
+
+  it('removes nothing for an unknown id', async () => {
+    const { id } = await createWorkspace();
+    choice = 'forget_and_trash_folder';
+    const result = await dispatch(handlers, 'workspace:remove', {
+      id: '33333333-3333-4333-8333-333333333333',
+    });
+    expect(result).toEqual({ ok: true, value: { removed: false, folderTrashed: false } });
+    expect(manager.current()?.id).toBe(id);
+  });
+
+  it('rejects a request without a valid id', async () => {
+    const result = await dispatch(handlers, 'workspace:remove', { id: '../x' });
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 });

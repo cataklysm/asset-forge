@@ -50,6 +50,7 @@ export interface WorkspaceRegistry {
   list(): Promise<WorkspaceSummary[]>;
   get(id: string): Promise<WorkspaceSummary | null>;
   upsert(entry: WorkspaceSummary): Promise<void>; // keyed by id
+  remove(id: string): Promise<void>; // no-op if unknown
 }
 
 export interface WorkspaceHost {
@@ -57,6 +58,8 @@ export interface WorkspaceHost {
   sources: SourceFiles;
   createStorage(rootPath: string): Storage;
   openDatabase(workspaceId: string): Promise<WorkspaceDatabase>; // creates the file and applies migrations
+  deleteDatabase(workspaceId: string): Promise<void>; // removes the local database; no-op if missing
+  moveToTrash(rootPath: string): Promise<void>; // recoverable removal of a workspace folder
   newId(): string;
   now(): Date;
 }

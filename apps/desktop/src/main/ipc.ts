@@ -1,4 +1,9 @@
-import { ipcContract, type IpcChannel, type IpcResult } from '@assetforge/contracts';
+import {
+  ipcContract,
+  type IpcChannel,
+  type IpcResult,
+  type WorkspaceSummary,
+} from '@assetforge/contracts';
 import { join } from 'node:path';
 import { AssetForgeError, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
 import type { z } from 'zod';
@@ -14,7 +19,11 @@ export type IpcHandlers = {
 export interface Dialogs {
   pickDirectory(): Promise<string | null>;
   pickFiles(): Promise<string[]>;
+  /** Asks the user how to remove a workspace; the renderer cannot answer this itself. */
+  confirmRemoveWorkspace(workspace: WorkspaceSummary): Promise<RemoveChoice>;
 }
+
+export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
 
 export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dialogs): IpcHandlers {
   return {
@@ -24,6 +33,17 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
     'workspace:resolveCreatePath': async (request) =>
       join(request.parentPath, workspaceFolderName(request.name)),
     'workspace:open': (request) => manager.open(request),
+    'workspace:remove': async ({ id }) => {
+      const workspace = (await manager.list()).find((w) => w.id === id);
+      if (!workspace) return { removed: false, folderTrashed: false };
+      const choice = await dialogs.confirmRemoveWorkspace(workspace);
+      if (choice === 'cancel') return { removed: false, folderTrashed: false };
+      const { folderTrashed } = await manager.remove({
+        id,
+        trashFolder: choice === 'forget_and_trash_folder',
+      });
+      return { removed: true, folderTrashed };
+    },
     'workspace:close': async () => {
       await manager.close();
       return null;

@@ -5,6 +5,8 @@ import {
   dialog,
   ipcMain,
   type BrowserWindow,
+  shell,
+  type MessageBoxOptions,
   type OpenDialogOptions,
 } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
@@ -36,6 +38,7 @@ function start(): void {
   const manager = createWorkspaceManager({
     userDataPath: app.getPath('userData'),
     migrationsFolder: __ASSETFORGE_DEV_MIGRATIONS_FOLDER__ ?? join(outMainDir, 'migrations'),
+    moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
   });
 
   const dialogs: Dialogs = {
@@ -46,6 +49,22 @@ function start(): void {
     async pickFiles() {
       const result = await showOpenDialog({ properties: ['openFile', 'multiSelections'] });
       return result.canceled ? [] : result.filePaths;
+    },
+    async confirmRemoveWorkspace(workspace) {
+      const options: MessageBoxOptions = {
+        type: 'warning',
+        title: 'Remove workspace',
+        message: `Remove the workspace "${workspace.name}"?`,
+        detail: `${workspace.rootPath}\n\nRemoving it deletes its catalog in AssetForge. The files in the folder stay where they are unless you also move the folder to the trash.`,
+        buttons: ['Cancel', 'Remove from AssetForge', 'Remove and move folder to trash'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const { response } = mainWindow
+        ? await dialog.showMessageBox(mainWindow, options)
+        : await dialog.showMessageBox(options);
+      return (['cancel', 'forget', 'forget_and_trash_folder'] as const)[response] ?? 'cancel';
     },
   };
   function showOpenDialog(options: OpenDialogOptions) {
