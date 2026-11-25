@@ -36,7 +36,7 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 ## Renderer
 
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
-- Returning from a detail screen resets the filters and page of the list.
+- Pagers inside detail screens (project members, asset files) still reset on navigation; the file grids of an asset still page by 50 and group per loaded page.
 - `CommitInput`: Enter followed by blur can save twice before the reload; the draft reset can overwrite typing while a reload is in flight.
 - Load errors are keyed by their message (duplicate React keys); two failed imports of the same source path collide the same way.
 - The import failure list hardcodes its red classes instead of using `ALERT`.
@@ -45,6 +45,9 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - `formatBytes(1048575)` yields `1024.0 KiB`; no guard for NaN or negative values.
 - Asset detail groups files by role per loaded page; with more than one page a role shows up incompletely on several pages.
 - A file whose placement failed counts as failed on the asset screen although it was imported into the inbox (the inbox screen counts it as imported).
+- No settings for the cache size and location; the preview worker timeout (30 s) is a constant.
+- The preview failure memory is per session and is not invalidated when a file changes.
+- `Cache-Control` max-age on previews assumes the content of a file ID never changes (true until working-file re-hashing in phase 6).
 - Two saves of the same workflow step in flight: the response that arrives last wins.
 - A workflow without mandatory steps renders `<progress max="0">`.
 - Removing a workflow clears the local state instead of reloading it.
@@ -68,6 +71,8 @@ Findings from the phase 1 and phase 2 reviews that were deliberately not fixed. 
 - The `EACCES` test of `writeStream` does not assert that the target is absent.
 - The in-memory `assetWorkflows.insert` checks fewer foreign keys than SQLite does.
 - A new template version next to workflows on the old one is only tested on the fakes, not on the SQL adapter.
+- No DOM test for the gallery, the file detail dialog and keyboard navigation (covered only end to end).
+- `check-sharp.mjs` is a manual gate and not part of `pnpm test`.
 - No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
 
 ## Not covered by any automated check
