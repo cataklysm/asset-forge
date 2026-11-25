@@ -58,12 +58,12 @@ describe('dispatch', () => {
   });
 
   it('rejects a request that fails its schema', async () => {
-    const result = await dispatch(handlers, 'files:list', { limit: 0, offset: 0 });
+    const result = await dispatch(handlers, 'files:list', { limit: 0, offset: 0, scope: { kind: 'all' } });
     expect(result).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 
   it('maps an AssetForgeError to its code', async () => {
-    const result = await dispatch(handlers, 'files:list', { limit: 10, offset: 0 });
+    const result = await dispatch(handlers, 'files:list', { limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(result).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
   });
 
@@ -74,7 +74,7 @@ describe('dispatch', () => {
     });
     expect(created).toMatchObject({ ok: true, value: { name: 'Test' } });
 
-    const result = await dispatch(handlers, 'files:list', { limit: 10, offset: 0 });
+    const result = await dispatch(handlers, 'files:list', { limit: 10, offset: 0, scope: { kind: 'all' } });
     expect(result).toEqual({ ok: true, value: { items: [], total: 0 } });
   });
 

@@ -20,7 +20,7 @@ export function FilesScreen({ workspace, onClosed }: Props) {
 
   const load = useCallback(async (at: number) => {
     try {
-      setList(await call('files:list', { limit: PAGE_SIZE, offset: at }));
+      setList(await call('files:list', { limit: PAGE_SIZE, offset: at, scope: { kind: 'inbox' } }));
     } catch (e) {
       setError(describeError(e));
     }

@@ -1,7 +1,35 @@
 import { z } from 'zod';
 import { ErrorCodeSchema } from './errors';
-import { FileListSchema, ImportResultSchema } from './files';
-import { PageRequestSchema } from './library';
+import {
+  FileListSchema,
+  FileRecordSchema,
+  FileScopeSchema,
+  FileTargetSchema,
+  ImportResultSchema,
+} from './files';
+import {
+  ApprovalStatusSchema,
+  AssetAssignmentSchema,
+  AssetListSchema,
+  AssetRelationSchema,
+  AssetRelationViewSchema,
+  AssetSchema,
+  AssetStatusSchema,
+  AssetTypeSchema,
+  AssignmentPrioritySchema,
+  DescriptionInputSchema,
+  FileRoleSchema,
+  IntendedUseInputSchema,
+  NameInputSchema,
+  NotesInputSchema,
+  PageRequestSchema,
+  ProjectAssignmentSchema,
+  ProjectListSchema,
+  ProjectMemberListSchema,
+  ProjectSchema,
+  ProjectStatusSchema,
+  RelationKindSchema,
+} from './library';
 import { WorkspaceSummarySchema } from './workspace';
 
 export const IpcErrorSchema = z.object({
@@ -13,6 +41,14 @@ export type IpcError = z.infer<typeof IpcErrorSchema>;
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
 const EmptyRequestSchema = z.object({});
+const IdSchema = z.uuid();
+const IdRequestSchema = z.object({ id: IdSchema });
+const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });
+const RelationKeySchema = z.object({
+  fromAssetId: IdSchema,
+  toAssetId: IdSchema,
+  kind: RelationKindSchema,
+});
 
 export const ipcContract = {
   'workspace:list': {
@@ -49,12 +85,128 @@ export const ipcContract = {
     response: z.null(),
   },
   'files:import': {
-    request: z.object({ sourcePaths: z.array(z.string()).min(1).max(1000) }),
+    request: z.object({
+      sourcePaths: z.array(z.string()).min(1).max(1000),
+      target: FileTargetSchema.optional(),
+    }),
     response: z.array(ImportResultSchema),
   },
   'files:list': {
-    request: PageRequestSchema,
+    request: PageRequestSchema.extend({ scope: FileScopeSchema }),
     response: FileListSchema,
+  },
+  'files:assign': {
+    request: z.object({ fileId: IdSchema, assetId: IdSchema, role: FileRoleSchema }),
+    response: FileRecordSchema,
+  },
+  'files:unassign': {
+    request: z.object({ fileId: IdSchema }),
+    response: FileRecordSchema,
+  },
+  'assetTypes:list': {
+    request: EmptyRequestSchema,
+    response: z.array(AssetTypeSchema),
+  },
+  'projects:list': {
+    request: PageRequestSchema,
+    response: ProjectListSchema,
+  },
+  'projects:get': {
+    request: IdRequestSchema,
+    response: ProjectSchema,
+  },
+  'projects:create': {
+    request: z.object({ name: NameInputSchema, description: DescriptionInputSchema.optional() }),
+    response: ProjectSchema,
+  },
+  'projects:update': {
+    request: z.object({
+      id: IdSchema,
+      patch: z
+        .object({
+          name: NameInputSchema.optional(),
+          description: DescriptionInputSchema.optional(),
+          status: ProjectStatusSchema.optional(),
+        })
+        .strict(),
+    }),
+    response: ProjectSchema,
+  },
+  'assets:list': {
+    request: PageRequestSchema.extend({
+      typeId: IdSchema.optional(),
+      status: AssetStatusSchema.optional(),
+      projectId: IdSchema.optional(),
+      nameContains: z.string().max(200).optional(),
+    }),
+    response: AssetListSchema,
+  },
+  'assets:get': {
+    request: IdRequestSchema,
+    response: AssetSchema,
+  },
+  'assets:create': {
+    request: z.object({
+      name: NameInputSchema,
+      typeId: IdSchema,
+      description: DescriptionInputSchema.optional(),
+    }),
+    response: AssetSchema,
+  },
+  'assets:update': {
+    request: z.object({
+      id: IdSchema,
+      patch: z
+        .object({
+          name: NameInputSchema.optional(),
+          description: DescriptionInputSchema.optional(),
+          typeId: IdSchema.optional(),
+          status: AssetStatusSchema.optional(),
+        })
+        .strict(),
+    }),
+    response: AssetSchema,
+  },
+  'assignments:listByAsset': {
+    request: z.object({ assetId: IdSchema }),
+    response: z.array(AssetAssignmentSchema),
+  },
+  'assignments:listByProject': {
+    request: PageRequestSchema.extend({ projectId: IdSchema }),
+    response: ProjectMemberListSchema,
+  },
+  'assignments:assign': {
+    request: AssignmentKeySchema,
+    response: ProjectAssignmentSchema,
+  },
+  'assignments:update': {
+    request: AssignmentKeySchema.extend({
+      patch: z
+        .object({
+          priority: AssignmentPrioritySchema.optional(),
+          intendedUse: IntendedUseInputSchema.optional(),
+          approvalStatus: ApprovalStatusSchema.optional(),
+          notes: NotesInputSchema.optional(),
+        })
+        .strict(),
+    }),
+    response: ProjectAssignmentSchema,
+  },
+  'assignments:remove': {
+    request: AssignmentKeySchema,
+    response: z.null(),
+  },
+  'relations:list': {
+    request: z.object({ assetId: IdSchema }),
+    response: z.array(AssetRelationViewSchema),
+  },
+  'relations:add': {
+    request: RelationKeySchema,
+    response: AssetRelationSchema,
+  },
+  'relations:remove': {
+    request: RelationKeySchema,
+    response: z.null(),
   },
   'dialog:pickDirectory': {
     request: EmptyRequestSchema,

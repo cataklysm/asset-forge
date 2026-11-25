@@ -54,9 +54,9 @@ describe('FileRecordSchema', () => {
 describe('ipcContract', () => {
   it('rejects files:list limits outside 1..200', () => {
     const { request } = ipcContract['files:list'];
-    expect(request.safeParse({ limit: 0, offset: 0 }).success).toBe(false);
-    expect(request.safeParse({ limit: 201, offset: 0 }).success).toBe(false);
-    expect(request.safeParse({ limit: 200, offset: 0 }).success).toBe(true);
+    expect(request.safeParse({ limit: 0, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
+    expect(request.safeParse({ limit: 201, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
+    expect(request.safeParse({ limit: 200, offset: 0, scope: { kind: 'all' } }).success).toBe(true);
   });
 
   it('rejects files:import with empty sourcePaths', () => {
@@ -74,9 +74,9 @@ describe('NameInputSchema', () => {
 
 describe('PageRequestSchema', () => {
   it('rejects limit 0, limit 201, a negative offset and fractions', () => {
-    expect(PageRequestSchema.safeParse({ limit: 1, offset: 0 }).success).toBe(true);
-    expect(PageRequestSchema.safeParse({ limit: 0, offset: 0 }).success).toBe(false);
-    expect(PageRequestSchema.safeParse({ limit: 201, offset: 0 }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 1, offset: 0, scope: { kind: 'all' } }).success).toBe(true);
+    expect(PageRequestSchema.safeParse({ limit: 0, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
+    expect(PageRequestSchema.safeParse({ limit: 201, offset: 0, scope: { kind: 'all' } }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 10, offset: -1 }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 1.5, offset: 0 }).success).toBe(false);
     expect(PageRequestSchema.safeParse({ limit: 10, offset: 0.5 }).success).toBe(false);
@@ -141,5 +141,25 @@ describe('assignment and relation views', () => {
   it('AssetAssignmentSchema embeds the project', () => {
     const { asset: _omit, ...base } = member;
     expect(AssetAssignmentSchema.safeParse({ ...base, project }).success).toBe(true);
+  });
+});
+
+describe('library IPC requests', () => {
+  it('assets:create rejects a whitespace-only name', () => {
+    const request = ipcContract['assets:create'].request;
+    expect(request.safeParse({ name: '   ', typeId: uuid }).success).toBe(false);
+    expect(request.safeParse({ name: ' Pump ', typeId: uuid }).success).toBe(true);
+  });
+
+  it('assets:update rejects unknown patch keys', () => {
+    const request = ipcContract['assets:update'].request;
+    expect(request.safeParse({ id: uuid, patch: { status: 'in_review' } }).success).toBe(true);
+    expect(request.safeParse({ id: uuid, patch: { id: uuid } }).success).toBe(false);
+  });
+
+  it('files:list requires a scope', () => {
+    const request = ipcContract['files:list'].request;
+    expect(request.safeParse({ limit: 10, offset: 0 }).success).toBe(false);
+    expect(request.safeParse({ limit: 10, offset: 0, scope: { kind: 'inbox' } }).success).toBe(true);
   });
 });

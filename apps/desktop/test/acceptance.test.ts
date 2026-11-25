@@ -3,7 +3,9 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { IpcChannel, IpcRequest, IpcResponse } from '@assetforge/contracts';
 import {
   assetFilePath,
   assignAsset,
@@ -13,9 +15,11 @@ import {
   listAssets,
   relocateFile,
   removeAssignment,
+  type WorkspaceManager,
 } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
+import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
 
 let base: string;
 let userDataPath: string;
@@ -173,5 +177,212 @@ describe('phase 1 acceptance', () => {
       // @ts-expect-error migrationsFolder is required
       createWorkspaceHost({ userDataPath });
     expect(typeof withoutFolder).toBe('function');
+  });
+});
+
+// The desktop package has no type declarations for better-sqlite3; this is the used subset.
+interface RawDatabase {
+  prepare(sql: string): { all(): unknown[] };
+  close(): void;
+}
+const Database = createRequire(import.meta.url)('better-sqlite3') as new (
+  path: string,
+  options: { readonly: boolean },
+) => RawDatabase;
+
+describe('phase 2a acceptance', () => {
+  const page = { limit: 50, offset: 0 };
+
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+    });
+    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await dispatch(handlers, channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+  }
+
+  async function sha256Of(path: string): Promise<string> {
+    return createHash('sha256')
+      .update(await readFile(path))
+      .digest('hex');
+  }
+
+  /** Asset of type `character` in two projects with `a.png` placed as a reference. */
+  async function scenario(manager: WorkspaceManager) {
+    const call = handlersFor(manager);
+    await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+    const types = await call('assetTypes:list', {});
+    const typeId = types.find((t) => t.key === 'character')!.id;
+    const asset = await call('assets:create', { name: 'Pump', typeId });
+    const first = await call('projects:create', { name: 'Game' });
+    const second = await call('projects:create', { name: 'Trailer' });
+    await call('assignments:assign', { projectId: first.id, assetId: asset.id });
+    await call('assignments:assign', { projectId: second.id, assetId: asset.id });
+    const [result] = await call('files:import', {
+      sourcePaths: [pngPath],
+      target: { assetId: asset.id, role: 'reference' },
+    });
+    return { call, typeId, asset, first, second, file: result!.file!, result: result! };
+  }
+
+  it('uses one asset in two projects and removes an assignment without losing anything', async () => {
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const { call, asset, first, second, file, result } = await scenario(manager);
+      expect(result.error).toBeNull();
+      expect(file.relativePath).toBe(`assets/${asset.id}/references/${file.id}_a.png`);
+      expect(existsSync(join(workspaceRoot, file.relativePath))).toBe(true);
+      expect(await readdir(join(workspaceRoot, 'inbox'))).toEqual([]);
+      const checksum = await sha256Of(join(workspaceRoot, file.relativePath));
+
+      await call('assignments:remove', { projectId: first.id, assetId: asset.id });
+
+      expect(await call('assets:get', { id: asset.id })).toMatchObject({ id: asset.id });
+      const assignments = await call('assignments:listByAsset', { assetId: asset.id });
+      expect(assignments.map((a) => a.projectId)).toEqual([second.id]);
+      const files = await call('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
+      expect(files.items).toEqual([file]);
+      expect(await sha256Of(join(workspaceRoot, file.relativePath))).toBe(checksum);
+      expect(checksum).toBe(file.sha256);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it('keeps assets, assignments, relations, placement and status across a restart', async () => {
+    const collect = async (call: ReturnType<typeof handlersFor>, assetId: string, otherId: string) => ({
+      asset: await call('assets:get', { id: assetId }),
+      assignments: await call('assignments:listByAsset', { assetId }),
+      relations: await call('relations:list', { assetId }),
+      incoming: await call('relations:list', { assetId: otherId }),
+      files: await call('files:list', { ...page, scope: { kind: 'asset', assetId } }),
+    });
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let before: Awaited<ReturnType<typeof collect>>;
+    let typeIds: string[];
+    let ids: { assetId: string; otherId: string };
+    try {
+      const { call, typeId, asset } = await scenario(first);
+      const other = await call('assets:create', { name: 'Valve', typeId });
+      await call('assets:update', { id: asset.id, patch: { status: 'in_review' } });
+      await call('relations:add', { fromAssetId: asset.id, toAssetId: other.id, kind: 'uses' });
+      ids = { assetId: asset.id, otherId: other.id };
+      before = await collect(call, ids.assetId, ids.otherId);
+      typeIds = (await call('assetTypes:list', {})).map((t) => t.id);
+      expect(typeIds).toHaveLength(8);
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      await second.open({ rootPath: workspaceRoot });
+      const call = handlersFor(second);
+      const after = await collect(call, ids.assetId, ids.otherId);
+      expect(after).toEqual(before);
+      expect(after.asset.status).toBe('in_review');
+      expect(after.relations).toHaveLength(1);
+      expect(after.files.items).toHaveLength(1);
+      expect((await call('assetTypes:list', {})).map((t) => t.id)).toEqual(typeIds);
+    } finally {
+      await second.close();
+    }
+  });
+
+  async function interruptedMove(performMove: boolean) {
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let setup: { assetId: string; fileId: string; inboxFile: string; newPath: string; before: unknown };
+    try {
+      const call = handlersFor(first);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const typeId = (await call('assetTypes:list', {}))[0]!.id;
+      const asset = await call('assets:create', { name: 'Pump', typeId });
+      const [imported] = await call('files:import', { sourcePaths: [pngPath] });
+      const file = imported!.file!;
+      const newPath = assetFilePath(asset.id, 'reference', file.id, 'a.png');
+      await first.exclusive(async (s) => {
+        await s.database.fileMoves.begin({
+          fileId: file.id,
+          targetRelativePath: newPath,
+          targetAssetId: asset.id,
+          targetRole: 'reference',
+          createdAt: s.now().toISOString(),
+        });
+        if (performMove) await s.storage.move(file.relativePath, newPath);
+      });
+      setup = { assetId: asset.id, fileId: file.id, inboxFile: file.relativePath, newPath, before: file };
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      await second.open({ rootPath: workspaceRoot });
+      const listed = await handlersFor(second)('files:list', { ...page, scope: { kind: 'all' } });
+      const record = listed.items.find((f) => f.id === setup.fileId);
+      const pending = await second.read((s) => s.database.fileMoves.list());
+      return { ...setup, record, pending };
+    } finally {
+      await second.close();
+    }
+  }
+
+  it('completes an interrupted move on the next open', async () => {
+    const r = await interruptedMove(true);
+    expect(r.record).toMatchObject({ assetId: r.assetId, role: 'reference', relativePath: r.newPath });
+    expect(r.pending).toEqual([]);
+    expect(existsSync(join(workspaceRoot, r.newPath))).toBe(true);
+    expect(existsSync(join(workspaceRoot, r.inboxFile))).toBe(false);
+  });
+
+  it('discards a move that never happened', async () => {
+    const r = await interruptedMove(false);
+    expect(r.record).toEqual(r.before);
+    expect(r.pending).toEqual([]);
+    expect(existsSync(join(workspaceRoot, r.inboxFile))).toBe(true);
+  });
+
+  it('no absolute path is stored', async () => {
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let workspaceId: string;
+    try {
+      const { call, asset, first } = await scenario(manager);
+      await call('assignments:update', {
+        projectId: first.id,
+        assetId: asset.id,
+        patch: { intendedUse: 'hero', notes: 'n' },
+      });
+      workspaceId = (await call('workspace:current', {}))!.id;
+    } finally {
+      await manager.close();
+    }
+
+    const raw = new Database(join(userDataPath, 'workspaces', workspaceId, 'assetforge.sqlite'), {
+      readonly: true,
+    });
+    try {
+      const tables = raw
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as { name: string }[];
+      expect(tables.length).toBeGreaterThan(5);
+      for (const { name } of tables) {
+        const columns = raw.prepare(`PRAGMA table_info("${name}")`).all() as { name: string; type: string }[];
+        for (const column of columns.filter((c) => c.type.toLowerCase().includes('text'))) {
+          const rows = raw.prepare(`SELECT "${column.name}" AS v FROM "${name}"`).all() as { v: unknown }[];
+          for (const { v } of rows) {
+            if (typeof v !== 'string') continue;
+            expect(v.includes(workspaceRoot), `${name}.${column.name}`).toBe(false);
+            expect(v.includes(userDataPath), `${name}.${column.name}`).toBe(false);
+          }
+        }
+      }
+    } finally {
+      raw.close();
+    }
   });
 });

@@ -8,6 +8,7 @@ import {
 import { join } from 'node:path';
 import { AssetForgeError, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
 import type { z } from 'zod';
+import { createLibraryHandlers } from './library-handlers.js';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
 
@@ -49,8 +50,7 @@ export function createWorkspaceHandlers(manager: WorkspaceManager, dialogs: Dial
       await manager.close();
       return null;
     },
-    'files:import': (request) => manager.importFiles(request.sourcePaths),
-    'files:list': (request) => manager.listFiles({ ...request, scope: { kind: 'all' } }),
+    ...createLibraryHandlers(manager),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };
