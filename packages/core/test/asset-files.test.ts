@@ -126,6 +126,7 @@ describe('relocateFile', () => {
         relativePath: inboxPath(id, 'x.png'),
         mimeType: 'image/png',
         importedAt: TS,
+        kind: 'image',
       });
     }
     await db.files.markFailed(failedId, 'Import failed');

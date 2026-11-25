@@ -1,11 +1,12 @@
-import type { FileList, FileRecord, FileScope, ImportStatus } from '@assetforge/contracts';
+import { FileKindSchema } from '@assetforge/contracts';
+import type { FileList, FileRecord, FileScope, ImportStatus, TagAssignment } from '@assetforge/contracts';
 import { NotFoundError, isOpenable, isPreviewable, type FileRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { asset, file } from './schema.js';
+import { asset, file, fileTag, tag } from './schema.js';
 
-// Row shape equals FileRecord; spelled out so schema drift fails at compile time.
-export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
+// Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
+const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRecord => ({
   id: row.id,
   storageId: row.storageId,
   assetId: row.assetId,
@@ -20,7 +21,37 @@ export const toRecord = (row: typeof file.$inferSelect): FileRecord => ({
   importedAt: row.importedAt,
   previewable: isPreviewable(row.mimeType),
   openable: isOpenable(row.relativePath),
+  kind: FileKindSchema.catch('other').parse(row.kind), // the column has no CHECK; an unknown value reads as 'other'
+  tags,
 });
+
+/** Turns rows into records; the file tags of all rows come from one query. */
+export function toRecords(tx: Pick<BetterSQLite3Database, 'select'>, rows: (typeof file.$inferSelect)[]): FileRecord[] {
+  if (rows.length === 0) return [];
+  const byFile = new Map<string, TagAssignment[]>();
+  const assignments = tx
+    .select({ fileId: fileTag.fileId, name: tag.name, displayName: tag.displayName, origin: fileTag.origin })
+    .from(fileTag)
+    .innerJoin(tag, eq(tag.id, fileTag.tagId))
+    .where(
+      inArray(
+        fileTag.fileId,
+        rows.map((r) => r.id),
+      ),
+    )
+    .orderBy(asc(tag.name), asc(fileTag.origin))
+    .all();
+  for (const { fileId, ...assignment } of assignments) {
+    const list = byFile.get(fileId);
+    if (list) list.push(assignment);
+    else byFile.set(fileId, [assignment]);
+  }
+  return rows.map((row) => toRecord(row, byFile.get(row.id) ?? []));
+}
+
+export function toRecordWithTags(tx: Pick<BetterSQLite3Database, 'select'>, row: typeof file.$inferSelect): FileRecord {
+  return toRecords(tx, [row])[0]!;
+}
 
 /**
  * Clears the chosen cover of every asset other than `assetId` (the file's new asset, or null for
@@ -59,6 +90,7 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
           relativePath: r.relativePath,
           mimeType: r.mimeType,
           importedAt: r.importedAt,
+          kind: r.kind,
           status: 'pending',
         })
         .run();
@@ -76,26 +108,43 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
       requireChanged(changes, id);
     },
     async findCompleteBySha256(sha256) {
-      return db
-        .select()
-        .from(file)
-        .where(and(eq(file.sha256, sha256), eq(file.status, 'complete')))
-        .orderBy(asc(file.importedAt), asc(file.id))
-        .all()
-        .map(toRecord);
+      return db.transaction(
+        (tx) =>
+          toRecords(
+            tx,
+            tx
+              .select()
+              .from(file)
+              .where(and(eq(file.sha256, sha256), eq(file.status, 'complete')))
+              .orderBy(asc(file.importedAt), asc(file.id))
+              .all(),
+          ),
+        { behavior: 'deferred' },
+      );
     },
     async listByStatus(status: ImportStatus) {
-      return db
-        .select()
-        .from(file)
-        .where(eq(file.status, status))
-        .orderBy(asc(file.importedAt), asc(file.id))
-        .all()
-        .map(toRecord);
+      return db.transaction(
+        (tx) =>
+          toRecords(
+            tx,
+            tx
+              .select()
+              .from(file)
+              .where(eq(file.status, status))
+              .orderBy(asc(file.importedAt), asc(file.id))
+              .all(),
+          ),
+        { behavior: 'deferred' },
+      );
     },
     async get(id) {
-      const row = db.select().from(file).where(eq(file.id, id)).get();
-      return row ? toRecord(row) : null;
+      return db.transaction(
+        (tx) => {
+          const row = tx.select().from(file).where(eq(file.id, id)).get();
+          return row ? toRecordWithTags(tx, row) : null;
+        },
+        { behavior: 'deferred' },
+      );
     },
     async setPlacement(id, placement) {
       // Throwing inside the transaction rolls back both statements.
@@ -108,7 +157,7 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
           .get();
         if (!row) throw new NotFoundError(`File ${id} does not exist`);
         clearCoverOutside(tx, id, placement.assetId);
-        return toRecord(row);
+        return toRecordWithTags(tx, row);
       });
     },
     async list({ limit, offset, scope }): Promise<FileList> {
@@ -116,15 +165,17 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
       // One read transaction, so the page and the total describe the same snapshot.
       return db.transaction(
         (tx) => {
-          const items = tx
-            .select()
-            .from(file)
-            .where(where)
-            .orderBy(desc(file.importedAt), desc(file.id))
-            .limit(limit)
-            .offset(offset)
-            .all()
-            .map(toRecord);
+          const items = toRecords(
+            tx,
+            tx
+              .select()
+              .from(file)
+              .where(where)
+              .orderBy(desc(file.importedAt), desc(file.id))
+              .limit(limit)
+              .offset(offset)
+              .all(),
+          );
           const total = tx.select({ n: count() }).from(file).where(where).get()?.n ?? 0;
           return { items, total };
         },

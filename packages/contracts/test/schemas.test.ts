@@ -8,6 +8,7 @@ import {
   FileRecordSchema,
   IpcErrorSchema,
   NameInputSchema,
+  normalizeTagName,
   PageRequestSchema,
   ProjectMemberSchema,
   SetCoverRequestSchema,
@@ -52,8 +53,12 @@ describe('FileRecordSchema', () => {
       importedAt: now,
       previewable: true,
       openable: true,
+      kind: 'image',
+      tags: [],
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);
+    const { kind: _k, ...withoutKind } = record;
+    expect(() => FileRecordSchema.parse(withoutKind)).toThrow();
     const { previewable: _p, ...withoutPreviewable } = record;
     const { openable: _o, ...withoutOpenable } = record;
     expect(() => FileRecordSchema.parse(withoutPreviewable)).toThrow();
@@ -241,10 +246,11 @@ describe('asset cover', () => {
   });
 
   it('AssetDetailSchema requires coverFileId and coverIsChosen', () => {
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true }).success).toBe(true);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false }).success).toBe(true);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null }).success).toBe(false);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true, tags: [] }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, tags: [] }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, tags: [] }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false, tags: [] }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false }).success).toBe(false);
   });
 
   it('SetCoverRequestSchema accepts a file id or null and requires both keys', () => {
@@ -252,5 +258,27 @@ describe('asset cover', () => {
     expect(SetCoverRequestSchema.safeParse({ assetId: uuid, fileId: null }).success).toBe(true);
     expect(SetCoverRequestSchema.safeParse({ assetId: uuid }).success).toBe(false);
     expect(SetCoverRequestSchema.safeParse({ assetId: 'x', fileId: null }).success).toBe(false);
+  });
+});
+
+describe('normalizeTagName', () => {
+  it('trims, collapses whitespace and lower-cases', () => {
+    expect(normalizeTagName('  Sci   Fi ')).toBe('sci fi');
+  });
+
+  it('normalises decomposed input to NFC', () => {
+    const acute = String.fromCodePoint(0x301);
+    expect(normalizeTagName('e' + acute)).toBe(String.fromCodePoint(0xe9));
+    expect(normalizeTagName('E' + acute)).toBe(normalizeTagName(String.fromCodePoint(0xc9)));
+  });
+
+  it('returns null for empty or blank input', () => {
+    expect(normalizeTagName('')).toBeNull();
+    expect(normalizeTagName('   ')).toBeNull();
+  });
+
+  it('counts code points against the 64 limit', () => {
+    expect(normalizeTagName(String.fromCodePoint(0x1f600).repeat(64))).not.toBeNull();
+    expect(normalizeTagName(String.fromCodePoint(0x1f600).repeat(65))).toBeNull();
   });
 });

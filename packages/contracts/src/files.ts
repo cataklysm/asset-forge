@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FileRoleSchema } from './library';
+import { TagAssignmentSchema } from './tags';
 
 export const ImportStatusSchema = z.enum(['pending', 'complete', 'failed']);
 export type ImportStatus = z.infer<typeof ImportStatusSchema>;
@@ -25,6 +26,8 @@ export const FileRecordSchema = z.object({
   importedAt: z.iso.datetime(),
   previewable: z.boolean(),
   openable: z.boolean(),
+  kind: FileKindSchema,
+  tags: z.array(TagAssignmentSchema), // file tags only
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 

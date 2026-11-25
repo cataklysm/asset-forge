@@ -24,6 +24,7 @@ const pending = (id: string, name: string) => ({
   relativePath: inboxPath(id, name),
   mimeType: 'image/png',
   importedAt: '2026-01-01T00:00:00.000Z',
+  kind: 'image' as const,
 });
 
 describe('recoverIncompleteImports', () => {

@@ -249,6 +249,7 @@ describe('asset workflow repository', () => {
       relativePath: 'inbox/a.png',
       mimeType: 'image/png',
       importedAt: TS,
+      kind: 'image',
     });
     await db.files.setPlacement(uuid(31), { relativePath: `assets/${uuid(1)}/a.png`, assetId: uuid(1), role: 'reference' });
     await db.projects.insert({ id: uuid(40), name: 'P', description: '', status: 'active', createdAt: TS, updatedAt: TS });

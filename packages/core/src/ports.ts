@@ -10,6 +10,7 @@ import type {
   FileList,
   FileRecord,
   FileRole,
+  FileKind,
   FileScope,
   ImportStatus,
   Project,
@@ -17,6 +18,9 @@ import type {
   ProjectList,
   ProjectMemberList,
   RelationKind,
+  TagAssignment,
+  TagOrigin,
+  TagSuggestion,
   AssetWorkflow,
   WorkflowStepState,
   WorkflowTemplate,
@@ -63,6 +67,7 @@ export interface FileRepository {
     relativePath: string;
     mimeType: string;
     importedAt: string;
+    kind: FileKind;
   }): Promise<void>;
   markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void>; // rejects with NotFoundError for an unknown id
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
@@ -238,6 +243,22 @@ export interface AssetRelationRepository {
   listForAsset(assetId: string): Promise<AssetRelationView[]>; // outgoing first, then incoming; each by kind, then other.name
 }
 
+/**
+ * Tags are keyed by normalised name; `displayName` is kept from the first creation. An assignment is
+ * identified by owner, tag and origin, so a manual and an AI assignment of one tag coexist.
+ */
+export interface TagRepository {
+  /** Tags with at least one assignment whose name starts with `prefix` (already normalised); most used first, then by name. */
+  suggest(q: { prefix: string; limit: number }): Promise<TagSuggestion[]>;
+  /** One transaction: inserts the tag if its name is missing, then the assignment; an existing assignment is left alone. */
+  addToAsset(r: { assetId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void>;
+  /** Deletes the one assignment of that origin; a missing tag or assignment is a no-op. */
+  removeFromAsset(r: { assetId: string; name: string; origin: TagOrigin }): Promise<void>;
+  addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void>;
+  removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void>;
+  listForAsset(assetId: string): Promise<TagAssignment[]>; // by name, then origin
+}
+
 export interface WorkspaceMeta {
   id: string;
   formatVersion: number;
@@ -262,6 +283,7 @@ export interface WorkspaceDatabase {
   relations: AssetRelationRepository;
   workflowTemplates: WorkflowTemplateRepository;
   assetWorkflows: AssetWorkflowRepository;
+  tags: TagRepository;
   close(): Promise<void>;
 }
 

@@ -34,6 +34,7 @@ const pending = (n: number, importedAt = '2026-01-01T00:00:00.000Z') => ({
   relativePath: `files/f${n}.png`,
   mimeType: 'image/png',
   importedAt,
+  kind: 'image' as const,
 });
 
 beforeEach(async () => {
@@ -81,6 +82,7 @@ describe('workspace database', () => {
       error: null,
       previewable: true,
       openable: true,
+      tags: [],
     });
     expect(() => FileRecordSchema.parse(list.items[0])).not.toThrow();
   });

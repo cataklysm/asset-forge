@@ -204,6 +204,7 @@ describe('project assignments', () => {
       relativePath: 'files/pump.png',
       mimeType: 'image/png',
       importedAt: TS,
+      kind: 'image',
     });
     await db.projectAssets.insert(assignment(1, 11));
     await db.projectAssets.insert(assignment(2, 11));
@@ -276,6 +277,7 @@ describe('file placement and moves', () => {
         relativePath: `inbox/f${n}.png`,
         mimeType: 'image/png',
         importedAt: `2026-01-0${n}T00:00:00.000Z`,
+        kind: 'image',
       });
       await db.files.markComplete(fileId(n), { sizeBytes: n, sha256: String(n).repeat(64) });
     }
@@ -298,6 +300,7 @@ describe('file placement and moves', () => {
       relativePath: 'inbox/f4_setup.exe',
       mimeType: 'application/octet-stream',
       importedAt: '2026-01-04T00:00:00.000Z',
+      kind: 'image',
     });
     await expect(db.files.get(fileId(1))).resolves.toMatchObject({ previewable: true, openable: true });
     await expect(db.files.get(fileId(4))).resolves.toMatchObject({ previewable: false, openable: false });

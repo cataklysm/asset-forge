@@ -1,7 +1,7 @@
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
 import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
 import { mimeFromFileName } from './file-names.js';
-import { isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
+import { fileKind, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, SourceFiles, Storage } from './ports.js';
 
@@ -59,6 +59,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     relativePath: finalPath,
     mimeType: mimeFromFileName(name),
     importedAt: ctx.now().toISOString(),
+    kind: fileKind(name),
   };
 
   try {
@@ -96,6 +97,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       importedAt: pending.importedAt,
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
+      kind: pending.kind,
+      tags: [],
     };
     return { sourcePath, file, error: null, duplicateOf };
   } catch (error) {
@@ -128,6 +131,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       importedAt: pending.importedAt,
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
+      kind: pending.kind,
+      tags: [],
     };
     return { sourcePath, file, error: message, duplicateOf: [] };
   }

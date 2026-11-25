@@ -7,6 +7,7 @@ import type {
   AssetRelation,
   AssetRelationView,
   AssetType,
+  FileKind,
   FileList,
   FileRecord,
   FileScope,
@@ -15,6 +16,9 @@ import type {
   ProjectAssignment,
   ProjectList,
   ProjectMemberList,
+  TagAssignment,
+  TagOrigin,
+  TagSuggestion,
   AssetWorkflow,
   WorkflowProgress,
   WorkflowStep,
@@ -56,6 +60,7 @@ import type {
   Storage,
   StorageRef,
   StorageRepository,
+  TagRepository,
   WorkspaceDatabase,
   WorkspaceHost,
   WorkspaceMeta,
@@ -213,10 +218,77 @@ class InMemoryStorages implements StorageRepository {
 /** Chosen covers, assetId -> fileId; shared so a file placement can clear a cover like the database does. */
 class CoverChoices extends Map<string, string> {}
 
+/** Tags and both kinds of assignment. Assignments are kept in insertion order and sorted on read. */
+class InMemoryTags implements TagRepository {
+  readonly tags = new Map<string, { id: string; displayName: string }>(); // by normalised name
+  readonly assetAssignments: { assetId: string; name: string; origin: TagOrigin }[] = [];
+  readonly fileAssignments: { fileId: string; name: string; origin: TagOrigin }[] = [];
+
+  private static sorted(rows: { name: string; origin: TagOrigin }[], tags: Map<string, { displayName: string }>): TagAssignment[] {
+    return rows
+      .map((r) => ({ name: r.name, displayName: tags.get(r.name)!.displayName, origin: r.origin }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0));
+  }
+
+  async suggest(q: { prefix: string; limit: number }): Promise<TagSuggestion[]> {
+    const used = new Map<string, number>();
+    for (const a of [...this.assetAssignments, ...this.fileAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
+    return [...used]
+      .filter(([name]) => name.startsWith(q.prefix))
+      .sort(([an, ac], [bn, bc]) => bc - ac || (an < bn ? -1 : an > bn ? 1 : 0))
+      .slice(0, q.limit)
+      .map(([name]) => ({ name, displayName: this.tags.get(name)!.displayName }));
+  }
+
+  private ensureTag(r: { name: string; displayName: string; newId: string }): void {
+    if (!this.tags.has(r.name)) this.tags.set(r.name, { id: r.newId, displayName: r.displayName });
+  }
+
+  async addToAsset(r: { assetId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+    this.ensureTag(r);
+    if (!this.assetAssignments.some((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin)) {
+      this.assetAssignments.push({ assetId: r.assetId, name: r.name, origin: r.origin });
+    }
+  }
+
+  async removeFromAsset(r: { assetId: string; name: string; origin: TagOrigin }): Promise<void> {
+    const i = this.assetAssignments.findIndex((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin);
+    if (i >= 0) this.assetAssignments.splice(i, 1);
+  }
+
+  async addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+    this.ensureTag(r);
+    if (!this.fileAssignments.some((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin)) {
+      this.fileAssignments.push({ fileId: r.fileId, name: r.name, origin: r.origin });
+    }
+  }
+
+  async removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void> {
+    const i = this.fileAssignments.findIndex((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin);
+    if (i >= 0) this.fileAssignments.splice(i, 1);
+  }
+
+  async listForAsset(assetId: string): Promise<TagAssignment[]> {
+    return InMemoryTags.sorted(this.assetAssignments.filter((a) => a.assetId === assetId), this.tags);
+  }
+
+  forFile(fileId: string): TagAssignment[] {
+    return InMemoryTags.sorted(this.fileAssignments.filter((a) => a.fileId === fileId), this.tags);
+  }
+}
+
 class InMemoryFiles implements FileRepository {
+  /** Stored without tags; every method that returns a record attaches the current file tags. */
   readonly records = new Map<string, FileRecord>();
 
-  constructor(private readonly covers: CoverChoices) {}
+  constructor(
+    private readonly covers: CoverChoices,
+    private readonly tags: InMemoryTags,
+  ) {}
+
+  private withTags(rec: FileRecord): FileRecord {
+    return { ...rec, tags: this.tags.forFile(rec.id) };
+  }
 
   async insertPending(r: {
     id: string;
@@ -225,6 +297,7 @@ class InMemoryFiles implements FileRepository {
     relativePath: string;
     mimeType: string;
     importedAt: string;
+    kind: FileKind;
   }): Promise<void> {
     this.records.set(r.id, {
       id: r.id,
@@ -241,6 +314,8 @@ class InMemoryFiles implements FileRepository {
       importedAt: r.importedAt,
       previewable: isPreviewable(r.mimeType),
       openable: isOpenable(r.relativePath),
+      kind: r.kind,
+      tags: [],
     });
   }
 
@@ -255,15 +330,16 @@ class InMemoryFiles implements FileRepository {
   }
 
   async findCompleteBySha256(sha256: string): Promise<FileRecord[]> {
-    return [...this.records.values()].filter((r) => r.status === 'complete' && r.sha256 === sha256);
+    return [...this.records.values()].filter((r) => r.status === 'complete' && r.sha256 === sha256).map((r) => this.withTags(r));
   }
 
   async listByStatus(status: ImportStatus): Promise<FileRecord[]> {
-    return [...this.records.values()].filter((r) => r.status === status);
+    return [...this.records.values()].filter((r) => r.status === status).map((r) => this.withTags(r));
   }
 
   async get(id: string): Promise<FileRecord | null> {
-    return this.records.get(id) ?? null;
+    const rec = this.records.get(id);
+    return rec ? this.withTags(rec) : null;
   }
 
   async setPlacement(id: string, placement: FilePlacement): Promise<FileRecord> {
@@ -273,7 +349,7 @@ class InMemoryFiles implements FileRepository {
     for (const [assetId, fileId] of this.covers) {
       if (fileId === id && assetId !== placement.assetId) this.covers.delete(assetId);
     }
-    return next;
+    return this.withTags(next);
   }
 
   async list(q: Page & { scope: FileScope }): Promise<FileList> {
@@ -281,7 +357,7 @@ class InMemoryFiles implements FileRepository {
     const sorted = [...this.records.values()]
       .filter((r) => scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null))
       .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-    return { items: sorted.slice(q.offset, q.offset + q.limit), total: sorted.length };
+    return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }
 
   private require(id: string): FileRecord {
@@ -746,7 +822,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
   private readonly covers = new CoverChoices();
-  readonly files = new InMemoryFiles(this.covers);
+  readonly tags = new InMemoryTags();
+  readonly files = new InMemoryFiles(this.covers, this.tags);
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();

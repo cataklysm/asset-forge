@@ -155,6 +155,7 @@ describe('media protocol', () => {
         relativePath: `inbox/${pendingId}/late.png`,
         mimeType: 'image/png',
         importedAt: new Date().toISOString(),
+        kind: 'image',
       }),
     );
     for (const fileId of [ID, pendingId, document.id]) {

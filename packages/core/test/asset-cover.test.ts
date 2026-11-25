@@ -43,6 +43,7 @@ async function addFile(
     name: string;
     mimeType: string;
     importedAt: string;
+    kind?: 'image';
     assetId?: string | null;
     role?: FileRole;
     status?: ImportStatus;
@@ -58,6 +59,7 @@ async function addFile(
     relativePath: inboxPath(f.id, f.name),
     mimeType: f.mimeType,
     importedAt: f.importedAt,
+    kind: f.kind ?? 'image',
   });
   const status = f.status ?? 'complete';
   if (status === 'complete') await ctx.db.files.markComplete(f.id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
@@ -120,7 +122,7 @@ describe('asset cover', () => {
 
     const before = await ctx.db.assets.get(ctx.asset.id);
     const chosen = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) });
-    expect(chosen).toEqual({ ...before, updatedAt: chosen.updatedAt, coverFileId: uuid(2), coverIsChosen: true });
+    expect(chosen).toEqual({ ...before, updatedAt: chosen.updatedAt, coverFileId: uuid(2), coverIsChosen: true, tags: [] });
     await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toEqual(chosen);
   });
 
