@@ -420,6 +420,8 @@ All server services get health checks, persistent data volumes where required, c
 
 The following commands are target conventions. They only work once the Compose file, services and package scripts are implemented in the repository.
 
+Already working (phase 1, no Docker needed): `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm typecheck`, a single test via `pnpm --filter @assetforge/<package> test <file> -t "<name>"` (without a `--` separator, which pnpm would pass on literally and thereby disable the filter), and `pnpm --filter @assetforge/persistence db:generate`. The persistence and desktop tests run under Electron's Node because of the better-sqlite3 ABI. Only the Docker Compose commands below are still planned.
+
 ```bash
 pnpm install
 

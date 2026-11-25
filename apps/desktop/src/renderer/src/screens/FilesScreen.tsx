@@ -1,0 +1,164 @@
+import { useCallback, useEffect, useState } from 'react';
+import type { FileList, ImportResult, WorkspaceSummary } from '@assetforge/contracts';
+import { call, describeError } from '../api';
+import { formatBytes, formatDateTime } from '../format';
+
+interface Props {
+  workspace: WorkspaceSummary;
+  onClosed(): void;
+}
+
+const PAGE_SIZE = 50;
+const BUTTON =
+  'rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50';
+
+export function FilesScreen({ workspace, onClosed }: Props) {
+  const [offset, setOffset] = useState(0);
+  const [list, setList] = useState<FileList | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [results, setResults] = useState<ImportResult[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (at: number) => {
+    try {
+      setList(await call('files:list', { limit: PAGE_SIZE, offset: at }));
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(offset);
+  }, [load, offset]);
+
+  async function importFiles() {
+    setError(null);
+    setImporting(true);
+    try {
+      const sourcePaths = await call('dialog:pickFiles', {});
+      if (sourcePaths.length === 0) return;
+      setResults(await call('files:import', { sourcePaths }));
+      setOffset(0);
+      await load(0);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function closeWorkspace() {
+    try {
+      await call('workspace:close', {});
+      onClosed();
+    } catch (e) {
+      setError(describeError(e));
+    }
+  }
+
+  const failed = results?.filter((result) => result.error !== null) ?? [];
+  // A duplicate is still imported (it only has matching content), so it counts in both figures.
+  const duplicates = results?.filter((result) => result.duplicateOf.length > 0).length ?? 0;
+  const imported = (results?.length ?? 0) - failed.length;
+  const total = list?.total ?? 0;
+
+  return (
+    <main className="mx-auto max-w-5xl space-y-4 p-6 text-slate-900">
+      <header className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">{workspace.name}</h1>
+          <p className="truncate text-sm text-slate-600">{workspace.rootPath}</p>
+        </div>
+        <button type="button" className={BUTTON} onClick={() => void closeWorkspace()}>
+          Close workspace
+        </button>
+      </header>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={importing}
+          onClick={() => void importFiles()}
+        >
+          Import files
+        </button>
+        {importing && <span className="text-sm text-slate-600">Importing…</span>}
+      </div>
+
+      {error !== null && (
+        <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-red-800">
+          {error}
+        </p>
+      )}
+
+      {results !== null && (
+        <div className="space-y-1">
+          <p>
+            {imported} imported, {failed.length} failed, {duplicates} duplicates
+          </p>
+          {failed.length > 0 && (
+            <ul className="list-disc pl-5 text-sm text-red-800">
+              {failed.map((result) => (
+                <li key={result.sourcePath}>
+                  {result.sourcePath}: {result.error}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {list === null ? (
+        <p className="text-slate-600">Loading…</p>
+      ) : (
+        <>
+          <table className="w-full text-left text-sm">
+            <thead className="border-b text-slate-600">
+              <tr>
+                <th className="py-1 pr-3">Name</th>
+                <th className="py-1 pr-3">Type</th>
+                <th className="py-1 pr-3">Size</th>
+                <th className="py-1 pr-3">Status</th>
+                <th className="py-1">Imported</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.items.map((file) => (
+                <tr key={file.id} className="border-b">
+                  <td className="py-1 pr-3">{file.originalName}</td>
+                  <td className="py-1 pr-3">{file.mimeType}</td>
+                  <td className="py-1 pr-3">{formatBytes(file.sizeBytes)}</td>
+                  <td className="py-1 pr-3">{file.status}</td>
+                  <td className="py-1">{formatDateTime(file.importedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {total === 0 && <p className="text-slate-600">No files yet.</p>}
+          <nav className="flex items-center gap-3 text-sm" aria-label="Pagination">
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              Previous
+            </button>
+            <span>
+              {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+            </span>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={offset + PAGE_SIZE >= total}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next
+            </button>
+          </nav>
+        </>
+      )}
+    </main>
+  );
+}
