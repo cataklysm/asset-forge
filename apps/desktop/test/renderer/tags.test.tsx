@@ -276,6 +276,10 @@ it('the tag filter stops at 10 tags', async () => {
   await user.type(input, 'OAK {Enter}');
   expect(onChange).toHaveBeenCalledTimes(1);
   expect(input.value).toBe('');
+  await user.type(input, '!!!{Enter}');
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button', { name: 'Remove !!!' })).toBeNull();
+  await user.clear(input);
 
   for (let i = 1; i < 10; i += 1) await user.type(input, `t${i}{Enter}`);
   expect(onChange).toHaveBeenLastCalledWith(['oak', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);

@@ -11,11 +11,11 @@ import { getAssetDetail } from './asset-cover.js';
 import { NotFoundError, ValidationFailedError } from './errors.js';
 import type { WorkspaceSession } from './session.js';
 
-/** The key and the display spelling of a tag; throws `validation_failed` for an empty or too long tag. */
+/** The key and the display spelling of a tag; throws `validation_failed` for a tag without a letter or digit or a too long one. */
 export function tagName(input: string): { name: string; displayName: string } {
   const name = normalizeTagName(input);
   if (name === null) {
-    throw new ValidationFailedError(`A tag must have 1 to ${MAX_TAG_LENGTH} characters`);
+    throw new ValidationFailedError(`A tag needs a letter or digit and at most ${MAX_TAG_LENGTH} characters`);
   }
   return { name, displayName: cleanTagText(input) };
 }

@@ -66,6 +66,10 @@ describe('tagName', () => {
     expect(() => tagName('   ')).toThrow(expect.objectContaining({ code: 'validation_failed' }));
     expect(() => tagName('x'.repeat(65))).toThrow(expect.objectContaining({ code: 'validation_failed' }));
   });
+
+  it('a tag without a letter or digit fails with validation_failed', () => {
+    expect(() => tagName('!!!')).toThrow(expect.objectContaining({ code: 'validation_failed' }));
+  });
 });
 
 describe('asset tags', () => {
@@ -92,6 +96,7 @@ describe('asset tags', () => {
       code: 'validation_failed',
     });
     await expect(removeAssetTag(session, { assetId: asset.id, name: '' })).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(addAssetTag(session, { assetId: asset.id, name: '!!!' })).rejects.toMatchObject({ code: 'validation_failed' });
   });
 
   it('tagging an unknown asset or file fails with not_found', async () => {

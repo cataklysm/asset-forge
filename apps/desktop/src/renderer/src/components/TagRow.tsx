@@ -17,12 +17,6 @@ interface Props {
 }
 
 const INVALID_TAG = 'Tags need a letter or digit and at most 64 characters.';
-const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
-
-function isValidTag(text: string): boolean {
-  const name = normalizeTagName(text);
-  return name !== null && LETTER_OR_DIGIT.test(name);
-}
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
   if (typeof ref === 'function') ref(value);
@@ -63,7 +57,7 @@ export function TagRow({ label, kind, tags, onAdd, onRemove, disabled = false, i
 
   async function add(value: string) {
     if (cleanTagText(value) === '') return;
-    if (!isValidTag(value)) {
+    if (normalizeTagName(value) === null) {
       setError(INVALID_TAG);
       return;
     }

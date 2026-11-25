@@ -353,8 +353,20 @@ describe('normalizeTagName', () => {
   });
 
   it('counts code points against the 64 limit', () => {
-    expect(normalizeTagName(String.fromCodePoint(0x1f600).repeat(64))).not.toBeNull();
-    expect(normalizeTagName(String.fromCodePoint(0x1f600).repeat(65))).toBeNull();
+    expect(normalizeTagName('a' + String.fromCodePoint(0x1f600).repeat(63))).not.toBeNull();
+    expect(normalizeTagName('a' + String.fromCodePoint(0x1f600).repeat(64))).toBeNull();
+  });
+
+  it('returns null for text without a letter or digit', () => {
+    expect(normalizeTagName('!!!')).toBeNull();
+    expect(normalizeTagName('  -- ')).toBeNull();
+    expect(normalizeTagName(String.fromCodePoint(0x1f600, 0x1f333))).toBeNull();
+  });
+
+  it('accepts text with at least one letter or digit', () => {
+    expect(normalizeTagName('c++')).toBe('c++');
+    expect(normalizeTagName('3d')).toBe('3d');
+    expect(normalizeTagName('ÄÖ')).toBe('äö');
   });
 });
 

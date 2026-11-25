@@ -33,10 +33,16 @@ export function cleanTagText(input: string): string {
 /** Clean text, lower-cased and NFC again (lower-casing can produce a composable sequence). */
 const lowerTagText = (input: string) => cleanTagText(input).toLowerCase().normalize('NFC');
 
-/** The tag key: clean text, lower-cased, NFC. Null when empty or longer than 64 code points. */
+/** A tag needs a letter or digit: a symbol-only tag has no search token. */
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/**
+ * The tag key: clean text, lower-cased, NFC. Null when it has no letter or digit (which includes
+ * empty text) or is longer than 64 code points.
+ */
 export function normalizeTagName(input: string): string | null {
   const name = lowerTagText(input);
-  if (name === '') return null;
+  if (!LETTER_OR_DIGIT.test(name)) return null;
   return [...name].length > MAX_TAG_LENGTH ? null : name;
 }
 
