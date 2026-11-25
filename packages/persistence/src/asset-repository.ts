@@ -4,7 +4,7 @@ import { and, asc, count, eq, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { containsPattern } from './like.js';
 import { qualified } from './qualified.js';
-import { asset, file, projectAsset } from './schema.js';
+import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, workflowStepDefinition } from './schema.js';
 
 const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   id: row.id,
@@ -17,6 +17,13 @@ const toAsset = (row: typeof asset.$inferSelect): Asset => ({
 });
 
 const outerAssetId = qualified(asset, asset.id);
+const workflowAssetId = qualified(assetWorkflow, assetWorkflow.assetId);
+
+/** `from ... where ...` over the mandatory step rows of the outer asset's workflow. */
+const mandatoryStepsOfOuterAsset = sql`from ${assetWorkflowStep}
+  join ${assetWorkflow} on ${qualified(assetWorkflow, assetWorkflow.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.assetWorkflowId)}
+  join ${workflowStepDefinition} on ${qualified(workflowStepDefinition, workflowStepDefinition.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.stepDefinitionId)}
+  where ${workflowAssetId} = ${outerAssetId} and ${qualified(workflowStepDefinition, workflowStepDefinition.mandatory)} = 1`;
 
 export function createAssetRepository(db: BetterSQLite3Database): AssetRepository {
   return {
@@ -73,13 +80,20 @@ export function createAssetRepository(db: BetterSQLite3Database): AssetRepositor
               updatedAt: asset.updatedAt,
               projectCount: sql<number>`(select count(*) from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId})`,
               fileCount: sql<number>`(select count(*) from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId})`,
+              hasWorkflow: sql<number>`exists (select 1 from ${assetWorkflow} where ${workflowAssetId} = ${outerAssetId})`,
+              workflowDone: sql<number>`(select count(*) ${mandatoryStepsOfOuterAsset} and ${qualified(assetWorkflowStep, assetWorkflowStep.state)} = 'done')`,
+              workflowTotal: sql<number>`(select count(*) ${mandatoryStepsOfOuterAsset})`,
             })
             .from(asset)
             .where(where)
             .orderBy(sql`lower(${asset.name})`, asc(asset.id))
             .limit(q.limit)
             .offset(q.offset)
-            .all();
+            .all()
+            .map(({ hasWorkflow, workflowDone, workflowTotal, ...row }) => ({
+              ...row,
+              workflowProgress: hasWorkflow ? { done: workflowDone, total: workflowTotal } : null,
+            }));
           const total = tx.select({ n: count() }).from(asset).where(where).get()?.n ?? 0;
           return { items, total };
         },

@@ -14,6 +14,8 @@ import { createAssetRelationRepository } from './asset-relation-repository.js';
 import { createProjectAssetRepository } from './project-asset-repository.js';
 import { createProjectRepository } from './project-repository.js';
 import { createStorageRepository } from './storage-repository.js';
+import { createAssetWorkflowRepository } from './asset-workflow-repository.js';
+import { createWorkflowTemplateRepository } from './workflow-template-repository.js';
 
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url));
 
@@ -38,6 +40,8 @@ export async function openWorkspaceDatabase(
       assets: createAssetRepository(db),
       projectAssets: createProjectAssetRepository(db),
       relations: createAssetRelationRepository(db),
+      workflowTemplates: createWorkflowTemplateRepository(db),
+      assetWorkflows: createAssetWorkflowRepository(db),
       async close() {
         if (sqlite.open) sqlite.close();
       },

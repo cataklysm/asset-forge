@@ -1,6 +1,6 @@
 import type { AssetType } from '@assetforge/contracts';
 import type { AssetTypeRepository } from '@assetforge/core';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetType } from './schema.js';
 
@@ -10,6 +10,7 @@ const toAssetType = (row: typeof assetType.$inferSelect): AssetType => ({
   name: row.name,
   sortOrder: row.sortOrder,
   builtIn: row.builtIn,
+  defaultWorkflowTemplateId: row.defaultWorkflowTemplateId,
 });
 
 export function createAssetTypeRepository(db: BetterSQLite3Database): AssetTypeRepository {
@@ -31,11 +32,24 @@ export function createAssetTypeRepository(db: BetterSQLite3Database): AssetTypeR
       db.transaction((tx) => {
         for (const t of types) {
           tx.insert(assetType)
-            .values({ id: t.id, key: t.key, name: t.name, sortOrder: t.sortOrder, builtIn: t.builtIn })
+            .values({
+              id: t.id,
+              key: t.key,
+              name: t.name,
+              sortOrder: t.sortOrder,
+              builtIn: t.builtIn,
+              defaultWorkflowTemplateId: t.defaultWorkflowTemplateId,
+            })
             .onConflictDoNothing({ target: assetType.key })
             .run();
         }
       });
+    },
+    async setDefaultWorkflowTemplateIfUnset(typeKey, templateId) {
+      db.update(assetType)
+        .set({ defaultWorkflowTemplateId: templateId })
+        .where(and(eq(assetType.key, typeKey), isNull(assetType.defaultWorkflowTemplateId)))
+        .run();
     },
   };
 }

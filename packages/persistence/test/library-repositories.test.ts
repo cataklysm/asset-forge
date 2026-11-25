@@ -15,7 +15,14 @@ import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 const TS = '2026-01-01T00:00:00.000Z';
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const typeRows = (base: number): AssetType[] =>
-  BUILT_IN_ASSET_TYPES.map((t, i) => ({ id: uuid(base + i), key: t.key, name: t.name, sortOrder: i, builtIn: true }));
+  BUILT_IN_ASSET_TYPES.map((t, i) => ({
+    id: uuid(base + i),
+    key: t.key,
+    name: t.name,
+    sortOrder: i,
+    builtIn: true,
+    defaultWorkflowTemplateId: null,
+  }));
 const asset = (n: number, name: string, typeId: string, status: Asset['status'] = 'draft'): Asset => ({
   id: uuid(n),
   name,

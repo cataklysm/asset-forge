@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AssetAssignmentSchema,
   AssetRelationViewSchema,
+  AssetSummarySchema,
+  AssetWorkflowSchema,
   FileRecordSchema,
   IpcErrorSchema,
   NameInputSchema,
@@ -161,5 +163,51 @@ describe('library IPC requests', () => {
     const request = ipcContract['files:list'].request;
     expect(request.safeParse({ limit: 10, offset: 0 }).success).toBe(false);
     expect(request.safeParse({ limit: 10, offset: 0, scope: { kind: 'inbox' } }).success).toBe(true);
+  });
+});
+
+describe('workflows', () => {
+  const step = {
+    id: uuid,
+    key: 'concept',
+    name: 'Concept',
+    position: 0,
+    mandatory: true,
+    state: 'done',
+    notes: '',
+    updatedAt: now,
+    completedAt: now,
+  };
+  const workflow = {
+    id: uuid,
+    assetId: uuid,
+    templateId: uuid,
+    templateName: 'Character',
+    templateVersion: 1,
+    createdAt: now,
+    progress: { done: 1, total: 1 },
+    steps: [step],
+  };
+
+  it('AssetWorkflowSchema accepts a well-formed workflow and rejects an unknown step state', () => {
+    expect(AssetWorkflowSchema.safeParse(workflow).success).toBe(true);
+    expect(AssetWorkflowSchema.safeParse({ ...workflow, steps: [{ ...step, state: 'blocked' }] }).success).toBe(false);
+  });
+
+  it('AssetSummarySchema accepts workflowProgress null and { done, total }', () => {
+    const summary = {
+      id: uuid,
+      name: 'A',
+      typeId: uuid,
+      description: '',
+      status: 'draft',
+      createdAt: now,
+      updatedAt: now,
+      projectCount: 0,
+      fileCount: 0,
+    };
+    expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: null }).success).toBe(true);
+    expect(AssetSummarySchema.safeParse({ ...summary, workflowProgress: { done: 2, total: 5 } }).success).toBe(true);
+    expect(AssetSummarySchema.safeParse(summary).success).toBe(false);
   });
 });

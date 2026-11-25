@@ -17,6 +17,9 @@ import type {
   ProjectList,
   ProjectMemberList,
   RelationKind,
+  AssetWorkflow,
+  WorkflowStepState,
+  WorkflowTemplate,
   WorkspaceSummary,
 } from '@assetforge/contracts';
 
@@ -101,6 +104,64 @@ export interface AssetTypeRepository {
   list(): Promise<AssetType[]>; // by sortOrder, then name
   get(id: string): Promise<AssetType | null>;
   insertMissing(types: AssetType[]): Promise<void>; // skips rows whose key already exists
+  /** Sets the default template of the type with `typeKey` unless it already has one; no-op for an unknown key. */
+  setDefaultWorkflowTemplateIfUnset(typeKey: string, templateId: string): Promise<void>;
+}
+
+export interface StepDefinitionInput {
+  id: string;
+  position: number;
+  key: string;
+  name: string;
+  mandatory: boolean;
+}
+
+export interface TemplateVersion {
+  id: string;
+  templateId: string;
+  version: number;
+  steps: StepDefinitionInput[]; // by position
+}
+
+/** Templates, versions and step definitions are immutable: there is no update or delete. */
+export interface WorkflowTemplateRepository {
+  list(): Promise<WorkflowTemplate[]>; // by name; only templates with at least one version
+  get(id: string): Promise<WorkflowTemplate | null>; // null also for a template without a version
+  findByKey(key: string): Promise<{ id: string } | null>;
+  insertTemplate(t: { id: string; key: string; name: string; builtIn: boolean; createdAt: string }): Promise<void>;
+  hasVersion(templateId: string, version: number): Promise<boolean>;
+  /** One transaction: the version row and all its step definitions. */
+  insertVersion(v: TemplateVersion & { createdAt: string }): Promise<void>;
+  latestVersion(templateId: string): Promise<TemplateVersion | null>;
+}
+
+export interface NewWorkflowStep {
+  id: string;
+  stepDefinitionId: string;
+  updatedAt: string;
+}
+
+export interface StepContext {
+  stepId: string;
+  assetId: string;
+  mandatory: boolean;
+  state: WorkflowStepState;
+}
+
+export interface AssetWorkflowRepository {
+  /** One transaction: the workflow row and one step row per entry, state 'not_started', notes ''. */
+  insert(
+    w: { id: string; assetId: string; templateVersionId: string; createdAt: string },
+    steps: NewWorkflowStep[],
+  ): Promise<void>;
+  getByAsset(assetId: string): Promise<AssetWorkflow | null>;
+  getStepContext(stepId: string): Promise<StepContext | null>;
+  /** Writes exactly the given fields; `completedAt` is not derived from `state`. */
+  updateStep(
+    stepId: string,
+    patch: { state?: WorkflowStepState; notes?: string; completedAt?: string | null; updatedAt: string },
+  ): Promise<void>;
+  remove(assetId: string): Promise<boolean>; // false if the asset had none
 }
 
 export interface ProjectRepository {
@@ -183,6 +244,8 @@ export interface WorkspaceDatabase {
   assets: AssetRepository;
   projectAssets: ProjectAssetRepository;
   relations: AssetRelationRepository;
+  workflowTemplates: WorkflowTemplateRepository;
+  assetWorkflows: AssetWorkflowRepository;
   close(): Promise<void>;
 }
 

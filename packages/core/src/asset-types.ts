@@ -25,6 +25,7 @@ export async function ensureBuiltInAssetTypes(ctx: {
     name: t.name,
     sortOrder,
     builtIn: true,
+    defaultWorkflowTemplateId: null,
   }));
   await ctx.database.assetTypes.insertMissing(types);
 }

@@ -15,6 +15,13 @@
       "when": 1795628437698,
       "tag": "0001_regular_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795632287583,
+      "tag": "0002_outgoing_franklin_richards",
+      "breakpoints": true
     }
   ]
 }

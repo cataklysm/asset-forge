@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WorkflowProgressSchema } from './workflows';
 
 const id = z.uuid();
 const timestamp = z.iso.datetime();
@@ -67,6 +68,7 @@ export const AssetTypeSchema = z.object({
   name: z.string(),
   sortOrder: z.number().int(),
   builtIn: z.boolean(),
+  defaultWorkflowTemplateId: id.nullable(),
 });
 export type AssetType = z.infer<typeof AssetTypeSchema>;
 
@@ -94,7 +96,11 @@ export const AssetSchema = z.object({
 });
 export type Asset = z.infer<typeof AssetSchema>;
 
-export const AssetSummarySchema = AssetSchema.extend({ projectCount: count, fileCount: count });
+export const AssetSummarySchema = AssetSchema.extend({
+  projectCount: count,
+  fileCount: count,
+  workflowProgress: WorkflowProgressSchema.nullable(), // null when the asset has no workflow
+});
 export type AssetSummary = z.infer<typeof AssetSummarySchema>;
 
 export const ProjectAssignmentSchema = z.object({

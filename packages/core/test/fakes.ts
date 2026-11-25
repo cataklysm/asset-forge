@@ -15,6 +15,11 @@ import type {
   ProjectAssignment,
   ProjectList,
   ProjectMemberList,
+  AssetWorkflow,
+  WorkflowProgress,
+  WorkflowStep,
+  WorkflowStepState,
+  WorkflowTemplate,
   WorkspaceSummary,
 } from '@assetforge/contracts';
 import { LAYOUT_DIRS } from '../src/paths.js';
@@ -25,6 +30,12 @@ import type {
   AssetRepository,
   AssignmentKey,
   AssetTypeRepository,
+  AssetWorkflowRepository,
+  NewWorkflowStep,
+  StepContext,
+  StepDefinitionInput,
+  TemplateVersion,
+  WorkflowTemplateRepository,
   FileMove,
   FileMoveRepository,
   FilePlacement,
@@ -304,6 +315,207 @@ class InMemoryAssetTypes implements AssetTypeRepository {
       if (![...this.rows.values()].some((r) => r.key === t.key)) this.rows.set(t.id, t);
     }
   }
+
+  async setDefaultWorkflowTemplateIfUnset(typeKey: string, templateId: string): Promise<void> {
+    const row = [...this.rows.values()].find((r) => r.key === typeKey);
+    if (row && row.defaultWorkflowTemplateId === null) this.rows.set(row.id, { ...row, defaultWorkflowTemplateId: templateId });
+  }
+
+  /** Test-only: sets or clears the default template of the type with `typeKey`, replacing any existing one. */
+  setDefaultWorkflowTemplate(typeKey: string, templateId: string | null): void {
+    const row = [...this.rows.values()].find((r) => r.key === typeKey);
+    if (!row) throw new Error(`Unknown asset type key: ${typeKey}`);
+    this.rows.set(row.id, { ...row, defaultWorkflowTemplateId: templateId });
+  }
+}
+
+type TemplateRow = { id: string; key: string; name: string; builtIn: boolean; createdAt: string };
+
+class InMemoryWorkflowTemplates implements WorkflowTemplateRepository {
+  readonly templates = new Map<string, TemplateRow>();
+  readonly versions = new Map<string, TemplateVersion & { createdAt: string }>();
+
+  private versionsOf(templateId: string): (TemplateVersion & { createdAt: string })[] {
+    return [...this.versions.values()].filter((v) => v.templateId === templateId).sort((a, b) => b.version - a.version);
+  }
+
+  private view(t: TemplateRow): WorkflowTemplate | null {
+    const latest = this.versionsOf(t.id)[0];
+    return latest ? { id: t.id, key: t.key, name: t.name, builtIn: t.builtIn, latestVersion: latest.version } : null;
+  }
+
+  /** The step definition with `id` and the version it belongs to. */
+  definition(id: string): { version: TemplateVersion; step: StepDefinitionInput } | null {
+    for (const version of this.versions.values()) {
+      const step = version.steps.find((s) => s.id === id);
+      if (step) return { version, step };
+    }
+    return null;
+  }
+
+  async list(): Promise<WorkflowTemplate[]> {
+    return [...this.templates.values()]
+      .map((t) => this.view(t))
+      .filter((t): t is WorkflowTemplate => t !== null)
+      .sort(byNameThenId);
+  }
+
+  async get(id: string): Promise<WorkflowTemplate | null> {
+    const t = this.templates.get(id);
+    return t ? this.view(t) : null;
+  }
+
+  async findByKey(key: string): Promise<{ id: string } | null> {
+    const t = [...this.templates.values()].find((r) => r.key === key);
+    return t ? { id: t.id } : null;
+  }
+
+  async insertTemplate(t: TemplateRow): Promise<void> {
+    if (this.templates.has(t.id) || [...this.templates.values()].some((r) => r.key === t.key)) {
+      throw new Error('UNIQUE constraint failed: workflow_template');
+    }
+    this.templates.set(t.id, { ...t });
+  }
+
+  async hasVersion(templateId: string, version: number): Promise<boolean> {
+    return this.versionsOf(templateId).some((v) => v.version === version);
+  }
+
+  async insertVersion(v: TemplateVersion & { createdAt: string }): Promise<void> {
+    if (!this.templates.has(v.templateId)) throw new Error('FOREIGN KEY constraint failed');
+    if (this.versions.has(v.id) || (await this.hasVersion(v.templateId, v.version))) {
+      throw new Error('UNIQUE constraint failed: workflow_template_version');
+    }
+    const unique = (values: unknown[]) => new Set(values).size === values.length;
+    if (!unique(v.steps.map((s) => s.key)) || !unique(v.steps.map((s) => s.position))) {
+      throw new Error('UNIQUE constraint failed: workflow_step_definition');
+    }
+    const steps = [...v.steps].sort((a, b) => a.position - b.position).map((s) => ({ ...s }));
+    this.versions.set(v.id, { ...v, steps });
+  }
+
+  async latestVersion(templateId: string): Promise<TemplateVersion | null> {
+    const latest = this.versionsOf(templateId)[0];
+    return latest ? { id: latest.id, templateId: latest.templateId, version: latest.version, steps: latest.steps.map((s) => ({ ...s })) } : null;
+  }
+}
+
+type WorkflowRow = { id: string; assetId: string; templateVersionId: string; createdAt: string };
+type StepRow = {
+  id: string;
+  workflowId: string;
+  stepDefinitionId: string;
+  state: WorkflowStepState;
+  notes: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+class InMemoryAssetWorkflows implements AssetWorkflowRepository {
+  readonly workflows = new Map<string, WorkflowRow>(); // by assetId
+  readonly steps = new Map<string, StepRow>();
+
+  constructor(private readonly templates: InMemoryWorkflowTemplates) {}
+
+  async insert(w: WorkflowRow, steps: NewWorkflowStep[]): Promise<void> {
+    if (this.workflows.has(w.assetId)) throw new Error('UNIQUE constraint failed: asset_workflow.asset_id');
+    for (const s of steps) {
+      if (this.templates.definition(s.stepDefinitionId) === null) throw new Error('FOREIGN KEY constraint failed');
+    }
+    this.workflows.set(w.assetId, { ...w });
+    for (const s of steps) {
+      this.steps.set(s.id, {
+        id: s.id,
+        workflowId: w.id,
+        stepDefinitionId: s.stepDefinitionId,
+        state: 'not_started',
+        notes: '',
+        updatedAt: s.updatedAt,
+        completedAt: null,
+      });
+    }
+  }
+
+  async getByAsset(assetId: string): Promise<AssetWorkflow | null> {
+    const w = this.workflows.get(assetId);
+    if (!w) return null;
+    const version = this.templates.versions.get(w.templateVersionId)!;
+    const template = this.templates.templates.get(version.templateId)!;
+    const steps: WorkflowStep[] = [...this.steps.values()]
+      .filter((s) => s.workflowId === w.id)
+      .map((s) => {
+        const { step } = this.templates.definition(s.stepDefinitionId)!;
+        return {
+          id: s.id,
+          key: step.key,
+          name: step.name,
+          position: step.position,
+          mandatory: step.mandatory,
+          state: s.state,
+          notes: s.notes,
+          updatedAt: s.updatedAt,
+          completedAt: s.completedAt,
+        };
+      })
+      .sort((a, b) => a.position - b.position);
+    return {
+      id: w.id,
+      assetId: w.assetId,
+      templateId: template.id,
+      templateName: template.name,
+      templateVersion: version.version,
+      createdAt: w.createdAt,
+      progress: progressOf(steps),
+      steps,
+    };
+  }
+
+  async getStepContext(stepId: string): Promise<StepContext | null> {
+    const s = this.steps.get(stepId);
+    if (!s) return null;
+    const w = [...this.workflows.values()].find((r) => r.id === s.workflowId)!;
+    const { step } = this.templates.definition(s.stepDefinitionId)!;
+    return { stepId: s.id, assetId: w.assetId, mandatory: step.mandatory, state: s.state };
+  }
+
+  async updateStep(
+    stepId: string,
+    patch: { state?: WorkflowStepState; notes?: string; completedAt?: string | null; updatedAt: string },
+  ): Promise<void> {
+    const row = this.steps.get(stepId);
+    if (!row) return;
+    const next = { ...row, ...definedOnly(patch) };
+    // Mirrors the check constraint of the database.
+    if ((next.state === 'done') !== (next.completedAt !== null)) {
+      throw new Error('CHECK constraint failed: asset_workflow_step_completed_check');
+    }
+    this.steps.set(stepId, next);
+  }
+
+  async remove(assetId: string): Promise<boolean> {
+    const w = this.workflows.get(assetId);
+    if (!w) return false;
+    for (const s of [...this.steps.values()]) if (s.workflowId === w.id) this.steps.delete(s.id);
+    this.workflows.delete(assetId);
+    return true;
+  }
+
+  /** Progress of the asset's workflow, or null when it has none. */
+  progressOfAsset(assetId: string): WorkflowProgress | null {
+    const w = this.workflows.get(assetId);
+    if (!w) return null;
+    return progressOf(
+      [...this.steps.values()]
+        .filter((s) => s.workflowId === w.id)
+        .map((s) => ({ mandatory: this.templates.definition(s.stepDefinitionId)!.step.mandatory, state: s.state })),
+    );
+  }
+}
+
+/** `done` = mandatory steps in state `done`, `total` = mandatory steps. */
+function progressOf(steps: readonly { mandatory: boolean; state: WorkflowStepState }[]): WorkflowProgress {
+  const mandatory = steps.filter((s) => s.mandatory);
+  return { done: mandatory.filter((s) => s.state === 'done').length, total: mandatory.length };
 }
 
 const byNameThenId = <T extends { name: string; id: string }>(a: T, b: T) =>
@@ -357,6 +569,7 @@ class InMemoryAssets implements AssetRepository {
   constructor(
     private readonly links: AssignmentRows,
     private readonly files: InMemoryFiles,
+    private readonly workflows: InMemoryAssetWorkflows,
   ) {}
 
   async insert(asset: Asset): Promise<void> {
@@ -390,6 +603,7 @@ class InMemoryAssets implements AssetRepository {
       ...a,
       projectCount: [...this.links.values()].filter((l) => l.assetId === a.id).length,
       fileCount: [...this.files.records.values()].filter((f) => f.assetId === a.id).length,
+      workflowProgress: this.workflows.progressOfAsset(a.id),
     }));
     return { items, total: matching.length };
   }
@@ -490,7 +704,9 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
   readonly projects = new InMemoryProjects(this.links);
-  readonly assets = new InMemoryAssets(this.links, this.files);
+  readonly workflowTemplates = new InMemoryWorkflowTemplates();
+  readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
+  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   closed = false;
