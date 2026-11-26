@@ -577,3 +577,29 @@ it('a rename of a tag outside the filter still reloads the gallery', async () =>
   await waitFor(() => expect(listRequests(api).length).toBeGreaterThan(before));
   expect(screen.getByText('Asset 0')).toBeTruthy();
 });
+
+it('the Selection column follows a rename when no loaded page holds the selected asset any more', async () => {
+  const user = userEvent.setup();
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id, tags: [tagOf('Front View')] });
+  const pine = assetSummary({ name: 'Pine', typeId: TYPE.id });
+  const rename = renameHandlers({ 'front view': 'Front View' });
+  const api = install({
+    'assets:list': listOf([oak, pine]),
+    ...rename,
+    'tags:rename': (request) => {
+      // After the rename the reloaded list no longer holds the selected asset.
+      api.set('assets:list', listOf([pine]));
+      return rename['tags:rename'](request);
+    },
+  });
+  render(<RenamingHarness initial={INITIAL} />);
+  await screen.findByText('Oak tree');
+  await user.click(itemOf('Oak tree'));
+  const column = selectionColumn();
+  expect(within(column).getByText('Front View')).toBeTruthy();
+  await renameThroughDialog(user, 'Front View', 'Side');
+  await waitFor(() => expect(screen.queryByText('Oak tree', { selector: '[data-index] *' })).toBeNull());
+  expect(within(column).getByText('Oak tree')).toBeTruthy();
+  expect(within(column).getByText('Side')).toBeTruthy();
+  expect(within(column).queryByText('Front View')).toBeNull();
+});

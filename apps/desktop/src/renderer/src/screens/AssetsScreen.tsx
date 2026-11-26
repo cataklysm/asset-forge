@@ -31,7 +31,8 @@ import {
   type AssetView,
 } from '../list-state';
 import { findLoaded, PAGE_SIZE } from '../paged-list';
-import { useTags } from '../tags-context';
+import { renameInTags } from '../tag-rename';
+import { useRenamed, useTags } from '../tags-context';
 import { ALERT, BUTTON, ICON_BUTTON, MUTED, SELECT } from '../ui';
 
 const STATUSES = AssetStatusSchema.options;
@@ -139,6 +140,14 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   // The selected asset as last seen, for when no loaded page holds it (any more).
   const lastSelected = useRef<AssetSummary | null>(null);
+  // The reload reaches the loaded pages; this copy follows the rename here.
+  useRenamed((change) => {
+    const asset = lastSelected.current;
+    if (asset === null) return;
+    const tags = renameInTags(asset.tags, change);
+    const coverTags = renameInTags(asset.coverTags, change);
+    if (tags !== asset.tags || coverTags !== asset.coverTags) lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
+  });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   const selectedAsset =
     loadedSelection?.item ??(lastSelected.current?.id === state.selectedId ? lastSelected.current : null);
