@@ -40,6 +40,9 @@ class RecordingControl implements JobControl {
     this.cancelled.push(jobId);
     await this.db.jobs.cancelPending({ id: jobId, now: TS });
   }
+  async cancelAll(): Promise<number> {
+    return 0;
+  }
 }
 
 async function setup() {

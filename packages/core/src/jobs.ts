@@ -1,5 +1,6 @@
 import {
   FINISHED_JOB_STATUSES,
+  IMAGE_GENERATE_JOB,
   JOB_ERROR_MESSAGES,
   type JobErrorCode,
   type JobStatus,
@@ -119,12 +120,12 @@ export async function cancelJob(s: WorkspaceSession, control: JobControl, jobId:
   await control.cancel(jobId);
 }
 
-/** Cancels every pending job, then aborts every running one. Returns how many were cancelled or aborted. */
-export async function cancelAllJobs(s: WorkspaceSession, control: JobControl): Promise<number> {
-  const pending = await s.database.jobs.cancelPending({ now: s.now().toISOString() });
-  const running = await s.database.jobs.listByStatus('running');
-  for (const job of running) await control.cancel(job.id);
-  return pending + running.length;
+/**
+ * Cancels every pending job and aborts every running one through the scheduler, which ends each with its
+ * handler's `settled`. Returns how many.
+ */
+export function cancelAllJobs(_s: WorkspaceSession, control: JobControl): Promise<number> {
+  return control.cancelAll();
 }
 
 /** Queues a failed or cancelled job again; `invalid_operation` for any other status or when its file already has an active job. */
@@ -140,9 +141,12 @@ export async function retryJob(s: WorkspaceSession, jobId: string): Promise<void
   if (retried === 0) throw new InvalidOperationError('The file of this job already has an active job');
 }
 
-/** Queues every failed or cancelled job whose file has no active job. Returns how many. */
+/**
+ * Queues every failed or cancelled job whose file has no active job. Returns how many. Generation jobs are
+ * paid work and only ever run again through `retryGeneration`.
+ */
 export function retryFailedJobs(s: WorkspaceSession): Promise<number> {
-  return s.database.jobs.retry({ now: s.now().toISOString() });
+  return s.database.jobs.retry({ now: s.now().toISOString(), excludeTypes: [IMAGE_GENERATE_JOB] });
 }
 
 /** Deletes every succeeded, failed or cancelled job. Returns how many. */
