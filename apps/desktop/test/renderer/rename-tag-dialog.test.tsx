@@ -168,6 +168,71 @@ it('a stale lookup answer is dropped', async () => {
   expect(confirmButton().disabled).toBe(false);
 });
 
+it('a failed lookup shows the error and keeps confirm disabled until a lookup succeeds', async () => {
+  let failing = true;
+  const { api } = setup({
+    'tags:usage': ({ name }) => {
+      if (name === 'side' && failing) throw fakeError('internal_error', 'Something went wrong');
+      return lookup(usageTable(), name);
+    },
+    'tags:rename': () => ({ name: 'side', displayName: 'Side', merged: false }),
+  });
+  await settle(0);
+  type('Side');
+  await settle();
+  expect(screen.getByRole('alert').textContent).toBe('Something went wrong');
+  expect(confirmButton().disabled).toBe(true);
+  fireEvent.keyDown(field(), { key: 'Enter' });
+  await settle(0);
+  expect(renameRequests(api)).toEqual([]);
+
+  // Typing again retries, also when the name stays the same.
+  failing = false;
+  type('Side ');
+  expect(confirmButton().disabled).toBe(true);
+  await settle();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(confirmButton().disabled).toBe(false);
+  expect(usageRequests(api).filter((r) => (r as { name: string }).name === 'side')).toHaveLength(2);
+});
+
+it('a failed lookup after a refused rename shows the error and keeps confirm disabled', async () => {
+  let table = usageTable();
+  let failing = false;
+  const { api } = setup({
+    'tags:usage': ({ name }) => {
+      if (failing) throw fakeError('internal_error', 'Something went wrong');
+      return lookup(table, name);
+    },
+    'tags:rename': ({ merge }) => {
+      if (!merge) {
+        table = new Map([...table, ['side', usage('side', 'Side', 2, 1)]]);
+        failing = true;
+        throw fakeError('invalid_operation', 'A tag with this name already exists');
+      }
+      return { name: 'side', displayName: 'Side', merged: true };
+    },
+  });
+  await settle(0);
+  type('Side');
+  await settle();
+  fireEvent.click(confirmButton());
+  await settle(0);
+  expect(screen.getByRole('alert').textContent).toBe('Something went wrong');
+  expect(confirmButton().disabled).toBe(true);
+  expect(screen.queryByText(/^Merges with/)).toBeNull();
+
+  failing = false;
+  type('Side ');
+  await settle();
+  expect(screen.getByText('Merges with Side · 2 files · 1 asset')).not.toBeNull();
+  expect(confirmButton().textContent).toBe('Merge');
+  expect(confirmButton().disabled).toBe(false);
+  fireEvent.click(confirmButton());
+  await settle(0);
+  expect(renameRequests(api).at(-1)).toEqual({ from: 'front view', to: 'Side', merge: true });
+});
+
 it('success reports the response values and then closes', async () => {
   const { onRenamed, onClose } = setup({
     'tags:rename': (): TagRenameResult => ({ name: 'front', displayName: 'Front', merged: true }),

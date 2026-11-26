@@ -40,8 +40,8 @@ export function RenameTagDialog({ tag, onClose, onRenamed }: Props) {
   );
 }
 
-/** A lookup answer for one normalised name; `usage` is null when the lookup failed. */
-type Lookup = { name: string; usage: TagUsage | null };
+/** A lookup answer for one normalised name, or the message of a failed lookup. */
+type Lookup = { name: string; usage: TagUsage } | { name: string; failure: string };
 
 function RenameTagForm({
   tag,
@@ -90,27 +90,30 @@ function RenameTagForm({
   const debounced = useDebouncedValue(lookupName, SEARCH_DEBOUNCE_MS);
 
   useEffect(() => {
-    if (debounced === '') return;
+    // A name still settling is looked up once the debounce has run out.
+    if (debounced === '' || debounced !== lookupName) return;
     // Superseded: a later name (or unmounting) drops this answer.
     let current = true;
     call('tags:usage', { name: debounced }).then(
       (usage) => {
         if (current) setTarget({ name: debounced, usage });
       },
-      // An unknown answer counts as a free name; the main process refuses an unconfirmed merge.
-      () => {
-        if (current) setTarget({ name: debounced, usage: null });
+      // A failed lookup is no answer: confirm stays disabled until one for the current text succeeds.
+      (e: unknown) => {
+        if (current) setTarget({ name: debounced, failure: describeError(e) });
       },
     );
     return () => {
       current = false;
     };
-  }, [debounced, lookupRun]);
+  }, [debounced, lookupName, lookupRun]);
 
   const answer = lookupName !== '' && target?.name === lookupName ? target : null;
   const outstanding = lookupName !== '' && answer === null;
-  const mergeWith = answer?.usage?.exists ? answer.usage : null;
-  const canConfirm = !busy && !gone && normalized !== null && !unchanged && !outstanding;
+  const lookupFailure = answer !== null && 'failure' in answer ? answer.failure : null;
+  const mergeWith = answer !== null && 'usage' in answer && answer.usage.exists ? answer.usage : null;
+  const canConfirm = !busy && !gone && normalized !== null && !unchanged && !outstanding && lookupFailure === null;
+  const shownError = lookupFailure ?? error;
 
   async function confirm() {
     if (!canConfirm || busyRef.current) return;
@@ -154,6 +157,11 @@ function RenameTagForm({
           onChange={(event) => {
             setText(event.target.value);
             if (!gone) setError(null);
+            // Typing again retries a failed lookup, also when the name stays the same.
+            if (target !== null && 'failure' in target) {
+              setTarget(null);
+              setLookupRun((run) => run + 1);
+            }
           }}
           onKeyDown={onKeyDown}
           className={`${INPUT} min-w-0 flex-1`}
@@ -161,9 +169,9 @@ function RenameTagForm({
       </label>
       <p className={`${LABEL} truncate`}>{source === null ? tag.displayName : tagUsageLine(source)}</p>
       {mergeWith !== null && <p className="truncate text-sm text-warning">{tagMergeLine(mergeWith)}</p>}
-      {error !== null && (
+      {shownError !== null && (
         <p role="alert" className={ALERT}>
-          {error}
+          {shownError}
         </p>
       )}
       <div className="flex justify-end gap-2">
