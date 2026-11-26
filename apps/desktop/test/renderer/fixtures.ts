@@ -52,6 +52,18 @@ export function fileRecord(p: Partial<FileRecord> = {}): FileRecord {
   };
 }
 
+/** A completely imported file without a preview (e.g. `.pdf`, `.blend`). */
+export function nonImageRecord(originalName: string, p: Partial<FileRecord> = {}): FileRecord {
+  return fileRecord({
+    originalName,
+    relativePath: `files/${originalName}`,
+    mimeType: 'application/octet-stream',
+    previewable: false,
+    kind: originalName.endsWith('.pdf') ? 'document' : 'model',
+    ...p,
+  });
+}
+
 export function projectSummary(p: Partial<ProjectSummary> = {}): ProjectSummary {
   return {
     id: nextId(),

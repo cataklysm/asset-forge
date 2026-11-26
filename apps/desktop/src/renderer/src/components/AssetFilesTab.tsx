@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from '@assetforge/contracts';
+import { analysableFiles, NONE_ANALYSABLE, startAnalysis } from '../analysis';
 import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -39,7 +40,7 @@ interface Props {
 
 /**
  * The asset's files: the file browser with its own filters, view and selection (none of them
- * persisted), the selection bar (Add tags, Set role, Detach) and the file detail dialog.
+ * persisted), the selection bar (Add tags, Analyse, Set role, Detach) and the file detail dialog.
  */
 export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChange, onCountChange }: Props) {
   const [filters, setFilters] = useState<FileFilters>(NO_FILE_FILTERS);
@@ -164,12 +165,23 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       onFilesChanged();
     });
 
+  /** Enqueues an analysis of `files`; the outcome shows in the result strip, the selection is kept. */
+  const analyse = (files: readonly FileRecord[]) =>
+    batch(async () => {
+      try {
+        setResult(await startAnalysis(files));
+      } catch (e) {
+        setError(describeError(e));
+      }
+    });
+
   const coverOf = (file: FileRecord) => ({
     isEffective: file.id === asset.coverFileId,
     isChosen: asset.coverIsChosen && file.id === asset.coverFileId,
   });
 
   const noneEligible = eligible.length === 0;
+  const toAnalyse = analysableFiles(selection);
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 pt-4">
@@ -191,6 +203,15 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
           }}
         >
           Add tags
+        </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={toAnalyse.length === 0 || batchBusy}
+          title={toAnalyse.length === 0 ? NONE_ANALYSABLE : undefined}
+          onClick={() => void analyse(toAnalyse)}
+        >
+          Analyse
         </button>
         <button
           type="button"
@@ -232,6 +253,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
             onDetails: () => openDetail(file),
             onSetCover: (fileId) => reported(() => setCover(fileId))(),
             onDetach: reported(() => detach(file)),
+            onAnalyse: () => void analyse([file]),
             onError: setError,
           })
         }
@@ -252,6 +274,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                   onDetails: () => {},
                   onSetCover: setCover,
                   onDetach: () => detach(detail),
+                  onAnalyse: () => void analyse([detail]),
                   onError: setError,
                 }}
                 roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} fullWidth />}

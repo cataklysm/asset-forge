@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
+import { analysableFiles, NONE_ANALYSABLE, startAnalysis } from '../analysis';
 import { call, describeError } from '../api';
 import { FileBrowser } from '../components/FileBrowser';
 import { FileDetailDialog } from '../components/FileDetailDialog';
@@ -44,6 +45,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const detail = useFileDialog(containerRef);
   // Synchronous guard: a second activation before the re-render must not start a second import.
   const importingRef = useRef(false);
+  const analysingRef = useRef(false);
 
   // The title shows the number of all inbox files, independent of the filters.
   const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken]);
@@ -107,6 +109,20 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     reload();
   }
 
+  /** Enqueues an analysis of `files`; the outcome shows in the result strip, the selection is kept. */
+  async function analyse(files: readonly FileRecord[]) {
+    if (analysingRef.current) return;
+    analysingRef.current = true;
+    setError(null);
+    try {
+      setImportResult(await startAnalysis(files));
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      analysingRef.current = false;
+    }
+  }
+
   /** Files that left the inbox: out of the selection, and the list reloads (the dialog moves on). */
   function moved(ids: readonly string[]) {
     setSelection((current) => dropSelected(current, ids));
@@ -119,6 +135,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     </button>
   );
   const noneEligible = eligibleFiles(selection).length === 0;
+  const toAnalyse = analysableFiles(selection);
   const shown = detail.file;
 
   return (
@@ -165,6 +182,15 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           >
             Add tags
           </button>
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={toAnalyse.length === 0}
+            title={toAnalyse.length === 0 ? NONE_ANALYSABLE : undefined}
+            onClick={() => void analyse(toAnalyse)}
+          >
+            Analyse
+          </button>
         </SelectionBar>
         <FileBrowser
           scope={INBOX}
@@ -179,7 +205,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           onSelectionChange={setSelection}
           reloadToken={reloadToken}
           onOpen={detail.open}
-          menuItems={(file) => fileMenuItems(file, { cover: null, onDetails: () => detail.open(file), onError: setError })}
+          menuItems={(file) =>
+            fileMenuItems(file, { cover: null, onDetails: () => detail.open(file), onAnalyse: () => void analyse([file]), onError: setError })
+          }
           emptyText="Inbox is empty"
           emptyAction={importButton}
           viewer={{
@@ -190,7 +218,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                 <FileDetailDialog
                   file={shown}
                   asset={null}
-                  actions={{ cover: null, onDetails: () => {}, onError: setError }}
+                  actions={{ cover: null, onDetails: () => {}, onAnalyse: () => void analyse([shown]), onError: setError }}
                   roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}
                   onFileChange={fileChanged}
                   onMeasured={detail.setDimensions}

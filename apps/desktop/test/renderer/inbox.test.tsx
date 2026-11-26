@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { FileRecord, IpcRequest } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
+import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
-import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
-import { assetSummary, fileRecord, pageOf, tagOf } from './fixtures';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { assetSummary, fileRecord, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
@@ -351,4 +352,74 @@ it('assigning in the detail dialog moves on to the following file; assigning the
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(callsOf(api, 'files:assign')).toHaveLength(2);
   await screen.findByText('Inbox is empty');
+});
+
+it('the tile menu analyses a complete image and shows the outcome', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const blend = nonImageRecord('tree.blend');
+  const api = install([c1, blend], { 'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }) });
+  render(<Harness />);
+  await screen.findByText('tree.blend');
+  await user.click(within(tile('tree.blend')).getByRole('button', { name: 'File actions' }));
+  expect(screen.queryByRole('menuitem', { name: 'Analyse' })).toBeNull();
+  await user.keyboard('{Escape}');
+  await user.click(within(tile('c1.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
+  expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id] }]);
+});
+
+it('the detail dialog analyses the shown image', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const api = install([c1], { 'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }) });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Enter}');
+  const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
+  await user.click(within(dialog).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
+  await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id] }]));
+});
+
+it('Analyse in the selection bar sends only the images and lists the skipped ones; the selection is kept', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const doc = nonImageRecord('notes.pdf');
+  const api = install([c1, c2, doc], {
+    'analysis:enqueue': () => ({ enqueued: 1, skipped: [{ fileId: c2.id, reason: 'already_queued' }] }),
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'notes.pdf');
+  await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
+  expect(strip.textContent).toContain('c2.png: Already queued');
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id, c2.id] }]);
+  expect(screen.getByText('3 selected')).toBeTruthy();
+});
+
+it('Analyse is disabled for a selection without images, and a rejected call shows the alert', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const doc = nonImageRecord('notes.pdf');
+  install([doc, c1], {
+    'analysis:enqueue': () => {
+      throw fakeError('not_found');
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('notes.pdf');
+  await user.click(tile('notes.pdf'));
+  const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
+  expect(analyse.disabled).toBe(true);
+  expect(analyse.title).toBe(NONE_ANALYSABLE);
+
+  await user.click(tile('c1.png'));
+  expect(analyse.disabled).toBe(false);
+  await user.click(analyse);
+  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  expect(screen.getByText('1 selected')).toBeTruthy();
 });

@@ -10,10 +10,11 @@ import type {
   IpcRequest,
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
+import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import type { AssetTab } from '../../src/renderer/src/list-state';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, nextId, pageOf, tagOf } from './fixtures';
+import { fileRecord, nextId, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const NOW = '2026-01-01T00:00:00.000Z';
 const TYPE: AssetType = {
@@ -592,4 +593,62 @@ it('workflow tab: start, step state without skipped for mandatory steps, and rem
   expect(screen.getByRole('button', { name: 'Remove workflow' }).getAttribute('title')).toBe(
     'Step states and notes are deleted; asks first',
   );
+});
+
+it('files tab: the tile menu analyses a complete image and shows the outcome', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
+  const blend = nonImageRecord('tree.blend', { assetId: asset.id, role: 'working' });
+  const api = install(asset, {
+    'files:list': listOf([leaf, blend]),
+    'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }),
+  });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('tree.blend');
+  await user.click(within(tile('tree.blend')).getByRole('button', { name: 'File actions' }));
+  expect(screen.queryByRole('menuitem', { name: 'Analyse' })).toBeNull();
+  await user.keyboard('{Escape}');
+  await user.click(within(tile('leaf.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
+  expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [leaf.id] }]);
+});
+
+it('files tab: Analyse in the selection bar sends only the analysable images and lists the skipped ones', async () => {
+  const asset = assetDetail();
+  const { user, api, c1, c2 } = await selectThree(asset, {
+    'analysis:enqueue': (r) => ({ enqueued: 1, skipped: [{ fileId: r.fileIds[1]!, reason: 'already_queued' }] }),
+  });
+  await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
+  expect(strip.textContent).toContain('c2.png: Already queued');
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id, c2.id] }]);
+  expect(screen.getByText('3 selected')).toBeTruthy();
+});
+
+it('files tab: Analyse is disabled without images, and a rejected call shows the alert', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const doc = nonImageRecord('notes.pdf', { assetId: asset.id, role: 'reference' });
+  const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
+  install(asset, {
+    'files:list': listOf([doc, leaf]),
+    'analysis:enqueue': () => {
+      throw fakeError('not_found');
+    },
+  });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('notes.pdf');
+  await user.click(tile('notes.pdf'));
+  const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
+  expect(analyse.disabled).toBe(true);
+  expect(analyse.title).toBe(NONE_ANALYSABLE);
+
+  await user.click(tile('leaf.png'));
+  expect(analyse.disabled).toBe(false);
+  await user.click(analyse);
+  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  expect(screen.getByText('1 selected')).toBeTruthy();
 });
