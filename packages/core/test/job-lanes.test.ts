@@ -83,6 +83,14 @@ describe('rerouteJobs', () => {
     expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'qwen:9b' })).toEqual({ moved: 0 });
   });
 
+  it('moves a job whose payload does not parse but keeps its payload', async () => {
+    const c = await setup();
+    const future = { version: 5, model: 'old', mode: 'propose', prompt: PROMPT };
+    const id = await addJob(c, { lane: A, payload: future });
+    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'm' })).toEqual({ moved: 1 });
+    expect(c.db.jobs.rows.find((j) => j.id === id)).toMatchObject({ lane: B, status: 'queued', payload: future });
+  });
+
   it('moves the jobs without a lane', async () => {
     const c = await setup();
     const v1 = await addJob(c, { lane: null, payload: { version: 1 } });

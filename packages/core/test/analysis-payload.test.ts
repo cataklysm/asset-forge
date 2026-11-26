@@ -47,6 +47,15 @@ describe('rewriteForProvider', () => {
   });
 });
 
+describe('rewriteForProvider with a payload that does not parse', () => {
+  it('returns it unchanged', () => {
+    const future = { version: 5, model: 'old', mode: 'propose', prompt: PROMPT, extra: true };
+    expect(rewriteForProvider(future, TO)).toBe(future);
+    expect(rewriteForProvider('x', TO)).toBe('x');
+    expect(rewriteForProvider(null, TO)).toBeNull();
+  });
+});
+
 describe('adoptForProvider', () => {
   const entry = { name: 'Ollama', taggingModel: 'llava:13b' };
 

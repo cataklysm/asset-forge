@@ -2,12 +2,15 @@ import { AnalyzeFilePayloadSchema, type AnalyzeFilePayload } from '@assetforge/c
 
 /**
  * The payload of an analysis job moved onto another provider: always v4 with that provider's name and
- * the chosen model. Mode and prompt stay; a v1 row (or one that does not parse) becomes mode `apply`
- * and a v1 or v2 row `prompt: null`, so it still runs with the legacy text and limit.
+ * the chosen model. Mode and prompt stay; a v1 row becomes mode `apply`
+ * and a v1 or v2 row `prompt: null`, so it still runs with the legacy text and limit. A payload that does
+ * not parse (for example one of a newer app version) is returned unchanged, so the moved job still fails
+ * `internal_error` instead of running with the legacy request.
  */
-export function rewriteForProvider(payload: unknown, to: { name: string; model: string }): AnalyzeFilePayload {
+export function rewriteForProvider(payload: unknown, to: { name: string; model: string }): AnalyzeFilePayload | unknown {
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
-  const p: AnalyzeFilePayload = parsed.success ? parsed.data : { version: 1 };
+  if (!parsed.success) return payload;
+  const p = parsed.data;
   return {
     version: 4,
     model: to.model,
