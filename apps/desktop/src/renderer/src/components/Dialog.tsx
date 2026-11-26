@@ -3,21 +3,20 @@ import { BORDER, SECTION_TITLE } from '../ui';
 
 interface Props {
   open: boolean;
+  /** The accessible name; the `form` dialog also shows it as its heading. */
   title: string;
   onClose(): void;
   /** Focused when the dialog opens; otherwise the browser focuses the first focusable element. */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /** `detail` renders its content edge to edge; the content brings its own header. */
   size?: 'form' | 'detail';
   children: ReactNode;
 }
 
-/** Keeps the title clear of the Close button that the detail dialog places in its top-right corner. */
-const TITLE_PADDING = { form: '', detail: 'pr-56' } as const;
-
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
   // The window size minus an even margin; the UA's max-width/max-height would cap it otherwise.
-  detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none',
+  detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none overflow-hidden',
 } as const;
 
 /** A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening. */
@@ -62,10 +61,12 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
     };
   }, []);
 
+  const detail = size === 'detail';
   return (
     <dialog
       ref={ref}
-      aria-labelledby={titleId}
+      aria-labelledby={detail ? undefined : titleId}
+      aria-label={detail ? title : undefined}
       onCancel={(event) => {
         event.preventDefault();
         onCloseRef.current();
@@ -76,14 +77,17 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
       }}
       className={`m-auto rounded-dialog border bg-surface p-0 text-text backdrop:bg-bg/70 ${BORDER} ${SIZE[size]}`}
     >
-      {open && (
-        <div className="flex h-full flex-col gap-4 p-5">
-          <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate ${TITLE_PADDING[size]}`}>
-            {title}
-          </h2>
-          <div className="min-h-0 flex-1">{children}</div>
-        </div>
-      )}
+      {open &&
+        (detail ? (
+          <div className="h-full">{children}</div>
+        ) : (
+          <div className="flex h-full flex-col gap-4 p-5">
+            <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate`}>
+              {title}
+            </h2>
+            <div className="min-h-0 flex-1">{children}</div>
+          </div>
+        ))}
     </dialog>
   );
 }

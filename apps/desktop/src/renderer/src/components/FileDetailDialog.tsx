@@ -6,7 +6,7 @@ import { fileMenuItems, type FileActionContext } from '../file-actions';
 import { formatBytes, formatDateTime } from '../format';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
-import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED } from '../ui';
+import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED, PANEL_TITLE, SECTION_TITLE } from '../ui';
 import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
 import { FilmStrip } from './FilmStrip';
@@ -163,49 +163,60 @@ export function FileDetailDialog({
     onFileChange(await call(channel, { fileId: file.id, name }));
   }
 
+  const image = file.kind === 'image';
+  const browsing = list !== null && list.total >= 2 ? list : null;
+  // The header pair and the on-stage pair: same behaviour and tooltips, distinct accessible names.
+  const step = (direction: -1 | 1, look: { className: string; name?: string }) =>
+    list === null ? null : (
+      <button
+        type="button"
+        aria-label={look.name ?? (direction < 0 ? 'Previous file (←)' : 'Next file (→)')}
+        title={direction < 0 ? 'Previous file (←)' : 'Next file (→)'}
+        className={look.className}
+        disabled={direction < 0 ? list.index <= 0 : list.index >= list.total - 1}
+        onClick={() => list.show(list.index + direction)}
+      >
+        {direction < 0 ? <ChevronLeft size={18} aria-hidden /> : <ChevronRight size={18} aria-hidden />}
+      </button>
+    );
+
   return (
     <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
-      <div ref={rootRef} className="h-full">
-        <div className="absolute right-4 top-4 flex items-center gap-2">
-          {list !== null && (
-            <>
-              <span className={`text-sm tabular-nums ${MUTED}`}>
-                {list.index + 1} / {list.total}
-              </span>
-              <button
-                type="button"
-                aria-label="Previous file (←)"
-                title="Previous file (←)"
-                className={ICON_BUTTON}
-                disabled={list.index <= 0}
-                onClick={() => list.show(list.index - 1)}
-              >
-                <ChevronLeft size={18} aria-hidden />
-              </button>
-              <button
-                type="button"
-                aria-label="Next file (→)"
-                title="Next file (→)"
-                className={ICON_BUTTON}
-                disabled={list.index >= list.total - 1}
-                onClick={() => list.show(list.index + 1)}
-              >
-                <ChevronRight size={18} aria-hidden />
-              </button>
-            </>
-          )}
-          <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={close}>
-            <X size={18} aria-hidden />
-          </button>
-        </div>
-        <div className="flex h-full min-h-0 gap-5">
-          <div className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto pr-1">
+      <div ref={rootRef} className="flex h-full flex-col">
+        <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
+          <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
+            <span className="truncate">{file.originalName}</span>
+            {asset !== null && (
+              <>
+                <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />
+                <span className="truncate font-normal">{asset.name}</span>
+              </>
+            )}
+          </h2>
+          <div className="flex shrink-0 items-center gap-2">
+            {list !== null && (
+              <>
+                <span className={`mr-2 text-sm tabular-nums ${MUTED}`}>
+                  {list.index + 1} / {list.total}
+                </span>
+                {step(-1, { className: ICON_BUTTON })}
+                {step(1, { className: ICON_BUTTON })}
+              </>
+            )}
+            <button ref={closeRef} type="button" aria-label="Close" title="Close" className={`ml-2 ${ICON_BUTTON}`} onClick={close}>
+              <X size={18} aria-hidden />
+            </button>
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <div className={`flex w-88 shrink-0 flex-col gap-6 overflow-y-auto border-r p-5 ${BORDER}`}>
             <section aria-label="Details" className="space-y-2">
-              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-                <dt className={LABEL}>Name</dt>
+              <h3 className={PANEL_TITLE}>{image ? 'Image details' : 'File details'}</h3>
+              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm">
+                <dt className={LABEL}>Filename</dt>
                 <dd className="break-all">{file.originalName}</dd>
-                <dt className={LABEL}>Type</dt>
-                <dd className="break-all">{file.mimeType}</dd>
+                <dt className={LABEL}>Format</dt>
+                <dd title={file.mimeType}>{formatLabel(file.originalName)}</dd>
                 <dt className={LABEL}>Dimensions</dt>
                 <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
                 <dt className={LABEL}>Size</dt>
@@ -225,13 +236,20 @@ export function FileDetailDialog({
                 </p>
               )}
             </section>
-            {/* Keyed by file: stepping on starts the controls afresh. */}
-            <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
+            {/* The inbox's assign control shows only for complete files. */}
+            {(asset !== null || complete) && (
+              <section className="space-y-2">
+                <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
+                {/* Keyed by file: stepping on starts the controls afresh. */}
+                <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
+              </section>
+            )}
             {complete && (
               <TagRow
                 key={`tags-${file.id}`}
-                label="Image tags"
+                label={image ? 'Image tags' : 'File tags'}
                 kind="file"
+                layout="stacked"
                 tags={file.tags}
                 onAdd={(name) => changeTag('files:addTag', name)}
                 onRemove={(name) => changeTag('files:removeTag', name)}
@@ -240,13 +258,18 @@ export function FileDetailDialog({
             {asset !== null && (
               <>
                 <hr className={`border-t ${BORDER}`} />
-                <div className="space-y-2">
-                  <div>
-                    <span className={LABEL}>Asset </span>
+                <section className="space-y-2">
+                  <h3 className={PANEL_TITLE}>Asset</h3>
+                  <div className="break-words">
                     {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
                   </div>
-                  <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} />
-                </div>
+                </section>
+                {asset.tags.length > 0 && (
+                  <section className="space-y-2">
+                    <h3 className={PANEL_TITLE}>Asset tags</h3>
+                    <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} wrap />
+                  </section>
+                )}
               </>
             )}
             {error !== null && (
@@ -255,23 +278,39 @@ export function FileDetailDialog({
               </p>
             )}
             <div>
-              <Menu label="More" items={items} align="start" side="top" />
+              <Menu label="More" items={items} align="start" side="top" trigger="labelled" />
             </div>
           </div>
-          <div ref={stageBox} className={`flex min-w-0 flex-1 flex-col gap-3 ${fullscreen ? 'bg-surface p-4' : ''}`}>
-            {viewable ? (
-              <>
-                <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />}</div>
-                <div className="min-h-0 flex-1">
-                  <ImageStage file={file} onControls={setControls} />
+          <div ref={stageBox} className="flex min-w-0 flex-1 flex-col bg-surface">
+            {viewable && (
+              <div className="shrink-0 px-4 py-3">
+                <div className="h-9">
+                  {controls !== null && (
+                    <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />
+                  )}
                 </div>
-              </>
-            ) : (
-              <div className={`flex min-h-0 w-full flex-1 items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
-                {complete ? formatLabel(file.originalName) : label(file.status)}
               </div>
             )}
-            {list !== null && list.total >= 2 && <FilmStrip list={list} />}
+            <div className={`relative min-h-0 flex-1 ${viewable ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}>
+              {viewable ? (
+                <ImageStage file={file} onControls={setControls} />
+              ) : (
+                <div className={`flex h-full w-full items-center justify-center bg-raised text-lg ${MUTED}`}>
+                  {complete ? formatLabel(file.originalName) : label(file.status)}
+                </div>
+              )}
+              {browsing !== null && (
+                <>
+                  {step(-1, { className: `absolute left-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`, name: 'Previous file' })}
+                  {step(1, { className: `absolute right-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`, name: 'Next file' })}
+                </>
+              )}
+            </div>
+            {browsing !== null && (
+              <div className="shrink-0 px-4 py-3">
+                <FilmStrip list={browsing} />
+              </div>
+            )}
           </div>
         </div>
       </div>

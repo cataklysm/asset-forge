@@ -278,3 +278,17 @@ it('the form dialog title stays on one line and carries the full text', () => {
   expect(form.getAttribute('title')).toBe('New asset');
   expect(form.className.split(/\s+/)).toContain('truncate');
 });
+
+it('the detail dialog is named by its title and leaves header and body to its content, unpadded', () => {
+  const title = 'a-very-long-file-name.png | A very long asset name';
+  render(
+    <Dialog open title={title} onClose={() => {}} size="detail">
+      <p>Body</p>
+    </Dialog>,
+  );
+  expect(screen.getByRole('dialog', { name: title })).toBeTruthy();
+  expect(screen.queryByRole('heading')).toBeNull();
+  const body = screen.getByText('Body').parentElement!;
+  expect(body.className.split(/\s+/)).toContain('h-full');
+  expect(body.className.split(/\s+/).some((c) => /^p[xy]?-/.test(c))).toBe(false);
+});

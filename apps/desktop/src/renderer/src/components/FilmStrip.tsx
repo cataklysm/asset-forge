@@ -5,7 +5,7 @@ import { MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
 import type { ViewerList } from './FileBrowser';
 
-const TILE = 64;
+const TILE = 96;
 const GAP = 8;
 
 /** One row of thumbnails below the stage; a click shows that file. Hidden for fewer than two files. */
@@ -34,12 +34,13 @@ export function FilmStrip({ list }: { list: ViewerList }) {
 
   if (list.total < 2) return null;
   return (
-    <div ref={scroller} role="group" aria-label="Files" className="h-[72px] shrink-0 overflow-x-auto overflow-y-hidden">
-      <div className="relative h-full" style={{ width: virtualizer.getTotalSize() }}>
+    <div ref={scroller} role="group" aria-label="Files" className="h-[104px] shrink-0 overflow-x-auto overflow-y-hidden">
+      {/* Centred while narrower than the strip; scrolls once wider. */}
+      <div className="relative mx-auto h-full" style={{ width: virtualizer.getTotalSize() }}>
         {items.map((item) => {
           const slot = list.slot(item.index);
           const current = item.index === list.index;
-          const frame = `flex h-16 w-16 items-center justify-center overflow-hidden rounded-control border bg-raised text-xs ${
+          const frame = `flex h-24 w-24 items-center justify-center overflow-hidden rounded-control border bg-raised text-xs ${
             current ? 'border-accent' : 'border-line'
           }`;
           const file = slot.kind === 'loaded' ? slot.item : null;

@@ -191,7 +191,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                   file={shown}
                   asset={null}
                   actions={{ cover: null, onDetails: () => {}, onError: setError }}
-                  roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} />}
+                  roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}
                   onFileChange={fileChanged}
                   onMeasured={detail.setDimensions}
                   list={list}

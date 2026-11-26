@@ -15,6 +15,7 @@ import {
   ICON_BUTTON,
   ICON_BUTTON_INLINE,
   PAGE_TITLE,
+  PANEL_TITLE,
   SECTION_TITLE,
   TILE_TITLE,
   WORKSPACE_TITLE,
@@ -83,6 +84,7 @@ describe('design tokens and window appearance', () => {
     expect(PAGE_TITLE).toContain('text-[28px] font-semibold');
     expect(WORKSPACE_TITLE).toContain('text-2xl font-semibold');
     expect(SECTION_TITLE).toContain('text-lg font-semibold');
+    expect(PANEL_TITLE).toContain('text-base font-semibold');
     expect(TILE_TITLE).toContain('text-[17px] font-semibold');
     expect(COUNT).toContain('text-[28px] font-normal');
     expect(COUNT).toContain('text-muted');

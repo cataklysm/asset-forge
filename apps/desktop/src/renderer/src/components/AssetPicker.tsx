@@ -7,6 +7,8 @@ import { ALERT, BORDER, INPUT, ITEM_HOVER, MUTED } from '../ui';
 interface Props {
   excludeIds?: readonly string[];
   onPick(asset: Asset): void | Promise<void>;
+  /** Stretches the search input to the width of its container. */
+  fullWidth?: boolean;
 }
 
 const RESULTS = 10;
@@ -15,7 +17,7 @@ const RESULTS = 10;
  * An ARIA 1.2 combobox that finds an asset by name: typing filters, ↓/↑ move through the
  * results, Enter or a click picks, Esc closes the list.
  */
-export function AssetPicker({ excludeIds = [], onPick }: Props) {
+export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Props) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -75,7 +77,7 @@ export function AssetPicker({ excludeIds = [], onPick }: Props) {
   return (
     <div className="relative space-y-2">
       <input
-        className={INPUT}
+        className={fullWidth ? `${INPUT} w-full` : INPUT}
         role="combobox"
         aria-label="Search assets"
         aria-autocomplete="list"

@@ -2,7 +2,7 @@ import { normalizeTagPrefix, type TagSuggestion } from '@assetforge/contracts';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { call } from '../api';
 import { latestOnly } from '../hooks/useLoad';
-import { BORDER, INPUT } from '../ui';
+import { BORDER, INLINE_INPUT, INPUT } from '../ui';
 
 interface Props {
   value: string;
@@ -15,6 +15,8 @@ interface Props {
   /** Receives every key the combobox does not handle itself (including Esc while the list is closed). */
   onKeyDown?(e: KeyboardEvent<HTMLInputElement>): void;
   disabled?: boolean;
+  /** `box` (the default) is a bordered input; `inline` reads as an action in a row of chips. */
+  look?: 'box' | 'inline';
 }
 
 const SUGGESTION_LIMIT = 8;
@@ -34,6 +36,7 @@ export function TagCombobox({
   inputRef,
   onKeyDown,
   disabled = false,
+  look = 'box',
 }: Props) {
   const listId = useId();
   const [open, setOpen] = useState(false);
@@ -120,7 +123,7 @@ export function TagCombobox({
         }}
         onKeyDown={handleKeyDown}
         onBlur={() => setOpen(false)}
-        className={`${INPUT} w-40`}
+        className={look === 'inline' ? INLINE_INPUT : `${INPUT} w-40`}
       />
       {expanded && (
         <ul
