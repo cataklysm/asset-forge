@@ -135,7 +135,7 @@ describe('listModels', () => {
       () => json(200, { models: [{ name: 'slow' }, { name: 'quick' }] }),
       (model, init) => (model === 'slow' ? hanging(init) : json(200, { capabilities: [] })),
     );
-    const listed = createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 600_000 }).listModels(signal());
+    const listed = createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 600_000, listTimeoutMs: 600_000 }).listModels(signal());
     let settled = false;
     void listed.finally(() => (settled = true));
     await vi.advanceTimersByTimeAsync(9_900);
@@ -155,6 +155,52 @@ describe('listModels', () => {
     const error = await failureOf(createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 30 }).listModels(signal()));
     expect(error).toBeInstanceOf(JobError);
     expect((error as JobError).code).toBe('provider_timeout');
+  });
+
+  it('bounds the whole call: tags at once, shows never answering', async () => {
+    const stub = server(
+      () => json(200, { models: [{ name: 'a' }, { name: 'b' }] }),
+      (_model, init) => hanging(init),
+    );
+    const reports: [string, number | null][] = [];
+    const started = Date.now();
+    const error = await failureOf(
+      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, listTimeoutMs: 50, onFailure: (c, s) => reports.push([c, s]) }).listModels(signal()),
+    );
+    expect((error as JobError).code).toBe('provider_timeout');
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(reports).toEqual([['provider_timeout', null]]);
+  });
+
+  it('bounds a /api/tags that never answers', async () => {
+    const stub = server(
+      () => hanging(stub.calls[0]!.init),
+      () => json(200, {}),
+    );
+    const reports: string[] = [];
+    const error = await failureOf(
+      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, listTimeoutMs: 50, onFailure: (c) => reports.push(c) }).listModels(signal()),
+    );
+    expect((error as JobError).code).toBe('provider_timeout');
+    expect(reports).toEqual(['provider_timeout']);
+  });
+
+  it.each([
+    [5_000, 5_000],
+    [120_000, 10_000],
+  ])('defaults the list bound for timeoutMs %i to %i ms', async (timeoutMs, bound) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const stub = server(
+      () => hanging(stub.calls[0]!.init),
+      () => json(200, {}),
+    );
+    const listed = failureOf(createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs }).listModels(signal()));
+    let settled = false;
+    void listed.finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(bound - 100);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(((await listed) as JobError).code).toBe('provider_timeout');
   });
 
   it.each([
