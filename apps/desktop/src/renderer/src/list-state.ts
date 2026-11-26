@@ -6,6 +6,7 @@ import type {
   IpcRequest,
   ProjectStatus,
 } from '@assetforge/contracts';
+import { renameInNames, type TagRename } from './tag-rename';
 
 export type AssetView = 'grid' | 'table';
 
@@ -84,6 +85,12 @@ export function listKey(filters: AnyFilters, extra?: string): string {
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([name, value]) => [name, Array.isArray(value) ? [...(value as string[])].sort() : value]);
   return JSON.stringify([extra ?? null, entries]);
+}
+
+/** The filters with the renamed tag in `tagNames`; the same object when the filter does not hold it. */
+export function renameInFilters<F extends { tagNames: string[] }>(filters: F, change: TagRename): F {
+  const tagNames = renameInNames(filters.tagNames, change);
+  return tagNames === filters.tagNames ? filters : { ...filters, tagNames: [...tagNames] };
 }
 
 function isSet(value: string | readonly string[]): boolean {

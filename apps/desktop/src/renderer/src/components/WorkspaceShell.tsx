@@ -8,6 +8,7 @@ import {
   NO_FILE_FILTERS,
   NO_FILTERS,
   NO_PROJECT_FILTERS,
+  renameInFilters,
   type AssetFilters,
   type AssetListState,
   type AssetTab,
@@ -24,6 +25,7 @@ import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TrashScreen } from '../screens/TrashScreen';
+import type { TagRename } from '../tag-rename';
 import { TagsProvider } from '../tags-context';
 import { TrashProvider, useTrash } from '../trash-context';
 import { ALERT } from '../ui';
@@ -86,6 +88,23 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
   const setTrashList = (trashList: TrashListState) => setShell((current) => ({ ...current, trashList }));
   const setAssetTab = (assetTab: AssetTab) => setShell((current) => ({ ...current, assetTab }));
 
+  /** A renamed tag in the filters of every list, mounted or not; the lists reload themselves. */
+  const renameInShell = useCallback((change: TagRename) => {
+    setShell((current) => {
+      const rename = <S extends { filters: { tagNames: string[] } }>(list: S): S => {
+        const filters = renameInFilters(list.filters, change);
+        return filters === list.filters ? list : { ...list, filters };
+      };
+      return {
+        ...current,
+        assetList: rename(current.assetList),
+        projectList: rename(current.projectList),
+        inboxList: rename(current.inboxList),
+        trashList: rename(current.trashList),
+      };
+    });
+  }, []);
+
   function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>) {
     setAssetList({ filters: { ...NO_FILTERS, ...filters }, scrollOffset: 0, openedIndex: null, selectedId: null });
     setView({ name: 'assets' });
@@ -115,7 +134,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
       <TrashProvider>
         <ProviderSettingsProvider>
           <AnalysisPromptsProvider>
-            <TagsProvider>
+            <TagsProvider onRenamed={renameInShell}>
               <JobsAppShell
                 workspaceName={workspace.name}
                 rootPath={workspace.rootPath}

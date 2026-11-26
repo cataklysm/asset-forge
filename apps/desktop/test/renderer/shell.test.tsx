@@ -8,7 +8,8 @@ import { AppShell } from '../../src/renderer/src/components/AppShell';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import { JOB_POLL_MS, sameSummary } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, pageOf, trashedRecord } from './fixtures';
+import { assetSummary, fileRecord, pageOf, tagOf, trashedRecord } from './fixtures';
+import { renameHandlers, renameThroughDialog } from './rename-flow';
 
 type Section = 'assets' | 'projects' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
@@ -370,4 +371,35 @@ it('deleting a file in the inbox raises the count in the navigation', async () =
   await user.click(within(tile).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
   expect(await screen.findByRole('link', { name: 'Trash, 1 file' })).toBeTruthy();
+});
+
+it('a rename on the asset screen rewrites the gallery filter that is not mounted', async () => {
+  const user = userEvent.setup();
+  const summary = assetSummary({ name: 'Oak tree', tags: [tagOf('Front View')] });
+  const { projectCount: _p, fileCount: _f, workflowProgress: _w, coverTags: _c, ...detail } = summary;
+  const api = workspaceShell(() => IDLE, () => {}, {
+    'assets:list': () => pageOf([summary]),
+    'assets:get': () => ({ ...detail, coverIsChosen: false }),
+    'assignments:listByAsset': () => [],
+    'relations:list': () => [],
+    'files:list': () => pageOf([]),
+    'workflows:get': () => null,
+    'workflowTemplates:list': () => [],
+    'tags:suggest': () => [],
+    ...renameHandlers({ 'front view': 'Front View' }),
+  });
+  await user.type(await screen.findByRole('combobox', { name: 'Tags' }), 'front view{Enter}');
+  expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
+  const grid = await screen.findByRole('grid', { name: 'Assets' });
+  await user.dblClick((await within(grid).findByText('Oak tree')).closest<HTMLElement>('[data-index]')!);
+  await screen.findByRole('group', { name: 'Asset tags' });
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await user.click(screen.getAllByRole('link', { name: 'Assets' })[0]!);
+  expect(await screen.findByRole('button', { name: 'Remove front' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
+  await waitFor(() =>
+    expect(
+      api.calls.some((c) => c.channel === 'assets:list' && (c.request as { tagNames?: string[] }).tagNames?.join() === 'front'),
+    ).toBe(true),
+  );
 });

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RenameTagDialog } from './components/RenameTagDialog';
 import type { TagRename } from './tag-rename';
 
@@ -44,4 +44,20 @@ export function TagsProvider({ children, onRenamed }: { children: ReactNode; onR
 /** The rename state of the surrounding `TagsProvider`; outside one no dialog and no renames. */
 export function useTags(): TagsState {
   return useContext(TagsContext);
+}
+
+/**
+ * Calls `apply` once for every rename that happens while the caller is mounted; a rename from
+ * before the mount is not applied.
+ */
+export function useRenamed(apply: (change: TagRename) => void): void {
+  const { lastRename } = useTags();
+  const applied = useRef(lastRename);
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+  useEffect(() => {
+    if (lastRename === null || lastRename === applied.current) return;
+    applied.current = lastRename;
+    applyRef.current(lastRename);
+  }, [lastRename]);
 }

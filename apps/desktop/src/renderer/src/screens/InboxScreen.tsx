@@ -18,6 +18,8 @@ import { useJobs } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
+import { renameInRecord, renameInSelection } from '../tag-rename';
+import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
 import { ALERT, BUTTON, MUTED } from '../ui';
@@ -58,6 +60,14 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   // A finished job may have changed records (e.g. AI tags): the list and the count reload.
   const { resultToken } = useJobs();
+
+  // A tag rename reloads the list; the selection and the shown file are copies it does not reach.
+  const { renameToken } = useTags();
+  useRenamed((change) => {
+    setSelection((current) => renameInSelection(current, change));
+    const shown = detail.file;
+    if (shown !== null) detail.update(renameInRecord(shown, change));
+  });
 
   // The title shows the number of all inbox files, independent of the filters.
   const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken, resultToken]);
@@ -247,7 +257,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           positionRef={positionRef}
           selection={selection}
           onSelectionChange={setSelection}
-          reloadToken={reloadToken + resultToken}
+          reloadToken={reloadToken + resultToken + renameToken}
           onOpen={detail.open}
           menuItems={(file) =>
             fileMenuItems(file, {

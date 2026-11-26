@@ -3,12 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { JOB_ERROR_MESSAGES, type AssetAssignment, type AssetSummary, type AssetType, type IpcRequest } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
-import { NO_FILTERS, type AssetListState } from '../../src/renderer/src/list-state';
+import { NO_FILTERS, renameInFilters, type AssetListState } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetsScreen } from '../../src/renderer/src/screens/AssetsScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, nextId, pageOf, projectSummary, tagOf } from './fixtures';
+import { renameHandlers, renameThroughDialog, RenameTrigger } from './rename-flow';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -527,4 +529,51 @@ it('a failed create shows the error in the dialog and Cancel returns focus', asy
   await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   expect(dialog.open).toBe(false);
   expect(document.activeElement).toBe(trigger);
+});
+
+/** The gallery inside a `TagsProvider` whose renames rewrite the filters, as the workspace shell does. */
+function RenamingHarness(props: { initial: AssetListState }) {
+  const [state, setState] = useState(props.initial);
+  return (
+    <TagsProvider onRenamed={(change) => setState((s) => ({ ...s, filters: renameInFilters(s.filters, change) }))}>
+      <RenameTrigger tag={{ name: 'front view', displayName: 'Front View' }} />
+      <AssetsScreen state={state} onStateChange={setState} onOpen={() => {}} />
+    </TagsProvider>
+  );
+}
+
+it('a rename switches a tag filter on the old name to the new one and reloads', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'assets:list': listOf(many(2)), ...renameHandlers({ 'front view': 'Front View' }) });
+  render(<RenamingHarness initial={{ ...INITIAL, filters: { ...NO_FILTERS, tagNames: ['front view'] } }} />);
+  expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
+  await renameThroughDialog(user, 'Front View', 'front');
+  await waitFor(() => expect(listRequests(api).some((r) => r.tagNames?.join() === 'front')).toBe(true));
+  expect(screen.getByRole('button', { name: 'Remove front' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
+});
+
+it('a merge into a name the filter already holds leaves one chip', async () => {
+  const user = userEvent.setup();
+  const api = install({
+    'assets:list': listOf(many(2)),
+    ...renameHandlers({ 'front view': 'Front View', front: 'Front' }),
+  });
+  render(<RenamingHarness initial={{ ...INITIAL, filters: { ...NO_FILTERS, tagNames: ['front view', 'front'] } }} />);
+  expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
+  await renameThroughDialog(user, 'Front View', 'front');
+  await waitFor(() => expect(listRequests(api).some((r) => r.tagNames?.join() === 'front')).toBe(true));
+  expect(screen.getAllByRole('button', { name: 'Remove front' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
+});
+
+it('a rename of a tag outside the filter still reloads the gallery', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'assets:list': listOf(many(2)), ...renameHandlers({ 'front view': 'Front View' }) });
+  render(<RenamingHarness initial={INITIAL} />);
+  await screen.findByText('Asset 0');
+  const before = listRequests(api).length;
+  await renameThroughDialog(user, 'Front View', 'Side');
+  await waitFor(() => expect(listRequests(api).length).toBeGreaterThan(before));
+  expect(screen.getByText('Asset 0')).toBeTruthy();
 });

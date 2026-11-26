@@ -5,9 +5,11 @@ import type { FileRecord, IpcRequest } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { NO_FILE_FILTERS } from '../../src/renderer/src/list-state';
 import { TrashScreen, type TrashListState } from '../../src/renderer/src/screens/TrashScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
 import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId, pageOf, tagOf, trashedRecord } from './fixtures';
+import { renameHandlers, renameThroughDialog, RenameTrigger } from './rename-flow';
 
 const INITIAL: TrashListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 
@@ -326,4 +328,32 @@ it('a rejected purge call from the detail dialog shows the message in the dialog
   render(<Harness />);
   const dialog = await purgeInDialog(user);
   expect((await within(dialog).findByRole('alert')).textContent).toContain('cannot be reached');
+});
+
+it('a tag rename reloads the trash list', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  const rename = renameHandlers({ bark: 'Bark' });
+  const api = install([hero, loose], {
+    handlers: {
+      ...rename,
+      'tags:rename': (request) => {
+        api.set('files:list', (r: ListRequest) =>
+          pageOf([{ ...hero, tags: [tagOf('Moss')] }, loose].slice(r.offset, r.offset + r.limit), 2),
+        );
+        return rename['tags:rename'](request);
+      },
+    },
+  });
+  render(
+    <TagsProvider>
+      <RenameTrigger tag={{ name: 'bark', displayName: 'Bark' }} />
+      <Harness />
+    </TagsProvider>,
+  );
+  await screen.findByText('hero.png');
+  expect(await within(tile('hero.png')).findByText('Bark')).toBeTruthy();
+  await renameThroughDialog(user, 'Bark', 'Moss');
+  expect(await within(tile('hero.png')).findByText('Moss')).toBeTruthy();
+  expect(within(tile('hero.png')).queryByText('Bark')).toBeNull();
 });

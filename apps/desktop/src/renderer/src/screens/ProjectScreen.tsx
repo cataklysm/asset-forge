@@ -10,6 +10,7 @@ import { Pager } from '../components/Pager';
 import { useLoad } from '../hooks/useLoad';
 import { label } from '../labels';
 import type { View } from '../nav';
+import { useTags } from '../tags-context';
 import { ALERT, BORDER, BUTTON_INLINE, ICON_BUTTON_INLINE, LABEL, MUTED, PAGE_TITLE, SECTION_TITLE, SELECT } from '../ui';
 
 const PAGE_SIZE = 50;
@@ -18,12 +19,14 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const { renameToken } = useTags();
 
   const project = useLoad(() => call('projects:get', { id }), [id]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const members = useLoad(
     () => call('assignments:listByProject', { projectId: id, limit: PAGE_SIZE, offset }),
-    [id, offset],
+    // A tag rename reloads the members page, as it does every list.
+    [id, offset, renameToken],
   );
   // The picker must exclude every member, not only those on the visible page.
   const allMembers = useLoad(

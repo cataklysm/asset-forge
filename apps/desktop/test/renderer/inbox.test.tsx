@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type JobSummary, type VisionSettingsView } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type VisionSettingsView } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
@@ -11,9 +11,11 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { renameHandlers, renameThroughDialog } from './rename-flow';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
@@ -850,4 +852,50 @@ it('the inbox count reloads after a delete', async () => {
   await user.click(within(tile('c1.png')).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
   await waitFor(() => expect(title()).toBe('Inbox1'));
+});
+
+it('a merge rewrites the selection at once, also a selected file outside the loaded pages', async () => {
+  const user = userEvent.setup();
+  const f1 = fileRecord({ originalName: 'f1.png', tags: [tagOf('Front View', 'ai'), tagOf('Front')] });
+  const f2 = fileRecord({ originalName: 'f2.png', tags: [tagOf('Front View')] });
+  const rename = renameHandlers({ 'front view': 'Front View', front: 'Front' });
+  let held: Promise<IpcResponse<'files:list'>> | null = null;
+  const api = install([f1, f2], {
+    ...rename,
+    'files:list': (request) => {
+      if (held !== null) return held;
+      const items = [f1, f2].filter((f) => request.query === undefined || f.originalName.startsWith(request.query));
+      return pageOf(items.slice(request.offset, request.offset + request.limit), items.length);
+    },
+    'tags:rename': (request) => {
+      held = deferred<IpcResponse<'files:list'>>().promise;
+      return rename['tags:rename'](request);
+    },
+  });
+  render(
+    <TagsProvider>
+      <Harness />
+    </TagsProvider>,
+  );
+  await selectRange(user, 'f1.png', 'f2.png');
+  expect(await screen.findByText('2 selected')).toBeTruthy();
+  // f2 leaves the loaded pages and stays selected.
+  await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'f1');
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('f2.png')).toBeNull());
+  expect(screen.getByText('2 selected')).toBeTruthy();
+  const row = within(column()).getByRole('group', { name: 'Shared image tags' });
+  expect(within(row).getAllByRole('button', { name: /^Remove/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+    'Remove AI tag Front View',
+  ]);
+
+  const before = callsOf(api, 'files:list').length;
+  await renameThroughDialog(user, 'Front View', 'front');
+  expect(callsOf(api, 'tags:rename')).toEqual([{ from: 'front view', to: 'front', merge: true }]);
+  // The list reload is requested and still unanswered; the selection already shows the merge.
+  await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(before));
+  await waitFor(() =>
+    expect(within(row).getAllByRole('button', { name: /^Remove/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Remove Front',
+    ]),
+  );
 });

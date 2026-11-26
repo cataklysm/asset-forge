@@ -3,6 +3,7 @@ import type { AssetList, AssetSummary, ProjectSummary } from '@assetforge/contra
 import { call, describeError } from '../api';
 import { useLoad } from '../hooks/useLoad';
 import { label } from '../labels';
+import { useTags } from '../tags-context';
 import { ALERT, BORDER, BUTTON, LABEL, MUTED, SECTION_TITLE } from '../ui';
 import { matchedNames } from './AssetGrid';
 import { CoverImage } from './CoverImage';
@@ -25,6 +26,7 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const typeName = (id: string) => (types.data ?? []).find((t) => t.id === id)?.name ?? '–';
   const [matching, setMatching] = useState<Matching | null>(null);
+  const { renameToken } = useTags();
 
   const projectId = project?.id ?? null;
   const tagKey = JSON.stringify(tagNames);
@@ -45,7 +47,8 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
     return () => {
       active = false;
     };
-  }, [requestKey, projectId, tagKey]);
+    // A rename asks again under the same key, so the shown answer stays until the new one arrives.
+  }, [requestKey, projectId, tagKey, renameToken]);
 
   // An answer for an earlier selection or other tags is never shown.
   const current = matching !== null && matching.key === requestKey ? matching : null;
