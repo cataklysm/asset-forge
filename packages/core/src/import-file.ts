@@ -3,13 +3,14 @@ import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from '.
 import { mimeFromFileName } from './file-names.js';
 import { fileKind, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
-import type { FileRepository, SourceFiles, Storage } from './ports.js';
+import type { FileRepository, ImageProbe, SourceFiles, Storage } from './ports.js';
 
 export interface ImportContext {
   storage: Storage;
   storageId: string;
   files: FileRepository;
   sources: SourceFiles;
+  probe: ImageProbe;
   newId(): string;
   now(): Date;
 }
@@ -81,7 +82,16 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
     await ctx.storage.move(staging, finalPath);
     moved = true;
-    await ctx.files.markComplete(id, { sizeBytes, sha256 });
+    // A failed measurement never fails the import; the file is measured on demand later.
+    let size: { width: number; height: number } | null = null;
+    if (isPreviewable(pending.mimeType)) {
+      try {
+        size = await ctx.probe.measure(await ctx.storage.absolutePath(finalPath));
+      } catch {
+        size = null;
+      }
+    }
+    await ctx.files.markComplete(id, { sizeBytes, sha256, width: size?.width ?? null, height: size?.height ?? null });
     const file: FileRecord = {
       id,
       storageId: ctx.storageId,
@@ -98,6 +108,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
       tags: [],
     };
     return { sourcePath, file, error: null, duplicateOf };
@@ -132,6 +144,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
+      width: null,
+      height: null,
       tags: [],
     };
     return { sourcePath, file, error: message, duplicateOf: [] };

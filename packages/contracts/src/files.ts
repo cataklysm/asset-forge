@@ -28,6 +28,8 @@ export const FileRecordSchema = z.object({
   previewable: z.boolean(),
   openable: z.boolean(),
   kind: FileKindSchema,
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
   tags: z.array(TagAssignmentSchema), // file tags only
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;

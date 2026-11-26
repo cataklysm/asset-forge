@@ -265,6 +265,71 @@ describe('project assignments', () => {
   });
 });
 
+describe('file dimensions', () => {
+  let dir: string;
+  let db: WorkspaceDatabase;
+  const STORAGE = uuid(900);
+  const fileId = (n: number) => uuid(700 + n);
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'af-dims-'));
+    db = await openWorkspaceDatabase(join(dir, 'assetforge.sqlite'), MIGRATIONS_FOLDER);
+    await db.storages.ensurePrimary({ id: STORAGE, createdAt: TS });
+  });
+  afterEach(async () => {
+    await db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const pending = (n: number) =>
+    db.files.insertPending({
+      id: fileId(n),
+      storageId: STORAGE,
+      originalName: `d${n}.png`,
+      relativePath: `inbox/d${n}.png`,
+      mimeType: 'image/png',
+      importedAt: TS,
+      kind: 'image',
+    });
+
+  test('markComplete stores the size and get returns it', async () => {
+    await pending(1);
+    await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'a'.repeat(64), width: 1600, height: 2000 });
+    const record = await db.files.get(fileId(1));
+    expect([record?.width, record?.height]).toEqual([1600, 2000]);
+  });
+
+  test('markComplete with nulls stores nulls', async () => {
+    await pending(1);
+    await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'a'.repeat(64), width: null, height: null });
+    const record = await db.files.get(fileId(1));
+    expect([record?.width, record?.height]).toEqual([null, null]);
+  });
+
+  test('setDimensions stores the size and returns the record with its tags', async () => {
+    await pending(1);
+    await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'a'.repeat(64), width: null, height: null });
+    await db.tags.addToFile({ fileId: fileId(1), name: 'rust', displayName: 'Rust', origin: 'manual', newId: uuid(950), now: TS });
+    const record = await db.files.setDimensions(fileId(1), { width: 640, height: 480 });
+    expect([record.width, record.height]).toEqual([640, 480]);
+    expect(record.tags.map((t) => t.name)).toEqual(['rust']);
+    expect((await db.files.get(fileId(1)))?.width).toBe(640);
+  });
+
+  test('setDimensions rejects for an unknown id', async () => {
+    await expect(db.files.setDimensions(uuid(999), { width: 1, height: 1 })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test('list and findCompleteBySha256 return the dimensions', async () => {
+    await pending(1);
+    await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'b'.repeat(64), width: 30, height: 40 });
+    const listed = await db.files.list({ scope: { kind: 'all' }, limit: 10, offset: 0 });
+    expect(listed.items.map((f) => [f.width, f.height])).toEqual([[30, 40]]);
+    const found = await db.files.findCompleteBySha256('b'.repeat(64));
+    expect(found.map((f) => [f.width, f.height])).toEqual([[30, 40]]);
+  });
+});
+
 describe('file placement and moves', () => {
   const STORAGE = uuid(500);
   const fileId = (n: number) => uuid(600 + n);
@@ -283,7 +348,7 @@ describe('file placement and moves', () => {
         importedAt: `2026-01-0${n}T00:00:00.000Z`,
         kind: 'image',
       });
-      await db.files.markComplete(fileId(n), { sizeBytes: n, sha256: String(n).repeat(64) });
+      await db.files.markComplete(fileId(n), { sizeBytes: n, sha256: String(n).repeat(64), width: null, height: null });
     }
   };
   const move = (n: number, patch: Partial<FileMove> = {}): FileMove => ({
@@ -521,7 +586,7 @@ describe('asset repository filters', () => {
         importedAt: TS,
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (status === 'failed') await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath, assetId, role });
       return id;
@@ -613,7 +678,7 @@ describe('file repository filters', () => {
       // Later files are newer, so the newest-first order is the reverse of insertion.
       const importedAt = new Date(Date.UTC(2026, 0, 1, 0, minute++)).toISOString();
       await db.files.insertPending({ id, storageId: uuid(900), originalName, relativePath, mimeType: 'image/png', importedAt, kind });
-      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
       return id;
     };
@@ -729,7 +794,7 @@ describe('project repository filters', () => {
         importedAt: TS,
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       else await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath, assetId, role: 'reference' });
       return id;

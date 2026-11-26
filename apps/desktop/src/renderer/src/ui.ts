@@ -20,6 +20,9 @@ export const ICON_BUTTON_INLINE = `${BUTTON_LOOK} h-8 w-8`;
 
 export const INPUT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text placeholder:text-muted ${FOCUS}`;
 
+/** An input that reads as an action in a row of chips ("+ Add tag"); its box shows while focused. */
+export const INLINE_INPUT = `h-[26px] w-28 rounded-control border border-transparent bg-transparent px-1 text-sm text-text placeholder:text-accent focus:border-line ${FOCUS}`;
+
 export const SELECT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text ${FOCUS}`;
 
 const CHIP_BASE = 'inline-flex h-[26px] items-center gap-1 rounded-control border bg-transparent px-2.5 text-[13px] font-normal';
@@ -47,6 +50,9 @@ export const PAGE_TITLE = 'text-[28px] font-semibold text-text';
 export const WORKSPACE_TITLE = 'text-2xl font-semibold text-text';
 
 export const SECTION_TITLE = 'text-lg font-semibold text-text';
+
+/** Headings inside a side panel (the details column of the file dialog). */
+export const PANEL_TITLE = 'text-base font-semibold text-text';
 
 export const TILE_TITLE = 'truncate text-[17px] font-semibold text-text';
 

@@ -62,7 +62,7 @@ async function addFile(
     kind: f.kind ?? 'image',
   });
   const status = f.status ?? 'complete';
-  if (status === 'complete') await ctx.db.files.markComplete(f.id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  if (status === 'complete') await ctx.db.files.markComplete(f.id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await ctx.db.files.markFailed(f.id, 'Import failed');
   if (assetId !== null) await ctx.db.files.setPlacement(f.id, { relativePath, assetId, role });
   ctx.storage.files.set(relativePath, Buffer.from(f.name));

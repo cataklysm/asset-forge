@@ -1,5 +1,5 @@
 import type { WorkspaceSummary } from '@assetforge/contracts';
-import type { Storage, WorkspaceDatabase } from './ports.js';
+import type { ImageProbe, Storage, WorkspaceDatabase } from './ports.js';
 
 /** What a use case gets to work with while a workspace is open. */
 export interface WorkspaceSession {
@@ -8,6 +8,7 @@ export interface WorkspaceSession {
   /** ID of the workspace's primary storage row. */
   readonly storageId: string;
   readonly database: WorkspaceDatabase;
+  readonly imageProbe: ImageProbe;
   newId(): string;
   now(): Date;
 }

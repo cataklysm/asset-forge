@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { WorkspaceManager, type WorkspaceHost } from '@assetforge/core';
+import { WorkspaceManager, type ImageProbe, type WorkspaceHost } from '@assetforge/core';
 import { WorkspaceSummarySchema } from '@assetforge/contracts';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { LocalFileSystemStorage, NodeSourceFiles } from '@assetforge/storage';
@@ -21,6 +21,8 @@ export interface CompositionOptions {
    * falling back to a permanent delete.
    */
   moveToTrash?: (absolutePath: string) => Promise<void>;
+  /** Reads image dimensions (the media worker pool in the app). Defaults to a probe that never measures. */
+  imageProbe?: ImageProbe;
 }
 
 const WorkspaceIdSchema = WorkspaceSummarySchema.shape.id;
@@ -41,6 +43,7 @@ export function createWorkspaceHost(opts: CompositionOptions): WorkspaceHost {
   return {
     registry: new JsonWorkspaceRegistry(join(opts.userDataPath, 'settings.json')),
     sources: new NodeSourceFiles(),
+    imageProbe: opts.imageProbe ?? { measure: async () => null },
     createStorage: (rootPath) => new LocalFileSystemStorage(rootPath),
     openDatabase: async (workspaceId) =>
       openWorkspaceDatabase(join(databaseDir(workspaceId), 'assetforge.sqlite'), migrationsFolder),

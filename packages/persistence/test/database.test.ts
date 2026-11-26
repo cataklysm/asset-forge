@@ -78,6 +78,8 @@ describe('workspace database', () => {
       role: null,
       sizeBytes: null,
       sha256: null,
+      width: null,
+      height: null,
       status: 'pending',
       error: null,
       previewable: true,
@@ -91,7 +93,7 @@ describe('workspace database', () => {
     const d = await open();
     await d.files.insertPending(pending(1));
     await d.files.insertPending(pending(2));
-    await d.files.markComplete(uuid(1), { sizeBytes: 42, sha256: HASH_A });
+    await d.files.markComplete(uuid(1), { sizeBytes: 42, sha256: HASH_A, width: null, height: null });
     await d.files.markFailed(uuid(2), 'disk full');
     const { items } = await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
     const one = items.find((i) => i.id === uuid(1));
@@ -104,9 +106,9 @@ describe('workspace database', () => {
   test('findCompleteBySha256 returns only complete rows with that hash', async () => {
     const d = await open();
     for (const n of [1, 2, 3, 4]) await d.files.insertPending(pending(n));
-    await d.files.markComplete(uuid(1), { sizeBytes: 1, sha256: HASH_A });
-    await d.files.markComplete(uuid(2), { sizeBytes: 1, sha256: HASH_B });
-    await d.files.markComplete(uuid(3), { sizeBytes: 1, sha256: HASH_A });
+    await d.files.markComplete(uuid(1), { sizeBytes: 1, sha256: HASH_A, width: null, height: null });
+    await d.files.markComplete(uuid(2), { sizeBytes: 1, sha256: HASH_B, width: null, height: null });
+    await d.files.markComplete(uuid(3), { sizeBytes: 1, sha256: HASH_A, width: null, height: null });
     const found = await d.files.findCompleteBySha256(HASH_A);
     expect(found.map((f) => f.id).sort()).toEqual([uuid(1), uuid(3)]);
     expect(await d.files.findCompleteBySha256('c'.repeat(64))).toEqual([]);
@@ -115,7 +117,7 @@ describe('workspace database', () => {
   test('listByStatus returns only rows with that status', async () => {
     const d = await open();
     for (const n of [1, 2, 3]) await d.files.insertPending(pending(n));
-    await d.files.markComplete(uuid(1), { sizeBytes: 1, sha256: HASH_A });
+    await d.files.markComplete(uuid(1), { sizeBytes: 1, sha256: HASH_A, width: null, height: null });
     await d.files.markFailed(uuid(3), 'x');
     expect((await d.files.listByStatus('pending')).map((f) => f.id)).toEqual([uuid(2)]);
     expect((await d.files.listByStatus('failed')).map((f) => f.id)).toEqual([uuid(3)]);
@@ -145,7 +147,7 @@ describe('workspace database', () => {
 
   test('markComplete and markFailed reject for an unknown id', async () => {
     const d = await open();
-    await expect(d.files.markComplete(uuid(9), { sizeBytes: 1, sha256: HASH_A })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(d.files.markComplete(uuid(9), { sizeBytes: 1, sha256: HASH_A, width: null, height: null })).rejects.toBeInstanceOf(NotFoundError);
     await expect(d.files.markFailed(uuid(9), 'x')).rejects.toBeInstanceOf(NotFoundError);
   });
 

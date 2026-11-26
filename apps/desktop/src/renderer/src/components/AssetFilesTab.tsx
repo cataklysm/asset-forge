@@ -96,7 +96,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     exclusive(async () => {
       await call('files:unassign', { fileId: file.id });
       setSelection((current) => dropSelected(current, [file.id]));
-      if (detailDialog.openId() === file.id) closeDetail();
+      // The reload moves the dialog on to the file that follows (FileBrowser `viewer`).
       onFilesChanged();
     });
 
@@ -239,6 +239,29 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         onTotal={(total) => {
           if (total !== null && unfiltered) onCountChange(total);
         }}
+        viewer={{
+          fileId: detail?.id ?? null,
+          onView: (file) => (file === null ? closeDetail() : detailDialog.show(file)),
+          render: (list) =>
+            detail !== null && (
+              <FileDetailDialog
+                file={detail}
+                asset={{ id: asset.id, name: asset.name, tags: asset.tags }}
+                actions={{
+                  cover: coverOf(detail),
+                  onDetails: () => {},
+                  onSetCover: setCover,
+                  onDetach: () => detach(detail),
+                  onError: setError,
+                }}
+                roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} fullWidth />}
+                onFileChange={fileChanged}
+                onMeasured={detailDialog.setDimensions}
+                list={list}
+                onClose={closeDetail}
+              />
+            ),
+        }}
       />
 
       <Dialog open={dialog === 'tags'} title="Add tags" onClose={() => setDialog(null)}>
@@ -287,23 +310,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
           )}
         </div>
       </Dialog>
-
-      {detail !== null && (
-        <FileDetailDialog
-          file={detail}
-          asset={{ id: asset.id, name: asset.name, tags: asset.tags }}
-          actions={{
-            cover: coverOf(detail),
-            onDetails: () => {},
-            onSetCover: setCover,
-            onDetach: () => detach(detail),
-            onError: setError,
-          }}
-          roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} />}
-          onFileChange={fileChanged}
-          onClose={closeDetail}
-        />
-      )}
     </div>
   );
 }

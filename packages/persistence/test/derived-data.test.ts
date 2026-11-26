@@ -70,7 +70,7 @@ const addFile = async (assetId: string | null, originalName: string, kind: FileK
     importedAt: TS,
     kind,
   });
-  await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (assetId !== null) {
     await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${id}.bin`, assetId, role: 'reference' });
   }

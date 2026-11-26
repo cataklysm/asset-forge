@@ -45,6 +45,8 @@ export function fileRecord(p: Partial<FileRecord> = {}): FileRecord {
     previewable: true,
     openable: true,
     kind: 'image',
+    width: null,
+    height: null,
     tags: [],
     ...p,
   };

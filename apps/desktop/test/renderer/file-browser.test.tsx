@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { FileList, FileRecord, FileScope, IpcRequest } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
-import { FileBrowser } from '../../src/renderer/src/components/FileBrowser';
+import { FileBrowser, type ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { fileMenuItems } from '../../src/renderer/src/file-actions';
 import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/renderer/src/list-state';
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
@@ -308,4 +308,216 @@ it('the table view shows the columns and keeps the selection rules', async () =>
   expect(selectedNames()).toEqual([]);
   await user.keyboard('{Enter}');
   expect(onOpen).toHaveBeenCalledWith(files[0]);
+});
+
+/** A host whose "viewer" prints its position and records what the browser asks it to show. */
+function ViewerHarness(props: { initialFileId?: string | null; onView?(file: FileRecord | null): void }) {
+  const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [fileId, setFileId] = useState<string | null>(props.initialFileId ?? null);
+  return (
+    <div>
+      <button type="button" onClick={() => setReloadToken((n) => n + 1)}>
+        Reload
+      </button>
+      <button type="button" onClick={() => setFileId(null)}>
+        Close viewer
+      </button>
+      <FileBrowser
+        scope={ASSET_SCOPE}
+        filters={NO_FILE_FILTERS}
+        onFiltersChange={() => {}}
+        showRoleFilter
+        view="grid"
+        onViewChange={() => {}}
+        selection={selection}
+        onSelectionChange={setSelection}
+        reloadToken={reloadToken}
+        onOpen={(file) => setFileId(file.id)}
+        menuItems={() => []}
+        emptyText="No files"
+        viewer={{
+          fileId,
+          onView: (file) => {
+            props.onView?.(file);
+            setFileId(file?.id ?? null);
+          },
+          render: (list) => <ViewerProbe list={list} />,
+        }}
+      />
+    </div>
+  );
+}
+
+let viewerList: ViewerList | null = null;
+
+function ViewerProbe({ list }: { list: ViewerList }) {
+  viewerList = list;
+  return <output aria-label="Viewer">{`index ${list.index} total ${list.total}`}</output>;
+}
+
+function viewerText(): string | null {
+  return screen.queryByRole('status', { name: 'Viewer' })?.textContent ?? null;
+}
+
+function show(index: number) {
+  act(() => viewerList!.show(index));
+}
+
+/** Serves `items`; requests for the offsets in `gates` wait for their deferred answer. */
+function gatedList(items: () => FileRecord[], gates: Map<number, ReturnType<typeof deferred<FileList>>>) {
+  return (request: ListRequest) => {
+    const gate = gates.get(request.offset);
+    const answer = () => pageOf(items().slice(request.offset, request.offset + request.limit), items().length);
+    return gate === undefined ? answer() : gate.promise.then(answer);
+  };
+}
+
+it('the viewer gets the position of the shown file and show() steps, clamped to the list', async () => {
+  const user = userEvent.setup();
+  const files = many(5);
+  const onView = vi.fn();
+  install({ 'files:list': listOf(files) });
+  render(<ViewerHarness onView={onView} />);
+  await screen.findByText('File 0.png');
+  expect(viewerText()).toBeNull();
+
+  await user.click(itemOf('File 2.png'));
+  await user.keyboard('{Enter}');
+  expect(viewerText()).toBe('index 2 total 5');
+
+  show(3);
+  expect(onView).toHaveBeenLastCalledWith(files[3]);
+  expect(viewerText()).toBe('index 3 total 5');
+  show(-1);
+  expect(onView).toHaveBeenLastCalledWith(files[0]);
+  show(5);
+  expect(onView).toHaveBeenLastCalledWith(files[4]);
+  expect(viewerText()).toBe('index 4 total 5');
+});
+
+it('the viewer keeps its neighbours loaded and show() loads the page it needs; the latest call wins', async () => {
+  const files = many(130);
+  const onView = vi.fn();
+  const gates = new Map([
+    [60, deferred<FileList>()],
+    [120, deferred<FileList>()],
+  ]);
+  const api = install({ 'files:list': gatedList(() => files, gates) });
+  render(<ViewerHarness initialFileId={files[59]!.id} onView={onView} />);
+  await screen.findByText('File 0.png');
+  expect(viewerText()).toBe('index 59 total 130');
+  // The page after the shown file is requested without scrolling.
+  await waitFor(() => expect(listRequests(api).map((r) => r.offset)).toContain(60));
+
+  show(60);
+  expect(onView).not.toHaveBeenCalled();
+  await act(async () => gates.get(60)!.resolve(pageOf([])));
+  expect(onView).toHaveBeenCalledTimes(1);
+  expect(onView).toHaveBeenLastCalledWith(files[60]);
+  expect(viewerText()).toBe('index 60 total 130');
+
+  show(125);
+  await waitFor(() => expect(listRequests(api).map((r) => r.offset)).toContain(120));
+  show(126);
+  expect(onView).toHaveBeenCalledTimes(1);
+  await act(async () => gates.get(120)!.resolve(pageOf([])));
+  expect(onView).toHaveBeenCalledTimes(2);
+  expect(onView).toHaveBeenLastCalledWith(files[126]);
+  expect(viewerText()).toBe('index 126 total 130');
+});
+
+it('after a reload without the shown file the viewer moves to the follower, else the previous, else closes', async () => {
+  const user = userEvent.setup();
+  const all = many(5);
+  let items = all;
+  const onView = vi.fn();
+  const api = install({ 'files:list': (r) => listOf(items)(r) });
+  render(<ViewerHarness onView={onView} />);
+  await screen.findByText('File 0.png');
+  await user.click(itemOf('File 2.png'));
+  await user.keyboard('{Enter}');
+
+  // Still present: nothing changes.
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(listRequests(api)).toHaveLength(2));
+  await waitFor(() => expect(document.querySelectorAll('[data-file-tile]')).toHaveLength(5));
+  expect(onView).not.toHaveBeenCalled();
+  expect(viewerText()).toBe('index 2 total 5');
+
+  // Gone from the middle: the file that followed it.
+  items = all.filter((f) => f !== all[2]);
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(onView).toHaveBeenCalledTimes(1));
+  expect(onView).toHaveBeenLastCalledWith(all[3]);
+  expect(viewerText()).toBe('index 2 total 4');
+
+  // Gone from the end: the one before it.
+  show(3);
+  expect(onView).toHaveBeenLastCalledWith(all[4]);
+  items = items.filter((f) => f !== all[4]);
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(onView).toHaveBeenLastCalledWith(all[3]));
+  expect(viewerText()).toBe('index 2 total 3');
+
+  // The only file gone: the viewer closes.
+  items = [all[3]!];
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(viewerText()).toBe('index 0 total 1'));
+  items = [];
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(onView).toHaveBeenLastCalledWith(null));
+  expect(viewerText()).toBeNull();
+});
+
+it('a reload that shrinks the list below a pending show() shows the last file', async () => {
+  const user = userEvent.setup();
+  let items = many(130);
+  const onView = vi.fn();
+  const gates = new Map([[120, deferred<FileList>()]]);
+  install({ 'files:list': gatedList(() => items, gates) });
+  render(<ViewerHarness initialFileId={items[0]!.id} onView={onView} />);
+  await screen.findByText('File 0.png');
+  show(125);
+  items = items.slice(0, 70);
+  await user.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(onView).toHaveBeenCalledTimes(1));
+  expect(onView).toHaveBeenLastCalledWith(items[69]);
+  expect(viewerText()).toBe('index 69 total 70');
+  // The old answer arrives late and changes nothing.
+  await act(async () => gates.get(120)!.resolve(pageOf([])));
+  expect(onView).toHaveBeenCalledTimes(1);
+});
+
+it('closing the viewer focuses the tile of the file shown last, also on a page never scrolled to', async () => {
+  const user = userEvent.setup();
+  const files = many(130);
+  install({ 'files:list': listOf(files) });
+  const scrollTo = Element.prototype.scrollTo;
+  // Like a browser: scrolling moves the offset and fires `scroll`.
+  Element.prototype.scrollTo = function (this: Element, options?: ScrollToOptions | number) {
+    const top = typeof options === 'object' ? (options.top ?? 0) : 0;
+    Object.defineProperty(this, 'scrollTop', { configurable: true, value: top });
+    this.dispatchEvent(new Event('scroll'));
+  } as typeof Element.prototype.scrollTo;
+  try {
+    render(<ViewerHarness />);
+    await screen.findByText('File 0.png');
+    // The scroll range the rows would give in a browser.
+    Object.defineProperty(screen.getByRole('listbox', { name: 'Files' }), 'scrollHeight', { value: 100_000 });
+    await user.click(itemOf('File 1.png'));
+    await user.keyboard('{Enter}');
+    show(2);
+    await user.click(screen.getByRole('button', { name: 'Close viewer' }));
+    expect(document.activeElement).toBe(itemOf('File 2.png'));
+
+    await user.click(itemOf('File 1.png'));
+    await user.keyboard('{Enter}');
+    show(125);
+    await waitFor(() => expect(viewerText()).toBe('index 125 total 130'));
+    await user.click(screen.getByRole('button', { name: 'Close viewer' }));
+    await waitFor(() => expect(document.activeElement).toBe(itemOf('File 125.png')));
+  } finally {
+    Element.prototype.scrollTo = scrollTo;
+  }
 });

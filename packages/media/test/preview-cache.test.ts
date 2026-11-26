@@ -10,6 +10,8 @@ import {
   CACHE_TARGET_RATIO,
   CLEANUP_EVERY,
   createPreviewService,
+  FULL_CLEANUP_EVERY,
+  FULL_FORMAT_VERSION,
   evictLeastRecentlyUsed,
   PREVIEW_EDGE,
   PREVIEW_FORMAT_VERSION,
@@ -71,6 +73,9 @@ function fakePool() {
       await utimes(job.targetPath, seconds, seconds);
       return 'ok';
     },
+    async measure() {
+      return null;
+    },
     async close() {},
   };
   return fake;
@@ -113,6 +118,7 @@ describe('preview cache', () => {
   it('the key changes with hash and size and carries the format version', () => {
     expect(previewRelativePath(A, 'thumb')).toBe(`thumbnails/${A.slice(0, 2)}/${A}-256-v1.webp`);
     expect(previewRelativePath(A, 'detail')).toBe(`previews/${A.slice(0, 2)}/${A}-1024-v1.webp`);
+    expect(previewRelativePath(A, 'full')).toBe(`full/${A.slice(0, 2)}/${A}-8192-v1.png`);
     expect(previewRelativePath(B, 'thumb')).not.toBe(previewRelativePath(A, 'thumb'));
   });
 
@@ -120,7 +126,9 @@ describe('preview cache', () => {
     expect(CACHE_LIMIT_BYTES).toBe(2 * 1024 ** 3);
     expect(CACHE_TARGET_RATIO).toBe(0.9);
     expect(CLEANUP_EVERY).toBe(500);
-    expect(PREVIEW_EDGE).toEqual({ thumb: 256, detail: 1024 });
+    expect(PREVIEW_EDGE).toEqual({ thumb: 256, detail: 1024, full: 8192 });
+    expect(FULL_FORMAT_VERSION).toBe(1);
+    expect(FULL_CLEANUP_EVERY).toBe(8);
     expect(PREVIEW_FORMAT_VERSION).toBe(1);
   });
 
@@ -133,9 +141,83 @@ describe('preview cache', () => {
     const before = (await stat(first as string)).mtimeMs;
     expect(await s.get({ sha256: A, sourcePath, size: 'thumb' })).toBe(first);
     expect(pool.calls).toHaveLength(1);
-    expect(pool.calls[0]).toEqual({ sourcePath, targetPath: first, longestEdge: 256 });
+    expect(pool.calls[0]).toEqual({ sourcePath, targetPath: first, longestEdge: 256, format: 'webp' });
     // The hit refreshes the LRU position.
     expect((await stat(first as string)).mtimeMs).toBeGreaterThan(before);
+  });
+
+  it('renders the full size as lossless png in its own directory and serves it from the cache', async () => {
+    const pool = fakePool();
+    const s = service(pool);
+    const sourcePath = await source('a.png');
+    const path = await s.get({ sha256: A, sourcePath, size: 'full' });
+    expect(path).toBe(join(cacheDir, `full/${A.slice(0, 2)}/${A}-8192-v1.png`));
+    expect(pool.calls).toEqual([{ sourcePath, targetPath: path, longestEdge: 8192, format: 'png' }]);
+    expect(await s.get({ sha256: A, sourcePath, size: 'full' })).toBe(path);
+    expect(pool.calls).toHaveLength(1);
+  });
+
+  it('detail previews are requested as webp', async () => {
+    const pool = fakePool();
+    const s = service(pool);
+    await s.get({ sha256: A, sourcePath: await source('a.png'), size: 'detail' });
+    expect(pool.calls[0]).toMatchObject({ longestEdge: 1024, format: 'webp' });
+  });
+
+  it('limits full separately from thumbnails and previews', async () => {
+    const full: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const path = join(cacheDir, 'full', 'aa', `${i}.png`);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, Buffer.alloc(100));
+      await utimes(path, 1_600_000_000 + i, 1_600_000_000 + i);
+      full.push(path);
+    }
+    const others: string[] = [];
+    for (const directory of ['thumbnails', 'previews']) {
+      const path = join(cacheDir, directory, 'aa', 'x.webp');
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, Buffer.alloc(500));
+      others.push(path);
+    }
+    await service(fakePool(), { limitBytes: 600 }).cleanup();
+    // Only full exceeds the limit and shrinks to at most 540 bytes.
+    expect(await Promise.all(full.map(exists))).toEqual([
+      false, false, false, false, false, true, true, true, true, true,
+    ]);
+    expect((await Promise.all(others.map(exists))).every(Boolean)).toBe(true);
+  });
+
+  it('runs cleanup after FULL_CLEANUP_EVERY new full entries', async () => {
+    const pool = fakePool();
+    const s = service(pool, { limitBytes: 350 });
+    let cleanupRuns = 0;
+    hooks.beforeReaddir = (path) => {
+      if (path === join(cacheDir, 'thumbnails')) cleanupRuns++;
+    };
+    const sourcePath = await source('a.png');
+    const hashes = Array.from({ length: FULL_CLEANUP_EVERY }, (_, i) => String(i).repeat(64).slice(0, 64));
+    for (const sha256 of hashes.slice(0, -1)) await s.get({ sha256, sourcePath, size: 'full' });
+    expect(cleanupRuns).toBe(0);
+    const last = (await s.get({ sha256: hashes.at(-1) as string, sourcePath, size: 'full' })) as string;
+    // Joins the run the last entry started instead of starting a new one.
+    await s.cleanup();
+    expect(cleanupRuns).toBe(1);
+    expect(await exists(last)).toBe(true);
+    expect(await exists(join(cacheDir, previewRelativePath(hashes[0] as string, 'full')))).toBe(false);
+  });
+
+  it('thumbnails do not count towards the full counter', async () => {
+    const s = service(fakePool(), { limitBytes: 50 });
+    let cleanupRuns = 0;
+    hooks.beforeReaddir = (path) => {
+      if (path === join(cacheDir, 'thumbnails')) cleanupRuns++;
+    };
+    const sourcePath = await source('a.png');
+    for (let i = 0; i < FULL_CLEANUP_EVERY; i++) {
+      await s.get({ sha256: String(i).repeat(64).slice(0, 64), sourcePath, size: 'thumb' });
+    }
+    expect(cleanupRuns).toBe(0);
   });
 
   it('concurrent identical requests produce one file', async () => {
@@ -197,6 +279,7 @@ describe('preview cache', () => {
         calls++;
         return real.run(job);
       },
+      measure: (path) => real.measure(path),
       close: () => real.close(),
     };
     const s = service(counting);

@@ -2,21 +2,28 @@ import { lstat, readdir, stat, unlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { WorkerPool } from './worker-pool.js';
 
-export type PreviewSize = 'thumb' | 'detail';
+export type PreviewSize = 'thumb' | 'detail' | 'full';
 
-export const PREVIEW_EDGE: Record<PreviewSize, number> = { thumb: 256, detail: 1024 };
+export const PREVIEW_EDGE: Record<PreviewSize, number> = { thumb: 256, detail: 1024, full: 8192 };
 export const PREVIEW_FORMAT_VERSION = 1;
+/** Version of the lossless `full` rendition, independent of `PREVIEW_FORMAT_VERSION`. */
+export const FULL_FORMAT_VERSION = 1;
 export const CACHE_LIMIT_BYTES = 2 * 1024 ** 3;
 export const CACHE_TARGET_RATIO = 0.9;
 export const CLEANUP_EVERY = 500;
+/** Full renditions are large, so they trigger a cleanup far sooner than thumbnails. */
+export const FULL_CLEANUP_EVERY = 8;
 
-const DIRECTORIES: Record<PreviewSize, string> = { thumb: 'thumbnails', detail: 'previews' };
+const DIRECTORIES: Record<PreviewSize, string> = { thumb: 'thumbnails', detail: 'previews', full: 'full' };
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A temporary file this old belongs to a write that will never be renamed. */
 const STALE_TMP_MS = 60 * 60 * 1000;
 
-/** Path relative to the cache root, e.g. `thumbnails/ab/<sha256>-256-v1.webp`. */
+/** Path relative to the cache root, e.g. `thumbnails/ab/<sha256>-256-v1.webp` or `full/ab/<sha256>-8192-v1.png`. */
 export function previewRelativePath(sha256: string, size: PreviewSize): string {
+  if (size === 'full') {
+    return `${DIRECTORIES.full}/${sha256.slice(0, 2)}/${sha256}-${PREVIEW_EDGE.full}-v${FULL_FORMAT_VERSION}.png`;
+  }
   return `${DIRECTORIES[size]}/${sha256.slice(0, 2)}/${sha256}-${PREVIEW_EDGE[size]}-v${PREVIEW_FORMAT_VERSION}.webp`;
 }
 
@@ -27,10 +34,10 @@ export interface PreviewRequest {
 }
 
 export interface PreviewService {
-  /** Absolute path of the cached WebP, or null for "no preview". Never throws. */
+  /** Absolute path of the cached WebP (PNG for `full`), or null for "no preview". Never throws. */
   get(request: PreviewRequest): Promise<string | null>;
   /**
-   * Evicts least recently used entries from `thumbnails` and from `previews`, each directory
+   * Evicts least recently used entries from `thumbnails`, `previews` and `full`, each directory
    * separately against `limitBytes`; concurrent calls share one run. Never throws.
    */
   cleanup(): Promise<void>;
@@ -64,7 +71,7 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
   const cleanupEvery = options.cleanupEvery ?? CLEANUP_EVERY;
   const failed = new Set<string>();
   const inflight = new Map<string, Promise<string | null>>();
-  let newEntries = 0;
+  const newEntries: Record<PreviewSize, number> = { thumb: 0, detail: 0, full: 0 };
   let cleaning: Promise<void> | undefined;
   let closed = false;
 
@@ -80,11 +87,14 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
       sourcePath: request.sourcePath,
       targetPath,
       longestEdge: PREVIEW_EDGE[request.size],
+      format: request.size === 'full' ? 'png' : 'webp',
     });
     if (result === 'ok') {
-      newEntries++;
-      if (newEntries >= cleanupEvery) {
-        newEntries = 0;
+      // Thumbnails and previews share one counter, full renditions have their own.
+      const counter = request.size === 'full' ? 'full' : 'thumb';
+      newEntries[counter]++;
+      if (newEntries[counter] >= (counter === 'full' ? FULL_CLEANUP_EVERY : cleanupEvery)) {
+        newEntries[counter] = 0;
         void cleanup();
       }
       return targetPath;

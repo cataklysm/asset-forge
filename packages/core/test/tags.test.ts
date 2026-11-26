@@ -52,7 +52,7 @@ async function addFile(
     importedAt: T1,
     kind: 'image',
   });
-  if (status === 'complete') await ctx.db.files.markComplete(uuid(n), { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  if (status === 'complete') await ctx.db.files.markComplete(uuid(n), { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await ctx.db.files.markFailed(uuid(n), 'Import failed');
   return uuid(n);
 }
@@ -233,6 +233,7 @@ describe('records', () => {
       storageId: session.storageId,
       files: db.files,
       sources: fake.sources,
+      probe: fake.probe,
       newId: () => crypto.randomUUID(),
       now: () => new Date(),
     };

@@ -56,6 +56,8 @@ describe('FileRecordSchema', () => {
       previewable: true,
       openable: true,
       kind: 'image',
+      width: null,
+      height: null,
       tags: [],
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);

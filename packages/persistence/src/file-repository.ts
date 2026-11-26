@@ -32,6 +32,8 @@ const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRec
   previewable: isPreviewable(row.mimeType),
   openable: isOpenable(row.relativePath),
   kind: FileKindSchema.catch('other').parse(row.kind), // the column has no CHECK; an unknown value reads as 'other'
+  width: row.width,
+  height: row.height,
   tags,
 });
 
@@ -149,12 +151,19 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
       db.transaction((tx) => {
         const row = tx
           .update(file)
-          .set({ sizeBytes: r.sizeBytes, sha256: r.sha256, status: 'complete', error: null })
+          .set({ sizeBytes: r.sizeBytes, sha256: r.sha256, width: r.width, height: r.height, status: 'complete', error: null })
           .where(eq(file.id, id))
           .returning({ assetId: file.assetId })
           .get();
         if (!row) throw new NotFoundError(`File ${id} does not exist`);
         reindexAssets(tx, [row.assetId]);
+      });
+    },
+    async setDimensions(id, size) {
+      return db.transaction((tx) => {
+        const row = tx.update(file).set({ width: size.width, height: size.height }).where(eq(file.id, id)).returning().get();
+        if (!row) throw new NotFoundError(`File ${id} does not exist`);
+        return toRecordWithTags(tx, row);
       });
     },
     async markFailed(id, error) {

@@ -66,7 +66,7 @@ async function addFile(f: {
     kind: 'image',
   });
   const status = f.status ?? 'complete';
-  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await db.files.markFailed(id, 'Import failed');
   if (f.assetId !== null) await placeIn(id, f.assetId, f.role ?? 'reference');
   return id;

@@ -1,3 +1,4 @@
+import { ORIGINAL_MIME_TYPES, viewSource } from '@assetforge/contracts';
 import { isOpenable, isPreviewable } from './media-types.js';
 import { NotFoundError, StorageUnreachableError, ValidationFailedError } from './errors.js';
 import type { WorkspaceSession } from './session.js';
@@ -16,6 +17,28 @@ export async function resolvePreviewSource(
   if (file === null || file.status !== 'complete' || file.sha256 === null) return null;
   if (!isPreviewable(file.mimeType)) return null;
   return { sha256: file.sha256, absolutePath: await s.storage.absolutePath(file.relativePath) };
+}
+
+export interface OriginalSource {
+  absolutePath: string;
+  mimeType: (typeof ORIGINAL_MIME_TYPES)[number];
+}
+
+/**
+ * null unless the file exists, is complete, has a checksum and viewSource(mimeType, width, height)
+ * is 'original' (one of the five native types, dimensions known, longest edge within the limit).
+ * Storage errors propagate.
+ */
+export async function resolveOriginalSource(
+  s: WorkspaceSession,
+  fileId: string,
+): Promise<OriginalSource | null> {
+  const file = await s.database.files.get(fileId);
+  if (file === null || file.status !== 'complete' || file.sha256 === null) return null;
+  if (viewSource(file.mimeType, file.width, file.height) !== 'original') return null;
+  const mimeType = ORIGINAL_MIME_TYPES.find((type) => type === file.mimeType);
+  if (mimeType === undefined) return null;
+  return { absolutePath: await s.storage.absolutePath(file.relativePath), mimeType };
 }
 
 /** Absolute path for the shell. 'open' additionally requires isOpenable. */

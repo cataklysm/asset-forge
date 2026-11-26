@@ -1,6 +1,6 @@
 import { MoreHorizontal } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { BORDER, ICON_BUTTON } from '../ui';
+import { BORDER, BUTTON, ICON_BUTTON } from '../ui';
 
 export interface MenuItem {
   label: string;
@@ -19,13 +19,15 @@ interface Props {
   align?: 'start' | 'end';
   /** Whether the popup opens below or above the trigger. */
   side?: 'bottom' | 'top';
+  /** `labelled` shows the label as text next to the icon; `icon` (the default) shows the icon only. */
+  trigger?: 'icon' | 'labelled';
 }
 
 /**
  * A menu button. Opening focuses the menu itself; ↑/↓ (wrapping), Home and End move between the
  * enabled items, Enter or Space selects, Esc or Tab closes. Focus returns to the trigger.
  */
-export function Menu({ label, items, icon, tabIndex, align = 'end', side = 'bottom' }: Props) {
+export function Menu({ label, items, icon, tabIndex, align = 'end', side = 'bottom', trigger = 'icon' }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -119,8 +121,8 @@ export function Menu({ label, items, icon, tabIndex, align = 'end', side = 'bott
       <button
         ref={triggerRef}
         type="button"
-        className={ICON_BUTTON}
-        aria-label={label}
+        className={trigger === 'labelled' ? BUTTON : ICON_BUTTON}
+        aria-label={trigger === 'labelled' ? undefined : label}
         title={label}
         tabIndex={tabIndex}
         aria-haspopup="menu"
@@ -129,6 +131,7 @@ export function Menu({ label, items, icon, tabIndex, align = 'end', side = 'bott
         onClick={() => setOpen((current) => !current)}
       >
         {icon ?? <MoreHorizontal size={16} aria-hidden />}
+        {trigger === 'labelled' && label}
       </button>
       {open && (
         <div

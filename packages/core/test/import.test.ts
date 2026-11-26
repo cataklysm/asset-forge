@@ -30,6 +30,7 @@ async function setup() {
     storageId: STORAGE_ID,
     files: db.files,
     sources: fake.sources,
+    probe: fake.probe,
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
@@ -361,5 +362,48 @@ describe('refused imports', () => {
       expect(result).toEqual({ sourcePath: p, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     }
     expect(sources.opened).toEqual([]);
+  });
+});
+
+describe('importFile measuring', () => {
+  it('stores the size measured at the final inbox path', async () => {
+    const { ctx, sources, storage, probe } = await setup();
+    sources.set('/src/a.png', Buffer.from('hello'));
+    const result = await importFile(ctx, '/src/a.png');
+    const file = result.file!;
+    expect(probe.calls).toEqual([`/memory/${file.relativePath}`]);
+    expect(storage.files.has(file.relativePath)).toBe(true);
+    expect([file.width, file.height]).toEqual([640, 480]);
+    expect(await ctx.files.get(file.id)).toMatchObject({ width: 640, height: 480 });
+  });
+
+  it('does not measure a file that is not previewable', async () => {
+    const { ctx, sources, probe } = await setup();
+    sources.set('/src/notes.txt', Buffer.from('hello'));
+    const file = (await importFile(ctx, '/src/notes.txt')).file!;
+    expect(probe.calls).toEqual([]);
+    expect([file.width, file.height]).toEqual([null, null]);
+  });
+
+  it.each([
+    ['resolves null', (p: { result: unknown }) => (p.result = null)],
+    ['rejects', (p: { failure: Error | null }) => (p.failure = new Error('/secret/path broke'))],
+  ])('stays complete without dimensions when the probe %s', async (_name, configure) => {
+    const { ctx, sources, probe } = await setup();
+    configure(probe as never);
+    sources.set('/src/a.png', Buffer.from('hello'));
+    const result = await importFile(ctx, '/src/a.png');
+    expect(result.error).toBeNull();
+    expect(result.file).toMatchObject({ status: 'complete', error: null, width: null, height: null });
+    expect(await ctx.files.get(result.file!.id)).toMatchObject({ status: 'complete', width: null, height: null });
+  });
+
+  it('never measures a failed import', async () => {
+    const { ctx, sources, storage, probe } = await setup();
+    sources.set('/src/a.png', Buffer.from('hello'));
+    storage.hashOverride = 'f'.repeat(64);
+    const result = await importFile(ctx, '/src/a.png');
+    expect(result.file?.status).toBe('failed');
+    expect(probe.calls).toEqual([]);
   });
 });

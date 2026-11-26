@@ -226,6 +226,11 @@ export const ipcContract = {
     request: z.object({ fileIds: FileIdsSchema, name: z.string().max(200) }),
     response: FileRecordsSchema,
   },
+  /** Measures a complete image without stored dimensions; returns the (possibly unchanged) record. */
+  'files:measure': {
+    request: z.object({ fileId: IdSchema }),
+    response: FileRecordSchema,
+  },
   'files:openExternal': {
     request: z.object({ fileId: IdSchema }),
     response: z.null(),

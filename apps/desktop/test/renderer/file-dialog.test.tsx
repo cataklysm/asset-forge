@@ -1,11 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
+import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import type { FileActionContext } from '../../src/renderer/src/file-actions';
-import { installFakeApi, type FakeHandlers } from './fake-api';
+import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, tagOf } from './fixtures';
 
 const ASSET = { id: nextId(), name: 'Oak tree', tags: [tagOf('Nature')] };
@@ -15,7 +17,9 @@ function Harness(props: {
   file: FileRecord;
   asset?: typeof ASSET | null;
   onOpenAsset?(id: string): void;
+  onMeasured?(fileId: string, size: { width: number; height: number }): void;
   actions?: FileActionContext;
+  list?: ViewerList | null;
 }) {
   const [file, setFile] = useState(props.file);
   const [open, setOpen] = useState(false);
@@ -31,7 +35,12 @@ function Harness(props: {
           actions={props.actions ?? ACTIONS}
           roleControl={<span>role control</span>}
           onFileChange={setFile}
+          onMeasured={(id, size) => {
+            props.onMeasured?.(id, size);
+            setFile((current) => (current.id === id ? { ...current, ...size } : current));
+          }}
           onOpenAsset={props.onOpenAsset}
+          list={props.list ?? null}
           onClose={() => setOpen(false)}
         />
       )}
@@ -132,7 +141,104 @@ it('without a handler the asset name is plain text, not a link', async () => {
   render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} />);
   await openDialog();
   expect(screen.queryByRole('link', { name: 'Oak tree' })).toBeNull();
-  expect(screen.getByText('Oak tree')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Asset' }).nextElementSibling?.textContent).toBe('Oak tree');
+});
+
+const headings = (level: number) => screen.getAllByRole('heading', { level }).map((h) => h.textContent);
+
+it('the header shows the file name and the asset name; the dialog keeps its combined name', async () => {
+  install();
+  const file = fileRecord({ assetId: ASSET.id, role: 'reference', originalName: 'a-very-long-file-name.png' });
+  const { unmount } = render(<Harness file={file} />);
+  await openDialog();
+  const title = 'a-very-long-file-name.png | Oak tree';
+  expect(screen.getByRole('dialog', { name: title })).toBeTruthy();
+  const heading = screen.getByRole('heading', { level: 2 });
+  expect(heading.getAttribute('title')).toBe(title);
+  expect(heading.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'flex-1']));
+  const parts = [...heading.children].filter((child) => child.textContent !== '');
+  expect(parts.map((part) => part.textContent)).toEqual(['a-very-long-file-name.png', 'Oak tree']);
+  for (const part of parts) expect(part.className.split(/\s+/)).toContain('truncate');
+  expect(heading.parentElement!.contains(screen.getByRole('button', { name: 'Close' }))).toBe(true);
+  unmount();
+
+  render(<Harness file={file} asset={null} />);
+  await openDialog();
+  expect(screen.getByRole('dialog', { name: 'a-very-long-file-name.png' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('a-very-long-file-name.png');
+});
+
+it('the details column shows its sections in order with one heading style', async () => {
+  install();
+  const { unmount } = render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} onOpenAsset={() => {}} />);
+  await openDialog();
+  expect(headings(3)).toEqual(['Image details', 'Role', 'Image tags', 'Asset', 'Asset tags']);
+  const styles = new Set(screen.getAllByRole('heading', { level: 3 }).map((h) => h.className));
+  expect(styles.size).toBe(1);
+  expect(screen.getByText('role control')).toBeTruthy();
+  const more = screen.getByRole('button', { name: 'More' });
+  expect(more.textContent).toBe('More');
+  expect(more.querySelector('svg')).not.toBeNull();
+  unmount();
+
+  // An asset without tags has no "Asset tags" heading; the inbox shows "Assign" and no asset part.
+  render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} asset={{ ...ASSET, tags: [] }} />);
+  await openDialog();
+  expect(headings(3)).toEqual(['Image details', 'Role', 'Image tags', 'Asset']);
+});
+
+it('the inbox shows Assign, and a non-image file is described as a file', async () => {
+  install();
+  const { unmount } = render(<Harness file={fileRecord()} asset={null} />);
+  await openDialog();
+  expect(headings(3)).toEqual(['Image details', 'Assign', 'Image tags']);
+  unmount();
+
+  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, kind: 'document' });
+  render(<Harness file={text} asset={null} />);
+  await openDialog();
+  expect(headings(3)).toEqual(['File details', 'Assign', 'File tags']);
+  expect(screen.getByRole('group', { name: 'File tags' })).toBeTruthy();
+});
+
+it('image tags sit below their heading, marked by the image icon, with the add input after the chips', async () => {
+  install();
+  const file = fileRecord({ assetId: ASSET.id, role: 'reference', tags: [tagOf('Bark', 'manual')] });
+  render(<Harness file={file} />);
+  await openDialog();
+  const group = screen.getByRole('group', { name: 'Image tags' });
+  const heading = screen.getByRole('heading', { name: 'Image tags' });
+  expect(group.contains(heading)).toBe(false);
+  expect(heading.parentElement!.querySelector('svg')).not.toBeNull();
+  const input = within(group).getByRole('combobox', { name: 'Add image tag' });
+  const chip = within(group).getByRole('button', { name: 'Remove Bark' });
+  expect(chip.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(input.className.split(/\s+/)).not.toContain('w-40');
+});
+
+it('on-stage arrows step through the list like the header buttons', async () => {
+  install();
+  const files = fileList(3);
+  const list = listOf(files, 0);
+  const { unmount } = render(<Harness file={files[0]!} asset={null} list={list} />);
+  const user = await openDialog();
+  const previous = screen.getByRole('button', { name: 'Previous file' });
+  const next = screen.getByRole('button', { name: 'Next file' });
+  expect(previous.title).toBe('Previous file (←)');
+  expect(next.title).toBe('Next file (→)');
+  expect((previous as HTMLButtonElement).disabled).toBe(true);
+  await user.click(next);
+  expect(list.show).toHaveBeenCalledWith(1);
+  // Overlays beside the scrolling stage, not inside it.
+  expect(screen.getByRole('region', { name: 'Image' }).contains(next)).toBe(false);
+  unmount();
+
+  const last = listOf(files, 2);
+  render(<Harness file={files[2]!} asset={null} list={last} />);
+  await openDialog();
+  expect((screen.getByRole('button', { name: 'Next file' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Previous file' }));
+  expect(last.show).toHaveBeenCalledWith(1);
 });
 
 it('cover and detach menu items carry their tooltips', async () => {
@@ -179,4 +285,343 @@ it('the More menu opens upwards from the left edge so it stays inside the panel'
   const classes = screen.getByRole('menu', { name: 'More' }).className.split(/\s+/);
   expect(classes).toEqual(expect.arrayContaining(['left-0', 'bottom-full']));
   expect(classes).not.toContain('right-0');
+});
+
+function detailValue(name: string): string | null | undefined {
+  const details = screen.getByRole('region', { name: 'Details' });
+  return within(details).getByText(name).nextElementSibling?.textContent;
+}
+
+const measureCalls = (api: ReturnType<typeof install>) => api.calls.filter((c) => c.channel === 'files:measure');
+
+it('Dimensions follow Format and show the stored size, or a dash while unknown', async () => {
+  install();
+  const { unmount } = render(<Harness file={fileRecord({ width: 1600, height: 2000 })} asset={null} />);
+  await openDialog();
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map((dt) => dt.textContent);
+  expect(labels).toEqual(['Filename', 'Format', 'Dimensions', 'Size', 'Imported']);
+  expect(detailValue('Format')).toBe('PNG');
+  const format = within(screen.getByRole('region', { name: 'Details' })).getByText('Format').nextElementSibling!;
+  expect(format.getAttribute('title')).toBe('image/png');
+  unmount();
+
+  install({ 'files:measure': () => deferred<FileRecord>().promise });
+  render(<Harness file={fileRecord()} asset={null} />);
+  await openDialog();
+  expect(detailValue('Dimensions')).toBe('–');
+});
+
+it('a previewable file without dimensions is measured once and handed to onMeasured', async () => {
+  const file = fileRecord();
+  const measured = { ...file, width: 1600, height: 2000 };
+  const api = install({ 'files:measure': () => measured });
+  const onMeasured = vi.fn();
+  render(<Harness file={file} asset={null} onMeasured={onMeasured} />);
+  await openDialog();
+  await waitFor(() => expect(onMeasured).toHaveBeenCalledWith(file.id, { width: 1600, height: 2000 }));
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: file.id }]);
+  expect(onMeasured).toHaveBeenCalledTimes(1);
+});
+
+it('a rejected measurement shows nothing and is not repeated', async () => {
+  const file = fileRecord();
+  const api = install({
+    'files:measure': () => {
+      throw fakeError('internal_error');
+    },
+    'files:addTag': () => ({ ...file, tags: [tagOf('Bark', 'manual')] }),
+  });
+  const onMeasured = vi.fn();
+  render(<Harness file={file} asset={null} onMeasured={onMeasured} />);
+  const user = await openDialog();
+  await waitFor(() => expect(measureCalls(api)).toHaveLength(1));
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), 'Bark{Enter}');
+  await screen.findByRole('button', { name: 'Remove Bark' });
+  expect(measureCalls(api)).toHaveLength(1);
+  expect(onMeasured).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(detailValue('Dimensions')).toBe('–');
+});
+
+it('files with dimensions and non-image files are not measured; a non-image keeps the placeholder', async () => {
+  const api = install();
+  const { unmount } = render(<Harness file={fileRecord({ width: 1600, height: 2000 })} asset={null} />);
+  await openDialog();
+  expect(screen.getByRole('toolbar', { name: 'Viewer' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Image' })).toBeTruthy();
+  unmount();
+
+  render(
+    <Harness
+      file={fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' })}
+      asset={null}
+    />,
+  );
+  await openDialog();
+  // Once as the format in the details, once in the placeholder.
+  expect(detailValue('Format')).toBe('TXT');
+  expect(screen.getAllByText('TXT')).toHaveLength(2);
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
+  expect(measureCalls(api)).toHaveLength(0);
+});
+
+function listOf(files: FileRecord[], index: number): ViewerList {
+  return {
+    total: files.length,
+    index,
+    slot: (i) => (files[i] === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item: files[i] }),
+    show: vi.fn(),
+    want: vi.fn(),
+  };
+}
+
+const fileList = (count: number) => Array.from({ length: count }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+
+it('the header counts the position in the list and Next shows the following file', async () => {
+  install();
+  const files = fileList(14);
+  const list = listOf(files, 1);
+  render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  expect(screen.getByText('2 / 14')).toBeTruthy();
+  const previous = screen.getByRole('button', { name: 'Previous file (←)' });
+  const next = screen.getByRole('button', { name: 'Next file (→)' });
+  expect(previous.title).toBe('Previous file (←)');
+  expect(next.title).toBe('Next file (→)');
+  await user.click(next);
+  expect(list.show).toHaveBeenCalledWith(2);
+  await user.click(previous);
+  expect(list.show).toHaveBeenCalledWith(0);
+});
+
+it('Previous is disabled on the first file and Next on the last', async () => {
+  install();
+  const files = fileList(3);
+  const { unmount } = render(<Harness file={files[0]!} asset={null} list={listOf(files, 0)} />);
+  await openDialog();
+  expect(screen.getByText('1 / 3')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Previous file (←)' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Next file (→)' }) as HTMLButtonElement).disabled).toBe(false);
+  unmount();
+
+  render(<Harness file={files[2]!} asset={null} list={listOf(files, 2)} />);
+  await openDialog();
+  expect(screen.getByText('3 / 3')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Previous file (←)' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Next file (→)' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('a text file in the list is shown with its placeholder', async () => {
+  install();
+  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' });
+  const files = [fileRecord({ originalName: 'File 0.png' }), text];
+  render(<Harness file={text} asset={null} list={listOf(files, 1)} />);
+  await openDialog();
+  expect(screen.getByText('2 / 2')).toBeTruthy();
+  // Once in the details, once in the placeholder, once in the film strip.
+  expect(screen.getAllByText('TXT')).toHaveLength(3);
+  expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
+});
+
+it('without a list there is no counter and no arrows', async () => {
+  install();
+  render(<Harness file={fileRecord()} asset={null} />);
+  await openDialog();
+  expect(screen.queryByText(/^\d+ \/ \d+$/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Previous file (←)' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next file (→)' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Previous file' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next file' })).toBeNull();
+});
+
+it('the viewer keys act on the dialog and do nothing for a file without a stage', async () => {
+  install();
+  const files = fileList(3);
+  const list = listOf(files, 1);
+  const { unmount } = render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  await user.keyboard('{ArrowRight}');
+  expect(list.show).toHaveBeenCalledWith(2);
+  await user.keyboard('{ArrowLeft}');
+  expect(list.show).toHaveBeenCalledWith(0);
+  unmount();
+
+  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, kind: 'document' });
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={text} asset={null} />);
+    const second = await openDialog();
+    await second.keyboard('f+r');
+    expect(fs.requestFullscreen).not.toHaveBeenCalled();
+  } finally {
+    fs.restore();
+  }
+});
+
+function stubFullscreen() {
+  let current: Element | null = null;
+  const requestFullscreen = vi.fn(function (this: HTMLElement) {
+    current = this;
+    return Promise.resolve();
+  });
+  const exitFullscreen = vi.fn(() => {
+    current = null;
+    return Promise.resolve();
+  });
+  HTMLElement.prototype.requestFullscreen = requestFullscreen;
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => current });
+  document.exitFullscreen = exitFullscreen;
+  return {
+    requestFullscreen,
+    exitFullscreen,
+    changed: () => document.dispatchEvent(new Event('fullscreenchange')),
+    restore: () => {
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
+    },
+  };
+}
+
+it('the fullscreen button requests fullscreen on the wrapper and follows fullscreenchange', async () => {
+  install();
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    const button = await screen.findByRole('button', { name: 'Fullscreen' });
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    await user.click(button);
+    expect(fs.requestFullscreen).toHaveBeenCalledTimes(1);
+    const wrapper = fs.requestFullscreen.mock.contexts[0] as HTMLElement;
+    expect(wrapper.contains(screen.getByRole('toolbar'))).toBe(true);
+    fs.changed();
+    await waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('true'));
+  } finally {
+    fs.restore();
+  }
+});
+
+it('Esc leaves fullscreen first and closes the dialog the second time', async () => {
+  install();
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    await user.click(await screen.findByRole('button', { name: 'Fullscreen' }));
+    fs.changed();
+    await user.keyboard('{Escape}');
+    expect(fs.exitFullscreen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+    fs.changed();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close' })).toBeNull());
+    expect(fs.exitFullscreen).toHaveBeenCalledTimes(1);
+  } finally {
+    fs.restore();
+  }
+});
+
+it('a rejected requestFullscreen leaves the button unpressed', async () => {
+  install();
+  const fs = stubFullscreen();
+  fs.requestFullscreen.mockImplementation(() => Promise.reject(new Error('denied')));
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    const button = await screen.findByRole('button', { name: 'Fullscreen' });
+    await user.click(button);
+    expect(fs.requestFullscreen).toHaveBeenCalled();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+  } finally {
+    fs.restore();
+  }
+});
+
+it('typing ArrowRight in the image tag input or in the open More menu does not step on', async () => {
+  install();
+  const files = fileList(3);
+  const list = listOf(files, 1);
+  render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), '{ArrowRight}');
+  expect(list.show).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  expect(screen.getByRole('menu', { name: 'More' })).toBeTruthy();
+  await user.keyboard('{ArrowRight}');
+  expect(list.show).not.toHaveBeenCalled();
+});
+
+/** A host as the file browsers wire it: the list delivers its own records, measured or not. */
+function Browsing({ files }: { files: FileRecord[] }) {
+  const container = useRef<HTMLDivElement>(null);
+  const detail = useFileDialog(container);
+  const [index, setIndex] = useState(0);
+  const list: ViewerList = {
+    total: files.length,
+    index,
+    slot: (i) => (files[i] === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item: files[i] }),
+    show: (i) => {
+      const next = files[i];
+      if (next === undefined) return;
+      setIndex(i);
+      detail.show(next);
+    },
+    want: () => {},
+  };
+  return (
+    <div ref={container}>
+      <button type="button" onClick={() => detail.open(files[0]!)}>
+        Opener
+      </button>
+      {detail.file !== null && (
+        <FileDetailDialog
+          file={detail.file}
+          asset={null}
+          actions={ACTIONS}
+          roleControl={<span>role control</span>}
+          onFileChange={detail.update}
+          onMeasured={detail.setDimensions}
+          list={list}
+          onClose={detail.close}
+        />
+      )}
+    </div>
+  );
+}
+
+it('a measured file keeps its dimensions when the viewer steps away and back', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  const b = fileRecord({ originalName: 'b.png', width: 800, height: 600 });
+  const api = install({ 'files:measure': (r) => ({ ...a, id: r.fileId, width: 1600, height: 2000 }) });
+  render(<Browsing files={[a, b]} />);
+  const user = await openDialog();
+  await waitFor(() => expect(detailValue('Dimensions')).toBe('1600 × 2000 px'));
+  await user.click(screen.getByRole('button', { name: 'Next file (→)' }));
+  expect(detailValue('Dimensions')).toBe('800 × 600 px');
+  await user.click(screen.getByRole('button', { name: 'Previous file (←)' }));
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  expect(screen.queryByRole('img', { name: 'Preview only' })).toBeNull();
+  expect((screen.getByRole('button', { name: '100%' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: a.id }]);
+});
+
+it('a change made while the measurement is in flight is kept and gains the dimensions', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  const measure = deferred<FileRecord>();
+  install({
+    'files:measure': () => measure.promise,
+    'files:addTag': () => ({ ...a, tags: [tagOf('Bark', 'manual')] }),
+  });
+  render(<Browsing files={[a]} />);
+  const user = await openDialog();
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), 'Bark{Enter}');
+  await screen.findByRole('button', { name: 'Remove Bark' });
+  measure.resolve({ ...a, width: 1600, height: 2000 });
+  await waitFor(() => expect(detailValue('Dimensions')).toBe('1600 × 2000 px'));
+  expect(screen.getByRole('button', { name: 'Remove Bark' })).toBeTruthy();
 });

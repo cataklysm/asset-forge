@@ -107,10 +107,8 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     reload();
   }
 
-  /** Files that left the inbox: out of the selection (and the dialog), and the list reloads. */
+  /** Files that left the inbox: out of the selection, and the list reloads (the dialog moves on). */
   function moved(ids: readonly string[]) {
-    const openId = detail.openId();
-    if (openId !== null && ids.includes(openId)) detail.close();
     setSelection((current) => dropSelected(current, ids));
     reload();
   }
@@ -184,19 +182,25 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           menuItems={(file) => fileMenuItems(file, { cover: null, onDetails: () => detail.open(file), onError: setError })}
           emptyText="Inbox is empty"
           emptyAction={importButton}
+          viewer={{
+            fileId: shown?.id ?? null,
+            onView: (file) => (file === null ? detail.close() : detail.show(file)),
+            render: (list) =>
+              shown !== null && (
+                <FileDetailDialog
+                  file={shown}
+                  asset={null}
+                  actions={{ cover: null, onDetails: () => {}, onError: setError }}
+                  roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}
+                  onFileChange={fileChanged}
+                  onMeasured={detail.setDimensions}
+                  list={list}
+                  onClose={detail.close}
+                />
+              ),
+          }}
         />
       </div>
-
-      {shown !== null && (
-        <FileDetailDialog
-          file={shown}
-          asset={null}
-          actions={{ cover: null, onDetails: () => {}, onError: setError }}
-          roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} />}
-          onFileChange={fileChanged}
-          onClose={detail.close}
-        />
-      )}
     </Page>
   );
 }

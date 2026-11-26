@@ -70,7 +70,9 @@ export interface FileRepository {
     importedAt: string;
     kind: FileKind;
   }): Promise<void>;
-  markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void>; // rejects with NotFoundError for an unknown id
+  markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void>; // rejects with NotFoundError for an unknown id
+  /** Stores the pixel size; rejects with NotFoundError for an unknown id. */
+  setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord>;
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;
@@ -337,9 +339,15 @@ export interface WorkspaceRegistry {
   remove(id: string): Promise<void>; // no-op if unknown
 }
 
+/** Reads the pixel size of an image file; null when it cannot be determined. Implemented outside core. */
+export interface ImageProbe {
+  measure(absolutePath: string): Promise<{ width: number; height: number } | null>;
+}
+
 export interface WorkspaceHost {
   registry: WorkspaceRegistry;
   sources: SourceFiles;
+  imageProbe: ImageProbe;
   createStorage(rootPath: string): Storage;
   openDatabase(workspaceId: string): Promise<WorkspaceDatabase>; // creates the file and applies migrations
   deleteDatabase(workspaceId: string): Promise<void>; // removes the local database; no-op if missing

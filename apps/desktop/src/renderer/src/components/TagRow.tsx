@@ -2,13 +2,18 @@ import { cleanTagText, normalizeTagName, type TagAssignment } from '@assetforge/
 import { Image as ImageIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { describeError } from '../api';
-import { ALERT, LABEL } from '../ui';
+import { ALERT, LABEL, PANEL_TITLE } from '../ui';
 import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
 
 interface Props {
-  label: 'Asset tags' | 'Image tags' | 'Shared image tags';
+  label: 'Asset tags' | 'Image tags' | 'File tags' | 'Shared image tags';
   kind: 'asset' | 'file';
+  /**
+   * `inline` (the default): label, chips and a boxed input in one wrapping row. `stacked`: the label
+   * as a panel heading, the chips below it and the input as an action after them.
+   */
+  layout?: 'inline' | 'stacked';
   tags: readonly TagAssignment[];
   onAdd(displayName: string): Promise<void>;
   onRemove(name: string): Promise<void>;
@@ -27,7 +32,7 @@ function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
  * Editable tags of one owner: chips with remove and an input with suggestions. Backspace in the
  * empty input focuses the last chip; Delete or Backspace on a chip removes it and keeps focus in the row.
  */
-export function TagRow({ label, kind, tags, onAdd, onRemove, disabled = false, inputRef }: Props) {
+export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, disabled = false, inputRef }: Props) {
   const labelId = useId();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -93,13 +98,27 @@ export function TagRow({ label, kind, tags, onAdd, onRemove, disabled = false, i
     last.focus();
   }
 
+  const stacked = layout === 'stacked';
+  const icon = kind === 'file' && <ImageIcon size={16} aria-hidden className="shrink-0 text-muted" />;
   return (
-    <div>
+    <div className={stacked ? 'space-y-2' : undefined}>
+      {stacked && (
+        <div className="flex items-center gap-2">
+          <h3 id={labelId} className={PANEL_TITLE}>
+            {label}
+          </h3>
+          {icon}
+        </div>
+      )}
       <div ref={rowRef} role="group" aria-labelledby={labelId} className="flex flex-wrap items-center gap-1.5">
-        <span id={labelId} className={`${LABEL} mr-1`}>
-          {label}
-        </span>
-        {kind === 'file' && <ImageIcon size={16} aria-hidden className="shrink-0 text-muted" />}
+        {!stacked && (
+          <>
+            <span id={labelId} className={`${LABEL} mr-1`}>
+              {label}
+            </span>
+            {icon}
+          </>
+        )}
         {tags.map((tag, index) => (
           <span
             key={tag.name}
@@ -126,6 +145,7 @@ export function TagRow({ label, kind, tags, onAdd, onRemove, disabled = false, i
           inputRef={setInput}
           onKeyDown={onInputKeyDown}
           disabled={disabled}
+          look={stacked ? 'inline' : 'box'}
         />
       </div>
       {error !== null && (

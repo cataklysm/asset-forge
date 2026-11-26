@@ -52,14 +52,21 @@ it('Esc closes the dialog and focus returns to the trigger', async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
-it('the detail dialog has the fixed detail geometry', async () => {
+it('the detail dialog follows the window size with an even margin; the form dialog keeps its size', async () => {
   const user = userEvent.setup();
-  render(<DialogHarness onClose={() => {}} size="detail" />);
+  const { unmount } = render(<DialogHarness onClose={() => {}} size="detail" />);
   await user.click(screen.getByRole('button', { name: 'New asset' }));
-  const className = document.querySelector('dialog')!.className;
-  expect(className).toContain('w-[min(92vw,1100px)]');
-  expect(className).toContain('h-[min(88vh,760px)]');
-  expect(className).toContain('rounded-dialog');
+  let classes = document.querySelector('dialog')!.className.split(/\s+/);
+  expect(classes).toEqual(
+    expect.arrayContaining(['w-[calc(100vw-3rem)]', 'h-[calc(100vh-3rem)]', 'max-w-none', 'max-h-none', 'rounded-dialog']),
+  );
+  expect(classes.some((c) => /\d+px/.test(c))).toBe(false);
+  unmount();
+
+  render(<DialogHarness onClose={() => {}} />);
+  await user.click(screen.getByRole('button', { name: 'New asset' }));
+  classes = document.querySelector('dialog')!.className.split(/\s+/);
+  expect(classes).toContain('w-[min(92vw,32rem)]');
 });
 
 function menuItems(): { items: MenuItem[]; details: () => void; detach: () => void } {
@@ -261,24 +268,27 @@ it('a menu opens below and right-aligned by default, and honours start alignment
   expect(classes).not.toContain('top-full');
 });
 
-it('the dialog title stays on one line, carries the full text, and clears the Close button in the detail size', () => {
-  const title = 'a-very-long-file-name.png | A very long asset name';
-  const { unmount } = render(
-    <Dialog open title={title} onClose={() => {}} size="detail">
-      <p>Body</p>
-    </Dialog>,
-  );
-  const heading = screen.getByRole('heading', { name: title });
-  expect(heading.getAttribute('title')).toBe(title);
-  expect(heading.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'pr-10']));
-  unmount();
-
+it('the form dialog title stays on one line and carries the full text', () => {
   render(
     <Dialog open title="New asset" onClose={() => {}}>
       <p>Body</p>
     </Dialog>,
   );
   const form = screen.getByRole('heading', { name: 'New asset' });
+  expect(form.getAttribute('title')).toBe('New asset');
   expect(form.className.split(/\s+/)).toContain('truncate');
-  expect(form.className.split(/\s+/)).not.toContain('pr-10');
+});
+
+it('the detail dialog is named by its title and leaves header and body to its content, unpadded', () => {
+  const title = 'a-very-long-file-name.png | A very long asset name';
+  render(
+    <Dialog open title={title} onClose={() => {}} size="detail">
+      <p>Body</p>
+    </Dialog>,
+  );
+  expect(screen.getByRole('dialog', { name: title })).toBeTruthy();
+  expect(screen.queryByRole('heading')).toBeNull();
+  const body = screen.getByText('Body').parentElement!;
+  expect(body.className.split(/\s+/)).toContain('h-full');
+  expect(body.className.split(/\s+/).some((c) => /^p[xy]?-/.test(c))).toBe(false);
 });
