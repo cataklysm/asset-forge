@@ -58,6 +58,7 @@ import {
   ProposalViewSchema,
 } from './analysis';
 import { ListModelsResultSchema, SetVisionSettingsSchema, VisionSettingsViewSchema } from './settings';
+import { AnalysisPromptListSchema, AnalysisPromptSchema, SaveAnalysisPromptSchema } from './analysis-prompts';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -347,6 +348,26 @@ export const ipcContract = {
   'settings:listVisionModels': {
     request: z.object({ refresh: z.boolean().optional() }),
     response: ListModelsResultSchema,
+  },
+  /** App-level analysis prompts need no open workspace. The file order is kept; a purpose never has none. */
+  'analysisPrompts:list': {
+    request: EmptyRequestSchema,
+    response: AnalysisPromptListSchema,
+  },
+  /** Without `id` the prompt is appended; with `id` it is replaced in place. The purpose cannot change. */
+  'analysisPrompts:save': {
+    request: SaveAnalysisPromptSchema,
+    response: AnalysisPromptSchema,
+  },
+  /** Refused for the last prompt of a purpose; the prompt used last reads as null afterwards. */
+  'analysisPrompts:delete': {
+    request: IdRequestSchema,
+    response: z.object({}),
+  },
+  /** Text (and tag limit) back to the built-in content of its purpose; the name stays. */
+  'analysisPrompts:reset': {
+    request: IdRequestSchema,
+    response: AnalysisPromptSchema,
   },
   /** What `analysis:enqueue` of this target with this model would do, as counts. */
   'analysis:preview': {

@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceManager, type ImageProbe, type ModelImageSource, type WorkspaceHost } from '@assetforge/core';
-import { WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
+import { WorkspaceSummarySchema, type AnalysisPromptPurpose, type ResourceClass } from '@assetforge/contracts';
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { LocalFileSystemStorage, NodeSourceFiles } from '@assetforge/storage';
+import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
+import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
 import type { AppServices } from './ipc.js';
 import { createJobHost, type JobHost } from './job-host.js';
@@ -73,6 +75,13 @@ export function createWorkspaceManager(opts: CompositionOptions): WorkspaceManag
   return new WorkspaceManager(createWorkspaceHost(opts));
 }
 
+// Replaced by builtInAnalysisPrompt in Task 4.
+function builtInAnalysisPromptStandIn(purpose: AnalysisPromptPurpose): { text: string; maxTags: number | null } {
+  return purpose === 'tagging'
+    ? { text: 'Describe this image with short English lower-case tags.', maxTags: 15 }
+    : { text: 'Describe this image as a prompt for an image generator.', maxTags: null };
+}
+
 export interface AnalysisServices extends AppServices {
   store: VisionSettingsStore;
   gateway: VisionGateway;
@@ -126,6 +135,12 @@ export function createAnalysisServices(o: {
   // New settings may fix what paused the queue.
   store.onChange(() => host.resume());
   const describe = createDescribeController({ manager: o.manager, vision: () => gateway.current(), images: o.images });
+  const prompts = createAnalysisPromptStore({
+    userData: o.userDataPath,
+    newId: randomUUID,
+    builtIn: builtInAnalysisPromptStandIn,
+    log: o.log,
+  });
 
   return {
     store,
@@ -133,6 +148,8 @@ export function createAnalysisServices(o: {
     pause,
     jobHost: host,
     settings: createSettingsHandlers(store, gateway),
+    analysisPrompts: createAnalysisPromptHandlers(prompts),
+    prompts,
     describe,
     workspaceOpened: async () => {
       describe.unblock();

@@ -13,7 +13,11 @@ export const idleJobHost: JobHost = {
   resume: () => {},
 };
 
-/** App services without a provider, for tests that do not exercise settings or describe. */
+function notUsed(): never {
+  throw new Error('Not used in this test');
+}
+
+/** App services without a provider, for tests that do not exercise settings, analysis prompts or describe. */
 export const idleServices: AppServices = {
   settings: {
     'settings:getVision': async () => ({
@@ -29,6 +33,20 @@ export const idleServices: AppServices = {
       throw new Error('Not used in this test');
     },
     'settings:listVisionModels': async () => ({ ok: false, code: 'provider_not_configured' }),
+  },
+  analysisPrompts: {
+    'analysisPrompts:list': notUsed,
+    'analysisPrompts:save': notUsed,
+    'analysisPrompts:delete': notUsed,
+    'analysisPrompts:reset': notUsed,
+  },
+  prompts: {
+    list: notUsed,
+    save: notUsed,
+    remove: notUsed,
+    reset: notUsed,
+    resolve: notUsed,
+    markUsed: () => {},
   },
   describe: {
     describe: async () => ({ ok: false, code: 'provider_not_configured' }),

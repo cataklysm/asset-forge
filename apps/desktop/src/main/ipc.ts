@@ -14,6 +14,8 @@ import {
   type WorkspaceManager,
 } from '@assetforge/core';
 import type { z } from 'zod';
+import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
+import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
@@ -53,6 +55,8 @@ export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
 /** App-level services the handlers route to; they do not need an open workspace. */
 export interface AppServices {
   settings: SettingsHandlers;
+  analysisPrompts: AnalysisPromptHandlers;
+  prompts: AnalysisPromptStore;
   describe: DescribeController;
 }
 
@@ -102,8 +106,9 @@ export function createWorkspaceHandlers(
     ...createJobHandlers(manager, jobs, services.describe),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
-    // App-level settings: not behind the workspace guard.
+    // App-level settings and analysis prompts: not behind the workspace guard.
     ...services.settings,
+    ...services.analysisPrompts,
   };
 }
 
