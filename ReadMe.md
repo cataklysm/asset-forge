@@ -37,6 +37,8 @@ The first version is designed for single-user operation. Multi-user operation, c
 | Jobs | Background tasks, queues, progress and error handling |
 | Settings | Storage, resource limits, providers, integrations and backups |
 
+The renderer presents the implemented modules in one shell; section 3.3 describes it.
+
 ## 3. Projects and Assets
 
 ### 3.1 Projects
@@ -85,6 +87,30 @@ Asset types should be configurable. A type defines optional type-specific metada
 An asset has at least an ID, name, type, description, status, and creation and modification timestamps. Optionally it has a cover image, tags, custom metadata, relations to other assets and a workflow.
 
 Relations between assets can be, for example, `uses`, `variant_of`, `part_of` or `derived_from`. A character can thus refer to a separate clothing or material asset.
+
+### 3.3 Application Shell and Screens
+
+The renderer is dark only. Its colours, radii and fonts are design tokens in the `@theme` block of `index.css` (`bg`, `surface`, `raised`, `line`, `text`, `muted`, `accent`, `danger`, ...); no component uses colour literals or light/dark variants, and a test scans the renderer sources for them. The window background equals the `bg` token (no white flash at start) and the window cannot be made smaller than 1024 x 680.
+
+**Shell.** `AppShell` is the frame of an open workspace: a header with the workspace name, its path and the "Workspaces" button; a navigation (Assets, Projects, Inbox); and the page slot. While an import runs, the navigation and the "Workspaces" button are disabled with the tooltip "Import in progress". When the storage is unreachable, a warning banner with a Retry button appears above the page; Retry remounts the page, so it loads from scratch. `Ctrl+F` focuses the search field of the current page. The list state of the screens (filters, scroll offset, opened or selected item, asset tab) lives in `WorkspaceShell` and survives navigation within a workspace; it is dropped with the workspace.
+
+**Detail column.** The Assets, Projects and Inbox screens show a right-hand detail column next to the list. On the gallery it is the "Selection" column of the selected asset (type, status, tags, cover image with its file tags, file count, projects, "Open asset"); on the project list it shows the selected project and, while a tag filter is set, the matching member assets; in the inbox it holds the batch actions for the selected files. The asset screen and the project screen use the full width.
+
+**Tag attribution.** Asset tags and file tags are never shown in one undifferentiated row. File tags are preceded by one image icon per row, and rows are labelled "Asset tags" or "Image tags" wherever both appear. A chip carries its origin (`manual` or `ai`) already; the visual difference for `ai` comes with the analysis phase. Tag filter chips show the normalised tag name.
+
+**Search and filters.** The search field applies its text after 250 ms without typing; clearing it (Esc) applies at once. A newer request supersedes an older one: only the answer to the latest query is shown. The previous results stay visible until the first page of the new result arrives, so typing causes no "Loading..." flash.
+
+**Selection model of file lists** (asset Files tab and inbox). A click selects only the file, Ctrl+click toggles it, Shift+click selects the loaded files from the anchor to the clicked one, Space toggles the focused file, Ctrl+A selects the whole result (missing pages are loaded first), Esc clears. A selection holds at most 1000 files, the limit of the batch channels. Pending and failed files can be selected but are left out of tagging and assigning, and the button texts count only the eligible files.
+
+**Batch channels.** Three channels act on 1 to 1000 distinct file ids:
+
+| Channel | Semantics |
+| --- | --- |
+| `files:assignMany` | Per item. Each file is relocated on its own (a journaled move, no shared transaction) in request order; a failing file does not stop the others. The response lists, per file, the placed record or an error with the usual code and message. The whole batch holds the exclusive workspace queue. |
+| `files:addTagMany` | All or nothing. One transaction: an unknown file fails the call with `not_found`, a file that is not complete with `validation_failed`, and nothing is written. A file that already has the tag is left alone; every affected asset is reindexed once. |
+| `files:removeTagMany` | All or nothing like `files:addTagMany`. Removes the manual tag; AI tags stay, and a file without the tag is left alone. |
+
+After a batch the inbox lists the failures of `files:assignMany` per file; the files that were placed leave the list.
 
 ## 4. Files, References and Versions
 
@@ -494,6 +520,7 @@ Resource consumption is an architectural characteristic and not merely a later o
 - Media is provided to the renderer through a controlled internal protocol or suitable bounded streams. No unrestricted `file://` access.
 - The 3D viewer is initialized only when needed. Geometries, materials and textures that are no longer visible are released; unnecessary render loops are paused.
 - No permanent full workspace scans. Changes are processed in a targeted, debounced way with a periodic or manual consistency check. Network file systems need a fallback for unreliable watchers.
+- Lists keep their previous results on screen while a new query or filter loads, so changing a filter does not flash an empty or "Loading..." state; a superseded request is dropped.
 - Search queries are debounced, paginated and index-backed. The debounce (250 ms, with a newer request superseding an older one) is a renderer rule for the UI phase; the backend pages search results like the list and answers every query from the FTS index through indexed joins, never by scanning all assets. Database transactions stay short; long file or API operations take place outside DB transactions.
 
 ### 15.2 Jobs and Workers

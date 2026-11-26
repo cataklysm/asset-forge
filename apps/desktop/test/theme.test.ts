@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ BrowserWindow: class {}, nativeTheme: { themeSource: 'system' } }));
@@ -18,6 +19,17 @@ import {
   TILE_TITLE,
   WORKSPACE_TITLE,
 } from '../src/renderer/src/ui.js';
+
+const RENDERER_SRC = fileURLToPath(new URL('../src/renderer/src/', import.meta.url));
+
+/** Every .ts, .tsx and .css file under the renderer source, as absolute paths. */
+function renderedSources(dir = RENDERER_SRC): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${dir}${entry.name}`;
+    if (entry.isDirectory()) return renderedSources(`${path}/`);
+    return /\.(tsx?|css)$/.test(entry.name) ? [path] : [];
+  });
+}
 
 const readUi = () => readFileSync(new URL('../src/renderer/src/ui.ts', import.meta.url), 'utf8');
 
@@ -74,5 +86,12 @@ describe('design tokens and window appearance', () => {
     expect(TILE_TITLE).toContain('text-[17px] font-semibold');
     expect(COUNT).toContain('text-[28px] font-normal');
     expect(COUNT).toContain('text-muted');
+  });
+
+  it('no renderer source uses light/dark literals', () => {
+    const files = renderedSources();
+    expect(files.length).toBeGreaterThan(20);
+    // The word boundary keeps utilities such as `translate-y-1/2` from matching `slate-`.
+    for (const file of files) expect(readFileSync(file, 'utf8'), file).not.toMatch(/\bdark:|\bslate-|bg-white|text-black/);
   });
 });

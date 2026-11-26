@@ -26,12 +26,12 @@ export function App() {
 
   if (loadError !== null) {
     return (
-      <p role="alert" className="p-6 text-red-700 dark:text-red-300">
+      <p role="alert" className="p-6 text-danger">
         {loadError}
       </p>
     );
   }
-  if (current === undefined) return <p className="p-6 text-slate-600 dark:text-slate-400">Loading…</p>;
+  if (current === undefined) return <p className="p-6 text-muted">Loading…</p>;
   if (current === null) return <WorkspaceScreen onOpened={setCurrent} />;
   // Keyed by workspace, so no list, scroll or loader state carries over to another workspace.
   return <WorkspaceShell key={current.id} workspace={current} onClosed={() => setCurrent(null)} />;

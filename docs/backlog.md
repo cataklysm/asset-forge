@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -36,6 +36,9 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - Adding and removing a tag are check-then-act in the use cases (safe today because one writer holds the workspace lock).
 - The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
 - The search path without a query still orders by `lower(name)` over all assets.
+- The inbox file list orders through a temporary B-tree (no index matches its sort).
+- `files:assignMany` holds the exclusive workspace queue for the whole batch.
+- Tags stored before the letter-or-digit rule that consist only of symbols cannot be removed through the UI; a symbol-only name in the tag filter is rejected with `validation_failed`.
 - Unused tag rows are never deleted and there is no tag rename or merge.
 - A drive-relative source path without a backslash (`C:a.exe::$DATA`) still passes the refused-import check; no file dialog produces such a path.
 - The 200-character limit of the search query counts UTF-16 code units, not characters.
@@ -51,14 +54,12 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 ## Renderer
 
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
-- Pagers inside detail screens (project members, asset files) still reset on navigation; the file grids of an asset still page by 50 and group per loaded page.
+- The project member table still uses a pager of 50 that resets on navigation.
 - `CommitInput`: Enter followed by blur can save twice before the reload; the draft reset can overwrite typing while a reload is in flight.
-- Load errors are keyed by their message (duplicate React keys); two failed imports of the same source path collide the same way.
-- The import failure list hardcodes its red classes instead of using `ALERT`.
+- The load-error lists of the screens are keyed by their message, so two identical errors share a React key.
 - The type select on the asset form is empty when loading the asset types fails.
 - The "Importing…" label is shown while the file picker is still open.
 - `formatBytes(1048575)` yields `1024.0 KiB`; no guard for NaN or negative values.
-- Asset detail groups files by role per loaded page; with more than one page a role shows up incompletely on several pages.
 - A file whose placement failed counts as failed on the asset screen although it was imported into the inbox (the inbox screen counts it as imported).
 - No settings for the cache size and location; the preview worker timeout (30 s) is a constant.
 - The preview failure memory is per session and is not invalidated when a file changes.
@@ -69,9 +70,13 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - `CoverImage` keeps a failed id per instance, so non-virtualised tiles stay on the format tile after the storage returns until the user navigates away and back.
 - A paged loader re-activated after an inactive settle would keep stale loading entries.
 - Focus is lost when a focused placeholder becomes a Retry button.
-- "Loading…" flashes on every keystroke in the search field.
-- The search field still carries the label "Filter by name" and the placeholder "Name" from the old name filter.
-- The search, filter and tag-row UI does not exist yet (UI phase): search field with the 250 ms debounce and request superseding, tag filter, role and kind selects, tag rows on the asset screen and in the file detail dialog. Asset tags and file tags must be visually distinct there.
+- Multi-file Detach is a renderer loop over `files:unassign`.
+- The project member table has no cover (the contract lacks it).
+- Tag filter chips show the normalised name, not the display name.
+- `ProjectListState` has no opened index, so focus does not return to the project row after Back.
+- After assigning a file from the inbox detail dialog, focus is lost when its tile leaves the list.
+- The assign busy guard of the inbox selection column does not survive a remount of the column.
+- Body text uses Tailwind `text-sm` (14 px) in buttons and tables where the design names 15 px.
 
 ## Code structure
 
@@ -83,7 +88,6 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 ## Tooling and tests
 
 - Split the desktop `tsconfig` into DOM (renderer) and Node (main, preload) configurations.
-- The renderer has no DOM test environment: hooks (`useLoad`) and screens are untested; the labels test only checks lengths.
 - Crash-recovery test on the real adapters (currently only on the fakes).
 - Tests for `journal_mode=wal`, a failed migration closing its handle, the dangling-link and Windows case-folding branches, temp-file cleanup in the registry, and the "ignore removal errors" branch of `importFile`.
 - The in-memory fakes approximate BM25 by a two-bucket rule (name matches first, then the rest).
@@ -92,11 +96,10 @@ Findings from the phase 1, phase 2, phase 3a and phase 3b reviews that were deli
 - The `EACCES` test of `writeStream` does not assert that the target is absent.
 - The in-memory `assetWorkflows.insert` checks fewer foreign keys than SQLite does.
 - A new template version next to workflows on the old one is only tested on the fakes, not on the SQL adapter.
-- No DOM test for the gallery, the file detail dialog and keyboard navigation (covered only end to end).
 - `check-sharp.mjs` is a manual gate and not part of `pnpm test`; it has no worker `exit` listener.
 - No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
 - `noopHost` is duplicated in three test files.
 
 ## Not covered by any automated check
 
-The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `storage_unreachable`, `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation of the screens.
+The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return.
