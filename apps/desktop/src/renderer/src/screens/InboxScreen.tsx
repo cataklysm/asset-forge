@@ -16,7 +16,10 @@ import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
 import { useJobs } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
+import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
+import { runFileBatch, throwFirst } from '../trash-actions';
+import { useTrash } from '../trash-context';
 import { ALERT, BUTTON, MUTED } from '../ui';
 
 const INBOX = { kind: 'inbox' } as const;
@@ -47,6 +50,11 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const detail = useFileDialog(containerRef);
   // Synchronous guard: a second activation before the re-render must not start a second import.
   const importingRef = useRef(false);
+  // The same for a single delete and for the selection's delete.
+  const acting = useRef(false);
+  const deleting = useRef(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const trash = useTrash();
 
   // A finished job may have changed records (e.g. AI tags): the list and the count reload.
   const { resultToken } = useJobs();
@@ -125,6 +133,40 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     reload();
   }
 
+  /** One file to the trash (menu, dialog); one at a time. A failure rejects for the caller to show. */
+  async function remove(file: FileRecord): Promise<void> {
+    if (acting.current) return;
+    acting.current = true;
+    try {
+      const { failures } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(failures);
+      moved([file.id]);
+      trash.refresh();
+    } finally {
+      acting.current = false;
+    }
+  }
+
+  /** All selected files to the trash, not only the eligible ones; one batch at a time. */
+  async function deleteSelected(): Promise<void> {
+    const files = [...selection.selected.values()];
+    if (deleting.current || files.length === 0) return;
+    deleting.current = true;
+    setDeleteBusy(true);
+    setError(null);
+    try {
+      const { doneIds, failures } = await runFileBatch('files:trashMany', files);
+      if (failures.length > 0) setImportResult({ title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
+      moved(doneIds);
+      trash.refresh();
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      deleting.current = false;
+      setDeleteBusy(false);
+    }
+  }
+
   const importButton = (
     <button type="button" className={BUTTON} disabled={importing} onClick={() => void importFiles()}>
       Import files
@@ -184,6 +226,15 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
             Add tags
           </button>
           <SelectionAnalysisButtons analysis={analysis} selection={selection} />
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={deleteBusy}
+            title={DELETE_SELECTION_TITLE}
+            onClick={() => void deleteSelected()}
+          >
+            {DELETE_LABEL}
+          </button>
         </SelectionBar>
         <FileBrowser
           scope={INBOX}
@@ -199,8 +250,18 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           reloadToken={reloadToken + resultToken}
           onOpen={detail.open}
           menuItems={(file) =>
-            fileMenuItems(file, { cover: null, onDetails: () => detail.open(file), ...fileActions(file), onError: setError })
+            fileMenuItems(file, {
+              cover: null,
+              onDetails: () => detail.open(file),
+              ...fileActions(file),
+              onError: setError,
+              onDelete: () => {
+                setError(null);
+                remove(file).catch((e: unknown) => setError(describeError(e)));
+              },
+            })
           }
+          onDeleteKey={() => void deleteSelected()}
           analysis={{
             onAnalyseAll: (filter) => analysis.start({ kind: 'fileFilter', filter }),
             blocked: analysis.blocked,
@@ -215,7 +276,13 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                 <FileDetailDialog
                   file={shown}
                   asset={null}
-                  actions={{ cover: null, onDetails: () => {}, ...fileActions(shown), onError: setError }}
+                  actions={{
+                    cover: null,
+                    onDetails: () => {},
+                    ...fileActions(shown),
+                    onError: setError,
+                    onDelete: () => remove(shown),
+                  }}
                   roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}
                   onFileChange={fileChanged}
                   onMeasured={detail.setDimensions}

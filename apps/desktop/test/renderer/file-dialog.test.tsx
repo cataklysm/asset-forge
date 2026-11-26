@@ -7,6 +7,8 @@ import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import type { FileActionContext } from '../../src/renderer/src/file-actions';
 import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
+import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
+import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, tagOf } from './fixtures';
 
@@ -624,4 +626,81 @@ it('a change made while the measurement is in flight is kept and gains the dimen
   measure.resolve({ ...a, width: 1600, height: 2000 });
   await waitFor(() => expect(detailValue('Dimensions')).toBe('1600 × 2000 px'));
   expect(screen.getByRole('button', { name: 'Remove Bark' })).toBeTruthy();
+});
+
+/** The inbox as a real host of the viewer, whose `files:trashMany` removes files from the served list. */
+function InboxHost() {
+  const [state, setState] = useState<InboxListState>({ filters: NO_FILE_FILTERS, scrollOffset: 0 });
+  return (
+    <div className="flex h-[800px] flex-col">
+      <InboxScreen state={state} onStateChange={setState} onBusyChange={() => {}} />
+    </div>
+  );
+}
+
+function installInbox(initial: FileRecord[], trash?: FakeHandlers['files:trashMany']) {
+  let items = initial;
+  const api = installFakeApi({
+    'files:list': (r) => ({ items: items.slice(r.offset, r.offset + r.limit), total: items.length }),
+    'tags:suggest': () => [],
+    'assets:list': () => ({ items: [], total: 0 }),
+    'files:trashMany':
+      trash ??
+      ((r) => {
+        items = items.filter((f) => !r.fileIds.includes(f.id));
+        return { items: r.fileIds.map((fileId) => ({ fileId, file: null, error: null })) };
+      }),
+  });
+  return api;
+}
+
+async function openInInbox(name: string) {
+  const user = userEvent.setup();
+  const tile = (await within(await screen.findByRole('listbox', { name: 'Files' })).findByText(name)).closest<HTMLElement>(
+    '[data-index]',
+  )!;
+  await user.click(tile);
+  await user.keyboard('{Enter}');
+  return { user, dialog: await screen.findByRole('dialog', { name }) };
+}
+
+async function deleteInDialog(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+  await user.click(within(dialog).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+}
+
+it('Delete in the More menu trashes the file and the dialog shows the next one', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  const b = fileRecord({ originalName: 'b.png' });
+  const api = installInbox([a, b]);
+  render(<InboxHost />);
+  const { user, dialog } = await openInInbox('a.png');
+  await deleteInDialog(user, dialog);
+  expect(await screen.findByRole('dialog', { name: 'b.png' })).toBeTruthy();
+  expect(api.calls.filter((c) => c.channel === 'files:trashMany').map((c) => c.request)).toEqual([{ fileIds: [a.id] }]);
+});
+
+it('deleting the last file closes the dialog', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  installInbox([a]);
+  render(<InboxHost />);
+  const { user, dialog } = await openInInbox('a.png');
+  await deleteInDialog(user, dialog);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('a failing delete shows the message in the dialog', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  installInbox([a], (r) => ({
+    items: r.fileIds.map((fileId) => ({
+      fileId,
+      file: null,
+      error: { code: 'invalid_operation', message: 'The file is still being imported' },
+    })),
+  }));
+  render(<InboxHost />);
+  const { user, dialog } = await openInInbox('a.png');
+  await deleteInDialog(user, dialog);
+  expect(await within(dialog).findByText('The file is still being imported')).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'a.png' })).toBe(dialog);
 });

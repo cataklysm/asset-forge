@@ -5,7 +5,7 @@ import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
-import { label } from '../labels';
+import { DELETE_LABEL, DELETE_SELECTION_TITLE, label } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, type AssetView, type FileFilters } from '../list-state';
 import {
   dropSelected,
@@ -16,6 +16,8 @@ import {
   sharedTags,
   type FileSelection,
 } from '../selection';
+import { runFileBatch, throwFirst } from '../trash-actions';
+import { useTrash } from '../trash-context';
 import { ALERT, BUTTON, SELECT } from '../ui';
 import { SelectionAnalysisButtons, useAnalysisDialogs } from './AnalysisDialogs';
 import { Dialog } from './Dialog';
@@ -41,7 +43,8 @@ interface Props {
 
 /**
  * The asset's files: the file browser with its own filters, view and selection (none of them
- * persisted), the selection bar (Add tags, Analyse, Set role, Detach) and the file detail dialog.
+ * persisted), the selection bar (Add tags, Analyse, Set role, Detach, Delete) and the file detail
+ * dialog.
  */
 export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChange, onCountChange }: Props) {
   const [filters, setFilters] = useState<FileFilters>(NO_FILE_FILTERS);
@@ -64,6 +67,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   // Synchronous guards: a second activation before the re-render must not send a second request.
   const acting = useRef(false);
   const batching = useRef(false);
+  const trash = useTrash();
 
   // The tab count is the unfiltered total; a filtered list (or one whose search is still pending) does not count.
   const debouncedQuery = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);
@@ -105,6 +109,16 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       setSelection((current) => dropSelected(current, [file.id]));
       // The reload moves the dialog on to the file that follows (FileBrowser `viewer`).
       onFilesChanged();
+    });
+
+  const remove = (file: FileRecord) =>
+    exclusive(async () => {
+      const { failures } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(failures);
+      setSelection((current) => dropSelected(current, [file.id]));
+      // As with Detach, the reload moves the dialog on.
+      onFilesChanged();
+      trash.refresh();
     });
 
   /** For the tile menu: failures show above the list. */
@@ -171,6 +185,25 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       onFilesChanged();
     });
 
+  // All selected files, not only the eligible ones: a failed import can be deleted too.
+  const deleteSelected = () =>
+    batch(async () => {
+      const files = [...selection.selected.values()];
+      if (files.length === 0) return;
+      let outcome;
+      try {
+        outcome = await runFileBatch('files:trashMany', files);
+      } catch (e) {
+        setError(describeError(e));
+        return;
+      }
+      const { doneIds, failures } = outcome;
+      setSelection((current) => dropSelected(current, doneIds));
+      setResult(failures.length === 0 ? null : { title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
+      onFilesChanged();
+      trash.refresh();
+    });
+
   const fileActions = (file: FileRecord) => ({
     onAnalyse: () => analysis.analyseFiles([file]),
     onReviewTags: () => analysis.review(file),
@@ -228,6 +261,15 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         >
           Detach
         </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={batchBusy}
+          title={DELETE_SELECTION_TITLE}
+          onClick={() => void deleteSelected()}
+        >
+          {DELETE_LABEL}
+        </button>
       </SelectionBar>
       <FileBrowser
         scope={{ kind: 'asset', assetId: asset.id }}
@@ -249,8 +291,12 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
             onDetach: reported(() => detach(file)),
             ...fileActions(file),
             onError: setError,
+            onDelete: reported(() => remove(file)),
           })
         }
+        onDeleteKey={() => {
+          if (selection.selected.size > 0) void deleteSelected();
+        }}
         analysis={{
           onAnalyseAll: (filter) => analysis.start({ kind: 'fileFilter', filter }),
           blocked: analysis.blocked,
@@ -274,6 +320,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                   onDetach: () => detach(detail),
                   ...fileActions(detail),
                   onError: setError,
+                  onDelete: () => remove(detail),
                 }}
                 roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} fullWidth />}
                 onFileChange={fileChanged}

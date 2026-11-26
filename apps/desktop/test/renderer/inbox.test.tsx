@@ -10,6 +10,7 @@ import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
+import { TrashProvider } from '../../src/renderer/src/trash-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 
@@ -731,4 +732,82 @@ it('a poll with risen succeeded shows the fresh record in the open detail dialog
   } finally {
     vi.useRealTimers();
   }
+});
+
+/** The inbox whose `files:trashMany` removes the requested files from the served list. */
+function installTrashable(initial: FileRecord[], handlers: FakeHandlers = {}) {
+  let items = initial;
+  const api = install(initial, handlers);
+  api.set('files:trashMany', (r) => {
+    items = items.filter((f) => !r.fileIds.includes(f.id));
+    api.setFiles(items);
+    return { items: r.fileIds.map((fileId) => ({ fileId, file: null, error: null })) };
+  });
+  return api;
+}
+
+it('the selection bar offers Delete', async () => {
+  const user = userEvent.setup();
+  const { c1, c2, f1 } = files();
+  const api = installTrashable([c1, c2, f1]);
+  render(<Harness />);
+  await selectRange(user, 'c2.png', 'f1.png');
+  const bar = screen.getByText('2 selected').parentElement!;
+  const button = within(bar).getByRole('button', { name: 'Delete' });
+  expect(button.getAttribute('title')).toBe('Moves the files to the trash');
+  const labels = within(bar)
+    .getAllByRole('button')
+    .map((b) => b.textContent);
+  expect(labels.slice(-2)).toEqual(['Delete', 'Clear selection']);
+  await user.click(button);
+  // The failed file is sent too.
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [c2.id, f1.id] }]);
+  await waitFor(() => expect(screen.queryByText('2 selected')).toBeNull());
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c2.png')).toBeNull());
+  expect(screen.getByText('c1.png')).toBeTruthy();
+});
+
+it('deleting a failed file from its menu removes it', async () => {
+  const user = userEvent.setup();
+  const { c1, f1 } = files();
+  const api = installTrashable([c1, f1]);
+  render(<Harness />);
+  await screen.findByText('f1.png');
+  await user.click(within(tile('f1.png')).getByRole('button', { name: 'File actions' }));
+  expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Details', 'Delete']);
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(screen.queryByText('f1.png')).toBeNull());
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [f1.id] }]);
+});
+
+it('the Delete key deletes the selection', async () => {
+  const user = userEvent.setup();
+  const { c1, c2, f1 } = files();
+  const api = installTrashable([c1, c2, f1], { 'trash:summary': () => ({ count: 0 }) });
+  render(
+    <TrashProvider>
+      <Harness />
+    </TrashProvider>,
+  );
+  await selectRange(user, 'c1.png', 'c2.png');
+  await waitFor(() => expect(callsOf(api, 'trash:summary')).toHaveLength(1));
+  await user.keyboard('{Delete}');
+  await waitFor(() => expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [c1.id, c2.id] }]));
+  await waitFor(() => expect(screen.queryByText('c1.png')).toBeNull());
+  expect(screen.queryByText('c2.png')).toBeNull();
+  // The trash count is loaded again after the delete.
+  await waitFor(() => expect(callsOf(api, 'trash:summary')).toHaveLength(2));
+});
+
+it('the inbox count reloads after a delete', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  installTrashable([c1, c2]);
+  render(<Harness />);
+  const title = () => screen.getByRole('heading', { level: 2, name: /Inbox/ }).textContent;
+  await waitFor(() => expect(title()).toBe('Inbox2'));
+  await screen.findByText('c1.png');
+  await user.click(within(tile('c1.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(title()).toBe('Inbox1'));
 });

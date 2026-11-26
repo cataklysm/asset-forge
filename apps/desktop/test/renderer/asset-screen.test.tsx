@@ -9,6 +9,7 @@ import {
   type AssetType,
   type FileRecord,
   type IpcRequest,
+  type IpcResponse,
   type VisionSettingsView,
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
@@ -730,6 +731,121 @@ it('the header Analyse starts the whole asset', async () => {
   expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'asset', assetId: asset.id }, model: 'vision-a' });
   await user.click(screen.getByRole('button', { name: 'Start' }));
   expect(within(await screen.findByRole('status')).getByText('2 queued, 1 already analysed')).toBeTruthy();
+});
+
+/** A `files:trashMany` answer that trashes every requested file except those in `failing`. */
+function trashAnswer(files: FileRecord[], failing: ReadonlySet<string> = new Set()) {
+  return (r: IpcRequest<'files:trashMany'>) => ({
+    items: r.fileIds.map((fileId) =>
+      failing.has(fileId)
+        ? { fileId, file: null, error: { code: 'invalid_operation' as const, message: 'The file is still being imported' } }
+        : { fileId, file: { ...files.find((f) => f.id === fileId)!, assetId: null, role: null, deletedAt: NOW }, error: null },
+    ),
+  });
+}
+
+it('Delete in the tile menu calls files:trashMany with the file and reloads the list and the asset', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  let files = threeFiles(asset);
+  const a = files[0]!;
+  const api = install(asset, {
+    'files:list': (r) => listOf(files)(r),
+    'files:trashMany': (r) => {
+      const answer = trashAnswer(files)(r);
+      files = files.filter((f) => !r.fileIds.includes(f.id));
+      return answer;
+    },
+  });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  const reads = callsOf(api, 'assets:get').length;
+  await user.click(within(tile('a.png')).getByRole('button', { name: 'File actions' }));
+  const item = screen.getByRole('menuitem', { name: 'Delete' });
+  expect(item.getAttribute('title')).toBe('Moves the file to the trash');
+  await user.click(item);
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('a.png')).toBeNull());
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [a.id] }]);
+  await waitFor(() => expect(callsOf(api, 'assets:get').length).toBeGreaterThan(reads));
+  expect(await screen.findByRole('tab', { name: 'Files 2' })).toBeTruthy();
+});
+
+it('Delete in the selection bar sends all selected files including a failed one', async () => {
+  const asset = assetDetail();
+  const holder: { files: FileRecord[] } = { files: [] };
+  const { user, api, c1, c2, bad } = await selectThree(asset, {
+    'files:trashMany': (r) => trashAnswer(holder.files)(r),
+  });
+  holder.files = [c1, c2, bad];
+  const button = screen.getByRole('button', { name: 'Delete' });
+  expect(button.getAttribute('title')).toBe('Moves the files to the trash');
+  // After Detach in the selection bar.
+  const bar = button.parentElement!;
+  const labels = within(bar)
+    .getAllByRole('button')
+    .map((b) => b.textContent);
+  expect(labels.indexOf('Delete')).toBe(labels.indexOf('Detach') + 1);
+  await user.click(button);
+  await waitFor(() => expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [c1.id, c2.id, bad.id] }]));
+  await waitFor(() => expect(screen.queryByText('3 selected')).toBeNull());
+  // Nothing failed: no strip.
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('a partly failing batch shows "1 deleted, 1 failed" and keeps the failed file selected', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  const [a, b] = files as [FileRecord, FileRecord, FileRecord];
+  const api = install(asset, { 'files:list': listOf(files), 'files:trashMany': trashAnswer(files, new Set([b.id])) });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.click(tile('a.png'));
+  await user.keyboard('{Shift>}');
+  await user.click(tile('b.png'));
+  await user.keyboard('{/Shift}');
+  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('1 deleted, 1 failed')).toBeTruthy();
+  expect(strip.textContent).toContain('b.png');
+  expect(strip.textContent).toContain('The file is still being imported');
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [a.id, b.id] }]);
+  expect(screen.getByText('1 selected')).toBeTruthy();
+});
+
+it('pressing Delete twice sends one request', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  const pending = deferred<IpcResponse<'files:trashMany'>>();
+  const api = install(asset, { 'files:list': listOf(files), 'files:trashMany': () => pending.promise });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.click(tile('a.png'));
+  await user.keyboard('{Delete}');
+  await user.keyboard('{Delete}');
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [files[0]!.id] }]);
+  expect((screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(true);
+  pending.resolve(trashAnswer(files)({ fileIds: [files[0]!.id] }));
+  await waitFor(() => expect(screen.queryByText('1 selected')).toBeNull());
+  expect(callsOf(api, 'files:trashMany')).toHaveLength(1);
+});
+
+it('no dialog opens on Delete', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  const api = install(asset, { 'files:list': listOf(files), 'files:trashMany': trashAnswer(files) });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.click(tile('a.png'));
+  await user.keyboard('{Delete}');
+  await waitFor(() => expect(callsOf(api, 'files:trashMany')).toHaveLength(1));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await user.click(within(tile('b.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(callsOf(api, 'files:trashMany')).toHaveLength(2));
+  expect(screen.queryByRole('dialog')).toBeNull();
 });
 
 it('without a configured provider the header Analyse is disabled with the reason', async () => {

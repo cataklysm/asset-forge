@@ -107,3 +107,30 @@ export const START_COUNTS: readonly {
   { key: 'alreadyQueued', label: 'Already queued', title: 'Files with an analysis that is queued or running' },
   { key: 'notAnalysable', label: 'Not analysable', title: 'Files that are not complete images of a supported type' },
 ];
+
+/** The trash: its navigation entry, the Delete, Restore and permanent delete actions and their confirmation. */
+export const TRASH_LABEL = 'Trash';
+export const DELETE_LABEL = 'Delete';
+export const DELETE_TITLE = 'Moves the file to the trash';
+export const DELETE_SELECTION_TITLE = 'Moves the files to the trash';
+export const RESTORE_LABEL = 'Restore';
+export const RESTORE_TITLE = 'Puts the file back where it was';
+export const RESTORE_SELECTION_TITLE = 'Puts the files back where they were';
+export const PURGE_LABEL = 'Delete permanently';
+export const PURGE_TITLE = 'Removes the file from disk; asks first';
+export const PURGE_SELECTION_TITLE = 'Removes the files from disk; asks first';
+export const EMPTY_TRASH_LABEL = 'Empty trash';
+export const EMPTY_TRASH_TITLE = 'Removes every file in the trash from disk; asks first';
+export const CANCEL_LABEL = 'Cancel';
+
+const fileCount = (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`;
+
+/** 'Delete 1 file permanently?' / 'Delete 12 files permanently?'. */
+export function purgeConfirmTitle(count: number): string {
+  return `Delete ${fileCount(count)} permanently?`;
+}
+
+/** The accessible name of the trash navigation entry with its count: 'Trash, 3 files'. */
+export function trashNavLabel(count: number): string {
+  return `${TRASH_LABEL}, ${fileCount(count)}`;
+}

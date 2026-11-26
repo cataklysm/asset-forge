@@ -53,6 +53,8 @@ export interface FileViewProps {
   onRows(rows: VisibleRows): void;
   onRetry(page: number): void;
   positionRef: { current: ViewHandle | null };
+  /** The Delete key on a focused item. */
+  onDeleteKey?(): void;
 }
 
 /** Marks the controls inside an item (checkbox, menu, magnifier) whose events the item ignores. */
@@ -69,7 +71,8 @@ function plainKey(event: KeyboardEvent): boolean {
 
 /**
  * Pointer and keyboard handling of one item of a file view: click, Ctrl+click and Shift+click
- * select, Space toggles, Ctrl+A selects all, Esc clears, Enter and double click open. Events
+ * select, Space toggles, Ctrl+A selects all, Esc clears, Enter and double click open, Delete
+ * calls `onDeleteKey` where the host offers it. Events
  * of the controls inside the item are left to them.
  */
 export function fileItemHandlers(props: FileViewProps, rows: VirtualRows, index: number, file: FileRecord | null) {
@@ -108,6 +111,11 @@ export function fileItemHandlers(props: FileViewProps, rows: VirtualRows, index:
           event.preventDefault();
           event.stopPropagation();
         }
+        return;
+      }
+      if (event.key === 'Delete' && plainKey(event) && props.onDeleteKey !== undefined) {
+        event.preventDefault();
+        props.onDeleteKey();
         return;
       }
       rows.onItemKeyDown(index, event);

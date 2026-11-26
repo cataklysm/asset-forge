@@ -5,7 +5,13 @@ import type { MenuItem } from './components/Menu';
 import {
   ANALYSE_LABEL,
   ANALYSE_TITLE,
+  DELETE_LABEL,
+  DELETE_TITLE,
   IMAGE_TO_PROMPT_LABEL,
+  PURGE_LABEL,
+  PURGE_TITLE,
+  RESTORE_LABEL,
+  RESTORE_TITLE,
   IMAGE_TO_PROMPT_TITLE,
   REVIEW_TAGS_LABEL,
   REVIEW_TAGS_TITLE,
@@ -28,13 +34,20 @@ export interface FileActionContext {
   analysisBlocked?: string | null;
   /** Receives the message when opening or revealing the file fails. */
   onError?(message: string): void;
+  /** Moves a live file to the trash; offered for every status except `pending`. */
+  onDelete?(): void;
+  /** Puts a trashed file back; offered only for files in the trash. */
+  onRestore?(): void;
+  /** Removes a trashed file from disk; offered only for files in the trash. */
+  onPurge?(): void;
 }
 
 /**
- * The actions of one file's "…" menu: Details; Open externally and Show in folder for completely
+ * The actions of one file's "…" menu. A trashed file offers only Details, Restore and Delete
+ * permanently. A live file offers Details; Open externally and Show in folder for completely
  * imported files (opening only when the type may be opened); Analyse, Review tags (with a
  * proposal) and Image to prompt for analysable images when the host offers them; the cover choice
- * where the file belongs to an asset; Detach when the host offers it.
+ * where the file belongs to an asset; Detach when the host offers it; Delete last.
  */
 export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuItem[] {
   const complete = file.status === 'complete';
@@ -42,6 +55,11 @@ export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuIte
     call(channel, { fileId: file.id }).catch((error: unknown) => ctx.onError?.(describeError(error)));
   };
   const items: MenuItem[] = [{ label: 'Details', onSelect: ctx.onDetails }];
+  if (file.deletedAt !== null) {
+    if (ctx.onRestore !== undefined) items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: ctx.onRestore });
+    if (ctx.onPurge !== undefined) items.push({ label: PURGE_LABEL, title: PURGE_TITLE, onSelect: ctx.onPurge });
+    return items;
+  }
   if (complete && file.openable) items.push({ label: 'Open externally', onSelect: shell('files:openExternal') });
   if (complete) items.push({ label: 'Show in folder', onSelect: shell('files:showInFolder') });
   const { cover, onSetCover, onDetach, onAnalyse, onReviewTags, onImageToPrompt } = ctx;
@@ -60,5 +78,8 @@ export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuIte
     else if (complete && file.previewable) items.push({ label: 'Use as cover', title: 'Show this image as the asset cover', onSelect: () => onSetCover(file.id) });
   }
   if (onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: onDetach });
+  if (ctx.onDelete !== undefined && file.status !== 'pending') {
+    items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: ctx.onDelete });
+  }
   return items;
 }

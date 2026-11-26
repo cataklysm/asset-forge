@@ -83,6 +83,8 @@ export interface FileBrowserProps {
   onOpen(file: FileRecord): void;
   /** The tile "…" menu; no menu without items. */
   menuItems(file: FileRecord): MenuItem[];
+  /** The Delete key on a focused file (never from an input or an inner control). */
+  onDeleteKey?(): void;
   /** Shown when the unfiltered list is empty ("No files" / "Inbox is empty"). */
   emptyText: string;
   /** Shown below `emptyText` (e.g. the inbox's "Import files"). */
@@ -449,6 +451,7 @@ export function FileBrowser(props: FileBrowserProps) {
           onRows,
           onRetry: paged.retry,
           positionRef: position,
+          onDeleteKey: props.onDeleteKey,
         };
 
   return (

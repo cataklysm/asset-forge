@@ -4,11 +4,11 @@ import { useState } from 'react';
 import type { FileList, FileRecord, FileScope, IpcRequest } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FileBrowser, type ViewerList } from '../../src/renderer/src/components/FileBrowser';
-import { fileMenuItems } from '../../src/renderer/src/file-actions';
+import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
 import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/renderer/src/list-state';
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
 import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, nextId, pageOf, tagOf } from './fixtures';
+import { fileRecord, nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -44,6 +44,7 @@ function Harness(props: {
   emptyText?: string;
   onOpen?(file: FileRecord): void;
   onSelection?(s: FileSelection): void;
+  onDeleteKey?(): void;
 }) {
   const [filters, setFilters] = useState(props.initialFilters ?? NO_FILE_FILTERS);
   const [view, setView] = useState<AssetView>(props.initialView ?? 'grid');
@@ -71,6 +72,7 @@ function Harness(props: {
         onOpen={onOpen}
         menuItems={(file) => fileMenuItems(file, { cover: null, onDetails: () => onOpen(file) })}
         emptyText={props.emptyText ?? 'No files'}
+        onDeleteKey={props.onDeleteKey}
       />
     </div>
   );
@@ -545,4 +547,82 @@ it('a reload with a fresh record of the viewed file hands it to the viewer once'
   await waitFor(() => expect(listRequests(api)).toHaveLength(3));
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(onView).toHaveBeenCalledTimes(1);
+});
+
+/** Every action a host can offer, so the menu shows which ones a file gets. */
+const FULL_CONTEXT: FileActionContext = {
+  cover: { isEffective: false, isChosen: false },
+  onDetails: () => {},
+  onSetCover: () => {},
+  onDetach: () => {},
+  onAnalyse: () => {},
+  onReviewTags: () => {},
+  onImageToPrompt: () => {},
+  onDelete: () => {},
+  onRestore: () => {},
+  onPurge: () => {},
+};
+
+const menuLabels = (file: FileRecord, ctx: FileActionContext = FULL_CONTEXT) => fileMenuItems(file, ctx).map((i) => i.label);
+
+it('the menu of a live file ends with Delete', () => {
+  const file = fileRecord({ assetId: nextId(), role: 'reference' });
+  const items = fileMenuItems(file, FULL_CONTEXT);
+  expect(items.map((i) => i.label).slice(-2)).toEqual(['Detach', 'Delete']);
+  expect(items.at(-1)!.title).toBe('Moves the file to the trash');
+  expect(menuLabels(file)).not.toContain('Restore');
+  expect(menuLabels(file)).not.toContain('Delete permanently');
+  // Without the host's handler there is no Delete.
+  expect(menuLabels(file, { cover: null, onDetails: () => {} })).not.toContain('Delete');
+});
+
+it('a pending file has no Delete', () => {
+  expect(menuLabels(fileRecord({ status: 'pending', sha256: null }), { cover: null, onDetails: () => {}, onDelete: () => {} })).toEqual([
+    'Details',
+  ]);
+});
+
+it('a failed file offers Details and Delete', () => {
+  expect(menuLabels(fileRecord({ status: 'failed', sha256: null }), { cover: null, onDetails: () => {}, onDelete: () => {} })).toEqual([
+    'Details',
+    'Delete',
+  ]);
+});
+
+it('a trashed file offers only Details, Restore and Delete permanently', () => {
+  const file = trashedRecord({ trashedAssetId: nextId(), trashedAssetName: 'Hero', trashedRole: 'reference' });
+  const items = fileMenuItems(file, FULL_CONTEXT);
+  expect(items.map((i) => i.label)).toEqual(['Details', 'Restore', 'Delete permanently']);
+  expect(items.map((i) => i.title)).toEqual([undefined, 'Puts the file back where it was', 'Removes the file from disk; asks first']);
+  expect(menuLabels(file, { ...FULL_CONTEXT, onRestore: undefined, onPurge: undefined })).toEqual(['Details']);
+});
+
+it('the Delete key on a focused tile calls onDeleteKey', async () => {
+  const user = userEvent.setup();
+  const onDeleteKey = vi.fn();
+  install({ 'files:list': listOf(many(3)) });
+  render(<Harness onDeleteKey={onDeleteKey} />);
+  await screen.findByText('File 0.png');
+  await user.click(itemOf('File 1.png'));
+  const event = fireEvent.keyDown(itemOf('File 1.png'), { key: 'Delete' });
+  expect(onDeleteKey).toHaveBeenCalledTimes(1);
+  // fireEvent returns false when the default was prevented.
+  expect(event).toBe(false);
+  // Not from a control inside the tile.
+  fireEvent.keyDown(within(itemOf('File 1.png')).getByRole('checkbox', { name: 'Select File 1.png' }), { key: 'Delete' });
+  expect(onDeleteKey).toHaveBeenCalledTimes(1);
+});
+
+it('the Delete key inside the search field does not', async () => {
+  const user = userEvent.setup();
+  const onDeleteKey = vi.fn();
+  install({ 'files:list': listOf(many(3)) });
+  render(<Harness onDeleteKey={onDeleteKey} />);
+  await screen.findByText('File 0.png');
+  await user.click(itemOf('File 0.png'));
+  const search = screen.getByRole('searchbox', { name: 'Search files' });
+  await user.type(search, 'oak');
+  await user.keyboard('{ArrowLeft}{Delete}');
+  expect((search as HTMLInputElement).value).toBe('oa');
+  expect(onDeleteKey).not.toHaveBeenCalled();
 });

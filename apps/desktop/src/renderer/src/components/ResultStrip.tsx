@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import type { AssignManyResult, ImportResult } from '@assetforge/contracts';
+import type { FileBatchResult, ImportResult } from '@assetforge/contracts';
 import { ApiError, describeError } from '../api';
 import { ALERT, BORDER, ICON_BUTTON_INLINE } from '../ui';
 
@@ -22,8 +22,8 @@ export function importFailures(results: readonly ImportResult[]): ResultFailure[
   );
 }
 
-/** One failure per item of a `files:assignMany` result with an error. */
-export function assignFailures(items: AssignManyResult['items'], nameOf: (fileId: string) => string): ResultFailure[] {
+/** One failure per item of a per-item file batch (`files:assignMany`, `files:trashMany`, …) with an error. */
+export function assignFailures(items: FileBatchResult['items'], nameOf: (fileId: string) => string): ResultFailure[] {
   return items.flatMap((item) =>
     item.error === null
       ? []

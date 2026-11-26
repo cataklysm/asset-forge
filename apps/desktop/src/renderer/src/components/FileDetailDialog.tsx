@@ -143,7 +143,7 @@ export function FileDetailDialog({
     setError(message);
     actions.onError?.(message);
   };
-  // Cover and detach callers may be asynchronous; their failures show in the dialog.
+  // Cover, detach and trash callers may be asynchronous; their failures show in the dialog.
   const guard = <A extends unknown[]>(action: ((...args: A) => unknown) | undefined) =>
     action === undefined
       ? undefined
@@ -157,6 +157,9 @@ export function FileDetailDialog({
     ...actions,
     onSetCover: guard(actions.onSetCover),
     onDetach: guard(actions.onDetach),
+    onDelete: guard(actions.onDelete),
+    onRestore: guard(actions.onRestore),
+    onPurge: guard(actions.onPurge),
     onError: report,
   }).filter((item) => item.label !== 'Details');
 

@@ -57,6 +57,11 @@ export function fileRecord(p: Partial<FileRecord> = {}): FileRecord {
   };
 }
 
+/** A file in the trash: deleted, without an asset or a role (the origin comes through `p`). */
+export function trashedRecord(p: Partial<FileRecord> = {}): FileRecord {
+  return fileRecord({ deletedAt: NOW, ...p, assetId: null, role: null });
+}
+
 /** A completely imported file without a preview (e.g. `.pdf`, `.blend`). */
 export function nonImageRecord(originalName: string, p: Partial<FileRecord> = {}): FileRecord {
   return fileRecord({
