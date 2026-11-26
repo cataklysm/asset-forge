@@ -10,6 +10,16 @@ export class ApiError extends Error {
   }
 }
 
+const unreachableListeners = new Set<() => void>();
+
+/** Subscribes to every call that fails with `storage_unreachable`; returns the unsubscribe function. */
+export function onStorageUnreachable(listener: () => void): () => void {
+  unreachableListeners.add(listener);
+  return () => {
+    unreachableListeners.delete(listener);
+  };
+}
+
 /** Calls an IPC channel, unwrapping the result: failures (including a rejected invoke) throw `ApiError`. */
 export async function call<C extends IpcChannel>(
   channel: C,
@@ -21,7 +31,10 @@ export async function call<C extends IpcChannel>(
   } catch {
     throw new ApiError('internal_error', 'The application did not respond');
   }
-  if (!result.ok) throw new ApiError(result.error.code, result.error.message);
+  if (!result.ok) {
+    if (result.error.code === 'storage_unreachable') for (const listener of [...unreachableListeners]) listener();
+    throw new ApiError(result.error.code, result.error.message);
+  }
   return result.value;
 }
 

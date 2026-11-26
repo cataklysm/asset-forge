@@ -1,8 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { Folder, FolderOpen, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { formatDateTime } from '../format';
-import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
+import { Dialog } from '../components/Dialog';
+import { Menu } from '../components/Menu';
+import { Page } from '../components/Page';
+import { ALERT, BORDER, BUTTON, BUTTON_INLINE, INPUT, MUTED, PAGE_TITLE } from '../ui';
 
 interface Props {
   onOpened(workspace: WorkspaceSummary): void;
@@ -15,8 +19,15 @@ export function WorkspaceScreen({ onOpened }: Props) {
   const [targetPath, setTargetPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const trimmedName = name.trim();
+  // Newest first; ISO timestamps sort as text.
+  const sorted = useMemo(
+    () => (known === null ? null : [...known].sort((a, b) => (a.lastOpenedAt < b.lastOpenedAt ? 1 : a.lastOpenedAt > b.lastOpenedAt ? -1 : 0))),
+    [known],
+  );
 
   useEffect(() => {
     let active = true;
@@ -104,76 +115,139 @@ export function WorkspaceScreen({ onOpened }: Props) {
       return rootPath === null ? null : openPath(rootPath);
     });
 
+
+  function cancelCreate() {
+    setCreating(false);
+    setName('');
+    setParentPath(null);
+    setError(null);
+  }
+
+  const count = sorted?.length ?? 0;
+  const headerCell = `px-3 py-2 text-left text-sm font-normal ${MUTED}`;
+
   return (
-    <main className="mx-auto max-w-3xl space-y-8 p-6">
-      <h1 className="text-2xl font-semibold">AssetForge</h1>
+    <div className="mx-auto flex h-screen max-w-6xl flex-col bg-bg text-text">
+      <div className={`flex h-[76px] shrink-0 items-center gap-4 border-b px-6 ${BORDER}`}>
+        <span className={PAGE_TITLE}>AssetForge</span>
+      </div>
+      <main className="flex min-h-0 flex-1 flex-col overflow-auto">
+        <Page
+          title="Workspaces"
+          count={sorted === null ? null : count}
+          actions={
+            <>
+              <button type="button" className={BUTTON} disabled={busy} onClick={() => void openExisting()}>
+                <FolderOpen size={16} aria-hidden />
+                Open folder
+              </button>
+              <button type="button" className={BUTTON} disabled={busy} onClick={() => setCreating(true)}>
+                <Plus size={16} aria-hidden />
+                New workspace
+              </button>
+            </>
+          }
+        >
+          {error !== null && !creating && (
+            <p role="alert" className={`mb-4 ${ALERT}`}>
+              {error}
+            </p>
+          )}
+          <table className={`w-full border-collapse rounded-control border ${BORDER}`}>
+            <thead>
+              <tr className={`border-b ${BORDER}`}>
+                <th scope="col" className={headerCell}>
+                  Name
+                </th>
+                <th scope="col" className={headerCell}>
+                  Location
+                </th>
+                <th scope="col" className={headerCell}>
+                  Last opened
+                </th>
+                <th scope="col" className={headerCell}>
+                  <span className="sr-only" />
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted === null
+                ? [0, 1, 2].map((index) => (
+                    <tr key={index} data-skeleton="" className={`border-b last:border-b-0 ${BORDER}`}>
+                      {[0, 1, 2, 3].map((cell) => (
+                        <td key={cell} className="px-3 py-3">
+                          <div className="h-4 animate-pulse rounded-control bg-raised" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                : sorted.map((workspace) => (
+                    <tr key={workspace.id} className={`border-b last:border-b-0 ${BORDER}`}>
+                      <td className="px-3 py-3">
+                        <span className="flex items-center gap-2 font-semibold">
+                          <Folder size={18} aria-hidden />
+                          {workspace.name}
+                        </span>
+                      </td>
+                      <td className={`max-w-0 truncate px-3 py-3 ${MUTED}`} title={workspace.rootPath}>
+                        {workspace.rootPath}
+                      </td>
+                      <td className={`whitespace-nowrap px-3 py-3 ${MUTED}`}>
+                        {formatDateTime(workspace.lastOpenedAt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className={BUTTON_INLINE}
+                            disabled={busy}
+                            aria-label={`Open workspace ${workspace.name}`}
+                            onClick={() => void run(() => openPath(workspace.rootPath))}
+                          >
+                            Open
+                          </button>
+                          <Menu
+                            label={`Actions for ${workspace.name}`}
+                            items={[
+                              {
+                                label: 'Remove',
+                                disabled: busy,
+                                title: 'Remove this workspace from AssetForge; asks before anything is removed',
+                                onSelect: () => void remove(workspace),
+                              },
+                            ]}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+          {sorted !== null && (
+            <p className={`mt-3 text-sm ${MUTED}`}>{count === 1 ? '1 workspace' : `${count} workspaces`}</p>
+          )}
+        </Page>
+      </main>
 
-      {error !== null && (
-        <p role="alert" className={ALERT}>
-          {error}
-        </p>
-      )}
-
-      <section aria-labelledby="known-heading" className="space-y-2">
-        <h2 id="known-heading" className="text-lg font-medium">
-          Workspaces
-        </h2>
-        {known === null && <p className={MUTED}>Loading…</p>}
-        {known?.length === 0 && <p className={MUTED}>No workspaces yet.</p>}
-        {known && known.length > 0 && (
-          <ul className={`divide-y rounded border ${BORDER} divide-slate-300 dark:divide-slate-700`}>
-            {known.map((workspace) => (
-              <li key={workspace.id} className="flex items-center justify-between gap-4 p-3">
-                <div className="min-w-0">
-                  <div className="font-medium">{workspace.name}</div>
-                  <div className={`truncate text-sm ${MUTED}`}>{workspace.rootPath}</div>
-                  <div className="text-xs text-slate-500">
-                    Last opened {formatDateTime(workspace.lastOpenedAt)}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    disabled={busy}
-                    aria-label={`Remove workspace ${workspace.name}`}
-                    title="Remove this workspace from AssetForge; asks before anything is removed"
-                    onClick={() => void remove(workspace)}
-                  >
-                    Remove
-                  </button>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    disabled={busy}
-                    aria-label={`Open workspace ${workspace.name}`}
-                    onClick={() => void run(() => openPath(workspace.rootPath))}
-                  >
-                    Open
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="create-heading" className="space-y-2">
-        <h2 id="create-heading" className="text-lg font-medium">
-          Create workspace
-        </h2>
-        <form className="space-y-2" onSubmit={submitCreate}>
-          <div className="flex gap-2">
-            <input
-              autoFocus
-              aria-label="Workspace name"
-              aria-describedby={parentPath === null ? undefined : 'create-location'}
-              placeholder="Workspace name"
-              maxLength={200}
-              className={`flex-1 ${INPUT}`}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
+      <Dialog open={creating} title="New workspace" initialFocusRef={nameRef} onClose={cancelCreate}>
+        <form className="space-y-3" onSubmit={submitCreate}>
+          {error !== null && (
+            <p role="alert" className={ALERT}>
+              {error}
+            </p>
+          )}
+          <input
+            ref={nameRef}
+            autoFocus
+            aria-label="Workspace name"
+            aria-describedby={parentPath === null ? undefined : 'create-location'}
+            placeholder="Workspace name"
+            maxLength={200}
+            className={`w-full ${INPUT}`}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <div className="flex items-center gap-2">
             <button
               type="button"
               className={BUTTON}
@@ -182,10 +256,6 @@ export function WorkspaceScreen({ onOpened }: Props) {
               onClick={() => void chooseParent()}
             >
               {parentPath === null ? 'Choose location' : 'Change location'}
-            </button>
-            {/* Stays enabled without a location, so Enter in the name field opens the picker. */}
-            <button type="submit" className={BUTTON} disabled={busy || trimmedName === ''}>
-              Create
             </button>
           </div>
           {/* Only the path itself; explanations live in tooltips, not in the layout. */}
@@ -198,20 +268,17 @@ export function WorkspaceScreen({ onOpened }: Props) {
               {targetPath ?? parentPath}
             </p>
           )}
+          <div className="flex justify-end gap-2">
+            <button type="button" className={BUTTON} onClick={cancelCreate}>
+              Cancel
+            </button>
+            {/* Stays enabled without a location, so Enter in the name field opens the picker. */}
+            <button type="submit" className={BUTTON} disabled={busy || trimmedName === ''}>
+              Create
+            </button>
+          </div>
         </form>
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-lg font-medium">Existing workspace</h2>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={busy}
-          onClick={() => void openExisting()}
-        >
-          Open existing folder
-        </button>
-      </section>
-    </main>
+      </Dialog>
+    </div>
   );
 }
