@@ -239,6 +239,21 @@ describe('recovery on open', () => {
     expect(storage.files.has(orphan)).toBe(false);
   });
 
+  it('does not sweep the trash when the database is new (a kept folder opened again)', async () => {
+    const { manager, storage, db, summary, databases } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    await db.fileMoves.commit(ID1);
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+
+    await manager.remove({ id: summary.id, trashFolder: false });
+    expect(databases.has(summary.id)).toBe(false);
+    await manager.open({ rootPath: ROOT });
+
+    expect(databases.get(summary.id)!.files.records.size).toBe(0);
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
+  });
+
   it('still opens when the trash sweep fails', async () => {
     const { manager, storage } = await setup();
     storage.files.set(trashPath(ID3, 'gone.png'), Buffer.from('orphan'));

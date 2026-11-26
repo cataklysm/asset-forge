@@ -154,7 +154,9 @@ export class WorkspaceManager {
     const database = await this.host.openDatabase(manifest.id);
     try {
       const meta = await database.meta.get();
-      if (meta === null) {
+      // A database created in this open knows no files yet, so a missing row proves nothing.
+      const freshDatabase = meta === null;
+      if (freshDatabase) {
         await database.meta.init(manifest);
       } else if (meta.id !== manifest.id) {
         throw new WorkspaceMismatchError(
@@ -175,10 +177,12 @@ export class WorkspaceManager {
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
-      try {
-        await sweepTrash({ storage, files: database.files });
-      } catch {
-        // Best effort: leftover trash binaries are swept on the next open.
+      if (!freshDatabase) {
+        try {
+          await sweepTrash({ storage, files: database.files });
+        } catch {
+          // Best effort: leftover trash binaries are swept on the next open.
+        }
       }
       const summary: WorkspaceSummary = {
         id: manifest.id,
