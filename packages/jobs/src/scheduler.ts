@@ -1,5 +1,5 @@
 import { ResourceClassSchema, isRetryableJobError, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
-import { JobError, type Job, type JobControl, type JobHandler, type JobRepository } from '@assetforge/core';
+import { JobError, type Job, type JobControl, type JobHandler, type JobOutcome, type JobRepository } from '@assetforge/core';
 import type { PauseGate } from './pause-gate.js';
 
 export const DEFAULT_LIMITS: Record<ResourceClass, number> = { cpu: 2, io: 2, local_gpu: 1, remote_api: 2 };
@@ -11,7 +11,10 @@ export const RETRY_DELAYS_MS = [5_000, 30_000] as const;
 export interface Scheduler extends JobControl {
   /** Recovers jobs found `running`, then begins claiming. */
   start(): Promise<void>;
-  /** Aborts running jobs, waits for them and puts the unfinished ones back to `queued`. */
+  /**
+   * Aborts running jobs and waits for them. An unfinished one goes back to `queued`, or ends `failed` with its
+   * handler's `interruptedCode` under `onInterrupted: 'fail'`.
+   */
   stop(): Promise<void>;
 }
 
@@ -74,9 +77,36 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let passing = false;
   let passAgain = false;
   let timer: { handle: unknown } | null = null;
-  const pendingCancels = new Set<Promise<void>>();
+  const pendingCancels = new Set<Promise<unknown>>();
 
   const iso = () => now().toISOString();
+
+  /** Ends a running job; the hook of its handler, if any, runs inside the end with the same outcome. */
+  const finishJob = (job: Job, outcome: JobOutcome): Promise<boolean> => {
+    const handler = handlers[job.type];
+    const errorCode = outcome.status === 'failed' ? outcome.errorCode : null;
+    return jobs.finish(job.id, {
+      status: outcome.status,
+      errorCode,
+      now: iso(),
+      ...(handler?.settled ? { settled: () => handler.settled!(job, outcome) } : {}),
+    });
+  };
+  /** The code a job of a handler under `onInterrupted: 'fail'` ends with when its run is cut off. */
+  const interruptedCodeOf = (job: Job): JobErrorCode => handlers[job.type]?.interruptedCode ?? 'internal_error';
+  /** The `settled` callback for `cancelPending`; absent when no handler has a hook. */
+  const cancelHook: { settled?: (job: Job) => void } = Object.values(handlers).some((h) => h.settled)
+    ? { settled: (job) => handlers[job.type]?.settled?.(job, { status: 'cancelled' }) }
+    : {};
+  /** Runs `work` so that `stop` waits for it. */
+  const tracked = async <T>(work: Promise<T>): Promise<T> => {
+    pendingCancels.add(work);
+    try {
+      return await work;
+    } finally {
+      pendingCancels.delete(work);
+    }
+  };
   /** Running jobs of the class per lane. */
   const runningOf = (rc: ResourceClass) => {
     const n = new Map<string | null, number>();
@@ -206,25 +236,30 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   /** Stores the outcome of a run. `job.attempt` is the value after the claim. */
   async function settle(job: Job, run: ActiveRun, outcome: Outcome): Promise<void> {
     record(job, run, outcome);
-    const at = iso();
-    const finish = async (status: 'succeeded' | 'failed' | 'cancelled', errorCode: JobErrorCode | null) => {
-      await jobs.finish(job.id, { status, errorCode, now: at });
+    const finish = async (end: JobOutcome) => {
+      await finishJob(job, end);
     };
-    if (run.cancelled) return finish('cancelled', null);
-    if (outcome.ok) return finish('succeeded', null);
+    if (run.cancelled) return finish({ status: 'cancelled' });
+    if (outcome.ok) return finish({ status: 'succeeded' });
+    const { error } = outcome;
     if (stopping) {
-      await jobs.release(job.id, at);
+      // Work with an unclear outcome is never put back: a later run could repeat it. A run that ended with a final
+      // code keeps it; one that was cut off, or could have been retried but for the stop, takes the interrupted code.
+      if (handlers[job.type]!.onInterrupted === 'fail') {
+        const final = error instanceof JobError && !isRetryableJobError(error.code);
+        return finish({ status: 'failed', errorCode: final ? error.code : interruptedCodeOf(job) });
+      }
+      await jobs.release(job.id, iso());
       return;
     }
-    const { error } = outcome;
     if (!(error instanceof JobError)) {
       log(`Job ${job.id} of type ${job.type} failed`, error);
-      return finish('failed', 'internal_error');
+      return finish({ status: 'failed', errorCode: 'internal_error' });
     }
-    if (!isRetryableJobError(error.code) || job.attempt >= MAX_ATTEMPTS) return finish('failed', error.code);
+    if (!isRetryableJobError(error.code) || job.attempt >= MAX_ATTEMPTS) return finish({ status: 'failed', errorCode: error.code });
     const delay = RETRY_DELAYS_MS[Math.min(job.attempt, RETRY_DELAYS_MS.length) - 1] ?? RETRY_DELAYS_MS[1];
     const runAfter = new Date(now().getTime() + delay).toISOString();
-    await jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter, now: at });
+    await jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter, now: iso() });
   }
 
   async function recover(): Promise<void> {
@@ -233,7 +268,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       if (stopping) break;
       const changedRow =
         handlers[job.type]?.onInterrupted === 'fail'
-          ? await jobs.finish(job.id, { status: 'failed', errorCode: 'internal_error', now: iso() })
+          ? await finishJob(job, { status: 'failed', errorCode: interruptedCodeOf(job) })
           : await jobs.release(job.id, iso());
       if (changedRow) n++;
     }
@@ -270,15 +305,43 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         run.controller.abort();
         return;
       }
-      const pending = (async () => {
-        if ((await jobs.cancelPending({ id: jobId, now: iso() })) > 0) changed();
-      })();
-      pendingCancels.add(pending);
-      try {
-        await pending;
-      } finally {
-        pendingCancels.delete(pending);
-      }
+      await tracked(
+        (async () => {
+          if ((await jobs.cancelPending({ id: jobId, now: iso(), ...cancelHook })) > 0) changed();
+        })(),
+      );
+    },
+
+    async cancelAll() {
+      if (stopping) return 0;
+      return tracked(
+        (async () => {
+          // Pending first: a job claimed meanwhile is running by then and is aborted below.
+          const pending = await jobs.cancelPending({ now: iso(), ...cancelHook });
+          if (pending > 0) changed();
+          // A stop that began meanwhile owns the running jobs.
+          if (stopping) return pending;
+          let running = 0;
+          const ending: Promise<void>[] = [];
+          for (const run of active.values()) {
+            // A run whose handler is done keeps its outcome, but a retry it is still storing is cancelled below.
+            if (run.settled) {
+              ending.push(run.done);
+              continue;
+            }
+            // Cancelled by an earlier call; not counted again.
+            if (run.cancelled) continue;
+            run.cancelled = true;
+            run.controller.abort();
+            running++;
+          }
+          if (ending.length === 0) return pending + running;
+          await Promise.all(ending);
+          const retried = await jobs.cancelPending({ now: iso(), ...cancelHook });
+          if (retried > 0) changed();
+          return pending + running + retried;
+        })(),
+      );
     },
 
     async stop() {
