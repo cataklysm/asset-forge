@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { RelationKindSchema } from '@assetforge/contracts';
-import { label, relationLabel } from '../src/renderer/src/labels.js';
+import { JobStatusSchema, RelationKindSchema } from '@assetforge/contracts';
+import { JOB_STATUS_LABELS, jobStatusLabel, label, relationLabel } from '../src/renderer/src/labels.js';
 
 describe('label', () => {
   it.each([
@@ -29,5 +29,32 @@ describe('relationLabel', () => {
 
   it('covers every relation kind', () => {
     expect(RelationKindSchema.options).toHaveLength(4);
+  });
+});
+
+describe('jobStatusLabel', () => {
+  it.each([
+    ['queued', 'Queued'],
+    ['running', 'Running'],
+    ['retry_wait', 'Retrying'],
+    ['waiting_remote', 'Waiting'],
+    ['succeeded', 'Done'],
+    ['failed', 'Failed'],
+    ['cancelled', 'Cancelled'],
+  ] as const)('%s -> %s', (status, expected) => {
+    expect(jobStatusLabel(status)).toBe(expected);
+  });
+
+  it('covers every job status, in the filter order', () => {
+    expect(JobStatusSchema.options).toHaveLength(7);
+    expect(Object.keys(JOB_STATUS_LABELS)).toEqual([
+      'queued',
+      'running',
+      'retry_wait',
+      'waiting_remote',
+      'succeeded',
+      'failed',
+      'cancelled',
+    ]);
   });
 });

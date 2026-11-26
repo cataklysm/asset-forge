@@ -1,4 +1,4 @@
-import type { RelationKind } from '@assetforge/contracts';
+import type { JobStatus, RelationKind } from '@assetforge/contracts';
 
 /** 'in_progress' -> 'In progress'. */
 export function label(value: string): string {
@@ -22,4 +22,19 @@ const INCOMING: Record<RelationKind, string> = {
 
 export function relationLabel(kind: RelationKind, direction: 'outgoing' | 'incoming'): string {
   return (direction === 'outgoing' ? OUTGOING : INCOMING)[kind];
+}
+
+/** In the order of the status filter. */
+export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  retry_wait: 'Retrying',
+  waiting_remote: 'Waiting',
+  succeeded: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+export function jobStatusLabel(status: JobStatus): string {
+  return JOB_STATUS_LABELS[status];
 }

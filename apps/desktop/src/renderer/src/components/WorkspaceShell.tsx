@@ -16,11 +16,11 @@ import type { View } from '../nav';
 import { AssetsScreen } from '../screens/AssetsScreen';
 import { AssetScreen } from '../screens/AssetScreen';
 import { InboxScreen } from '../screens/InboxScreen';
+import { JobsScreen } from '../screens/JobsScreen';
 import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { ALERT } from '../ui';
 import { AppShell, type Section } from './AppShell';
-import { Page } from './Page';
 
 interface Props {
   workspace: WorkspaceSummary;
@@ -120,7 +120,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
         ) : view.name === 'inbox' ? (
           <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
         ) : view.name === 'jobs' ? (
-          <Page title="Jobs">{null}</Page>
+          <JobsScreen />
         ) : (
           <ProjectsScreen
             state={shell.projectList}
