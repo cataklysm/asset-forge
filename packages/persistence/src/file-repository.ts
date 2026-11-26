@@ -13,7 +13,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
-import { asset, file, fileAnalysis, fileAnalysisProposal, fileMove, fileTag, job, tag } from './schema.js';
+import { asset, file, fileAnalysis, fileAnalysisProposal, fileMove, filePurge, fileTag, job, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
@@ -340,9 +340,24 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         tx.delete(job).where(eq(job.fileId, id)).run();
         const left = assetOfFile(tx, id);
         tx.delete(file).where(eq(file.id, id)).run();
+        // The tombstone tells the trash sweep that a leftover binary of this id may go.
+        if (row.deletedAt !== null) {
+          tx.insert(filePurge).values({ fileId: id, purgedAt: new Date().toISOString() }).onConflictDoNothing().run();
+        }
         reindexAssets(tx, [left]);
         return true;
       });
+    },
+    async listPurgedIds() {
+      return db
+        .select({ id: filePurge.fileId })
+        .from(filePurge)
+        .orderBy(asc(filePurge.fileId))
+        .all()
+        .map((r) => r.id);
+    },
+    async forgetPurge(id) {
+      db.delete(filePurge).where(eq(filePurge.fileId, id)).run();
     },
     async countTrashed() {
       return db.select({ n: count() }).from(file).where(trashed()).get()?.n ?? 0;

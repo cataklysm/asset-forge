@@ -348,6 +348,8 @@ class ProposalRows extends Map<string, Proposal> {}
 class InMemoryFiles implements FileRepository {
   /** Stored without tags; every method that returns a record attaches the current file tags and `hasProposal`. */
   readonly records = new Map<string, FileRecord>();
+  /** Purge tombstones: ids of trashed files whose row is gone and whose binary may still be in the trash. */
+  readonly purged = new Set<string>();
 
   constructor(
     private readonly covers: CoverChoices,
@@ -519,7 +521,16 @@ class InMemoryFiles implements FileRepository {
     if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
     this.onPurge(id);
     this.records.delete(id);
+    if (rec.deletedAt !== null) this.purged.add(id);
     return true;
+  }
+
+  async listPurgedIds(): Promise<string[]> {
+    return [...this.purged].sort();
+  }
+
+  async forgetPurge(id: string): Promise<void> {
+    this.purged.delete(id);
   }
 
   async countTrashed(): Promise<number> {

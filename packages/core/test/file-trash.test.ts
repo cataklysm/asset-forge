@@ -361,6 +361,19 @@ describe('purgeFiles', () => {
     expect(remove).toHaveBeenCalledWith(trashed!.relativePath);
     expect(purge.mock.invocationCallOrder[0]!).toBeLessThan(remove.mock.invocationCallOrder[0]!);
     expect(await trashCount(session)).toBe(0);
+    // The tombstone written with the row deletion goes once the binary is gone.
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+  });
+
+  it('removing a failed file outright leaves no tombstone', async () => {
+    const { session, db, control } = await setup();
+    const id = crypto.randomUUID();
+    await db.files.insertPending({ id, storageId: 's', originalName: 'f.png', relativePath: inboxPath(id, 'f.png'), mimeType: 'image/png', importedAt: TS, kind: 'image' });
+    await db.files.markFailed(id, 'Import was interrupted');
+
+    ok(await trashFiles(session, control, [id]));
+
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
   });
 
   it('purge of a live file is refused', async () => {
@@ -440,6 +453,12 @@ describe('purgeFiles', () => {
     expect(await purgeFiles(session, control, [file.id])).toEqual([{ fileId: file.id, file: null, error: null }]);
     expect(db.files.records.has(file.id)).toBe(false);
     expect(storage.files.has(trashed!.relativePath)).toBe(true);
+    // The tombstone stays, so the next sweep removes the binary and then the tombstone.
+    await expect(db.files.listPurgedIds()).resolves.toEqual([file.id]);
+
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [trashed!.relativePath], skipped: [] });
+    expect(storage.files.has(trashed!.relativePath)).toBe(false);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
   });
 });
 
@@ -470,34 +489,78 @@ describe('emptyTrash', () => {
 });
 
 describe('sweepTrash', () => {
-  it('sweepTrash removes binaries without a row and keeps the others', async () => {
+  it('sweepTrash removes only binaries of tombstoned ids without a row and keeps the others', async () => {
     const { session, storage, db, importOne, control } = await setup();
     const trashed = await importOne('t.png');
     const [t] = ok(await trashFiles(session, control, [trashed.id]));
     const live = await importOne('l.png');
-    const orphan = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
+    const purged = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
+    const NO_TOMBSTONE = '88888888-8888-4888-8888-888888888888';
+    const unknown = `${TRASH_DIR}/${NO_TOMBSTONE}_y.png`;
     const liveCopy = `${TRASH_DIR}/${live.id}_copy.png`;
     const notes = `${TRASH_DIR}/notes.txt`;
-    for (const p of [orphan, liveCopy, notes]) storage.files.set(p, Buffer.from(p));
+    for (const p of [purged, unknown, liveCopy, notes]) storage.files.set(p, Buffer.from(p));
+    db.files.purged.add(UNKNOWN_ID);
+    // A tombstone for an id that still has a row never removes its binaries.
+    db.files.purged.add(trashed.id);
 
     const result = await sweepTrash({ storage, files: db.files });
 
-    expect(result).toEqual({ removed: [orphan], skipped: [] });
-    expect(storage.files.has(orphan)).toBe(false);
+    expect(result).toEqual({ removed: [purged], skipped: [] });
+    expect(storage.files.has(purged)).toBe(false);
+    expect(storage.files.has(unknown)).toBe(true);
     expect(storage.files.has(t!.relativePath)).toBe(true);
     expect(storage.files.has(liveCopy)).toBe(true);
     expect(storage.files.has(notes)).toBe(true);
+    expect(await db.files.listPurgedIds()).not.toContain(UNKNOWN_ID);
   });
 
-  it('reports a binary that cannot be removed and never throws', async () => {
+  it('a binary without a row and without a tombstone survives the sweep', async () => {
     const { storage, db } = await setup();
-    const orphan = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
-    storage.files.set(orphan, Buffer.from('x'));
+    const stray = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
+    storage.files.set(stray, Buffer.from('x'));
+
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+    expect(storage.files.has(stray)).toBe(true);
+  });
+
+  it('a tombstone whose binary is already gone is cleared on a reachable storage, kept on an unreachable one', async () => {
+    const { storage, db } = await setup();
+    db.files.purged.add(UNKNOWN_ID);
+    storage.reachable = false;
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+    await expect(db.files.listPurgedIds()).resolves.toEqual([UNKNOWN_ID]);
+
+    storage.reachable = true;
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+  });
+
+  it('does nothing while the storage is unreachable', async () => {
+    const { storage, db } = await setup();
+    const purged = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
+    storage.files.set(purged, Buffer.from('x'));
+    db.files.purged.add(UNKNOWN_ID);
+    storage.reachable = false;
+    const remove = vi.spyOn(storage, 'remove');
+
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+    expect(remove).not.toHaveBeenCalled();
+    await expect(db.files.listPurgedIds()).resolves.toEqual([UNKNOWN_ID]);
+  });
+
+  it('reports a binary that cannot be removed, keeps its tombstone and never throws', async () => {
+    const { storage, db } = await setup();
+    const purged = `${TRASH_DIR}/${UNKNOWN_ID}_x.png`;
+    storage.files.set(purged, Buffer.from('x'));
+    db.files.purged.add(UNKNOWN_ID);
     storage.failNext('remove', new Error('EBUSY'));
-    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [orphan] });
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [purged] });
+    await expect(db.files.listPurgedIds()).resolves.toEqual([UNKNOWN_ID]);
 
     storage.failNext('list', new Error('EIO'));
     expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+    await expect(db.files.listPurgedIds()).resolves.toEqual([UNKNOWN_ID]);
   });
 });
 

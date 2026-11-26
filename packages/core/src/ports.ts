@@ -90,9 +90,14 @@ export interface FileRepository {
   /**
    * One transaction: deletes the file row and every row that references it, only for a row that is
    * in the trash or has status `failed`. False otherwise and for an unknown id. Rejects with
-   * InvalidOperationError and deletes nothing while the file has an open `file_move` row.
+   * InvalidOperationError and deletes nothing while the file has an open `file_move` row. For a
+   * trashed file the same transaction writes a purge tombstone (`file_purge`).
    */
   purge(id: string): Promise<boolean>;
+  /** The ids of purged trashed files whose tombstone is still there, ascending. */
+  listPurgedIds(): Promise<string[]>;
+  /** Deletes the purge tombstone of `id`; no-op without one. */
+  forgetPurge(id: string): Promise<void>;
   /** How many files are in the trash. */
   countTrashed(): Promise<number>;
   /** The ids of every file in the trash, newest deletion first. */

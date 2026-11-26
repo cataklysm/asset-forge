@@ -209,6 +209,15 @@ export const fileMove = sqliteTable(
   ],
 );
 
+/**
+ * Tombstone of a purged trashed file whose trash binary may still be on disk. No foreign key: it
+ * outlives the file row and is deleted once the binary is gone.
+ */
+export const filePurge = sqliteTable('file_purge', {
+  fileId: text('file_id').primaryKey(),
+  purgedAt: text('purged_at').notNull(),
+});
+
 // Workflows. Template, version and step definition rows are immutable once written.
 
 export const workflowTemplate = sqliteTable('workflow_template', {

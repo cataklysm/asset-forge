@@ -298,6 +298,39 @@ describe('file trash repository', () => {
     await expect(db.files.get(kept)).resolves.toMatchObject({ id: kept });
   });
 
+  test('purge of a trashed file writes a tombstone that forgetPurge deletes', async () => {
+    const a = await addFile('a.png', { assetId: PUMP, role: 'reference' });
+    const b = await addFile('b.png');
+    await trash(a);
+    await trash(b);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+
+    await db.files.purge(b);
+    await db.files.purge(a);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([a, b].sort());
+    expect(rows('select file_id, purged_at from file_purge where file_id = ?', a)).toEqual([
+      { file_id: a, purged_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) },
+    ]);
+
+    await db.files.forgetPurge(a);
+    await db.files.forgetPurge(uuid(999));
+    await expect(db.files.listPurgedIds()).resolves.toEqual([b]);
+  });
+
+  test('purge writes no tombstone for a failed file, a refused purge or a live file', async () => {
+    const failed = await addFile('broken.png', undefined, { complete: false });
+    await db.files.markFailed(failed, 'The file could not be imported');
+    await db.files.purge(failed);
+    const live = await addFile('live.png');
+    await db.files.purge(live);
+    const moving = await addFile('moving.png');
+    await trash(moving);
+    await db.fileMoves.begin({ ...trashMove(moving), kind: 'restore' });
+    await expect(db.files.purge(moving)).rejects.toMatchObject({ code: 'invalid_operation' });
+
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+  });
+
   test('purge refuses a file with an open move row and deletes nothing', async () => {
     const f = await addFile('moving.png', { assetId: PUMP, role: 'reference' });
     await tagFile(f, 'metal');

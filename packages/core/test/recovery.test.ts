@@ -227,8 +227,10 @@ describe('recovery on open', () => {
     await db.files.markComplete(ID1, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
     await db.fileMoves.begin({ ...trashMove(ID1, 'a.png') });
     storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+    // A purge whose binary removal did not happen: the row is gone, its tombstone is there.
     const orphan = trashPath(ID3, 'gone.png');
     storage.files.set(orphan, Buffer.from('orphan'));
+    db.files.purged.add(ID3);
     await manager.close();
 
     await manager.open({ rootPath: ROOT });
@@ -237,6 +239,23 @@ describe('recovery on open', () => {
     expect(db.files.records.get(ID1)!.deletedAt).not.toBeNull();
     expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
     expect(storage.files.has(orphan)).toBe(false);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+  });
+
+  it('a crash between the row deletion and the binary removal is cleaned up by the sweep on open', async () => {
+    const { manager, storage, db } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    await db.fileMoves.commit(ID1);
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+    // The purge transaction committed; the process died before the binary was removed.
+    await db.files.purge(ID1);
+    await manager.close();
+
+    await manager.open({ rootPath: ROOT });
+
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(false);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
   });
 
   it('does not sweep the trash when the database is new (a kept folder opened again)', async () => {
@@ -254,9 +273,26 @@ describe('recovery on open', () => {
     expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
   });
 
+  it('a trashed binary survives two opens with a recreated database', async () => {
+    const { manager, storage, db, summary } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    await db.fileMoves.commit(ID1);
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+
+    await manager.remove({ id: summary.id, trashFolder: false });
+    await manager.open({ rootPath: ROOT });
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
+    await manager.close();
+    await manager.open({ rootPath: ROOT });
+
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
+  });
+
   it('still opens when the trash sweep fails', async () => {
-    const { manager, storage } = await setup();
+    const { manager, storage, db } = await setup();
     storage.files.set(trashPath(ID3, 'gone.png'), Buffer.from('orphan'));
+    db.files.purged.add(ID3);
     await manager.close();
     storage.failNext('remove', new Error('EBUSY'));
     await expect(manager.open({ rootPath: ROOT })).resolves.toMatchObject({ rootPath: ROOT });
