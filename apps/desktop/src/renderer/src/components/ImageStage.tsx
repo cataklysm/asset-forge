@@ -153,6 +153,12 @@ function Stage({ file, onControls }: Props) {
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     const el = event.currentTarget;
+    // A press on the stage's own scrollbars belongs to the native scrolling, not to a pan. Measured
+    // against the stage's client area, so it holds whichever child the press lands on.
+    const rect = el.getBoundingClientRect();
+    const x = event.clientX - rect.left - el.clientLeft;
+    const y = event.clientY - rect.top - el.clientTop;
+    if (x < 0 || y < 0 || x >= el.clientWidth || y >= el.clientHeight) return;
     drag.current = { x: event.clientX, y: event.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
     el.setPointerCapture?.(event.pointerId);
   }

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ImageStage, type ViewerControls } from '../../src/renderer/src/components/ImageStage';
 import { ViewerToolbar } from '../../src/renderer/src/components/ViewerToolbar';
 import { fileRecord } from './fixtures';
@@ -146,6 +146,30 @@ it('dragging with the primary button pans the stage', () => {
   fireEvent.pointerUp(stage(), { pointerId: 1 });
   fireEvent.pointerMove(stage(), { clientX: 0, clientY: 0, pointerId: 1 });
   expect(stage().scrollLeft).toBe(550);
+});
+
+it('a press on the scrollbars starts no pan; a press on the image does', () => {
+  const file = png(4000, 2000);
+  render(<Viewer file={file} />);
+  fireEvent.click(button('100%'));
+  const capture = vi.fn();
+  stage().setPointerCapture = capture;
+  stage().scrollLeft = 500;
+  stage().scrollTop = 300;
+
+  // The stage's client area is 1000 × 800 inside a 1280 × 800 box: x ≥ 1000 is the vertical scrollbar.
+  fireEvent.pointerDown(stage(), { button: 0, clientX: 1005, clientY: 400, pointerId: 1 });
+  fireEvent.pointerMove(stage(), { clientX: 1005, clientY: 300, pointerId: 1 });
+  expect(stage().scrollLeft).toBe(500);
+  expect(stage().scrollTop).toBe(300);
+  expect(capture).not.toHaveBeenCalled();
+  fireEvent.pointerUp(stage(), { pointerId: 1 });
+
+  fireEvent.pointerDown(large(file)!, { button: 0, clientX: 400, clientY: 400, pointerId: 2 });
+  fireEvent.pointerMove(large(file)!, { clientX: 350, clientY: 380, pointerId: 2 });
+  expect(stage().scrollLeft).toBe(550);
+  expect(stage().scrollTop).toBe(320);
+  expect(capture).toHaveBeenCalledWith(2);
 });
 
 it('rotate swaps the box and refits', () => {
