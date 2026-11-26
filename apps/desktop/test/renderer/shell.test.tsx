@@ -1,12 +1,13 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { JOB_ERROR_MESSAGES, type JobSummary } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type JobSummary, type PausedProvider } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
-import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
-import { JOB_POLL_MS, sameSummary } from '../../src/renderer/src/jobs-context';
+import { JobsAppShell, WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
+import { JOB_POLL_MS, JobsProvider, sameSummary } from '../../src/renderer/src/jobs-context';
+import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, pageOf, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
@@ -104,7 +105,7 @@ it('Ctrl+F focuses the page search field', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: null };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: [] };
 
 function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}, handlers: FakeHandlers = {}) {
   const api = installFakeApi({
@@ -113,19 +114,11 @@ function workspaceShell(summary: () => JobSummary, onResume: () => void = () => 
       onResume();
       return {};
     },
+    'jobs:waitingByProvider': () => [],
     'assets:list': () => ({ items: [], total: 0 }),
     'trash:summary': () => ({ count: 0 }),
     'assetTypes:list': () => [],
     'projects:list': () => ({ items: [], total: 0 }),
-    'settings:getVision': () => ({
-      baseUrl: null,
-      timeoutSeconds: 120,
-      taggingModel: null,
-      promptModel: null,
-      hasApiKey: false,
-      fromEnvironment: false,
-      canStoreKey: true,
-    }),
     ...handlers,
   });
   render(
@@ -160,40 +153,85 @@ it('the Jobs entry shows no number while idle and the active count otherwise', a
   }
 });
 
-it('a paused queue shows the reason; Resume calls jobs:resume and the banner goes', async () => {
-  const user = userEvent.setup();
-  let summary: JobSummary = { ...IDLE, queued: 2, paused: { reason: 'provider_unreachable' } };
-  const api = workspaceShell(
-    () => summary,
-    () => {
-      summary = { ...summary, paused: null, changes: summary.changes + 1 };
-    },
+const LOCAL_ID = '00000000-0000-4000-8000-00000000a001';
+const RUNPOD_ID = '00000000-0000-4000-8000-00000000b001';
+const PAUSED_LOCAL: PausedProvider = { providerId: LOCAL_ID, providerName: 'Local Ollama', reason: 'provider_unreachable' };
+const PAUSED_RUNPOD: PausedProvider = { providerId: RUNPOD_ID, providerName: 'RunPod', reason: 'provider_unauthorized' };
+
+/** The app frame of the workspace shell inside its job and provider state, without the screens. */
+function jobsShell(summary: () => JobSummary, handlers: FakeHandlers = {}) {
+  const onNavigate = vi.fn();
+  const api = installFakeApi({
+    'jobs:summary': summary,
+    'jobs:resume': () => ({}),
+    'jobs:waitingByProvider': () => [
+      { providerId: LOCAL_ID, providerName: 'Local Ollama', waiting: 12 },
+      { providerId: RUNPOD_ID, providerName: 'RunPod', waiting: 3 },
+    ],
+    ...handlers,
+  });
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <JobsAppShell workspaceName="W" rootPath="root" section="assets" busy={false} onNavigate={onNavigate} onClose={() => {}}>
+          <p>content</p>
+        </JobsAppShell>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
   );
+  return { api, onNavigate };
+}
+
+it('one line per paused provider; Resume on the second resumes that provider only', async () => {
+  const user = userEvent.setup();
+  let summary: JobSummary = { ...IDLE, queued: 2, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] };
+  const { api } = jobsShell(() => summary, {
+    'jobs:resume': ({ providerId }) => {
+      summary = { ...summary, paused: summary.paused.filter((p) => p.providerId !== providerId), changes: summary.changes + 1 };
+      return {};
+    },
+  });
   const banner = await screen.findByRole('alert');
-  expect(banner.textContent).toContain(JOB_ERROR_MESSAGES.provider_unreachable);
-  expect(within(banner).queryByRole('button', { name: 'Settings' })).toBeNull();
-  await user.click(within(banner).getByRole('button', { name: 'Resume' }));
-  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-  expect(api.calls.filter((c) => c.channel === 'jobs:resume')).toHaveLength(1);
+  const local = within(banner).getByRole('group', { name: 'Local Ollama' });
+  const runpod = within(banner).getByRole('group', { name: 'RunPod' });
+  expect(local.textContent).toContain(JOB_ERROR_MESSAGES.provider_unreachable);
+  expect(runpod.textContent).toContain(JOB_ERROR_MESSAGES.provider_unauthorized);
+  await user.click(within(runpod).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(within(screen.getByRole('alert')).queryByRole('group', { name: 'RunPod' })).toBeNull());
+  expect(api.calls.filter((c) => c.channel === 'jobs:resume').map((c) => c.request)).toEqual([{ providerId: RUNPOD_ID }]);
+  expect(within(screen.getByRole('alert')).getByRole('group', { name: 'Local Ollama' })).toBeTruthy();
 });
 
-it.each(['provider_unauthorized', 'provider_not_configured'] as const)(
-  'a queue paused by %s offers Settings',
-  async (reason) => {
-    const user = userEvent.setup();
-    workspaceShell(() => ({ ...IDLE, paused: { reason } }));
-    const banner = await screen.findByRole('alert');
-    expect(banner.textContent).toContain(JOB_ERROR_MESSAGES[reason]);
-    await user.click(within(banner).getByRole('button', { name: 'Settings' }));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
-  },
-);
-
-it('the banner shows a failed resume and keeps the pause', async () => {
+it('Settings is offered only on the line paused for a settings reason', async () => {
   const user = userEvent.setup();
-  const onResume = vi.fn(() => {
-    throw fakeError('internal_error');
-  });
+  const { onNavigate } = jobsShell(() => ({ ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] }));
+  const banner = await screen.findByRole('alert');
+  expect(within(within(banner).getByRole('group', { name: 'Local Ollama' })).queryByRole('button', { name: 'Settings' })).toBeNull();
+  await user.click(within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Settings' }));
+  expect(onNavigate).toHaveBeenCalledWith('settings');
+});
+
+it('Move jobs on a line opens the move dialog with that provider as the fixed source', async () => {
+  const user = userEvent.setup();
+  jobsShell(() => ({ ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] }));
+  const banner = await screen.findByRole('alert');
+  await user.click(within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Move jobs' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Move jobs' });
+  expect(await within(dialog).findByText('3 waiting')).toBeTruthy();
+  expect(within(dialog).getByText('RunPod')).toBeTruthy();
+  expect(within(dialog).queryByRole('combobox', { name: 'From' })).toBeNull();
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog', { name: 'Move jobs' })).toBeNull();
+});
+
+it('no paused provider shows no banner', async () => {
+  const { api } = jobsShell(() => IDLE);
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:summary')).toBe(true));
+  await act(async () => {});
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('a paused line without a name shows Removed provider, and No provider for the jobs without one', () => {
   render(
     <AppShell
       workspaceName="Studio"
@@ -201,8 +239,39 @@ it('the banner shows a failed resume and keeps the pause', async () => {
       section="assets"
       busy={false}
       activeJobs={0}
-      paused="provider_unreachable"
-      onResume={async () => onResume()}
+      paused={[
+        { providerId: LOCAL_ID, providerName: null, reason: 'provider_not_configured' },
+        { providerId: null, providerName: null, reason: 'provider_not_configured' },
+      ]}
+      onNavigate={() => {}}
+      onClose={() => {}}
+    >
+      <p>content</p>
+    </AppShell>,
+  );
+  const banner = screen.getByRole('alert');
+  expect(within(banner).getByRole('group', { name: 'Removed provider' }).textContent).toContain(
+    JOB_ERROR_MESSAGES.provider_not_configured,
+  );
+  expect(within(banner).getByRole('group', { name: 'No provider' })).toBeTruthy();
+});
+
+it('the banner shows a failed resume in its line and keeps the pause', async () => {
+  const user = userEvent.setup();
+  const onResume = vi.fn((_providerId: string | null) => {
+    throw fakeError('internal_error');
+  });
+  const onMove = vi.fn();
+  render(
+    <AppShell
+      workspaceName="Studio"
+      rootPath="D:/work/studio"
+      section="assets"
+      busy={false}
+      activeJobs={0}
+      paused={[PAUSED_LOCAL]}
+      onResume={async (id) => onResume(id)}
+      onMove={onMove}
       onNavigate={() => {}}
       onClose={() => {}}
     >
@@ -211,13 +280,18 @@ it('the banner shows a failed resume and keeps the pause', async () => {
   );
   await user.click(screen.getByRole('button', { name: 'Resume' }));
   await waitFor(() => expect(screen.getByRole('alert').textContent).not.toContain(JOB_ERROR_MESSAGES.provider_unreachable));
+  expect(onResume).toHaveBeenCalledWith(LOCAL_ID);
   expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Move jobs' }));
+  expect(onMove).toHaveBeenCalledWith(LOCAL_ID);
 });
 
-it('sameSummary tells a changed pause reason apart', () => {
-  expect(sameSummary({ ...IDLE, paused: { reason: 'provider_unreachable' } }, { ...IDLE, paused: { reason: 'provider_unreachable' } })).toBe(true);
-  expect(sameSummary({ ...IDLE, paused: { reason: 'provider_unreachable' } }, { ...IDLE, paused: { reason: 'provider_unauthorized' } })).toBe(false);
-  expect(sameSummary(IDLE, { ...IDLE, paused: { reason: 'provider_unreachable' } })).toBe(false);
+it('sameSummary compares the pause list entry by entry', () => {
+  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL }] })).toBe(true);
+  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, reason: 'provider_unauthorized' }] })).toBe(false);
+  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, providerName: 'Local' }] })).toBe(false);
+  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] })).toBe(false);
+  expect(sameSummary(IDLE, { ...IDLE, paused: [PAUSED_LOCAL] })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, failed: 1 })).toBe(false);
 });
 
