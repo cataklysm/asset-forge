@@ -85,6 +85,13 @@
       "when": 1795722739597,
       "tag": "0011_eager_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795725967555,
+      "tag": "0012_clear_kate_bishop",
+      "breakpoints": true
     }
   ]
 }
