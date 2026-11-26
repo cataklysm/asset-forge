@@ -1160,16 +1160,80 @@ describe('createScheduler with a settled hook', () => {
     await s.scheduler.start();
     h.runOf(id).resolve();
     await flush();
-    expect(await s.scheduler.cancelAll()).toBe(0);
-    slow.gate.release!();
+    const cancelling = s.scheduler.cancelAll();
     await flush();
+    slow.gate.release!();
+    expect(await cancelling).toBe(0);
     expect(s.row(id).status).toBe('succeeded');
+    expect(h.settled.map((x) => x.outcome)).toEqual([{ status: 'succeeded' }]);
 
     const [waiting] = (await s.enqueue('t', 'cpu')) as [string];
     Object.assign(s.row(waiting), { status: 'retry_wait', runAfter: '2030-01-01T00:00:00.000Z' });
     await s.scheduler.stop();
     expect(await s.scheduler.cancelAll()).toBe(0);
     expect(s.row(waiting).status).toBe('retry_wait');
+  });
+
+  it('cancelAll cancels a retry that a settled run was still storing', async () => {
+    const h = hooked('cpu');
+    const gate: { release: (() => void) | null } = { release: null };
+    const s = setup({
+      handlers: { t: h.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async scheduleRetry(id: string, r: Parameters<JobRepository['scheduleRetry']>[1]) {
+            await new Promise<void>((resolve) => (gate.release = resolve));
+            return fake.scheduleRetry(id, r);
+          },
+        }),
+    });
+    h.bind(s.fake);
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.scheduler.start();
+    h.runOf(id).reject(new JobError('provider_timeout'));
+    await flush();
+    expect(gate.release).not.toBeNull();
+
+    const cancelling = s.scheduler.cancelAll();
+    await flush();
+    gate.release!();
+    expect(await cancelling).toBe(1);
+    expect(s.row(id).status).toBe('cancelled');
+    expect(h.settled).toEqual([{ id, outcome: { status: 'cancelled' }, rowStatus: 'cancelled' }]);
+  });
+
+  it('cancelAll does not count a run an earlier cancel already aborted', async () => {
+    const h = hooked('cpu');
+    const s = setup({ handlers: { t: h.handler } });
+    h.bind(s.fake);
+    const [a, b] = (await s.enqueue('t', 'cpu', 2)) as [string, string];
+    await s.scheduler.start();
+    await s.scheduler.cancel(a);
+    expect(await s.scheduler.cancelAll()).toBe(1);
+    h.runOf(a).resolve();
+    h.runOf(b).resolve();
+    await flush();
+    for (const id of [a, b]) expect(s.row(id).status).toBe('cancelled');
+    expect(h.settled.map((x) => x.id).sort()).toEqual([a, b].sort());
+  });
+
+  it('a fail handler ending at stop keeps a final code and takes interruptedCode for a retryable one', async () => {
+    const h = hooked('remote_api', 'fail', 'provider_outcome_unknown');
+    const s = setup({ handlers: { t: h.handler } });
+    h.bind(s.fake);
+    const [refused, timedOut] = (await s.enqueue('t', 'remote_api', 2)) as [string, string];
+    await s.scheduler.start();
+    const stopping = s.scheduler.stop();
+    await flush();
+    h.runOf(refused).reject(new JobError('provider_content_refused'));
+    h.runOf(timedOut).reject(new JobError('provider_timeout'));
+    await stopping;
+    expect(s.row(refused)).toMatchObject({ status: 'failed', errorCode: 'provider_content_refused' });
+    expect(s.row(timedOut)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+    expect(h.settled.map((x) => [x.id, x.outcome])).toEqual([
+      [refused, { status: 'failed', errorCode: 'provider_content_refused' }],
+      [timedOut, { status: 'failed', errorCode: 'provider_outcome_unknown' }],
+    ]);
   });
 
   it('stop waits for a cancelAll in progress', async () => {

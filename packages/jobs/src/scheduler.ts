@@ -241,13 +241,17 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     };
     if (run.cancelled) return finish({ status: 'cancelled' });
     if (outcome.ok) return finish({ status: 'succeeded' });
+    const { error } = outcome;
     if (stopping) {
-      // Work with an unclear outcome is never put back: a later run could repeat it.
-      if (handlers[job.type]!.onInterrupted === 'fail') return finish({ status: 'failed', errorCode: interruptedCodeOf(job) });
+      // Work with an unclear outcome is never put back: a later run could repeat it. A run that ended with a final
+      // code keeps it; one that was cut off, or could have been retried but for the stop, takes the interrupted code.
+      if (handlers[job.type]!.onInterrupted === 'fail') {
+        const final = error instanceof JobError && !isRetryableJobError(error.code);
+        return finish({ status: 'failed', errorCode: final ? error.code : interruptedCodeOf(job) });
+      }
       await jobs.release(job.id, iso());
       return;
     }
-    const { error } = outcome;
     if (!(error instanceof JobError)) {
       log(`Job ${job.id} of type ${job.type} failed`, error);
       return finish({ status: 'failed', errorCode: 'internal_error' });
@@ -318,13 +322,24 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           // A stop that began meanwhile owns the running jobs.
           if (stopping) return pending;
           let running = 0;
+          const ending: Promise<void>[] = [];
           for (const run of active.values()) {
-            if (run.settled) continue;
+            // A run whose handler is done keeps its outcome, but a retry it is still storing is cancelled below.
+            if (run.settled) {
+              ending.push(run.done);
+              continue;
+            }
+            // Cancelled by an earlier call; not counted again.
+            if (run.cancelled) continue;
             run.cancelled = true;
             run.controller.abort();
             running++;
           }
-          return pending + running;
+          if (ending.length === 0) return pending + running;
+          await Promise.all(ending);
+          const retried = await jobs.cancelPending({ now: iso(), ...cancelHook });
+          if (retried > 0) changed();
+          return pending + running + retried;
         })(),
       );
     },
