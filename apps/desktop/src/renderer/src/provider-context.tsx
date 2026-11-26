@@ -1,14 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   JobErrorCodeSchema,
+  type ListImageModelsResult,
   type ListModelsResult,
+  type ProviderKind,
   type ProviderList,
   type ProviderView,
   type SaveProvider,
 } from '@assetforge/contracts';
 import { ApiError, call } from './api';
 
-export type ProviderStatus = 'checking' | 'ready' | 'unreachable' | 'unauthorized' | 'no_vision_model' | 'error';
+export type ProviderStatus =
+  | 'checking'
+  | 'ready'
+  | 'unreachable'
+  | 'unauthorized'
+  | 'no_vision_model'
+  | 'no_edit_model'
+  | 'error';
 
 export interface ProvidersState {
   /** Null until the first answer; a later failed reload keeps the list held. */
@@ -17,18 +26,23 @@ export interface ProvidersState {
   loading: boolean;
   /** True when loading failed and no list is held (not the same as "no provider"). */
   failed: boolean;
-  /** The model list answer per entry; undefined before the first answer and while a request runs. */
+  /** The model list answer per `ollama` entry; undefined before the first answer and while a request runs. */
   models: Readonly<Record<string, ListModelsResult | undefined>>;
+  /** The edit model list answer per `venice` entry; `checking` while a request runs, absent before the first. */
+  imageModels: Readonly<Record<string, ListImageModelsResult | 'checking'>>;
   /** Loads the list again, then the model list of every entry; rejects when the list cannot be read. */
   reload(): Promise<void>;
-  /** Asks for the models of one entry; `refresh` asks the provider instead of the main process cache. Never rejects. */
+  /**
+   * Asks for the models of one entry by its kind: vision models for `ollama`, edit models for
+   * `venice`; `refresh` asks the provider instead of the main process cache. Never rejects.
+   */
   loadModels(id: string, refresh?: boolean): Promise<void>;
   /** Asks every entry with `refresh: true`, in parallel. */
   checkAll(): void;
   /** Saves, takes the returned entry into the list and loads its models. */
   save(input: SaveProvider): Promise<ProviderView>;
   remove(id: string): Promise<void>;
-  /** Records locally what the main process stored after a start, so the next dialog preselects it. */
+  /** Records locally what the main process stored after an analysis start, so the next dialog preselects it. */
   noteUsed(id: string): void;
 }
 
@@ -37,6 +51,7 @@ const EMPTY: ProvidersState = {
   loading: false,
   failed: false,
   models: {},
+  imageModels: {},
   reload: async () => {},
   loadModels: async () => {},
   checkAll: () => {},
@@ -48,7 +63,7 @@ const EMPTY: ProvidersState = {
 const ProvidersContext = createContext<ProvidersState>(EMPTY);
 
 /** A failed call as a model list answer: its code when it is a job error code, otherwise a generic error. */
-function failureOf(error: unknown): ListModelsResult {
+function failureOf(error: unknown): Extract<ListModelsResult, { ok: false }> {
   const code = error instanceof ApiError ? JobErrorCodeSchema.safeParse(error.code) : null;
   return { ok: false, code: code?.success ? code.data : 'internal_error' };
 }
@@ -61,6 +76,19 @@ function upsert(list: ProviderList | null, view: ProviderView): ProviderList | n
   return { ...list, providers };
 }
 
+/** `record` without key `id`; the same object when it has none. */
+function without<T>(record: Record<string, T>, id: string): Record<string, T> {
+  if (!(id in record)) return record;
+  const rest = { ...record };
+  delete rest[id];
+  return rest;
+}
+
+/** The kind of entry `id`; an entry that is not listed counts as `ollama`. */
+function kindOf(list: ProviderList | null | undefined, id: string): ProviderKind {
+  return list?.providers.find((p) => p.id === id)?.kind ?? 'ollama';
+}
+
 /**
  * The provider entries of the app and the model list of each. Loads the list once on mount and the
  * models of every entry in parallel; an answer for an entry is taken only when it is the newest
@@ -69,6 +97,7 @@ function upsert(list: ProviderList | null, view: ProviderView): ProviderList | n
 export function ProviderSettingsProvider({ children }: { children: ReactNode }) {
   const [list, setList] = useState<ProviderList | null>(null);
   const [models, setModels] = useState<Record<string, ListModelsResult | undefined>>({});
+  const [imageModels, setImageModels] = useState<Record<string, ListImageModelsResult | 'checking'>>({});
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const disposed = useRef(false);
@@ -84,15 +113,27 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   const loadModels = useCallback(async (id: string, refresh = false) => {
     const request = (modelRequests.current.get(id) ?? 0) + 1;
     modelRequests.current.set(id, request);
+    const input = refresh ? { providerId: id, refresh: true } : { providerId: id };
+    const newest = () => !disposed.current && modelRequests.current.get(id) === request;
+    if (kindOf(listRef.current, id) === 'venice') {
+      setImageModels((m) => (m[id] === 'checking' ? m : { ...m, [id]: 'checking' }));
+      let result: ListImageModelsResult;
+      try {
+        result = await call('providers:listImageModels', input);
+      } catch (e) {
+        result = failureOf(e);
+      }
+      if (newest()) setImageModels((m) => ({ ...m, [id]: result }));
+      return;
+    }
     setModels((m) => (m[id] === undefined ? m : { ...m, [id]: undefined }));
     let result: ListModelsResult;
     try {
-      result = await call('providers:listModels', refresh ? { providerId: id, refresh: true } : { providerId: id });
+      result = await call('providers:listModels', input);
     } catch (e) {
       result = failureOf(e);
     }
-    if (disposed.current || modelRequests.current.get(id) !== request) return;
-    setModels((m) => ({ ...m, [id]: result }));
+    if (newest()) setModels((m) => ({ ...m, [id]: result }));
   }, []);
 
   // Only the newest reload may take its answer; an older one arriving later is dropped.
@@ -156,13 +197,10 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
           ...current,
           providers: current.providers.filter((p) => p.id !== id),
           lastUsedId: current.lastUsedId === id ? null : current.lastUsedId,
+          lastUsedImageId: current.lastUsedImageId === id ? null : current.lastUsedImageId,
         });
-      setModels((m) => {
-        if (!(id in m)) return m;
-        const rest = { ...m };
-        delete rest[id];
-        return rest;
-      });
+      setModels((m) => without(m, id));
+      setImageModels((m) => without(m, id));
     },
     [takeList],
   );
@@ -176,8 +214,8 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   );
 
   const value = useMemo<ProvidersState>(
-    () => ({ list, loading, failed, models, reload, loadModels, checkAll, save, remove, noteUsed }),
-    [list, loading, failed, models, reload, loadModels, checkAll, save, remove, noteUsed],
+    () => ({ list, loading, failed, models, imageModels, reload, loadModels, checkAll, save, remove, noteUsed }),
+    [list, loading, failed, models, imageModels, reload, loadModels, checkAll, save, remove, noteUsed],
   );
 
   return <ProvidersContext.Provider value={value}>{children}</ProvidersContext.Provider>;
@@ -190,21 +228,41 @@ export function useProviders(): ProvidersState {
 
 const UNREACHABLE: ReadonlySet<string> = new Set(['provider_unreachable', 'provider_timeout', 'provider_unavailable']);
 
-/** The state of entry `id` from its model list answer. */
-export function providerStatus(state: Pick<ProvidersState, 'models'>, id: string): ProviderStatus {
-  const answer = state.models[id];
-  if (answer === undefined) return 'checking';
-  if (answer.ok) return answer.models.some((m) => m.vision !== false) ? 'ready' : 'no_vision_model';
-  if (UNREACHABLE.has(answer.code)) return 'unreachable';
-  if (answer.code === 'provider_unauthorized') return 'unauthorized';
+/**
+ * The state of entry `id` from its model list answer: the edit model list for a `venice` entry,
+ * the vision model list otherwise (also for an entry that is not listed).
+ */
+export function providerStatus(
+  state: Pick<ProvidersState, 'list' | 'models' | 'imageModels'>,
+  id: string,
+): ProviderStatus {
+  let failure: Extract<ListModelsResult, { ok: false }>;
+  if (kindOf(state.list, id) === 'venice') {
+    const answer = state.imageModels[id];
+    if (answer === undefined || answer === 'checking') return 'checking';
+    if (answer.ok) return answer.models.length > 0 ? 'ready' : 'no_edit_model';
+    failure = answer;
+  } else {
+    const answer = state.models[id];
+    if (answer === undefined) return 'checking';
+    if (answer.ok) return answer.models.some((m) => m.vision !== false) ? 'ready' : 'no_vision_model';
+    failure = answer;
+  }
+  if (UNREACHABLE.has(failure.code)) return 'unreachable';
+  if (failure.code === 'provider_unauthorized') return 'unauthorized';
   return 'error';
 }
 
-/** The entry a dialog preselects: the one used last when it is still listed, otherwise the first; null without any. */
-export function defaultProviderId(state: Pick<ProvidersState, 'list'>): string | null {
+/**
+ * The entry of `kind` a dialog preselects: the one of that kind used last when it is still listed,
+ * otherwise the first of that kind; null without any.
+ */
+export function defaultProviderId(state: Pick<ProvidersState, 'list'>, kind: ProviderKind = 'ollama'): string | null {
   const list = state.list;
   if (list === null) return null;
-  return list.providers.find((p) => p.id === list.lastUsedId)?.id ?? list.providers[0]?.id ?? null;
+  const providers = list.providers.filter((p) => p.kind === kind);
+  const lastUsed = kind === 'venice' ? list.lastUsedImageId : list.lastUsedId;
+  return providers.find((p) => p.id === lastUsed)?.id ?? providers[0]?.id ?? null;
 }
 
 /** The stored default model of entry `id` for `purpose`; null when there is none or the entry is not listed. */
@@ -216,4 +274,18 @@ export function defaultModelOf(
   const entry = id === null ? undefined : state.list?.providers.find((p) => p.id === id);
   if (entry === undefined) return null;
   return purpose === 'tagging' ? entry.taggingModel : entry.promptModel;
+}
+
+/**
+ * The edit model `venice` entry `id` starts with: its stored `editModel` when the loaded list
+ * contains it, else the first listed one (null for an empty list). Without a usable list (still
+ * asked or failed) the stored model stands. Null for an entry that is not a listed `venice` one.
+ */
+export function defaultEditModelOf(state: Pick<ProvidersState, 'list' | 'imageModels'>, id: string | null): string | null {
+  const entry = id === null ? undefined : state.list?.providers.find((p) => p.id === id);
+  if (entry === undefined || entry.kind !== 'venice') return null;
+  const answer = state.imageModels[entry.id];
+  if (answer === undefined || answer === 'checking' || !answer.ok) return entry.editModel;
+  if (entry.editModel !== null && answer.models.some((m) => m.name === entry.editModel)) return entry.editModel;
+  return answer.models[0]?.name ?? null;
 }

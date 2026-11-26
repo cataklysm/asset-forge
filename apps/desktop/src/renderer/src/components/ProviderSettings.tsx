@@ -4,9 +4,11 @@ import {
   JOB_ERROR_MESSAGES,
   MAX_PROVIDERS,
   PROVIDER_NAME_MAX,
+  VENICE_DEFAULT_BASE_URL,
   VISION_TIMEOUT_DEFAULT_SECONDS,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
+  type ProviderKind,
   type ProviderList,
   type ProviderView,
   type SaveProvider,
@@ -19,6 +21,8 @@ import {
   BASE_URL_TITLE,
   DELETE_LABEL,
   DELETE_PROVIDER_TITLE,
+  EDIT_MODEL_LABEL,
+  EDIT_MODEL_TITLE,
   ENTER_BASE_URL,
   ENTER_NAME,
   FROM_ENVIRONMENT,
@@ -29,6 +33,9 @@ import {
   NEW_PROVIDER_TITLE,
   NO_KEY_STORE_TITLE,
   PROMPT_MODEL_TITLE,
+  PROVIDER_KIND_LABEL,
+  PROVIDER_KIND_LABELS,
+  PROVIDER_KIND_TITLE,
   PROVIDER_LIMIT_TITLE,
   PROVIDER_NAME_LABEL,
   PROVIDER_NAME_TITLE,
@@ -48,15 +55,17 @@ import {
   deleteProviderTitle,
 } from '../labels';
 import { providerStatus, useProviders } from '../provider-context';
-import { ALERT, BUTTON, BUTTON_INLINE, ICON_BUTTON, INPUT, LABEL, MUTED, SECTION_TITLE } from '../ui';
+import { ALERT, BUTTON, BUTTON_INLINE, ICON_BUTTON, INPUT, LABEL, MUTED, SECTION_TITLE, SELECT } from '../ui';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ModelSelect } from './ModelSelect';
+import { EditModelSelect, ModelSelect } from './ModelSelect';
 
 /** The selection of the editor for an entry that is not saved yet; never a provider id. */
 const NEW = 'new';
 
 /** The fields of one entry, as typed. */
 interface Draft {
+  /** Chosen only for an entry that is not saved yet. */
+  kind: ProviderKind;
   name: string;
   baseUrl: string;
   /** Write-only: never filled from the stored entry, cleared after a successful save. */
@@ -66,9 +75,16 @@ interface Draft {
   timeout: string;
   taggingModel: string | null;
   promptModel: string | null;
+  editModel: string | null;
 }
 
+const KINDS: readonly ProviderKind[] = ['ollama', 'venice'];
+
+/** The base URL a new entry of `kind` starts with. */
+const baseUrlOf = (kind: ProviderKind) => (kind === 'venice' ? VENICE_DEFAULT_BASE_URL : '');
+
 const draftOf = (view: ProviderView | null): Draft => ({
+  kind: view?.kind ?? 'ollama',
   name: view?.name ?? '',
   baseUrl: view?.baseUrl ?? '',
   apiKey: '',
@@ -76,6 +92,7 @@ const draftOf = (view: ProviderView | null): Draft => ({
   timeout: String(view?.timeoutSeconds ?? VISION_TIMEOUT_DEFAULT_SECONDS),
   taggingModel: view?.taggingModel ?? null,
   promptModel: view?.promptModel ?? null,
+  editModel: view?.editModel ?? null,
 });
 
 /** The timeout in seconds, or null when it is not a whole number in range. */
@@ -272,21 +289,29 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const keyTitle = list.canStoreKey ? API_KEY_TITLE : NO_KEY_STORE_TITLE;
   const status = entry === null ? null : providerStatus(providers, entry.id);
-  const answer = entry === null ? undefined : providers.models[entry.id];
-  const failure = answer !== undefined && !answer.ok ? JOB_ERROR_MESSAGES[answer.code] : undefined;
+  const answer = entry === null ? undefined : draft.kind === 'venice' ? providers.imageModels[entry.id] : providers.models[entry.id];
+  const failure = answer !== undefined && answer !== 'checking' && !answer.ok ? JOB_ERROR_MESSAGES[answer.code] : undefined;
+
+  /** A base URL still at the prefill of the previous kind follows the new kind; a typed one stays. */
+  const changeKind = (kind: ProviderKind) =>
+    setDraft((d) => ({ ...d, kind, baseUrl: d.baseUrl.trim() === baseUrlOf(d.kind) ? baseUrlOf(kind) : d.baseUrl }));
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (locked || busy || reason !== null) return;
     const sent = draft;
+    const venice = sent.kind === 'venice';
     const input: SaveProvider = {
       name: sent.name.trim(),
       baseUrl: sent.baseUrl.trim(),
       timeoutSeconds: timeoutOf(sent.timeout)!,
-      taggingModel: sent.taggingModel,
-      promptModel: sent.promptModel,
+      taggingModel: venice ? null : sent.taggingModel,
+      promptModel: venice ? null : sent.promptModel,
     };
+    if (venice) input.editModel = sent.editModel;
+    // The kind is sent only on create; an existing entry keeps its own.
     if (entry !== null) input.id = entry.id;
+    else input.kind = sent.kind;
     if (sent.apiKey !== '') input.apiKey = sent.apiKey;
     else if (sent.clearKey) input.apiKey = null;
     onSave(input, (view) =>
@@ -297,6 +322,31 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
 
   return (
     <form className="flex min-w-0 flex-1 flex-col gap-4" onSubmit={onSubmit} aria-busy={busy || undefined}>
+      {entry === null ? (
+        <label className="flex flex-col gap-1" title={PROVIDER_KIND_TITLE}>
+          <span className={LABEL}>{PROVIDER_KIND_LABEL}</span>
+          <select
+            className={`w-48 ${SELECT}`}
+            value={draft.kind}
+            disabled={locked}
+            onChange={(e) => changeKind(e.target.value as ProviderKind)}
+          >
+            {KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {PROVIDER_KIND_LABELS[kind]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <div className="flex items-center gap-2 text-sm">
+          <span className={LABEL}>{PROVIDER_KIND_LABEL}</span>
+          <span className="text-text" data-kind="">
+            {PROVIDER_KIND_LABELS[entry.kind]}
+          </span>
+        </div>
+      )}
+
       <label className="flex flex-col gap-1" title={PROVIDER_NAME_TITLE}>
         <span className={LABEL}>{PROVIDER_NAME_LABEL}</span>
         <input
@@ -367,27 +417,41 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
         />
       </label>
 
-      <div className="flex flex-col gap-1" title={TAGGING_MODEL_TITLE}>
-        <span className={LABEL}>{MODEL_PURPOSE_LABELS.tagging}</span>
-        <ModelSelect
-          providerId={entry?.id ?? null}
-          purpose="tagging"
-          value={draft.taggingModel}
-          disabled={locked}
-          onChange={(taggingModel) => update({ taggingModel })}
-        />
-      </div>
+      {draft.kind === 'venice' ? (
+        <div className="flex flex-col gap-1" title={EDIT_MODEL_TITLE}>
+          <span className={LABEL}>{EDIT_MODEL_LABEL}</span>
+          <EditModelSelect
+            providerId={entry?.id ?? null}
+            value={draft.editModel}
+            disabled={locked}
+            onChange={(editModel) => update({ editModel })}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1" title={TAGGING_MODEL_TITLE}>
+            <span className={LABEL}>{MODEL_PURPOSE_LABELS.tagging}</span>
+            <ModelSelect
+              providerId={entry?.id ?? null}
+              purpose="tagging"
+              value={draft.taggingModel}
+              disabled={locked}
+              onChange={(taggingModel) => update({ taggingModel })}
+            />
+          </div>
 
-      <div className="flex flex-col gap-1" title={PROMPT_MODEL_TITLE}>
-        <span className={LABEL}>{MODEL_PURPOSE_LABELS.prompt}</span>
-        <ModelSelect
-          providerId={entry?.id ?? null}
-          purpose="prompt"
-          value={draft.promptModel}
-          disabled={locked}
-          onChange={(promptModel) => update({ promptModel })}
-        />
-      </div>
+          <div className="flex flex-col gap-1" title={PROMPT_MODEL_TITLE}>
+            <span className={LABEL}>{MODEL_PURPOSE_LABELS.prompt}</span>
+            <ModelSelect
+              providerId={entry?.id ?? null}
+              purpose="prompt"
+              value={draft.promptModel}
+              disabled={locked}
+              onChange={(promptModel) => update({ promptModel })}
+            />
+          </div>
+        </>
+      )}
 
       {status !== null && (
         <div className="flex items-center gap-2 text-sm">
