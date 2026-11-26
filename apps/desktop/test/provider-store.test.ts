@@ -771,6 +771,35 @@ describe('provider store: kinds', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  it.each([
+    ['refuses', 'http://example.com', false],
+    ['loads', 'http://127.0.0.1:11500/api/v1', true],
+  ])('%s a stored venice entry on %s when reading the file', (_label, baseUrl, loads) => {
+    writeFileSync(
+      settingsFile(),
+      JSON.stringify({
+        version: 3,
+        providers: [
+          { id: PREPARED, kind: 'venice', name: 'V', baseUrl, timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: 'edit-a' },
+        ],
+        lastUsed: { vision: null, image: null },
+        adoptLegacyKey: null,
+      }),
+    );
+    mkdirSync(credentials(), { recursive: true });
+    writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
+    const s = store();
+    if (loads) {
+      expect(s.list().providers).toMatchObject([{ id: PREPARED, kind: 'venice', baseUrl, hasApiKey: true }]);
+      expect(existsSync(settingsFile())).toBe(true);
+    } else {
+      expect(s.list().providers).toEqual([]);
+      expect(s.apiKeyFor(PREPARED, baseUrl)).toBeNull();
+      expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
+      expect(existsSync(settingsFile())).toBe(false);
+    }
+  });
+
   it('allows plain http for an ollama entry anywhere', () => {
     expect(store().save(input({ baseUrl: 'http://example.com' })).baseUrl).toBe('http://example.com');
   });

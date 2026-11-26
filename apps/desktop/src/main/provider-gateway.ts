@@ -67,6 +67,8 @@ export function createProviderGateway(o: {
     return entry !== null && entry.kind === kind ? entry : null;
   };
 
+  // Looking up the adapter caches before the kind check is safe only because an entry's kind never changes
+  // and every change of an entry clears both maps.
   const vision = (id: string | null): VisionProvider | null => {
     const existing = id === null ? undefined : visionAdapters.get(id);
     if (existing !== undefined) return existing;

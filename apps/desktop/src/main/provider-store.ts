@@ -159,7 +159,9 @@ const V3FileSchema = z.object({
         })
         .refine((e) =>
           e.kind === 'venice' ? e.taggingModel === null && e.promptModel === null : e.editModel === null,
-        ),
+        )
+        // The save rule holds on read too: a hand-edited file must not send a stored key over plain http.
+        .refine((e) => e.kind !== 'venice' || secureForImages(e.baseUrl)),
     )
     .max(MAX_PROVIDERS)
     .refine((entries) => new Set(entries.map((e) => e.id)).size === entries.length),
@@ -448,7 +450,12 @@ function environment(env: NodeJS.ProcessEnv): ProviderEntry | null {
 
 /** An image provider carries a key for a paid service: https, or plain http only to this machine. */
 function secureForImages(baseUrl: string): boolean {
-  const url = new URL(baseUrl);
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return false;
+  }
   if (url.protocol === 'https:') return true;
   // The WHATWG parser has already normalised IPv4 forms (e.g. `127.1`) and IPv6 literals (e.g. `[0::1]`).
   const host = url.hostname;
