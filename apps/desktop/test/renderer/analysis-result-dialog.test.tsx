@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type {
-  FileRecord,
-  IpcResponse,
-  JobSummary,
-  JobView,
-  ListModelsResult,
-  ProposalView,
-  VisionSettingsView,
+import {
+  JOB_ERROR_MESSAGES,
+  type FileRecord,
+  type IpcResponse,
+  type JobSummary,
+  type JobView,
+  type ListModelsResult,
+  type ProposalView,
+  type VisionSettingsView,
 } from '@assetforge/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -21,7 +22,7 @@ import {
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AI_CHIP, BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId } from './fixtures';
 
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -113,12 +114,12 @@ function setup(file: FileRecord, options: Options = {}) {
   const onClose = vi.fn();
   const onChanged = vi.fn();
   const onOpenSettings = vi.fn();
-  const ui = (open: boolean) => (
+  const ui = (open: boolean, shownFile: FileRecord = file) => (
     <JobsProvider>
       <ProviderSettingsProvider>
         <AnalysisResultDialog
           open={open}
-          file={file}
+          file={shownFile}
           onClose={onClose}
           onChanged={onChanged}
           onOpenSettings={onOpenSettings}
@@ -127,7 +128,7 @@ function setup(file: FileRecord, options: Options = {}) {
     </JobsProvider>
   );
   const view = render(ui(options.open ?? true));
-  return { api, state, onClose, onChanged, onOpenSettings, rerender: (open: boolean) => view.rerender(ui(open)) };
+  return { api, state, onClose, onChanged, onOpenSettings, rerender: (open: boolean, shownFile?: FileRecord) => view.rerender(ui(open, shownFile)) };
 }
 
 const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
@@ -215,6 +216,93 @@ describe('AnalysisResultDialog', () => {
     await providerReady();
     await userEvent.setup().click(button('Analyse'));
     await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
+  });
+
+  it('a re-analysis that failed after the stored proposal shows its message above the still usable proposal', async () => {
+    const file = fileRecord();
+    const job = jobOf(file, {
+      status: 'failed',
+      createdAt: '2026-01-01T00:05:00.000Z',
+      errorCode: 'provider_timeout',
+      errorMessage: JOB_ERROR_MESSAGES.provider_timeout,
+    });
+    setup(file, { stored: { proposal: proposalOf(), job } });
+    expect((await screen.findByRole('alert')).textContent).toBe(JOB_ERROR_MESSAGES.provider_timeout);
+    const alert = screen.getByRole('alert');
+    const chips = screen.getByRole('group', { name: 'Proposed tags' });
+    expect(alert.compareDocumentPosition(chips) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tagBox('Wood').checked).toBe(true);
+    expect(button('Accept').disabled).toBe(false);
+  });
+
+  it('a failed job without a message falls back to the fixed text of its code', async () => {
+    const file = fileRecord();
+    const job = jobOf(file, {
+      status: 'failed',
+      createdAt: '2026-01-01T00:05:00.000Z',
+      errorCode: 'provider_unauthorized',
+      errorMessage: null,
+    });
+    setup(file, { stored: { proposal: proposalOf(), job } });
+    expect((await screen.findByRole('alert')).textContent).toBe(JOB_ERROR_MESSAGES.provider_unauthorized);
+  });
+
+  it('a failed job older than the stored proposal shows no alert', async () => {
+    const file = fileRecord();
+    const job = jobOf(file, {
+      status: 'failed',
+      createdAt: '2025-12-31T23:00:00.000Z',
+      errorCode: 'provider_timeout',
+      errorMessage: JOB_ERROR_MESSAGES.provider_timeout,
+    });
+    setup(file, { stored: { proposal: proposalOf(), job } });
+    await screen.findByRole('checkbox', { name: 'Wood' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('an Analyse still in flight after closing and reopening for another file neither blocks nor reports on it', async () => {
+    const a = fileRecord({ originalName: 'a.png' });
+    const b = fileRecord({ originalName: 'b.png' });
+    const pending = deferred<IpcResponse<'analysis:enqueue'>>();
+    const { api, onClose, rerender } = setup(a, { handlers: { 'analysis:enqueue': () => pending.promise } });
+    await providerReady();
+    const user = userEvent.setup();
+    await user.click(button('Analyse'));
+    expect(button('Analyse').disabled).toBe(true);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    rerender(false);
+    rerender(true, b);
+    await waitFor(() =>
+      expect(callsOf(api, 'analysis:getProposal').some((c) => (c.request as { fileId: string }).fileId === b.id)).toBe(true),
+    );
+    await waitFor(() => expect(button('Analyse').disabled).toBe(false));
+
+    const readsOfA = callsOf(api, 'analysis:getProposal').filter((c) => (c.request as { fileId: string }).fileId === a.id).length;
+    await act(async () =>
+      pending.resolve({ enqueued: 0, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } }),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(button('Analyse').disabled).toBe(false);
+    expect(callsOf(api, 'analysis:getProposal').filter((c) => (c.request as { fileId: string }).fileId === a.id)).toHaveLength(readsOfA);
+  });
+
+  it('an accept that succeeds after the dialog moved on reports the change but does not close the new opening', async () => {
+    const a = fileRecord({ originalName: 'a.png' });
+    const b = fileRecord({ originalName: 'b.png' });
+    const pending = deferred<IpcResponse<'analysis:acceptProposal'>>();
+    const { api, onClose, onChanged, rerender } = setup(a, {
+      stored: { proposal: proposalOf(), job: null },
+      handlers: { 'analysis:acceptProposal': () => pending.promise },
+    });
+    await screen.findByRole('checkbox', { name: 'Wood' });
+    await userEvent.setup().click(button('Accept'));
+    await waitFor(() => expect(callsOf(api, 'analysis:acceptProposal')).toHaveLength(1));
+    rerender(false);
+    rerender(true, b);
+    await act(async () => pending.resolve({}));
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('shows every proposed tag switched on in the AI chip style and the model it came from', async () => {

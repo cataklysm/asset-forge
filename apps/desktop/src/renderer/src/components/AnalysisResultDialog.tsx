@@ -21,8 +21,8 @@ interface Props {
   onClose(): void;
   /** After an accept or a discard changed the file's tags or proposal. */
   onChanged(): void;
-  /** Shows the settings screen; the dialog closes first. Without it no Settings button is offered. */
-  onOpenSettings?(): void;
+  /** Shows the settings screen; the dialog closes first. */
+  onOpenSettings(): void;
 }
 
 /** Shown when an accept would act on a proposal other than the one on screen. */
@@ -56,6 +56,9 @@ const isActive = (job: JobView | null) =>
 
 const NO_OFF: ReadonlySet<string> = new Set();
 
+/** Whether ISO time `a` is later than `b`. */
+const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
+
 /**
  * The single-image analysis: starts a proposal, shows the job while it runs and the stored tag
  * proposal when it is there (tags can be switched off before accepting). It re-reads whenever the
@@ -68,8 +71,13 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   const [shown, setShown] = useState<Shown | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
+  // Every open (or switch to another file) is a new opening; work started in one never touches the next.
+  const openingRef = useRef(0);
+  const [opening, setOpening] = useState(0);
+  // The opening whose action is in flight; another opening is not blocked by it.
+  const busyRef = useRef<number | null>(null);
+  const [busyOpening, setBusyOpening] = useState<number | null>(null);
+  const busy = busyOpening !== null && busyOpening === opening;
   // The owner's pick for this file; until then the tagging default.
   const [chosen, setChosen] = useState<{ fileId: string; model: string | null } | null>(null);
   const fileIdRef = useRef(fileId);
@@ -100,6 +108,10 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   // Opening (or another file) starts fresh; a moved change token re-reads what is shown.
   useEffect(() => {
     if (fileId === null) {
+      if (lastFileId.current !== null) {
+        openingRef.current += 1;
+        setOpening(openingRef.current);
+      }
       lastFileId.current = null;
       readSeq.current += 1;
       setShown(null);
@@ -108,6 +120,8 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
     }
     if (lastFileId.current !== fileId) {
       lastFileId.current = fileId;
+      openingRef.current += 1;
+      setOpening(openingRef.current);
       setShown(null);
       setError(null);
       setChosen(null);
@@ -119,21 +133,29 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   const model = chosen !== null && chosen.fileId === fileId ? chosen.model : (settings?.taggingModel ?? null);
 
-  async function run(action: () => Promise<void>) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
+  /**
+   * Runs one action of the current opening; `live()` is false once the dialog closed or switched
+   * file, and every state change or callback after an await checks it.
+   */
+  async function run(action: (live: () => boolean) => Promise<void>) {
+    const token = openingRef.current;
+    if (busyRef.current === token) return;
+    busyRef.current = token;
+    setBusyOpening(token);
     setError(null);
+    const live = () => openingRef.current === token;
     try {
-      await action();
+      await action(live);
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (busyRef.current === token) {
+        busyRef.current = null;
+        setBusyOpening(null);
+      }
     }
   }
 
   const analyse = () =>
-    run(async () => {
+    run(async (live) => {
       if (file === null || model === null) return;
       const id = file.id;
       try {
@@ -144,39 +166,41 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
           force: true,
         });
         refresh();
+        if (!live()) return;
         await read(id);
-        if (result.enqueued === 0 && result.skipped.alreadyQueued === 0) setError(NOT_ANALYSABLE);
+        if (live() && result.enqueued === 0 && result.skipped.alreadyQueued === 0) setError(NOT_ANALYSABLE);
       } catch (e) {
-        setError(describeError(e));
+        if (live()) setError(describeError(e));
       }
     });
 
   const cancel = (jobId: string) =>
-    run(async () => {
+    run(async (live) => {
       if (file === null) return;
       try {
         await call('jobs:cancel', { jobId });
         refresh();
       } catch (e) {
-        setError(describeError(e));
+        if (live()) setError(describeError(e));
       }
-      await read(file.id);
+      if (live()) await read(file.id);
     });
 
   const discard = () =>
-    run(async () => {
+    run(async (live) => {
       if (file === null) return;
       try {
         await call('analysis:discardProposal', { fileId: file.id });
+        // The data changed, also when the dialog closed meanwhile.
         onChanged();
       } catch (e) {
-        setError(describeError(e));
+        if (live()) setError(describeError(e));
       }
-      await read(file.id);
+      if (live()) await read(file.id);
     });
 
   const accept = () =>
-    run(async () => {
+    run(async (live) => {
       if (file === null || shown === null || shown.proposal === null) return;
       const id = file.id;
       const key = proposalKey(shown.proposal);
@@ -185,7 +209,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
       try {
         // Never accept names against a proposal other than the one on screen.
         const fresh = await call('analysis:getProposal', { fileId: id });
-        if (fileIdRef.current !== id) return;
+        if (!live()) return;
         if (proposalKey(fresh.proposal) !== key || fresh.proposal?.stale !== false) {
           readSeq.current += 1;
           take(id, fresh);
@@ -194,16 +218,18 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
         }
         await call('analysis:acceptProposal', { fileId: id, names });
       } catch (e) {
+        if (!live()) return;
         if (e instanceof ApiError && (e.code === 'invalid_operation' || e.code === 'not_found')) {
           await read(id);
-          setError(PROPOSAL_CHANGED);
+          if (live()) setError(PROPOSAL_CHANGED);
         } else {
           setError(describeError(e));
         }
         return;
       }
+      // The tags changed even if the dialog closed meanwhile; only the live opening closes.
       onChanged();
-      onClose();
+      if (live()) onClose();
     });
 
   function toggle(name: string) {
@@ -218,7 +244,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   function openSettings() {
     onClose();
-    onOpenSettings?.();
+    onOpenSettings();
   }
 
   // Why Analyse cannot start, as its tooltip; null when it can.
@@ -235,13 +261,22 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
         : chosenNotVision
           ? MODEL_NOT_VISION
           : null;
-  const offerSettings = onOpenSettings !== undefined && !providerLoading && (!configured || noVisionModel);
+  const offerSettings = !providerLoading && (!configured || noVisionModel);
 
   const current = shown !== null && shown.fileId === fileId ? shown : null;
   const proposal = current?.proposal ?? null;
   const job = current?.job ?? null;
   const running = isActive(job);
-  const failed = !running && proposal === null && job !== null && job.status === 'failed';
+  // A failed analysis counts unless a proposal newer than it is stored (then it is history).
+  const failedMessage =
+    !running && job !== null && job.status === 'failed' && (proposal === null || newer(job.createdAt, proposal.createdAt))
+      ? (job.errorMessage ?? (job.errorCode !== null ? JOB_ERROR_MESSAGES[job.errorCode] : FAILED_FALLBACK))
+      : null;
+  const failedAlert = failedMessage !== null && (
+    <p role="alert" className={ALERT}>
+      {failedMessage}
+    </p>
+  );
 
   function analyseRow(label: string) {
     return (
@@ -295,6 +330,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
           </div>
         ) : proposal !== null ? (
           <>
+            {failedAlert}
             <div className="flex flex-wrap gap-2" role="group" aria-label="Proposed tags">
               {proposal.tags.map((tag) => {
                 const on = !current.off.has(tag.name);
@@ -344,11 +380,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
           </>
         ) : (
           <>
-            {failed && (
-              <p role="alert" className={ALERT}>
-                {job.errorMessage ?? (job.errorCode !== null ? JOB_ERROR_MESSAGES[job.errorCode] : FAILED_FALLBACK)}
-              </p>
-            )}
+            {failedAlert}
             {analyseRow('Analyse')}
           </>
         )}
