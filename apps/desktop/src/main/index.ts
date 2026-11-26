@@ -45,20 +45,21 @@ function start(): void {
   let mainWindow: BrowserWindow | null = null;
   let shutdown: 'running' | 'closing' | 'closed' = 'running';
 
+  // One pool serves previews and measuring; closing the preview service closes it.
+  const pool = createWorkerPool({
+    workerUrl: new URL('./preview-worker.js', import.meta.url),
+    size: POOL_SIZE,
+    timeoutMs: JOB_TIMEOUT_MS,
+  });
+  const previews = createPreviewService({ cacheDir: join(app.getPath('userData'), 'cache'), pool });
+
   const manager = createWorkspaceManager({
     userDataPath: app.getPath('userData'),
     migrationsFolder: __ASSETFORGE_DEV_MIGRATIONS_FOLDER__ ?? join(outMainDir, 'migrations'),
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
+    imageProbe: { measure: (path) => pool.measure(path) },
   });
 
-  const previews = createPreviewService({
-    cacheDir: join(app.getPath('userData'), 'cache'),
-    pool: createWorkerPool({
-      workerUrl: new URL('./preview-worker.js', import.meta.url),
-      size: POOL_SIZE,
-      timeoutMs: JOB_TIMEOUT_MS,
-    }),
-  });
 
   const dialogs: Dialogs = {
     async pickDirectory() {

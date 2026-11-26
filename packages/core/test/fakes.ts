@@ -55,6 +55,7 @@ import type {
   FilePlacement,
   FileQuery,
   FileRepository,
+  ImageProbe,
   Page,
   ProjectAssetRepository,
   ProjectQuery,
@@ -1043,8 +1044,22 @@ export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles 
   }
 }
 
+/** Records its calls; `result` is returned, or `failure` is thrown when set. */
+export class FakeImageProbe implements ImageProbe {
+  readonly calls: string[] = [];
+  result: { width: number; height: number } | null = { width: 640, height: 480 };
+  failure: Error | null = null;
+
+  async measure(absolutePath: string): Promise<{ width: number; height: number } | null> {
+    this.calls.push(absolutePath);
+    if (this.failure) throw this.failure;
+    return this.result;
+  }
+}
+
 export function createFakeHost(): {
   host: WorkspaceHost;
+  probe: FakeImageProbe;
   storages: Map<string, InMemoryStorage>;
   databases: Map<string, InMemoryDatabase>;
   sources: FakeSourceFiles;
@@ -1054,9 +1069,11 @@ export function createFakeHost(): {
   const storages = new Map<string, InMemoryStorage>();
   const databases = new Map<string, InMemoryDatabase>();
   const sources = new FakeSourceFiles();
+  const probe = new FakeImageProbe();
   const host: WorkspaceHost = {
     registry: new InMemoryRegistry(),
     sources,
+    imageProbe: probe,
     createStorage(rootPath) {
       let storage = storages.get(rootPath);
       if (!storage) {
@@ -1088,5 +1105,5 @@ export function createFakeHost(): {
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
-  return { host, storages, databases, sources, trash };
+  return { host, probe, storages, databases, sources, trash };
 }

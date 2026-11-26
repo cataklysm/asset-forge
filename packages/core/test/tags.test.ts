@@ -233,6 +233,7 @@ describe('records', () => {
       storageId: session.storageId,
       files: db.files,
       sources: fake.sources,
+      probe: fake.probe,
       newId: () => crypto.randomUUID(),
       now: () => new Date(),
     };

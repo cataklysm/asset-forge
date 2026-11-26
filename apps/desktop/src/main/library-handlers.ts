@@ -26,6 +26,7 @@ import {
   removeFileTags,
   removeRelation,
   removeWorkflow,
+  measureFile,
   resolveFilePath,
   setAssetCover,
   startWorkflow,
@@ -65,6 +66,7 @@ export type LibraryHandlers = Pick<
   | 'files:removeTag'
   | 'files:addTagMany'
   | 'files:removeTagMany'
+  | 'files:measure'
   | 'files:openExternal'
   | 'files:showInFolder'
   | 'assignments:listByAsset'
@@ -130,6 +132,7 @@ export function createLibraryHandlers(
     'files:addTagMany': async (r) => ({ items: await manager.exclusive((s) => addFileTags(s, r)) }),
     'files:removeTagMany': async (r) => ({ items: await manager.exclusive((s) => removeFileTags(s, r)) }),
 
+    'files:measure': (r) => manager.exclusive((s) => measureFile(s, r.fileId)),
     'files:openExternal': async (r) => {
       const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));
       // The shell's text may contain paths; it is never forwarded.

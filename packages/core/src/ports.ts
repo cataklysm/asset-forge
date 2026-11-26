@@ -339,9 +339,15 @@ export interface WorkspaceRegistry {
   remove(id: string): Promise<void>; // no-op if unknown
 }
 
+/** Reads the pixel size of an image file; null when it cannot be determined. Implemented outside core. */
+export interface ImageProbe {
+  measure(absolutePath: string): Promise<{ width: number; height: number } | null>;
+}
+
 export interface WorkspaceHost {
   registry: WorkspaceRegistry;
   sources: SourceFiles;
+  imageProbe: ImageProbe;
   createStorage(rootPath: string): Storage;
   openDatabase(workspaceId: string): Promise<WorkspaceDatabase>; // creates the file and applies migrations
   deleteDatabase(workspaceId: string): Promise<void>; // removes the local database; no-op if missing

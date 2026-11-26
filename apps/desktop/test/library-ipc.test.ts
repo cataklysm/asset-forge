@@ -11,14 +11,19 @@ import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main
 let base: string;
 let manager: WorkspaceManager;
 let handlers: IpcHandlers;
+const measure = vi.fn(async (_path: string): Promise<{ width: number; height: number } | null> => null);
 const confirmWorkflow = vi.fn(async (_assetName: string) => false);
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 
 beforeEach(async () => {
   confirmWorkflow.mockClear();
+  measure.mockReset();
+  measure.mockResolvedValue(null);
   base = await mkdtemp(join(tmpdir(), 'af-lib-ipc-'));
-  manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
+  manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER,
+    imageProbe: { measure },
+  });
   handlers = createWorkspaceHandlers(manager, {
     pickDirectory: async () => null,
     pickFiles: async () => [],
@@ -73,6 +78,7 @@ describe('library IPC', () => {
       'files:assign': { fileId: uuid, assetId: uuid, role: 'reference' },
       'files:unassign': { fileId: uuid },
       'assets:setCover': { assetId: uuid, fileId: null },
+      'files:measure': { fileId: uuid },
       'files:openExternal': { fileId: uuid },
       'files:showInFolder': { fileId: uuid },
       'tags:suggest': { prefix: 'me', limit: 10 },
@@ -84,7 +90,7 @@ describe('library IPC', () => {
       'files:addTagMany': { fileIds: [uuid], name: 'metal' },
       'files:removeTagMany': { fileIds: [uuid], name: 'metal' },
     };
-    expect(Object.keys(requests)).toHaveLength(32);
+    expect(Object.keys(requests)).toHaveLength(33);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({
@@ -160,6 +166,23 @@ describe('library IPC', () => {
     expect(byTag.items).toMatchObject([
       { id: created.id, assetCount: 1, matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }] },
     ]);
+  });
+
+  describe('files:measure', () => {
+    it('measures an image imported without dimensions and rejects a non-UUID id', async () => {
+      await openWorkspace();
+      const source = join(base, 'a.png');
+      await writeFile(source, 'hello');
+      const [imported] = await ok<any[]>('files:import', { sourcePaths: [source] });
+      expect(imported.file).toMatchObject({ width: null, height: null });
+
+      measure.mockResolvedValue({ width: 320, height: 200 });
+      const measured = await ok('files:measure', { fileId: imported.file.id });
+      expect(ipcContract['files:measure'].response.safeParse(measured).success).toBe(true);
+      expect(measured).toMatchObject({ id: imported.file.id, width: 320, height: 200 });
+
+      expect(await call('files:measure', { fileId: 'nope' })).toMatchObject({ ok: false });
+    });
   });
 
   describe('tags', () => {

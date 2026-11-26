@@ -6,6 +6,7 @@ export * from './assets.js';
 export * from './errors.js';
 export * from './file-access.js';
 export * from './file-names.js';
+export * from './measure-file.js';
 export * from './media-types.js';
 export * from './import-file.js';
 export * from './paths.js';

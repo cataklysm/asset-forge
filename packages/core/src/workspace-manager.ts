@@ -116,6 +116,7 @@ export class WorkspaceManager {
       storage,
       storageId,
       database,
+      imageProbe: this.host.imageProbe,
       newId: () => this.host.newId(),
       now: () => this.host.now(),
     };
@@ -228,6 +229,7 @@ export class WorkspaceManager {
       storageId: session.storageId,
       files: session.database.files,
       sources: this.host.sources,
+      probe: this.host.imageProbe,
       newId: session.newId,
       now: session.now,
     };
