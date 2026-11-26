@@ -7,13 +7,13 @@ import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from 
 import { composeTaggingRequest, type WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
-import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
+import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analysis-prompts.js';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
-import { servicesWithPrompts } from './idle-job-host.js';
+import { mockProviderEntry, servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
 let sources: string;
@@ -22,6 +22,8 @@ let mock: MockProvider | undefined;
 let jobHost: JobHost;
 let handlers: IpcHandlers;
 let logs: string[];
+/** The id of the mock's provider entry. */
+let entryId: string;
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
@@ -44,16 +46,17 @@ afterEach(async () => {
 });
 
 /** Starts the mock and wires the handlers to a job host that talks to it. */
-async function setup(failures: MockFailure[] = []): Promise<void> {
+async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Promise<void> {
   mock = await startMockProvider({ port: 0, failures });
-  const adapter = createOllamaVision({ baseUrl: mock.url });
+  const provider = mockProviderEntry(join(base, 'userData'), mock.url);
+  entryId = provider.entry.id;
   jobHost = createJobHost({
     manager,
-    gateway: { current: () => adapter },
+    vision: provider.vision,
     images: { jpeg: (path) => readFile(path) },
     provider: OLLAMA_PROVIDER,
-    defaultModel: () => MOCK_MODEL,
     pause: createPauseGate({}),
+    firstEntry: firstEntry ?? (() => provider.store.first()),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(
@@ -72,7 +75,7 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
       workspaceClosing: () => jobHost.workspaceClosing(),
     },
     jobHost,
-    servicesWithPrompts(join(base, 'userData'), (line) => logs.push(line)),
+    servicesWithPrompts(join(base, 'userData'), (line) => logs.push(line), provider.store),
   );
 }
 
@@ -121,6 +124,10 @@ describe('job IPC', () => {
       ['jobs:retry', { jobId: uuid }],
       ['jobs:retryFailed', {}],
       ['jobs:clearFinished', {}],
+      ['jobs:waitingByProvider', {}],
+      ['jobs:reroute', { fromProviderId: null, toProviderId: uuid, model: MOCK_MODEL }],
+      // An unknown provider id does not win over the missing workspace.
+      ['analysis:enqueue', { ...filesRequest([uuid]), providerId: uuid }],
     ];
     for (const [channel, request] of requests) {
       expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
@@ -131,6 +138,8 @@ describe('job IPC', () => {
     await setup();
     const requests: [IpcChannel, unknown][] = [
       ['analysis:preview', { target: { kind: 'files', fileIds: [uuid] }, model: MOCK_MODEL }],
+      ['analysis:preview', { target: { kind: 'files', fileIds: [uuid] }, model: MOCK_MODEL, providerId: uuid }],
+      ['analysis:describe', { requestId: uuid, fileId: uuid, model: MOCK_MODEL, providerId: uuid }],
       ['analysis:getProposal', { fileId: uuid }],
       ['analysis:acceptProposal', { fileId: uuid, names: ['red car'] }],
       ['analysis:discardProposal', { fileId: uuid }],
@@ -144,7 +153,8 @@ describe('job IPC', () => {
 
   it('resumes without a workspace, since the pause belongs to the app session', async () => {
     await setup();
-    expect(await ok('jobs:resume', {})).toEqual({});
+    expect(await ok('jobs:resume', { providerId: null })).toEqual({});
+    expect(await ok('jobs:resume', { providerId: uuid })).toEqual({});
   });
 
   it('refuses an accept with an empty tag name', async () => {
@@ -167,10 +177,20 @@ describe('job IPC', () => {
     expect(await call('analysis:enqueue', request)).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
   });
 
+  it('starts the scheduler when the provider store cannot be read on open, and runs a job that has a lane', async () => {
+    await setup([], () => {
+      throw new Error('store unreadable');
+    });
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', { ...filesRequest([fileId!]), providerId: entryId });
+    await until((s) => s.succeeded === 1);
+  });
+
   it('reports no pause in the summary', async () => {
     await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    expect(await ok('jobs:summary', {})).toMatchObject({ queued: 0, paused: null });
+    expect(await ok('jobs:summary', {})).toMatchObject({ queued: 0, paused: [] });
   });
 
   it('counts the skipped files of an enqueue per reason', async () => {
@@ -328,7 +348,7 @@ describe('analysis:enqueue with an analysis prompt', () => {
 
     // Without an id the prompt used last runs.
     await ok('analysis:enqueue', filesRequest([second!]));
-    const expected = { version: 3, model: MOCK_MODEL, mode: 'apply', prompt: { name: 'Armour', text: 'Only armour.', maxTags: 3 } };
+    const expected = { version: 4, model: MOCK_MODEL, mode: 'apply', prompt: { name: 'Armour', text: 'Only armour.', maxTags: 3 }, providerName: 'Mock' };
     expect(await payloads()).toEqual([expected, expected]);
   });
 

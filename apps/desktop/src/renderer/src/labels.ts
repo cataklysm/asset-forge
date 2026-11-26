@@ -4,6 +4,8 @@ import {
   type AnalysisPromptPurpose,
   type JobStatus,
   type RelationKind,
+  VISION_TIMEOUT_MAX_SECONDS,
+  VISION_TIMEOUT_MIN_SECONDS,
 } from '@assetforge/contracts';
 
 /** 'in_progress' -> 'In progress'. */
@@ -85,6 +87,78 @@ export const PROPOSAL_MARKER_TITLE = 'Tag proposal waiting for review';
 /** The banner of a paused job queue. */
 export const RESUME_LABEL = 'Resume';
 export const RESUME_TITLE = 'Continue the queued jobs';
+
+/** The state of a provider entry, as the provider select and the settings show it. */
+export const PROVIDER_STATE_LABELS = {
+  checking: 'checking',
+  ready: 'ready',
+  unreachable: 'not reachable',
+  unauthorized: 'key refused',
+  no_vision_model: 'no vision model',
+  error: 'error',
+} as const;
+
+/** The provider select (ProviderSelect). */
+export const PROVIDER_LABEL = 'Provider';
+export const NO_PROVIDER = 'No provider';
+
+/** 'RunPod — ready'. */
+export function providerOptionLabel(name: string, state: string): string {
+  return `${name} — ${state}`;
+}
+
+/** Moving waiting jobs to another provider (MoveJobsDialog), the pause banner and the Jobs screen. */
+export const MOVE_JOBS_LABEL = 'Move jobs';
+export const MOVE_JOBS_TITLE = 'Moves the waiting jobs of a provider to another one';
+export const MOVE_LABEL = 'Move';
+export const MOVE_FROM = 'From';
+export const MOVE_TO = 'To';
+export const WAITING_COUNT = (n: number) => `${n} waiting`;
+export const NO_WAITING_JOBS = 'No waiting jobs';
+export const COUNTING_WAITING_JOBS = 'The waiting jobs are being counted';
+export const JOBS_PROVIDER_HEADER = 'Provider';
+export const ALL_PROVIDERS = 'All providers';
+export const REMOVED_PROVIDER = 'Removed provider';
+
+/** The name of a job lane: its stored name, else `No provider` for id null and `Removed provider` otherwise. */
+export function laneLabel(id: string | null, name: string | null): string {
+  return name ?? (id === null ? NO_PROVIDER : REMOVED_PROVIDER);
+}
+
+/** Why nothing can start while the selected provider is asked for its models (see `providerGate`). */
+export const PROVIDER_CHECKING = 'The provider is being checked';
+
+/** The provider section of the settings (ProviderSettings). */
+export const PROVIDERS_TITLE = 'Vision providers';
+export const PROVIDERS_LIST_LABEL = 'Providers';
+export const NEW_PROVIDER_LABEL = 'New';
+export const NEW_PROVIDER_TITLE = 'Adds a provider';
+export const PROVIDER_LIMIT_TITLE = 'No more than 10 providers';
+export const DELETE_PROVIDER_TITLE = 'Deletes the provider; asks first';
+export const PROVIDER_NAME_LABEL = 'Name';
+export const PROVIDER_NAME_TITLE = 'Shown in the analysis dialogs and the jobs; unique';
+export const BASE_URL_LABEL = 'Base URL';
+export const BASE_URL_TITLE = 'Address of the Ollama-compatible vision server (http or https)';
+export const API_KEY_LABEL = 'API key';
+export const API_KEY_TITLE = 'Sent as a bearer token to this server only; a stored key is never shown again';
+export const NO_KEY_STORE_TITLE = 'The system credential store is not available, so no key can be saved';
+export const KEY_STORED = 'Stored';
+export const REMOVE_KEY_LABEL = 'Remove key';
+export const REMOVE_KEY_TITLE = 'Deletes the stored key on save';
+export const TIMEOUT_LABEL = 'Timeout (s)';
+export const TIMEOUT_TITLE = `Seconds to wait for one answer (${VISION_TIMEOUT_MIN_SECONDS}–${VISION_TIMEOUT_MAX_SECONDS})`;
+export const TIMEOUT_INVALID = `The timeout must be a whole number from ${VISION_TIMEOUT_MIN_SECONDS} to ${VISION_TIMEOUT_MAX_SECONDS}`;
+export const TAGGING_MODEL_TITLE = 'Model that tags images';
+export const PROMPT_MODEL_TITLE = 'Model that writes a prompt from an image';
+export const PROVIDER_STATE_LABEL = 'State';
+export const FROM_ENVIRONMENT = 'From environment';
+export const FROM_ENVIRONMENT_TITLE = 'The provider comes from the environment and cannot be changed here';
+export const ENTER_BASE_URL = 'Enter a base URL';
+
+/** 'Delete the provider RunPod?'. */
+export function deleteProviderTitle(name: string): string {
+  return `Delete the provider ${name}?`;
+}
 
 /** A failed load of the provider settings; not the same as "not configured". */
 export const SETTINGS_LOAD_FAILED = 'The provider settings could not be read';

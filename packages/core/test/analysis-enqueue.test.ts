@@ -15,11 +15,13 @@ const MODEL = 'llava:13b';
 
 const PROMPT = { name: 'Detail', text: 'T', maxTags: 30 };
 
+const ENTRY = { id: '11111111-1111-4111-8111-111111111111', name: 'RunPod' };
+
 function request(
   target: AnalysisTarget,
-  patch: { mode?: 'apply' | 'propose'; force?: boolean; model?: string; prompt?: typeof PROMPT } = {},
+  patch: { mode?: 'apply' | 'propose'; force?: boolean; model?: string; prompt?: typeof PROMPT; entry?: typeof ENTRY } = {},
 ) {
-  return { target, model: MODEL, mode: 'apply' as const, force: false, provider: PROVIDER, prompt: PROMPT, ...patch };
+  return { target, model: MODEL, mode: 'apply' as const, force: false, provider: PROVIDER, prompt: PROMPT, entry: ENTRY, ...patch };
 }
 
 function analysed(c: Setup, fileId: string, model = MODEL): void {
@@ -39,7 +41,7 @@ function spyEnqueue(c: Setup): NewJob[][] {
 }
 
 describe('enqueueAnalysis', () => {
-  it('enqueues a v3 job per analysable file and counts the rest', async () => {
+  it('enqueues a v4 job in the lane of the entry per analysable file and counts the rest', async () => {
     const c = await setup();
     const queued = await c.importOne('queued.png');
     const pending = c.seedFile({ status: 'pending', sha256: null });
@@ -56,7 +58,8 @@ describe('enqueueAnalysis', () => {
       type: ANALYZE_FILE_JOB,
       resourceClass: 'local_gpu',
       status: 'queued',
-      payload: { version: 3, model: MODEL, mode: 'apply', prompt: PROMPT },
+      lane: ENTRY.id,
+      payload: { version: 4, model: MODEL, mode: 'apply', prompt: PROMPT, providerName: 'RunPod' },
       dedupeKey: `vision.analyze_file:${c.file.id}`,
     });
   });
@@ -81,6 +84,24 @@ describe('enqueueAnalysis', () => {
     expect(c.db.jobs.rows.map((j) => j.fileId).sort()).toEqual([c.file.id, other.id].sort());
   });
 
+  it('skips a file analysed with the model when another entry asks, and gives every job its entry', async () => {
+    const c = await setup();
+    const other = await c.importOne('other.png');
+    analysed(c, c.file.id);
+    const second = { id: '22222222-2222-4222-8222-222222222222', name: 'Second' };
+
+    expect(await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id, other.id] }, { entry: second }))).toEqual({
+      enqueued: 1,
+      skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 1 },
+    });
+    expect(c.db.jobs.rows).toHaveLength(1);
+    expect(c.db.jobs.rows[0]).toMatchObject({
+      fileId: other.id,
+      lane: second.id,
+      payload: { version: 4, model: MODEL, mode: 'apply', prompt: PROMPT, providerName: 'Second' },
+    });
+  });
+
   it('counts a file with a waiting proposal of the model as analysed', async () => {
     const c = await setup();
     await c.db.analyses.propose({
@@ -102,7 +123,7 @@ describe('enqueueAnalysis', () => {
     analysed(c, c.file.id);
     const result = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { mode: 'propose' }));
     expect(result).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 3, model: MODEL, mode: 'propose', prompt: PROMPT });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 4, model: MODEL, mode: 'propose', prompt: PROMPT, providerName: 'RunPod' });
   });
 
   it('refuses propose for anything but a one-file list', async () => {
@@ -149,7 +170,7 @@ describe('enqueueAnalysis', () => {
     for (let i = 0; i < 3; i++) c.seedFile();
     await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
     expect(c.db.jobs.rows).toHaveLength(4);
-    for (const job of c.db.jobs.rows) expect(job.payload).toEqual({ version: 3, model: MODEL, mode: 'apply', prompt: PROMPT });
+    for (const job of c.db.jobs.rows) expect(job.payload).toEqual({ version: 4, model: MODEL, mode: 'apply', prompt: PROMPT, providerName: 'RunPod' });
   });
 
   it('counts a file analysed with another prompt as analysed unless forced', async () => {
@@ -165,7 +186,7 @@ describe('enqueueAnalysis', () => {
     expect(
       await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB, force: true })),
     ).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 3, model: MODEL, mode: 'apply', prompt: promptB });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 4, model: MODEL, mode: 'apply', prompt: promptB, providerName: 'RunPod' });
   });
 
   it('does not call enqueue when nothing is to be queued', async () => {
@@ -186,14 +207,14 @@ describe('previewAnalysis', () => {
     await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [queued.id] }));
     analysed(c, done.id);
 
-    expect(await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER })).toEqual({
+    expect(await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER, entry: ENTRY })).toEqual({
       analysable: 1,
       alreadyAnalysed: 1,
       alreadyQueued: 1,
       notAnalysable: 1,
     });
     expect(
-      (await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [done.id] }, model: 'another-model', provider: PROVIDER })).analysable,
+      (await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [done.id] }, model: 'another-model', provider: PROVIDER, entry: ENTRY })).analysable,
     ).toBe(1);
   });
 });
@@ -215,12 +236,12 @@ describe('trashed files', () => {
   it('previewAnalysis counts agree', async () => {
     const c = await setup();
     await trashForTest(c.session, [c.file.id]);
-    expect(await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [c.file.id] }, model: MODEL, provider: PROVIDER })).toEqual({
+    expect(await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [c.file.id] }, model: MODEL, provider: PROVIDER, entry: ENTRY })).toEqual({
       analysable: 0,
       alreadyAnalysed: 0,
       alreadyQueued: 0,
       notAnalysable: 1,
     });
-    expect((await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER })).analysable).toBe(0);
+    expect((await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER, entry: ENTRY })).analysable).toBe(0);
   });
 });

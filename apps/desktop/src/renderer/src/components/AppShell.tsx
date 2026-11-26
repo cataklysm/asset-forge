@@ -1,8 +1,16 @@
 import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, type JobErrorCode } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type JobErrorCode, type PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
-import { RESUME_LABEL, RESUME_TITLE, TRASH_LABEL, trashNavLabel } from '../labels';
+import {
+  laneLabel,
+  MOVE_JOBS_LABEL,
+  MOVE_JOBS_TITLE,
+  RESUME_LABEL,
+  RESUME_TITLE,
+  TRASH_LABEL,
+  trashNavLabel,
+} from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 
 /** Pause reasons the user fixes on the settings screen: the banner offers the way there. */
@@ -19,10 +27,12 @@ interface Props {
   activeJobs: number;
   /** Files in the trash; shown beside the Trash entry when above zero. */
   trashCount?: number | null;
-  /** Why the provider queue stopped claiming work; shows the pause banner. */
-  paused?: JobErrorCode | null;
-  /** Resumes the paused queue (`jobs:resume`); a rejection shows in the banner. */
-  onResume?(): Promise<void>;
+  /** Every provider whose queue stopped claiming work; each gets a line in the pause banner. */
+  paused?: readonly PausedProvider[];
+  /** Resumes one provider's queue (`jobs:resume`); a rejection shows in its line. */
+  onResume?(providerId: string | null): Promise<void>;
+  /** Opens the move dialog for one provider's waiting jobs. */
+  onMove?(providerId: string | null): void;
   onNavigate(section: Section): void;
   onClose(): void;
   children: ReactNode;
@@ -42,6 +52,8 @@ export const BUSY_TITLE = 'Import in progress';
 
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 
+const NOTHING_PAUSED: readonly PausedProvider[] = [];
+
 /** The application frame: header, navigation, the alert region and the page slot. */
 export function AppShell({
   workspaceName,
@@ -50,8 +62,9 @@ export function AppShell({
   busy,
   activeJobs,
   trashCount = null,
-  paused = null,
+  paused = NOTHING_PAUSED,
   onResume = async () => {},
+  onMove = () => {},
   onNavigate,
   onClose,
   children,
@@ -62,27 +75,6 @@ export function AppShell({
   const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => onStorageUnreachable(() => setUnreachable(true)), []);
-
-  const [resuming, setResuming] = useState(false);
-  const [resumeError, setResumeError] = useState<string | null>(null);
-  const resumingRef = useRef(false);
-  // A new pause reason (or none) drops the error of an earlier resume.
-  useEffect(() => setResumeError(null), [paused]);
-
-  async function resume() {
-    if (resumingRef.current) return;
-    resumingRef.current = true;
-    setResuming(true);
-    setResumeError(null);
-    try {
-      await onResume();
-    } catch (e) {
-      setResumeError(describeError(e));
-    } finally {
-      resumingRef.current = false;
-      setResuming(false);
-    }
-  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -170,33 +162,86 @@ export function AppShell({
               </button>
             </div>
           )}
-          {paused !== null && (
-            <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
-              <span>{resumeError ?? JOB_ERROR_MESSAGES[paused]}</span>
-              <div className="flex shrink-0 items-center gap-2">
-                {SETTINGS_REASONS.has(paused) && (
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    aria-disabled={busy || undefined}
-                    title={busy ? BUSY_TITLE : undefined}
-                    onClick={() => {
-                      if (!busy) onNavigate('settings');
-                    }}
-                  >
-                    Settings
-                  </button>
-                )}
-                <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
-                  {RESUME_LABEL}
-                </button>
-              </div>
+          {paused.length > 0 && (
+            <div role="alert" className={`m-6 mb-0 flex flex-col gap-3 ${WARNING}`}>
+              {paused.map((entry) => (
+                <PauseLine
+                  key={entry.providerId ?? ''}
+                  entry={entry}
+                  busy={busy}
+                  onResume={() => onResume(entry.providerId)}
+                  onMove={() => onMove(entry.providerId)}
+                  onSettings={() => onNavigate('settings')}
+                />
+              ))}
             </div>
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
             {children}
           </main>
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface PauseLineProps {
+  entry: PausedProvider;
+  busy: boolean;
+  onResume(): Promise<void>;
+  onMove(): void;
+  onSettings(): void;
+}
+
+/** One paused provider in the banner: its name, the reason, Resume, Move jobs and, for the settings reasons, Settings. */
+function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps) {
+  const name = laneLabel(entry.providerId, entry.providerName);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const resumingRef = useRef(false);
+  // A new pause reason drops the error of an earlier resume.
+  useEffect(() => setResumeError(null), [entry.reason]);
+
+  async function resume() {
+    if (resumingRef.current) return;
+    resumingRef.current = true;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await onResume();
+    } catch (e) {
+      setResumeError(describeError(e));
+    } finally {
+      resumingRef.current = false;
+      setResuming(false);
+    }
+  }
+
+  return (
+    <div role="group" aria-label={name} className="flex items-center justify-between gap-4">
+      <span className="min-w-0">
+        <span className="font-semibold">{name}</span> {resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        {SETTINGS_REASONS.has(entry.reason) && (
+          <button
+            type="button"
+            className={BUTTON}
+            aria-disabled={busy || undefined}
+            title={busy ? BUSY_TITLE : undefined}
+            onClick={() => {
+              if (!busy) onSettings();
+            }}
+          >
+            Settings
+          </button>
+        )}
+        <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
+          {MOVE_JOBS_LABEL}
+        </button>
+        <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
+          {RESUME_LABEL}
+        </button>
       </div>
     </div>
   );

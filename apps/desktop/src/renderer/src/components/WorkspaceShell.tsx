@@ -1,5 +1,5 @@
 import { useCallback, useState, type ComponentProps } from 'react';
-import type { WorkspaceSummary } from '@assetforge/contracts';
+import type { PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { JobsProvider, useJobs } from '../jobs-context';
 import { AnalysisPromptsProvider } from '../analysis-prompts-context';
@@ -31,6 +31,7 @@ import { TrashProvider, useTrash } from '../trash-context';
 import { ALERT } from '../ui';
 import { OpenSettingsProvider } from './AnalysisDialogs';
 import { AppShell, BUSY_TITLE, type Section } from './AppShell';
+import { MoveJobsDialog } from './MoveJobsDialog';
 
 interface Props {
   workspace: WorkspaceSummary;
@@ -57,21 +58,34 @@ function sectionOf(view: View): Section {
   return view.name === 'asset' ? 'assets' : view.name === 'project' ? 'projects' : view.name;
 }
 
-/** The app frame with the active jobs of the surrounding `JobsProvider` and the trash count of the `TrashProvider`. */
-function JobsAppShell(props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume'>) {
+const NOTHING_PAUSED: PausedProvider[] = [];
+
+/**
+ * The app frame with the active jobs and the paused providers of the surrounding `JobsProvider` and
+ * the trash count of the `TrashProvider`; `Move jobs` in the pause banner opens the move dialog.
+ */
+export function JobsAppShell(
+  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove'>,
+) {
   const { active, summary, refresh } = useJobs();
   const trash = useTrash();
+  // The provider whose waiting jobs the open move dialog moves; absent while it is closed.
+  const [moving, setMoving] = useState<{ source: string | null } | null>(null);
   return (
-    <AppShell
-      {...props}
-      activeJobs={active}
-      trashCount={trash.count}
-      paused={summary?.paused?.reason ?? null}
-      onResume={async () => {
-        await call('jobs:resume', {});
-        refresh();
-      }}
-    />
+    <>
+      <AppShell
+        {...props}
+        activeJobs={active}
+        trashCount={trash.count}
+        paused={summary?.paused ?? NOTHING_PAUSED}
+        onResume={async (providerId) => {
+          await call('jobs:resume', { providerId });
+          refresh();
+        }}
+        onMove={(source) => setMoving({ source })}
+      />
+      {moving !== null && <MoveJobsDialog source={moving.source} onClose={() => setMoving(null)} />}
+    </>
   );
 }
 

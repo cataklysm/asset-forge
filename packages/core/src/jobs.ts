@@ -17,6 +17,8 @@ export interface Job {
   resourceClass: ResourceClass;
   status: JobStatus;
   fileId: string | null;
+  /** The queue lane within the resource class (for analysis jobs the provider id); null for jobs without one. */
+  lane: string | null;
   payload: unknown;
   dedupeKey: string | null;
   /** Number of started runs. */
@@ -36,6 +38,7 @@ export interface NewJob {
   type: string;
   resourceClass: ResourceClass;
   fileId: string | null;
+  lane: string | null;
   payload: unknown;
   dedupeKey: string | null;
 }
@@ -76,10 +79,10 @@ async function requireJob(s: WorkspaceSession, jobId: string): Promise<Job> {
   return job;
 }
 
-/** Newest first. */
+/** Newest first; with `lane` only the jobs of that lane. */
 export function listJobs(
   s: WorkspaceSession,
-  q: { limit: number; offset: number; status?: JobStatus },
+  q: { limit: number; offset: number; status?: JobStatus; lane?: string },
 ): Promise<{ items: JobView[]; total: number }> {
   return s.database.jobs.list(q);
 }

@@ -54,6 +54,7 @@ describe('getProposal', () => {
       force: true,
       provider: PROVIDER,
       prompt: { name: 'Detail', text: 'T', maxTags: 15 },
+      entry: { id: 'environment', name: 'Environment' },
     });
     const jobId = c.db.jobs.rows[0]!.id;
 
@@ -82,6 +83,9 @@ describe('getProposal', () => {
         startedAt: null,
         finishedAt: null,
         runAfter: null,
+        providerId: 'environment',
+        providerName: 'Environment',
+        model: MODEL,
       },
     });
   });
@@ -94,6 +98,7 @@ describe('getProposal', () => {
       resourceClass: 'remote_api' as const,
       payload: {},
       fileId: c.file.id,
+      lane: null,
       dedupeKey: null,
     });
     await c.db.jobs.enqueue({ jobs: [newJob('job-a')], now: '2026-03-01T00:00:00.000Z' });

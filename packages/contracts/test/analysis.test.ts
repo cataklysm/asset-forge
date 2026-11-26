@@ -133,9 +133,10 @@ describe('analysis results', () => {
 
   test('every new channel is in the contract', () => {
     for (const channel of [
-      'settings:getVision',
-      'settings:setVision',
-      'settings:listVisionModels',
+      'providers:list',
+      'providers:save',
+      'providers:delete',
+      'providers:listModels',
       'analysis:preview',
       'analysis:enqueue',
       'analysis:getProposal',
@@ -144,6 +145,8 @@ describe('analysis results', () => {
       'analysis:describe',
       'analysis:cancelDescribe',
       'jobs:resume',
+      'jobs:waitingByProvider',
+      'jobs:reroute',
     ]) {
       expect(Object.hasOwn(ipcContract, channel), channel).toBe(true);
     }

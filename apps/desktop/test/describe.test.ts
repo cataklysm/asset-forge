@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
-import { createHarness, TEST_KEY, type Harness } from './analysis-harness.js';
+import { createHarness, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 
 const ids = {
   a: '0a2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f',
@@ -84,7 +84,7 @@ async function holdFirstJpeg(): Promise<{ hold(): void; release(): void; entered
 describe('analysis:describe', () => {
   it('runs one request at a time, cancels on request and on close, and writes nothing', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY, failures: ['hang', 'hang'] });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
     const before = await rowCounts();
@@ -119,7 +119,7 @@ describe('analysis:describe', () => {
   it('frees the slot on cancel; the cancelled run never answers the next request', async () => {
     const jpeg = await holdFirstJpeg();
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
 
@@ -143,7 +143,7 @@ describe('analysis:describe', () => {
   it('refuses new requests while the workspace closes', async () => {
     const jpeg = await holdFirstJpeg();
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
     const block = vi.spyOn(h.services.describe, 'block');
@@ -173,20 +173,20 @@ describe('analysis:describe', () => {
 
   it('maps a provider failure to its code without logging it', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: 'wrong-key-not-real' });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY_2 });
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
     expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL })).toEqual({
       ok: false,
       code: 'provider_unauthorized',
     });
-    for (const line of h.logs) expect(line).not.toContain('wrong-key-not-real');
-    expect(h.logs.filter((l) => !l.startsWith('Vision provider failed:'))).toEqual([]);
+    for (const line of h.logs) expect(line).not.toContain(TEST_KEY_2);
+    expect(h.logs.filter((l) => !/^Vision provider \S+ failed: /.test(l))).toEqual([]);
   });
 
   it('sends the chosen prompt text and remembers it after an answer, also a failed one', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
     const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
@@ -200,7 +200,7 @@ describe('analysis:describe', () => {
     expect(chatContents().at(-1)).toBe('Paint it.');
 
     const sketch = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Sketch', text: 'Sketch it.' });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: 'wrong-key-not-real' });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY_2 });
     expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, promptId: sketch.id })).toEqual({
       ok: false,
       code: 'provider_unauthorized',
@@ -210,7 +210,7 @@ describe('analysis:describe', () => {
 
   it('does not remember a prompt that answered busy, that is unknown or that ran without a workspace', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY, failures: ['hang'] });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
     const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
     const tagging = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'tagging')!;
     const lastUsed = async () => (await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt;
@@ -252,10 +252,63 @@ describe('analysis:describe', () => {
       ok: false,
       code: 'provider_not_configured',
     });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
+    await h.provider({ url: mock.url });
     expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: ids.c, model: MOCK_MODEL })).toEqual({
       ok: false,
       code: 'file_unavailable',
     });
+  });
+});
+
+describe('analysis:describe with several providers', () => {
+  it('runs against the chosen entry with its key and remembers it, but not after busy or an unknown id', async () => {
+    const pair = await startTwoMocks({ failuresB: ['hang'] });
+    mock = pair.a;
+    try {
+      const a = await h.provider({ name: 'A', url: pair.a.url, apiKey: TEST_KEY });
+      const b = await h.provider({ name: 'B', url: pair.b.url, apiKey: TEST_KEY_2 });
+      await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+      const [fileId] = await h.importImages(1);
+      const lastUsed = async () => (await h.ok('providers:list', {})).lastUsedId;
+      const chatsOf = (m: MockProvider) => m.requests.filter((r) => r.path === '/api/chat');
+
+      expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: a.id })).toMatchObject({ ok: true });
+      expect(chatsOf(pair.a)).toHaveLength(1);
+      expect(chatsOf(pair.b)).toHaveLength(0);
+      expect(await lastUsed()).toBe(a.id);
+
+      // B hangs; a second request for A answers busy and leaves B as the entry used last.
+      const hanging = h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL, providerId: b.id });
+      const deadline = Date.now() + 5_000;
+      while (chatsOf(pair.b).length === 0) {
+        if (Date.now() > deadline) throw new Error('B never got the request');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(await lastUsed()).toBe(a.id);
+      expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, providerId: a.id })).toEqual({
+        ok: false,
+        code: 'busy',
+      });
+      await h.ok('analysis:cancelDescribe', { requestId: ids.b });
+      expect(await hanging).toEqual({ ok: false, code: 'cancelled' });
+      expect(await lastUsed()).toBe(b.id);
+
+      // Without an id the entry used last runs.
+      expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
+      expect(chatsOf(pair.b)).toHaveLength(2);
+      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: ids.c })).toEqual({
+        ok: false,
+        error: { code: 'not_found', message: 'This provider does not exist' },
+      });
+      expect(await lastUsed()).toBe(b.id);
+
+      for (const r of pair.a.requests) expect(r.headers['authorization']).toBe(`Bearer ${TEST_KEY}`);
+      for (const r of pair.b.requests) expect(r.headers['authorization']).toBe(`Bearer ${TEST_KEY_2}`);
+      for (const response of h.responses) {
+        expect(response).not.toContain(TEST_KEY);
+      }
+    } finally {
+      await pair.b.close();
+    }
   });
 });

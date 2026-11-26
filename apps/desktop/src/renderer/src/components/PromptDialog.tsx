@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
 import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
-import { useProvider } from '../provider-context';
+import { useProviderChoice } from '../provider-choice';
+import { useProviders } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, FOCUS } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { ProviderSelect } from './ProviderSelect';
 import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
@@ -29,9 +31,9 @@ const GENERATING_TITLE = 'The prompt is being generated';
 const NO_FILE_TITLE = 'No image to describe';
 
 /**
- * Image2Prompt: describes one image with a chosen model and shows the text to copy. The text lives
- * only in this dialog's state; it is dropped when the dialog closes or another file is shown, and
- * a request still running then is cancelled.
+ * Image2Prompt: describes one image with a chosen provider and model and shows the text to copy.
+ * The text lives only in this dialog's state; it is dropped when the dialog closes or another file
+ * is shown, and a request still running then is cancelled.
  */
 export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBlocked = null }: Props) {
   return (
@@ -49,11 +51,11 @@ export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBloc
 }
 
 function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: Omit<Props, 'open'>) {
-  const provider = useProvider();
+  const providers = useProviders();
   const prompts = useAnalysisPrompts();
-  const { settings } = provider;
-  // Null until the user picks one: until then the stored prompt default is shown.
-  const [chosen, setChosen] = useState<{ model: string | null } | null>(null);
+  // The body is mounted per opening and file: it starts from the entry used last and its prompt default.
+  const choice = useProviderChoice('prompt', 'open');
+  const { providerId, model } = choice;
   // Null until the user picks one: until then the Image to prompt prompt used last (or the first).
   const [chosenPrompt, setChosenPrompt] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -62,14 +64,13 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   // The request whose answer is still wanted; any other answer is dropped.
   const request = useRef<string | null>(null);
 
-  const model = chosen !== null ? chosen.model : (settings?.promptModel ?? null);
-  const configured = settings !== null && settings.baseUrl !== null;
   const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
-  const gate = providerGate(provider, model);
+  const gate = providerGate(providers, providerId, model);
   const blocked = gate.blocked ?? promptGate(prompts, promptId);
 
   const blockedTitle = blocked ?? (running ? GENERATING_TITLE : file === null ? NO_FILE_TITLE : undefined);
-  const canGenerate = blocked === null && !running && file !== null && model !== null && promptId !== null;
+  const canGenerate =
+    blocked === null && !running && file !== null && providerId !== null && model !== null && promptId !== null;
 
   function cancel() {
     const requestId = request.current;
@@ -82,16 +83,19 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   useEffect(() => () => cancel(), []);
 
   async function generate() {
-    if (!canGenerate || file === null || model === null || promptId === null) return;
+    if (!canGenerate || file === null || providerId === null || model === null || promptId === null) return;
     const requestId = crypto.randomUUID();
     request.current = requestId;
     setRunning(true);
     setText(null);
     setError(null);
     try {
-      const result = await call('analysis:describe', { requestId, fileId: file.id, model, promptId });
+      const result = await call('analysis:describe', { requestId, fileId: file.id, model, providerId, promptId });
       // Every answer but `busy` means the describe started; a cancelled one too, also after closing.
-      if (result.ok || result.code !== 'busy') prompts.noteUsed('image_prompt', promptId);
+      if (result.ok || result.code !== 'busy') {
+        prompts.noteUsed('image_prompt', promptId);
+        providers.noteUsed(providerId);
+      }
       if (request.current !== requestId) return;
       if (result.ok) setText(result.text);
       else if (result.code === 'busy') setError(PROMPT_BUSY_MESSAGE);
@@ -130,11 +134,13 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
 
   return (
     <div className="flex flex-col gap-3">
+      <ProviderSelect value={providerId} onChange={choice.setProvider} disabled={running} />
       <ModelSelect
+        providerId={providerId}
         purpose="prompt"
         value={model}
-        onChange={(next) => setChosen({ model: next })}
-        disabled={running || !configured}
+        onChange={choice.setModel}
+        disabled={running || providerId === null}
       />
       <PromptSelect purpose="image_prompt" value={promptId} onChange={setChosenPrompt} disabled={running} />
       <div className="flex gap-2">

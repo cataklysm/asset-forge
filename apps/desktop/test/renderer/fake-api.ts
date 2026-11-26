@@ -8,6 +8,9 @@ import type {
   IpcRequest,
   IpcResponse,
   IpcResult,
+  ListModelsResult,
+  ProviderList,
+  ProviderView,
 } from '@assetforge/contracts';
 import {
   BUILT_IN_IMAGE_PROMPT_TEXT,
@@ -117,6 +120,86 @@ export function fakeAnalysisPrompts(seed?: Partial<AnalysisPromptList>): {
   return { state, handlers };
 }
 
+type ProviderChannel = 'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels';
+
+/** A stored provider entry: `Local` on the mock address, with a tagging and a prompt model and no key. */
+export function providerView(p: Partial<ProviderView> = {}): ProviderView {
+  return {
+    id: nextId(),
+    name: 'Local',
+    baseUrl: 'http://127.0.0.1:11500',
+    timeoutSeconds: 120,
+    taggingModel: 'vision-a',
+    promptModel: 'vision-a',
+    hasApiKey: false,
+    ...p,
+  };
+}
+
+/** The model list a fake entry answers unless `models` names another for it. */
+export const FAKE_MODELS: ListModelsResult = { ok: true, models: [{ name: 'vision-a', vision: true }] };
+
+/**
+ * In-memory handlers for the `providers:*` channels, refusing what the main process refuses with
+ * its fixed messages. Empty unless `seed` is given; `models` answers `providers:listModels` per
+ * entry id (a function may return a pending promise), every other listed entry answers `FAKE_MODELS`.
+ */
+export function fakeProviders(
+  seed?: Partial<ProviderList>,
+  models: Record<string, ListModelsResult | (() => ListModelsResult | Promise<ListModelsResult>)> = {},
+): {
+  state: ProviderList;
+  handlers: { [C in ProviderChannel]: NonNullable<FakeHandlers[C]> };
+} {
+  const state: ProviderList = {
+    providers: seed?.providers ?? [],
+    lastUsedId: seed?.lastUsedId ?? null,
+    fromEnvironment: seed?.fromEnvironment ?? false,
+    canStoreKey: seed?.canStoreKey ?? true,
+  };
+  const find = (id: string) => {
+    const entry = state.providers.find((p) => p.id === id);
+    if (entry === undefined) throw fakeError('not_found', 'This provider does not exist');
+    return entry;
+  };
+  const handlers: { [C in ProviderChannel]: NonNullable<FakeHandlers[C]> } = {
+    'providers:list': () => structuredClone(state),
+    'providers:save': (request) => {
+      if (state.fromEnvironment)
+        throw fakeError('invalid_operation', 'The provider settings are set by the environment and cannot be changed');
+      const name = request.name.trim();
+      if (name.length < 1 || name.length > 60) throw fakeError('validation_failed', 'The provider name must have 1 to 60 characters');
+      if (state.providers.some((p) => p.id !== request.id && p.name.toLowerCase() === name.toLowerCase()))
+        throw fakeError('invalid_operation', 'A provider with this name already exists');
+      const before = request.id === undefined ? undefined : find(request.id);
+      if (before === undefined && state.providers.length >= 10) throw fakeError('invalid_operation', 'No more than 10 providers');
+      const next: ProviderView = {
+        id: before?.id ?? nextId(),
+        name,
+        baseUrl: request.baseUrl,
+        timeoutSeconds: request.timeoutSeconds,
+        taggingModel: request.taggingModel,
+        promptModel: request.promptModel,
+        hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
+      };
+      state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
+      return structuredClone(next);
+    },
+    'providers:delete': ({ id }) => {
+      find(id);
+      state.providers = state.providers.filter((p) => p.id !== id);
+      if (state.lastUsedId === id) state.lastUsedId = null;
+      return {};
+    },
+    'providers:listModels': ({ providerId }) => {
+      if (!state.providers.some((p) => p.id === providerId)) return { ok: false, code: 'provider_not_configured' };
+      const answer = models[providerId] ?? FAKE_MODELS;
+      return typeof answer === 'function' ? answer() : structuredClone(answer);
+    },
+  };
+  return { state, handlers };
+}
+
 type SourceChannel = 'assets:get' | 'assets:addSource' | 'assets:removeSource' | 'assets:openSource';
 
 /**
@@ -166,13 +249,14 @@ export function fakeAssetSources(asset: AssetDetail): {
   return { state, handlers };
 }
 
-/** Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see `fakeAnalysisPrompts`). */
+/** Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see `fakeAnalysisPrompts`) and the `providers:*` ones with no entry (see `fakeProviders`). */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
   set<C extends IpcChannel>(channel: C, handler: FakeHandlers[C]): void;
 } {
   const table: Record<string, ((request: never) => unknown) | undefined> = {
     ...fakeAnalysisPrompts().handlers,
+    ...fakeProviders().handlers,
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

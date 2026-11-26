@@ -24,6 +24,7 @@ export const ErrorCodeSchema = z.enum([
   'shutting_down',
   'forbidden_sender',
   'credential_store_unavailable',
+  'provider_not_configured',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;
 

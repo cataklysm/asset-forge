@@ -3,16 +3,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
-import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from '@assetforge/contracts';
+import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderView } from '@assetforge/contracts';
 import type { ModelImageSource, WorkspaceManager } from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
+import { startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createAnalysisServices, createWorkspaceManager, type AnalysisServices } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { FakeCodec } from './fake-codec.js';
 
-/** The only key the tests use; it must never show up anywhere but in the request header. */
+/** The keys the tests use; they must never show up anywhere but in the request header. */
 export const TEST_KEY = 'test-key-not-real';
+export const TEST_KEY_2 = 'test-key-not-real-2';
 export const NONE_SKIPPED = { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
 
 export interface Harness {
@@ -25,6 +27,18 @@ export interface Harness {
   responses: string[];
   /** Every captured main-console line and every provider failure line. */
   logs: string[];
+  /**
+   * Saves a provider entry through `providers:save`: created the first time a name is used, replaced
+   * (same id) afterwards. `apiKey` absent keeps the stored key, null deletes it. No default models unless given.
+   */
+  provider(o: {
+    name?: string;
+    url: string;
+    apiKey?: string | null;
+    taggingModel?: string | null;
+    promptModel?: string | null;
+    timeoutSeconds?: number;
+  }): Promise<ProviderView>;
   call(channel: IpcChannel, request: unknown): Promise<IpcResult<unknown>>;
   ok<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>>;
   importImages(count: number, prefix?: string): Promise<string[]>;
@@ -92,6 +106,9 @@ export async function createHarness(
     return result.value as IpcResponse<C>;
   };
 
+  /** The ids of the entries saved by `provider`, by name. */
+  const saved = new Map<string, string>();
+
   let imported = 0;
   return {
     base,
@@ -103,6 +120,21 @@ export async function createHarness(
     logs,
     call,
     ok,
+    async provider(p) {
+      const name = p.name ?? 'Mock';
+      const id = saved.get(name);
+      const view = await ok('providers:save', {
+        ...(id === undefined ? {} : { id }),
+        name,
+        baseUrl: p.url,
+        timeoutSeconds: p.timeoutSeconds ?? 30,
+        taggingModel: p.taggingModel ?? null,
+        promptModel: p.promptModel ?? null,
+        ...(p.apiKey === undefined ? {} : { apiKey: p.apiKey }),
+      });
+      saved.set(view.name, view.id);
+      return view;
+    },
     async importImages(count, prefix = 'image') {
       const paths: string[] = [];
       for (let i = 0; i < count; i++) {
@@ -144,4 +176,23 @@ export async function filesBelow(dir: string): Promise<{ path: string; text: str
     out.push({ path, text: (await readFile(path)).toString('latin1') });
   }
   return out;
+}
+
+/**
+ * Two in-process mocks, each requiring its own key: A takes `TEST_KEY`, B takes `TEST_KEY_2`. A request
+ * with the other key, or with none, gets 401.
+ */
+export async function startTwoMocks(
+  o: { delayMs?: number; failuresA?: MockFailure[]; failuresB?: MockFailure[] } = {},
+): Promise<{ a: MockProvider; b: MockProvider; close(): Promise<void> }> {
+  const delay = o.delayMs === undefined ? {} : { delayMs: o.delayMs };
+  const a = await startMockProvider({ port: 0, apiKey: TEST_KEY, failures: o.failuresA ?? [], ...delay });
+  const b = await startMockProvider({ port: 0, apiKey: TEST_KEY_2, failures: o.failuresB ?? [], ...delay });
+  return {
+    a,
+    b,
+    async close() {
+      await Promise.allSettled([a.close(), b.close()]);
+    },
+  };
 }

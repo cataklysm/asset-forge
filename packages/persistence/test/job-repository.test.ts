@@ -52,6 +52,7 @@ const newJob = (n: number, o: Partial<NewJob> = {}): NewJob => ({
   type: TYPE,
   resourceClass: 'local_gpu',
   fileId: null,
+  lane: null,
   payload: { version: 1 },
   dedupeKey: null,
   ...o,
@@ -83,6 +84,7 @@ describe('job repository', () => {
       resourceClass: 'local_gpu',
       status: 'queued',
       fileId: FILE_ID,
+      lane: null,
       payload: { version: 1, extra: [1, 2] },
       dedupeKey: null,
       attempt: 0,
@@ -324,6 +326,9 @@ describe('job repository', () => {
       startedAt: null,
       finishedAt: null,
       runAfter: null,
+      providerId: null,
+      providerName: null,
+      model: null,
     });
     expect(rest.items[0]).toMatchObject({ fileId: null, fileName: null });
 
@@ -453,5 +458,281 @@ describe('jobs of trashed files', () => {
     expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'failed' });
     expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'queued' });
     expect(await db.jobs.get(uuid(12))).toMatchObject({ status: 'queued' });
+  });
+});
+
+describe('job lanes', () => {
+  const LATER = '2026-01-01T01:00:00.000Z';
+  const RA = '2026-01-01T00:05:00.000Z';
+  const RB = '2026-01-01T00:10:00.000Z';
+
+  /** A job of lane `lane` with id uuid(n). */
+  const laned = (n: number, lane: string | null, payload: unknown = { version: 1 }, type = TYPE): NewJob =>
+    newJob(n, { lane, payload, type });
+
+  /** Enqueues the jobs one at a time, one second apart, so their order is the order given. */
+  async function enqueueInOrder(...jobs: NewJob[]): Promise<void> {
+    for (const [i, j] of jobs.entries()) {
+      expect(await enqueue(new Date(Date.parse(T0) + i * 1000).toISOString(), j)).toEqual([j.id]);
+    }
+  }
+
+  /** Puts a job into `status` directly, as a test fixture. */
+  function setStatus(n: number, status: string, runAfter: string | null = null): void {
+    const retrying = status === 'retry_wait';
+    handle
+      .prepare('update job set status = ?, run_after = ?, attempt = 2, error_code = ?, error_message = ? where id = ?')
+      .run(status, runAfter, retrying ? 'provider_timeout' : null, retrying ? JOB_ERROR_MESSAGES.provider_timeout : null, uuid(n));
+  }
+
+  const claimLanes = (excludeLanes?: (string | null)[]) =>
+    db.jobs.claimNext({ resourceClass: 'local_gpu', types: [TYPE], now: LATER, excludeLanes });
+
+  test('enqueue stores the lane in provider_id', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, null));
+    expect((await db.jobs.get(uuid(10)))?.lane).toBe('a');
+    expect((await db.jobs.get(uuid(11)))?.lane).toBeNull();
+    expect(handle.prepare('select id, provider_id from job order by id').all()).toEqual([
+      { id: uuid(10), provider_id: 'a' },
+      { id: uuid(11), provider_id: null },
+    ]);
+  });
+
+  test('a job enqueued without a lane field stores null', async () => {
+    const { lane: _lane, ...withoutLane } = newJob(10);
+    await enqueue(T0, withoutLane as NewJob);
+    expect((await db.jobs.get(uuid(10)))?.lane).toBeNull();
+  });
+
+  test('claimNext skips jobs of an excluded lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'b'), laned(12, 'a'));
+    expect((await claimLanes(['a']))?.id).toBe(uuid(11));
+    expect(await claimLanes(['a', 'b'])).toBeNull();
+    expect((await claimLanes())?.id).toBe(uuid(10));
+  });
+
+  test('claimNext with null excluded skips a job without lane', async () => {
+    await enqueueInOrder(laned(10, null), laned(11, 'a'));
+    expect((await claimLanes([null]))?.id).toBe(uuid(11));
+    expect(await claimLanes([null])).toBeNull();
+    expect((await claimLanes([]))?.id).toBe(uuid(10));
+  });
+
+  test('claimNext with only strings excluded still takes a job without lane', async () => {
+    await enqueueInOrder(laned(10, null), laned(11, 'a'));
+    expect((await claimLanes(['a']))?.id).toBe(uuid(10));
+    expect(await claimLanes(['a'])).toBeNull();
+    expect((await claimLanes(['b', null]))?.id).toBe(uuid(11));
+  });
+
+  test('nextRunAfter ignores a retry_wait job of an excluded lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'b'), laned(12, null));
+    setStatus(10, 'retry_wait', RA);
+    setStatus(11, 'retry_wait', RB);
+    setStatus(12, 'retry_wait', T9);
+    expect(await db.jobs.nextRunAfter([TYPE])).toBe(T9);
+    expect(await db.jobs.nextRunAfter([TYPE], [null])).toBe(RA);
+    expect(await db.jobs.nextRunAfter([TYPE], [null, 'a'])).toBe(RB);
+    expect(await db.jobs.nextRunAfter([TYPE], [null, 'a', 'b'])).toBeNull();
+    expect(await db.jobs.nextRunAfter([TYPE], ['a', 'b'])).toBe(T9);
+  });
+
+  test('rerouteWaiting moves the queued and retry_wait jobs of a lane and leaves the others', async () => {
+    await enqueueInOrder(
+      laned(10, 'a', { n: 'q' }),
+      laned(11, 'a', { n: 'w' }),
+      laned(12, 'a'),
+      laned(13, 'a'),
+      laned(14, 'a'),
+      laned(15, 'c'),
+      laned(16, 'a', { version: 1 }, 'other.type'),
+    );
+    setStatus(11, 'retry_wait', RA);
+    setStatus(12, 'running');
+    setStatus(13, 'failed');
+    setStatus(14, 'cancelled');
+
+    const moved = await db.jobs.rerouteWaiting({
+      type: TYPE,
+      fromLane: 'a',
+      toLane: 'b',
+      rewrite: (p) => ({ ...(p as object), moved: true }),
+      now: LATER,
+    });
+
+    expect(moved).toBe(2);
+    for (const [n, name] of [
+      [10, 'q'],
+      [11, 'w'],
+    ] as const) {
+      expect(await db.jobs.get(uuid(n))).toMatchObject({
+        lane: 'b',
+        status: 'queued',
+        attempt: 0,
+        runAfter: null,
+        errorCode: null,
+        errorMessage: null,
+        payload: { n: name, moved: true },
+        updatedAt: LATER,
+      });
+    }
+    expect(await db.jobs.get(uuid(12))).toMatchObject({ lane: 'a', status: 'running', attempt: 2 });
+    expect(await db.jobs.get(uuid(13))).toMatchObject({ lane: 'a', status: 'failed' });
+    expect(await db.jobs.get(uuid(14))).toMatchObject({ lane: 'a', status: 'cancelled' });
+    expect((await db.jobs.get(uuid(15)))?.lane).toBe('c');
+    expect((await db.jobs.get(uuid(16)))?.lane).toBe('a');
+    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite: (p) => p, now: LATER })).toBe(0);
+  });
+
+  test('rerouteWaiting leaves a running job of the source lane uncounted and a second call moves 0', async () => {
+    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }));
+    expect((await claimLanes())?.id).toBe(uuid(10));
+    const rewrite = vi.fn((p: unknown) => ({ ...(p as object), moved: true }));
+
+    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).toBe(1);
+    expect(rewrite).toHaveBeenCalledTimes(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ lane: 'a', status: 'running', attempt: 1, payload: { n: 1 }, startedAt: LATER });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ lane: 'b', status: 'queued', payload: { n: 2, moved: true } });
+
+    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).toBe(0);
+    expect(await db.jobs.countActiveInLane(TYPE, 'a')).toBe(1);
+  });
+
+  test('rerouteWaiting whose rewrite throws on the second row changes no row', async () => {
+    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }), laned(12, 'a', { n: 3 }));
+    setStatus(11, 'retry_wait', RA);
+    const before = handle.prepare('select * from job order by id').all();
+    let calls = 0;
+    const rewrite = (p: unknown) => {
+      calls++;
+      if (calls === 2) throw new Error('boom');
+      return { ...(p as object), moved: true };
+    };
+
+    await expect(db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).rejects.toThrow('boom');
+    expect(calls).toBe(2);
+    expect(handle.prepare('select * from job order by id').all()).toEqual(before);
+  });
+
+  test('rerouteWaiting from null moves the jobs without lane', async () => {
+    await enqueueInOrder(laned(10, null), laned(11, 'a'));
+    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: null, toLane: 'b', rewrite: (p) => p, now: LATER })).toBe(1);
+    expect((await db.jobs.get(uuid(10)))?.lane).toBe('b');
+    expect((await db.jobs.get(uuid(11)))?.lane).toBe('a');
+  });
+
+  test('assignLane gives active jobs without lane a lane, unless rewrite answers null', async () => {
+    await enqueueInOrder(
+      laned(10, null, { keep: false }),
+      laned(11, null, { keep: false }),
+      laned(12, null, { keep: true }),
+      laned(13, null, { keep: false }),
+      laned(14, 'a', { keep: false }),
+      laned(15, null, { keep: false }, 'other.type'),
+    );
+    setStatus(11, 'retry_wait', RA);
+    setStatus(13, 'succeeded');
+
+    const changed = await db.jobs.assignLane({
+      type: TYPE,
+      lane: 'b',
+      rewrite: (p) => ((p as { keep: boolean }).keep ? null : { ...(p as object), laned: true }),
+      now: LATER,
+    });
+
+    expect(changed).toBe(2);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({
+      lane: 'b',
+      status: 'queued',
+      attempt: 0,
+      payload: { keep: false, laned: true },
+      updatedAt: LATER,
+    });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({
+      lane: 'b',
+      status: 'retry_wait',
+      attempt: 2,
+      runAfter: RA,
+      errorCode: 'provider_timeout',
+      payload: { keep: false, laned: true },
+    });
+    expect(await db.jobs.get(uuid(12))).toMatchObject({ lane: null, payload: { keep: true }, updatedAt: T2 });
+    expect(await db.jobs.get(uuid(13))).toMatchObject({ lane: null, payload: { keep: false } });
+    expect(await db.jobs.get(uuid(14))).toMatchObject({ lane: 'a', payload: { keep: false } });
+    expect(await db.jobs.get(uuid(15))).toMatchObject({ lane: null, payload: { keep: false } });
+  });
+
+  test('waitingByLane counts queued and retry_wait jobs per lane', async () => {
+    await enqueueInOrder(
+      laned(10, 'a'),
+      laned(11, 'a'),
+      laned(12, 'a'),
+      laned(13, null),
+      laned(14, 'b'),
+      laned(15, 'a', { version: 1 }, 'other.type'),
+    );
+    setStatus(11, 'retry_wait', LATER);
+    setStatus(12, 'running');
+    setStatus(14, 'failed');
+    const waiting = await db.jobs.waitingByLane(TYPE);
+    expect(waiting).toHaveLength(2);
+    expect(waiting).toEqual(
+      expect.arrayContaining([
+        { lane: 'a', waiting: 2 },
+        { lane: null, waiting: 1 },
+      ]),
+    );
+    expect(await db.jobs.waitingByLane('none')).toEqual([]);
+  });
+
+  test('countActiveInLane counts every active job of the lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'a'), laned(12, 'a'), laned(13, 'a'), laned(14, 'b'), laned(15, 'a', {}, 'other.type'));
+    setStatus(11, 'running');
+    setStatus(12, 'waiting_remote');
+    setStatus(13, 'cancelled');
+    expect(await db.jobs.countActiveInLane(TYPE, 'a')).toBe(3);
+    expect(await db.jobs.countActiveInLane(TYPE, 'b')).toBe(1);
+    expect(await db.jobs.countActiveInLane(TYPE, 'c')).toBe(0);
+  });
+
+  test('latestPayloadOfLane answers the payload of the newest job of the lane in any status', async () => {
+    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }), laned(12, 'b', { n: 3 }), laned(13, null, { n: 4 }));
+    setStatus(11, 'failed');
+    expect(await db.jobs.latestPayloadOfLane(TYPE, 'a')).toEqual({ n: 2 });
+    expect(await db.jobs.latestPayloadOfLane(TYPE, null)).toEqual({ n: 4 });
+    expect(await db.jobs.latestPayloadOfLane(TYPE, 'c')).toBeNull();
+    expect(await db.jobs.latestPayloadOfLane('other.type', 'a')).toBeNull();
+  });
+
+  test('latestPayloadOfLane breaks a created_at tie by the higher id', async () => {
+    await enqueue(T0, laned(10, 'a', { n: 10 }), laned(11, 'a', { n: 11 }));
+    expect(await db.jobs.latestPayloadOfLane(TYPE, 'a')).toEqual({ n: 11 });
+  });
+
+  test('list filters by lane and carries provider id, provider name and model', async () => {
+    const v4 = { version: 4, model: 'm4', mode: 'apply', prompt: null, providerName: 'RunPod' };
+    await enqueueInOrder(laned(10, 'a', v4), laned(11, 'b', { version: 2, model: 'm2', mode: 'apply' }), laned(12, null));
+
+    const all = await db.jobs.list({ limit: 10, offset: 0 });
+    expect(all.total).toBe(3);
+    expect(all.items.map((i) => [i.id, i.providerId, i.providerName, i.model])).toEqual([
+      [uuid(12), null, null, null],
+      [uuid(11), 'b', null, 'm2'],
+      [uuid(10), 'a', 'RunPod', 'm4'],
+    ]);
+
+    const a = await db.jobs.list({ limit: 10, offset: 0, lane: 'a' });
+    expect(a.total).toBe(1);
+    expect(a.items[0]).toMatchObject({ id: uuid(10), providerId: 'a', providerName: 'RunPod', model: 'm4', createdAt: T0 });
+    expect(await db.jobs.list({ limit: 10, offset: 0, lane: 'a', status: 'failed' })).toEqual({ items: [], total: 0 });
+    expect((await db.jobs.list({ limit: 10, offset: 0, lane: 'b' })).items[0]?.createdAt).toBe(T1);
+  });
+
+  test('retry keeps the lane and the payload', async () => {
+    await enqueue(T0, newJob(10, { lane: 'a', payload: { n: 1 }, resourceClass: 'remote_api' }));
+    expect((await claim(T0, 'remote_api'))?.id).toBe(uuid(10));
+    await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1 });
+    expect(await db.jobs.retry({ id: uuid(10), now: T2 })).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', lane: 'a', payload: { n: 1 } });
   });
 });

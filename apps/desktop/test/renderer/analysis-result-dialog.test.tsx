@@ -8,7 +8,8 @@ import {
   type JobView,
   type ListModelsResult,
   type ProposalView,
-  type VisionSettingsView,
+  type ProviderList,
+  type ProviderView,
 } from '@assetforge/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -23,10 +24,23 @@ import {
 } from '../../src/renderer/src/components/AnalysisResultDialog';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
-import { PROMPTS_LOAD_FAILED, SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import {
+  PROMPTS_LOAD_FAILED,
+  PROVIDER_STATE_LABELS,
+  SETTINGS_LOAD_FAILED,
+  START_LOADING,
+} from '../../src/renderer/src/labels';
+import { ProviderSettingsProvider, useProviders, type ProvidersState } from '../../src/renderer/src/provider-context';
 import { AI_CHIP, BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import {
+  deferred,
+  fakeAnalysisPrompts,
+  fakeError,
+  fakeProviders,
+  installFakeApi,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { fileRecord, imagePrompt, nextId, taggingPrompt } from './fixtures';
 
 const TAG_DEFAULT = taggingPrompt({ name: 'Default' });
@@ -36,17 +50,9 @@ const PROMPTS = [TAG_DEFAULT, IMAGE_DEFAULT, TAG_DETAIL];
 
 const NOW = '2026-01-01T00:00:00.000Z';
 
-const CONFIGURED: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 120,
-  taggingModel: 'vision-a',
-  promptModel: null,
-  hasApiKey: false,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
-
-const UNCONFIGURED: VisionSettingsView = { ...CONFIGURED, baseUrl: null, taggingModel: null };
+/** The one entry most tests use; `null` in its place stands for no entry at all. */
+const CONFIGURED: ProviderView = providerView({ name: 'Local', taggingModel: 'vision-a', promptModel: null });
+const UNCONFIGURED = null;
 
 const MODELS: ListModelsResult = {
   ok: true,
@@ -57,7 +63,7 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
 
 function proposalOf(p: Partial<ProposalView> = {}): ProposalView {
   return {
@@ -88,6 +94,9 @@ function jobOf(file: FileRecord, p: Partial<JobView> = {}): JobView {
     startedAt: null,
     finishedAt: null,
     runAfter: null,
+    providerId: null,
+    providerName: null,
+    model: null,
     ...p,
   };
 }
@@ -96,10 +105,24 @@ type Stored = IpcResponse<'analysis:getProposal'>;
 
 interface Options {
   stored?: Stored;
-  settings?: VisionSettingsView;
+  /** The one provider entry; `null` for none. */
+  provider?: ProviderView | null;
   models?: ListModelsResult;
   handlers?: FakeHandlers;
   open?: boolean;
+}
+
+/** The `providers:*` handlers of one entry answering `models`, or of none. */
+function oneProvider(entry: ProviderView | null, models: ListModelsResult) {
+  return entry === null
+    ? fakeProviders().handlers
+    : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: models }).handlers;
+}
+
+let probe: ProvidersState | null = null;
+function Probe() {
+  probe = useProviders();
+  return null;
 }
 
 function setup(file: FileRecord, options: Options = {}) {
@@ -109,8 +132,7 @@ function setup(file: FileRecord, options: Options = {}) {
   };
   const api = installFakeApi({
     ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
-    'settings:getVision': () => options.settings ?? CONFIGURED,
-    'settings:listVisionModels': () => options.models ?? MODELS,
+    ...oneProvider(options.provider === undefined ? CONFIGURED : options.provider, options.models ?? MODELS),
     'jobs:summary': () => state.summary,
     'analysis:getProposal': () => state.stored,
     'analysis:enqueue': () => ({
@@ -129,6 +151,7 @@ function setup(file: FileRecord, options: Options = {}) {
     <JobsProvider>
       <ProviderSettingsProvider>
         <AnalysisPromptsProvider>
+          <Probe />
           <AnalysisResultDialog
             open={open}
             file={shownFile}
@@ -175,6 +198,7 @@ describe('AnalysisResultDialog', () => {
     expect(callsOf(api, 'analysis:enqueue')[0]!.request).toEqual({
       target: { kind: 'files', fileIds: [file.id] },
       model: 'vision-b',
+      providerId: CONFIGURED.id,
       mode: 'propose',
       force: true,
       promptId: TAG_DEFAULT.id,
@@ -509,7 +533,7 @@ describe('AnalysisResultDialog', () => {
 
   it('not configured: Analyse is disabled with a title and Settings navigates to the settings', async () => {
     const file = fileRecord();
-    const { api, onOpenSettings, onClose } = setup(file, { settings: UNCONFIGURED });
+    const { api, onOpenSettings, onClose } = setup(file, { provider: UNCONFIGURED });
     const settings = await screen.findByRole('button', { name: 'Settings' });
     expect(button('Analyse').disabled).toBe(true);
     expect(button('Analyse').title).toBe('No analysis provider is configured');
@@ -522,7 +546,7 @@ describe('AnalysisResultDialog', () => {
   it('no selectable model: Analyse is disabled with a title and Settings is offered', async () => {
     const file = fileRecord();
     setup(file, {
-      settings: { ...CONFIGURED, taggingModel: null },
+      provider: { ...CONFIGURED, taggingModel: null },
       models: { ok: true, models: [{ name: 'text-only', vision: false }] },
     });
     await waitFor(() => expect(button('Analyse').title).toBe(NO_VISION_MODEL));
@@ -535,7 +559,7 @@ describe('AnalysisResultDialog', () => {
     const pending = deferred<IpcResponse<'analysis:acceptProposal'>>();
     const { api, onOpenSettings, onClose, onChanged } = setup(file, {
       stored: { proposal: proposalOf(), job: null },
-      settings: { ...CONFIGURED, taggingModel: null },
+      provider: { ...CONFIGURED, taggingModel: null },
       models: { ok: true, models: [{ name: 'text-only', vision: false }] },
       handlers: { 'analysis:acceptProposal': () => pending.promise },
     });
@@ -555,7 +579,7 @@ describe('AnalysisResultDialog', () => {
 
   it('without a chosen model Analyse is disabled with a title', async () => {
     const file = fileRecord();
-    setup(file, { settings: { ...CONFIGURED, taggingModel: null } });
+    setup(file, { provider: { ...CONFIGURED, taggingModel: null } });
     await providerReady();
     expect(button('Analyse').disabled).toBe(true);
     expect(button('Analyse').title).toBe(CHOOSE_MODEL);
@@ -564,7 +588,7 @@ describe('AnalysisResultDialog', () => {
 
   it('a stored default the provider does not offer blocks Analyse with the reason', async () => {
     const file = fileRecord();
-    setup(file, { settings: { ...CONFIGURED, taggingModel: 'gone-model' } });
+    setup(file, { provider: { ...CONFIGURED, taggingModel: 'gone-model' } });
     await providerReady();
     expect(button('Analyse').disabled).toBe(true);
     expect(button('Analyse').title).toBe(MODEL_NOT_LISTED);
@@ -572,8 +596,8 @@ describe('AnalysisResultDialog', () => {
 
   it('while the settings load Analyse says so instead of "not configured"', async () => {
     const file = fileRecord();
-    const settings = deferred<VisionSettingsView>();
-    setup(file, { handlers: { 'settings:getVision': () => settings.promise } });
+    const settings = deferred<ProviderList>();
+    setup(file, { handlers: { 'providers:list': () => settings.promise } });
     await waitFor(() => expect(button('Analyse').title).toBe(START_LOADING));
     expect(button('Analyse').title).not.toBe(JOB_ERROR_MESSAGES.provider_not_configured);
     await act(async () => settings.reject(fakeError('internal_error')));
@@ -707,5 +731,115 @@ describe('AnalysisResultDialog prompt choice', () => {
     expect(screen.getByTitle('Model').textContent).toBe('vision-b');
     expect(screen.queryByTitle('Prompt')).toBeNull();
     expect(screen.getByTitle('Model').nextElementSibling).toBeNull();
+  });
+});
+
+describe('AnalysisResultDialog provider choice', () => {
+  const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: 'big-vision', promptModel: null });
+  const POD_MODELS: ListModelsResult = { ok: true, models: [{ name: 'big-vision', vision: true }] };
+  const DOWN: ListModelsResult = { ok: false, code: 'provider_unreachable' };
+
+  const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
+  const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+
+  function two(lastUsedId: string | null, models: Record<string, ListModelsResult> = {}): FakeHandlers {
+    return fakeProviders(
+      { providers: [CONFIGURED, RUNPOD], lastUsedId },
+      { [CONFIGURED.id]: MODELS, [RUNPOD.id]: POD_MODELS, ...models },
+    ).handlers;
+  }
+
+  it('shows both entries with their states before the model select and preselects the one used last', async () => {
+    setup(fileRecord(), { handlers: two(RUNPOD.id, { [CONFIGURED.id]: DOWN }) });
+    await waitFor(() =>
+      expect(optionTexts(providerSelect())).toEqual([
+        `Local — ${PROVIDER_STATE_LABELS.unreachable}`,
+        `RunPod — ${PROVIDER_STATE_LABELS.ready}`,
+      ]),
+    );
+    expect(providerSelect().value).toBe(RUNPOD.id);
+    expect(modelSelect().value).toBe('big-vision');
+    expect(providerSelect().compareDocumentPosition(modelSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('opening asks every entry for its state once', async () => {
+    const { api } = setup(fileRecord(), { handlers: two(null) });
+    await providerReady();
+    const refreshed = callsOf(api, 'providers:listModels')
+      .map((c) => c.request)
+      .filter((r) => (r as { refresh?: boolean }).refresh === true);
+    expect(refreshed).toEqual([
+      { providerId: CONFIGURED.id, refresh: true },
+      { providerId: RUNPOD.id, refresh: true },
+    ]);
+  });
+
+  it('switching the provider swaps the model list and preselects its tagging default', async () => {
+    setup(fileRecord(), { handlers: two(CONFIGURED.id) });
+    await providerReady();
+    expect(modelSelect().value).toBe('vision-a');
+    await userEvent.setup().selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(within(modelSelect()).queryByRole('option', { name: 'big-vision' })).toBeTruthy());
+    expect(modelSelect().value).toBe('big-vision');
+    expect(within(modelSelect()).queryByRole('option', { name: 'vision-b' })).toBeNull();
+  });
+
+  it('a provider that is down blocks Analyse with its reason; switching to the ready one enables it', async () => {
+    setup(fileRecord(), { handlers: two(CONFIGURED.id, { [CONFIGURED.id]: DOWN }) });
+    await waitFor(() => expect(button('Analyse').title).toBe(JOB_ERROR_MESSAGES.provider_unreachable));
+    expect(button('Analyse').disabled).toBe(true);
+    await userEvent.setup().selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(button('Analyse').disabled).toBe(false));
+  });
+
+  it('Analyse sends the selected provider and records it as used', async () => {
+    const file = fileRecord();
+    const { api, rerender } = setup(file, { handlers: two(CONFIGURED.id) });
+    await providerReady();
+    const user = userEvent.setup();
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(button('Analyse').disabled).toBe(false));
+    await user.click(button('Analyse'));
+    await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
+    expect(callsOf(api, 'analysis:enqueue')[0]!.request).toEqual({
+      target: { kind: 'files', fileIds: [file.id] },
+      model: 'big-vision',
+      providerId: RUNPOD.id,
+      mode: 'propose',
+      force: true,
+      promptId: TAG_DEFAULT.id,
+    });
+    await waitFor(() => expect(probe!.list?.lastUsedId).toBe(RUNPOD.id));
+    rerender(false);
+    rerender(true, fileRecord());
+    await waitFor(() => expect(providerSelect().value).toBe(RUNPOD.id));
+  });
+
+  it('another file starts again from the entry used last', async () => {
+    const { rerender } = setup(fileRecord(), { handlers: two(CONFIGURED.id) });
+    await providerReady();
+    await userEvent.setup().selectOptions(providerSelect(), RUNPOD.id);
+    expect(providerSelect().value).toBe(RUNPOD.id);
+    rerender(true, fileRecord());
+    await waitFor(() => expect(providerSelect().value).toBe(CONFIGURED.id));
+    expect(modelSelect().value).toBe('vision-a');
+  });
+
+  it('an entry deleted while the dialog is open moves the selection to the remaining one', async () => {
+    setup(fileRecord(), { handlers: two(CONFIGURED.id) });
+    await providerReady();
+    await userEvent.setup().selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(modelSelect().value).toBe('big-vision'));
+    await act(async () => probe!.remove(RUNPOD.id));
+    await waitFor(() => expect(providerSelect().value).toBe(CONFIGURED.id));
+    expect(optionTexts(providerSelect())).toHaveLength(1);
+    expect(modelSelect().value).toBe('vision-a');
+  });
+
+  it('without any entry the provider select shows no provider and Settings is offered', async () => {
+    setup(fileRecord(), { provider: UNCONFIGURED });
+    await screen.findByRole('button', { name: 'Settings' });
+    expect(optionTexts(providerSelect())).toEqual(['No provider']);
+    expect(button('Analyse').title).toBe(JOB_ERROR_MESSAGES.provider_not_configured);
   });
 });

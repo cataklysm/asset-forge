@@ -382,10 +382,19 @@ export interface JobRepository {
   enqueue(r: { jobs: readonly NewJob[]; now: string }): Promise<string[]>;
   get(id: string): Promise<Job | null>;
   listByStatus(status: JobStatus): Promise<Job[]>; // oldest created_at first, then id
-  /** Oldest job (created_at, id) of the class and one of `types` that is `queued`, or `retry_wait` with run_after <= now. Atomically sets `running`, attempt + 1, started_at = now, clears run_after and the error. */
-  claimNext(r: { resourceClass: ResourceClass; types: readonly string[]; now: string }): Promise<Job | null>;
-  /** Earliest run_after of `retry_wait` jobs of these types; null when there is none. */
-  nextRunAfter(types: readonly string[]): Promise<string | null>;
+  /**
+   * Oldest job (created_at, id) of the class and one of `types` that is `queued`, or `retry_wait` with run_after <= now,
+   * whose lane is not in `excludeLanes` (`null` in it excludes the jobs without a lane). Atomically sets `running`,
+   * attempt + 1, started_at = now, clears run_after and the error.
+   */
+  claimNext(r: {
+    resourceClass: ResourceClass;
+    types: readonly string[];
+    now: string;
+    excludeLanes?: readonly (string | null)[];
+  }): Promise<Job | null>;
+  /** Earliest run_after of `retry_wait` jobs of these types whose lane is not in `excludeLanes`; null when there is none. */
+  nextRunAfter(types: readonly string[], excludeLanes?: readonly (string | null)[]): Promise<string | null>;
   /** running → succeeded | failed | cancelled, finished_at = now, message from JOB_ERROR_MESSAGES. False when the row is not `running`. */
   finish(id: string, r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string }): Promise<boolean>;
   /** running → retry_wait with run_after and the error. False when the row is not `running`. */
@@ -399,8 +408,27 @@ export interface JobRepository {
   /** Deletes every succeeded, failed or cancelled job. Returns how many. */
   clearFinished(): Promise<number>;
   counts(): Promise<Record<JobStatus, number>>;
-  /** Newest created_at first, then id descending. `fileName` is the file's original name. */
-  list(q: { limit: number; offset: number; status?: JobStatus }): Promise<{ items: JobView[]; total: number }>;
+  /**
+   * Newest created_at first, then id descending; with `lane` only the jobs of that lane. `fileName` is the file's
+   * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload.
+   */
+  list(q: { limit: number; offset: number; status?: JobStatus; lane?: string }): Promise<{ items: JobView[]; total: number }>;
+  /** Jobs of this type in `queued` or `retry_wait`, counted per lane; lanes without such a job are left out. */
+  waitingByLane(type: string): Promise<{ lane: string | null; waiting: number }[]>;
+  /** The payload of the newest job (created_at, then id) of this type and lane in any status; null when there is none. */
+  latestPayloadOfLane(type: string, lane: string | null): Promise<unknown | null>;
+  /** Jobs of this type and lane in `queued`, `retry_wait`, `running` or `waiting_remote`. */
+  countActiveInLane(type: string, lane: string): Promise<number>;
+  /**
+   * One transaction. Every job of this type and `fromLane` in `queued` or `retry_wait` gets `toLane`, the payload
+   * `rewrite` answers, status `queued`, attempt 0, and run_after and the error cleared. Returns how many.
+   */
+  rerouteWaiting(r: { type: string; fromLane: string | null; toLane: string; rewrite: (payload: unknown) => unknown; now: string }): Promise<number>;
+  /**
+   * One transaction. Every active job of this type without a lane gets `lane` and the payload `rewrite` answers;
+   * a row for which `rewrite` answers null is left as it is. Status and attempt stay. Returns how many changed.
+   */
+  assignLane(r: { type: string; lane: string; rewrite: (payload: unknown) => unknown | null; now: string }): Promise<number>;
   /**
    * The active or latest job of this type for the file: the newest active job (created_at, then id)
    * when there is one, otherwise the newest job whatever its status; null when there is none.

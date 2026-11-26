@@ -55,29 +55,39 @@ export async function setup() {
   const file = await importOne('car.png');
   const vision = new FakeVisionProvider();
   const images = new FakeModelImageSource();
-  let configured: { vision: FakeVisionProvider | null; model: string | null } = { vision, model: 'mock-vision' };
+  let configured: { vision: FakeVisionProvider | null } = { vision };
+  /** The lane of every provider lookup of the handler. */
+  const lanes: (string | null)[] = [];
   const handler = createAnalyzeFileHandler({
     session,
-    vision: () => configured.vision,
+    vision: (lane) => {
+      lanes.push(lane);
+      return configured.vision;
+    },
     images,
     provider: PROVIDER,
-    defaultModel: () => configured.model,
   });
-  const configure = (c: { vision: FakeVisionProvider | null; model: string | null }) => {
+  const configure = (c: { vision: FakeVisionProvider | null }) => {
     configured = c;
   };
-  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure };
+  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;
 
-export function jobFor(fileId: string | null, payload: unknown = { version: 1 }): Job {
+export const LANE = 'lane-a';
+
+/** A v4 payload without a prompt: the legacy request with the model `mock-vision`. */
+export const LEGACY_V4 = { version: 4, model: 'mock-vision', mode: 'apply', prompt: null, providerName: 'Local' } as const;
+
+export function jobFor(fileId: string | null, payload: unknown = LEGACY_V4, lane: string | null = LANE): Job {
   return {
     id: 'job-1',
     type: ANALYZE_FILE_JOB,
     resourceClass: 'local_gpu',
     status: 'running',
     fileId,
+    lane,
     payload,
     dedupeKey: fileId === null ? null : `${ANALYZE_FILE_JOB}:${fileId}`,
     attempt: 1,

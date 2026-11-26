@@ -8,7 +8,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetsScreen } from '../../src/renderer/src/screens/AssetsScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { assetSummary, nextId, pageOf, projectSummary, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog, RenameTrigger } from './rename-flow';
 
@@ -214,17 +214,10 @@ it('arrow keys move focus and selection together', async () => {
   expect(tabbable).toEqual([itemOf('Asset 6')]);
 });
 
+const PROVIDER = providerView({ promptModel: null });
 const ANALYSIS: FakeHandlers = {
-  'settings:getVision': () => ({
-    baseUrl: 'http://127.0.0.1:11500',
-    timeoutSeconds: 120,
-    taggingModel: 'vision-a',
-    promptModel: null,
-    hasApiKey: false,
-    fromEnvironment: false,
-    canStoreKey: true,
-  }),
-  'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
+  ...fakeProviders({ providers: [PROVIDER], lastUsedId: PROVIDER.id }, { [PROVIDER.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
+    .handlers,
   'analysis:preview': () => ({ analysable: 3, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
   'analysis:enqueue': () => ({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } }),
 };
@@ -250,6 +243,7 @@ it('Analyse all starts the current asset filter and shows the outcome', async ()
   expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
     target: { kind: 'assetFilter', filter: { status: 'in_review', tagNames: ['oak'] } },
     model: 'vision-a',
+    providerId: PROVIDER.id,
   });
   await user.click(screen.getByRole('button', { name: 'Start' }));
   expect(within(await screen.findByRole('status')).getByText('3 queued')).toBeTruthy();
@@ -267,6 +261,7 @@ it('Analyse in the Selection column starts the selected asset', async () => {
   expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
     target: { kind: 'asset', assetId: oak.id },
     model: 'vision-a',
+    providerId: PROVIDER.id,
   });
 });
 
@@ -276,15 +271,7 @@ it('without a configured provider Analyse all and the Selection Analyse are disa
   install({
     'assets:list': listOf([oak]),
     ...ANALYSIS,
-    'settings:getVision': () => ({
-      baseUrl: null,
-      timeoutSeconds: 120,
-      taggingModel: null,
-      promptModel: null,
-      hasApiKey: false,
-      fromEnvironment: false,
-      canStoreKey: true,
-    }),
+    ...fakeProviders().handlers,
   });
   renderWithProvider();
   await user.click(await screen.findByText('Oak tree'));

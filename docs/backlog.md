@@ -1,13 +1,12 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import and asset sources reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources and several vision providers reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
-- **Several vision providers.** Today exactly one provider can be configured (one base URL, one API key, one default model per purpose). The owner needs several defined side by side: the local Ollama on their own graphics card is not always available (the card is needed for other work), and at times a container on RunPod or a similar host takes over, also to try much larger models. Decided by the owner: the provider is chosen where an analysis is started (the start dialog, the single-image dialog, Image to prompt), not only in the settings, so that switching needs no detour through the settings and the dialog shows which provider is selected and whether it is reachable; a dialog preselects the provider that was used last. Open for the design: what a provider entry holds (name, base URL, key, timeout, default models), how reachability is shown there, one stored key per provider in `safeStorage`, the read-only environment mode, the pause gate and the pause banner per provider, queued jobs whose provider is switched or removed, and the fingerprint skip (it already contains provider and model, so the same file analysed through another provider counts as not analysed).
 
 ## Correctness and robustness
 
@@ -198,10 +197,10 @@ Deferred by design:
 - Image2Prompt runs outside the scheduler, so it can overlap one running analysis on the same GPU (Ollama queues the requests).
 - The pause of the analysis queue is not persisted; a restart starts unpaused.
 - A file has one AI tag set, not one per model, and there is no proposal history.
-- `settings:listVisionModels` has no cancel channel; a slow server holds the request until its timeout.
+- `providers:listModels` has no cancel channel (`provider-handlers.ts`); a slow server holds the request until its timeout.
 - The Settings screen is reachable only inside an open workspace, although the settings are app-level.
 - The two "Before paid providers" entries of phase 4a still apply.
-- `jobs:resume` is app-level: it works without an open workspace and resumes the one pause gate of the app session.
+- `jobs:resume { providerId }` is app-level: it works without an open workspace and resumes one lane of the app session's pause gate.
 - The "Proposals" toggle of the file lists is local to `FileBrowser` and does not survive navigation (the list state assumes string filter values, and "Analyse all" would have to leave the toggle out of its filter).
 - The pause banner sits in the shell behind the backdrop of a modal dialog: behind a form-size dialog it stays faintly visible but cannot be used, and the file detail dialog covers it almost completely.
 - With a selection, the asset Files tab shows two Analyse buttons (the asset's in the header and the selection's), told apart only by their tooltips.
@@ -214,17 +213,16 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 - A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
 - A failure while building the request headers throws `provider_unauthorized` directly instead of going through `fail`, so an abort at that point would be reported as `provider_unauthorized`; not reachable today, because `throwIfAborted` runs just before and the header build is synchronous.
 
-Settings (`apps/desktop/src/main/vision-settings.ts`):
+Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
-- A change listener that throws in the `finally` of a save masks an error of the key write.
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
-- The key's origin binding lives only in the plaintext settings file (`vision-settings.ts:160,177-181`): a process with write access to `userData` can replace the base URL and keep the credential file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
+- The key's origin binding lives only in the plaintext settings file (an entry's stored base URL): a process with write access to `userData` can replace an entry's base URL and keep its key file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
 
 Main process (`apps/desktop/src/main`):
 
 - Cancelled Image2Prompt runs keep running in the media worker pool until they settle; the set of settling runs is unbounded, so repeated Generate and Cancel can pile them up (pass the signal into `images.jpeg` or cap the set).
-- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every settings save even when the queue is not paused (`job-host.ts`).
-- The provider id reaches core by two routes: `composition.ts:120` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts:53,56` imports it for `analysis:preview` and `analysis:enqueue`. Both use the one constant today; a second vision provider must keep them equal.
+- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every save or delete of a provider entry even when the queue is not paused (`job-host.ts`).
+- The provider id reaches core by two routes: `composition.ts` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts` imports it for `analysis:preview` and `analysis:enqueue`. `OLLAMA_PROVIDER` stays the one adapter kind and the provider id of the fingerprint, not an entry id, so the same model through two entries counts as already analysed; a second kind of provider must keep both routes equal.
 
 Mock provider (`docker/mock-provider/server.mjs`):
 
@@ -413,6 +411,49 @@ Found in the final review and not fixed:
 - Writing a source and touching the asset's `updated_at` are two statements, not one transaction (as for tags).
 - An `assets:get` reload already in flight can briefly show the asset without a source that was just added (the same pattern as for tags).
 - How Windows treats `^`, `|`, `&` and a backtick in a query string handed to `shell.openExternal` is unverified.
+
+## Vision providers
+
+Deferred by design:
+
+- No second kind of provider (OpenAI-compatible servers, vLLM, a llama.cpp server, RunPod serverless); every entry speaks the Ollama API (see the note on the provider id routes under "Main process").
+- No automatic failover: the app never moves jobs or switches a provider by itself.
+- No starting, stopping or loading anything on a provider (pods, Ollama model load control).
+- No setting for parallel analyses per provider; each provider runs one at a time.
+- No moving of a running job or of single jobs picked from the list; a move is all waiting jobs of one provider.
+- No background polling of reachability; a state is checked when a dialog, the select or the settings ask.
+- No record of which entry produced a stored analysis; the stored model name stays the record.
+- No paid providers and no safeguards for them.
+- Jobs in workspaces that are not open are not checked when an entry is deleted; such a job later fails as `provider_not_configured` and can be moved.
+- Jobs without a provider are assigned to the first entry only when a workspace is opened, not when the first entry is created.
+- The origin binding of a key lives in the plaintext settings file (it is the stored base URL), now per entry.
+- The Jobs-screen provider filter offers `All providers` and the existing entries; there is no option for jobs without a provider or for the lanes of a deleted provider.
+- In environment mode an unusable `ASSETFORGE_VISION_BASE_URL` gives an empty provider list rather than one entry that reports the error.
+
+Found in the final review and not fixed:
+
+- Opening a dialog or the provider select discards each entry's last answer before re-checking, so a ready entry shows as being checked and Start is blocked until the answer arrives.
+- A failed reload with a list already held is visible only to the caller.
+- A pending key removal is not shown and cannot be undone before saving.
+- Focus is lost after deleting an entry in Settings.
+- The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
+- Key temporary files are swept only at start.
+- The waiting count in the move dialog is not refreshed while it is open.
+- Jobs of a deleted provider cannot be filtered on the Jobs screen.
+- The result dialog re-checks all entries and drops a manual provider pick on every file switch.
+- `listTimeoutMs` is not clamped.
+- `assignLane` with a rewrite that answers `undefined` behaves differently in the SQLite repository and the in-memory repository of the core tests; `rerouteWaiting` does not refuse the same lane itself (the host does).
+- `list({ lane: null })` matches no row in the SQLite repository; `nextRunAfter(types, [])` is not pinned by a test.
+- `pause.paused(rc)` is called unguarded when the scheduler computes the excluded lanes.
+- No test for a caller abort of `listModels`; `MAX_TIMER_MS` is a magic value on the model-list request.
+- `listWaitingLanes` runs one query per lane.
+- Model-list answers of entries that no longer exist stay in the renderer's provider context.
+- `internal_error` on the model list with a stored model (no Settings offer) is untested in the start dialog.
+- Move jobs dialog: the source name shows `Removed provider` until the lanes arrive; an old refusal stays visible after the source changes; a failed lane lookup leaves the disabled Move without a tooltip.
+- `shell.test.tsx` no longer asserts the Settings button for `provider_not_configured` nor the path from the banner to the Settings screen through `WorkspaceShell`.
+- The acceptance test pins "one job at a time per provider" weakly; no desktop test runs a v1 job to success; no desktop test queues a job in environment mode.
+- `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
+- Moving jobs into a paused target lane leaves them waiting there with no hint in the dialog.
 
 ## Not covered by any automated check
 

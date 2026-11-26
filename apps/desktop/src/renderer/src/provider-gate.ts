@@ -6,11 +6,12 @@ import {
   MODEL_NOT_LISTED,
   MODEL_NOT_VISION,
   NO_VISION_MODEL,
+  PROVIDER_CHECKING,
   PROMPTS_LOAD_FAILED,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
 } from './labels';
-import type { ProviderState } from './provider-context';
+import { providerStatus, type ProvidersState } from './provider-context';
 
 /**
  * Why nothing can start with the analysis prompt `promptId`, as the start button's tooltip; null
@@ -37,41 +38,38 @@ export interface ProviderGate {
 }
 
 /**
- * The provider side of the analysis and prompt dialogs, shared so all three agree: a failed
- * settings load is its own state (not "not configured"), and a model the loaded list does not
- * contain cannot start.
+ * The provider side of the analysis and prompt dialogs, shared so all three agree, applied to the
+ * selected entry: a failed list load is its own state (not "no provider"), an entry still being
+ * asked cannot start, and a model the entry's loaded list does not contain cannot start.
  */
 export function providerGate(
-  provider: Pick<ProviderState, 'settings' | 'models' | 'loading' | 'settingsFailed'>,
+  state: Pick<ProvidersState, 'list' | 'models' | 'loading' | 'failed'>,
+  providerId: string | null,
   model: string | null,
 ): ProviderGate {
-  const { settings, models, loading } = provider;
-  const failed = settings === null && provider.settingsFailed && !loading;
-  const notConfigured = settings !== null && settings.baseUrl === null;
-  const list = models !== null && models.ok ? models.models : null;
-  const noVisionModel = list !== null && !list.some((m) => m.vision !== false);
-  const notListed = list !== null && model !== null && !list.some((m) => m.name === model);
-  const notVision = list !== null && list.some((m) => m.name === model && m.vision === false);
-  const listRefused = models !== null && !models.ok && SETTINGS_CODES.has(models.code);
-  // A list that cannot be used leaves nothing to choose from when no model is stored.
-  const listUnusable = settings !== null && !notConfigured && list === null && model === null;
-
-  const blocked = failed
-    ? SETTINGS_LOAD_FAILED
-    : settings === null
-      ? START_LOADING
-      : notConfigured
-        ? JOB_ERROR_MESSAGES.provider_not_configured
-        : noVisionModel
-          ? NO_VISION_MODEL
-          : model === null
-            ? CHOOSE_MODEL
-            : notListed
-              ? MODEL_NOT_LISTED
-              : notVision
-                ? MODEL_NOT_VISION
-                : null;
-  const offerSettings =
-    !loading && (failed || notConfigured || noVisionModel || listRefused || listUnusable);
-  return { blocked, offerSettings };
+  const { list, loading } = state;
+  if (list === null) {
+    const failed = state.failed && !loading;
+    return { blocked: failed ? SETTINGS_LOAD_FAILED : START_LOADING, offerSettings: failed };
+  }
+  if (providerId === null || !list.providers.some((p) => p.id === providerId))
+    return { blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: !loading };
+  const status = providerStatus(state, providerId);
+  if (status === 'checking') return { blocked: PROVIDER_CHECKING, offerSettings: false };
+  const answer = state.models[providerId]!;
+  if (!answer.ok) {
+    // A list that cannot be used leaves nothing to choose from when no model is chosen.
+    const offerSettings = !loading && (SETTINGS_CODES.has(answer.code) || model === null);
+    return { blocked: JOB_ERROR_MESSAGES[answer.code], offerSettings };
+  }
+  if (status === 'no_vision_model') return { blocked: NO_VISION_MODEL, offerSettings: !loading };
+  const blocked =
+    model === null
+      ? CHOOSE_MODEL
+      : !answer.models.some((m) => m.name === model)
+        ? MODEL_NOT_LISTED
+        : answer.models.some((m) => m.name === model && m.vision === false)
+          ? MODEL_NOT_VISION
+          : null;
+  return { blocked, offerSettings: false };
 }

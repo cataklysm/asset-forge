@@ -8,13 +8,13 @@ import { ANALYZE_FILE_JOB, type IpcChannel, type IpcRequest, type IpcResponse, t
 import type { WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
-import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
+import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
 import { createJobHost } from '../src/main/job-host.js';
-import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, type Harness } from './analysis-harness.js';
-import { servicesWithPrompts } from './idle-job-host.js';
+import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
+import { mockProviderEntry, servicesWithPrompts } from './idle-job-host.js';
 
 /** The tags the mock answers for these image bytes. */
 async function mockTagsOf(mock: MockProvider, bytes: Uint8Array, headers: Record<string, string> = {}): Promise<string[]> {
@@ -53,14 +53,14 @@ describe('phase 4a acceptance', () => {
   });
 
   it('analyses a batch through cancel, retry and a close mid-batch without touching manual tags', async () => {
-    const adapter = createOllamaVision({ baseUrl: mock.url });
+    const provider = mockProviderEntry(join(base, 'userData'), mock.url);
     const jobHost = createJobHost({
       manager,
-      gateway: { current: () => adapter },
+      vision: provider.vision,
       images: { jpeg: (path) => readFile(path) },
       provider: OLLAMA_PROVIDER,
-      defaultModel: () => MOCK_MODEL,
       pause: createPauseGate({}),
+      firstEntry: () => provider.store.first(),
       limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
     });
     // While held, opening a workspace does not start its scheduler.
@@ -81,7 +81,7 @@ describe('phase 4a acceptance', () => {
         workspaceClosing: () => jobHost.workspaceClosing(),
       },
       jobHost,
-      servicesWithPrompts(join(base, 'userData')),
+      servicesWithPrompts(join(base, 'userData'), () => {}, provider.store),
     );
     const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
@@ -176,7 +176,7 @@ describe('phase 4a acceptance', () => {
 });
 
 describe('phase 4b acceptance', () => {
-  const WRONG_KEY = 'wrong-key-not-real';
+  const WRONG_KEY = TEST_KEY_2;
   let h: Harness;
   let mock: MockProvider | undefined;
 
@@ -189,15 +189,8 @@ describe('phase 4b acceptance', () => {
     mock = undefined;
   });
 
-  /** Saves the mock as the provider; no default models, so every job runs with the model it was enqueued with. */
-  const configure = (url: string, apiKey?: string | null) =>
-    h.ok('settings:setVision', {
-      baseUrl: url,
-      timeoutSeconds: 30,
-      taggingModel: null,
-      promptModel: null,
-      ...(apiKey === undefined ? {} : { apiKey }),
-    });
+  /** Saves the mock as the only provider entry; no default models, so every job runs with the model it was enqueued with. */
+  const configure = (url: string, apiKey?: string | null) => h.provider({ url, ...(apiKey === undefined ? {} : { apiKey }) });
   const createWorkspace = () => h.ok('workspace:create', { name: 'Analysis', rootPath: join(h.base, 'workspace') });
   const filesOf = async () => (await h.ok('files:list', { limit: 100, offset: 0, scope: { kind: 'all' } })).items;
 
@@ -211,8 +204,9 @@ describe('phase 4b acceptance', () => {
 
   it('analyses a file filter with the chosen model, skips what it analysed and redoes it on force', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    expect(await configure(mock.url, TEST_KEY)).toMatchObject({ baseUrl: mock.url, hasApiKey: true });
-    const listed = await h.ok('settings:listVisionModels', {});
+    const entry = await configure(mock.url, TEST_KEY);
+    expect(entry).toMatchObject({ baseUrl: mock.url, hasApiKey: true });
+    const listed = await h.ok('providers:listModels', { providerId: entry.id });
     expect(listed).toMatchObject({ ok: true });
     expect(listed.ok && listed.models).toContainEqual({ name: MOCK_MODEL, vision: true });
 
@@ -295,27 +289,31 @@ describe('phase 4b acceptance', () => {
 
   it('pauses on a wrong key across reopening and drains the queue once the right key is saved', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
-    await configure(mock.url, WRONG_KEY);
+    const entry = await configure(mock.url, WRONG_KEY);
     await createWorkspace();
     const fileIds = await h.importImages(3);
     const request = { target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: false };
     expect(await h.ok('analysis:enqueue', request)).toMatchObject({ enqueued: 3 });
 
-    const paused = await h.until((s) => s.paused !== null);
-    expect(paused).toMatchObject({ paused: { reason: 'provider_unauthorized' }, failed: 1, queued: 2, running: 0 });
+    const paused = await h.until((s) => s.paused.length > 0);
+    expect(paused).toMatchObject({ failed: 1, queued: 2, running: 0 });
+    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unauthorized' }]);
     const [failed] = (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'failed' })).items;
     expect(failed).toMatchObject({ errorCode: 'provider_unauthorized' });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 2, failed: 1 });
-    expect(h.logs).toContain('Vision provider failed: provider_unauthorized (HTTP 401)');
+    expect(h.logs).toContain(`Vision provider ${entry.id} failed: provider_unauthorized (HTTP 401)`);
 
     await h.ok('workspace:close', {});
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(await h.ok('jobs:summary', {})).toMatchObject({ paused: { reason: 'provider_unauthorized' }, queued: 2 });
+    expect(await h.ok('jobs:summary', {})).toMatchObject({
+      paused: [{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unauthorized' }],
+      queued: 2,
+    });
 
-    expect(await configure(mock.url, TEST_KEY)).toMatchObject({ hasApiKey: true });
-    expect((await h.ok('jobs:summary', {})).paused).toBeNull();
+    expect(await configure(mock.url, TEST_KEY)).toMatchObject({ id: entry.id, hasApiKey: true });
+    expect((await h.ok('jobs:summary', {})).paused).toEqual([]);
     await h.until((s) => s.succeeded === 2 && s.queued === 0);
     await expectNoKeyAnywhere(TEST_KEY);
     for (const line of h.logs) expect(line).not.toContain(WRONG_KEY);
@@ -325,61 +323,48 @@ describe('phase 4b acceptance', () => {
     mock = await startMockProvider({ port: 0 });
     const url = mock.url;
     const port = Number(new URL(url).port);
-    await configure(url);
+    const entry = await configure(url);
     await mock.close();
     mock = undefined;
     await createWorkspace();
     const fileIds = await h.importImages(4);
     await h.ok('analysis:enqueue', { target: { kind: 'files', fileIds }, model: MOCK_MODEL, mode: 'apply', force: false });
 
-    const paused = await h.until((s) => s.paused !== null);
-    expect(paused).toMatchObject({ paused: { reason: 'provider_unreachable' }, waiting: 3, queued: 1, running: 0 });
+    const paused = await h.until((s) => s.paused.length > 0);
+    expect(paused).toMatchObject({ waiting: 3, queued: 1, running: 0 });
+    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unreachable' }]);
     for (const job of (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'retry_wait' })).items) {
       expect(job).toMatchObject({ attempt: 1, errorCode: 'provider_unreachable' });
     }
 
     mock = await startMockProvider({ port });
-    expect(await h.ok('jobs:resume', {})).toEqual({});
-    expect((await h.ok('jobs:summary', {})).paused).toBeNull();
+    expect(await h.ok('jobs:resume', { providerId: entry.id })).toEqual({});
+    expect((await h.ok('jobs:summary', {})).paused).toEqual([]);
     await h.until((s) => s.succeeded === 1 && s.queued === 0);
   });
 
-  it('runs a queued phase 4a job with the tagging default', async () => {
-    mock = await startMockProvider({ port: 0 });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: MOCK_MODEL, promptModel: null });
-    await createWorkspace();
-    const [fileId] = await h.importImages(1);
-    await h.manager.read((s) =>
-      s.database.jobs.enqueue({
-        jobs: [{ id: randomUUID(), type: ANALYZE_FILE_JOB, resourceClass: 'local_gpu', fileId: fileId!, payload: { version: 1 }, dedupeKey: `${ANALYZE_FILE_JOB}:${fileId}` }],
-        now: new Date().toISOString(),
-      }),
-    );
-    h.services.jobHost.wake();
-    await h.until((s) => s.succeeded === 1);
-    expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({ model: MOCK_MODEL });
-  });
-
-  it('fails a job as not configured without settings and environment, and pauses', async () => {
-    expect(h.services.gateway.current()).toBeNull();
-    expect(await h.ok('settings:getVision', {})).toMatchObject({ baseUrl: null, taggingModel: null, promptModel: null, fromEnvironment: false });
+  it('answers provider_not_configured without an entry and environment, and queues nothing', async () => {
+    expect(await h.ok('providers:list', {})).toMatchObject({ providers: [], lastUsedId: null, fromEnvironment: false });
     await createWorkspace();
     const fileIds = await h.importImages(2);
-    await h.ok('analysis:enqueue', { target: { kind: 'files', fileIds }, model: MOCK_MODEL, mode: 'apply', force: false });
-    const summary = await h.until((s) => s.paused !== null);
-    expect(summary).toMatchObject({ paused: { reason: 'provider_not_configured' }, failed: 1, queued: 1 });
-    const [failed] = (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'failed' })).items;
-    expect(failed).toMatchObject({ errorCode: 'provider_not_configured' });
+    const request = { target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: false };
+    for (const channel of ['analysis:enqueue', 'analysis:preview'] as const) {
+      expect(await h.call(channel, request)).toEqual({
+        ok: false,
+        error: { code: 'provider_not_configured', message: 'No analysis provider is configured' },
+      });
+    }
+    expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 0, failed: 0, paused: [] });
   });
 
   it('drops the key when the origin changes, so another server never receives it', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
     const other = await startMockProvider({ port: 0 });
     try {
-      await configure(mock.url, TEST_KEY);
-      expect(await h.ok('settings:listVisionModels', {})).toMatchObject({ ok: true });
-      expect(await configure(other.url)).toMatchObject({ baseUrl: other.url, hasApiKey: false });
-      expect(await h.ok('settings:listVisionModels', {})).toMatchObject({ ok: true });
+      const entry = await configure(mock.url, TEST_KEY);
+      expect(await h.ok('providers:listModels', { providerId: entry.id })).toMatchObject({ ok: true });
+      expect(await configure(other.url)).toMatchObject({ id: entry.id, baseUrl: other.url, hasApiKey: false });
+      expect(await h.ok('providers:listModels', { providerId: entry.id })).toMatchObject({ ok: true });
       expect(other.requests.length).toBeGreaterThan(0);
       for (const r of other.requests) expect(r.headers['authorization']).toBeUndefined();
       for (const r of mock.requests) expect(r.headers['authorization']).toBe(`Bearer ${TEST_KEY}`);
@@ -397,7 +382,7 @@ describe('editable prompts acceptance', () => {
   beforeEach(async () => {
     h = await createHarness();
     mock = await startMockProvider({ port: 0 });
-    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
+    await h.provider({ url: mock.url });
     await h.ok('workspace:create', { name: 'Analysis', rootPath: join(h.base, 'workspace') });
   });
   afterEach(async () => {

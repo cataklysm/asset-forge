@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JOB_POLL_MS, JobsProvider, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi } from './fake-api';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
 
 let seen: JobState[] = [];
 
@@ -132,6 +132,35 @@ describe('JobsProvider', () => {
     const before = latest();
     await tick();
     expect(latest()).toBe(before);
+  });
+
+  it('a new pause list is taken, an equal one keeps the state object', async () => {
+    const a = { providerId: '00000000-0000-4000-8000-00000000a001', providerName: 'Local', reason: 'provider_unreachable' } as const;
+    const b = { providerId: '00000000-0000-4000-8000-00000000b001', providerName: 'RunPod', reason: 'provider_unauthorized' } as const;
+    let next: JobSummary = { ...IDLE, queued: 1, paused: [a] };
+    installFakeApi({ 'jobs:summary': () => structuredClone(next) });
+    render(
+      <JobsProvider>
+        <Probe />
+      </JobsProvider>,
+    );
+    await settle();
+    const before = latest();
+    expect(before.summary?.paused).toEqual([a]);
+    await tick();
+    expect(latest()).toBe(before);
+
+    next = { ...next, paused: [a, b] };
+    await tick();
+    expect(latest().summary?.paused).toEqual([a, b]);
+
+    next = { ...next, paused: [a, { ...b, reason: 'provider_not_configured' }] };
+    await tick();
+    expect(latest().summary?.paused[1]?.reason).toBe('provider_not_configured');
+
+    next = { ...next, paused: [] };
+    await tick();
+    expect(latest().summary?.paused).toEqual([]);
   });
 
   it('a rejected poll renders no alert, keeps the previous summary and the next tick polls again', async () => {

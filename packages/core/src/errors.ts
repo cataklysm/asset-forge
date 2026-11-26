@@ -40,6 +40,8 @@ export class StorageFullError extends define('storage_full') {}
 export class NotFoundError extends define('not_found') {}
 export class InvalidOperationError extends define('invalid_operation') {}
 export class ValidationFailedError extends define('validation_failed') {}
+/** No usable provider entry for a request: none exists, the one asked for is gone, or it has no model. */
+export class ProviderNotConfiguredError extends define('provider_not_configured') {}
 
 /** A readable source that is not a ZIP archive (or whose directory cannot be read). */
 export class ArchiveNotReadableError extends ValidationFailedError {

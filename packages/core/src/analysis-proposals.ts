@@ -1,4 +1,4 @@
-import { ANALYZE_FILE_JOB, normalizeTagName, type JobView, type ProposalView } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, analysisJobFields, normalizeTagName, type JobView, type ProposalView } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { Job } from './jobs.js';
@@ -18,6 +18,8 @@ function viewOf(job: Job, fileName: string | null): JobView {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     runAfter: job.runAfter,
+    providerId: job.lane,
+    ...analysisJobFields(job.payload),
   };
 }
 
