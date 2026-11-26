@@ -204,6 +204,17 @@ describe('analysis prompt store', () => {
     expect(logs).toEqual([LAST_USED_WRITE_FAILED]);
   });
 
+  it('does not write when the prompt is already the one used last', () => {
+    const store = open();
+    const image = store.list().prompts[1]!;
+    store.markUsed(image);
+    // A write would now fail and log; a skipped write does neither.
+    rmSync(filePath());
+    mkdirSync(join(filePath(), 'blocker'), { recursive: true });
+    store.markUsed(image);
+    expect(logs).toEqual([]);
+  });
+
   it('leaves no temporary file behind', () => {
     const store = open();
     store.save({ purpose: 'tagging', name: 'General', text: 'x', maxTags: 5 });

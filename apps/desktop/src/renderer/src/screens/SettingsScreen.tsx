@@ -9,7 +9,7 @@ import { describeError } from '../api';
 import { ModelSelect } from '../components/ModelSelect';
 import { Page } from '../components/Page';
 import { PromptSettings } from '../components/PromptSettings';
-import { MODEL_PURPOSE_LABELS } from '../labels';
+import { MODEL_PURPOSE_LABELS, RETRY_LABEL } from '../labels';
 import { useProvider } from '../provider-context';
 import { ALERT, BUTTON, BUTTON_INLINE, INPUT, LABEL, MUTED, SECTION_TITLE } from '../ui';
 
@@ -98,7 +98,7 @@ function ProviderSettings() {
                 reload().catch((e: unknown) => setError(describeError(e)));
               }}
             >
-              Retry
+              {RETRY_LABEL}
             </button>
           </div>
         )}

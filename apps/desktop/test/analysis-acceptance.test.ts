@@ -428,7 +428,9 @@ describe('editable prompts acceptance', () => {
     expect(tags.length).toBeGreaterThan(0);
     expect(tags.length).toBeLessThanOrEqual(2);
     expect(await analysisOf(fileId!)).toMatchObject({ model: MOCK_MODEL, promptName: 'Two tags' });
-    const [chat] = mock.requests.filter((r) => r.path === '/api/chat');
+    const chatRequests = mock.requests.filter((r) => r.path === '/api/chat');
+    expect(chatRequests).toHaveLength(1);
+    const [chat] = chatRequests;
     expect(JSON.stringify(chat!.body)).toContain('Give at most 2 tags.');
     expect((await h.ok('analysisPrompts:list', {})).lastUsed.tagging).toBe(narrow.id);
 

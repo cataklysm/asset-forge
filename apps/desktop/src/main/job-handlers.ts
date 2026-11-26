@@ -85,7 +85,7 @@ export function createJobHandlers(
       manager.read(async () => {
         const prompt = prompts.resolve('image_prompt', r.promptId);
         const result = await describe.describe({ requestId: r.requestId, fileId: r.fileId, model: r.model, prompt: prompt.text });
-        // A busy answer never ran this prompt; every other answer did, or was cancelled after it started.
+        // A busy answer never ran this prompt; every other answer, including a cancelled one, counts as an accepted request.
         if (result.ok || result.code !== 'busy') prompts.markUsed(prompt);
         return result;
       }),

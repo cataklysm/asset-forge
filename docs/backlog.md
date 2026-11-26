@@ -331,7 +331,6 @@ Found during the build — main process:
 - `markUsed` in `apps/desktop/src/main/analysis-prompts.ts` catches around `load()` as well, so a prompt file that cannot be read while the prompt used last is stored is logged as the write warning instead of failing.
 - After a failed write of the prompt used last, the store keeps the previous value in memory too, so the dialogs preselect the earlier prompt until the next successful write.
 - The `TOO_MANY` message is built from `ANALYSIS_PROMPTS_PER_PURPOSE` instead of being a literal fixed string (same text today).
-- A describe refused with `cancelled` while a workspace open or close is under way never started a request but still marks the prompt as used; the comment in `job-handlers.ts` ("every other answer did, or was cancelled after it started") claims otherwise.
 
 Found during the build — renderer:
 
@@ -339,10 +338,16 @@ Found during the build — renderer:
 - Reset drops text typed into the editor while the call runs.
 - An error of a prompt action outlives a change of the selected prompt.
 - A tag limit typed as `015` counts as an unsaved change of `15`.
-- The provider retry button of `SettingsScreen` uses the literal `Retry` instead of `RETRY_LABEL`.
 - The unsaved-changes marker in the prompt list is `aria-hidden`, so a screen reader does not learn of unsaved changes.
 - The Image to prompt dialog names both the prompt select and the result text "Prompt".
 - While the analysis prompts load, the start button's tooltip of the three dialogs is `START_LOADING`, "The provider settings are loading", instead of a text about the prompts.
+- A failed prompt reload leaves the three analysis dialogs on "The analysis prompts could not be read" with no Retry or Settings action in the dialog; the only retry is in Settings > Prompts.
+- Reset in the Prompts settings overwrites a saved text without confirmation, while Delete confirms (owner's call).
+- A hand-edited `analysis-prompts.json` with more than 50 prompts per purpose or duplicate names is accepted on load; only ids are checked for uniqueness.
+- A choice whose prompt vanished from the list through a reload shows "choose a prompt" instead of falling back to the default.
+- The `not_found` handling (reload and drop the choice) is copied in the three dialogs.
+- A `not_found` start shows the generic "This item no longer exists." text.
+- `promptGate` does not check the purpose of the chosen id (the main process does).
 
 Tests:
 

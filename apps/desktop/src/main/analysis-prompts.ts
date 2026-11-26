@@ -170,7 +170,9 @@ export function createAnalysisPromptStore(o: {
       try {
         const current = load();
         if (!current.prompts.some((p) => p.id === prompt.id && p.purpose === prompt.purpose)) return;
-        commit({ ...current, lastUsed: { ...current.lastUsed, [lastUsedKey(prompt.purpose)]: prompt.id } });
+        const key = lastUsedKey(prompt.purpose);
+        if (current.lastUsed[key] === prompt.id) return;
+        commit({ ...current, lastUsed: { ...current.lastUsed, [key]: prompt.id } });
       } catch {
         o.log(LAST_USED_WRITE_FAILED);
       }
