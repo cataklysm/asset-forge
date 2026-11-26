@@ -2,6 +2,7 @@ import { cleanTagText, normalizeTagName, type TagAssignment } from '@assetforge/
 import { Image as ImageIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { describeError } from '../api';
+import { useTags } from '../tags-context';
 import { ALERT, LABEL, PANEL_TITLE } from '../ui';
 import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
@@ -50,7 +51,10 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
     [inputRef],
   );
 
-  const removeButtons = () => [...(rowRef.current?.querySelectorAll<HTMLButtonElement>('[data-chip] button') ?? [])];
+  const { openRename } = useTags();
+  const removeButtons = () => [
+    ...(rowRef.current?.querySelectorAll<HTMLButtonElement>('[data-chip] button[data-remove]') ?? []),
+  ];
 
   useEffect(() => {
     const pending = pendingFocus.current;
@@ -126,11 +130,17 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
             className="max-w-full"
             onKeyDown={(event) => {
               if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+              // The pencil renames; only the chip and its remove button remove.
+              if (event.target instanceof Element && event.target.closest('[data-rename]') !== null) return;
               event.preventDefault();
               void remove(tag.name, index);
             }}
           >
-            <TagChip tag={tag} onRemove={disabled ? undefined : () => void remove(tag.name, index)} />
+            <TagChip
+              tag={tag}
+              onRemove={disabled ? undefined : () => void remove(tag.name, index)}
+              onRename={disabled || openRename === null ? undefined : () => openRename({ name: tag.name, displayName: tag.displayName })}
+            />
           </span>
         ))}
         <TagCombobox

@@ -11,6 +11,7 @@ import { TagCombobox } from '../../src/renderer/src/components/TagCombobox';
 import { TagFilter } from '../../src/renderer/src/components/TagFilter';
 import { TagList } from '../../src/renderer/src/components/TagList';
 import { TagRow } from '../../src/renderer/src/components/TagRow';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { AI_CHIP, CHIP, FILTER_CHIP, MATCHED_CHIP } from '../../src/renderer/src/ui';
 import { deferred, installFakeApi } from './fake-api';
 import { tagOf } from './fixtures';
@@ -340,4 +341,96 @@ it('the tag filter stops at 10 tags', async () => {
   expect(onChange).toHaveBeenLastCalledWith(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
   expect(input.disabled).toBe(false);
   expect(document.activeElement).toBe(input);
+});
+
+const TAG_USAGE = {
+  'tags:usage': ({ name }: { name: string }) => ({ exists: true, name, displayName: name, files: 1, assets: 0 }),
+};
+
+it('a chip with onRename shows the pencil before the remove button; without it none', () => {
+  render(
+    <>
+      <TagChip tag={tagOf('oak')} onRemove={() => {}} onRename={() => {}} />
+      <TagChip tag={tagOf('bark')} onRemove={() => {}} />
+    </>,
+  );
+  const pencil = screen.getByRole('button', { name: 'Rename oak' });
+  expect(pencil.getAttribute('title')).toBe('Rename');
+  expect(pencil.hasAttribute('data-rename')).toBe(true);
+  const oakButtons = [...(screen.getByText('oak').parentElement as HTMLElement).querySelectorAll('button')];
+  expect(oakButtons.map((b) => b.getAttribute('aria-label'))).toEqual(['Rename oak', 'Remove oak']);
+  expect(oakButtons[1]!.hasAttribute('data-remove')).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Rename bark' })).toBeNull();
+});
+
+it('a row inside a TagsProvider has a pencil per chip, none when disabled and none outside a provider', () => {
+  installFakeApi({ 'tags:suggest': () => [], ...TAG_USAGE });
+  const tags = [tagOf('oak'), tagOf('Car', 'ai')];
+  const row = (disabled: boolean) => (
+    <TagRow label="Asset tags" kind="asset" tags={tags} onAdd={async () => {}} onRemove={async () => {}} disabled={disabled} />
+  );
+  const { rerender, unmount } = render(<TagsProvider>{row(false)}</TagsProvider>);
+  expect(screen.getByRole('button', { name: 'Rename oak' })).not.toBeNull();
+  expect(screen.getByRole('button', { name: 'Rename Car' })).not.toBeNull();
+  rerender(<TagsProvider>{row(true)}</TagsProvider>);
+  expect(screen.queryByRole('button', { name: /^Rename/ })).toBeNull();
+  unmount();
+  render(row(false));
+  expect(screen.getByRole('button', { name: 'Remove oak' })).not.toBeNull();
+  expect(screen.queryByRole('button', { name: /^Rename/ })).toBeNull();
+});
+
+it('clicking the pencil opens the rename dialog for that tag', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...TAG_USAGE });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RowHarness initial={[tagOf('oak'), tagOf('Car', 'ai')]} />
+    </TagsProvider>,
+  );
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Rename Car' }));
+  expect(screen.getByRole('dialog', { name: 'Rename tag' })).not.toBeNull();
+  expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Name' }).value).toBe('Car');
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('Delete and Backspace on a focused pencil remove nothing; on the remove button they still remove', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...TAG_USAGE });
+  const user = userEvent.setup();
+  const onRemove = vi.fn(async () => {});
+  render(
+    <TagsProvider>
+      <RowHarness initial={[tagOf('oak'), tagOf('bark')]} onRemove={onRemove} />
+    </TagsProvider>,
+  );
+  screen.getByRole('button', { name: 'Rename oak' }).focus();
+  await user.keyboard('{Delete}');
+  await user.keyboard('{Backspace}');
+  expect(onRemove).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Remove oak' })).not.toBeNull();
+
+  screen.getByRole('button', { name: 'Remove oak' }).focus();
+  await user.keyboard('{Delete}');
+  expect(onRemove).toHaveBeenCalledWith('oak');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove bark' }));
+});
+
+it('with pencils, Backspace in the empty input and a removal still focus remove buttons', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...TAG_USAGE });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RowHarness initial={[tagOf('oak'), tagOf('bark'), tagOf('moss')]} />
+    </TagsProvider>,
+  );
+  await user.click(screen.getByRole('combobox', { name: 'Add asset tag' }));
+  await user.keyboard('{Backspace}');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove moss' }));
+  await user.keyboard('{Backspace}');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove bark' }));
+  screen.getByRole('button', { name: 'Remove oak' }).focus();
+  await user.keyboard('{Delete}');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove bark' }));
 });

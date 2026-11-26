@@ -182,6 +182,28 @@ export const DELETED_LABEL = 'Deleted';
 export const ORIGIN_LABEL = 'Origin';
 
 const fileCount = (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`;
+const assetCount = (count: number) => `${count} ${count === 1 ? 'asset' : 'assets'}`;
+
+/** The rename tag dialog (RenameTagDialog) and the pencil on an editable tag chip. */
+export const RENAME_TAG_TITLE = 'Rename tag';
+export const TAG_NAME_LABEL = 'Name';
+export const RENAME_LABEL = 'Rename';
+export const MERGE_LABEL = 'Merge';
+
+/** The accessible name of the pencil on a chip: 'Rename front view'. */
+export function renameTagLabel(displayName: string): string {
+  return `${RENAME_LABEL} ${displayName}`;
+}
+
+/** 'front view · 42 files · 3 assets'. */
+export function tagUsageLine(usage: { displayName: string; files: number; assets: number }): string {
+  return `${usage.displayName} · ${fileCount(usage.files)} · ${assetCount(usage.assets)}`;
+}
+
+/** 'Merges with front · 118 files · 5 assets'. */
+export function tagMergeLine(usage: { displayName: string; files: number; assets: number }): string {
+  return `Merges with ${tagUsageLine(usage)}`;
+}
 
 /** 'Delete 1 file permanently?' / 'Delete 12 files permanently?'. */
 export function purgeConfirmTitle(count: number): string {

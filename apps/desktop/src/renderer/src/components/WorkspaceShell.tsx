@@ -24,6 +24,7 @@ import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TrashScreen } from '../screens/TrashScreen';
+import { TagsProvider } from '../tags-context';
 import { TrashProvider, useTrash } from '../trash-context';
 import { ALERT } from '../ui';
 import { OpenSettingsProvider } from './AnalysisDialogs';
@@ -114,60 +115,62 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
       <TrashProvider>
         <ProviderSettingsProvider>
           <AnalysisPromptsProvider>
-            <JobsAppShell
-              workspaceName={workspace.name}
-              rootPath={workspace.rootPath}
-              section={sectionOf(view)}
-              busy={busy}
-              onNavigate={navigate}
-              onClose={() => void closeWorkspace()}
-            >
-              {/* The screens bring their own padding. */}
-              {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
-              <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
-                {error !== null && (
-                  <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
-                    {error}
-                  </p>
-                )}
-                {view.name === 'assets' ? (
-                  <AssetsScreen
-                    state={shell.assetList}
-                    onStateChange={setAssetList}
-                    onOpen={(id) => setView({ name: 'asset', id })}
-                  />
-                ) : view.name === 'asset' ? (
-                  <AssetScreen
-                    key={view.id}
-                    id={view.id}
-                    tab={shell.assetTab}
-                    onTabChange={setAssetTab}
-                    onBack={() => setView({ name: 'assets' })}
-                    onOpenAsset={(id) => setView({ name: 'asset', id })}
-                    onOpenProject={(id) => setView({ name: 'project', id })}
-                    onBusyChange={setBusy}
-                  />
-                ) : view.name === 'project' ? (
-                  <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
-                ) : view.name === 'inbox' ? (
-                  <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
-                ) : view.name === 'trash' ? (
-                  <TrashScreen state={shell.trashList} onStateChange={setTrashList} />
-                ) : view.name === 'jobs' ? (
-                  <JobsScreen />
-                ) : view.name === 'settings' ? (
-                  <SettingsScreen />
-                ) : (
-                  <ProjectsScreen
-                    state={shell.projectList}
-                    onStateChange={setProjectList}
-                    onOpen={(id) => setView({ name: 'project', id })}
-                    onOpenAsset={(id) => setView({ name: 'asset', id })}
-                    onShowAssets={showAssets}
-                  />
-                )}
-              </OpenSettingsProvider>
-            </JobsAppShell>
+            <TagsProvider>
+              <JobsAppShell
+                workspaceName={workspace.name}
+                rootPath={workspace.rootPath}
+                section={sectionOf(view)}
+                busy={busy}
+                onNavigate={navigate}
+                onClose={() => void closeWorkspace()}
+              >
+                {/* The screens bring their own padding. */}
+                {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
+                <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
+                  {error !== null && (
+                    <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+                      {error}
+                    </p>
+                  )}
+                  {view.name === 'assets' ? (
+                    <AssetsScreen
+                      state={shell.assetList}
+                      onStateChange={setAssetList}
+                      onOpen={(id) => setView({ name: 'asset', id })}
+                    />
+                  ) : view.name === 'asset' ? (
+                    <AssetScreen
+                      key={view.id}
+                      id={view.id}
+                      tab={shell.assetTab}
+                      onTabChange={setAssetTab}
+                      onBack={() => setView({ name: 'assets' })}
+                      onOpenAsset={(id) => setView({ name: 'asset', id })}
+                      onOpenProject={(id) => setView({ name: 'project', id })}
+                      onBusyChange={setBusy}
+                    />
+                  ) : view.name === 'project' ? (
+                    <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+                  ) : view.name === 'inbox' ? (
+                    <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
+                  ) : view.name === 'trash' ? (
+                    <TrashScreen state={shell.trashList} onStateChange={setTrashList} />
+                  ) : view.name === 'jobs' ? (
+                    <JobsScreen />
+                  ) : view.name === 'settings' ? (
+                    <SettingsScreen />
+                  ) : (
+                    <ProjectsScreen
+                      state={shell.projectList}
+                      onStateChange={setProjectList}
+                      onOpen={(id) => setView({ name: 'project', id })}
+                      onOpenAsset={(id) => setView({ name: 'asset', id })}
+                      onShowAssets={showAssets}
+                    />
+                  )}
+                </OpenSettingsProvider>
+              </JobsAppShell>
+            </TagsProvider>
           </AnalysisPromptsProvider>
         </ProviderSettingsProvider>
       </TrashProvider>
