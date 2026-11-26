@@ -1,143 +1,142 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import type { FileRecord } from '@assetforge/contracts';
+import { X } from 'lucide-react';
+import { useRef, useState, type ReactNode } from 'react';
+import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import { fileMenuItems, type FileActionContext } from '../file-actions';
 import { formatBytes, formatDateTime } from '../format';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
-import { ALERT, BORDER, BUTTON, MUTED } from '../ui';
+import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
+import { Dialog } from './Dialog';
+import { Link } from './Link';
+import { Menu } from './Menu';
+import { TagList } from './TagList';
+import { TagRow } from './TagRow';
 
 interface Props {
   file: FileRecord;
-  /** `null` in the inbox: no cover actions. */
-  cover: { coverFileId: string | null; coverIsChosen: boolean } | null;
-  onSetCover?(fileId: string | null): Promise<void>;
-  extraControls?: ReactNode;
+  /** `null` in the inbox. */
+  asset: { id: string; name: string; tags: readonly TagAssignment[] } | null;
+  /** Drives the "More" menu; its "Details" entry is not offered here. */
+  actions: FileActionContext;
+  /** Asset files: the role select. Inbox files: the assign control. */
+  roleControl: ReactNode;
+  /** Receives the updated file after `files:addTag` / `files:removeTag`. */
+  onFileChange(file: FileRecord): void;
+  onOpenAsset?(assetId: string): void;
   onClose(): void;
 }
 
-export function FileDetailDialog({ file, cover, onSetCover, extraControls, onClose }: Props) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const headingId = useId();
+export function FileDetailDialog({ file, asset, actions, roleControl, onFileChange, onOpenAsset, onClose }: Props) {
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (dialog !== null && !dialog.open) dialog.showModal();
-  }, []);
-
-  async function act(action: () => Promise<unknown>) {
-    setError(null);
-    setBusy(true);
-    try {
-      await action();
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const complete = file.status === 'complete';
-  const isChosenCover = cover !== null && cover.coverIsChosen && cover.coverFileId === file.id;
-  const frame = 'h-72 w-full';
+  const title = asset === null ? file.originalName : `${file.originalName} | ${asset.name}`;
+  const report = (message: string) => {
+    setError(message);
+    actions.onError?.(message);
+  };
+  // Cover and detach callers may be asynchronous; their failures show in the dialog.
+  const guard = <A extends unknown[]>(action: ((...args: A) => unknown) | undefined) =>
+    action === undefined
+      ? undefined
+      : (...args: A) => {
+          setError(null);
+          Promise.resolve()
+            .then(() => action(...args))
+            .catch((e: unknown) => report(describeError(e)));
+        };
+  const items = fileMenuItems(file, {
+    ...actions,
+    onSetCover: guard(actions.onSetCover),
+    onDetach: guard(actions.onDetach),
+    onError: report,
+  }).filter((item) => item.label !== 'Details');
+
+  async function changeTag(channel: 'files:addTag' | 'files:removeTag', name: string) {
+    onFileChange(await call(channel, { fileId: file.id, name }));
+  }
 
   return (
-    <dialog
-      ref={ref}
-      aria-labelledby={headingId}
-      onClose={onClose}
-      className={`m-auto w-[min(92vw,44rem)] rounded border bg-white p-4 text-slate-900 backdrop:bg-black/50 dark:bg-slate-900 dark:text-slate-100 ${BORDER}`}
-    >
-      <div className="space-y-3">
-        {complete && file.previewable ? (
-          <CoverImage
-            fileId={file.id}
-            size="detail"
-            fallback={formatLabel(file.originalName)}
-            className={frame}
-          />
-        ) : (
-          <div
-            className={`flex items-center justify-center rounded bg-slate-100 text-lg dark:bg-slate-800 ${frame} ${MUTED}`}
-          >
-            {complete ? formatLabel(file.originalName) : label(file.status)}
-          </div>
-        )}
-        <h2 id={headingId} className="break-all text-lg font-semibold">{file.originalName}</h2>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
-          <dt className={MUTED}>Role</dt>
-          <dd>{file.role === null ? '–' : label(file.role)}</dd>
-          <dt className={MUTED}>Type</dt>
-          <dd>{file.mimeType}</dd>
-          <dt className={MUTED}>Size</dt>
-          <dd>{formatBytes(file.sizeBytes)}</dd>
-          <dt className={MUTED}>Imported</dt>
-          <dd>{formatDateTime(file.importedAt)}</dd>
-          {!complete && (
+    <Dialog open title={title} onClose={onClose} initialFocusRef={closeRef} size="detail">
+      <button
+        ref={closeRef}
+        type="button"
+        aria-label="Close"
+        title="Close"
+        className={`${ICON_BUTTON} absolute right-4 top-4`}
+        onClick={onClose}
+      >
+        <X size={18} aria-hidden />
+      </button>
+      <div className="flex h-full min-h-0 gap-5">
+        <div className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto pr-1">
+          <section aria-label="Details" className="space-y-2">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+              <dt className={LABEL}>Name</dt>
+              <dd className="break-all">{file.originalName}</dd>
+              <dt className={LABEL}>Type</dt>
+              <dd className="break-all">{file.mimeType}</dd>
+              <dt className={LABEL}>Size</dt>
+              <dd>{formatBytes(file.sizeBytes)}</dd>
+              <dt className={LABEL}>Imported</dt>
+              <dd>{formatDateTime(file.importedAt)}</dd>
+              {!complete && (
+                <>
+                  <dt className={LABEL}>Status</dt>
+                  <dd>{label(file.status)}</dd>
+                </>
+              )}
+            </dl>
+            {file.error !== null && (
+              <p role="alert" className={ALERT}>
+                {file.error}
+              </p>
+            )}
+          </section>
+          {roleControl}
+          {complete && (
+            <TagRow
+              label="Image tags"
+              kind="file"
+              tags={file.tags}
+              onAdd={(name) => changeTag('files:addTag', name)}
+              onRemove={(name) => changeTag('files:removeTag', name)}
+            />
+          )}
+          {asset !== null && (
             <>
-              <dt className={MUTED}>Status</dt>
-              <dd>{label(file.status)}</dd>
+              <hr className={`border-t ${BORDER}`} />
+              <div className="space-y-2">
+                <div>
+                  <span className={LABEL}>Asset </span>
+                  <Link onFollow={() => onOpenAsset?.(asset.id)}>{asset.name}</Link>
+                </div>
+                <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} />
+              </div>
             </>
           )}
-        </dl>
-        {file.error !== null && (
-          <p role="alert" className={ALERT}>
-            {file.error}
-          </p>
-        )}
-        {error !== null && (
-          <p role="alert" className={ALERT}>
-            {error}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          {complete && file.openable && (
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={busy}
-              onClick={() => void act(() => call('files:openExternal', { fileId: file.id }))}
-            >
-              Open externally
-            </button>
+          {error !== null && (
+            <p role="alert" className={ALERT}>
+              {error}
+            </p>
           )}
-          {complete && (
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={busy}
-              onClick={() => void act(() => call('files:showInFolder', { fileId: file.id }))}
-            >
-              Show in folder
-            </button>
+          <div>
+            <Menu label="More" items={items} />
+          </div>
+        </div>
+        <div className="min-w-0 flex-1">
+          {complete && file.previewable ? (
+            <CoverImage fileId={file.id} size="detail" fallback={formatLabel(file.originalName)} className="h-full w-full" />
+          ) : (
+            <div className={`flex h-full w-full items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
+              {complete ? formatLabel(file.originalName) : label(file.status)}
+            </div>
           )}
-          {cover !== null && onSetCover !== undefined && complete && file.previewable && (
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={busy}
-              title={
-                isChosenCover
-                  ? 'Return to the first image as the cover'
-                  : 'Show this image as the asset cover'
-              }
-              onClick={() => void act(() => onSetCover(isChosenCover ? null : file.id))}
-            >
-              {isChosenCover ? 'Use automatic cover' : 'Use as cover'}
-            </button>
-          )}
-          {extraControls}
-          <button
-            type="button"
-            className={`${BUTTON} ml-auto`}
-            onClick={() => ref.current?.close()}
-          >
-            Close
-          </button>
         </div>
       </div>
-    </dialog>
+    </Dialog>
   );
 }

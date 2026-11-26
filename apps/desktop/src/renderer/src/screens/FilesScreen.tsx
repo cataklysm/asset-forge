@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { FileRecord, FileRole, ImportResult } from '@assetforge/contracts';
 import { FileRoleSchema } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { AssetPicker } from '../components/AssetPicker';
 import { FileDetailDialog } from '../components/FileDetailDialog';
+import { AssignFileControl } from '../components/FileRoleControls';
 import { FileGrid } from '../components/FileGrid';
 import { Pager } from '../components/Pager';
 import { useFileDetail } from '../components/useFileDetail';
@@ -112,17 +112,10 @@ export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
           {detail.file !== null && (
             <FileDetailDialog
               file={detail.file}
-              cover={null}
-              extraControls={
-                detail.file.status === 'complete' ? (
-                  <AssignControl
-                    file={detail.file}
-                    role={role}
-                    onRoleChange={setRole}
-                    onAssigned={list.reload}
-                  />
-                ) : undefined
-              }
+              asset={null}
+              actions={{ cover: null, onDetails: () => {} }}
+              roleControl={<AssignFileControl file={detail.file} onAssigned={list.reload} />}
+              onFileChange={() => list.reload()}
               onClose={detail.close}
             />
           )}
@@ -131,58 +124,5 @@ export function FilesScreen({ offset, onOffsetChange, onBusyChange }: Props) {
         </>
       )}
     </section>
-  );
-}
-
-/** The assign control of the file detail dialog; the file leaves the inbox once it is assigned. */
-function AssignControl(props: {
-  file: FileRecord;
-  role: FileRole;
-  onRoleChange(role: FileRole): void;
-  onAssigned(): void;
-}) {
-  const { file, role, onRoleChange: setRole, onAssigned } = props;
-  const [assigning, setAssigning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function assign(assetId: string) {
-    setError(null);
-    try {
-      await call('files:assign', { fileId: file.id, assetId, role });
-      onAssigned();
-    } catch (e) {
-      setError(describeError(e));
-    }
-  }
-
-  return (
-    <>
-      {assigning ? (
-        <div className="basis-full space-y-2">
-          <select
-            className={INPUT}
-            aria-label="Role"
-            value={role}
-            onChange={(e) => setRole(FileRoleSchema.parse(e.target.value))}
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {label(r)}
-              </option>
-            ))}
-          </select>
-          <AssetPicker onPick={(asset) => assign(asset.id)} />
-        </div>
-      ) : (
-        <button type="button" className={BUTTON} onClick={() => setAssigning(true)}>
-          Assign
-        </button>
-      )}
-      {error !== null && (
-        <p role="alert" className={`basis-full ${ALERT}`}>
-          {error}
-        </p>
-      )}
-    </>
   );
 }

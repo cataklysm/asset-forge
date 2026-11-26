@@ -13,6 +13,7 @@ import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
 import { FileDetailDialog } from '../components/FileDetailDialog';
+import { FileRoleSelect } from '../components/FileRoleControls';
 import { FileGrid } from '../components/FileGrid';
 import { useFileDetail } from '../components/useFileDetail';
 import { Pager } from '../components/Pager';
@@ -114,6 +115,17 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
   }
 
   const detail = useFileDetail(files.data?.items ?? null, filesSection, importButton);
+
+  function reloadFiles() {
+    files.reload();
+    asset.reload();
+  }
+
+  async function detachFile() {
+    if (detail.file === null) return;
+    await call('files:unassign', { fileId: detail.file.id });
+    reloadFiles();
+  }
 
   const loadErrors = [asset, types, assignments, projects, relations, files]
     .map((l) => l.error)
@@ -278,19 +290,18 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
             {detail.file !== null && (
               <FileDetailDialog
                 file={detail.file}
-                cover={data}
-                onSetCover={setCover}
-                extraControls={
-                  <FileControls
-                    file={detail.file}
-                    assetId={id}
-                    assetName={data?.name ?? 'asset'}
-                    onChanged={() => {
-                      files.reload();
-                      asset.reload();
-                    }}
-                  />
-                }
+                asset={data === null ? null : { id: data.id, name: data.name, tags: data.tags }}
+                actions={{
+                  cover: {
+                    isEffective: data?.coverFileId === detail.file.id,
+                    isChosen: data?.coverIsChosen === true && data.coverFileId === detail.file.id,
+                  },
+                  onDetails: () => {},
+                  onSetCover: setCover,
+                  onDetach: detachFile,
+                }}
+                roleControl={<FileRoleSelect file={detail.file} onChanged={reloadFiles} />}
+                onFileChange={reloadFiles}
                 onClose={detail.close}
               />
             )}
@@ -416,76 +427,5 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
         </>
       )}
     </section>
-  );
-}
-
-/** Role and detach controls of the file detail dialog; reports its own errors inside the dialog. */
-function FileControls(props: {
-  file: FileRecord;
-  assetId: string;
-  assetName: string;
-  onChanged(): void;
-}) {
-  const { file, assetId, assetName, onChanged } = props;
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  // Synchronous guard: a second activation before the re-render must not send a second request.
-  const busyRef = useRef(false);
-
-  async function run(action: () => Promise<unknown>) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      onChanged();
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <select
-        className={INPUT}
-        disabled={busy}
-        aria-label={`Role of ${file.originalName}`}
-        value={file.role ?? 'other'}
-        onChange={(e) =>
-          void run(() =>
-            call('files:assign', {
-              fileId: file.id,
-              assetId,
-              role: FileRoleSchema.parse(e.target.value),
-            }),
-          )
-        }
-      >
-        {ROLES.map((r) => (
-          <option key={r} value={r}>
-            {label(r)}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className={BUTTON}
-        disabled={busy}
-        aria-label={`Detach ${file.originalName} from ${assetName}`}
-        title="The file is kept and moves to the inbox"
-        onClick={() => void run(() => call('files:unassign', { fileId: file.id }))}
-      >
-        Detach
-      </button>
-      {error !== null && (
-        <p role="alert" className={`basis-full ${ALERT}`}>
-          {error}
-        </p>
-      )}
-    </>
   );
 }
