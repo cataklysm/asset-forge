@@ -351,13 +351,21 @@ class InMemoryFiles implements FileRepository {
       previewable: isPreviewable(r.mimeType),
       openable: isOpenable(r.relativePath),
       kind: r.kind,
+      width: null,
+      height: null,
       tags: [],
     });
   }
 
-  async markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void> {
+  async markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void> {
     const rec = this.require(id);
-    this.records.set(id, { ...rec, status: 'complete', sizeBytes: r.sizeBytes, sha256: r.sha256, error: null });
+    this.records.set(id, { ...rec, status: 'complete', sizeBytes: r.sizeBytes, sha256: r.sha256, width: r.width, height: r.height, error: null });
+  }
+
+  async setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord> {
+    const rec = { ...this.require(id), width: size.width, height: size.height };
+    this.records.set(id, rec);
+    return this.withTags(rec);
   }
 
   async markFailed(id: string, error: string): Promise<void> {

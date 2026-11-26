@@ -70,7 +70,9 @@ export interface FileRepository {
     importedAt: string;
     kind: FileKind;
   }): Promise<void>;
-  markComplete(id: string, r: { sizeBytes: number; sha256: string }): Promise<void>; // rejects with NotFoundError for an unknown id
+  markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void>; // rejects with NotFoundError for an unknown id
+  /** Stores the pixel size; rejects with NotFoundError for an unknown id. */
+  setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord>;
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;

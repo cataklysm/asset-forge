@@ -66,7 +66,7 @@ describe('recoverIncompleteImports', () => {
   it('leaves complete rows and their files untouched', async () => {
     const { storage, db } = await setup();
     await db.files.insertPending(pending(ID2, 'b.png'));
-    await db.files.markComplete(ID2, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+    await db.files.markComplete(ID2, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
     storage.files.set(inboxPath(ID2, 'b.png'), Buffer.from('b'));
 
     const result = await recoverIncompleteImports({ storage, files: db.files });

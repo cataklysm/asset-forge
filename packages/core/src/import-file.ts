@@ -81,7 +81,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
     const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
     await ctx.storage.move(staging, finalPath);
     moved = true;
-    await ctx.files.markComplete(id, { sizeBytes, sha256 });
+    await ctx.files.markComplete(id, { sizeBytes, sha256, width: null, height: null });
     const file: FileRecord = {
       id,
       storageId: ctx.storageId,
@@ -98,6 +98,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
+      width: null,
+      height: null,
       tags: [],
     };
     return { sourcePath, file, error: null, duplicateOf };
@@ -132,6 +134,8 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       previewable: isPreviewable(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
+      width: null,
+      height: null,
       tags: [],
     };
     return { sourcePath, file, error: message, duplicateOf: [] };

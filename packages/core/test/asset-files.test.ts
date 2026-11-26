@@ -398,7 +398,7 @@ describe('file list filters', () => {
       const id = `f0000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
       const relativePath = `inbox/${id}/${originalName}`;
       await db.files.insertPending({ id, storageId: 's', originalName, relativePath, mimeType: 'image/png', importedAt: TS, kind });
-      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
       return id;
     };

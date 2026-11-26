@@ -65,7 +65,7 @@ const addInboxFile = async (originalName: string, status: 'complete' | 'pending'
     importedAt: TS,
     kind,
   });
-  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await db.files.markFailed(id, 'x');
   return id;
 };
@@ -188,7 +188,7 @@ describe('search index triggers', () => {
     const pending = await addInboxFile('pallet.png', 'pending');
     await place(pending, uuid(1));
     await expect(found('pallet')).resolves.toEqual([]);
-    await db.files.markComplete(pending, { sizeBytes: 1, sha256: 'b'.repeat(64) });
+    await db.files.markComplete(pending, { sizeBytes: 1, sha256: 'b'.repeat(64), width: null, height: null });
     await expect(found('pallet')).resolves.toEqual(['Crate']);
 
     const failing = await addInboxFile('barrel.png', 'pending');
@@ -357,7 +357,7 @@ describe('list item tags', () => {
       importedAt: TS,
       kind: 'image',
     });
-    await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+    await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
     await place(id, assetId);
     return id;
   };

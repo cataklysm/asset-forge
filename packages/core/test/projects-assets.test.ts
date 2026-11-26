@@ -157,7 +157,7 @@ describe('asset list filters', () => {
         importedAt: '2026-01-01T00:00:00.000Z',
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (status === 'failed') await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${originalName}`, assetId, role });
       return id;
@@ -351,7 +351,7 @@ describe('project list filters', () => {
         importedAt: '2026-01-01T00:00:00.000Z',
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       else await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${originalName}`, assetId, role: 'reference' });
       return id;

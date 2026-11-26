@@ -55,7 +55,7 @@ async function addFile(n: number): Promise<string> {
     importedAt: T1,
     kind: 'image',
   });
-  await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64) });
+  await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   return id;
 }
 

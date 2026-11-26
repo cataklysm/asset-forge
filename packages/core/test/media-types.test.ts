@@ -1,3 +1,4 @@
+import { ORIGINAL_MIME_TYPES, viewSource } from '@assetforge/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   FILE_KIND_EXTENSIONS,
@@ -13,6 +14,11 @@ import {
 } from '../src/index.js';
 
 describe('media types', () => {
+  it('every previewable type has a view source and the originals plus tiff are exactly the previewable types', () => {
+    for (const type of PREVIEWABLE_MIME_TYPES) expect(viewSource(type, null, null)).toBe('preview');
+    expect([...ORIGINAL_MIME_TYPES, 'image/tiff'].sort()).toEqual([...PREVIEWABLE_MIME_TYPES].sort());
+  });
+
   it('previewable types are exactly the six raster formats', () => {
     expect(PREVIEWABLE_MIME_TYPES).toEqual([
       'image/png',
