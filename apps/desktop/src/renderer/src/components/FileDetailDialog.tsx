@@ -124,7 +124,7 @@ export function FileDetailDialog({ file, asset, actions, roleControl, onFileChan
             </p>
           )}
           <div>
-            <Menu label="More" items={items} />
+            <Menu label="More" items={items} align="start" side="top" />
           </div>
         </div>
         <div className="min-w-0 flex-1">

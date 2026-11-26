@@ -15,13 +15,17 @@ interface Props {
   icon?: ReactNode;
   /** Tab index of the trigger; -1 keeps it out of the tab order (e.g. inside a roving tab index list). */
   tabIndex?: number;
+  /** Which trigger edge the popup lines up with; `end` grows leftwards, `start` rightwards. */
+  align?: 'start' | 'end';
+  /** Whether the popup opens below or above the trigger. */
+  side?: 'bottom' | 'top';
 }
 
 /**
  * A menu button. Opening focuses the menu itself; ↑/↓ (wrapping), Home and End move between the
  * enabled items, Enter or Space selects, Esc or Tab closes. Focus returns to the trigger.
  */
-export function Menu({ label, items, icon, tabIndex }: Props) {
+export function Menu({ label, items, icon, tabIndex, align = 'end', side = 'bottom' }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -134,7 +138,7 @@ export function Menu({ label, items, icon, tabIndex }: Props) {
           aria-label={label}
           tabIndex={-1}
           onKeyDown={onKeyDown}
-          className={`absolute right-0 top-full z-50 mt-1 min-w-44 rounded-control border bg-surface py-1 outline-none ${BORDER}`}
+          className={`absolute ${align === 'start' ? 'left-0' : 'right-0'} ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 min-w-44 rounded-control border bg-surface py-1 outline-none ${BORDER}`}
         >
           {items.map((item, index) => (
             <div

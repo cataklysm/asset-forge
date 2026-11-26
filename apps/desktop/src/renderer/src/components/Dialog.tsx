@@ -11,6 +11,9 @@ interface Props {
   children: ReactNode;
 }
 
+/** Keeps the title clear of the Close button that the detail dialog places in its top-right corner. */
+const TITLE_PADDING = { form: '', detail: 'pr-10' } as const;
+
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
   detail: 'w-[min(92vw,1100px)] h-[min(88vh,760px)]',
@@ -74,7 +77,7 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
     >
       {open && (
         <div className="flex h-full flex-col gap-4 p-5">
-          <h2 id={titleId} className={SECTION_TITLE}>
+          <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate ${TITLE_PADDING[size]}`}>
             {title}
           </h2>
           <div className="min-h-0 flex-1">{children}</div>

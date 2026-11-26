@@ -170,3 +170,13 @@ it('the chosen cover item offers the automatic cover with its tooltip', async ()
     'Return to the first image as the cover',
   );
 });
+
+it('the More menu opens upwards from the left edge so it stays inside the panel', async () => {
+  install();
+  render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} />);
+  const user = await openDialog();
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  const classes = screen.getByRole('menu', { name: 'More' }).className.split(/\s+/);
+  expect(classes).toEqual(expect.arrayContaining(['left-0', 'bottom-full']));
+  expect(classes).not.toContain('right-0');
+});

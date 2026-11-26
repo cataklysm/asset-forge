@@ -100,7 +100,7 @@ export function AssetPicker({ excludeIds = [], onPick }: Props) {
         </p>
       )}
       <div
-        className={`absolute left-0 top-10 z-50 min-w-64 rounded-control border bg-surface py-1 ${BORDER}`}
+        className={`absolute inset-x-0 top-10 z-50 min-w-0 rounded-control border bg-surface py-1 ${BORDER}`}
         hidden={!expanded}
       >
         {items.length === 0 && error === null && <p className={`px-3 py-1.5 ${MUTED}`}>No assets</p>}
@@ -111,7 +111,8 @@ export function AssetPicker({ excludeIds = [], onPick }: Props) {
               id={optionId(index)}
               role="option"
               aria-selected={index === current}
-              className={`cursor-default px-3 py-1.5 ${ITEM_HOVER} ${index === current ? 'bg-raised' : ''}`}
+              title={asset.name}
+              className={`cursor-default truncate px-3 py-1.5 ${ITEM_HOVER} ${index === current ? 'bg-raised' : ''}`}
               // Keep the focus in the input; the click picks.
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => void pick(asset)}

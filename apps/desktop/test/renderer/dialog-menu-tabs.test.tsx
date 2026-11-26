@@ -242,3 +242,43 @@ it('a link follows without navigating the document', async () => {
   expect(onFollow).toHaveBeenCalledTimes(1);
   expect(window.location.hash).toBe('');
 });
+
+it('a menu opens below and right-aligned by default, and honours start alignment and the top side', async () => {
+  const user = userEvent.setup();
+  const items: MenuItem[] = [{ label: 'One', onSelect: () => {} }];
+  const { unmount } = render(<Menu label="Actions" items={items} />);
+  await user.click(screen.getByRole('button', { name: 'Actions' }));
+  let classes = screen.getByRole('menu').className.split(/\s+/);
+  expect(classes).toEqual(expect.arrayContaining(['right-0', 'top-full', 'mt-1']));
+  expect(classes).not.toContain('left-0');
+  unmount();
+
+  render(<Menu label="Actions" items={items} align="start" side="top" />);
+  await user.click(screen.getByRole('button', { name: 'Actions' }));
+  classes = screen.getByRole('menu').className.split(/\s+/);
+  expect(classes).toEqual(expect.arrayContaining(['left-0', 'bottom-full', 'mb-1']));
+  expect(classes).not.toContain('right-0');
+  expect(classes).not.toContain('top-full');
+});
+
+it('the dialog title stays on one line, carries the full text, and clears the Close button in the detail size', () => {
+  const title = 'a-very-long-file-name.png | A very long asset name';
+  const { unmount } = render(
+    <Dialog open title={title} onClose={() => {}} size="detail">
+      <p>Body</p>
+    </Dialog>,
+  );
+  const heading = screen.getByRole('heading', { name: title });
+  expect(heading.getAttribute('title')).toBe(title);
+  expect(heading.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'pr-10']));
+  unmount();
+
+  render(
+    <Dialog open title="New asset" onClose={() => {}}>
+      <p>Body</p>
+    </Dialog>,
+  );
+  const form = screen.getByRole('heading', { name: 'New asset' });
+  expect(form.className.split(/\s+/)).toContain('truncate');
+  expect(form.className.split(/\s+/)).not.toContain('pr-10');
+});
