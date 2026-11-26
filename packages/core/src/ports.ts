@@ -416,6 +416,12 @@ export interface VisionProvider {
   analyzeImage(r: { image: Uint8Array; prompt: string; schema: unknown; signal: AbortSignal }): Promise<unknown>;
 }
 
+/** Renders an image for a vision model. Implemented outside core. */
+export interface ModelImageSource {
+  /** A JPEG of the image, longest edge at most 1024 px, EXIF-oriented; null when it cannot be produced. */
+  jpeg(absolutePath: string): Promise<Uint8Array | null>;
+}
+
 export interface WorkspaceHost {
   registry: WorkspaceRegistry;
   sources: SourceFiles;

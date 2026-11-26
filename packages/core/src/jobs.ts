@@ -1,4 +1,14 @@
-import { JOB_ERROR_MESSAGES, type JobErrorCode, type JobStatus, type ResourceClass } from '@assetforge/contracts';
+import {
+  FINISHED_JOB_STATUSES,
+  JOB_ERROR_MESSAGES,
+  type JobErrorCode,
+  type JobStatus,
+  type JobSummary,
+  type JobView,
+  type ResourceClass,
+} from '@assetforge/contracts';
+import { InvalidOperationError, NotFoundError } from './errors.js';
+import type { WorkspaceSession } from './session.js';
 
 /** A persistent job row. `payload` is the parsed JSON; each job type validates it with its own schema. */
 export interface Job {
@@ -56,4 +66,68 @@ export interface JobControl {
   wake(): void;
   /** Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the handler. */
   cancel(jobId: string): Promise<void>;
+}
+
+const FINISHED: readonly JobStatus[] = FINISHED_JOB_STATUSES;
+
+async function requireJob(s: WorkspaceSession, jobId: string): Promise<Job> {
+  const job = await s.database.jobs.get(jobId);
+  if (job === null) throw new NotFoundError(`Job ${jobId} does not exist`);
+  return job;
+}
+
+/** Newest first. */
+export function listJobs(
+  s: WorkspaceSession,
+  q: { limit: number; offset: number; status?: JobStatus },
+): Promise<{ items: JobView[]; total: number }> {
+  return s.database.jobs.list(q);
+}
+
+/** Jobs per status; `waiting` is `retry_wait` and `waiting_remote` together. */
+export async function countJobs(s: WorkspaceSession): Promise<Omit<JobSummary, 'changes'>> {
+  const c = await s.database.jobs.counts();
+  return {
+    queued: c.queued,
+    running: c.running,
+    waiting: c.retry_wait + c.waiting_remote,
+    failed: c.failed,
+    cancelled: c.cancelled,
+    succeeded: c.succeeded,
+  };
+}
+
+/** Cancels a pending or running job; a finished job is left alone. */
+export async function cancelJob(s: WorkspaceSession, control: JobControl, jobId: string): Promise<void> {
+  const job = await requireJob(s, jobId);
+  if (FINISHED.includes(job.status)) return;
+  await control.cancel(jobId);
+}
+
+/** Cancels every pending job, then aborts every running one. Returns how many were cancelled or aborted. */
+export async function cancelAllJobs(s: WorkspaceSession, control: JobControl): Promise<number> {
+  const pending = await s.database.jobs.cancelPending({ now: s.now().toISOString() });
+  const running = await s.database.jobs.listByStatus('running');
+  for (const job of running) await control.cancel(job.id);
+  return pending + running.length;
+}
+
+/** Queues a failed or cancelled job again; `invalid_operation` for any other status or when its file already has an active job. */
+export async function retryJob(s: WorkspaceSession, jobId: string): Promise<void> {
+  const job = await requireJob(s, jobId);
+  if (job.status !== 'failed' && job.status !== 'cancelled') {
+    throw new InvalidOperationError('Only a failed or cancelled job can be retried');
+  }
+  const retried = await s.database.jobs.retry({ id: jobId, now: s.now().toISOString() });
+  if (retried === 0) throw new InvalidOperationError('The file of this job already has an active job');
+}
+
+/** Queues every failed or cancelled job whose file has no active job. Returns how many. */
+export function retryFailedJobs(s: WorkspaceSession): Promise<number> {
+  return s.database.jobs.retry({ now: s.now().toISOString() });
+}
+
+/** Deletes every succeeded, failed or cancelled job. Returns how many. */
+export function clearFinishedJobs(s: WorkspaceSession): Promise<number> {
+  return s.database.jobs.clearFinished();
 }

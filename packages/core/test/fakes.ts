@@ -58,6 +58,7 @@ import type {
   FileQuery,
   FileRepository,
   ImageProbe,
+  ModelImageSource,
   Page,
   ProjectAssetRepository,
   ProjectQuery,
@@ -68,6 +69,7 @@ import type {
   StorageRef,
   StorageRepository,
   TagRepository,
+  VisionProvider,
   WorkspaceDatabase,
   WorkspaceHost,
   WorkspaceMeta,
@@ -1112,6 +1114,34 @@ export class FakeImageProbe implements ImageProbe {
     this.calls.push(absolutePath);
     if (this.failure) throw this.failure;
     return this.result;
+  }
+}
+
+/** Answers `jpeg` from `script` (one entry per call, the last entry repeating); records every path. */
+export class FakeModelImageSource implements ModelImageSource {
+  readonly calls: string[] = [];
+  /** Per call: bytes or null to return, an error to throw, or a function of the path. */
+  script: (Uint8Array | null | Error | ((absolutePath: string) => Uint8Array | null))[] = [new Uint8Array([0xff, 0xd8, 0xff])];
+
+  async jpeg(absolutePath: string): Promise<Uint8Array | null> {
+    const call = this.calls.push(absolutePath) - 1;
+    const step = this.script[Math.min(call, this.script.length - 1)]!;
+    if (step instanceof Error) throw step;
+    return typeof step === 'function' ? step(absolutePath) : step;
+  }
+}
+
+type VisionRequest = { image: Uint8Array; prompt: string; schema: unknown; signal: AbortSignal };
+
+/** Resolves with `answer`, or with what `respond` returns when set; records every request. */
+export class FakeVisionProvider implements VisionProvider {
+  readonly calls: Omit<VisionRequest, 'signal'>[] = [];
+  answer: unknown = { tags: ['Red Car', 'metal', 'front view', 'photorealistic'] };
+  respond: ((r: VisionRequest) => Promise<unknown>) | null = null;
+
+  async analyzeImage(r: VisionRequest): Promise<unknown> {
+    this.calls.push({ image: r.image, prompt: r.prompt, schema: r.schema });
+    return this.respond === null ? this.answer : this.respond(r);
   }
 }
 
