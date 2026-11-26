@@ -1,8 +1,9 @@
 import { RotateCcw, X } from 'lucide-react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, type JobStatus, type JobView } from '@assetforge/contracts';
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
+import { laneName, MoveJobsDialog } from '../components/MoveJobsDialog';
 import { Page } from '../components/Page';
 import { formatDateTime } from '../format';
 import { pagesForRows, rowCount } from '../gallery';
@@ -15,7 +16,15 @@ import {
   type VisibleRows,
 } from '../hooks/useVirtualRows';
 import { useJobs } from '../jobs-context';
-import { JOB_STATUS_LABELS, jobStatusLabel } from '../labels';
+import {
+  ALL_PROVIDERS,
+  JOB_STATUS_LABELS,
+  JOBS_PROVIDER_HEADER,
+  jobStatusLabel,
+  MOVE_JOBS_LABEL,
+  MOVE_JOBS_TITLE,
+} from '../labels';
+import { useProviders } from '../provider-context';
 import { retryIndex, slotAt, type PagedState } from '../paged-list';
 import { ALERT, BORDER, BUTTON, BUTTON_INLINE, ICON_BUTTON, ITEM_HOVER, MUTED, SELECT } from '../ui';
 
@@ -31,8 +40,8 @@ const HEADER_HEIGHT = 32;
 const ROW_HEIGHT = 48;
 const ROW_FOCUS = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent';
 const COLUMNS =
-  'grid grid-cols-[9rem_minmax(8rem,1.2fr)_6rem_5rem_10rem_minmax(8rem,1.5fr)_2.5rem] items-center gap-3 px-2';
-const HEADERS = ['Job', 'File', 'Status', 'Attempt', 'Created', 'Error'];
+  'grid grid-cols-[9rem_minmax(8rem,1.2fr)_minmax(8rem,1fr)_6rem_5rem_10rem_minmax(8rem,1.5fr)_2.5rem] items-center gap-3 px-2';
+const HEADERS = ['Job', 'File', JOBS_PROVIDER_HEADER, 'Status', 'Attempt', 'Created', 'Error'];
 
 function jobLabel(type: string): string {
   return type === ANALYZE_FILE_JOB ? 'Analyse image' : type;
@@ -51,13 +60,19 @@ function focusedIndex(root: HTMLElement | null): number | null {
 export function JobsScreen() {
   const { summary, active, changeToken, refresh } = useJobs();
   const [status, setStatus] = useState<JobStatus | ''>('');
+  const providers = useProviders();
+  const entries = providers.list?.providers ?? [];
+  // The chosen provider filter; '' (all) once its entry is no longer listed.
+  const [chosenProvider, setChosenProvider] = useState('');
+  const providerId = entries.some((p) => p.id === chosenProvider) ? chosenProvider : '';
+  const [moving, setMoving] = useState(false);
   // Bumped after every action of this screen; with `changeToken` it reloads the list.
   const [reloadToken, setReloadToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const reloadKey = `${changeToken}|${reloadToken}`;
-  const key = JSON.stringify([status, reloadKey]);
+  const key = JSON.stringify([status, providerId, reloadKey]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // Where the next mounted table starts; read once by each table when it mounts.
@@ -66,8 +81,14 @@ export function JobsScreen() {
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
   const fetchPage = useCallback(
-    (offset: number, limit: number) => call('jobs:list', { limit, offset, ...(status === '' ? {} : { status }) }),
-    [status],
+    (offset: number, limit: number) =>
+      call('jobs:list', {
+        limit,
+        offset,
+        ...(status === '' ? {} : { status }),
+        ...(providerId === '' ? {} : { providerId }),
+      }),
+    [status, providerId],
   );
 
   const [wanted, setWanted] = useState<readonly number[]>([0]);
@@ -112,6 +133,11 @@ export function JobsScreen() {
     setStatus(STATUSES.find((s) => s === value) ?? '');
   }
 
+  function chooseProvider(value: string) {
+    restore.current = TOP;
+    setChosenProvider(value);
+  }
+
   async function run(action: () => Promise<unknown>) {
     // One action at a time; the ref also catches a second click before the busy render.
     if (busyRef.current) return;
@@ -134,6 +160,9 @@ export function JobsScreen() {
   const retryable = summary === null ? 0 : summary.failed + summary.cancelled;
   const actions = (
     <>
+      <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={() => setMoving(true)}>
+        {MOVE_JOBS_LABEL}
+      </button>
       <button
         type="button"
         className={BUTTON}
@@ -168,6 +197,19 @@ export function JobsScreen() {
         {STATUSES.map((s) => (
           <option key={s} value={s}>
             {jobStatusLabel(s)}
+          </option>
+        ))}
+      </select>
+      <select
+        className={SELECT}
+        aria-label={JOBS_PROVIDER_HEADER}
+        value={providerId}
+        onChange={(e) => chooseProvider(e.target.value)}
+      >
+        <option value="">{ALL_PROVIDERS}</option>
+        {entries.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
           </option>
         ))}
       </select>
@@ -214,6 +256,15 @@ export function JobsScreen() {
           />
         )}
       </div>
+      {moving && (
+        <MoveJobsDialog
+          source={undefined}
+          onClose={() => {
+            setMoving(false);
+            setReloadToken((n) => n + 1);
+          }}
+        />
+      )}
     </Page>
   );
 }
@@ -335,7 +386,16 @@ function JobRows(props: JobTableProps & { scrollRef: RefObject<HTMLDivElement | 
   );
 }
 
+/** The provider of an analysis job: the current entry name (or the stored one) and the model; '—' for other jobs. */
+function providerText(list: ProviderList | null, job: JobView): string {
+  if (job.type !== ANALYZE_FILE_JOB) return '—';
+  const name = laneName(list, job.providerId, job.providerName);
+  return job.model === null ? name : `${name} · ${job.model}`;
+}
+
 function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex: number; onCancel(): void; onRetry(): void }) {
+  const { list } = useProviders();
+  const provider = providerText(list, job);
   const waitTitle =
     job.status === 'retry_wait' && job.runAfter !== null ? `Next try at ${formatDateTime(job.runAfter)}` : undefined;
   return (
@@ -345,6 +405,9 @@ function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex
       </span>
       <span role="gridcell" className="truncate font-medium" title={job.fileName ?? undefined}>
         {job.fileName ?? '—'}
+      </span>
+      <span role="gridcell" className="truncate" title={provider}>
+        {provider}
       </span>
       <span role="gridcell" className={`truncate ${job.status === 'failed' ? 'text-danger' : ''}`} title={waitTitle}>
         {jobStatusLabel(job.status)}

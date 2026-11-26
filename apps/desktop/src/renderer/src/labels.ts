@@ -107,6 +107,24 @@ export function providerOptionLabel(name: string, state: string): string {
   return `${name} — ${state}`;
 }
 
+/** Moving waiting jobs to another provider (MoveJobsDialog), the pause banner and the Jobs screen. */
+export const MOVE_JOBS_LABEL = 'Move jobs';
+export const MOVE_JOBS_TITLE = 'Moves the waiting jobs of a provider to another one';
+export const MOVE_LABEL = 'Move';
+export const MOVE_FROM = 'From';
+export const MOVE_TO = 'To';
+export const WAITING_COUNT = (n: number) => `${n} waiting`;
+export const NO_WAITING_JOBS = 'No waiting jobs';
+export const COUNTING_WAITING_JOBS = 'The waiting jobs are being counted';
+export const JOBS_PROVIDER_HEADER = 'Provider';
+export const ALL_PROVIDERS = 'All providers';
+export const REMOVED_PROVIDER = 'Removed provider';
+
+/** The name of a job lane: its stored name, else `No provider` for id null and `Removed provider` otherwise. */
+export function laneLabel(id: string | null, name: string | null): string {
+  return name ?? (id === null ? NO_PROVIDER : REMOVED_PROVIDER);
+}
+
 /** Why nothing can start while the selected provider is asked for its models (see `providerGate`). */
 export const PROVIDER_CHECKING = 'The provider is being checked';
 

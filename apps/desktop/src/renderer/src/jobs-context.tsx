@@ -27,10 +27,16 @@ interface Polled {
   resultToken: number;
 }
 
-/** Every count by value, and the pause by its reason (each poll parses a new `paused` object). */
+const samePaused = (a: JobSummary['paused'], b: JobSummary['paused']) =>
+  a.length === b.length &&
+  a.every(
+    (p, i) => p.providerId === b[i]!.providerId && p.providerName === b[i]!.providerName && p.reason === b[i]!.reason,
+  );
+
+/** Every count by value, and the pause list entry by entry (each poll parses new `paused` objects). */
 export const sameSummary = (a: JobSummary, b: JobSummary) =>
   (Object.keys(a) as (keyof JobSummary)[]).every((key) =>
-    key === 'paused' ? a.paused?.reason === b.paused?.reason : a[key] === b[key],
+    key === 'paused' ? samePaused(a.paused, b.paused) : a[key] === b[key],
   );
 
 /**
