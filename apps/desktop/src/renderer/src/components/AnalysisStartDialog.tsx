@@ -82,7 +82,6 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     }
   }
 
-
   // The prompt is not part of the preview: the counts do not depend on it.
   const promptId = promptChoice ?? defaultPromptId(prompts, 'tagging');
 

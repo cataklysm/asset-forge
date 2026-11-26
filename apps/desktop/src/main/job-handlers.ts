@@ -200,14 +200,15 @@ export function createJobHandlers(
       jobs.resume(r.providerId);
       return {};
     },
-    // The target's pause is not lifted: the moved jobs wait in its lane until it is resumed.
+    // The target's pause is not lifted: the moved jobs wait in its lane until it is resumed. The source lane
+    // has no waiting jobs left, so its pause ends; resume already raises the counter and wakes the scheduler.
     'jobs:reroute': async (r) => {
       const result = await manager.read((s) => {
         const to = providers.get(r.toProviderId);
         if (to === null) throw new NotFoundError(PROVIDER_NOT_FOUND);
         return rerouteJobs(s, { fromLane: r.fromProviderId, to: { id: to.id, name: to.name }, model: r.model });
       });
-      touched();
+      if (result.moved > 0) jobs.resume(r.fromProviderId);
       return result;
     },
     'jobs:clearFinished': async () => {

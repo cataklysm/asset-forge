@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 /** Starts the mock and wires the handlers to a job host that talks to it. */
-async function setup(failures: MockFailure[] = []): Promise<void> {
+async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Promise<void> {
   mock = await startMockProvider({ port: 0, failures });
   const provider = mockProviderEntry(join(base, 'userData'), mock.url);
   entryId = provider.entry.id;
@@ -56,7 +56,7 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
     images: { jpeg: (path) => readFile(path) },
     provider: OLLAMA_PROVIDER,
     pause: createPauseGate({}),
-    firstEntry: () => provider.store.first(),
+    firstEntry: firstEntry ?? (() => provider.store.first()),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(
@@ -175,6 +175,16 @@ describe('job IPC', () => {
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
     const request = { ...filesRequest([uuid, '4f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f']), mode: 'propose' };
     expect(await call('analysis:enqueue', request)).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+  });
+
+  it('starts the scheduler when the provider store cannot be read on open, and runs a job that has a lane', async () => {
+    await setup([], () => {
+      throw new Error('store unreadable');
+    });
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', { ...filesRequest([fileId!]), providerId: entryId });
+    await until((s) => s.succeeded === 1);
   });
 
   it('reports no pause in the summary', async () => {

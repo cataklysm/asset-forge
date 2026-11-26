@@ -143,7 +143,6 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, changeToken]);
 
-
   const promptId =
     chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : defaultPromptId(prompts, 'tagging');
 

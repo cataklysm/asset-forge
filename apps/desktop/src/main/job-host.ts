@@ -67,8 +67,13 @@ export function createJobHost(deps: JobHostDeps): JobHost {
         // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
         const session = await manager.read(async (s) => s);
         // Before the scheduler claims, so every waiting job runs in the lane the list shows.
-        const entry = deps.firstEntry();
-        if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) changed();
+        // A failure here must not keep the scheduler from starting: the jobs that already have a lane still run.
+        try {
+          const entry = await deps.firstEntry();
+          if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) changed();
+        } catch {
+          console.error('Jobs without a provider could not be assigned');
+        }
         const created = createScheduler({
           jobs: session.database.jobs,
           handlers: {

@@ -438,12 +438,22 @@ Found in the final review and not fixed:
 - Focus is lost after deleting an entry in Settings.
 - The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
 - Key temporary files are swept only at start.
-- A store read error on workspace open prevents the scheduler from starting.
-- A source lane stays paused with no jobs after a move until Resume or a save of its entry.
 - The waiting count in the move dialog is not refreshed while it is open.
 - Jobs of a deleted provider cannot be filtered on the Jobs screen.
 - The result dialog re-checks all entries and drops a manual provider pick on every file switch.
 - `listTimeoutMs` is not clamped.
+- `assignLane` with a rewrite that answers `undefined` behaves differently in the SQLite repository and the in-memory repository of the core tests; `rerouteWaiting` does not refuse the same lane itself (the host does).
+- `list({ lane: null })` matches no row in the SQLite repository; `nextRunAfter(types, [])` is not pinned by a test.
+- `pause.paused(rc)` is called unguarded when the scheduler computes the excluded lanes.
+- No test for a caller abort of `listModels`; `MAX_TIMER_MS` is a magic value on the model-list request.
+- `listWaitingLanes` runs one query per lane.
+- Model-list answers of entries that no longer exist stay in the renderer's provider context.
+- `internal_error` on the model list with a stored model (no Settings offer) is untested in the start dialog.
+- Move jobs dialog: the source name shows `Removed provider` until the lanes arrive; an old refusal stays visible after the source changes; a failed lane lookup leaves the disabled Move without a tooltip.
+- `shell.test.tsx` no longer asserts the Settings button for `provider_not_configured` nor the path from the banner to the Settings screen through `WorkspaceShell`.
+- The acceptance test pins "one job at a time per provider" weakly; no desktop test runs a v1 job to success; no desktop test queues a job in environment mode.
+- `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
+- Moving jobs into a paused target lane leaves them waiting there with no hint in the dialog.
 
 ## Not covered by any automated check
 

@@ -246,6 +246,31 @@ describe('several vision providers', () => {
     expect((await h.ok('providers:list', {})).providers.map((p) => p.name)).toEqual(['B']);
   });
 
+  it('resumes the source lane after a move of at least one job and leaves the target lane paused', async () => {
+    mocks = await startTwoMocks();
+    const a = await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY_2 });
+    const b = await h.provider({ name: 'B', url: mocks.b.url, apiKey: TEST_KEY });
+    await createWorkspace();
+    await h.ok('analysis:enqueue', request(await h.importImages(2, 'a'), a.id));
+    await h.until((s) => s.paused.length === 1 && s.paused[0]!.providerId === a.id);
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 1 });
+    const summary = await h.until((s) => s.paused.every((p) => p.providerId !== a.id));
+    expect(summary.paused.some((p) => p.providerId === a.id)).toBe(false);
+  });
+
+  it('leaves a paused source lane paused when a move finds no waiting job', async () => {
+    mocks = await startTwoMocks();
+    const a = await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY_2 });
+    const b = await h.provider({ name: 'B', url: mocks.b.url, apiKey: TEST_KEY });
+    await createWorkspace();
+    await h.ok('analysis:enqueue', request(await h.importImages(1, 'a'), a.id));
+    await h.until((s) => s.paused.length === 1 && s.failed === 1);
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 0 });
+    expect((await h.ok('jobs:summary', {})).paused).toEqual([
+      { providerId: a.id, providerName: 'A', reason: 'provider_unauthorized' },
+    ]);
+  });
+
   it('filters the job list by entry, shows the current name, refuses a move onto the same entry and resumes only the saved entry', async () => {
     mocks = await startTwoMocks();
     // Each entry holds the other mock's key, so both answer 401 and both entries pause at once.
