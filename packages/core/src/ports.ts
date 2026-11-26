@@ -408,6 +408,14 @@ export interface ImageProbe {
   measure(absolutePath: string): Promise<{ width: number; height: number } | null>;
 }
 
+/**
+ * Asks a vision model about one image. Resolves with the model's parsed JSON answer; rejects with a
+ * `JobError` on provider failure, or with the signal's reason when `signal` aborts. Implemented outside core.
+ */
+export interface VisionProvider {
+  analyzeImage(r: { image: Uint8Array; prompt: string; schema: unknown; signal: AbortSignal }): Promise<unknown>;
+}
+
 export interface WorkspaceHost {
   registry: WorkspaceRegistry;
   sources: SourceFiles;
