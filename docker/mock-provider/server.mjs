@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 export const MOCK_MODEL = 'mock-vision';
 /** A model whose capabilities lack vision. */
@@ -55,13 +56,208 @@ function descriptionFor(imageBytes) {
   return `A ${tags[7]} ${tags[6]} of a ${tags[0]} with ${tags[1]} and ${tags[2]}.`;
 }
 
+// --- Venice-shaped image endpoints under /api/v1 -------------------------------------------------
+
+export const MOCK_EDIT_MODEL = 'mock-edit';
+/** An edit model that states no constraints and no pricing. */
+export const MOCK_EDIT_BASIC_MODEL = 'mock-edit-basic';
+
+/** Edit prompts that make the mock fail in a fixed way. */
+export const MOCK_PROMPT_NO_BALANCE = 'mock:402';
+export const MOCK_PROMPT_VIOLATION = 'mock:422';
+export const MOCK_PROMPT_BUSY = 'mock:429';
+export const MOCK_PROMPT_FAIL = 'mock:500';
+/** Answers after 30 s, or at once when the mock is closed. */
+export const MOCK_PROMPT_SLOW = 'mock:slow';
+/** A 200 with the content-violation header. */
+export const MOCK_PROMPT_VIOLATION_OK = 'mock:violation-200';
+
+const SLOW_MS = 30_000;
+const VIOLATION_HEADER = 'x-venice-is-content-violation';
+const TRIGGERS = {
+  [MOCK_PROMPT_NO_BALANCE]: { status: 402, error: 'Insufficient balance' },
+  [MOCK_PROMPT_VIOLATION]: { status: 422, error: 'Content violation', violation: true },
+  [MOCK_PROMPT_BUSY]: { status: 429, error: 'Rate limit exceeded' },
+  [MOCK_PROMPT_FAIL]: { status: 500, error: 'Inference failed' },
+};
+
+const EDIT_MODELS = [
+  {
+    id: MOCK_EDIT_MODEL,
+    object: 'model',
+    type: 'inpaint',
+    owned_by: 'mock',
+    model_spec: {
+      name: 'Mock Edit',
+      constraints: {
+        aspectRatios: ['1:1', '16:9', '9:16'],
+        resolutions: ['1K', '2K', '4K'],
+        defaultResolution: '1K',
+        promptCharacterLimit: 1500,
+      },
+      pricing: { inpaint: { usd: 0.04, diem: 0.04 } },
+    },
+  },
+  {
+    id: MOCK_EDIT_BASIC_MODEL,
+    object: 'model',
+    type: 'inpaint',
+    owned_by: 'mock',
+    model_spec: { name: 'Mock Edit Basic' },
+  },
+];
+const LONG_EDGE = { '1K': 64, '2K': 128, '4K': 256 };
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([length, body, crc]);
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** A deterministic RGB PNG of the given size, coloured from `seed`. */
+function pngOf(width, height, seed) {
+  const [r, g, b] = createHash('sha256').update(seed).digest();
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // truecolour
+  const row = Buffer.alloc(1 + width * 3);
+  for (let x = 0; x < width; x += 1) row.set([r, g, b], 1 + x * 3);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
+}
+
+/** The IHDR size of a PNG; null for anything else. */
+function pngSizeOf(bytes) {
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE) || bytes.toString('ascii', 12, 16) !== 'IHDR') return null;
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+function sendPng(res, bytes, headers = {}) {
+  res.writeHead(200, { 'content-type': 'image/png', 'content-length': bytes.length, ...headers });
+  res.end(bytes);
+}
+
+/** The multipart fields of a request body: text fields and the bytes of `image`. */
+async function readForm(contentType, raw) {
+  try {
+    const form = await new Request('http://mock/', { method: 'POST', headers: { 'content-type': contentType ?? '' }, body: raw }).formData();
+    const fields = {};
+    let image = null;
+    for (const [name, value] of form) {
+      if (typeof value === 'string') fields[name] = value;
+      else if (name === 'image') image = Buffer.from(await value.arrayBuffer());
+    }
+    return { fields, image };
+  } catch {
+    return { fields: {}, image: null };
+  }
+}
+
+/** Answers an edit: the long edge follows the resolution, the short one the aspect ratio. */
+function editAnswer(fields) {
+  const model = EDIT_MODELS.find((entry) => entry.id === fields.model);
+  if (!model) return { status: 400, error: 'Unknown model' };
+  const constraints = model.model_spec.constraints;
+  const resolution = fields.resolution ?? constraints?.defaultResolution ?? '1K';
+  const aspectRatio = fields.aspect_ratio ?? '1:1';
+  if (constraints && (!constraints.resolutions.includes(resolution) || !constraints.aspectRatios.includes(aspectRatio))) {
+    return { status: 400, error: 'Invalid parameters' };
+  }
+  const edge = LONG_EDGE[resolution];
+  const ratio = /^(\d{1,2}):(\d{1,2})$/.exec(aspectRatio);
+  if (!edge || !ratio || Number(ratio[1]) === 0 || Number(ratio[2]) === 0) return { status: 400, error: 'Invalid parameters' };
+  const [w, h] = [Number(ratio[1]), Number(ratio[2])];
+  const width = w >= h ? edge : Math.max(1, Math.round((edge * w) / h));
+  const height = h >= w ? edge : Math.max(1, Math.round((edge * h) / w));
+  return { status: 200, png: pngOf(width, height, `${fields.model}\n${fields.prompt}\n${aspectRatio}\n${resolution}`) };
+}
+
+// --------------------------------------------------------------------------------------------------
+
 export async function startMockProvider(options = {}) {
   const { port = 11500, host = '127.0.0.1', delayMs = 0, log = () => {} } = options;
   // An empty key means none: the Compose file passes an unset variable through as an empty string.
   const apiKey = options.apiKey ? String(options.apiKey) : null;
   const failures = [...(options.failures ?? [])];
   const requests = [];
+  const imageRequests = [];
   const timers = new Set();
+  /** Slow answers still waiting; `close` sends them at once. */
+  const slow = new Set();
+
+  const authorized = (req) => apiKey === null || req.headers.authorization === `Bearer ${apiKey}`;
+
+  async function venice(req, res, path, raw) {
+    // The multipart body is not kept on `requests`; `imageRequests` records its fields and the image size.
+    requests.push({ method: req.method ?? '', path, body: undefined, headers: { ...req.headers } });
+    const query = new URL(req.url ?? '/', 'http://mock').searchParams;
+    if (req.method === 'GET' && path === '/api/v1/models') {
+      if (!authorized(req)) return sendJson(res, 401, { error: 'Authentication failed' });
+      const type = query.get('type') ?? 'text';
+      return sendJson(res, 200, { object: 'list', type, data: type === 'inpaint' ? EDIT_MODELS : [] });
+    }
+    const isEdit = path === '/api/v1/image/edit';
+    if (req.method !== 'POST' || (!isEdit && path !== '/api/v1/image/upscale')) return sendJson(res, 404, { error: 'not found' });
+
+    const { fields, image } = await readForm(req.headers['content-type'], raw);
+    imageRequests.push({ path, authorization: req.headers.authorization ?? null, fields, fileBytes: image?.length ?? 0 });
+    if (!authorized(req)) return sendJson(res, 401, { error: 'Authentication failed' });
+    if (!image || image.length === 0) return sendJson(res, 400, { error: 'No image supplied' });
+
+    if (!isEdit) {
+      const scale = Number(fields.scale);
+      if (scale !== 2 && scale !== 4) return sendJson(res, 400, { error: 'Invalid scale' });
+      const base = pngSizeOf(image) ?? { width: 32, height: 32 };
+      return sendPng(res, pngOf(base.width * scale, base.height * scale, image));
+    }
+
+    if (typeof fields.prompt !== 'string' || fields.prompt.length === 0) return sendJson(res, 400, { error: 'No prompt supplied' });
+    const trigger = Object.hasOwn(TRIGGERS, fields.prompt) ? TRIGGERS[fields.prompt] : null;
+    if (trigger) {
+      const text = JSON.stringify({ error: trigger.error });
+      res.writeHead(trigger.status, {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(text),
+        ...(trigger.violation ? { [VIOLATION_HEADER]: 'true' } : {}),
+      });
+      return res.end(text);
+    }
+    const answer = editAnswer(fields);
+    if (answer.status !== 200) return sendJson(res, answer.status, { error: answer.error });
+    if (fields.prompt === MOCK_PROMPT_VIOLATION_OK) return sendPng(res, answer.png, { [VIOLATION_HEADER]: 'true' });
+    if (fields.prompt !== MOCK_PROMPT_SLOW) return sendPng(res, answer.png);
+
+    const send = () => {
+      clearTimeout(timer);
+      slow.delete(send);
+      if (!res.writableEnded && !res.destroyed) sendPng(res, answer.png);
+    };
+    const timer = setTimeout(send, SLOW_MS);
+    slow.add(send);
+    res.on('close', () => {
+      clearTimeout(timer);
+      slow.delete(send);
+    });
+  }
 
   const server = createServer((req, res) => {
     // The log line carries method, path and status only; headers (and so the key) never reach it.
@@ -71,6 +267,12 @@ export async function startMockProvider(options = {}) {
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const path = (req.url ?? '').split('?')[0];
+      if (path.startsWith('/api/v1/')) {
+        venice(req, res, path, Buffer.concat(chunks)).catch(() => {
+          if (!res.headersSent) sendJson(res, 500, { error: 'mock error' });
+        });
+        return;
+      }
       const raw = Buffer.concat(chunks).toString('utf8');
       let body;
       if (raw) {
@@ -158,9 +360,11 @@ export async function startMockProvider(options = {}) {
   return {
     url: `http://${host}:${actualPort}`,
     requests,
+    imageRequests,
     close() {
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
+      for (const send of [...slow]) send();
       return new Promise((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();
