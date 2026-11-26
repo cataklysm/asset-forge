@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const ANALYSIS_PROMPT_NAME_MAX = 60;
-export const ANALYSIS_PROMPT_TEXT_MAX = 2000;
+export const ANALYSIS_PROMPT_TEXT_MAX = 8000;
 export const ANALYSIS_TAG_LIMIT_MIN = 1;
 export const ANALYSIS_TAG_LIMIT_MAX = 50;
 export const ANALYSIS_TAG_LIMIT_DEFAULT = 15;

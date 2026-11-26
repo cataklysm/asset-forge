@@ -22,10 +22,10 @@ describe('analysis prompt fields', () => {
     expect(AnalysisPromptNameSchema.safeParse('a'.repeat(60)).success).toBe(true);
   });
 
-  test('a text is trimmed and holds 1 to 2000 characters', () => {
+  test('a text is trimmed and holds 1 to 8000 characters', () => {
     expect(AnalysisPromptTextSchema.safeParse(' \n ').success).toBe(false);
-    expect(AnalysisPromptTextSchema.safeParse('a'.repeat(2001)).success).toBe(false);
-    expect(AnalysisPromptTextSchema.safeParse('a'.repeat(2000)).success).toBe(true);
+    expect(AnalysisPromptTextSchema.safeParse('a'.repeat(8001)).success).toBe(false);
+    expect(AnalysisPromptTextSchema.safeParse('a'.repeat(8000)).success).toBe(true);
     expect(AnalysisPromptTextSchema.parse('Describe.\n\n')).toBe('Describe.');
   });
 

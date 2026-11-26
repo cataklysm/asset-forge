@@ -54,7 +54,7 @@ it('shows both lists and the editor of the selected entry', async () => {
   expect(field('Name').getAttribute('maxlength')).toBe('60');
   expect(field('Tag limit').value).toBe('25');
   expect(field('Text').value).toBe('Describe the person precisely');
-  expect(field('Text').getAttribute('maxlength')).toBe('2000');
+  expect(field('Text').getAttribute('maxlength')).toBe('8000');
 
   await userEvent.click(entry('Image to prompt', 'Default'));
   expect(field('Text').value).toBe('Write a prompt for this image');
