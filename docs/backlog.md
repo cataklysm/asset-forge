@@ -281,15 +281,41 @@ Deferred by design:
 - Assets and projects cannot be deleted.
 - The trash is in the app only, not the operating system's recycle bin.
 
-Found during the build:
+Found during the build — core and persistence:
 
 - The port doc comments in `packages/core/src/ports.ts` do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
-- A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open.
+- A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open, and a restore or purge of that file that resolves it fails with the same refusal.
 - The trash sweep treats "no row" as "purged". It is skipped only in the open that creates the database, so on the following open of a re-opened kept folder (or a database restored from a backup) the binaries still in `.assetforge/trash/` are removed. More robust: record purges as tombstones in the purge transaction and let the sweep remove only binaries of tombstoned ids.
+- The sweep's UUID regex is case-insensitive (`packages/core/src/file-trash.ts`), while ids are stored lower-case and looked up case-sensitively, so a foreign entry with an upper-case UUID prefix in `.assetforge/trash/` counts as "no row" and is removed.
+- `analysis:discardProposal` has no trash guard (`packages/core/src/analysis-proposals.ts`, `discardProposal`): it deletes the waiting proposal of a trashed file, which a restore should bring back. The renderer does not offer it in the trash.
+- The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).
+- A purge that loses a race to another purge answers "The file is not in the trash" although the file is gone.
+
+Found during the build — main process and jobs:
+
+- `analysis:enqueue` and `jobs:retry` run in `manager.read`, not in the exclusive queue, so a race between `cancelFileJobs` and the trash commit can leave a job that later fails `file_unavailable` (accepted by the design).
+- Without a running scheduler `jobHost.cancel` is a no-op (`apps/desktop/src/main/job-host.ts`), so a queued job of a trashed file can survive the delete; it later fails `file_unavailable` or is removed by the purge.
+- `trash:empty` counts an unexpected per-item error as failed without logging it.
+- `touchingJobs` in `apps/desktop/src/main/library-handlers.ts` raises the job change counter after every trash, restore and purge, even when no job was touched.
+
+Found during the build — renderer:
+
+- The `Delete` key acts only while a file item has focus, narrower than the design's "when focus is not in an input".
+- A failed `trash:summary` is swallowed and not retried (`trash-context.tsx`); the badge stays stale or missing until the next delete, restore or purge.
+- `throwFirst` (`apps/desktop/src/renderer/src/trash-actions.ts`) rethrows the first per-item failure by message and drops its error code.
+- The single delete and the selection delete have separate busy guards (the inbox selection Delete has its own); an overlap reports "already in the trash".
+- A failed single restore shows the error message instead of the count strip; the Empty trash count can be one reload behind.
+- Trash tiles and table rows still show the proposal marker, hinting at Review tags, which the trash does not offer.
+- The nine-column trash table may be too wide; the Confirm/Cancel order differs between the confirm dialog and other dialogs.
+- `TrashScreen`'s `exclusive` returns without clearing the pending confirmation when an action is already running, and a replaced pending confirmation with `settle` would stay unsettled (both unreachable while the buttons are disabled and the dialog is modal).
+- Import order in the touched renderer files is not consistent.
 
 Tests:
 
 - Not tested: a file trashed while the analysis handler re-reads the image; the order of the trash check and the stale check when accepting a proposal; the `retryJob` race in which the file is trashed between the check and the retry and the caller gets the "active job" message.
+- Core and jobs: the open test cannot detect a swapped order of move recovery and sweep; the fake `onPurge` does not clear a chosen cover; the scheduler test does not pin the purge order (cancel, then row removal); the proposal-accept refusal for a trashed file is pinned only at core level; `wake()` after a trash action is not pinned.
+- Renderer: no tests for Delete from the asset-tab detail dialog, the trash count refresh after an asset-tab or single delete and after restore, purge and Empty trash, a partial failure and a double Delete in the inbox, focus after a delete, the double-submit guard, Esc while busy and purge from the detail dialog in the trash; the search-field Delete test is weak; the selection-bar tests do not pin the absence of other actions.
+- The acceptance test's "images" are text files named `.png`; its comment does not say so.
 
 ## Not covered by any automated check
 
