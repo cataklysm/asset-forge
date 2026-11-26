@@ -21,7 +21,7 @@ import {
 } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
-import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
+import { createWorkspaceHandlers, dispatch, type HostActions } from '../src/main/ipc.js';
 import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;
@@ -1021,6 +1021,54 @@ describe('ZIP import acceptance', () => {
       expect(results[1]!.error).toBeNull();
       expect(await readFile(join(workspaceRoot, results[1]!.file!.relativePath), 'utf8')).toBe('honest pixels');
       expect(await readdir(join(workspaceRoot, '.assetforge', 'staging'))).toEqual([]);
+    } finally {
+      await manager.close();
+    }
+  });
+});
+
+describe('Asset sources acceptance', () => {
+  it('adds, refuses a duplicate, opens, removes and keeps sources across a reopen', async () => {
+    const opened: string[] = [];
+    const host: HostActions = { ...noopHost, openExternal: async (url) => void opened.push(url) };
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const handlers = createWorkspaceHandlers(manager, {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      }, host, idleJobHost, idleServices);
+      const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
+      const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+        const result = await raw(channel, request);
+        if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+        return result.value as IpcResponse<C>;
+      };
+
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const typeId = (await call('assetTypes:list', {}))[0]!.id;
+      const asset = await call('assets:create', { name: 'Quarry', typeId });
+
+      await call('assets:addSource', { assetId: asset.id, url: 'https://example.org/a' });
+      await call('assets:addSource', { assetId: asset.id, url: 'https://example.org/b' });
+      const both = await call('assets:get', { id: asset.id });
+      expect(both.sources.map((s) => s.url)).toEqual(['https://example.org/a', 'https://example.org/b']);
+
+      expect(await raw('assets:addSource', { assetId: asset.id, url: 'HTTPS://EXAMPLE.ORG/a' })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_operation', message: 'This source already exists' },
+      });
+
+      const [first, second] = both.sources;
+      await call('assets:openSource', { assetId: asset.id, sourceId: second!.id });
+      expect(opened).toEqual(['https://example.org/b']);
+
+      await call('assets:removeSource', { assetId: asset.id, sourceId: first!.id });
+
+      await manager.close();
+      await call('workspace:open', { rootPath: workspaceRoot });
+      expect((await call('assets:get', { id: asset.id })).sources.map((s) => s.url)).toEqual(['https://example.org/b']);
     } finally {
       await manager.close();
     }

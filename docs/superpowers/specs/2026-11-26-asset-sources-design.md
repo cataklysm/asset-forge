@@ -40,7 +40,7 @@ The owner collects material for an asset from web pages. They want to note on th
 
 ### Data
 
-A new table `asset_source` (migration `0011`): `id`, `asset_id` (references `asset`), `url`, `created_at`; unique on (`asset_id`, `url`); indexed by `asset_id`. The asset detail record (`assets:get` and every channel that answers the asset) gets `sources: { id, url, createdAt }[]`, ordered by `created_at`, then `id`. The asset list (`assets:list`) does not carry sources. The search index is untouched, so `DERIVED_DATA_VERSION` stays.
+A new table `asset_source` (migration `0011`): `id`, `asset_id` (references `asset`), `url`, `created_at`; the unique index on (`asset_id`, `url`) also serves lookups by asset. The asset detail record (`assets:get` and every channel that answers the asset) gets `sources: { id, url, createdAt }[]`, ordered by `created_at`, then `id`. The asset list (`assets:list`) does not carry sources. The search index is untouched, so `DERIVED_DATA_VERSION` stays.
 
 ### URL rule
 
@@ -75,7 +75,8 @@ A weathered oak door …      [door] [wood] [+ tag]       https://example.org/do
 - Per source two icon buttons: copy the URL to the clipboard, remove (without confirmation, like removing a tag).
 - An input `Add URL` below the list; Enter adds. An error shows in the header's alert line, as for the other header fields.
 - More than five sources scroll inside the block, so the header's height stays bounded.
-- All controls are disabled while an import runs, like the rest of the header.
+- The input and the remove buttons are disabled while an import runs; opening and copying stay possible.
+- A failed copy shows `The URL could not be copied` in the block.
 
 ### Documentation
 

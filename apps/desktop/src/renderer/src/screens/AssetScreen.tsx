@@ -8,7 +8,7 @@ import {
   type RelationKind,
 } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
-import { call, describeError } from '../api';
+import { ApiError, call, describeError } from '../api';
 import { useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetPicker } from '../components/AssetPicker';
@@ -16,6 +16,7 @@ import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
 import { Link } from '../components/Link';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
+import { SourceList } from '../components/SourceList';
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
@@ -44,15 +45,24 @@ interface Props {
 }
 
 /** Runs a mutation and reports its error through `setError`; resolves to whether it succeeded. */
-async function attempt(setError: (message: string | null) => void, action: () => Promise<unknown>): Promise<boolean> {
+async function attempt(
+  setError: (message: string | null) => void,
+  action: () => Promise<unknown>,
+  describe: (error: unknown) => string = describeError,
+): Promise<boolean> {
   setError(null);
   try {
     await action();
     return true;
   } catch (e) {
-    setError(describeError(e));
+    setError(describe(e));
     return false;
   }
+}
+
+/** An unusable address is refused with its own fixed message, which the generic one would hide. */
+function describeSourceError(error: unknown): string {
+  return error instanceof ApiError && error.code === 'validation_failed' ? error.message : describeError(error);
 }
 
 export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenProject, onBusyChange }: Props) {
@@ -110,6 +120,11 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
 
   const saveAsset = (patch: Patch) =>
     attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
+
+  /** Like `attempt`, but rejects after reporting, so that the source list keeps the typed text. */
+  async function reported(action: () => Promise<unknown>, describe = describeError): Promise<void> {
+    if (!(await attempt(setError, action, describe))) throw new Error('reported');
+  }
 
   async function importFiles() {
     setError(null);
@@ -239,6 +254,19 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
               tags={asset.tags}
               onAdd={async (name) => setAsset(await call('assets:addTag', { assetId: id, name }))}
               onRemove={async (name) => setAsset(await call('assets:removeTag', { assetId: id, name }))}
+            />
+          </div>
+          <div className="min-w-64 flex-1">
+            <SourceList
+              sources={asset.sources}
+              disabled={importing}
+              onAdd={(url) =>
+                reported(async () => setAsset(await call('assets:addSource', { assetId: id, url })), describeSourceError)
+              }
+              onRemove={(sourceId) =>
+                reported(async () => setAsset(await call('assets:removeSource', { assetId: id, sourceId })))
+              }
+              onOpen={(sourceId) => reported(() => call('assets:openSource', { assetId: id, sourceId }))}
             />
           </div>
         </div>

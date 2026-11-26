@@ -133,6 +133,7 @@ function start(): void {
     {
       openPath: (path) => shell.openPath(path),
       showItemInFolder: (path) => shell.showItemInFolder(path),
+      openExternal: (url) => shell.openExternal(url),
       workspaceOpened: async () => {
         // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
         void previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));

@@ -9,6 +9,7 @@ import type {
   AssetList,
   AssetRelation,
   AssetRelationView,
+  AssetSource,
   AssetType,
   FileKind,
   FileList,
@@ -54,6 +55,7 @@ import type {
   Proposal,
   AssetRelationRepository,
   AssetRepository,
+  AssetSourceRepository,
   AssignmentKey,
   AssetTypeRepository,
   AssetWorkflowRepository,
@@ -1361,11 +1363,43 @@ class InMemoryRelations implements AssetRelationRepository {
   }
 }
 
+/** Source URLs by id; enforces one URL per asset like the unique index of the database. */
+class InMemoryAssetSources implements AssetSourceRepository {
+  readonly rows = new Map<string, AssetSource & { assetId: string }>();
+
+  async listByAsset(assetId: string): Promise<AssetSource[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.assetId === assetId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map(({ id, url, createdAt }) => ({ id, url, createdAt }));
+  }
+
+  async get(id: string): Promise<(AssetSource & { assetId: string }) | null> {
+    const row = this.rows.get(id);
+    return row === undefined ? null : { ...row };
+  }
+
+  async countByAsset(assetId: string): Promise<number> {
+    return [...this.rows.values()].filter((r) => r.assetId === assetId).length;
+  }
+
+  async insert(row: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean> {
+    if ([...this.rows.values()].some((r) => r.assetId === row.assetId && r.url === row.url)) return false;
+    this.rows.set(row.id, { ...row });
+    return true;
+  }
+
+  async remove(id: string): Promise<boolean> {
+    return this.rows.delete(id);
+  }
+}
+
 export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
   private readonly covers = new CoverChoices();
   readonly tags = new InMemoryTags();
+  readonly assetSources = new InMemoryAssetSources();
   private readonly proposals = new ProposalRows();
   readonly files = new InMemoryFiles(this.covers, this.tags, this.proposals);
   readonly fileMoves = new InMemoryFileMoves(this.files);

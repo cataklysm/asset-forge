@@ -71,6 +71,7 @@ export function servicesWithPrompts(userData: string, log: (line: string) => voi
 export const noopHost: HostActions = {
   openPath: async () => '',
   showItemInFolder: () => {},
+  openExternal: async () => {},
   workspaceOpened: async () => {},
   workspaceClosing: async () => {},
 };

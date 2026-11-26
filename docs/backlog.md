@@ -1,12 +1,11 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge and ZIP import reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import and asset sources reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
-- **Sources on an asset.** An asset can carry sources (where it or its material comes from). Open for the design: what a source is (URL, free text, author, licence, retrieval date), one or several per asset, whether a source can also sit on a single file, whether sources are searchable, and whether a URL is only stored or can be opened (ReadMe constraints on URL downloads apply if anything is fetched).
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
 - **Several vision providers.** Today exactly one provider can be configured (one base URL, one API key, one default model per purpose). The owner needs several defined side by side: the local Ollama on their own graphics card is not always available (the card is needed for other work), and at times a container on RunPod or a similar host takes over, also to try much larger models. Decided by the owner: the provider is chosen where an analysis is started (the start dialog, the single-image dialog, Image to prompt), not only in the settings, so that switching needs no detour through the settings and the dialog shows which provider is selected and whether it is reachable; a dialog preselects the provider that was used last. Open for the design: what a provider entry holds (name, base URL, key, timeout, default models), how reachability is shown there, one stored key per provider in `safeStorage`, the read-only environment mode, the pause gate and the pause banner per provider, queued jobs whose provider is switched or removed, and the fingerprint skip (it already contains provider and model, so the same file analysed through another provider counts as not analysed).
 
@@ -393,6 +392,27 @@ Found in the final review and not fixed:
 - Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-manager.ts`).
 - The acceptance test for an entry with a wrong declared size only checks that the error carries no workspace path, not the exact fixed message.
 - An entry whose file name is longer than 255 characters and has a refused extension answers `This archive entry cannot be imported`, not the refused-type message (the length check comes first).
+
+## Asset sources
+
+Deferred by design:
+
+- No further fields on a source (title, author, licence, note, retrieval date).
+- No sources on single files or on projects.
+- No search or filter by source.
+- No editing a source in place and no reordering (remove and add again).
+- No adding several URLs at once.
+- No fetching of any kind: no page title, favicon or reachability check.
+
+Found in the final review and not fixed:
+
+- Remove has no in-flight guard: a double click on `Remove source` sends two requests and the second shows a not-found alert.
+- After an add the `Add URL` input takes focus again even when the user has moved focus elsewhere meanwhile.
+- The alert of a failed copy stays until a later copy succeeds.
+- Test gaps: the scroll threshold of the list and the double-Enter guard are tested only through class names and `disabled` (jsdom cannot measure layout).
+- Writing a source and touching the asset's `updated_at` are two statements, not one transaction (as for tags).
+- An `assets:get` reload already in flight can briefly show the asset without a source that was just added (the same pattern as for tags).
+- How Windows treats `^`, `|`, `&` and a backtick in a query string handed to `shell.openExternal` is unverified.
 
 ## Not covered by any automated check
 

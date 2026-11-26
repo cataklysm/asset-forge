@@ -123,7 +123,7 @@ describe('asset cover', () => {
 
     const before = await ctx.db.assets.get(ctx.asset.id);
     const chosen = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) });
-    expect(chosen).toEqual({ ...before, updatedAt: chosen.updatedAt, coverFileId: uuid(2), coverIsChosen: true, tags: [] });
+    expect(chosen).toEqual({ ...before, updatedAt: chosen.updatedAt, coverFileId: uuid(2), coverIsChosen: true, tags: [], sources: [] });
     await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toEqual(chosen);
   });
 

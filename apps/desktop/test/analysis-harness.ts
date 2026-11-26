@@ -72,6 +72,7 @@ export async function createHarness(
     {
       openPath: async () => '',
       showItemInFolder: () => {},
+      openExternal: async () => {},
       workspaceOpened: () => services.workspaceOpened(),
       workspaceClosing: () => services.workspaceClosing(),
     },
