@@ -97,7 +97,7 @@ To make this possible `importFile` is split: the part after "the source is open"
 
 `ImportResult` gets the required field `entryName: string | null`: `null` for a plain source, the entry's path inside the archive for an entry. `sourcePath` stays the archive's path for its entries. `files:import` then answers one result per plain source and, for an unpacked archive, one result per imported or refused entry — or exactly one result with `entryName: null` when the archive as a whole fails:
 
-- not readable or not a ZIP: `This file is not a readable ZIP archive`;
+- not a ZIP, or its directory cannot be read: `This file is not a readable ZIP archive` (a missing or unreadable file answers `This file cannot be read`);
 - over a limit: `This archive is too large to unpack`;
 - no result at all (empty, or only skipped entries): `This archive contains no files`. An archive holding only refused entries answers one refusal per entry instead.
 

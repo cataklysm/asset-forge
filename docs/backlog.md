@@ -391,6 +391,8 @@ Found in the final review and not fixed:
 - `useZipChoice` leaves a pending promise when the screen unmounts or `choose` is called twice.
 - `AssetScreen` has no synchronous re-entry guard like the inbox's `importingRef`.
 - Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-manager.ts`).
+- The acceptance test for an entry with a wrong declared size only checks that the error carries no workspace path, not the exact fixed message.
+- An entry whose file name is longer than 255 characters and has a refused extension answers `This archive entry cannot be imported`, not the refused-type message (the length check comes first).
 
 ## Not covered by any automated check
 
