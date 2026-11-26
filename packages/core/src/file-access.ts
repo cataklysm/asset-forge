@@ -1,6 +1,7 @@
 import { ORIGINAL_MIME_TYPES, viewSource } from '@assetforge/contracts';
 import { isOpenable, isPreviewable } from './media-types.js';
 import { NotFoundError, StorageUnreachableError, ValidationFailedError } from './errors.js';
+import { requireLiveFile } from './file-trash.js';
 import type { WorkspaceSession } from './session.js';
 
 export interface PreviewSource {
@@ -49,6 +50,7 @@ export async function resolveFilePath(
 ): Promise<string> {
   const file = await s.database.files.get(fileId);
   if (file === null || file.status !== 'complete') throw new NotFoundError('File not found');
+  requireLiveFile(file);
   if (!(await s.storage.isReachable())) {
     throw new StorageUnreachableError('The storage of this workspace is not reachable');
   }

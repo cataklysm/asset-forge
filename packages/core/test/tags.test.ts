@@ -7,6 +7,7 @@ import {
   getAssetDetail,
   importFile,
   inboxPath,
+  InvalidOperationError,
   NotFoundError,
   removeAssetTag,
   removeFileTag,
@@ -18,7 +19,7 @@ import {
   type ImportContext,
   type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost, type InMemoryDatabase } from './fakes.js';
+import { createFakeHost, trashForTest, type InMemoryDatabase } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -266,5 +267,31 @@ describe('records', () => {
     expect(blend.tags).toEqual([]);
     expect(png.kind).toBe('image');
     expect((await db.files.get(blend.id))!.kind).toBe('model');
+  });
+});
+
+describe('trashed files', () => {
+  it('addFileTag and removeFileTag refuse a trashed file', async () => {
+    const ctx = await setup();
+    const id = await addFile(ctx, 1);
+    await addFileTag(ctx.session, { fileId: id, name: 'Metal' });
+    await trashForTest(ctx.session, [id]);
+    for (const op of [addFileTag, removeFileTag]) {
+      const error = await op(ctx.session, { fileId: id, name: 'Metal' }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InvalidOperationError);
+      expect((error as Error).message).toBe('The file is in the trash');
+    }
+    expect((await ctx.db.files.get(id))!.tags.map((t) => t.name)).toEqual(['metal']);
+  });
+
+  it('addFileTags and removeFileTags refuse a batch containing one', async () => {
+    const ctx = await setup();
+    const live = await addFile(ctx, 1);
+    const trashed = await addFile(ctx, 2);
+    await addFileTags(ctx.session, { fileIds: [live, trashed], name: 'Metal' });
+    await trashForTest(ctx.session, [trashed]);
+    await expect(addFileTags(ctx.session, { fileIds: [live, trashed], name: 'Wood' })).rejects.toThrow('The file is in the trash');
+    await expect(removeFileTags(ctx.session, { fileIds: [live, trashed], name: 'Metal' })).rejects.toThrow('The file is in the trash');
+    expect((await ctx.db.files.get(live))!.tags.map((t) => t.name)).toEqual(['metal']);
   });
 });

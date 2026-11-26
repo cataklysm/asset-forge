@@ -9,6 +9,7 @@ import {
   type NewJob,
 } from '../src/index.js';
 import { PROVIDER, setup, T0, UNKNOWN_ID, type Setup } from './analysis-setup.js';
+import { trashForTest } from './fakes.js';
 
 const MODEL = 'llava:13b';
 
@@ -164,5 +165,32 @@ describe('previewAnalysis', () => {
     expect(
       (await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [done.id] }, model: 'another-model', provider: PROVIDER })).analysable,
     ).toBe(1);
+  });
+});
+
+describe('trashed files', () => {
+  it('enqueue counts a trashed file as not analysable and creates no job', async () => {
+    const c = await setup();
+    const live = await c.importOne('live.png');
+    await trashForTest(c.session, [c.file.id]);
+
+    const byIds = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }));
+    expect(byIds).toEqual({ enqueued: 0, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } });
+    const byFilter = await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
+    expect(byFilter.enqueued).toBe(1);
+    expect(c.db.jobs.rows.map((j) => j.fileId)).toEqual([live.id]);
+    expect(c.db.jobs.rows.some((j) => j.fileId === c.file.id)).toBe(false);
+  });
+
+  it('previewAnalysis counts agree', async () => {
+    const c = await setup();
+    await trashForTest(c.session, [c.file.id]);
+    expect(await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [c.file.id] }, model: MODEL, provider: PROVIDER })).toEqual({
+      analysable: 0,
+      alreadyAnalysed: 0,
+      alreadyQueued: 0,
+      notAnalysable: 1,
+    });
+    expect((await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER })).analysable).toBe(0);
   });
 });

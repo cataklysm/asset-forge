@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  InvalidOperationError,
   NotFoundError,
   resolveFilePath,
   resolveOriginalSource,
@@ -9,7 +10,7 @@ import {
   WorkspaceManager,
   type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, trashForTest } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -176,5 +177,26 @@ describe('resolveFilePath', () => {
   it('returns the path for a normal file', async () => {
     const { session, file } = await setup();
     expect(await resolveFilePath(session, file.id, 'open')).toBe(`/memory/${file.relativePath}`);
+  });
+});
+
+describe('trashed files', () => {
+  it('resolveFilePath refuses a trashed file for open and reveal', async () => {
+    const { session, file } = await setup();
+    await trashForTest(session, [file.id]);
+    for (const purpose of ['open', 'reveal'] as const) {
+      const error = await resolveFilePath(session, file.id, purpose).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InvalidOperationError);
+      expect((error as Error).message).toBe('The file is in the trash');
+    }
+  });
+
+  it('resolvePreviewSource and resolveOriginalSource still serve it', async () => {
+    const { session, db, file } = await setup();
+    await trashForTest(session, [file.id]);
+    const trashed = (await db.files.get(file.id))!;
+    expect(await resolvePreviewSource(session, file.id)).toEqual({ sha256: file.sha256, absolutePath: `/memory/${trashed.relativePath}` });
+    expect(file.width).not.toBeNull();
+    expect(await resolveOriginalSource(session, file.id)).toMatchObject({ absolutePath: `/memory/${trashed.relativePath}` });
   });
 });

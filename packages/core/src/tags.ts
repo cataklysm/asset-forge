@@ -9,6 +9,7 @@ import {
 } from '@assetforge/contracts';
 import { getAssetDetail } from './asset-cover.js';
 import { NotFoundError, ValidationFailedError } from './errors.js';
+import { requireLiveFile } from './file-trash.js';
 import type { WorkspaceSession } from './session.js';
 
 /** The key and the display spelling of a tag; throws `validation_failed` for a tag without a letter or digit or a too long one. */
@@ -69,6 +70,7 @@ export async function addFileTag(
 ): Promise<FileRecord> {
   const tag = tagName(r.name);
   const file = await requireFile(s, r.fileId);
+  requireLiveFile(file);
   if (file.status !== 'complete') throw new ValidationFailedError(`File ${r.fileId} is not completely imported`);
   await s.database.tags.addToFile({
     fileId: r.fileId,
@@ -113,7 +115,7 @@ export async function removeFileTag(
   r: { fileId: string; name: string },
 ): Promise<FileRecord> {
   const tag = tagName(r.name);
-  await requireFile(s, r.fileId);
+  requireLiveFile(await requireFile(s, r.fileId));
   await s.database.tags.removeFromFile({ fileId: r.fileId, name: tag.name });
   return requireFile(s, r.fileId);
 }

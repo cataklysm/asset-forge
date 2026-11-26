@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { measureFile, NotFoundError, StorageUnreachableError, WorkspaceManager } from '../src/index.js';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, trashForTest } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -76,5 +76,14 @@ describe('measureFile', () => {
     storage.reachable = false;
     await expect(measureFile(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
     expect(probe.calls).toEqual([]);
+  });
+});
+
+describe('measureFile of a trashed file', () => {
+  it('measureFile still measures it', async () => {
+    const { session, file, probe } = await setup();
+    await trashForTest(session, [file.id]);
+    await expect(measureFile(session, file.id)).resolves.toMatchObject({ width: 800, height: 600 });
+    expect(probe.calls).toHaveLength(1);
   });
 });

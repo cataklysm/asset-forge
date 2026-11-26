@@ -118,6 +118,9 @@ export async function retryJob(s: WorkspaceSession, jobId: string): Promise<void
   if (job.status !== 'failed' && job.status !== 'cancelled') {
     throw new InvalidOperationError('Only a failed or cancelled job can be retried');
   }
+  if (job.fileId !== null && (await s.database.files.get(job.fileId))?.deletedAt != null) {
+    throw new InvalidOperationError('The file of this job is in the trash');
+  }
   const retried = await s.database.jobs.retry({ id: jobId, now: s.now().toISOString() });
   if (retried === 0) throw new InvalidOperationError('The file of this job already has an active job');
 }

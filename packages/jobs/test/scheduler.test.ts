@@ -460,6 +460,29 @@ describe('createScheduler', () => {
   });
 });
 
+describe('createScheduler with a purged job row', () => {
+  for (const outcome of ['succeeds', 'fails'] as const) {
+    it(`a run whose job row was removed settles without an error and frees its slot (${outcome})`, async () => {
+      const h = controlled('cpu');
+      const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 1 } });
+      const [first, second] = await s.enqueue('t', 'cpu', 2);
+      await s.scheduler.start();
+      expect(s.row(first!).status).toBe('running');
+
+      // As when the file of the job is purged while its handler runs: the row goes with it.
+      s.fake.rows.splice(s.fake.rows.indexOf(s.row(first!)), 1);
+      if (outcome === 'succeeds') h.runOf(first!).resolve();
+      // A retryable failure, so the scheduler tries `scheduleRetry` on the missing row.
+      else h.runOf(first!).reject(new JobError('provider_unreachable'));
+      await flush();
+
+      expect(s.fake.rows.some((r) => r.id === first)).toBe(false);
+      expect(s.row(second!).status).toBe('running');
+      expect(s.logged).toEqual([]);
+    });
+  }
+});
+
 describe('createScheduler with a pause gate', () => {
   const gpuLimit = { ...DEFAULT_LIMITS, local_gpu: 1 };
 

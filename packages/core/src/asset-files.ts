@@ -1,5 +1,6 @@
 import type { FileList, FileRecord, FileRole, FileTarget } from '@assetforge/contracts';
 import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
+import { requireLiveFile } from './file-trash.js';
 import { assetFilePath, inboxPath } from './paths.js';
 import type { FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
 import { searchWords } from './search.js';
@@ -19,6 +20,7 @@ export async function relocateFile(
 ): Promise<FileRecord> {
   const file = await s.database.files.get(fileId);
   if (file === null) throw new NotFoundError(`File ${fileId} does not exist`);
+  requireLiveFile(file);
   if (file.status !== 'complete') {
     throw new InvalidOperationError(`File ${fileId} is not completely imported`);
   }

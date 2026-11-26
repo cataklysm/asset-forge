@@ -14,7 +14,7 @@ import {
   type JobControl,
   type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost, type InMemoryDatabase } from './fakes.js';
+import { createFakeHost, trashForTest, type InMemoryDatabase } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -133,5 +133,28 @@ describe('job use cases', () => {
     await addJob('failed');
     expect(await clearFinishedJobs(session)).toBe(2);
     expect(db.jobs.rows.map((r) => r.status)).toEqual(['queued', 'queued', 'queued']);
+  });
+});
+
+describe('jobs of trashed files', () => {
+  it('retryJob refuses a job whose file is in the trash', async () => {
+    const { db, session, addJob } = await setup();
+    const fileId = crypto.randomUUID();
+    const failed = await addJob('failed', fileId);
+    await trashForTest(session, [fileId]);
+    const error = await retryJob(session, failed).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('The file of this job is in the trash');
+    expect(db.jobs.rows.find((r) => r.id === failed)!.status).toBe('failed');
+  });
+
+  it('retryFailedJobs skips it and counts only the others', async () => {
+    const { db, session, addJob } = await setup();
+    const fileId = crypto.randomUUID();
+    const trashedJob = await addJob('failed', fileId);
+    await addJob('cancelled', crypto.randomUUID());
+    await trashForTest(session, [fileId]);
+    expect(await retryFailedJobs(session)).toBe(1);
+    expect(db.jobs.rows.find((r) => r.id === trashedJob)!.status).toBe('failed');
   });
 });

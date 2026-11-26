@@ -1,5 +1,6 @@
 import type { AssetDetail, FileRecord } from '@assetforge/contracts';
 import { NotFoundError, ValidationFailedError } from './errors.js';
+import { requireLiveFile } from './file-trash.js';
 import { isPreviewable } from './media-types.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -38,6 +39,7 @@ export async function setAssetCover(
   if ((await s.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
   if (fileId !== null) {
     const file = await s.database.files.get(fileId);
+    if (file !== null) requireLiveFile(file);
     if (file === null || file.assetId !== assetId) {
       throw new ValidationFailedError(`File ${fileId} is not attached to asset ${assetId}`);
     }

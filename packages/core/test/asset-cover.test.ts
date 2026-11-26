@@ -6,6 +6,7 @@ import {
   createAsset,
   getAssetDetail,
   inboxPath,
+  InvalidOperationError,
   listAssets,
   recoverFileMoves,
   relocateFile,
@@ -13,7 +14,7 @@ import {
   WorkspaceManager,
   type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost, type InMemoryDatabase } from './fakes.js';
+import { createFakeHost, trashForTest, type InMemoryDatabase } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -243,5 +244,16 @@ describe('asset cover', () => {
       ['Valve', uuid(3)],
       ['Zeppelin', null],
     ]);
+  });
+});
+
+describe('asset cover of a trashed file', () => {
+  it('setAssetCover refuses a trashed file', async () => {
+    const ctx = await setup();
+    const file = await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    await trashForTest(ctx.session, [file.id]);
+    const error = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: file.id }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('The file is in the trash');
   });
 });

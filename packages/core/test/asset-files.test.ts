@@ -18,7 +18,7 @@ import {
   type WorkspaceSession,
 } from '../src/index.js';
 import type { FileKind, FileList, FileRole, FileScope } from '@assetforge/contracts';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, trashForTest } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -461,5 +461,27 @@ describe('file list filters', () => {
     expect(names(await listFiles(s, page({ scope: assetScope, role: 'texture', kind: 'image' })))).toEqual(['tex.png']);
     expect(names(await listFiles(s, page({ scope: inbox, kind: 'model' })))).toEqual(['inbox.glb']);
     expect(names(await listFiles(s, page({ scope: all, kind: 'model' })))).toEqual(['inbox.glb', 'mesh.glb']);
+  });
+});
+
+describe('trashed files', () => {
+  it('relocateFile refuses a trashed file', async () => {
+    const { session, asset, file } = await setup();
+    await trashForTest(session, [file.id]);
+    for (const target of [{ assetId: asset.id, role: 'reference' as const }, null]) {
+      const error = await relocateFile(session, file.id, target).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InvalidOperationError);
+      expect((error as Error).message).toBe('The file is in the trash');
+    }
+  });
+
+  it('assignFiles reports it per item', async () => {
+    const { session, manager, asset, file } = await setup();
+    const [second] = await manager.importFiles(['/src/motel.png']);
+    await trashForTest(session, [file.id]);
+    const items = await assignFiles(session, { fileIds: [file.id, second!.file!.id], assetId: asset.id, role: 'reference' });
+    expect(items[0]!.error).toBeInstanceOf(InvalidOperationError);
+    expect(items[0]!.error!.message).toBe('The file is in the trash');
+    expect(items[1]).toMatchObject({ error: null, file: { assetId: asset.id } });
   });
 });

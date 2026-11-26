@@ -38,6 +38,11 @@ async function requireFile(s: WorkspaceSession, fileId: string): Promise<FileRec
   return file;
 }
 
+/** Refuses a file in the trash: it can be restored or purged, but not placed, tagged, opened or analysed. */
+export function requireLiveFile(file: FileRecord): void {
+  if (file.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
+}
+
 async function requireReachable(s: WorkspaceSession): Promise<void> {
   if (!(await s.storage.isReachable())) {
     throw new StorageUnreachableError('The storage of this workspace is not reachable');

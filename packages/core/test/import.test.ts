@@ -11,7 +11,7 @@ import {
   type ImportContext,
   type SourceFiles,
 } from '../src/index.js';
-import { createFakeHost, type InMemoryStorage } from './fakes.js';
+import { createFakeHost, trashForTest, type InMemoryStorage } from './fakes.js';
 
 const ROOT = '/ws/a';
 const HELLO_SHA = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
@@ -405,5 +405,18 @@ describe('importFile measuring', () => {
     const result = await importFile(ctx, '/src/a.png');
     expect(result.file?.status).toBe('failed');
     expect(probe.calls).toEqual([]);
+  });
+});
+
+describe('importing the content of a trashed file', () => {
+  it('an import of the same content as a trashed file is not a duplicate', async () => {
+    const { manager, sources } = await setup();
+    sources.set('/src/a.png', Buffer.from('same'));
+    sources.set('/src/b.png', Buffer.from('same'));
+    const [first] = await manager.importFiles(['/src/a.png']);
+    const session = await manager.read(async (s) => s);
+    await trashForTest(session, [first!.file!.id]);
+    const [second] = await manager.importFiles(['/src/b.png']);
+    expect(second!.duplicateOf).toEqual([]);
   });
 });

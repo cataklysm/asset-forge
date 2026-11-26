@@ -11,6 +11,7 @@ import {
   NotFoundError,
 } from '../src/index.js';
 import { PROVIDER, setup, type Setup } from './analysis-setup.js';
+import { trashForTest } from './fakes.js';
 
 const MODEL = 'llava:13b';
 const CREATED = '2026-02-02T00:00:00.000Z';
@@ -172,6 +173,19 @@ describe('discardProposal', () => {
     await discardProposal(c.session, c.file.id);
     await discardProposal(c.session, c.file.id);
     expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
+    expect(c.db.tags.forFile(c.file.id)).toEqual([]);
+  });
+});
+
+describe('trashed files', () => {
+  it('acceptProposal refuses a trashed file and keeps its proposal', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    await trashForTest(c.session, [c.file.id]);
+    const error = await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('The file is in the trash');
+    expect(await c.db.analyses.getProposal(c.file.id)).not.toBeNull();
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
   });
 });

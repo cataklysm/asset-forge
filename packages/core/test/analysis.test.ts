@@ -11,6 +11,7 @@ import {
 } from '../src/index.js';
 import type { FileRecord } from '@assetforge/contracts';
 import { jobFor, PROVIDER, rejectsWith, setup, UNKNOWN_ID } from './analysis-setup.js';
+import { trashForTest } from './fakes.js';
 
 describe('isAnalysable', () => {
   const complete: FileRecord = {
@@ -329,5 +330,29 @@ describe('the analyze file handler with a v2 payload', () => {
     configure({ vision: null, model: 'mock-vision' });
     await rejectsWith(handler.run(jobFor(file.id, apply), new AbortController().signal), 'provider_not_configured');
     expect(images.calls).toEqual([]);
+  });
+});
+
+describe('trashed files in the handler', () => {
+  for (const mode of ['apply', 'propose'] as const) {
+    it(`a job whose file was trashed after the image was read ends file_unavailable and writes nothing (${mode})`, async () => {
+      const { db, session, file, vision, handler } = await setup();
+      vision.respond = async () => {
+        await trashForTest(session, [file.id]);
+        return { tags: ['car'] };
+      };
+      await rejectsWith(handler.run(jobFor(file.id, { version: 2, model: 'mock-vision', mode }), new AbortController().signal), 'file_unavailable');
+      expect(db.tags.forFile(file.id)).toEqual([]);
+      expect(await db.analyses.get(file.id)).toBeNull();
+      expect(await db.analyses.getProposal(file.id)).toBeNull();
+    });
+  }
+
+  it('a job started for an already trashed file ends file_unavailable', async () => {
+    const { session, file, vision, images, handler } = await setup();
+    await trashForTest(session, [file.id]);
+    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'file_unavailable');
+    expect(images.calls).toEqual([]);
+    expect(vision.calls).toEqual([]);
   });
 });
