@@ -80,7 +80,7 @@ IPC (no open workspace needed):
 
 ### 2. Models
 
-- The adapter gains `listModels`: `GET /api/tags`, then `POST /api/show` per model for its `capabilities` (at most 100 models, 4 at a time, 10 s each, responses capped like every other one). `vision` is `true`/`false` when the server reports capabilities, `null` when it does not (older servers, a failed `show`).
+- The adapter gains `listModels`: `GET /api/tags`, then `POST /api/show` per model for its `capabilities` (at most 100 models, 4 at a time, 10 s each, responses capped like every other one). `vision` is `true`/`false` when the server reports capabilities, `null` when it does not (older servers, a failed or blocked `show`); a failing `show` never fails the list. The owner's gateway is known to pass `/api/tags`.
 - Models with `vision: false` are shown but cannot be chosen. `true` first, then `null`, by name.
 - No model name appears in code as a default. A request without a model is impossible by type: the model is a required argument of every provider call.
 - A model name is 1–200 characters, stored and sent verbatim.
@@ -128,7 +128,7 @@ type AnalysisTarget =
   | { kind: 'assetFilter'; filter: AssetListFilter } // the filter part of assets:list
 ```
 
-For `asset` and `assetFilter` the files are all analysable files of the matching assets. Analysable is 4a's `isAnalysable`.
+For `asset` the files are all analysable files of the asset. For `assetFilter` they are the analysable files of the matching assets; when the filter has `fileRole` or `fileKind`, only the files that themselves have that role or kind (the owner filtered to those files). `query` and `tagNames` select assets and do not narrow the files. Analysable is 4a's `isAnalysable`.
 
 IPC (workspace needed):
 
@@ -144,7 +144,7 @@ IPC (workspace needed):
 - The enqueue result carries counts, not a per-file list: a filter target can cover a whole workspace.
 - Filter targets are resolved in the main process by a keyset-paged repository enumeration; jobs are inserted in chunks of at most 500 per transaction. The whole id set is never held by the renderer and never sent over IPC.
 - `getProposal.job` is the file's active or latest analysis job (for the dialog's running/failed state); `stale` is true when the file's hash differs from the proposal's.
-- `FileRecord` gains `hasProposal: boolean`; `files:list` gains the optional filter `hasProposal`.
+- `FileRecord` gains `hasProposal: boolean`; `files:list` gains the optional filter `hasProposal`. It is a list filter only and not part of `FileListFilter` in a target: while the proposal toggle is on, `Analyse all` is disabled (a batch over waiting proposals would silently replace what the owner is about to review).
 
 ### 5. Image2Prompt
 
@@ -154,9 +154,9 @@ IPC (workspace needed):
 
 ### 6. Queue pause
 
-- The scheduler counts, per resource class, consecutive job runs that end with `provider_unreachable`; a success or any other outcome resets the count. At **3** the class pauses. One run ending with `provider_unauthorized` or `provider_not_configured` pauses it at once.
+- Consecutive job runs of a resource class that end with a "provider is down" code are counted: `provider_unreachable`, `provider_unavailable` (5xx and 429 — what a gateway answers when the Ollama behind it is down) and `provider_timeout`. A success or any other outcome resets the count. At **3** the class pauses; the pause reason is the last code. One run ending with `provider_unauthorized` or `provider_not_configured` pauses it at once.
 - A paused class claims nothing: `queued` jobs stay queued, `retry_wait` jobs keep their attempt count and wait. Running jobs finish. The job that tripped the pause follows its normal path (retry or failed).
-- `Scheduler` gains `resume(resourceClass)` and reports the pause through its change callback. The pause is in memory only; a restart starts unpaused.
+- The pause belongs to the app session, not to one scheduler instance: the job host holds it and hands it to every scheduler it creates, so closing, opening or switching a workspace keeps the queue paused. It ends only through Resume, through saving the vision settings, or with the app (it is not persisted; a restart starts unpaused).
 - `jobs:summary` gains `paused: { reason: JobErrorCode } | null` (for `local_gpu`); new channel `jobs:resume` `{}` → `{}`. Saving the vision settings also resumes.
 
 ### 7. Renderer
@@ -208,7 +208,9 @@ Closing the dialog changes nothing. This replaces 4a's behaviour where a single 
 
 - No multi-select in the asset gallery; "asset selection" is the selected asset.
 - Resource class stays `local_gpu`, limit 1, also when the base URL is not local.
-- Pause thresholds: three consecutive `provider_unreachable`; one `provider_unauthorized` or `provider_not_configured`. The pause is not persisted.
+- Pause thresholds: three consecutive runs ending unreachable, unavailable (5xx/429) or timed out; one `provider_unauthorized` or `provider_not_configured`. The pause lasts for the app session across workspace switches and is not persisted.
+- An asset filter with a file role or file kind analyses only the files of that role or kind.
+- `Analyse all` is disabled while the list is filtered to waiting proposals.
 - A discarded proposal leaves no trace, so the file counts as not analysed again.
 - A waiting proposal counts as "analysed" for the skip.
 - Image2Prompt bypasses the scheduler and may overlap one running analysis.
