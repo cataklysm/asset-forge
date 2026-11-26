@@ -90,7 +90,7 @@ function writeV2(o: { baseUrl: string; marker: { id: string; origin: string } | 
 
 describe('provider store: upgrade and start', () => {
   it('is empty without a file and writes nothing', () => {
-    expect(store().list()).toEqual({ providers: [], lastUsedId: null, fromEnvironment: false, canStoreKey: true });
+    expect(store().list()).toEqual({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true });
     expect(readdirSync(dir)).toEqual([]);
   });
 
@@ -102,11 +102,13 @@ describe('provider store: upgrade and start', () => {
     expect(providers).toEqual([
       {
         id: expect.any(String),
+        kind: 'ollama',
         name: 'Ollama',
         baseUrl: 'http://192.168.1.20:11434',
         timeoutSeconds: 300,
         taggingModel: 'tagger',
         promptModel: null,
+        editModel: null,
         hasApiKey: true,
       },
     ]);
@@ -115,9 +117,20 @@ describe('provider store: upgrade and start', () => {
     expect(readdirSync(credentials())).toEqual([`vision-api-key-${id}`]);
     expect(s.apiKeyFor(id, 'http://192.168.1.20:11434')).toBe(KEY);
     expect(readSettings()).toEqual({
-      version: 2,
-      providers: [{ id, name: 'Ollama', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 300, taggingModel: 'tagger', promptModel: null }],
-      lastUsedId: null,
+      version: 3,
+      providers: [
+        {
+          id,
+          kind: 'ollama',
+          name: 'Ollama',
+          baseUrl: 'http://192.168.1.20:11434',
+          timeoutSeconds: 300,
+          taggingModel: 'tagger',
+          promptModel: null,
+          editModel: null,
+        },
+      ],
+      lastUsed: { vision: null, image: null },
       adoptLegacyKey: null,
     });
     // A second start reads the upgraded file as it is.
@@ -134,7 +147,7 @@ describe('provider store: upgrade and start', () => {
     writeLegacyKey();
     expect(store().list().providers).toEqual([]);
     expect(existsSync(legacyKeyFile())).toBe(false);
-    expect(readSettings()).toEqual({ version: 2, providers: [], lastUsedId: null, adoptLegacyKey: null });
+    expect(readSettings()).toEqual({ version: 3, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null });
   });
 
   it('adopts the legacy key after a crash between writing version 2 and the rename', () => {
@@ -197,7 +210,19 @@ describe('provider store: upgrade and start', () => {
 
   it.each([
     ['not JSON', 'not json'],
-    ['an unknown version', JSON.stringify({ version: 3, providers: [] })],
+    ['an unknown version', JSON.stringify({ version: 4, providers: [] })],
+    ['a version 3 without slots', JSON.stringify({ version: 3, providers: [], adoptLegacyKey: null })],
+    [
+      'a venice entry with a tagging model',
+      JSON.stringify({
+        version: 3,
+        providers: [
+          { id: PREPARED, kind: 'venice', name: 'V', baseUrl: 'https://v.example.test', timeoutSeconds: 120, taggingModel: 'x', promptModel: null, editModel: null },
+        ],
+        lastUsed: { vision: null, image: null },
+        adoptLegacyKey: null,
+      }),
+    ],
     ['a wrong shape', JSON.stringify({ version: 2, providers: [{ id: 5 }], lastUsedId: null, adoptLegacyKey: null })],
     ['a bad version 1', JSON.stringify({ version: 1, vision: { baseUrl: 'http://u:p@h', timeoutSeconds: 120, taggingModel: null, promptModel: null } })],
   ])('sets a file with %s aside and reads an empty list', (_label, content) => {
@@ -221,11 +246,13 @@ describe('provider store: save', () => {
     expect(b.id).not.toBe(a.id);
     expect(b).toEqual({
       id: b.id,
+      kind: 'ollama',
       name: 'B',
       baseUrl: 'https://pod.example.test/base',
       timeoutSeconds: 120,
       taggingModel: 'tagger',
       promptModel: 'writer',
+      editModel: null,
       hasApiKey: false,
     });
     const edited = s.save(input({ id: a.id, name: 'A2', timeoutSeconds: 60 }));
@@ -548,15 +575,18 @@ describe('provider store: environment', () => {
       providers: [
         {
           id: 'environment',
+          kind: 'ollama',
           name: 'Environment',
           baseUrl: 'http://127.0.0.1:11500',
           timeoutSeconds: 120,
           taggingModel: 'env-model',
           promptModel: 'env-model',
+          editModel: null,
           hasApiKey: false,
         },
       ],
       lastUsedId: null,
+      lastUsedImageId: null,
       fromEnvironment: true,
       canStoreKey: true,
     });
@@ -609,5 +639,213 @@ describe('provider store: environment', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+const venice = (overrides: Partial<SaveProvider> = {}): SaveProvider =>
+  input({ kind: 'venice', name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', editModel: 'edit-a', ...overrides });
+
+describe('provider store: version 3', () => {
+  const SECOND = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  function writeV2WithTwo() {
+    writeFileSync(
+      settingsFile(),
+      JSON.stringify({
+        version: 2,
+        providers: [
+          { id: PREPARED, name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null },
+          { id: SECOND, name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer' },
+        ],
+        lastUsedId: SECOND,
+        adoptLegacyKey: null,
+      }),
+    );
+    mkdirSync(credentials(), { recursive: true });
+    writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
+    writeFileSync(keyFile(SECOND), codec.encrypt(OTHER_KEY));
+  }
+
+  it('upgrades version 2 in memory, keeping ids, keys and the vision entry used last', () => {
+    writeV2WithTwo();
+    const before = readFileSync(settingsFile(), 'utf8');
+    const s = store();
+    const list = s.list();
+    expect(list.providers).toEqual([
+      expect.objectContaining({ id: PREPARED, kind: 'ollama', editModel: null, taggingModel: 'tagger', hasApiKey: true }),
+      expect.objectContaining({ id: SECOND, kind: 'ollama', editModel: null, promptModel: 'writer', hasApiKey: true }),
+    ]);
+    expect(list.lastUsedId).toBe(SECOND);
+    expect(list.lastUsedImageId).toBeNull();
+    expect(s.apiKeyFor(PREPARED, 'http://192.168.1.20:11434')).toBe(KEY);
+    expect(s.apiKeyFor(SECOND, 'http://192.168.1.30:11434')).toBe(OTHER_KEY);
+    // Reading alone writes nothing; a crash now leaves version 2, which reads the same on the next start.
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    expect(store().list()).toEqual(list);
+  });
+
+  it('writes version 3 atomically on the first write', () => {
+    writeV2WithTwo();
+    const s = store();
+    s.markUsed(PREPARED);
+    expect(readSettings()).toEqual({
+      version: 3,
+      providers: [
+        { id: PREPARED, kind: 'ollama', name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null },
+        { id: SECOND, kind: 'ollama', name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer', editModel: null },
+      ],
+      lastUsed: { vision: PREPARED, image: null },
+      adoptLegacyKey: null,
+    });
+    expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    expect(store().list().providers.map((p) => [p.id, p.hasApiKey])).toEqual([
+      [PREPARED, true],
+      [SECOND, true],
+    ]);
+  });
+});
+
+describe('provider store: kinds', () => {
+  it('creates an ollama entry without a kind and a venice entry with one', () => {
+    const s = store();
+    const o = s.save(input({ editModel: 'ignored' }));
+    expect(o).toMatchObject({ kind: 'ollama', taggingModel: 'tagger', promptModel: 'writer', editModel: null });
+    const v = s.save(venice());
+    expect(v).toEqual({
+      id: expect.any(String),
+      kind: 'venice',
+      name: 'Venice',
+      baseUrl: 'https://api.venice.ai/api/v1',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      editModel: 'edit-a',
+      hasApiKey: false,
+    });
+    expect(readSettings().providers[1]).toMatchObject({ kind: 'venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
+    expect(store().get(v.id)).toMatchObject({ kind: 'venice', editModel: 'edit-a' });
+  });
+
+  it('keeps the edit model when it is absent on an edit and clears it on null', () => {
+    const s = store();
+    const v = s.save(venice());
+    const { editModel: _omit, ...withoutEdit } = venice({ id: v.id, name: 'Renamed' });
+    expect(s.save(withoutEdit).editModel).toBe('edit-a');
+    expect(s.save(venice({ id: v.id, editModel: null })).editModel).toBeNull();
+  });
+
+  it('refuses a changed kind; the same kind or none is fine', () => {
+    const s = store();
+    const o = s.save(input());
+    const v = s.save(venice());
+    expect(errorOf(() => s.save(input({ id: o.id, kind: 'venice' })))).toEqual({
+      code: 'invalid_operation',
+      message: 'The kind of a provider cannot be changed',
+    });
+    expect(errorOf(() => s.save(venice({ id: v.id, kind: 'ollama' })))?.message).toBe('The kind of a provider cannot be changed');
+    expect(s.save(input({ id: o.id, kind: 'ollama', name: 'Same' })).kind).toBe('ollama');
+    const { kind: _omit, ...noKind } = venice({ id: v.id, name: 'Still venice' });
+    expect(s.save(noKind)).toMatchObject({ kind: 'venice', taggingModel: null });
+  });
+
+  it.each([
+    ['http on 127.0.0.1', 'http://127.0.0.1:11500/api/v1', 'http://127.0.0.1:11500/api/v1'],
+    ['http on 127.8.9.10', 'http://127.8.9.10/api/v1', 'http://127.8.9.10/api/v1'],
+    ['http on localhost', 'http://localhost:8080/api/v1', 'http://localhost:8080/api/v1'],
+    ['http on ::1', 'http://[::1]:8080/api/v1', 'http://[::1]:8080/api/v1'],
+    ['https anywhere', 'https://api.venice.ai/api/v1/', 'https://api.venice.ai/api/v1'],
+  ])('accepts a venice URL with %s', (_label, baseUrl, stored) => {
+    expect(store().save(venice({ baseUrl })).baseUrl).toBe(stored);
+  });
+
+  it.each([
+    ['http elsewhere', 'http://example.com'],
+    ['http on a LAN address', 'http://192.168.1.20:11500/api/v1'],
+    ['http on a name ending in localhost', 'http://evil-localhost.example/api'],
+    ['http on a localhost subdomain', 'http://a.localhost/api'],
+  ])('refuses a venice URL with %s and writes nothing', (_label, baseUrl) => {
+    const s = store();
+    expect(errorOf(() => s.save(venice({ baseUrl, apiKey: KEY })))).toEqual({
+      code: 'validation_failed',
+      message: 'An image provider needs an https URL, or http on a loopback address',
+    });
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('allows plain http for an ollama entry anywhere', () => {
+    expect(store().save(input({ baseUrl: 'http://example.com' })).baseUrl).toBe('http://example.com');
+  });
+
+  it('counts both kinds against the limit of 10', () => {
+    const s = store();
+    for (let i = 0; i < 5; i++) s.save(input({ name: `O${i}` }));
+    for (let i = 0; i < 5; i++) s.save(venice({ name: `V${i}` }));
+    expect(codeOf(() => s.save(venice({ name: 'V5' })))).toBe('invalid_operation');
+    expect(codeOf(() => s.save(input({ name: 'O5' })))).toBe('invalid_operation');
+  });
+
+  it('drops the key of a venice entry whose URL moves to another origin', () => {
+    const s = store();
+    const v = s.save(venice({ apiKey: KEY }));
+    expect(s.apiKeyFor(v.id, 'https://api.venice.ai/api/v1')).toBe(KEY);
+    expect(s.save(venice({ id: v.id, baseUrl: 'https://other.example.test/api/v1' })).hasApiKey).toBe(false);
+    expect(s.apiKeyFor(v.id, 'https://api.venice.ai/api/v1')).toBeNull();
+    expect(existsSync(keyFile(v.id))).toBe(false);
+  });
+});
+
+describe('provider store: resolve by kind', () => {
+  it('resolves the image entry used last, else the first venice entry, else null', () => {
+    const s = store();
+    const o = s.save(input({ name: 'O' }));
+    expect(s.resolve(undefined, 'venice')).toBeNull();
+    expect(s.first('venice')).toBeNull();
+    const v1 = s.save(venice({ name: 'V1' }));
+    const v2 = s.save(venice({ name: 'V2' }));
+    expect(s.first()?.id).toBe(o.id);
+    expect(s.first('ollama')?.id).toBe(o.id);
+    expect(s.first('venice')?.id).toBe(v1.id);
+    expect(s.resolve(undefined)?.id).toBe(o.id);
+    expect(s.resolve(undefined, 'venice')?.id).toBe(v1.id);
+    s.markUsed(v2.id);
+    expect(s.list()).toMatchObject({ lastUsedId: null, lastUsedImageId: v2.id });
+    expect(s.resolve(undefined, 'venice')?.id).toBe(v2.id);
+    expect(s.resolve(undefined)?.id).toBe(o.id);
+    expect(store().resolve(undefined, 'venice')?.id).toBe(v2.id);
+    s.markUsed(o.id);
+    expect(s.list()).toMatchObject({ lastUsedId: o.id, lastUsedImageId: v2.id });
+    expect(readSettings().lastUsed).toEqual({ vision: o.id, image: v2.id });
+    s.delete(v2.id);
+    expect(s.list()).toMatchObject({ lastUsedId: o.id, lastUsedImageId: null });
+    expect(s.resolve(undefined, 'venice')?.id).toBe(v1.id);
+  });
+
+  it('skips an entry of the other kind as the first one', () => {
+    const s = store();
+    const v = s.save(venice());
+    expect(s.first()).toBeNull();
+    expect(s.resolve(undefined)).toBeNull();
+    expect(s.first('venice')?.id).toBe(v.id);
+  });
+
+  it('resolves a given id of the right kind and refuses one of the wrong kind', () => {
+    const s = store();
+    const o = s.save(input());
+    const v = s.save(venice());
+    expect(s.resolve(v.id, 'venice')?.id).toBe(v.id);
+    expect(s.resolve(o.id)?.id).toBe(o.id);
+    expect(errorOf(() => s.resolve(o.id, 'venice'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
+    expect(errorOf(() => s.resolve(v.id))).toEqual({ code: 'invalid_operation', message: 'This provider cannot analyse images' });
+    expect(errorOf(() => s.resolve(UNKNOWN, 'venice'))).toEqual({ code: 'not_found', message: 'This provider does not exist' });
+  });
+
+  it('lists only the environment entry in environment mode, with no image entry used last', () => {
+    store().save(venice());
+    const s = store({ ASSETFORGE_VISION_BASE_URL: 'http://127.0.0.1:11500' });
+    expect(s.list()).toMatchObject({ providers: [{ id: 'environment', kind: 'ollama' }], lastUsedImageId: null });
+    expect(s.list().providers).toHaveLength(1);
+    expect(s.resolve(undefined, 'venice')).toBeNull();
+    expect(s.first('venice')).toBeNull();
+    s.markUsed('environment');
+    expect(s.list()).toMatchObject({ lastUsedId: 'environment', lastUsedImageId: null });
   });
 });
