@@ -1,4 +1,13 @@
-import type { AssetSummary, FileRecord, IpcResponse, ProjectSummary, TagAssignment, TagOrigin } from '@assetforge/contracts';
+import {
+  ANALYSIS_TAG_LIMIT_DEFAULT,
+  type AnalysisPrompt,
+  type AssetSummary,
+  type FileRecord,
+  type IpcResponse,
+  type ProjectSummary,
+  type TagAssignment,
+  type TagOrigin,
+} from '@assetforge/contracts';
 
 let counter = 0;
 /** Deterministic, unique UUID-shaped ids. */
@@ -102,3 +111,25 @@ export const NONE_SKIPPED: IpcResponse<'analysis:enqueue'>['skipped'] = {
   alreadyQueued: 0,
   alreadyAnalysed: 0,
 };
+
+/** Stand-ins for the built-in texts the main process resets a prompt to. */
+export const BUILT_IN_TAGGING_TEXT = 'Built-in tagging text';
+export const BUILT_IN_IMAGE_PROMPT_TEXT = 'Built-in image prompt text';
+
+type TaggingPrompt = Extract<AnalysisPrompt, { purpose: 'tagging' }>;
+type ImagePrompt = Extract<AnalysisPrompt, { purpose: 'image_prompt' }>;
+
+export function taggingPrompt(p: Partial<Omit<TaggingPrompt, 'purpose'>> = {}): TaggingPrompt {
+  return {
+    id: nextId(),
+    purpose: 'tagging',
+    name: 'Default',
+    text: BUILT_IN_TAGGING_TEXT,
+    maxTags: ANALYSIS_TAG_LIMIT_DEFAULT,
+    ...p,
+  };
+}
+
+export function imagePrompt(p: Partial<Omit<ImagePrompt, 'purpose'>> = {}): ImagePrompt {
+  return { id: nextId(), purpose: 'image_prompt', name: 'Default', text: BUILT_IN_IMAGE_PROMPT_TEXT, ...p };
+}
