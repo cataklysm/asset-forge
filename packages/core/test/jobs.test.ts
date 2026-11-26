@@ -54,7 +54,7 @@ async function setup() {
     const id = `job-${++n}`;
     if (db.files.records.get(fileId) === undefined) await addFile(db, fileId);
     await db.jobs.enqueue({
-      jobs: [{ id, type: 'test', resourceClass: 'cpu', fileId, payload: {}, dedupeKey: `test:${fileId}` }],
+      jobs: [{ id, type: 'test', resourceClass: 'cpu', fileId, lane: null, payload: {}, dedupeKey: `test:${fileId}` }],
       now: T0,
     });
     db.jobs.rows.find((r) => r.id === id)!.status = status;

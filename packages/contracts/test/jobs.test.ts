@@ -10,6 +10,9 @@ import {
   JobViewSchema,
   EnqueueAnalysisResultSchema,
   isRetryableJobError,
+  analysisJobFields,
+  ipcContract,
+  ProviderIdSchema,
 } from '../src/index';
 
 const view = {
@@ -25,6 +28,9 @@ const view = {
   startedAt: null,
   finishedAt: null,
   runAfter: null,
+  providerId: null,
+  providerName: null,
+  model: null,
 };
 
 describe('job contracts', () => {
@@ -53,11 +59,16 @@ describe('job contracts', () => {
   });
 
   test('summary counts are non-negative integers and a pause names its reason', () => {
-    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: null };
+    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: [] };
     expect(JobSummarySchema.safeParse(ok).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, failed: -1 }).success).toBe(false);
-    expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'provider_unauthorized' } }).success).toBe(true);
-    expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'nope' } }).success).toBe(false);
+    const pause = { providerId: 'environment', providerName: 'Environment', reason: 'provider_unauthorized' };
+    expect(JobSummarySchema.safeParse({ ...ok, paused: [pause] }).success).toBe(true);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: [{ ...pause, providerId: null, providerName: null }] }).success).toBe(true);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: [{ ...pause, reason: 'nope' }] }).success).toBe(false);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'provider_unauthorized' } }).success).toBe(false);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: null }).success).toBe(false);
+    expect(ipcContract['jobs:summary'].response.safeParse({ ...ok, paused: [pause] }).success).toBe(true);
     const { paused: _paused, ...withoutPause } = ok;
     expect(JobSummarySchema.safeParse(withoutPause).success).toBe(false);
   });
@@ -66,5 +77,85 @@ describe('job contracts', () => {
     const skipped = { notFound: 1, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
     expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped }).success).toBe(true);
     expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped: [{ fileId: 'f', reason: 'not_found' }] }).success).toBe(false);
+  });
+});
+
+const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
+const prompt = { name: 'Default', text: 'Tag this image.', maxTags: 15 };
+
+describe('several providers', () => {
+  test('a provider id is a UUID or environment', () => {
+    expect(ProviderIdSchema.safeParse(uuid).success).toBe(true);
+    expect(ProviderIdSchema.safeParse('environment').success).toBe(true);
+    expect(ProviderIdSchema.safeParse('').success).toBe(false);
+    expect(ProviderIdSchema.safeParse('env').success).toBe(false);
+  });
+
+  test('payload v4 carries the provider name; v1 to v3 still parse', () => {
+    const v4 = { version: 4, model: 'm', mode: 'apply', providerName: 'RunPod' };
+    expect(AnalyzeFilePayloadSchema.safeParse({ ...v4, prompt: null }).success).toBe(true);
+    expect(AnalyzeFilePayloadSchema.safeParse({ ...v4, prompt }).success).toBe(true);
+    expect(AnalyzeFilePayloadSchema.safeParse(v4).success).toBe(false);
+    expect(AnalyzeFilePayloadSchema.safeParse({ ...v4, prompt: null, providerName: '' }).success).toBe(false);
+    expect(AnalyzeFilePayloadSchema.safeParse({ version: 1 }).success).toBe(true);
+    expect(AnalyzeFilePayloadSchema.safeParse({ version: 2, model: 'm', mode: 'propose' }).success).toBe(true);
+    expect(AnalyzeFilePayloadSchema.safeParse({ version: 3, model: 'm', mode: 'apply', prompt }).success).toBe(true);
+  });
+
+  test('analysisJobFields reads the provider name of v4 and the model of v2 to v4', () => {
+    expect(analysisJobFields({ version: 4, model: 'm', mode: 'apply', prompt: null, providerName: 'RunPod' })).toEqual({
+      providerName: 'RunPod',
+      model: 'm',
+    });
+    expect(analysisJobFields({ version: 3, model: 'm', mode: 'apply', prompt })).toEqual({ providerName: null, model: 'm' });
+    expect(analysisJobFields({ version: 2, model: 'm', mode: 'apply' })).toEqual({ providerName: null, model: 'm' });
+    expect(analysisJobFields({ version: 1 })).toEqual({ providerName: null, model: null });
+    expect(analysisJobFields('x')).toEqual({ providerName: null, model: null });
+  });
+
+  test('a job view carries provider id, provider name and model', () => {
+    expect(JobViewSchema.safeParse({ ...view, providerId: uuid, providerName: 'RunPod', model: 'm' }).success).toBe(true);
+    expect(JobViewSchema.safeParse({ ...view, providerId: 'env' }).success).toBe(false);
+    const { model: _model, ...withoutModel } = view;
+    expect(JobViewSchema.safeParse(withoutModel).success).toBe(false);
+  });
+
+  test('jobs:reroute needs a model and accepts jobs without provider as source', () => {
+    const request = ipcContract['jobs:reroute'].request;
+    expect(request.safeParse({ fromProviderId: null, toProviderId: uuid, model: 'm' }).success).toBe(true);
+    expect(request.safeParse({ fromProviderId: 'environment', toProviderId: uuid, model: 'm' }).success).toBe(true);
+    expect(request.safeParse({ fromProviderId: null, toProviderId: uuid }).success).toBe(false);
+    expect(request.safeParse({ fromProviderId: null, toProviderId: null, model: 'm' }).success).toBe(false);
+    expect(ipcContract['jobs:reroute'].response.safeParse({ moved: 2 }).success).toBe(true);
+    expect(ipcContract['jobs:reroute'].response.safeParse({ moved: -1 }).success).toBe(false);
+  });
+
+  test('jobs:resume names the provider; null is the jobs without one', () => {
+    const request = ipcContract['jobs:resume'].request;
+    expect(request.safeParse({}).success).toBe(false);
+    expect(request.safeParse({ providerId: null }).success).toBe(true);
+    expect(request.safeParse({ providerId: uuid }).success).toBe(true);
+  });
+
+  test('jobs:waitingByProvider counts waiting jobs per provider', () => {
+    const response = ipcContract['jobs:waitingByProvider'].response;
+    expect(response.safeParse([{ providerId: null, providerName: null, waiting: 3 }]).success).toBe(true);
+    expect(response.safeParse([{ providerId: uuid, providerName: 'RunPod', waiting: -1 }]).success).toBe(false);
+    expect(ipcContract['jobs:waitingByProvider'].request.safeParse({}).success).toBe(true);
+  });
+
+  test('jobs:list and the analysis channels take an optional provider id', () => {
+    expect(ipcContract['jobs:list'].request.safeParse({ limit: 10, offset: 0, providerId: uuid }).success).toBe(true);
+    expect(ipcContract['jobs:list'].request.safeParse({ limit: 10, offset: 0, providerId: 'x' }).success).toBe(false);
+    const describeRequest = ipcContract['analysis:describe'].request;
+    const base = { requestId: uuid, fileId: uuid, model: 'm' };
+    expect(describeRequest.safeParse(base).success).toBe(true);
+    expect(describeRequest.safeParse({ ...base, providerId: 'environment' }).success).toBe(true);
+    expect(describeRequest.safeParse({ ...base, providerId: 'x' }).success).toBe(false);
+    const target = { kind: 'files', fileIds: [uuid] };
+    expect(ipcContract['analysis:preview'].request.safeParse({ target, model: 'm', providerId: uuid }).success).toBe(true);
+    expect(
+      ipcContract['analysis:enqueue'].request.safeParse({ target, model: 'm', mode: 'apply', force: false, providerId: uuid }).success,
+    ).toBe(true);
   });
 });

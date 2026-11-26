@@ -182,7 +182,7 @@ describe('trashFiles', () => {
     const { session, db, importOne, control } = await setup();
     const a = await importOne('a.png');
     const b = await importOne('b.png');
-    const job = (id: string, fileId: string) => ({ id, type: 't', resourceClass: 'cpu' as const, fileId, payload: {}, dedupeKey: null });
+    const job = (id: string, fileId: string) => ({ id, type: 't', resourceClass: 'cpu' as const, fileId, lane: null, payload: {}, dedupeKey: null });
     await db.jobs.enqueue({ jobs: [job('run', a.id)], now: TS });
     await db.jobs.claimNext({ resourceClass: 'cpu', types: ['t'], now: TS });
     await db.jobs.enqueue({ jobs: [job('queued', a.id), job('other', b.id)], now: TS });
@@ -409,6 +409,7 @@ describe('purgeFiles', () => {
       resourceClass: 'cpu',
       status: 'running',
       fileId: file.id,
+      lane: null,
       payload: {},
       dedupeKey: null,
       attempt: 1,

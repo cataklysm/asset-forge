@@ -78,6 +78,7 @@ export function jobFor(fileId: string | null, payload: unknown = { version: 1 })
     resourceClass: 'local_gpu',
     status: 'running',
     fileId,
+    lane: null,
     payload,
     dedupeKey: fileId === null ? null : `${ANALYZE_FILE_JOB}:${fileId}`,
     attempt: 1,

@@ -46,7 +46,8 @@ import {
   WorkflowTemplateSchema,
 } from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
-import { JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema } from './jobs';
+import { JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema, WaitingByProviderSchema } from './jobs';
+import { ProviderIdSchema } from './provider-ref';
 import {
   AnalysisModeSchema,
   AnalysisPreviewSchema,
@@ -57,7 +58,7 @@ import {
   FileListFilterSchema,
   ProposalViewSchema,
 } from './analysis';
-import { ListModelsResultSchema, SetVisionSettingsSchema, VisionSettingsViewSchema } from './settings';
+import { ListModelsResultSchema, ProviderListSchema, ProviderViewSchema, SaveProviderSchema } from './settings';
 import { AnalysisPromptListSchema, AnalysisPromptSchema, SaveAnalysisPromptSchema } from './analysis-prompts';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
@@ -359,19 +360,27 @@ export const ipcContract = {
     request: z.object({ assetId: IdSchema }),
     response: z.object({ removed: z.boolean() }),
   },
-  /** Settings channels need no open workspace. The view never carries the API key. */
-  'settings:getVision': {
+  /** Provider channels need no open workspace. A view never carries an API key. */
+  'providers:list': {
     request: EmptyRequestSchema,
-    response: VisionSettingsViewSchema,
+    response: ProviderListSchema,
   },
-  /** `apiKey` absent keeps the stored key, `null` deletes it; a changed origin without a new key deletes it. */
-  'settings:setVision': {
-    request: SetVisionSettingsSchema,
-    response: VisionSettingsViewSchema,
+  /**
+   * Without `id` the entry is created, with `id` it is replaced. `apiKey` absent keeps the stored key,
+   * `null` deletes it; a changed origin without a new key deletes it.
+   */
+  'providers:save': {
+    request: SaveProviderSchema,
+    response: ProviderViewSchema,
   },
-  /** Uses the stored settings; the list is cached until the settings change or `refresh` is true. */
-  'settings:listVisionModels': {
-    request: z.object({ refresh: z.boolean().optional() }),
+  /** Refused while the entry has active jobs. */
+  'providers:delete': {
+    request: z.object({ id: ProviderIdSchema }),
+    response: z.object({}),
+  },
+  /** The models of one entry; cached until the entry changes or `refresh` is true. */
+  'providers:listModels': {
+    request: z.object({ providerId: ProviderIdSchema, refresh: z.boolean().optional() }),
     response: ListModelsResultSchema,
   },
   /** App-level analysis prompts need no open workspace. The file order is kept; a purpose never has none. */
@@ -396,7 +405,7 @@ export const ipcContract = {
   },
   /** What `analysis:enqueue` of this target with this model would do, as counts. */
   'analysis:preview': {
-    request: z.object({ target: AnalysisTargetSchema, model: ModelNameSchema }),
+    request: z.object({ target: AnalysisTargetSchema, model: ModelNameSchema, providerId: ProviderIdSchema.optional() }),
     response: AnalysisPreviewSchema,
   },
   /**
@@ -411,6 +420,7 @@ export const ipcContract = {
       mode: AnalysisModeSchema,
       force: z.boolean(),
       promptId: IdSchema.optional(),
+      providerId: ProviderIdSchema.optional(),
     }),
     response: EnqueueAnalysisResultSchema,
   },
@@ -437,7 +447,13 @@ export const ipcContract = {
    * the Image to prompt analysis prompt used last runs, otherwise the first one.
    */
   'analysis:describe': {
-    request: z.object({ requestId: IdSchema, fileId: IdSchema, model: ModelNameSchema, promptId: IdSchema.optional() }),
+    request: z.object({
+      requestId: IdSchema,
+      fileId: IdSchema,
+      model: ModelNameSchema,
+      promptId: IdSchema.optional(),
+      providerId: ProviderIdSchema.optional(),
+    }),
     response: DescribeResultSchema,
   },
   /** An unknown or finished request is left alone. */
@@ -447,7 +463,7 @@ export const ipcContract = {
   },
   /** Newest first. */
   'jobs:list': {
-    request: PageRequestSchema.extend({ status: JobStatusSchema.optional() }),
+    request: PageRequestSchema.extend({ status: JobStatusSchema.optional(), providerId: ProviderIdSchema.optional() }),
     response: pageOf(JobViewSchema),
   },
   'jobs:summary': {
@@ -474,10 +490,24 @@ export const ipcContract = {
     request: EmptyRequestSchema,
     response: z.object({ retried: z.number().int().nonnegative() }),
   },
-  /** Ends a pause of the analysis queue. */
-  'jobs:resume': {
+  /** Waiting analysis jobs per provider; `providerId` null is the jobs without one. */
+  'jobs:waitingByProvider': {
     request: EmptyRequestSchema,
+    response: z.array(WaitingByProviderSchema),
+  },
+  /** Ends the pause of one provider's analysis queue; `null` is the jobs without a provider. */
+  'jobs:resume': {
+    request: z.object({ providerId: ProviderIdSchema.nullable() }),
     response: z.object({}),
+  },
+  /** Moves every waiting analysis job of one provider onto another with this model; a running job stays. */
+  'jobs:reroute': {
+    request: z.object({
+      fromProviderId: ProviderIdSchema.nullable(),
+      toProviderId: ProviderIdSchema,
+      model: ModelNameSchema,
+    }),
+    response: z.object({ moved: z.number().int().min(0) }),
   },
   /** Deletes every succeeded, failed and cancelled job. */
   'jobs:clearFinished': {

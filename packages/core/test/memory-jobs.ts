@@ -3,6 +3,7 @@ import {
   FINISHED_JOB_STATUSES,
   JOB_ERROR_MESSAGES,
   JobStatusSchema,
+  analysisJobFields,
   type JobErrorCode,
   type JobStatus,
   type JobView,
@@ -15,7 +16,9 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const oldestFirst = (a: Job, b: Job) => cmp(a.createdAt, b.createdAt) || cmp(a.id, b.id);
 
 const isActive = (status: JobStatus) => (ACTIVE_JOB_STATUSES as readonly JobStatus[]).includes(status);
+const isWaiting = (status: JobStatus) => status === 'queued' || status === 'retry_wait';
 const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
+const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) => !(excludeLanes ?? []).includes(r.lane);
 
 /** The job queue over an array, following the contract of the SQLite repository. */
 export class InMemoryJobRepository implements JobRepository {
@@ -52,6 +55,8 @@ export class InMemoryJobRepository implements JobRepository {
       if (this.rows.some((r) => r.id === j.id)) throw new Error('UNIQUE constraint failed: job.id');
       this.rows.push({
         ...j,
+        // The SQLite column is nullable; a caller that leaves the lane out stores null.
+        lane: j.lane ?? null,
         payload: structuredClone(j.payload),
         status: 'queued',
         attempt: 0,
@@ -87,7 +92,17 @@ export class InMemoryJobRepository implements JobRepository {
     return this.rows.filter((r) => r.status === status).sort(oldestFirst).map((r) => structuredClone(r));
   }
 
-  async claimNext({ resourceClass, types, now }: { resourceClass: Job['resourceClass']; types: readonly string[]; now: string }): Promise<Job | null> {
+  async claimNext({
+    resourceClass,
+    types,
+    now,
+    excludeLanes,
+  }: {
+    resourceClass: Job['resourceClass'];
+    types: readonly string[];
+    now: string;
+    excludeLanes?: readonly (string | null)[];
+  }): Promise<Job | null> {
     const next = this.rows
       .filter(
         (r) =>
@@ -95,15 +110,17 @@ export class InMemoryJobRepository implements JobRepository {
           types.includes(r.type) &&
           (r.status === 'queued' || (r.status === 'retry_wait' && r.runAfter !== null && r.runAfter <= now)),
       )
+      .filter(notExcluded(excludeLanes))
       .sort(oldestFirst)[0];
     if (!next) return null;
     Object.assign(next, { status: 'running', attempt: next.attempt + 1, startedAt: now, runAfter: null, ...errorOf(null), updatedAt: now });
     return structuredClone(next);
   }
 
-  async nextRunAfter(types: readonly string[]): Promise<string | null> {
+  async nextRunAfter(types: readonly string[], excludeLanes?: readonly (string | null)[]): Promise<string | null> {
     const times = this.rows
       .filter((r) => r.status === 'retry_wait' && types.includes(r.type) && r.runAfter !== null)
+      .filter(notExcluded(excludeLanes))
       .map((r) => r.runAfter!)
       .sort(cmp);
     return times[0] ?? null;
@@ -160,10 +177,13 @@ export class InMemoryJobRepository implements JobRepository {
     return result;
   }
 
-  async list(q: { limit: number; offset: number; status?: JobStatus }): Promise<{ items: JobView[]; total: number }> {
-    const matching = this.rows.filter((r) => q.status === undefined || r.status === q.status).sort((a, b) => oldestFirst(b, a));
+  async list(q: { limit: number; offset: number; status?: JobStatus; lane?: string }): Promise<{ items: JobView[]; total: number }> {
+    const matching = this.rows
+      .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
+      .sort((a, b) => oldestFirst(b, a));
     const items = matching.slice(q.offset, q.offset + q.limit).map(
       (r): JobView => ({
+        ...analysisJobFields(r.payload),
         id: r.id,
         type: r.type,
         status: r.status,
@@ -176,8 +196,61 @@ export class InMemoryJobRepository implements JobRepository {
         startedAt: r.startedAt,
         finishedAt: r.finishedAt,
         runAfter: r.runAfter,
+        providerId: r.lane,
       }),
     );
     return { items, total: matching.length };
+  }
+
+  async waitingByLane(type: string): Promise<{ lane: string | null; waiting: number }[]> {
+    const counts = new Map<string | null, number>();
+    for (const r of this.rows) {
+      if (r.type === type && isWaiting(r.status)) counts.set(r.lane, (counts.get(r.lane) ?? 0) + 1);
+    }
+    return [...counts].map(([lane, waiting]) => ({ lane, waiting }));
+  }
+
+  async latestPayloadOfLane(type: string, lane: string | null): Promise<unknown | null> {
+    const newest = this.rows.filter((r) => r.type === type && r.lane === lane).sort((a, b) => oldestFirst(b, a))[0];
+    return newest ? structuredClone(newest.payload) : null;
+  }
+
+  async countActiveInLane(type: string, lane: string): Promise<number> {
+    return this.rows.filter((r) => r.type === type && r.lane === lane && isActive(r.status)).length;
+  }
+
+  async rerouteWaiting(r: {
+    type: string;
+    fromLane: string | null;
+    toLane: string;
+    rewrite: (payload: unknown) => unknown;
+    now: string;
+  }): Promise<number> {
+    const moving = this.rows.filter((row) => row.type === r.type && row.lane === r.fromLane && isWaiting(row.status));
+    // Rewrite every payload first, so a throwing rewrite changes nothing, as a rolled-back transaction would.
+    const payloads = moving.map((row) => structuredClone(r.rewrite(structuredClone(row.payload))));
+    moving.forEach((row, i) => {
+      Object.assign(row, {
+        lane: r.toLane,
+        payload: payloads[i],
+        status: 'queued',
+        attempt: 0,
+        runAfter: null,
+        ...errorOf(null),
+        updatedAt: r.now,
+      });
+    });
+    return moving.length;
+  }
+
+  async assignLane(r: { type: string; lane: string; rewrite: (payload: unknown) => unknown | null; now: string }): Promise<number> {
+    const candidates = this.rows.filter((row) => row.type === r.type && row.lane === null && isActive(row.status));
+    const changes = candidates
+      .map((row) => ({ row, payload: r.rewrite(structuredClone(row.payload)) }))
+      .filter((c) => c.payload !== null);
+    for (const { row, payload } of changes) {
+      Object.assign(row, { lane: r.lane, payload: structuredClone(payload), updatedAt: r.now });
+    }
+    return changes.length;
   }
 }
