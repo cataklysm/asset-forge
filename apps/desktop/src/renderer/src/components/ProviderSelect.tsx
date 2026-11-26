@@ -1,4 +1,5 @@
 import type { KeyboardEvent } from 'react';
+import type { ProviderKind } from '@assetforge/contracts';
 import { NO_PROVIDER, PROVIDER_LABEL, PROVIDER_STATE_LABELS, providerOptionLabel } from '../labels';
 import { providerStatus, useProviders } from '../provider-context';
 import { SELECT } from '../ui';
@@ -9,18 +10,20 @@ interface Props {
   disabled?: boolean;
   /** An entry left out of the options, such as the source of a move. */
   exclude?: string | null;
+  /** The kind of the entries offered; `ollama` (image analysis) unless given. */
+  kind?: ProviderKind;
 }
 
 /** The keys that open a native select. */
 const OPENING_KEYS: ReadonlySet<string> = new Set([' ', 'Enter', 'F4']);
 
 /**
- * The provider entries as a select, each option naming the entry's state. Opening it asks every
- * entry again; it preselects nothing itself, and a `value` that is not listed shows as no provider.
+ * The provider entries of `kind` as a select, each option naming the entry's state. Opening it asks
+ * every entry again; it preselects nothing itself, and a `value` that is not listed shows as no provider.
  */
-export function ProviderSelect({ value, onChange, disabled = false, exclude = null }: Props) {
+export function ProviderSelect({ value, onChange, disabled = false, exclude = null, kind = 'ollama' }: Props) {
   const state = useProviders();
-  const providers = (state.list?.providers ?? []).filter((p) => p.id !== exclude);
+  const providers = (state.list?.providers ?? []).filter((p) => p.kind === kind && p.id !== exclude);
   const listed = value !== null && providers.some((p) => p.id === value);
 
   function onKeyDown(event: KeyboardEvent<HTMLSelectElement>) {

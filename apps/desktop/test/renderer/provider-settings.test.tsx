@@ -1,6 +1,14 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IpcRequest, ListModelsResult, ProviderList, ProviderView } from '@assetforge/contracts';
+import {
+  VENICE_DEFAULT_BASE_URL,
+  type ImageModel,
+  type IpcRequest,
+  type ListImageModelsResult,
+  type ListModelsResult,
+  type ProviderList,
+  type ProviderView,
+} from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { ProviderSettings } from '../../src/renderer/src/components/ProviderSettings';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
@@ -242,6 +250,114 @@ it('environment mode shows the entry with every control disabled', async () => {
   for (const name of ['Name', 'Base URL', 'API key', 'Timeout (s)']) expect(field(name).disabled).toBe(true);
   for (const name of ['Tagging model', 'Prompt model']) expect(select(name).disabled).toBe(true);
   for (const el of screen.getAllByRole('button')) expect((el as HTMLButtonElement).disabled).toBe(true);
+});
+
+// --- provider kinds ---
+
+const VENICE = providerView({
+  kind: 'venice',
+  name: 'Venice',
+  baseUrl: VENICE_DEFAULT_BASE_URL,
+  taggingModel: null,
+  promptModel: null,
+  editModel: 'edit-b',
+  hasApiKey: true,
+});
+const editModel = (name: string, price: string | null = null): ImageModel => ({
+  name,
+  aspectRatios: null,
+  resolutions: null,
+  defaultResolution: null,
+  promptCharacterLimit: null,
+  price,
+});
+const EDIT_MODELS: ListImageModelsResult = { ok: true, models: [editModel('edit-a', '0.04 USD'), editModel('edit-b')] };
+
+it('creating a Venice entry sends kind venice and the prefilled URL', async () => {
+  const user = userEvent.setup();
+  const { api } = install();
+  renderSection();
+  await loaded();
+  await user.click(button('New'));
+  expect(select('Kind').value).toBe('ollama');
+  expect(within(select('Kind')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Ollama', 'Venice']);
+  expect(field('Base URL').value).toBe('');
+  await user.selectOptions(select('Kind'), 'venice');
+  expect(field('Base URL').value).toBe(VENICE_DEFAULT_BASE_URL);
+  expect(screen.queryByRole('combobox', { name: 'Tagging model' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Prompt model' })).toBeNull();
+  expect(select('Edit model').value).toBe('');
+  // Back to Ollama the untouched prefill leaves again, and Venice brings it back.
+  await user.selectOptions(select('Kind'), 'ollama');
+  expect(field('Base URL').value).toBe('');
+  expect(select('Tagging model')).toBeTruthy();
+  await user.selectOptions(select('Kind'), 'venice');
+  await user.type(field('Name'), 'Venice');
+  await user.type(field('API key'), TEST_KEY);
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect(callsOf(api, 'providers:save')[0]!.request).toEqual({
+    kind: 'venice',
+    name: 'Venice',
+    baseUrl: VENICE_DEFAULT_BASE_URL,
+    timeoutSeconds: 120,
+    taggingModel: null,
+    promptModel: null,
+    editModel: null,
+    apiKey: TEST_KEY,
+  });
+  await waitFor(() => expect(entryNames()).toEqual(['Local', 'RunPod', 'Venice']));
+  expect(screen.queryByRole('combobox', { name: 'Kind' })).toBeNull();
+  expect(screen.getByText('Venice', { selector: '[data-kind]' })).toBeTruthy();
+  // The new entry is asked for its edit models, not its vision models.
+  const saved = within(list()).getByRole('button', { name: 'Venice' });
+  expect(saved.getAttribute('aria-pressed')).toBe('true');
+  expect(await screen.findByText('no edit model')).toBeTruthy();
+});
+
+it('a typed base URL stays when the kind changes', async () => {
+  const user = userEvent.setup();
+  install();
+  renderSection();
+  await loaded();
+  await user.click(button('New'));
+  await user.type(field('Base URL'), 'http://127.0.0.1:11500/api/v1');
+  await user.selectOptions(select('Kind'), 'venice');
+  expect(field('Base URL').value).toBe('http://127.0.0.1:11500/api/v1');
+});
+
+it('editing does not offer the kind and shows it read-only', async () => {
+  const user = userEvent.setup();
+  const { api } = install({ providers: [LOCAL, VENICE] }, { 'providers:listImageModels': () => EDIT_MODELS });
+  renderSection();
+  await loaded();
+  expect(screen.queryByRole('combobox', { name: 'Kind' })).toBeNull();
+  expect(screen.getByText('Ollama', { selector: '[data-kind]' })).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: 'Edit model' })).toBeNull();
+  await user.click(within(list()).getByRole('button', { name: 'Venice' }));
+  expect(screen.queryByRole('combobox', { name: 'Kind' })).toBeNull();
+  expect(screen.getByText('Venice', { selector: '[data-kind]' })).toBeTruthy();
+  expect(screen.queryByRole('combobox', { name: 'Tagging model' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Prompt model' })).toBeNull();
+  await waitFor(() => expect(within(select('Edit model')).getAllByRole('option').map((o) => o.textContent)).toEqual(['No model', 'edit-a', 'edit-b']));
+  expect(select('Edit model').value).toBe('edit-b');
+  expect(within(select('Edit model')).getByRole('option', { name: 'edit-a' }).getAttribute('title')).toBe('0.04 USD');
+  expect(screen.getByText('ready')).toBeTruthy();
+  await user.selectOptions(select('Edit model'), 'edit-a');
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect(callsOf(api, 'providers:save')[0]!.request).toEqual({
+    id: VENICE.id,
+    name: 'Venice',
+    baseUrl: VENICE_DEFAULT_BASE_URL,
+    timeoutSeconds: 120,
+    taggingModel: null,
+    promptModel: null,
+    editModel: 'edit-a',
+  });
+  const before = callsOf(api, 'providers:listImageModels').length;
+  await user.click(button('Refresh models'));
+  expect(callsOf(api, 'providers:listImageModels').slice(before).map((c) => c.request)).toEqual([{ providerId: VENICE.id, refresh: true }]);
 });
 
 it('an empty list opens the editor for a new entry', async () => {

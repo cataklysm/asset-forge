@@ -38,11 +38,15 @@ export function laneName(list: ProviderList | null, id: string | null, stored: s
 /** The value of a lane in the From select; the lane without a provider is the empty string. */
 const laneValue = (id: string | null) => id ?? '';
 
-/** The target a move preselects: the default entry unless it is the source, else the first other one. */
+/** Whether `id` names a listed `ollama` entry: only those take analysis jobs. */
+const isTarget = (list: ProviderList | null, id: string | null) =>
+  id !== null && list?.providers.some((p) => p.id === id && p.kind === 'ollama') === true;
+
+/** The target a move preselects: the default `ollama` entry unless it is the source, else the first other one. */
 function pickTarget(state: Pick<ProvidersState, 'list'>, source: string | null | undefined): string | null {
-  const preferred = defaultProviderId(state);
+  const preferred = defaultProviderId(state, 'ollama');
   if (preferred !== null && preferred !== source) return preferred;
-  return state.list?.providers.find((p) => p.id !== source)?.id ?? null;
+  return state.list?.providers.find((p) => p.kind === 'ollama' && p.id !== source)?.id ?? null;
 }
 
 /**
@@ -92,7 +96,7 @@ export function MoveJobsDialog({ source, onClose }: Props) {
   const waiting = lanes === null ? null : (lane?.waiting ?? 0);
   const fromName = from === undefined ? null : laneName(providers.list, from, lane?.providerName ?? null);
 
-  const listed = (id: string | null) => id !== null && id !== from && providers.list?.providers.some((p) => p.id === id) === true;
+  const listed = (id: string | null) => id !== from && isTarget(providers.list, id);
   const effective =
     choice !== null && listed(choice.target)
       ? choice
@@ -176,6 +180,7 @@ export function MoveJobsDialog({ source, onClose }: Props) {
           <span className={LABEL}>{MOVE_TO}</span>
           <div className="col-span-2 flex min-w-0 flex-col gap-3">
             <ProviderSelect
+              kind="ollama"
               value={target}
               exclude={from ?? null}
               disabled={moving}

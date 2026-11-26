@@ -1,4 +1,4 @@
-import { JOB_ERROR_MESSAGES, type ListModelsResult } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type ImageModel, type ListImageModelsResult, type ListModelsResult } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import {
   CHOOSE_MODEL,
@@ -8,11 +8,12 @@ import {
   NO_VISION_MODEL,
   PROMPTS_LOAD_FAILED,
   PROVIDER_CHECKING,
+  PROVIDER_STATE_LABELS,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
 } from '../../src/renderer/src/labels';
 import type { ProvidersState } from '../../src/renderer/src/provider-context';
-import { promptGate, providerGate } from '../../src/renderer/src/provider-gate';
+import { imageProviderGate, promptGate, providerGate } from '../../src/renderer/src/provider-gate';
 import { providerView } from './fake-api';
 import { imagePrompt, taggingPrompt } from './fixtures';
 
@@ -55,8 +56,9 @@ const LISTED: ListModelsResult = {
 
 function gateState(models: Record<string, ListModelsResult | undefined>, p: Partial<ProvidersState> = {}) {
   return {
-    list: { providers: [LOCAL, RUNPOD], lastUsedId: null, fromEnvironment: false, canStoreKey: true },
+    list: { providers: [LOCAL, RUNPOD], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true },
     models,
+    imageModels: {},
     loading: false,
     failed: false,
     ...p,
@@ -114,7 +116,9 @@ it('no entry selected, or one not listed, is the not-configured state with Setti
   const notConfigured = { blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: true };
   expect(providerGate(s, null, 'vision-a')).toEqual(notConfigured);
   expect(providerGate(s, '00000000-0000-4000-8000-00000000dead', 'vision-a')).toEqual(notConfigured);
-  expect(providerGate(gateState({}, { list: { providers: [], lastUsedId: null, fromEnvironment: false, canStoreKey: true } }), null, null)).toEqual(
+  expect(
+    providerGate(gateState({}, { list: { providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true } }), null, null),
+  ).toEqual(
     notConfigured,
   );
 });
@@ -132,4 +136,71 @@ it('a list not loaded yet blocks as loading', () => {
     offerSettings: false,
   });
   expect(providerGate(gateState({}, { list: null, loading: true, failed: true }), null, null).blocked).toBe(START_LOADING);
+});
+
+// --- image provider gate ---
+
+const VENICE = providerView({ kind: 'venice', name: 'Venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
+const editModel = (name: string): ImageModel => ({
+  name,
+  aspectRatios: null,
+  resolutions: null,
+  defaultResolution: null,
+  promptCharacterLimit: null,
+  price: null,
+});
+const EDIT_LISTED: ListImageModelsResult = { ok: true, models: [editModel('edit-a')] };
+
+function imageState(imageModels: ProvidersState['imageModels'], p: Partial<ProvidersState> = {}) {
+  return gateState({}, { list: { providers: [LOCAL, VENICE], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true }, imageModels, ...p });
+}
+
+it('a listed edit model of the selected image entry lets the start go ahead', () => {
+  expect(imageProviderGate(imageState({ [VENICE.id]: EDIT_LISTED }), VENICE.id, 'edit-a')).toEqual({ blocked: null, offerSettings: false });
+});
+
+it('an image entry still being asked blocks as checking', () => {
+  expect(imageProviderGate(imageState({}), VENICE.id, 'edit-a')).toEqual({ blocked: PROVIDER_CHECKING, offerSettings: false });
+  expect(imageProviderGate(imageState({ [VENICE.id]: 'checking' }), VENICE.id, 'edit-a')).toEqual({
+    blocked: PROVIDER_CHECKING,
+    offerSettings: false,
+  });
+});
+
+it('a failed image list blocks with the message of its code', () => {
+  expect(imageProviderGate(imageState({ [VENICE.id]: { ok: false, code: 'provider_unreachable' } }), VENICE.id, 'edit-a')).toEqual({
+    blocked: JOB_ERROR_MESSAGES.provider_unreachable,
+    offerSettings: false,
+  });
+  expect(imageProviderGate(imageState({ [VENICE.id]: { ok: false, code: 'provider_unauthorized' } }), VENICE.id, 'edit-a')).toEqual({
+    blocked: JOB_ERROR_MESSAGES.provider_unauthorized,
+    offerSettings: true,
+  });
+});
+
+it('an image entry without edit models blocks and offers the settings', () => {
+  expect(imageProviderGate(imageState({ [VENICE.id]: { ok: true, models: [] } }), VENICE.id, null)).toEqual({
+    blocked: PROVIDER_STATE_LABELS.no_edit_model,
+    offerSettings: true,
+  });
+});
+
+it('an edit model missing from the list, or none, blocks', () => {
+  const s = imageState({ [VENICE.id]: EDIT_LISTED });
+  expect(imageProviderGate(s, VENICE.id, 'gone')).toEqual({ blocked: MODEL_NOT_LISTED, offerSettings: false });
+  expect(imageProviderGate(s, VENICE.id, null)).toEqual({ blocked: CHOOSE_MODEL, offerSettings: false });
+});
+
+it('each gate treats an entry of the other kind as not configured', () => {
+  const notConfigured = { blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: true };
+  const s = imageState({ [VENICE.id]: EDIT_LISTED }, { models: { [LOCAL.id]: LISTED } });
+  expect(imageProviderGate(s, LOCAL.id, 'vision-a')).toEqual(notConfigured);
+  expect(imageProviderGate(s, null, null)).toEqual(notConfigured);
+  expect(providerGate(s, VENICE.id, 'edit-a')).toEqual(notConfigured);
+  expect(providerGate(s, LOCAL.id, 'vision-a').blocked).toBeNull();
+});
+
+it('the image gate shares the list load states', () => {
+  expect(imageProviderGate(imageState({}, { list: null, failed: true }), null, null)).toEqual({ blocked: SETTINGS_LOAD_FAILED, offerSettings: true });
+  expect(imageProviderGate(imageState({}, { list: null, loading: true }), null, null)).toEqual({ blocked: START_LOADING, offerSettings: false });
 });
