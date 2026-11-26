@@ -194,6 +194,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           actions={{ cover: null, onDetails: () => {}, onError: setError }}
           roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} />}
           onFileChange={fileChanged}
+          onMeasured={detail.update}
           onClose={detail.close}
         />
       )}

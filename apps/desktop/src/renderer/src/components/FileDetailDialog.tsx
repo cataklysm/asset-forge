@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
@@ -7,12 +7,13 @@ import { formatBytes, formatDateTime } from '../format';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED } from '../ui';
-import { CoverImage } from './CoverImage';
 import { Dialog } from './Dialog';
+import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
 import { Menu } from './Menu';
 import { TagList } from './TagList';
 import { TagRow } from './TagRow';
+import { ViewerToolbar } from './ViewerToolbar';
 
 interface Props {
   file: FileRecord;
@@ -24,15 +25,45 @@ interface Props {
   roleControl: ReactNode;
   /** Receives the updated file after `files:addTag` / `files:removeTag`. */
   onFileChange(file: FileRecord): void;
+  /** Receives the file with its dimensions after `files:measure`; must not reload the list. */
+  onMeasured(file: FileRecord): void;
   onOpenAsset?(assetId: string): void;
   onClose(): void;
 }
 
-export function FileDetailDialog({ file, asset, actions, roleControl, onFileChange, onOpenAsset, onClose }: Props) {
+export function FileDetailDialog({
+  file,
+  asset,
+  actions,
+  roleControl,
+  onFileChange,
+  onMeasured,
+  onOpenAsset,
+  onClose,
+}: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [controls, setControls] = useState<ViewerControls | null>(null);
 
   const complete = file.status === 'complete';
+  const viewable = complete && file.previewable;
+
+  // Files imported before dimensions were stored are measured once when shown; failures are ignored.
+  const measured = useRef(new Set<string>());
+  const onMeasuredRef = useRef(onMeasured);
+  onMeasuredRef.current = onMeasured;
+  const unmeasured = viewable && file.width === null;
+  useEffect(() => {
+    if (!unmeasured || measured.current.has(file.id)) return;
+    measured.current.add(file.id);
+    call('files:measure', { fileId: file.id }).then(
+      (record) => {
+        if (record.width !== null && record.height !== null) onMeasuredRef.current(record);
+      },
+      () => {},
+    );
+  }, [file.id, unmeasured]);
+
   const title = asset === null ? file.originalName : `${file.originalName} | ${asset.name}`;
   const report = (message: string) => {
     setError(message);
@@ -79,6 +110,8 @@ export function FileDetailDialog({ file, asset, actions, roleControl, onFileChan
               <dd className="break-all">{file.originalName}</dd>
               <dt className={LABEL}>Type</dt>
               <dd className="break-all">{file.mimeType}</dd>
+              <dt className={LABEL}>Dimensions</dt>
+              <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
               <dt className={LABEL}>Size</dt>
               <dd>{formatBytes(file.sizeBytes)}</dd>
               <dt className={LABEL}>Imported</dt>
@@ -127,9 +160,14 @@ export function FileDetailDialog({ file, asset, actions, roleControl, onFileChan
             <Menu label="More" items={items} align="start" side="top" />
           </div>
         </div>
-        <div className="min-w-0 flex-1">
-          {complete && file.previewable ? (
-            <CoverImage fileId={file.id} size="detail" fallback={formatLabel(file.originalName)} className="h-full w-full" />
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          {viewable ? (
+            <>
+              <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={null} />}</div>
+              <div className="min-h-0 flex-1">
+                <ImageStage file={file} onControls={setControls} />
+              </div>
+            </>
           ) : (
             <div className={`flex h-full w-full items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
               {complete ? formatLabel(file.originalName) : label(file.status)}

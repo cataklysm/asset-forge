@@ -57,8 +57,8 @@ it('the detail dialog has the fixed detail geometry', async () => {
   render(<DialogHarness onClose={() => {}} size="detail" />);
   await user.click(screen.getByRole('button', { name: 'New asset' }));
   const className = document.querySelector('dialog')!.className;
-  expect(className).toContain('w-[min(92vw,1100px)]');
-  expect(className).toContain('h-[min(88vh,760px)]');
+  expect(className).toContain('w-[min(96vw,1600px)]');
+  expect(className).toContain('h-[min(92vh,1000px)]');
   expect(className).toContain('rounded-dialog');
 });
 

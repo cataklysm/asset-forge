@@ -16,7 +16,7 @@ const TITLE_PADDING = { form: '', detail: 'pr-10' } as const;
 
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
-  detail: 'w-[min(92vw,1100px)] h-[min(88vh,760px)]',
+  detail: 'w-[min(96vw,1600px)] h-[min(92vh,1000px)]',
 } as const;
 
 /** A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening. */

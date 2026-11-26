@@ -5,7 +5,7 @@ import type { FileRecord } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import type { FileActionContext } from '../../src/renderer/src/file-actions';
-import { installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, tagOf } from './fixtures';
 
 const ASSET = { id: nextId(), name: 'Oak tree', tags: [tagOf('Nature')] };
@@ -15,6 +15,7 @@ function Harness(props: {
   file: FileRecord;
   asset?: typeof ASSET | null;
   onOpenAsset?(id: string): void;
+  onMeasured?(file: FileRecord): void;
   actions?: FileActionContext;
 }) {
   const [file, setFile] = useState(props.file);
@@ -31,6 +32,10 @@ function Harness(props: {
           actions={props.actions ?? ACTIONS}
           roleControl={<span>role control</span>}
           onFileChange={setFile}
+          onMeasured={(record) => {
+            props.onMeasured?.(record);
+            setFile(record);
+          }}
           onOpenAsset={props.onOpenAsset}
           onClose={() => setOpen(false)}
         />
@@ -179,4 +184,80 @@ it('the More menu opens upwards from the left edge so it stays inside the panel'
   const classes = screen.getByRole('menu', { name: 'More' }).className.split(/\s+/);
   expect(classes).toEqual(expect.arrayContaining(['left-0', 'bottom-full']));
   expect(classes).not.toContain('right-0');
+});
+
+function detailValue(name: string): string | null | undefined {
+  const details = screen.getByRole('region', { name: 'Details' });
+  return within(details).getByText(name).nextElementSibling?.textContent;
+}
+
+const measureCalls = (api: ReturnType<typeof install>) => api.calls.filter((c) => c.channel === 'files:measure');
+
+it('Dimensions follow Type and show the stored size, or a dash while unknown', async () => {
+  install();
+  const { unmount } = render(<Harness file={fileRecord({ width: 1600, height: 2000 })} asset={null} />);
+  await openDialog();
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map((dt) => dt.textContent);
+  expect(labels.slice(0, 4)).toEqual(['Name', 'Type', 'Dimensions', 'Size']);
+  unmount();
+
+  install({ 'files:measure': () => deferred<FileRecord>().promise });
+  render(<Harness file={fileRecord()} asset={null} />);
+  await openDialog();
+  expect(detailValue('Dimensions')).toBe('–');
+});
+
+it('a previewable file without dimensions is measured once and handed to onMeasured', async () => {
+  const file = fileRecord();
+  const measured = { ...file, width: 1600, height: 2000 };
+  const api = install({ 'files:measure': () => measured });
+  const onMeasured = vi.fn();
+  render(<Harness file={file} asset={null} onMeasured={onMeasured} />);
+  await openDialog();
+  await waitFor(() => expect(onMeasured).toHaveBeenCalledWith(measured));
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: file.id }]);
+  expect(onMeasured).toHaveBeenCalledTimes(1);
+});
+
+it('a rejected measurement shows nothing and is not repeated', async () => {
+  const file = fileRecord();
+  const api = install({
+    'files:measure': () => {
+      throw fakeError('internal_error');
+    },
+    'files:addTag': () => ({ ...file, tags: [tagOf('Bark', 'manual')] }),
+  });
+  const onMeasured = vi.fn();
+  render(<Harness file={file} asset={null} onMeasured={onMeasured} />);
+  const user = await openDialog();
+  await waitFor(() => expect(measureCalls(api)).toHaveLength(1));
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), 'Bark{Enter}');
+  await screen.findByRole('button', { name: 'Remove Bark' });
+  expect(measureCalls(api)).toHaveLength(1);
+  expect(onMeasured).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(detailValue('Dimensions')).toBe('–');
+});
+
+it('files with dimensions and non-image files are not measured; a non-image keeps the placeholder', async () => {
+  const api = install();
+  const { unmount } = render(<Harness file={fileRecord({ width: 1600, height: 2000 })} asset={null} />);
+  await openDialog();
+  expect(screen.getByRole('toolbar', { name: 'Viewer' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Image' })).toBeTruthy();
+  unmount();
+
+  render(
+    <Harness
+      file={fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' })}
+      asset={null}
+    />,
+  );
+  await openDialog();
+  expect(screen.getByText('TXT')).toBeTruthy();
+  expect(screen.queryByRole('toolbar')).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
+  expect(measureCalls(api)).toHaveLength(0);
 });
