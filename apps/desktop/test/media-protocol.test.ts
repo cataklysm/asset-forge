@@ -215,6 +215,18 @@ describe('openFile', () => {
     await reader.cancel();
     expect(await settled(handle)).toBe(-1);
   });
+
+  it('rejects for a directory and leaves no handle open', async () => {
+    const directory = join(base, 'folder');
+    await mkdir(directory);
+    const before = vi.mocked(open).mock.results.length;
+    await expect(openFile(directory)).rejects.toThrow();
+    // On Windows `open` may already refuse a directory; where it succeeds, the handle is closed again.
+    const results = vi.mocked(open).mock.results.slice(before);
+    expect(results).toHaveLength(1);
+    const handle = await (results[0]!.value as Promise<FileHandle>).catch(() => null);
+    if (handle !== null) expect(await settled(handle)).toBe(-1);
+  });
 });
 
 describe('original route', () => {
@@ -282,6 +294,13 @@ describe('original route', () => {
     const seen = await expectBare404(await handleMediaRequest({ url: originalUrl(ID), method: 'GET' }, fakeDeps()));
     expect(seen.headers).toEqual([]);
     expect(plainText(seen)).not.toContain(base);
+  });
+
+  it('a directory in place of the file answers 404', async () => {
+    await rm(originalPath);
+    await mkdir(originalPath);
+    const seen = await expectBare404(await handleMediaRequest({ url: originalUrl(ID), method: 'GET' }, fakeDeps()));
+    expect(seen.headers).toEqual([]);
   });
 
   it('an unreachable storage while opening answers 404', async () => {

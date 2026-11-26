@@ -144,13 +144,15 @@ export async function handleMediaRequest(
 /**
  * Opens a file for streaming. The size comes from the open handle; the handle is closed when the
  * stream ends, errors or is cancelled. Rejects (with the handle closed) when the file cannot be
- * opened, so the caller can answer 404 before any response exists.
+ * opened or is not a regular file, so the caller can answer 404 before any response exists.
  */
 export async function openFile(path: string): Promise<{ size: number; stream: ReadableStream<Uint8Array> }> {
   const handle = await open(path, 'r');
   let size: number;
   try {
-    size = (await handle.stat()).size;
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error('Not a regular file');
+    size = stat.size;
   } catch (error) {
     await handle.close();
     throw error;
