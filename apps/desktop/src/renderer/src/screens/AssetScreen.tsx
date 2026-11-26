@@ -143,7 +143,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     );
   }
 
-  const headerErrors = [error, types.error].filter((e): e is string => e !== null);
+  const headerErrors = [error, loaded.error, types.error].filter((e): e is string => e !== null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">

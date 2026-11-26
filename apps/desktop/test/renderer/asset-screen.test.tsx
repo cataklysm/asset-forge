@@ -362,6 +362,28 @@ it('the tile menu sets the cover once while the call runs', async () => {
   expect(await within(tile('leaf.png')).findByText('Cover')).toBeTruthy();
 });
 
+it('a failed asset re-read after a file change shows an alert and keeps the screen usable', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const file = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
+  const api = install(asset, {
+    'files:list': listOf([file]),
+    'assets:setCover': () => ({ ...asset, coverFileId: file.id, coverIsChosen: true }),
+  });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('leaf.png');
+  api.set('assets:get', () => {
+    throw fakeError('storage_unreachable');
+  });
+  await user.click(within(tile('leaf.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Use as cover' }));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(callsOf(api, 'assets:get').length).toBeGreaterThan(1);
+  expect(screen.getByRole('textbox', { name: 'Name' })).toBeTruthy();
+  expect(screen.getByRole('tablist')).toBeTruthy();
+  expect(within(tile('leaf.png')).getByText('Cover')).toBeTruthy();
+});
+
 it('not found shows an alert with the breadcrumb', async () => {
   const asset = assetDetail();
   install(asset, {
