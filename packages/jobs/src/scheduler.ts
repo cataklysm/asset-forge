@@ -1,5 +1,6 @@
 import { ResourceClassSchema, isRetryableJobError, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
 import { JobError, type Job, type JobControl, type JobHandler, type JobRepository } from '@assetforge/core';
+import type { PauseGate } from './pause-gate.js';
 
 export const DEFAULT_LIMITS: Record<ResourceClass, number> = { cpu: 2, io: 2, local_gpu: 1, remote_api: 2 };
 /** Runs per job, the first one included. */
@@ -24,6 +25,8 @@ export interface SchedulerOptions {
   /** Called after every status change the scheduler made. Must not throw. */
   onChange?(): void;
   log?(message: string, cause: unknown): void;
+  /** Outlives the scheduler: a class it reports paused claims nothing, and every run end is recorded in it. */
+  pause?: PauseGate;
 }
 
 interface ActiveRun {
@@ -78,6 +81,24 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return n;
   };
 
+  const paused = (rc: ResourceClass) => options.pause !== undefined && options.pause.reason(rc) !== null;
+
+  /** Tells the gate how a run ended, before the next pass decides whether its class may claim again. */
+  function record(job: Job, run: ActiveRun, outcome: Outcome): void {
+    if (!options.pause) return;
+    // Same order as `settle`: a cancel wins, then success; a run released on stop or a foreign error is 'other'.
+    let result: JobErrorCode | 'ok' | 'other' = 'other';
+    if (!run.cancelled) {
+      if (outcome.ok) result = 'ok';
+      else if (!stopping && outcome.error instanceof JobError) result = outcome.error.code;
+    }
+    try {
+      options.pause.record(job.resourceClass, result);
+    } catch (cause) {
+      log('Job pause gate failed', cause);
+    }
+  }
+
   function cancelTimer(): void {
     if (timer) clearTimer(timer.handle);
     timer = null;
@@ -87,8 +108,11 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     let earliest: number | null = null;
     for (const [rc, types] of typesOf) {
       if (types.length === 0) continue;
+      // A paused class needs no timer either: the caller wakes the scheduler after resume.
+      if (paused(rc)) continue;
       while (runningOf(rc) < limits[rc]) {
         if (stopping) return;
+        if (paused(rc)) break;
         const job = await jobs.claimNext({ resourceClass: rc, types, now: iso() });
         if (!job) break;
         if (stopping) {
@@ -100,7 +124,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       }
       if (stopping) return;
       // A full class gets a pass when one of its jobs ends; only classes with room need the timer.
-      if (runningOf(rc) < limits[rc]) {
+      if (runningOf(rc) < limits[rc] && !paused(rc)) {
         const next = await jobs.nextRunAfter(types);
         if (next !== null) earliest = Math.min(earliest ?? Infinity, Date.parse(next));
       }
@@ -175,6 +199,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
   /** Stores the outcome of a run. `job.attempt` is the value after the claim. */
   async function settle(job: Job, run: ActiveRun, outcome: Outcome): Promise<void> {
+    record(job, run, outcome);
     const at = iso();
     const finish = async (status: 'succeeded' | 'failed' | 'cancelled', errorCode: JobErrorCode | null) => {
       await jobs.finish(job.id, { status, errorCode, now: at });
