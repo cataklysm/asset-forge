@@ -140,7 +140,7 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewe
 
 Deferred by design:
 
-- No circuit breaker for an unreachable provider: with the local GPU limit of 1 a batch fails one file after another, each after about 35 s; "Cancel all" ends it. A possible fix is "stop the queue after N consecutive unreachable failures".
+- No circuit breaker for an unreachable provider: every job of a batch still makes its three tries and fails about 35 s after its first one. A job in `retry_wait` holds no slot, so the files interleave rather than fail strictly one after another, but the whole batch keeps calling a provider that is down until each file has used its tries; "Cancel all" ends it. A possible fix is "stop the queue after N consecutive unreachable failures".
 - No attempt history: a job keeps only its attempt counter and the error of its latest run (ReadMe §10). Needed at the latest for paid jobs in phase 5.
 - The file name on the Jobs screen is plain text, not a link to the file.
 - Job rows are only removed by "Clear finished"; there is no age-based cleanup of finished jobs.
@@ -156,6 +156,21 @@ Found during the build:
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
 - `job.file_id` and `file_analysis.file_id` reference `file` without a delete rule; once files can be deleted, their jobs and analysis rows must be handled.
+- Base URL check (`apps/desktop/src/main/vision-config.ts`): a bare `?` or `#` (`http://h/?`) still passes, because `search` and `hash` are empty while `href` keeps the delimiter; reject a raw value that contains `?` or `#`.
+- `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
+- `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs; it matters once paid providers run.
+- `retryJob` (`packages/core/src/jobs.ts`): the message "The file of this job already has an active job" also covers a job whose status changed between the check and the update.
+- Inbox (`apps/desktop/src/renderer/src/screens/InboxScreen.tsx`): the `importResult` state also holds analysis results (rename to `result`); "Analyse" is not blocked while an import runs and not disabled while an analysis call runs; a rejected call leaves an earlier result strip in place.
+- `AssetFilesTab.tsx`: the `useJobs` hook line sits between the JSDoc of `analyse` and the function; move it up to the other hooks.
+- `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
+- `TagChip.tsx`: the doc comment still says AI tags may be styled apart "later"; they already are.
+- `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
+- A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
+- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts`); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx`.
+
+Replaced by the phase 4b result dialog:
+
+- An analysis started from the file detail dialog shows its result strip or error behind the dialog (`InboxScreen.tsx`, `AssetFilesTab.tsx`), as the 4a spec asks; the 4b result dialog shows the outcome in place.
 
 Tests:
 
@@ -165,6 +180,11 @@ Tests:
 - Missing persistence tests: `FileAnalysisRepository.apply` for an inbox file, rejection of an unknown `job.file_id` by the foreign key.
 - Mock provider: its test does not pin the style tag or that the tags come from the vocabulary; scripted numeric and `'hang'` failures bypass `delayMs` and are consumed before the model and image checks.
 - Ollama adapter: no tests for an HTTP 200 with an empty body and for a signal that is already aborted; the `closedPortUrl` test can flake.
+- Tag cleaning: no test pins that control and format characters pass `cleanTagText` (see above).
+- No test pins the content of `ANALYSIS_PROMPT` (`packages/core/src/analysis.ts`); the analysis test only checks that it is sent.
+- Analysis acceptance test (`apps/desktop/test/analysis-acceptance.test.ts`): the `interrupted` job may be undefined (no `toBeDefined`, or a hanging mock answer to make the run certain); the number of mock tags per file is never asserted.
+- Renderer: the theme contrast test in `tags.test.tsx` reads `index.css` through `process.cwd()` (use `import.meta.url` like `theme.test.ts`); `file-browser.test.tsx` waits a real 50 ms for a negative assertion; `inbox.test.tsx` imports `act` and `JobSummary` in second import lines from the same sources.
+- Renderer analysis tests: the Files-tab skipped test uses a failed PNG rather than a document; the inbox dialog test asserts only the IPC call; there is no dialog test on the Files tab; no test checks `refresh()` after a successful `startAnalysis` (inbox, Files tab) or the `resultToken` reload of the asset Files tab.
 - The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
 
 ## Not covered by any automated check
