@@ -57,7 +57,9 @@ The owner chose an in-app trash emptied by hand; the mechanism (approach 1) is t
 - `trashed_asset_id` — the asset the file was attached to when deleted, null for an inbox file. Foreign key to `asset` with `set null`, so a later asset deletion sends a restore to the inbox.
 - `trashed_role` — the role it had there.
 
-Invariant: `deleted_at is not null` implies `asset_id is null and role is null`. `status` is unchanged by deleting.
+`file_move` gains `kind` — `relocate` (default, the existing behaviour), `trash` or `restore`. The commit of a move acts by kind: `trash` copies the row's current `asset_id`/`role` into `trashed_asset_id`/`trashed_role`, clears them and sets `deleted_at`; `restore` sets `asset_id`/`role` from the move's target and clears the three trash columns. The same commit runs in startup recovery, so an interrupted delete or restore ends in a consistent state in either direction.
+
+Invariant: `deleted_at is not null` implies `asset_id is null and role is null`. It is enforced in the repositories and pinned by tests, not by a table CHECK: migration `0008` stays a set of `ADD COLUMN`s and does not rebuild `file`, which six tables reference (author's call). `status` is unchanged by deleting.
 
 On disk a trashed file lives at `.assetforge/trash/<fileId>_<sanitised name>` in the same storage as before (a rename on one volume). `relative_path` follows the binary as with every relocation.
 
@@ -65,15 +67,17 @@ On disk a trashed file lives at `.assetforge/trash/<fileId>_<sanitised name>` in
 
 Applies to a file with status `complete`. In order:
 
-1. Pending jobs of the file are cancelled and a running one is aborted, before the file moves.
-2. The binary moves to the trash path through the journaled move (`file_move`); the commit transaction sets `asset_id`/`role` to null, fills `deleted_at`, `trashed_asset_id`, `trashed_role`, clears a chosen cover that pointed at the file (the automatic cover then takes over) and reindexes the former asset.
+1. Pending jobs of the file are cancelled and a running one is cancelled through the scheduler, before the file moves. Delete does not wait for the running handler to settle (a provider call may take up to the timeout); the write guard below is the guarantee.
+2. The binary moves to the trash path through a journaled move of kind `trash`; the commit transaction sets `asset_id`/`role` to null, fills `deleted_at`, `trashed_asset_id`, `trashed_role`, clears a chosen cover that pointed at the file (the automatic cover then takes over) and reindexes the former asset.
 3. Tags, the analysis record and a waiting proposal stay on the row untouched.
 
-A complete file whose binary is missing on a reachable storage can still be deleted: the row goes to the trash without a move. An unreachable storage refuses the operation with the existing storage error.
+A complete file whose binary is missing on a reachable storage can still be deleted: the row goes to the trash without a move, and its `relative_path` is rewritten to the trash path all the same. Such an entry cannot be restored, only purged, and purging finds nothing to remove. Purge and sweep therefore never remove anything outside `.assetforge/trash/`. An unreachable storage refuses the operation with the existing storage error.
 
 A **failed** file is removed outright: its row and any leftover binary in staging or the inbox are deleted, no trash entry. A **pending** file cannot be deleted (`invalid_operation`); an import in flight owns it.
 
-The analysis handler must not write to a trashed file: when its file is in the trash at write time the job ends `cancelled` and writes nothing. Enqueueing refuses trashed files the same way it refuses files that are not analysable.
+The analysis must not write to a trashed file. The guard sits in the write itself: applying tags and storing a proposal check `deleted_at` inside their transaction and write nothing for a trashed or purged file. The handler also does not follow the file into the trash when it re-reads the image; a trashed file is `file_unavailable`. A job cancelled through the scheduler ends `cancelled` whatever its handler returns afterwards; a job that hits the guard without having been cancelled (a race) ends `failed` with `file_unavailable` and is not retried. No new job outcome is introduced.
+
+Enqueueing refuses trashed files the same way it refuses files that are not analysable, checked in the transaction that inserts the job. Retry does not bring such jobs back: `jobs:retry` on a job whose file is in the trash answers `invalid_operation`, and `jobs:retryFailed` skips them.
 
 ### Restoring
 
@@ -83,7 +87,7 @@ The binary moves back through the journaled move: to `trashed_asset_id` with `tr
 
 Only files in the trash can be purged. Per file:
 
-1. One transaction deletes its `file_tag`, `file_analysis`, `file_analysis_proposal` and `job` rows and then the `file` row. (All of the file's jobs are finished by then; deleting cancelled them.)
+1. Any job of the file that is still active is cancelled through the scheduler (normally none: deleting cancelled them and retry refuses them). Then one transaction deletes its `file_tag`, `file_analysis`, `file_analysis_proposal` and `job` rows and then the `file` row. The scheduler must tolerate finishing a run whose job row is gone.
 2. After the commit the binary is removed from the trash directory.
 
 A crash between the two steps leaves a binary without a row. On every workspace open a sweep lists `.assetforge/trash/` — one bounded directory, not a workspace scan — and removes each binary whose file ID has no row. A binary that cannot be removed is left for the next sweep; the purge still counts as done.
@@ -94,7 +98,7 @@ Preview cache entries are keyed by content hash, shared between duplicates and e
 
 ### Queries that must exclude trashed files
 
-Everything that reads files without going through `asset_id`: the inbox scope of `files:list` and its counts, the workspace-wide file list and tag filters, `tags:suggest` usage where it counts files, duplicate detection on import (`findCompleteBySha256`: a file in the trash is not a duplicate), the analysis target reader for `files` and `fileFilter` targets and `analysis:preview`, `files:measure`, tagging channels (`files:addTag`/`removeTag` and the batch variants refuse a trashed file) and assignment (`files:assign`, `assignMany`, `unassign` refuse it). `files:get` and the media protocol still serve a trashed file, so the trash can show previews and the viewer. "Open externally" and "Show in folder" are not offered for it.
+Everything that reads files without going through `asset_id`: the inbox scope of `files:list` and its counts, the workspace-wide file list and tag filters, `tags:suggest` usage where it counts files, duplicate detection on import (`findCompleteBySha256`: a file in the trash is not a duplicate), the analysis target reader for `files` and `fileFilter` targets and `analysis:preview`, tagging channels (`files:addTag`/`removeTag` and the batch variants refuse a trashed file) and assignment (`files:assign`, `assignMany`, `unassign` refuse it). `files:get`, `files:measure` and the media protocol still serve a trashed file, so the trash can show previews and the viewer with image dimensions. "Open externally" and "Show in folder" are not offered for it.
 
 Each of these gets a test with one trashed file among live ones.
 
@@ -124,7 +128,7 @@ Fixed messages only. Per-item failures carry an `AssetForgeError` code: `not_fou
 
 ### Recovery on workspace open
 
-In this order: the existing `recoverFileMoves` (covers interrupted moves into and out of the trash, since they are ordinary journaled moves), then the trash sweep for binaries without a row.
+In this order: the existing `recoverFileMoves` (covers interrupted moves into and out of the trash through the move's `kind`), then the trash sweep for binaries without a row.
 
 ### Documentation
 
@@ -132,7 +136,7 @@ ReadMe §9.2 (trash directory), §9.4 (trash, purge order, sweep, "recovery peri
 
 ## Testing
 
-- Core and persistence: delete, restore and purge per state (asset file, inbox file, failed, pending, missing binary, unreachable storage); the invariant; cover handover; job cancellation on delete and the handler's refusal to write; restore after the asset is gone; every excluded query; migration `0008` on a populated database.
+- Core and persistence: delete, restore and purge per state (asset file, inbox file, failed, pending, missing binary, unreachable storage); the invariant; cover handover; job cancellation on delete, the write guard with a handler that finishes after the delete, retry refusing and skipping jobs of trashed files, purge with a still active job; restore after the asset is gone; every excluded query; migration `0008` on a populated database.
 - Storage consistency: a crash after the move and before the commit, in both directions; a crash between row deletion and binary removal followed by the sweep; the sweep never removes a binary that has a row.
 - IPC: validation, per-item results, the exclusive section.
 - Renderer (jsdom): Delete from menu, selection bar, detail dialog and key; the Trash screen's actions and confirmations; the count in the navigation; nothing forbidden offered in the trash.
