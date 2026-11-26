@@ -1,6 +1,7 @@
 import { FileKindSchema } from '@assetforge/contracts';
 import type { FileList, FileRecord, FileScope, ImportStatus, TagAssignment } from '@assetforge/contracts';
 import {
+  InvalidOperationError,
   NotFoundError,
   foldSearchWord,
   isOpenable,
@@ -294,6 +295,9 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
     async setPlacement(id, placement) {
       // Throwing inside the transaction rolls back both statements.
       return db.transaction((tx) => {
+        // A trashed file has no asset and no role; only a restore move places it again.
+        const trashed = tx.select({ deletedAt: file.deletedAt }).from(file).where(eq(file.id, id)).get();
+        if (trashed?.deletedAt != null) throw new InvalidOperationError('The file is in the trash');
         const left = assetOfFile(tx, id);
         const row = tx
           .update(file)

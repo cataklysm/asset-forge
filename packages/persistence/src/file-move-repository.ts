@@ -34,6 +34,16 @@ function placementOf(
   }
 }
 
+/**
+ * Keeps the trash invariant (a trashed file has no asset and no role) and its origin: only `trash`
+ * leaves a live file for the trash, only `restore` brings a trashed file back.
+ */
+function refuseAgainstTrash(kind: FileMove['kind'], trashed: boolean): void {
+  if (kind === 'relocate' && trashed) throw new InvalidOperationError('The file is in the trash');
+  if (kind === 'trash' && trashed) throw new InvalidOperationError('The file is already in the trash');
+  if (kind === 'restore' && !trashed) throw new InvalidOperationError('The file is not in the trash');
+}
+
 export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRepository {
   return {
     async begin(move) {
@@ -59,8 +69,14 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
       return db.transaction((tx) => {
         const move = tx.select().from(fileMove).where(eq(fileMove.fileId, fileId)).get();
         if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
-        const current = tx.select({ assetId: file.assetId, role: file.role }).from(file).where(eq(file.id, fileId)).get();
+        const current = tx
+          .select({ assetId: file.assetId, role: file.role, deletedAt: file.deletedAt })
+          .from(file)
+          .where(eq(file.id, fileId))
+          .get();
         if (!current) throw new NotFoundError(`File ${fileId} does not exist`);
+        // A refused commit keeps the journal row and the file row as they are.
+        refuseAgainstTrash(move.kind, current.deletedAt !== null);
         const row = tx
           .update(file)
           .set({ relativePath: move.targetRelativePath, ...placementOf(move, current) })

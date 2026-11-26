@@ -347,3 +347,79 @@ describe('file trash repository', () => {
     expect(rows('select count(*) as n from file where deleted_at is not null')).toEqual([{ n: 3 }]);
   });
 });
+
+describe('trash invariant guards', () => {
+  const fileRow = (id: string) => handle.prepare('select * from file where id = ?').get(id);
+  const moveRow = (id: string) => handle.prepare('select * from file_move where file_id = ?').get(id);
+
+  /** Begins `move`, expects its commit to be refused with `message`, and checks that nothing changed. */
+  async function expectRefusedCommit(move: FileMove, message: string): Promise<void> {
+    await db.fileMoves.begin(move);
+    const before = { file: fileRow(move.fileId), move: moveRow(move.fileId) };
+    await expect(db.fileMoves.commit(move.fileId)).rejects.toMatchObject({ code: 'invalid_operation', message });
+    // The journal row stays for a later decision and the file row is untouched.
+    expect({ file: fileRow(move.fileId), move: moveRow(move.fileId) }).toEqual(before);
+    expect(before.move).toBeDefined();
+    expectInvariant();
+  }
+
+  test('a relocate commit on a trashed file is refused', async () => {
+    const f = await addFile('f.png', { assetId: PUMP, role: 'texture' });
+    await trash(f);
+    await expectRefusedCommit(
+      {
+        fileId: f,
+        kind: 'relocate',
+        targetRelativePath: `assets/${MOTEL}/${f}_f.png`,
+        targetAssetId: MOTEL,
+        targetRole: 'reference',
+        createdAt: '2026-03-01T00:00:00.000Z',
+      },
+      'The file is in the trash',
+    );
+    expect((await ids({ kind: 'asset', assetId: MOTEL })).total).toBe(0);
+  });
+
+  test('a trash commit on a file already in the trash is refused and keeps its origin', async () => {
+    const f = await addFile('f.png', { assetId: PUMP, role: 'texture' });
+    await trash(f);
+    await expectRefusedCommit(trashMove(f, '2026-04-01T00:00:00.000Z'), 'The file is already in the trash');
+    expect(await db.files.get(f)).toMatchObject({ trashedAssetId: PUMP, trashedRole: 'texture', deletedAt: '2026-02-01T00:00:00.000Z' });
+  });
+
+  test('a restore commit on a live file is refused', async () => {
+    const f = await addFile('f.png', { assetId: PUMP, role: 'texture' });
+    await expectRefusedCommit(
+      {
+        fileId: f,
+        kind: 'restore',
+        targetRelativePath: `assets/${MOTEL}/${f}_f.png`,
+        targetAssetId: MOTEL,
+        targetRole: 'reference',
+        createdAt: '2026-03-01T00:00:00.000Z',
+      },
+      'The file is not in the trash',
+    );
+  });
+
+  test('setPlacement on a trashed file is refused and changes nothing', async () => {
+    const f = await addFile('f.png', { assetId: PUMP, role: 'texture' });
+    await trash(f);
+    const before = fileRow(f);
+    await expect(
+      db.files.setPlacement(f, { relativePath: `assets/${MOTEL}/${f}_f.png`, assetId: MOTEL, role: 'reference' }),
+    ).rejects.toMatchObject({ code: 'invalid_operation', message: 'The file is in the trash' });
+    expect(fileRow(f)).toEqual(before);
+    expectInvariant();
+  });
+
+  test('the legitimate commits of recovery still go through', async () => {
+    // An interrupted trash move finds a live row, an interrupted restore a trashed one.
+    const live = await addFile('live.png', { assetId: PUMP, role: 'texture' });
+    await db.fileMoves.begin(trashMove(live));
+    await expect(db.fileMoves.commit(live)).resolves.toMatchObject({ deletedAt: '2026-02-01T00:00:00.000Z', trashedAssetId: PUMP });
+    await expect(restore(live, { assetId: PUMP, role: 'texture' })).resolves.toMatchObject({ assetId: PUMP, deletedAt: null });
+    expect(moveRow(live)).toBeUndefined();
+    expectInvariant();
+  });
+});
