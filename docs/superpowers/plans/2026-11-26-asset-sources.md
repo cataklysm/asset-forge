@@ -22,7 +22,7 @@
   - `This source could not be opened` (`invalid_operation`)
 - URL rule (one function in core): trimmed input; at most 2000 characters before and after normalisation; parseable by `new URL`; protocol `http:` or `https:`; non-empty host; empty `username` and `password`; stored and compared as `URL.href`.
 - At most `MAX_ASSET_SOURCES = 50` sources per asset.
-- UI: no explanatory text in the layout (tooltips through `title`); buttons only from `ui.ts` (`BUTTON`, `ICON_BUTTON`, `BUTTON_INLINE`); tokens only, no colour literals; labels in `apps/desktop/src/renderer/src/labels.ts`.
+- UI: no explanatory text in the layout (tooltips through `title`); buttons only from `ui.ts` (`BUTTON`, `ICON_BUTTON`, `BUTTON_INLINE`, `ICON_BUTTON_INLINE`); tokens only, no colour literals; labels in `apps/desktop/src/renderer/src/labels.ts`.
 - Commands: `pnpm --filter @assetforge/<package> test <file>` (no `--`), `pnpm test`, `pnpm typecheck`, `pnpm --filter @assetforge/desktop build`, `pnpm --filter @assetforge/persistence db:generate`. Known flaky test (re-run once): `inbox.test.tsx > filters and scroll offset survive navigation`.
 
 ## Review Focus
@@ -96,8 +96,8 @@
 
 Behaviour:
 - A labelled group `Sources` in the header row that holds the description and the asset tags (third block, `min-w-64 flex-1`, as its neighbours).
-- Each source is a `<button type="button">` in the link look (`BUTTON_INLINE`), never an `<a href>` (the window must not navigate). Its text is the URL, cut with an ellipsis; `title` is the full URL. A click calls `onOpen(id)`.
-- Per source two `ICON_BUTTON`s with `title` and `aria-label`: copy (writes the URL to the clipboard the way `PromptDialog.tsx` copies text) and remove (no confirmation).
+- Each source is the existing `Link` component (`components/Link.tsx`, `href="#"` with the click prevented), never an anchor whose `href` is the source URL (the window must not navigate). Its text is the URL, cut with an ellipsis; `title` is the full URL. A click calls `onOpen(id)`.
+- Per source two `ICON_BUTTON_INLINE`s with `title` and `aria-label`: copy (writes the URL to the clipboard the way `PromptDialog.tsx` copies text) and remove (no confirmation).
 - The list scrolls inside the block beyond five rows (a max height on the list).
 - An input with placeholder and `aria-label` `Add URL`, `maxLength` 2000. Enter with a non-blank value calls `onAdd(value)`; while it runs the input is disabled; on success it is cleared, on failure the text stays.
 - `disabled` disables the input and the remove buttons; open and copy stay usable.
@@ -106,7 +106,7 @@ Behaviour:
 - [ ] **Step 1: Extend the fake API** with the three channels (in-memory sources on the fake asset, the same error codes for duplicate and invalid URL, a recorded list of opened source IDs).
 
 - [ ] **Step 2: Failing component tests** in `source-list.test.tsx`:
-  - renders one button per source with the URL as text and the full URL as `title`; no element has an `href`;
+  - renders one link per source with the URL as text and the full URL as `title`; no element's `href` attribute is a source URL;
   - click on a source calls `onOpen` with its ID;
   - the remove button calls `onRemove` with the ID; the copy button calls `navigator.clipboard.writeText` with the URL (mocked);
   - typing `https://example.org` and Enter calls `onAdd('https://example.org')` once and clears the input after it resolves;
