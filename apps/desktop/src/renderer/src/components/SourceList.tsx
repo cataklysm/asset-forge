@@ -33,6 +33,9 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
   const addingRef = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const refocus = useRef(false);
+  const list = useRef<HTMLUListElement>(null);
+  /** The source being removed and its index, so that focus can move once it is gone. */
+  const pendingFocus = useRef<{ id: string; index: number } | null>(null);
 
   // The input loses focus while it is disabled; it gets it back once the add has finished.
   useEffect(() => {
@@ -40,6 +43,25 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
     refocus.current = false;
     input.current?.focus();
   }, [adding]);
+
+  // A removed source takes its focused button with it; focus moves to the next source, else the previous one.
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    if (pending === null || sources.some((s) => s.id === pending.id)) return;
+    pendingFocus.current = null;
+    const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>('button[data-remove]') ?? [])];
+    (buttons[pending.index] ?? buttons[pending.index - 1] ?? input.current)?.focus();
+  }, [sources]);
+
+  async function remove(id: string, index: number) {
+    pendingFocus.current = { id, index };
+    try {
+      await onRemove(id);
+    } catch {
+      // Reported by the caller; the source stays and keeps its focus.
+      pendingFocus.current = null;
+    }
+  }
 
   async function add() {
     const url = text.trim();
@@ -79,9 +101,9 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
         {SOURCES_LABEL}
       </span>
       {sources.length > 0 && (
-        // Five rows (h-8 with a 4 px gap) fit; more scroll inside the block.
-        <ul className="max-h-44 min-w-0 space-y-1 overflow-y-auto">
-          {sources.map((source) => (
+        // Five rows (h-8 with a 4 px gap) and the 4 px padding that keeps focus rings unclipped fit; more scroll.
+        <ul ref={list} className="max-h-46 min-w-0 space-y-1 overflow-y-auto p-1">
+          {sources.map((source, index) => (
             <li key={source.id} className="flex min-w-0 items-center gap-1">
               <Link
                 onFollow={() => void onOpen(source.id).catch(() => {})}
@@ -104,8 +126,9 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
                 className={`shrink-0 ${ICON_BUTTON_INLINE}`}
                 title={REMOVE_SOURCE_TITLE}
                 aria-label={REMOVE_SOURCE_TITLE}
+                data-remove
                 disabled={disabled}
-                onClick={() => void onRemove(source.id).catch(() => {})}
+                onClick={() => void remove(source.id, index)}
               >
                 <X size={14} aria-hidden />
               </button>

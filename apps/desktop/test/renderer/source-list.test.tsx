@@ -129,5 +129,7 @@ it('the list scrolls inside the block and a long URL is cut', () => {
   const list = within(group()).getByRole('list');
   expect(list.className).toContain('max-h-');
   expect(list.className).toContain('overflow-y-auto');
+  // The padding keeps the 2 px focus outline with its 2 px offset inside the scrolling box.
+  expect(list.className.split(' ')).toContain('p-1');
   expect(within(group()).getAllByRole('link')[0]!.className).toContain('truncate');
 });

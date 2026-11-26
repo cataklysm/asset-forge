@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,12 @@ const confirmWorkflow = vi.fn(async (_assetName: string) => false);
 const openExternal = vi.fn(async (_url: string): Promise<void> => {});
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
+
+// The desktop package has no type declarations for better-sqlite3; this is the used subset.
+const Database = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => {
+  prepare(sql: string): { run(...params: unknown[]): unknown };
+  close(): void;
+};
 
 beforeEach(async () => {
   confirmWorkflow.mockClear();
@@ -723,6 +730,23 @@ describe('library IPC', () => {
         ok: false,
         error: { code: 'invalid_operation', message: 'This source could not be opened' },
       });
+    });
+
+    it('re-checks the stored address on open and never hands an unusable one to the host', async () => {
+      const { asset } = await twoAssets();
+      const added = await ok('assets:addSource', { assetId: asset.id, url: 'https://example.org/' });
+      const workspaceId = (await ok<{ id: string }>('workspace:current', {})).id;
+      const raw = new Database(join(base, 'userData', 'workspaces', workspaceId, 'assetforge.sqlite'));
+      try {
+        raw.prepare('UPDATE asset_source SET url = ? WHERE id = ?').run('file:///C:/Windows/System32/calc.exe', added.sources[0].id);
+      } finally {
+        raw.close();
+      }
+      expect(await call('assets:openSource', { assetId: asset.id, sourceId: added.sources[0].id })).toMatchObject({
+        ok: false,
+        error: { code: 'validation_failed' },
+      });
+      expect(openExternal).not.toHaveBeenCalled();
     });
 
     it('refuses a file address and a non-string url', async () => {

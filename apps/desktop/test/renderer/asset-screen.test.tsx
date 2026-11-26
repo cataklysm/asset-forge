@@ -1113,6 +1113,46 @@ it('adding a duplicate source shows the error in the header and keeps the text',
   expect(within(block).getAllByRole('link')).toHaveLength(1);
 });
 
+it('an address that is not a web address shows the fixed message in the header', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  install(asset, fakeAssetSources(asset).handlers);
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  const field = within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement;
+  await user.type(field, 'example.org{Enter}');
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toBe('This is not a web address');
+  expect(alert.closest('header')).not.toBeNull();
+  await waitFor(() => expect(field.disabled).toBe(false));
+  expect(field.value).toBe('example.org');
+});
+
+it('removing a source moves focus to the next source, else the previous one, else the input', async () => {
+  const user = userEvent.setup();
+  const [a, b, c] = [sourceOf('https://example.org/a'), sourceOf('https://example.org/b'), sourceOf('https://example.org/c')];
+  const asset = assetDetail({ sources: [a!, b!, c!] });
+  install(asset, fakeAssetSources(asset).handlers);
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  const removeOf = (url: string) =>
+    within(within(block).getByRole('link', { name: url }).closest('li') as HTMLElement).getByRole('button', {
+      name: 'Remove source',
+    });
+
+  await user.click(removeOf(a!.url));
+  await waitFor(() => expect(within(block).queryByRole('link', { name: a!.url })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(removeOf(b!.url)));
+
+  await user.click(removeOf(c!.url));
+  await waitFor(() => expect(within(block).queryByRole('link', { name: c!.url })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(removeOf(b!.url)));
+
+  await user.click(removeOf(b!.url));
+  await waitFor(() => expect(within(block).queryByRole('link')).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(within(block).getByRole('textbox', { name: 'Add URL' })));
+});
+
 it('a source that cannot be opened shows the error in the header', async () => {
   const user = userEvent.setup();
   const oak = sourceOf('https://example.org/');

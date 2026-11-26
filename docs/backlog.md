@@ -404,6 +404,16 @@ Deferred by design:
 - No adding several URLs at once.
 - No fetching of any kind: no page title, favicon or reachability check.
 
+Found in the final review and not fixed:
+
+- Remove has no in-flight guard: a double click on `Remove source` sends two requests and the second shows a not-found alert.
+- After an add the `Add URL` input takes focus again even when the user has moved focus elsewhere meanwhile.
+- The alert of a failed copy stays until a later copy succeeds.
+- Test gaps: the scroll threshold of the list and the double-Enter guard are tested only through class names and `disabled` (jsdom cannot measure layout).
+- Writing a source and touching the asset's `updated_at` are two statements, not one transaction (as for tags).
+- An `assets:get` reload already in flight can briefly show the asset without a source that was just added (the same pattern as for tags).
+- How Windows treats `^`, `|`, `&` and a backtick in a query string handed to `shell.openExternal` is unverified.
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
