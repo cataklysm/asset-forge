@@ -1,6 +1,6 @@
 import { RotateCcw, X } from 'lucide-react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { laneName, MoveJobsDialog } from '../components/MoveJobsDialog';
@@ -387,9 +387,12 @@ function JobRows(props: JobTableProps & { scrollRef: RefObject<HTMLDivElement | 
   );
 }
 
-/** The provider of an analysis job: the current entry name (or the stored one) and the model; '—' for other jobs. */
+/**
+ * The provider of an analysis or generation job: the current entry name (or the stored one) and the
+ * model when there is one (an upscale has none); '—' for other jobs.
+ */
 function providerText(list: ProviderList | null, job: JobView): string {
-  if (job.type !== ANALYZE_FILE_JOB) return '—';
+  if (job.type !== ANALYZE_FILE_JOB && job.type !== IMAGE_GENERATE_JOB) return '—';
   const name = laneName(list, job.providerId, job.providerName);
   return job.model === null ? name : `${name} · ${job.model}`;
 }

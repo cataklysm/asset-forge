@@ -368,6 +368,8 @@ export const COPY_PROMPT_TITLE = 'Copy prompt';
 export const PARAMETERS_LABEL = 'Parameters';
 export const MODEL_LABEL = 'Model';
 export const COPY_PROMPT_FAILED = 'The prompt could not be copied';
+/** A source or result link whose file cannot be read. */
+export const LINKED_FILE_FAILED = 'This file could not be opened';
 
 /** '16:9 · 2K · Safe mode' for an edit (a value left to the model is not named), 'Upscale 4×' for an upscale. */
 export function generationParametersText(parameters: GenerationParameters): string {

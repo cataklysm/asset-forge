@@ -9,6 +9,7 @@ import {
   DELETED_MARK,
   GENERATED_FROM_LABEL,
   generationParametersText,
+  LINKED_FILE_FAILED,
   MODEL_LABEL,
   PARAMETERS_LABEL,
   PROMPT_LABEL,
@@ -127,27 +128,35 @@ function MadeBy({ generation }: { generation: Generation }) {
 
 function FileLinks({ files }: { files: readonly GenerationFile[] }) {
   const studio = useStudio();
+  const [failed, setFailed] = useState(false);
+  const follow = (fileId: string) => {
+    setFailed(false);
+    studio.openFile(fileId).catch(() => setFailed(true));
+  };
   return (
-    <ul className="space-y-1 text-sm">
-      {files.map((file, index) => (
-        <li key={file.fileId ?? `purged-${index}`} className="break-words">
-          {file.fileId === null ? (
-            <>
-              <span>{file.name}</span> <span className={MUTED}>{DELETED_MARK}</span>
-            </>
-          ) : (
-            <>
-              <Link onFollow={() => openLinked(studio.openFile, file.fileId!)}>{file.name}</Link>
-              {file.trashed && <span className={MUTED}> {TRASHED_MARK}</span>}
-            </>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="space-y-1 text-sm">
+        {files.map((file, index) => (
+          <li key={file.fileId ?? `purged-${index}`} className="break-words">
+            {file.fileId === null ? (
+              <>
+                <span>{file.name}</span> <span className={MUTED}>{DELETED_MARK}</span>
+              </>
+            ) : (
+              <>
+                <Link onFollow={() => follow(file.fileId!)}>{file.name}</Link>
+                {file.trashed && <span className={MUTED}> {TRASHED_MARK}</span>}
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {/* A file that cannot be read any more (e.g. purged since the answer) does not open. */}
+      {failed && (
+        <p role="alert" className={ALERT}>
+          {LINKED_FILE_FAILED}
+        </p>
+      )}
+    </>
   );
-}
-
-// A file that cannot be read any more (e.g. purged since the answer) simply does not open.
-function openLinked(openFile: (fileId: string) => Promise<void>, fileId: string) {
-  openFile(fileId).catch(() => {});
 }

@@ -58,20 +58,29 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const openFile = useCallback(async (fileId: string) => {
     const request = ++linkRequest.current;
     const file = await call('files:measure', { fileId });
-    const asset = file.assetId === null ? null : await call('assets:get', { id: file.assetId });
+    // An asset that cannot be read does not keep the file from showing; it shows without one.
+    const asset = file.assetId === null ? null : await call('assets:get', { id: file.assetId }).catch(() => null);
     if (request !== linkRequest.current) return;
     setLinked({ file, asset: asset === null ? null : { id: asset.id, name: asset.name, tags: asset.tags } });
   }, []);
 
+  // A paid start: while one for a file is in flight, a repeated click for that file sends nothing.
+  const starting = useRef(new Set<string>());
   const upscale = useCallback(
     async (file: FileRecord, scale: UpscaleScale) => {
-      const providerId = defaultProviderId(providersRef.current, 'venice');
-      const result = await call(
-        'generations:start',
-        providerId === null ? { kind: 'upscale', fileId: file.id, scale } : { kind: 'upscale', fileId: file.id, providerId, scale },
-      );
-      if (!result.ok) throw new Error(JOB_ERROR_MESSAGES[result.code]);
-      refresh();
+      if (starting.current.has(file.id)) return;
+      starting.current.add(file.id);
+      try {
+        const providerId = defaultProviderId(providersRef.current, 'venice');
+        const result = await call(
+          'generations:start',
+          providerId === null ? { kind: 'upscale', fileId: file.id, scale } : { kind: 'upscale', fileId: file.id, providerId, scale },
+        );
+        if (!result.ok) throw new Error(JOB_ERROR_MESSAGES[result.code]);
+        refresh();
+      } finally {
+        starting.current.delete(file.id);
+      }
     },
     [refresh],
   );

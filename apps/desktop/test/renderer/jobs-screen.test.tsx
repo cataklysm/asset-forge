@@ -397,6 +397,16 @@ it('the Provider column shows the entry name and the model, and the stored name 
   expect(within(rowOf('nameless.png')).getAllByRole('gridcell')[2]!.textContent).toBe('Removed provider');
 });
 
+it('the Provider column names the lane of a generation job, with the model of an edit and none for an upscale', async () => {
+  const edit = job({ type: IMAGE_GENERATE_JOB, fileName: 'edit.png', providerId: RUNPOD.id, providerName: 'RunPod', model: 'mock-edit' });
+  const upscale = job({ type: IMAGE_GENERATE_JOB, fileName: 'upscale.png', providerId: RUNPOD.id, providerName: 'RunPod', model: null });
+  withProviders({ 'jobs:list': listOf([edit, upscale]) });
+  renderScreen();
+  await screen.findByText('edit.png');
+  expect(within(rowOf('edit.png')).getAllByRole('gridcell')[2]!.textContent).toBe('RunPod · mock-edit');
+  expect(within(rowOf('upscale.png')).getAllByRole('gridcell')[2]!.textContent).toBe('RunPod');
+});
+
 it('the provider filter offers All providers plus the entries and sends providerId', async () => {
   const user = userEvent.setup();
   const local = job({ fileName: 'local.png', providerId: LOCAL.id, providerName: 'Local Ollama', model: 'vision-a' });

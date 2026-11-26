@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
 import type { FileRecord, Generation, GenerationFile, JobSummary } from '@assetforge/contracts';
@@ -10,7 +10,7 @@ import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { deferred, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, trashedRecord } from './fixtures';
 
 // The studio dialog is built in its own task; here it only shows which file it was opened on and
@@ -297,6 +297,70 @@ it('a file without generations shows neither block', async () => {
   await waitFor(() => expect(api.calls.some((c) => c.channel === 'generations:forFile')).toBe(true));
   expect(screen.queryByRole('region', { name: 'Generated from' })).toBeNull();
   expect(screen.queryByRole('region', { name: 'Results' })).toBeNull();
+});
+
+it('a source whose asset cannot be read still opens, without its asset', async () => {
+  const inAsset = { ...SOURCE, assetId: nextId(), role: 'reference' as const };
+  const made = generation();
+  install({
+    ...linkedHandlers(made),
+    'files:measure': ({ fileId }) => (fileId === SOURCE.id ? inAsset : RESULT),
+    'assets:get': () => {
+      throw new Error('gone');
+    },
+  });
+  render(
+    <Providers>
+      <DialogHost file={RESULT} />
+    </Providers>,
+  );
+  const block = await screen.findByRole('region', { name: 'Generated from' });
+  await userEvent.setup().click(within(block).getByRole('link', { name: 'oak.png' }));
+  expect(await screen.findByRole('dialog', { name: 'oak.png' })).not.toBeNull();
+  expect(within(block).queryByRole('alert')).toBeNull();
+});
+
+it('a source that cannot be read shows the fixed message beside its link', async () => {
+  const made = generation();
+  install({
+    ...linkedHandlers(made),
+    'files:measure': () => {
+      throw new Error('unreadable');
+    },
+  });
+  render(
+    <Providers>
+      <DialogHost file={RESULT} />
+    </Providers>,
+  );
+  const block = await screen.findByRole('region', { name: 'Generated from' });
+  await userEvent.setup().click(within(block).getByRole('link', { name: 'oak.png' }));
+  expect((await within(block).findByRole('alert')).textContent).toBe('This file could not be opened');
+  expect(screen.queryByRole('dialog', { name: 'oak.png' })).toBeNull();
+});
+
+it('a second Upscale 4× while the first start is in flight sends nothing', async () => {
+  const file = fileRecord();
+  const start = deferred<{ ok: true; generation: Generation }>();
+  const api = install({ 'generations:start': () => start.promise });
+  render(
+    <Providers>
+      <MenuHost file={file} />
+    </Providers>,
+  );
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'providers:list')).toBe(true));
+  let user = await openMenu();
+  await user.click(screen.getByRole('menuitem', { name: 'Upscale 4×' }));
+  user = await openMenu();
+  await user.click(screen.getByRole('menuitem', { name: 'Upscale 4×' }));
+  const starts = () => api.calls.filter((c) => c.channel === 'generations:start');
+  expect(starts()).toHaveLength(1);
+  await act(async () => start.resolve({ ok: true, generation: generation({ kind: 'upscale' }) }));
+  // Once the first start answered, another one may go out.
+  user = await openMenu();
+  await user.click(screen.getByRole('menuitem', { name: 'Upscale 4×' }));
+  await waitFor(() => expect(starts()).toHaveLength(2));
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('Open in the studio shows the result in the file detail dialog', async () => {
