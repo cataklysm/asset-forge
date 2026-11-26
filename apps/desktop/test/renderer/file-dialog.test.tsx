@@ -127,6 +127,14 @@ it('the asset link follows to the asset', async () => {
   expect(onOpenAsset).toHaveBeenCalledWith(ASSET.id);
 });
 
+it('without a handler the asset name is plain text, not a link', async () => {
+  install();
+  render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} />);
+  await openDialog();
+  expect(screen.queryByRole('link', { name: 'Oak tree' })).toBeNull();
+  expect(screen.getByText('Oak tree')).toBeTruthy();
+});
+
 it('cover and detach menu items carry their tooltips', async () => {
   install();
   const file = fileRecord({ assetId: ASSET.id, role: 'reference' });

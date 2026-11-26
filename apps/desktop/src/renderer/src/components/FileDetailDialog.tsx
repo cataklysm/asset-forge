@@ -112,7 +112,7 @@ export function FileDetailDialog({ file, asset, actions, roleControl, onFileChan
               <div className="space-y-2">
                 <div>
                   <span className={LABEL}>Asset </span>
-                  <Link onFollow={() => onOpenAsset?.(asset.id)}>{asset.name}</Link>
+                  {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
                 </div>
                 <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} />
               </div>

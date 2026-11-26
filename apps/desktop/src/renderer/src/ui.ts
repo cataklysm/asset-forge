@@ -10,7 +10,7 @@ export const ITEM_HOVER = 'hover:bg-raised';
  * The one button look: every button in the application looks the same, only its size differs.
  * A toggle button (`aria-pressed`) shows its pressed state through the same look.
  */
-export const BUTTON_LOOK = `inline-flex items-center justify-center gap-2 rounded-control border border-line bg-raised text-sm text-text hover:border-line-strong disabled:opacity-50 aria-pressed:border-accent aria-pressed:bg-nav-active ${FOCUS}`;
+export const BUTTON_LOOK = `inline-flex items-center justify-center gap-2 rounded-control border border-line bg-raised text-sm text-text hover:border-line-strong disabled:opacity-50 aria-disabled:opacity-50 aria-pressed:border-accent aria-pressed:bg-nav-active ${FOCUS}`;
 
 export const BUTTON = `${BUTTON_LOOK} h-9 px-3.5`;
 export const ICON_BUTTON = `${BUTTON_LOOK} h-9 w-9`;

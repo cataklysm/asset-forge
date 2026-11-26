@@ -260,11 +260,15 @@ describe('file tag batches', () => {
     const prepare = vi.spyOn(Database.prototype, 'prepare');
     const indexWrites = () => prepare.mock.calls.filter(([source]) => /^\s*insert into asset_search\b/i.test(String(source))).length;
 
-    await addMany([...ids, inbox]);
-    expect(indexWrites()).toBe(1);
-    prepare.mockClear();
-    await removeMany([...ids, inbox]);
-    expect(indexWrites()).toBe(1);
+    try {
+      await addMany([...ids, inbox]);
+      expect(indexWrites()).toBe(1);
+      prepare.mockClear();
+      await removeMany([...ids, inbox]);
+      expect(indexWrites()).toBe(1);
+    } finally {
+      prepare.mockRestore();
+    }
   });
 
   test('a tagged asset file is found by assets:list query afterwards', async () => {
