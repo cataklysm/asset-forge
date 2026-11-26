@@ -26,6 +26,7 @@ import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TrashScreen } from '../screens/TrashScreen';
 import type { TagRename } from '../tag-rename';
+import { StudioProvider } from '../studio-context';
 import { TagsProvider } from '../tags-context';
 import { TrashProvider, useTrash } from '../trash-context';
 import { ALERT } from '../ui';
@@ -160,47 +161,49 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
                 {/* The screens bring their own padding. */}
                 {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
                 <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
-                  {error !== null && (
-                    <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
-                      {error}
-                    </p>
-                  )}
-                  {view.name === 'assets' ? (
-                    <AssetsScreen
-                      state={shell.assetList}
-                      onStateChange={setAssetList}
-                      onOpen={(id) => setView({ name: 'asset', id })}
-                    />
-                  ) : view.name === 'asset' ? (
-                    <AssetScreen
-                      key={view.id}
-                      id={view.id}
-                      tab={shell.assetTab}
-                      onTabChange={setAssetTab}
-                      onBack={() => setView({ name: 'assets' })}
-                      onOpenAsset={(id) => setView({ name: 'asset', id })}
-                      onOpenProject={(id) => setView({ name: 'project', id })}
-                      onBusyChange={setBusy}
-                    />
-                  ) : view.name === 'project' ? (
-                    <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
-                  ) : view.name === 'inbox' ? (
-                    <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
-                  ) : view.name === 'trash' ? (
-                    <TrashScreen state={shell.trashList} onStateChange={setTrashList} />
-                  ) : view.name === 'jobs' ? (
-                    <JobsScreen />
-                  ) : view.name === 'settings' ? (
-                    <SettingsScreen />
-                  ) : (
-                    <ProjectsScreen
-                      state={shell.projectList}
-                      onStateChange={setProjectList}
-                      onOpen={(id) => setView({ name: 'project', id })}
-                      onOpenAsset={(id) => setView({ name: 'asset', id })}
-                      onShowAssets={showAssets}
-                    />
-                  )}
+                  <StudioProvider>
+                    {error !== null && (
+                      <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+                        {error}
+                      </p>
+                    )}
+                    {view.name === 'assets' ? (
+                      <AssetsScreen
+                        state={shell.assetList}
+                        onStateChange={setAssetList}
+                        onOpen={(id) => setView({ name: 'asset', id })}
+                      />
+                    ) : view.name === 'asset' ? (
+                      <AssetScreen
+                        key={view.id}
+                        id={view.id}
+                        tab={shell.assetTab}
+                        onTabChange={setAssetTab}
+                        onBack={() => setView({ name: 'assets' })}
+                        onOpenAsset={(id) => setView({ name: 'asset', id })}
+                        onOpenProject={(id) => setView({ name: 'project', id })}
+                        onBusyChange={setBusy}
+                      />
+                    ) : view.name === 'project' ? (
+                      <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+                    ) : view.name === 'inbox' ? (
+                      <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
+                    ) : view.name === 'trash' ? (
+                      <TrashScreen state={shell.trashList} onStateChange={setTrashList} />
+                    ) : view.name === 'jobs' ? (
+                      <JobsScreen />
+                    ) : view.name === 'settings' ? (
+                      <SettingsScreen />
+                    ) : (
+                      <ProjectsScreen
+                        state={shell.projectList}
+                        onStateChange={setProjectList}
+                        onOpen={(id) => setView({ name: 'project', id })}
+                        onOpenAsset={(id) => setView({ name: 'asset', id })}
+                        onShowAssets={showAssets}
+                      />
+                    )}
+                  </StudioProvider>
                 </OpenSettingsProvider>
               </JobsAppShell>
             </TagsProvider>

@@ -11,6 +11,7 @@ import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
 import { FilmStrip } from './FilmStrip';
 import { fileOrigin } from './FileTile';
+import { GenerationDetails } from './GenerationDetails';
 import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
@@ -26,7 +27,7 @@ interface Props {
   asset: { id: string; name: string; tags: readonly TagAssignment[] } | null;
   /** Drives the "More" menu; its "Details" entry is not offered here. */
   actions: FileActionContext;
-  /** Asset files: the role select. Inbox files: the assign control. Not shown for a trashed file. */
+  /** Asset files: the role select. Inbox files: the assign control. Not shown for a trashed file; null shows no section. */
   roleControl: ReactNode;
   /** Receives the updated file after `files:addTag` / `files:removeTag`. */
   onFileChange(file: FileRecord): void;
@@ -254,7 +255,7 @@ export function FileDetailDialog({
               )}
             </section>
             {/* The inbox's assign control shows only for complete files. */}
-            {!trashed && (asset !== null || complete) && (
+            {!trashed && roleControl !== null && (asset !== null || complete) && (
               <section className="space-y-2">
                 <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
                 {/* Keyed by file: stepping on starts the controls afresh. */}
@@ -279,6 +280,7 @@ export function FileDetailDialog({
                 onRemove={(name) => changeTag('files:removeTag', name)}
               />
             )}
+            {complete && <GenerationDetails key={`generation-${file.id}`} fileId={file.id} />}
             {asset !== null && (
               <>
                 <hr className={`border-t ${BORDER}`} />
