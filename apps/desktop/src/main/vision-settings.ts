@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -64,6 +64,11 @@ export interface VisionSettingsStore {
   timeoutMs(): number;
   /** Decrypts the stored key for one request; null when there is none or the environment is in force. */
   apiKey(): string | null;
+  /**
+   * The key for a request to `baseUrl`: null unless the base URL in force has the same origin.
+   * An adapter built for an earlier origin can therefore never receive a key entered for a later one.
+   */
+  apiKeyFor(baseUrl: string): string | null;
   defaults(): { taggingModel: string | null; promptModel: string | null };
   /** Called after every successful save. */
   onChange(listener: () => void): void;
@@ -93,7 +98,10 @@ export function createVisionSettingsStore(o: {
   };
 
   const load = (): StoredVision => {
-    if (stored === null) stored = readStored(settingsPath);
+    if (stored === null) {
+      sweepKeyTemps(keyPath);
+      stored = readStored(settingsPath);
+    }
     return stored;
   };
 
@@ -148,17 +156,26 @@ export function createVisionSettingsStore(o: {
       // half-way leaves no key rather than a key bound to the wrong origin.
       if (apiKey === null || originOf(previous.baseUrl) !== originOf(next.baseUrl)) {
         rmSync(keyPath, { force: true });
+        sweepKeyTemps(keyPath);
       }
       writeAtomic(settingsPath, `${JSON.stringify({ version: 1, vision: next }, null, 2)}\n`);
       stored = next;
-      if (encrypted !== null) writeAtomic(keyPath, encrypted);
-
-      for (const listener of listeners) listener();
+      // The settings changed once they are written, so listeners hear of it even if the key write fails.
+      try {
+        if (encrypted !== null) writeAtomic(keyPath, encrypted);
+      } finally {
+        for (const listener of listeners) listener();
+      }
       return view();
     },
     baseUrl: () => current().baseUrl,
     timeoutMs: () => current().timeoutSeconds * 1000,
     apiKey: decryptKey,
+    apiKeyFor(baseUrl) {
+      const inForce = current().baseUrl;
+      if (inForce === null || originOf(inForce) !== originOf(baseUrl)) return null;
+      return decryptKey();
+    },
     defaults: () => {
       const { taggingModel, promptModel } = current();
       return { taggingModel, promptModel };
@@ -167,6 +184,21 @@ export function createVisionSettingsStore(o: {
       listeners.push(listener);
     },
   };
+}
+
+/** Removes temporary key files a crash between write and rename left behind. */
+function sweepKeyTemps(keyPath: string): void {
+  const dir = dirname(keyPath);
+  const prefix = `${keyPath.slice(dir.length + 1)}.`;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name.startsWith(prefix) && name.endsWith('.tmp')) rmSync(join(dir, name), { force: true });
+  }
 }
 
 function originOf(baseUrl: string | null): string | null {

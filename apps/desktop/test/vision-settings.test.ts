@@ -210,6 +210,39 @@ describe('vision settings store: API key', () => {
     expect(s.apiKey()).toBeNull();
   });
 
+  it('tells listeners when the key write fails after the settings were written', () => {
+    const s = store();
+    s.save(input());
+    // A non-empty directory where the key file belongs makes the final rename fail.
+    mkdirSync(keyFile(), { recursive: true });
+    writeFileSync(join(keyFile(), 'blocker'), 'x');
+    let calls = 0;
+    s.onChange(() => calls++);
+    expect(() => s.save(input({ timeoutSeconds: 200, apiKey: KEY }))).toThrow();
+    expect(calls).toBe(1);
+    expect(s.timeoutMs()).toBe(200_000);
+    expect(readdirSync(join(dir, 'credentials')).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('sweeps temporary key files left by a crash on load', () => {
+    mkdirSync(join(dir, 'credentials'));
+    const leftover = join(dir, 'credentials', 'vision-api-key.11111111-1111-4111-8111-111111111111.tmp');
+    writeFileSync(leftover, 'partial');
+    writeFileSync(join(dir, 'credentials', 'unrelated.tmp'), 'other');
+    store().view();
+    expect(existsSync(leftover)).toBe(false);
+    expect(readdirSync(join(dir, 'credentials'))).toEqual(['unrelated.tmp']);
+  });
+
+  it('sweeps temporary key files when the key is deleted', () => {
+    const s = store();
+    s.save(input({ apiKey: KEY }));
+    const leftover = join(dir, 'credentials', 'vision-api-key.22222222-2222-4222-8222-222222222222.tmp');
+    writeFileSync(leftover, 'partial');
+    s.save(input({ apiKey: null }));
+    expect(readdirSync(join(dir, 'credentials'))).toEqual([]);
+  });
+
   it('reports no key when the credential store becomes unavailable', () => {
     store().save(input({ apiKey: KEY }));
     codec.canEncrypt = false;
@@ -244,6 +277,27 @@ describe('vision settings store: origin rule', () => {
     const s = store();
     s.save(input({ baseUrl: 'https://ollama.example.test', apiKey: KEY }));
     expect(s.save(input({ baseUrl: 'https://ollama.example.test:443/' })).hasApiKey).toBe(true);
+  });
+
+  it.each([
+    ['host case', 'http://Ollama.Example.test:11434', 'http://ollama.example.TEST:11434/x', true],
+    ['an IPv6 literal', 'http://[::1]:11434', 'http://[0:0:0:0:0:0:0:1]:11434/api', true],
+    ['an explicit default port', 'http://ollama.example.test', 'http://ollama.example.test:80', true],
+    ['a trailing dot', 'http://ollama.example.test:11434', 'http://ollama.example.test.:11434', false],
+  ])('normalises the origin for %s', (_label, first, second, kept) => {
+    const s = store();
+    s.save(input({ baseUrl: first, apiKey: KEY }));
+    expect(s.save(input({ baseUrl: second })).hasApiKey).toBe(kept);
+    expect(s.apiKey()).toBe(kept ? KEY : null);
+  });
+
+  it('answers apiKeyFor only for the origin in force', () => {
+    const s = store();
+    s.save(input({ apiKey: KEY }));
+    expect(s.apiKeyFor('http://192.168.1.20:11434/other')).toBe(KEY);
+    expect(s.apiKeyFor('http://192.168.1.21:11434')).toBeNull();
+    s.save(input({ baseUrl: null }));
+    expect(s.apiKeyFor('http://192.168.1.20:11434')).toBeNull();
   });
 
   it('stores the new key when the origin changes with a new key', () => {

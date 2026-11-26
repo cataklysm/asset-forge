@@ -40,7 +40,8 @@ export function createVisionGateway(o: {
     adapter = o.create({
       baseUrl,
       timeoutMs: o.settings.timeoutMs(),
-      apiKey: () => o.settings.apiKey(),
+      // Bound to this adapter's base URL: a stale adapter still in use after an origin change gets no key.
+      apiKey: () => o.settings.apiKeyFor(baseUrl),
       onFailure,
     });
     return adapter;

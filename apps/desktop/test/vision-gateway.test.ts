@@ -83,6 +83,25 @@ describe('vision gateway', () => {
     expect(options.apiKey!()).toBeNull();
   });
 
+  it('never hands a key entered for a new origin to an adapter built for the old one', () => {
+    settings.save(input({ apiKey: KEY }));
+    const g = gateway();
+    g.current();
+    const stale = created[0]!;
+    settings.save(input({ baseUrl: 'http://192.168.1.21:11434', apiKey: 'test-key-not-real-2' }));
+    expect(stale.apiKey!()).toBeNull();
+    g.current();
+    expect(created[1]!.apiKey!()).toBe('test-key-not-real-2');
+  });
+
+  it('keeps handing the key to an adapter whose origin is unchanged by a path-only change', () => {
+    settings.save(input({ apiKey: KEY }));
+    gateway().current();
+    const stale = created[0]!;
+    settings.save(input({ baseUrl: 'http://192.168.1.20:11434/ollama' }));
+    expect(stale.apiKey!()).toBe(KEY);
+  });
+
   it('builds a new adapter after a settings change', () => {
     settings.save(input());
     const g = gateway();
