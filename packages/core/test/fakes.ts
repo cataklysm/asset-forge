@@ -351,7 +351,10 @@ class InMemoryTags implements TagRepository {
     const source = this.tags.get(r.from);
     if (!source) throw new NotFoundError('Tag does not exist');
     if (r.from === r.name) {
-      source.displayName = r.displayName;
+      if (source.displayName !== r.displayName) {
+        source.displayName = r.displayName;
+        this.rewriteProposals(r);
+      }
       return { merged: false };
     }
     const target = this.tags.get(r.name);
@@ -375,16 +378,22 @@ class InMemoryTags implements TagRepository {
     this.tags.delete(r.from);
     if (target) target.displayName = r.displayName;
     else this.tags.set(r.name, { id: source.id, displayName: r.displayName });
+    this.rewriteProposals(r);
+    return { merged: target !== undefined };
+  }
+
+  /** Mirrors the database: every entry named `from` or `name` becomes `name` spelled `displayName`, first position wins. */
+  private rewriteProposals(r: { from: string; name: string; displayName: string }): void {
+    const touched = (t: { name: string }) => t.name === r.from || t.name === r.name;
     for (const [fileId, proposal] of this.proposals ?? []) {
-      if (!proposal.tags.some((t) => t.name === r.from)) continue;
+      if (!proposal.tags.some((t) => touched(t) && (t.name !== r.name || t.displayName !== r.displayName))) continue;
       const tags: { name: string; displayName: string }[] = [];
       for (const t of proposal.tags) {
-        const entry = t.name === r.from ? { name: r.name, displayName: r.displayName } : t;
+        const entry = touched(t) ? { name: r.name, displayName: r.displayName } : t;
         if (!tags.some((x) => x.name === entry.name)) tags.push(entry);
       }
       this.proposals!.set(fileId, { ...proposal, tags });
     }
-    return { merged: target !== undefined };
   }
 
   forAsset(assetId: string): TagAssignment[] {

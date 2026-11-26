@@ -80,7 +80,6 @@ function RenameTagForm({
       current = false;
     };
     // Once per tag; the form is keyed by the tag name.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cleaned = cleanTagText(text);

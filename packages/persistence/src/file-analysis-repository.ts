@@ -1,6 +1,7 @@
 import type { FileAnalysis, FileAnalysisRepository, Proposal } from '@assetforge/core';
 import { and, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { parseTags } from './proposal-tags.js';
 import { file, fileAnalysis, fileAnalysisProposal, fileTag } from './schema.js';
 import { reindexAssets } from './search-index.js';
 import { ensureTag } from './tag-repository.js';
@@ -56,22 +57,6 @@ function writeAnalysis(
     .run();
   tx.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, r.fileId)).run();
   reindexAssets(tx, [r.assetId]);
-}
-
-/** The stored tag list; anything but an array of `{ name, displayName }` strings reads as []. */
-export function parseTags(json: string): Proposal['tags'] {
-  let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((t: unknown) => {
-    if (typeof t !== 'object' || t === null) return [];
-    const { name, displayName } = t as { name?: unknown; displayName?: unknown };
-    return typeof name === 'string' && typeof displayName === 'string' ? [{ name, displayName }] : [];
-  });
 }
 
 const toProposal = (row: typeof fileAnalysisProposal.$inferSelect): Proposal => ({

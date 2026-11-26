@@ -490,4 +490,32 @@ describe('rename and merge', () => {
       { name: 'metal', displayName: 'Metal' },
     ]);
   });
+
+  it('gives every kept target entry of a proposal the new display name on a merge', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const b = await addFile(ctx, 2);
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    await tagAsset(ctx, ctx.other.id, 'front', 'Front', 'manual');
+    expect(await propose(ctx, a, [{ name: 'front', displayName: 'Front' }, { name: 'front view', displayName: 'Front View' }])).toBe(true);
+    expect(await propose(ctx, b, [{ name: 'metal', displayName: 'Metal' }, { name: 'front', displayName: 'Front' }])).toBe(true);
+    await renameTag(ctx.session, { from: 'front view', to: 'FRONT', merge: true });
+    expect((await ctx.db.analyses.getProposal(a))!.tags).toEqual([{ name: 'front', displayName: 'FRONT' }]);
+    expect((await ctx.db.analyses.getProposal(b))!.tags).toEqual([
+      { name: 'metal', displayName: 'Metal' },
+      { name: 'front', displayName: 'FRONT' },
+    ]);
+  });
+
+  it('gives proposals holding the tag the new display name on a display-name-only change', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    await tagAsset(ctx, ctx.asset.id, 'front', 'front', 'manual');
+    expect(await propose(ctx, a, [{ name: 'front', displayName: 'front' }, { name: 'metal', displayName: 'Metal' }])).toBe(true);
+    await renameTag(ctx.session, { from: 'front', to: 'Front', merge: false });
+    expect((await ctx.db.analyses.getProposal(a))!.tags).toEqual([
+      { name: 'front', displayName: 'Front' },
+      { name: 'metal', displayName: 'Metal' },
+    ]);
+  });
 });

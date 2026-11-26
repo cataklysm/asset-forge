@@ -277,12 +277,18 @@ describe('tag rename and waiting proposals', () => {
     await tagAsset('frontal', 'frontal');
     const held = proposal({ tags: pairs(['front view', 'Front View'], ['metal', 'Metal']), promptName: 'Default' });
     await db.analyses.propose(held);
+    const third = uuid(44);
+    await addFile(third);
     await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal'], ['frontal', 'frontal']) }));
-    const untouched = rawProposal(other);
+    await db.analyses.propose(proposal({ fileId: third, tags: pairs(['metal', 'Metal']) }));
+    const before = rawProposal(other) as { tags: string };
+    const untouched = rawProposal(third);
 
     await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: true });
     expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...held, tags: pairs(['frontal', 'Frontal'], ['metal', 'Metal']), stale: false });
-    expect(rawProposal(other)).toEqual(untouched);
+    // The target entry takes the new display name; nothing else of that proposal changes.
+    expect(rawProposal(other)).toEqual({ ...before, tags: JSON.stringify(pairs(['metal', 'Metal'], ['frontal', 'Frontal'])) });
+    expect(rawProposal(third)).toEqual(untouched);
   });
 
   test('a proposal holding source and target keeps one entry at the first position', async () => {
@@ -291,6 +297,30 @@ describe('tag rename and waiting proposals', () => {
     await db.analyses.propose(proposal({ tags: pairs(['front view', 'Front View'], ['front', 'Front']) }));
     await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true });
     expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'FRONT']));
+  });
+
+  test('a merge gives every kept target entry the new display name, also in proposals without the source', async () => {
+    const other = uuid(42);
+    await addFile(other);
+    await tagAsset('front view', 'Front View');
+    await tagAsset('front', 'Front');
+    await db.analyses.propose(proposal({ tags: pairs(['front', 'Front'], ['front view', 'Front View']) }));
+    await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal'], ['front', 'Front']) }));
+    await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true });
+    expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'FRONT']));
+    expect((await db.analyses.getProposal(other))!.tags).toEqual(pairs(['metal', 'Metal'], ['front', 'FRONT']));
+  });
+
+  test('a display-name-only change rewrites proposals holding the tag and leaves the others alone', async () => {
+    const other = uuid(43);
+    await addFile(other);
+    await tagAsset('front', 'front');
+    await db.analyses.propose(proposal({ tags: pairs(['front', 'front'], ['metal', 'Metal']) }));
+    await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal']) }));
+    const untouched = rawProposal(other);
+    await db.tags.rename({ from: 'front', name: 'front', displayName: 'Front', merge: false });
+    expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'Front'], ['metal', 'Metal']));
+    expect(rawProposal(other)).toEqual(untouched);
   });
 
   test('names with LIKE wildcards, quotes and backslashes are rewritten exactly', async () => {

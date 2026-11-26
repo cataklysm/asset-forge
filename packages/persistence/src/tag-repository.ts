@@ -2,8 +2,8 @@ import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@asset
 import { InvalidOperationError, NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { parseTags } from './file-analysis-repository.js';
 import { toRecords } from './file-repository.js';
+import { parseTags } from './proposal-tags.js';
 import { assetTag, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
 
@@ -126,22 +126,25 @@ function mergeLinks(tx: RenameTx, { table, owner }: LinkTable, sourceId: string,
 }
 
 /**
- * Replaces `from` in every waiting proposal with `name` and `displayName`; a list that then holds
- * the name twice keeps the first. `instr` on the JSON text narrows the rows (no LIKE wildcards);
- * only lists that really hold the name are written.
+ * Every entry named `from` or `name` in a waiting proposal becomes `name` spelled `displayName`; a
+ * list that then holds the name twice keeps the first. `instr` on the JSON text narrows the rows
+ * (no LIKE wildcards); only lists that really change are written.
  */
 function rewriteProposals(tx: RenameTx, r: { from: string; name: string; displayName: string }): void {
   const rows = tx
     .select({ fileId: fileAnalysisProposal.fileId, tags: fileAnalysisProposal.tags })
     .from(fileAnalysisProposal)
-    .where(sql`instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.from)}) > 0`)
+    .where(
+      sql`instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.from)}) > 0 or instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.name)}) > 0`,
+    )
     .all();
   for (const row of rows) {
     const tags = parseTags(row.tags);
-    if (!tags.some((t) => t.name === r.from)) continue;
+    const touched = (t: { name: string }) => t.name === r.from || t.name === r.name;
+    if (!tags.some((t) => touched(t) && (t.name !== r.name || t.displayName !== r.displayName))) continue;
     const rewritten: { name: string; displayName: string }[] = [];
     for (const t of tags) {
-      const entry = t.name === r.from ? { name: r.name, displayName: r.displayName } : t;
+      const entry = touched(t) ? { name: r.name, displayName: r.displayName } : t;
       if (!rewritten.some((x) => x.name === entry.name)) rewritten.push(entry);
     }
     tx.update(fileAnalysisProposal).set({ tags: JSON.stringify(rewritten) }).where(eq(fileAnalysisProposal.fileId, row.fileId)).run();
@@ -245,7 +248,10 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
         if (!source) throw new NotFoundError('Tag does not exist');
         if (r.from === r.name) {
           // Only how the name is written changes; the index holds normalised names.
-          if (source.displayName !== r.displayName) tx.update(tag).set({ displayName: r.displayName }).where(eq(tag.id, source.id)).run();
+          if (source.displayName !== r.displayName) {
+            tx.update(tag).set({ displayName: r.displayName }).where(eq(tag.id, source.id)).run();
+            rewriteProposals(tx, r);
+          }
           return { merged: false };
         }
         const target = tx.select().from(tag).where(eq(tag.name, r.name)).get();
