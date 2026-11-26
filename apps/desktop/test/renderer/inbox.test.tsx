@@ -297,9 +297,9 @@ it('import results list imported, failed and duplicates', async () => {
     'files:import': () => {
       api.setFiles([a, b]);
       return [
-        { sourcePath: 'C:\\in\\a.png', file: a, error: null, duplicateOf: [] },
-        { sourcePath: 'C:\\in\\b.png', file: b, error: null, duplicateOf: [a.id] },
-        { sourcePath: 'C:\\in\\c.exe', file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+        { sourcePath: 'C:\\in\\a.png', entryName: null, file: a, error: null, duplicateOf: [] },
+        { sourcePath: 'C:\\in\\b.png', entryName: null, file: b, error: null, duplicateOf: [a.id] },
+        { sourcePath: 'C:\\in\\c.exe', entryName: null, file: null, error: 'This file type cannot be imported', duplicateOf: [] },
       ];
     },
   });

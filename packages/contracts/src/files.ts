@@ -43,8 +43,11 @@ export const FileRecordSchema = z.object({
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 
+/** One result per plain source; for an unpacked archive one per imported or refused entry, or one for the archive as a whole. */
 export const ImportResultSchema = z.object({
   sourcePath: z.string(),
+  /** The entry's path inside the archive; null for a plain source and for an archive-level failure. */
+  entryName: z.string().nullable(),
   file: FileRecordSchema.nullable(),
   error: z.string().nullable(),
   duplicateOf: z.array(z.uuid()),

@@ -110,6 +110,8 @@ export const ipcContract = {
     request: z.object({
       sourcePaths: z.array(z.string()).min(1).max(1000),
       target: FileTargetSchema.optional(),
+      /** Unpack every `.zip` source into its entries instead of importing it as a file. */
+      unpackArchives: z.boolean().optional(),
     }),
     response: z.array(ImportResultSchema),
   },

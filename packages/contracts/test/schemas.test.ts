@@ -129,6 +129,22 @@ describe('ipcContract', () => {
   it('rejects files:import with empty sourcePaths', () => {
     expect(ipcContract['files:import'].request.safeParse({ sourcePaths: [] }).success).toBe(false);
   });
+
+  it('files:import takes an optional boolean unpackArchives', () => {
+    const request = ipcContract['files:import'].request;
+    expect(request.safeParse({ sourcePaths: ['C:\\in\\a.zip'] }).success).toBe(true);
+    expect(request.safeParse({ sourcePaths: ['C:\\in\\a.zip'], unpackArchives: true }).success).toBe(true);
+    expect(request.safeParse({ sourcePaths: ['C:\\in\\a.zip'], unpackArchives: false }).success).toBe(true);
+    expect(request.safeParse({ sourcePaths: ['C:\\in\\a.zip'], unpackArchives: 'yes' }).success).toBe(false);
+  });
+
+  it('an import result requires entryName', () => {
+    const response = ipcContract['files:import'].response;
+    const result = { sourcePath: 'C:\\in\\a.zip', file: null, error: 'This archive contains no files', duplicateOf: [] };
+    expect(response.safeParse([result]).success).toBe(false);
+    expect(response.safeParse([{ ...result, entryName: null }]).success).toBe(true);
+    expect(response.safeParse([{ ...result, entryName: 'tex/a.png' }]).success).toBe(true);
+  });
 });
 
 describe('NameInputSchema', () => {

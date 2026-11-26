@@ -24,10 +24,12 @@ import { listFiles, recoverFileMoves, relocateFile } from './asset-files.js';
 import { sweepTrash } from './file-trash.js';
 import { ensureBuiltInAssetTypes } from './asset-types.js';
 import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
+import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
+import { isZipArchive } from './media-types.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
-import type { FileQuery, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+import type { ArchiveReader, FileQuery, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -91,9 +93,16 @@ export class WorkspaceManager {
     return this.queue.run(() => this.doRemove(input));
   }
 
-  /** Imports into the inbox, or with `target` into that asset (which must exist before anything is imported). */
-  importFiles(sourcePaths: string[], target: FileTarget | null = null): Promise<ImportResult[]> {
-    return this.queue.run(() => this.doImportFiles(sourcePaths, target));
+  /**
+   * Imports into the inbox, or with `target` into that asset (which must exist before anything is imported).
+   * With `unpackArchives` every `.zip` source is unpacked into its entries instead of imported as a file.
+   */
+  importFiles(
+    sourcePaths: string[],
+    target: FileTarget | null = null,
+    options: { unpackArchives?: boolean } = {},
+  ): Promise<ImportResult[]> {
+    return this.queue.run(() => this.doImportFiles(sourcePaths, target, options));
   }
 
   listFiles(q: FileQuery): Promise<FileList> {
@@ -225,31 +234,44 @@ export class WorkspaceManager {
     return { folderTrashed };
   }
 
-  private async doImportFiles(sourcePaths: string[], target: FileTarget | null): Promise<ImportResult[]> {
+  private async doImportFiles(
+    sourcePaths: string[],
+    target: FileTarget | null,
+    options: { unpackArchives?: boolean },
+  ): Promise<ImportResult[]> {
     const session = this.session();
     if (target !== null && (await session.database.assets.get(target.assetId)) === null) {
       throw new NotFoundError(`Asset ${target.assetId} does not exist`);
     }
-    const ctx: ImportContext = {
+    const ctx: ImportContext & { archives: ArchiveReader } = {
       storage: session.storage,
       storageId: session.storageId,
       files: session.database.files,
       sources: this.host.sources,
+      archives: this.host.archives,
       probe: this.host.imageProbe,
       newId: session.newId,
       now: session.now,
     };
+    const place = async (result: ImportResult): Promise<void> => {
+      if (target === null || result.file?.status !== 'complete') return;
+      try {
+        result.file = await relocateFile(session, result.file.id, target);
+      } catch (error) {
+        // The file stays in the inbox; the result reports why it was not placed.
+        result.error = safeErrorMessage(error, 'Placing the file failed');
+      }
+    };
+    const budget: ArchiveBudget = { entries: MAX_ARCHIVE_ENTRIES, bytes: MAX_ARCHIVE_BYTES };
     const results: ImportResult[] = [];
     for (const sourcePath of sourcePaths) {
-      const result = await importFile(ctx, sourcePath);
-      if (target !== null && result.file?.status === 'complete') {
-        try {
-          result.file = await relocateFile(session, result.file.id, target);
-        } catch (error) {
-          // The file stays in the inbox; the result reports why it was not placed.
-          result.error = safeErrorMessage(error, 'Placing the file failed');
-        }
+      const sourceName = sourcePath.split(/[\\/]/).pop() ?? '';
+      if (options.unpackArchives === true && isZipArchive(sourceName)) {
+        results.push(...(await importArchive(ctx, sourcePath, budget, place)));
+        continue;
       }
+      const result = await importFile(ctx, sourcePath);
+      await place(result);
       results.push(result);
     }
     return results;

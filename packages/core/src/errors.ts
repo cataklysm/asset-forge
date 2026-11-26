@@ -36,6 +36,20 @@ export class NotFoundError extends define('not_found') {}
 export class InvalidOperationError extends define('invalid_operation') {}
 export class ValidationFailedError extends define('validation_failed') {}
 
+/** A readable source that is not a ZIP archive (or whose directory cannot be read). */
+export class ArchiveNotReadableError extends ValidationFailedError {
+  constructor(options?: { cause?: unknown }) {
+    super('This file is not a readable ZIP archive', options);
+  }
+}
+
+/** An archive that would take an import over its entry or size limit. */
+export class ArchiveTooLargeError extends ValidationFailedError {
+  constructor(options?: { cause?: unknown }) {
+    super('This archive is too large to unpack', options);
+  }
+}
+
 export const CREDENTIAL_STORE_UNAVAILABLE_MESSAGE = 'The system credential store is not available, so the API key cannot be saved';
 
 /** The OS credential store cannot encrypt, so a secret is not saved; there is no plaintext fallback. */

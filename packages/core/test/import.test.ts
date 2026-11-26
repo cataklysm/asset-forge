@@ -49,6 +49,7 @@ describe('importFile', () => {
     expect(result.error).toBeNull();
     expect(result.duplicateOf).toEqual([]);
     expect(result.sourcePath).toBe('/src/ref.png');
+    expect(result.entryName).toBeNull();
     const file = result.file!;
     expect(file.status).toBe('complete');
     expect(file.sizeBytes).toBe(5);
@@ -349,7 +350,7 @@ describe('refused imports', () => {
       return ctx.files.insertPending(r);
     };
     const result = await importFile({ ...ctx, files }, '/src/tool.exe');
-    expect(result).toEqual({ sourcePath: '/src/tool.exe', file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(result).toEqual({ sourcePath: '/src/tool.exe', entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     expect(sources.opened).toEqual([]);
     expect(inserted).toBe(0);
   });
@@ -359,7 +360,7 @@ describe('refused imports', () => {
     for (const p of ['C:\\x\\a.exe::$DATA', 'C:\\x\\a.exe:stream', 'C:\\x\\evil.txt:payload.exe']) {
       sources.set(p, Buffer.from('x'));
       const result = await importFile(ctx, p);
-      expect(result).toEqual({ sourcePath: p, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+      expect(result).toEqual({ sourcePath: p, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     }
     expect(sources.opened).toEqual([]);
   });

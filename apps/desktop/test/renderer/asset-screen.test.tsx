@@ -218,8 +218,8 @@ it('import shows the result strip with failed names and errors, and reports busy
   const api = install(asset, {
     'dialog:pickFiles': () => picked.promise,
     'files:import': () => [
-      { sourcePath: 'C:\\in\\a.png', file: imported, error: null, duplicateOf: [] },
-      { sourcePath: 'C:\\in\\b.exe', file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+      { sourcePath: 'C:\\in\\a.png', entryName: null, file: imported, error: null, duplicateOf: [] },
+      { sourcePath: 'C:\\in\\b.exe', entryName: null, file: null, error: 'This file type cannot be imported', duplicateOf: [] },
     ],
   });
   const onBusyChange = vi.fn();
