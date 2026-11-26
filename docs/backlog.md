@@ -163,7 +163,7 @@ Found during the build:
 - `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
 - Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
 - `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
-- Inbox (`apps/desktop/src/renderer/src/screens/InboxScreen.tsx`): the `importResult` state also holds analysis results (rename to `result`); "Analyse" is not blocked while an import runs and not disabled while an analysis call runs; a rejected call leaves an earlier result strip in place.
+- Inbox and asset Files tab (`InboxScreen.tsx`, `AssetFilesTab.tsx`): the `importResult` state also holds the analysis counts (rename to `result`); the counts of a start replace an import failure list in the shared strip even when it was not read yet.
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
@@ -182,7 +182,6 @@ Tests:
 - Renderer: the theme contrast test in `tags.test.tsx` reads `index.css` through `process.cwd()` (use `import.meta.url` like `theme.test.ts`).
 - Real 50 ms sleeps in negative assertions (`file-browser.test.tsx`, `inbox.test.tsx`, `jobs-ipc.test.ts`).
 - Jobs screen tests: no test for the poll and reload after a rejected action, for the position kept across a reload, or for the reset to the top on a status change.
-- Renderer analysis tests: the Files-tab skipped test uses a failed PNG rather than a document; the inbox dialog test asserts only the IPC call; there is no dialog test on the Files tab; no test checks `refresh()` after a successful `startAnalysis` (inbox, Files tab) or the `resultToken` reload of the asset Files tab.
 - The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
 
 ## Phase 4b
@@ -196,6 +195,10 @@ Deferred by design:
 - `settings:listVisionModels` has no cancel channel; a slow server holds the request until its timeout.
 - The Settings screen is reachable only inside an open workspace, although the settings are app-level.
 - The two "Before paid providers" entries of phase 4a still apply.
+- `jobs:resume` is app-level: it works without an open workspace and resumes the one pause gate of the app session.
+- The "Proposals" toggle of the file lists is local to `FileBrowser` and does not survive navigation (the list state assumes string filter values, and "Analyse all" would have to leave the toggle out of its filter).
+- The pause banner sits in the shell behind the backdrop of a modal dialog, so a pause is not visible while a dialog is open.
+- With a selection, the asset Files tab shows two Analyse buttons (the asset's in the header and the selection's), told apart only by their tooltips.
 
 Provider adapter (`packages/providers/src/ollama-vision.ts`):
 
@@ -208,7 +211,11 @@ Settings (`apps/desktop/src/main/vision-settings.ts`):
 
 - A change listener that throws in the `finally` of a save masks an error of the key write.
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
-- An unusable `ASSETFORGE_VISION_BASE_URL` in environment mode is treated as "not configured" without a warning.
+
+Main process (`apps/desktop/src/main`):
+
+- Cancelled Image2Prompt runs keep running in the media worker pool until they settle; the set of settling runs is unbounded, so repeated Generate and Cancel can pile them up (pass the signal into `images.jpeg` or cap the set).
+- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every settings save even when the queue is not paused (`job-host.ts`).
 
 Scheduler and pause gate (`packages/jobs`):
 
@@ -220,15 +227,22 @@ Persistence:
 
 - `acceptProposal` in the repository answers `false` both for no proposal and for a stale one; core tells them apart only by reading first.
 - A wrong `sha256` passed to the repository's `acceptProposal` deletes a valid proposal (core always passes the stored one).
-- The proposal reader returns an empty tag list for invalid stored tag names, where the list readers throw.
+- The proposal reader (`parseTags` in `file-analysis-repository.ts`) returns an empty tag list for stored JSON that does not parse or is not an array and drops malformed entries, where the list readers throw; it does not validate tag names.
 - No query-plan test for the reader page statement or the new index `job (file_id, type, created_at, id)`.
 
 Renderer:
 
-- Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract.
-- A stored default model that the server no longer offers is shown but not blocked.
-- The title says "not configured" while the settings are still loading.
-- A busy state can flicker for one frame; no test for a double click on Start or Accept.
+- Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract, which carries only `fileId` and `names`.
+- A file that is analysed and also queued is counted only as `alreadyAnalysed`, so with "Analyse again" the start dialog can count it to analyse and the start then reports 0 queued without saying why; there is no dedicated dialog state for 0 enqueued (only the strip's "0 queued, …").
+- `ModelSelect` shows a failed model list twice on the Settings screen, and a stale refresh error stays visible after a good list arrived.
+- The prompt dialog loses focus when its state changes (Generate disabled, Cancel unmounted).
+- The result dialog's busy state can flicker for one frame after a file switch.
+
+Renderer tests:
+
+- No test for a double click on Start or Accept.
+- The settings route of `AssetFilesTab` (closing the file detail dialog before Settings opens) has no dedicated test, only the inbox's; the result dialog's disabled Settings during an import is covered only by a shell test.
+- Not tested: the proposal toggle on the Files tab, the debounced query reaching "Analyse all", the gallery filters reaching the `assetFilter` target, and Image to prompt from the detail dialog menu.
 
 Core tests:
 
