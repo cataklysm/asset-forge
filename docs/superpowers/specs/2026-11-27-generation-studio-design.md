@@ -88,7 +88,7 @@ The image sent is the original file when it is JPEG, PNG or WebP of at most 25 M
 
 Job type `image.generate`, class `remote_api` (two at a time per provider), payload `{ v: 1, generationId }`, `onInterrupted: 'fail'`.
 
-The handler: read the input (checksum compared with the record) → call the provider → import the answer through `importStream` → place the file in the asset the source belongs to at that moment, with role `generated` (in the inbox when the source has none) → write the output row and `succeeded` in one transaction. The result is named after the source: `<source name> edit <n>.png`, `<source name> <scale>x.png`.
+The handler: read the input (checksum compared with the record) → call the provider → import the answer through `importStream` into the inbox → write the output row and `succeeded` in one transaction → move the file into the asset the source belongs to at that moment, with role `generated` (it stays in the inbox when the source has none or the move fails). The result is named after the source: `<source name> edit <n>.png`, `<source name> <scale>x.png`.
 
 Outcome rules, by whether the request may have been charged:
 
@@ -162,7 +162,7 @@ ReadMe (§7.2, §8, §9.3, §15.2, §17 and the IPC list), `docs/backlog.md`, `C
 ## Testing
 
 - Core: start validation (file state, prompt and parameter limits, provider choice); the handler for every row of the outcome table; the result lands in the source's asset or the inbox; checksum mismatch; purge keeps name and checksum on the record; `generations:retry` reuses the generation, also without the old job row; remove refuses a succeeded one; `jobs:retryFailed` skips generation jobs; the `settled` paths (cancel while queued, last retry, stop while running).
-- Persistence: migration `0013` on an existing database; `set null` on file and asset removal.
+- Persistence: migration `0013` on an existing database; `set null` on file removal.
 - Providers: the Venice adapter against the mock — request shape, bearer only to its origin, streamed answer with the cap, every error mapping, `listEditModels`.
 - Jobs: `remote_api` lane pause and resume; an interrupted `running` generation job fails with `provider_outcome_unknown` on recovery and is not requeued.
 - Desktop: settings upgrade v2 → v3; kind rules; IPC validation; end to end against the mock from `generations:start` to a linked file.
