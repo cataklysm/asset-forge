@@ -122,3 +122,18 @@ export function slotAt<T>(state: PagedState<T>, index: number, pageSize: number 
 export function retryIndex(page: number, firstVisibleIndex: number, pageSize: number = PAGE_SIZE): number {
   return Math.max(page * pageSize, firstVisibleIndex);
 }
+
+/** The loaded item with `id` and its index, or null when no loaded page holds it. */
+export function findLoaded<T extends { id: string }>(
+  state: PagedState<T>,
+  id: string | null,
+  pageSize: number = PAGE_SIZE,
+): { index: number; item: T } | null {
+  if (id === null) return null;
+  for (const [page, entry] of state.pages) {
+    if (entry.status !== 'loaded') continue;
+    const at = entry.items.findIndex((item) => item.id === id);
+    if (at >= 0) return { index: page * pageSize + at, item: entry.items[at]! };
+  }
+  return null;
+}

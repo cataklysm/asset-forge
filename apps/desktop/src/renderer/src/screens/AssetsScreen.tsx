@@ -27,7 +27,7 @@ import {
   type AssetListState,
   type AssetView,
 } from '../list-state';
-import { PAGE_SIZE, type PagedState } from '../paged-list';
+import { findLoaded, PAGE_SIZE } from '../paged-list';
 import { ALERT, BUTTON, ICON_BUTTON, MUTED, SELECT } from '../ui';
 
 const STATUSES = AssetStatusSchema.options;
@@ -52,17 +52,6 @@ function deviceStorage(): Storage | null {
   } catch {
     return null;
   }
-}
-
-/** The loaded item with `id` and its index, or null when no loaded page holds it. */
-function findLoaded(paged: PagedState<AssetSummary>, id: string | null): { index: number; asset: AssetSummary } | null {
-  if (id === null) return null;
-  for (const [page, entry] of paged.pages) {
-    if (entry.status !== 'loaded') continue;
-    const at = entry.items.findIndex((item) => item.id === id);
-    if (at >= 0) return { index: page * PAGE_SIZE + at, asset: entry.items[at]! };
-  }
-  return null;
 }
 
 interface Props {
@@ -136,7 +125,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   const lastSelected = useRef<AssetSummary | null>(null);
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   const selectedAsset =
-    loadedSelection?.asset ?? (lastSelected.current?.id === state.selectedId ? lastSelected.current : null);
+    loadedSelection?.item ??(lastSelected.current?.id === state.selectedId ? lastSelected.current : null);
 
   const typeItems = types.data ?? [];
   const typeName = (id: string) => typeItems.find((t) => t.id === id)?.name ?? '–';
