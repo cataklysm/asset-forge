@@ -37,6 +37,8 @@ describe('generationNames', () => {
     expect(generationNames.edit('archive.tar.gz', 1)).toBe('archive.tar edit 1.png');
     expect(generationNames.upscale('noext', 4)).toBe('noext 4x.png');
     expect(generationNames.edit('.hidden', 1)).toBe('.hidden edit 1.png');
+    expect(generationNames.edit('face.png', 2, 'webp')).toBe('face edit 2.webp');
+    expect(generationNames.upscale('face.png', 4, 'jpg')).toBe('face 4x.jpg');
   });
 });
 
@@ -191,7 +193,32 @@ describe('the image.generate handler', () => {
     const g = await started(t, edit(t.file.id));
     t.providers.provider.answer = async () => ({ stream: failingStream(), mimeType: 'image/png' });
     expectJobError((await runNext(t)).error, 'provider_outcome_unknown');
-    expect(results(t).every((f) => f.status === 'failed')).toBe(true);
+    // The import leaves exactly its own failed inbox row, with no binary, like any failed import.
+    const left = results(t);
+    expect(left).toHaveLength(1);
+    expect(left[0]).toMatchObject({ originalName: 'face edit 1.png', status: 'failed', assetId: null, sha256: null });
+    expect(t.storage.files.has(left[0]!.relativePath)).toBe(false);
+    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
+  });
+
+  it('stores a JPEG answer as `.jpg` with its mime type', async () => {
+    const t = await setup();
+    const g = await started(t, edit(t.file.id));
+    t.providers.provider.answer = async () => ({ stream: Readable.from([RESULT_BYTES]), mimeType: 'image/jpeg' });
+    expect((await runNext(t)).error).toBeNull();
+    const [result] = results(t);
+    expect(result).toMatchObject({ originalName: 'face edit 1.jpg', mimeType: 'image/jpeg', status: 'complete' });
+    expect((await generation(t, g.id)).outputs).toEqual([expect.objectContaining({ fileId: result!.id, name: 'face edit 1.jpg' })]);
+  });
+
+  it('imports nothing for an answer that is not PNG, JPEG or WebP and fails provider_outcome_unknown', async () => {
+    const t = await setup();
+    const g = await started(t, { kind: 'upscale', fileId: t.file.id, providerId: VENICE_ID, scale: 2 });
+    const stream = Readable.from([RESULT_BYTES]);
+    t.providers.provider.answer = async () => ({ stream, mimeType: 'image/svg+xml' });
+    expectJobError((await runNext(t)).error, 'provider_outcome_unknown');
+    expect(stream.destroyed).toBe(true);
+    expect(results(t)).toEqual([]);
     expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
   });
 

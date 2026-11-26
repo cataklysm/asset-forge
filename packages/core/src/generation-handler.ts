@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 import { EditParametersSchema, ImageGeneratePayloadSchema, UpscaleParametersSchema } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
 import { SourceNotReadableError } from './errors.js';
-import { generationNames } from './generations.js';
+import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generations.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { JobError, type Job, type JobHandler } from './jobs.js';
 import type { GenerationImageSource, ImageInput, ImageProviderDirectory } from './ports.js';
@@ -68,11 +68,12 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
       signal.throwIfAborted();
 
       let answer: { stream: Readable; mimeType: string };
-      let name: string;
+      let nameFor: (extension: string) => string;
       if (generation.kind === 'edit') {
         const parameters = EditParametersSchema.safeParse(generation.parameters);
         if (!parameters.success || generation.model === null || generation.prompt === null) throw new JobError('internal_error');
-        name = generationNames.edit(input.name, await s.database.generations.editRank(generation.id));
+        const rank = await s.database.generations.editRank(generation.id);
+        nameFor = (extension) => generationNames.edit(input.name, rank, extension);
         answer = await provider.editImage({
           image: source.image,
           model: generation.model,
@@ -85,8 +86,9 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
       } else {
         const parameters = UpscaleParametersSchema.safeParse(generation.parameters);
         if (!parameters.success) throw new JobError('internal_error');
-        name = generationNames.upscale(input.name, parameters.data.scale);
-        answer = await provider.upscaleImage({ image: source.image, scale: parameters.data.scale, signal });
+        const scale = parameters.data.scale;
+        nameFor = (extension) => generationNames.upscale(input.name, scale, extension);
+        answer = await provider.upscaleImage({ image: source.image, scale, signal });
       }
       // Listen at once: an import failure is `provider_outcome_unknown` when the answer stream itself failed.
       let streamErrored = false;
@@ -97,6 +99,15 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
         answer.stream.destroy();
         signal.throwIfAborted();
       }
+      // The result is stored under the extension of its own image type; any other answer is not imported.
+      const extension = Object.hasOwn(GENERATION_RESULT_EXTENSIONS, answer.mimeType)
+        ? GENERATION_RESULT_EXTENSIONS[answer.mimeType]!
+        : null;
+      if (extension === null) {
+        answer.stream.destroy();
+        throw new JobError('provider_outcome_unknown');
+      }
+      const name = nameFor(extension);
       const imported = await importStream(ctx, { sourcePath: '', entryName: null, name, stream: answer.stream });
       const file = imported.file;
       if (imported.error !== null || file === null || file.status !== 'complete' || file.sha256 === null) {
