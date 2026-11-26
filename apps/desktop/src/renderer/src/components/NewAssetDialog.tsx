@@ -1,0 +1,87 @@
+import { useRef, useState, type FormEvent } from 'react';
+import type { AssetType } from '@assetforge/contracts';
+import { call, describeError } from '../api';
+import { ALERT, BUTTON, INPUT, SELECT } from '../ui';
+import { Dialog } from './Dialog';
+
+interface Props {
+  open: boolean;
+  types: readonly AssetType[];
+  onClose(): void;
+  onCreated(id: string): void;
+}
+
+/** Creates an asset from a name and a type. */
+export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
+  const [name, setName] = useState('');
+  const [typeId, setTypeId] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  const effectiveType = types.some((t) => t.id === typeId) ? typeId : (types[0]?.id ?? '');
+  const trimmed = name.trim();
+
+  function close() {
+    setName('');
+    setTypeId('');
+    setError(null);
+    onClose();
+  }
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    if (creating || trimmed === '' || effectiveType === '') return;
+    setCreating(true);
+    setError(null);
+    try {
+      const asset = await call('assets:create', { name: trimmed, typeId: effectiveType });
+      onCreated(asset.id);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} title="New asset" initialFocusRef={nameRef} onClose={close}>
+      <form className="space-y-3" onSubmit={(e) => void create(e)}>
+        {error !== null && (
+          <p role="alert" className={ALERT}>
+            {error}
+          </p>
+        )}
+        <input
+          ref={nameRef}
+          aria-label="Asset name"
+          placeholder="Asset name"
+          maxLength={200}
+          className={`w-full ${INPUT}`}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <select
+          aria-label="Asset type"
+          className={`w-full ${SELECT}`}
+          value={effectiveType}
+          onChange={(e) => setTypeId(e.target.value)}
+        >
+          {types.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <div className="flex justify-end gap-2">
+          <button type="button" className={BUTTON} onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" className={BUTTON} disabled={creating || trimmed === '' || effectiveType === ''}>
+            Create
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}

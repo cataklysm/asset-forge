@@ -76,34 +76,44 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
       onNavigate={navigate}
       onClose={() => void closeWorkspace()}
     >
-      {/* The screens still bring their own layout until they are redesigned. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
-        {error !== null && (
-          <p role="alert" className={ALERT}>
-            {error}
-          </p>
-        )}
-
-        {view.name === 'inbox' ? (
-          <FilesScreen offset={inboxOffset} onOffsetChange={setInboxOffset} onBusyChange={setBusy} />
-        ) : view.name === 'asset' ? (
-          <AssetScreen key={view.id} id={view.id} onNavigate={setView} onBusyChange={setBusy} />
-        ) : view.name === 'project' ? (
-          <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
-        ) : view.name === 'projects' ? (
-          <ProjectsScreen
-            offset={projectsOffset}
-            onOffsetChange={setProjectsOffset}
-            onOpen={(id) => setView({ name: 'project', id })}
-          />
-        ) : (
+      {view.name === 'assets' ? (
+        // Redesigned screens render a `Page` and bring their own padding.
+        <>
+          {error !== null && (
+            <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+              {error}
+            </p>
+          )}
           <AssetsScreen
             state={shell.assetList}
             onStateChange={setAssetList}
             onOpen={(id) => setView({ name: 'asset', id })}
           />
-        )}
-      </div>
+        </>
+      ) : (
+        /* The other screens still bring their own layout until they are redesigned. */
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+          {error !== null && (
+            <p role="alert" className={ALERT}>
+              {error}
+            </p>
+          )}
+
+          {view.name === 'inbox' ? (
+            <FilesScreen offset={inboxOffset} onOffsetChange={setInboxOffset} onBusyChange={setBusy} />
+          ) : view.name === 'asset' ? (
+            <AssetScreen key={view.id} id={view.id} onNavigate={setView} onBusyChange={setBusy} />
+          ) : view.name === 'project' ? (
+            <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+          ) : (
+            <ProjectsScreen
+              offset={projectsOffset}
+              onOffsetChange={setProjectsOffset}
+              onOpen={(id) => setView({ name: 'project', id })}
+            />
+          )}
+        </div>
+      )}
     </AppShell>
   );
 }
