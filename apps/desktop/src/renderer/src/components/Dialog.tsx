@@ -12,7 +12,7 @@ interface Props {
 }
 
 /** Keeps the title clear of the Close button that the detail dialog places in its top-right corner. */
-const TITLE_PADDING = { form: '', detail: 'pr-10' } as const;
+const TITLE_PADDING = { form: '', detail: 'pr-56' } as const;
 
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',

@@ -4,12 +4,16 @@ import type { FileRecord } from '@assetforge/contracts';
 interface Opened {
   id: string;
   trigger: HTMLElement | null;
+  /** The dialog moved on to this file; the file browser brings its tile back into view. */
+  followed: boolean;
 }
 
 /**
  * The file detail dialog of a file browser host: the file it shows and the focus return after it
  * closes — the opener, else the same file's element (the list may have been reloaded while the
- * dialog was open), else the first tile inside `container`.
+ * dialog was open), else the first tile inside `container`. Once the dialog moved on to another
+ * file, the focus return targets that file's tile and the file browser reveals it, so the
+ * first-tile fallback no longer applies.
  */
 export function useFileDialog(container: RefObject<HTMLElement | null>) {
   const [file, setFile] = useState<FileRecord | null>(null);
@@ -25,15 +29,25 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
       return;
     }
     const root = container.current;
-    const element =
-      root?.querySelector<HTMLElement>(`[data-file-id="${CSS.escape(target.id)}"]`) ??
-      root?.querySelector<HTMLElement>('[data-file-tile]');
-    element?.focus();
+    const element = root?.querySelector<HTMLElement>(`[data-file-id="${CSS.escape(target.id)}"]`);
+    if (element) {
+      element.focus();
+      return;
+    }
+    if (!target.followed) root?.querySelector<HTMLElement>('[data-file-tile]')?.focus();
   }, [file, container]);
 
   function open(next: FileRecord) {
     const active = document.activeElement;
-    opened.current = { id: next.id, trigger: active instanceof HTMLElement ? active : null };
+    opened.current = { id: next.id, trigger: active instanceof HTMLElement ? active : null, followed: false };
+    setFile(next);
+  }
+
+  /** Shows another file in the open dialog; the remembered opener no longer applies to it. */
+  function show(next: FileRecord) {
+    if (opened.current !== null && opened.current.id !== next.id) {
+      opened.current = { id: next.id, trigger: null, followed: true };
+    }
     setFile(next);
   }
 
@@ -51,5 +65,5 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
   /** The id of the file the dialog shows; read synchronously, e.g. right after an action. */
   const openId = () => opened.current?.id ?? null;
 
-  return { file, open, close, update, openId };
+  return { file, open, show, close, update, openId };
 }

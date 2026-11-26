@@ -313,27 +313,42 @@ it('import results list imported, failed and duplicates', async () => {
   await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
 });
 
-it('the detail dialog assigns one file and closes', async () => {
+async function assignInDialog(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+  await user.click(within(dialog).getByRole('button', { name: 'Assign' }));
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Role' }), 'texture');
+  await user.click(within(dialog).getByRole('combobox', { name: 'Search assets' }));
+  await within(dialog).findByRole('option', { name: 'Oak' });
+  await user.keyboard('{ArrowDown}{Enter}');
+}
+
+it('assigning in the detail dialog moves on to the following file; assigning the last one closes it', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();
-  const api = install([c1, c2], {
+  let remaining = [c1, c2];
+  const api = install(remaining, {
     'files:assign': (r) => {
-      api.setFiles([c2]);
-      return { ...c1, assetId: r.assetId, role: r.role };
+      const file = remaining.find((f) => f.id === r.fileId)!;
+      remaining = remaining.filter((f) => f.id !== r.fileId);
+      api.setFiles(remaining);
+      return { ...file, assetId: r.assetId, role: r.role };
     },
   });
   render(<Harness />);
   await screen.findByText('c1.png');
   await user.click(tile('c1.png'));
   await user.keyboard('{Enter}');
-  const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
-  await user.click(within(dialog).getByRole('button', { name: 'Assign' }));
-  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Role' }), 'texture');
-  await user.click(within(dialog).getByRole('combobox', { name: 'Search assets' }));
-  await within(dialog).findByRole('option', { name: 'Oak' });
-  await user.keyboard('{ArrowDown}{Enter}');
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const first = await screen.findByRole('dialog', { name: 'c1.png' });
+  expect(within(first).getByText('1 / 2')).toBeTruthy();
+  await assignInDialog(user, first);
+
+  const second = await screen.findByRole('dialog', { name: 'c2.png' });
+  expect(within(second).getByText('1 / 1')).toBeTruthy();
   expect(callsOf(api, 'files:assign')).toEqual([{ fileId: c1.id, assetId: OAK.id, role: 'texture' }]);
   await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c1.png')).toBeNull());
   expect(screen.queryByText('1 selected')).toBeNull();
+
+  await assignInDialog(user, second);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(callsOf(api, 'files:assign')).toHaveLength(2);
+  await screen.findByText('Inbox is empty');
 });

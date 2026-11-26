@@ -22,6 +22,14 @@ export interface ViewPosition {
   firstIndex: number;
 }
 
+/** What a mounted view offers its host through `positionRef`. */
+export interface ViewHandle {
+  viewKey: string;
+  get(): ViewPosition;
+  /** Scrolls the item's row into view and focuses the item, once it is rendered. */
+  reveal(index: number): void;
+}
+
 export interface VisibleRows {
   firstRow: number;
   lastRow: number;
@@ -60,7 +68,8 @@ interface Options {
   onRows(rows: VisibleRows): void;
   /** Identifies this mounted view, so a stale position is never mistaken for the current one. */
   viewKey: string;
-  positionRef: { current: { viewKey: string; get(): ViewPosition } | null };
+  /** Receives the handle; hosts that never reveal an item may keep it as a plain position source. */
+  positionRef: { current: ViewHandle | null } | { current: Omit<ViewHandle, 'reveal'> | null };
 }
 
 export interface VirtualRows {
@@ -117,6 +126,10 @@ export function useVirtualRows({
   positionRef.current = {
     viewKey,
     get: () => ({ scrollOffset: scrollOffset(), firstIndex: clampIndex(firstVisibleRow() * columns) }),
+    reveal: (index) => {
+      if (total === 0) return;
+      moveFocus(clampIndex(index));
+    },
   };
 
   const items = virtualizer.getVirtualItems();
@@ -148,6 +161,11 @@ export function useVirtualRows({
     const target = nextFocusIndex(index, event.key, columns, total);
     if (target === null) return;
     event.preventDefault();
+    moveFocus(target);
+  }
+
+  /** Makes `target` the active item, scrolls its row into view and focuses it now or once rendered. */
+  function moveFocus(target: number) {
     setActiveIndex(target);
     pendingFocus.current = target;
     virtualizer.scrollToIndex(Math.floor(target / columns), { align: 'auto' });

@@ -270,7 +270,7 @@ it('the dialog title stays on one line, carries the full text, and clears the Cl
   );
   const heading = screen.getByRole('heading', { name: title });
   expect(heading.getAttribute('title')).toBe(title);
-  expect(heading.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'pr-10']));
+  expect(heading.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'pr-56']));
   unmount();
 
   render(
@@ -280,5 +280,5 @@ it('the dialog title stays on one line, carries the full text, and clears the Cl
   );
   const form = screen.getByRole('heading', { name: 'New asset' });
   expect(form.className.split(/\s+/)).toContain('truncate');
-  expect(form.className.split(/\s+/)).not.toContain('pr-10');
+  expect(form.className.split(/\s+/)).not.toContain('pr-56');
 });

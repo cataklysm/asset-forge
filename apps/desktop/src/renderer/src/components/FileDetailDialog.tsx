@@ -1,5 +1,5 @@
-import { X } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
@@ -8,6 +8,7 @@ import { label } from '../labels';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
+import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
 import { Menu } from './Menu';
@@ -28,6 +29,8 @@ interface Props {
   /** Receives the file with its dimensions after `files:measure`; must not reload the list. */
   onMeasured(file: FileRecord): void;
   onOpenAsset?(assetId: string): void;
+  /** The list of the file browser the dialog was opened from; steps through it. */
+  list: ViewerList | null;
   onClose(): void;
 }
 
@@ -39,11 +42,18 @@ export function FileDetailDialog({
   onFileChange,
   onMeasured,
   onOpenAsset,
+  list,
   onClose,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [controls, setControls] = useState<ViewerControls | null>(null);
+  // Error and viewer controls belong to the file they came from; stepping on leaves them behind.
+  const [failure, setFailure] = useState<{ fileId: string; message: string } | null>(null);
+  const [stage, setStage] = useState<{ fileId: string; controls: ViewerControls } | null>(null);
+  const error = failure?.fileId === file.id ? failure.message : null;
+  const controls = stage?.fileId === file.id ? stage.controls : null;
+  const fileId = file.id;
+  const setError = (message: string | null) => setFailure(message === null ? null : { fileId, message });
+  const setControls = (next: ViewerControls) => setStage({ fileId, controls: next });
 
   const complete = file.status === 'complete';
   const viewable = complete && file.previewable;
@@ -92,16 +102,38 @@ export function FileDetailDialog({
 
   return (
     <Dialog open title={title} onClose={onClose} initialFocusRef={closeRef} size="detail">
-      <button
-        ref={closeRef}
-        type="button"
-        aria-label="Close"
-        title="Close"
-        className={`${ICON_BUTTON} absolute right-4 top-4`}
-        onClick={onClose}
-      >
-        <X size={18} aria-hidden />
-      </button>
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        {list !== null && (
+          <>
+            <span className={`text-sm tabular-nums ${MUTED}`}>
+              {list.index + 1} / {list.total}
+            </span>
+            <button
+              type="button"
+              aria-label="Previous file (←)"
+              title="Previous file (←)"
+              className={ICON_BUTTON}
+              disabled={list.index <= 0}
+              onClick={() => list.show(list.index - 1)}
+            >
+              <ChevronLeft size={18} aria-hidden />
+            </button>
+            <button
+              type="button"
+              aria-label="Next file (→)"
+              title="Next file (→)"
+              className={ICON_BUTTON}
+              disabled={list.index >= list.total - 1}
+              onClick={() => list.show(list.index + 1)}
+            >
+              <ChevronRight size={18} aria-hidden />
+            </button>
+          </>
+        )}
+        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={onClose}>
+          <X size={18} aria-hidden />
+        </button>
+      </div>
       <div className="flex h-full min-h-0 gap-5">
         <div className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto pr-1">
           <section aria-label="Details" className="space-y-2">
@@ -129,9 +161,11 @@ export function FileDetailDialog({
               </p>
             )}
           </section>
-          {roleControl}
+          {/* Keyed by file: stepping on starts the controls afresh. */}
+          <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
           {complete && (
             <TagRow
+              key={`tags-${file.id}`}
               label="Image tags"
               kind="file"
               tags={file.tags}

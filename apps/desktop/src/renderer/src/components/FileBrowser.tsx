@@ -16,13 +16,14 @@ import { usePagedList } from '../hooks/usePagedList';
 import {
   useElementSize,
   useVirtualRows,
+  type ViewHandle,
   type ViewPosition,
   type ViewRestore,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
 import { label } from '../labels';
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
-import { PAGE_SIZE, retryIndex, slotAt, type PagedState } from '../paged-list';
+import { findLoaded, PAGE_SIZE, retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import {
   clickSelect,
   MAX_SELECTION,
@@ -85,7 +86,29 @@ export interface FileBrowserProps {
   /** Shown below `emptyText` (e.g. the inbox's "Import files"). */
   emptyAction?: ReactNode;
   onTotal?(total: number | null): void;
+  /** The host's file detail dialog, which browses this list. */
+  viewer?: {
+    /** The file the host's dialog shows; null when closed. */
+    fileId: string | null;
+    /** The dialog must show this file now; null closes it. */
+    onView(file: FileRecord | null): void;
+    render(list: ViewerList): ReactNode;
+  };
 }
+
+/** The displayed list as the viewer sees it. */
+export interface ViewerList {
+  total: number;
+  /** Position of the viewed file in the list. */
+  index: number;
+  slot(index: number): Slot<FileRecord>;
+  /** Shows the file at `index`: loads its page when needed, then calls `onView(file)`. Clamped to 0 … total − 1; the latest call wins. */
+  show(index: number): void;
+  /** Keeps the pages of this index range loaded (film strip). */
+  want(first: number, last: number): void;
+}
+
+const pageOf = (index: number) => Math.floor(index / PAGE_SIZE);
 
 /**
  * A paginated, virtualised list of files as tiles or a table, with its filters, endless
@@ -104,7 +127,7 @@ export function FileBrowser(props: FileBrowserProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const restore = useRef<ViewRestore>(props.restore ?? TOP);
-  const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
+  const position = useRef<ViewHandle | null>(null);
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
   const fetchPage = useCallback(
@@ -130,16 +153,147 @@ export function FileBrowser(props: FileBrowserProps) {
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: focused, focus: focused !== null };
   }
 
-  const nextWanted =
-    total === null
-      ? [bootPage]
-      : rows !== null && rows.viewKey === viewKey
-        ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
-        : [];
+  // The viewer is tracked by file id; `tracked` keeps its last known index while a reload has not
+  // yet loaded the page that holds it (and for the focus return after it closed).
+  const viewer = props.viewer;
+  const viewedId = viewer?.fileId ?? null;
+  const tracked = useRef<{ id: string; index: number } | null>(null);
+  const found = findLoaded(paged.state, viewedId);
+  if (found !== null) tracked.current = { id: found.item.id, index: found.index };
+  const knownIndex = viewedId !== null && tracked.current?.id === viewedId ? tracked.current.index : null;
+  // The target of the latest `show` whose page is not loaded yet.
+  const [pendingShow, setPendingShow] = useState<{ index: number } | null>(null);
+  const [wantRange, setWantRange] = useState<{ first: number; last: number } | null>(null);
+  // What the browser last asked the host to show, and from which file; never asked twice.
+  const asked = useRef<{ from: string | null; to: string | null } | null>(null);
+
+  /** The pages the open viewer needs: a pending `show` target, its neighbours, the `want` range. */
+  function viewerPages(count: number): number[] {
+    if (viewedId === null || count === 0) return [];
+    const pages: number[] = [];
+    const add = (index: number) => {
+      if (index >= 0 && index < count) pages.push(pageOf(index));
+    };
+    if (pendingShow !== null) add(Math.min(pendingShow.index, count - 1));
+    if (knownIndex !== null) {
+      for (const index of [knownIndex, knownIndex - 1, knownIndex + 1]) add(index);
+      add(Math.min(knownIndex, count - 1));
+    }
+    if (wantRange !== null) {
+      const first = Math.max(0, wantRange.first);
+      const last = Math.min(count - 1, wantRange.last);
+      for (let page = pageOf(first); first <= last && page <= pageOf(last); page += 1) pages.push(page);
+    }
+    return pages;
+  }
+
+  const rowPages =
+    total !== null && rows !== null && rows.viewKey === viewKey
+      ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
+      : [];
+  const nextWanted = total === null ? [bootPage] : [...new Set([...viewerPages(total), ...rowPages])];
   if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
 
   const latest = useRef({ props, viewKey, paged });
   latest.current = { props, viewKey, paged };
+
+  function ask(file: FileRecord | null) {
+    const current = latest.current.props.viewer;
+    if (current === undefined) return;
+    asked.current = { from: current.fileId, to: file?.id ?? null };
+    current.onView(file);
+  }
+
+  function show(index: number) {
+    const { state } = latest.current.paged;
+    const count = state.total;
+    if (count === null) return;
+    if (count === 0) {
+      setPendingShow(null);
+      ask(null);
+      return;
+    }
+    const target = Math.min(Math.max(0, Math.trunc(index)), count - 1);
+    const slot = slotAt(state, target);
+    if (slot.kind !== 'loaded') {
+      setPendingShow({ index: target });
+      return;
+    }
+    setPendingShow(null);
+    if (slot.item.id !== latest.current.props.viewer?.fileId) ask(slot.item);
+  }
+
+  // A pending `show` resolves once its page is loaded (clamped to a shrunk list). Without one, a
+  // viewed file that left the displayed list is replaced by the file now at its last index (the
+  // one that followed it), else the last file, else the viewer closes.
+  useEffect(() => {
+    if (viewedId === null) return;
+    const { state } = paged;
+    const count = state.total;
+    if (count === null) return;
+    if (pendingShow !== null) {
+      if (count === 0) {
+        setPendingShow(null);
+        ask(null);
+        return;
+      }
+      const slot = slotAt(state, Math.min(pendingShow.index, count - 1));
+      if (slot.kind !== 'loaded') return;
+      setPendingShow(null);
+      if (slot.item.id !== viewedId) ask(slot.item);
+      return;
+    }
+    if (paged.pending || findLoaded(state, viewedId) !== null) return;
+    const last = tracked.current;
+    if (last === null || last.id !== viewedId) return;
+    let next: FileRecord | null = null;
+    if (count > 0) {
+      // The file may have moved to a neighbouring page; decide once those have settled.
+      for (const index of [last.index - 1, last.index, last.index + 1]) {
+        if (index < 0 || index >= count) continue;
+        const status = state.pages.get(pageOf(index))?.status;
+        if (status !== 'loaded' && status !== 'failed') return;
+      }
+      const slot = slotAt(state, Math.min(last.index, count - 1));
+      if (slot.kind !== 'loaded') return;
+      next = slot.item;
+    }
+    if (asked.current?.from === viewedId && asked.current.to === (next?.id ?? null)) return;
+    ask(next);
+    // `ask` reads the latest props itself.
+  }, [paged.state, paged.pending, viewedId, pendingShow]);
+
+  // After the viewer closed, the tile of the file shown last comes into view and takes the focus.
+  const lastViewed = useRef<string | null>(viewedId);
+  useEffect(() => {
+    const previous = lastViewed.current;
+    lastViewed.current = viewedId;
+    if (previous === null || viewedId !== null) return;
+    setPendingShow(null);
+    setWantRange(null);
+    asked.current = null;
+    const last = tracked.current;
+    tracked.current = null;
+    const { paged: current, viewKey: key } = latest.current;
+    const count = current.state.total;
+    if (last === null || last.id !== previous || count === null || count === 0) return;
+    const index = findLoaded(current.state, previous)?.index ?? Math.min(last.index, count - 1);
+    if (position.current?.viewKey === key) position.current.reveal(index);
+  }, [viewedId]);
+
+  const viewIndex =
+    total === null || total === 0 ? null : (found?.index ?? (knownIndex === null ? null : Math.min(knownIndex, total - 1)));
+  const viewerList: ViewerList | null =
+    viewer !== undefined && viewedId !== null && total !== null && viewIndex !== null
+      ? {
+          total,
+          index: viewIndex,
+          slot: (index) => slotAt(paged.state, index),
+          show,
+          want: (first, last) =>
+            setWantRange((old) => (old !== null && old.first === first && old.last === last ? old : { first, last })),
+        }
+      : null;
 
   function publishPosition() {
     const { props: current, viewKey: key } = latest.current;
@@ -263,99 +417,103 @@ export function FileBrowser(props: FileBrowserProps) {
         };
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3">
-      <FilterBar
-        resultCount={total === null ? null : `${total} ${total === 1 ? 'file' : 'files'}`}
-        countTitle={total !== null && total > MAX_SELECTION ? `At most ${MAX_SELECTION} files can be selected` : undefined}
-        onClear={hasFilters(showRoleFilter ? filters : { ...filters, role: '' }) ? () => setFilter(NO_FILE_FILTERS) : null}
-      >
-        <>
-          <SearchField
-            label="Search files"
-            placeholder="Search files"
-            value={filters.query}
-            onChange={(text) => setFilter({ query: text })}
-          />
-          {showRoleFilter && (
+    <>
+      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3">
+        <FilterBar
+          resultCount={total === null ? null : `${total} ${total === 1 ? 'file' : 'files'}`}
+          countTitle={total !== null && total > MAX_SELECTION ? `At most ${MAX_SELECTION} files can be selected` : undefined}
+          onClear={hasFilters(showRoleFilter ? filters : { ...filters, role: '' }) ? () => setFilter(NO_FILE_FILTERS) : null}
+        >
+          <>
+            <SearchField
+              label="Search files"
+              placeholder="Search files"
+              value={filters.query}
+              onChange={(text) => setFilter({ query: text })}
+            />
+            {showRoleFilter && (
+              <select
+                className={SELECT}
+                aria-label="Role"
+                value={filters.role}
+                onChange={(e) => setFilter({ role: ROLES.find((r) => r === e.target.value) ?? '' })}
+              >
+                <option value="">All roles</option>
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {label(r)}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               className={SELECT}
-              aria-label="Role"
-              value={filters.role}
-              onChange={(e) => setFilter({ role: ROLES.find((r) => r === e.target.value) ?? '' })}
+              aria-label="File type"
+              value={filters.kind}
+              onChange={(e) => setFilter({ kind: KINDS.find((k) => k.kind === e.target.value)?.kind ?? '' })}
             >
-              <option value="">All roles</option>
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {label(r)}
+              <option value="">All file types</option>
+              {KINDS.map((k) => (
+                <option key={k.kind} value={k.kind}>
+                  {k.title}
                 </option>
               ))}
             </select>
-          )}
-          <select
-            className={SELECT}
-            aria-label="File type"
-            value={filters.kind}
-            onChange={(e) => setFilter({ kind: KINDS.find((k) => k.kind === e.target.value)?.kind ?? '' })}
-          >
-            <option value="">All file types</option>
-            {KINDS.map((k) => (
-              <option key={k.kind} value={k.kind}>
-                {k.title}
-              </option>
-            ))}
-          </select>
-          <div className="ml-auto flex items-center gap-2">
-            {VIEWS.map(({ view: v, tooltip, icon: Icon }) => (
-              <button
-                key={v}
-                type="button"
-                className={ICON_BUTTON}
-                title={tooltip}
-                aria-label={tooltip}
-                aria-pressed={view === v}
-                onClick={() => switchView(v)}
-              >
-                <Icon size={16} aria-hidden />
-              </button>
-            ))}
-          </div>
-        </>
-        <TagFilter value={filters.tagNames} title="Image tags" onChange={(tagNames) => setFilter({ tagNames })} />
-      </FilterBar>
-      <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
-        {failedPage !== null ? (
-          <div>
-            <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-              Retry
-            </button>
-          </div>
-        ) : total === null ? (
-          <div className="flex flex-wrap gap-4" aria-busy="true">
-            {Array.from({ length: SKELETON_TILES }, (_, i) => (
-              <div
-                key={i}
-                data-skeleton=""
-                className="animate-pulse rounded-tile bg-raised"
-                style={{ width: TILE_WIDTH, height: TILE_HEIGHT }}
-              />
-            ))}
-          </div>
-        ) : viewProps === null ? (
-          hasFilters(effective) || props.emptyAction === undefined ? (
-            <p className={MUTED}>{hasFilters(effective) ? 'No matching files' : emptyText}</p>
-          ) : (
-            <div className="flex flex-col items-start gap-3">
-              <p className={MUTED}>{emptyText}</p>
-              {props.emptyAction}
+            <div className="ml-auto flex items-center gap-2">
+              {VIEWS.map(({ view: v, tooltip, icon: Icon }) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={ICON_BUTTON}
+                  title={tooltip}
+                  aria-label={tooltip}
+                  aria-pressed={view === v}
+                  onClick={() => switchView(v)}
+                >
+                  <Icon size={16} aria-hidden />
+                </button>
+              ))}
             </div>
-          )
-        ) : view === 'grid' ? (
-          <FileGridView key={viewKey} {...viewProps} />
-        ) : (
-          <FileTable key={viewKey} {...viewProps} />
-        )}
+          </>
+          <TagFilter value={filters.tagNames} title="Image tags" onChange={(tagNames) => setFilter({ tagNames })} />
+        </FilterBar>
+        <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
+          {failedPage !== null ? (
+            <div>
+              <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
+                Retry
+              </button>
+            </div>
+          ) : total === null ? (
+            <div className="flex flex-wrap gap-4" aria-busy="true">
+              {Array.from({ length: SKELETON_TILES }, (_, i) => (
+                <div
+                  key={i}
+                  data-skeleton=""
+                  className="animate-pulse rounded-tile bg-raised"
+                  style={{ width: TILE_WIDTH, height: TILE_HEIGHT }}
+                />
+              ))}
+            </div>
+          ) : viewProps === null ? (
+            hasFilters(effective) || props.emptyAction === undefined ? (
+              <p className={MUTED}>{hasFilters(effective) ? 'No matching files' : emptyText}</p>
+            ) : (
+              <div className="flex flex-col items-start gap-3">
+                <p className={MUTED}>{emptyText}</p>
+                {props.emptyAction}
+              </div>
+            )
+          ) : view === 'grid' ? (
+            <FileGridView key={viewKey} {...viewProps} />
+          ) : (
+            <FileTable key={viewKey} {...viewProps} />
+          )}
+        </div>
       </div>
-    </div>
+      {/* Modal, so its place does not matter; outside the list, focus in it never counts as focus in the list. */}
+      {viewerList !== null && viewer?.render(viewerList)}
+    </>
   );
 }
 

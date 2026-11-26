@@ -1,7 +1,7 @@
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { formatBytes } from '../format';
-import type { ViewPosition, ViewRestore, VirtualRows, VisibleRows } from '../hooks/useVirtualRows';
+import type { ViewHandle, ViewRestore, VirtualRows, VisibleRows } from '../hooks/useVirtualRows';
 import { formatLabel } from '../media-url';
 import { label } from '../labels';
 import type { PagedState } from '../paged-list';
@@ -52,7 +52,7 @@ export interface FileViewProps {
   menuItems(file: FileRecord): MenuItem[];
   onRows(rows: VisibleRows): void;
   onRetry(page: number): void;
-  positionRef: { current: { viewKey: string; get(): ViewPosition } | null };
+  positionRef: { current: ViewHandle | null };
 }
 
 /** Marks the controls inside an item (checkbox, menu, magnifier) whose events the item ignores. */

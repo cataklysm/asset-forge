@@ -339,10 +339,88 @@ it('the file dialog returns focus to the same file after the list reloaded while
   await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(before));
   // The reloaded list replaced the tiles.
   await waitFor(() => expect(within(tile('leaf.png')).getByText('Green')).toBeTruthy());
+  // Adding a tag keeps the same file in the dialog.
+  expect(screen.getByRole('dialog', { name: 'leaf.png | Oak tree' })).toBe(dialog);
+  expect(within(dialog).getByText('1 / 2')).toBeTruthy();
 
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(document.activeElement).toBe(tile('leaf.png'));
+});
+
+function threeFiles(asset: AssetDetail) {
+  return ['a.png', 'b.png', 'c.png'].map((name) => fileRecord({ originalName: name, assetId: asset.id, role: 'reference' }));
+}
+
+async function openFile(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await screen.findByText(name);
+  await user.click(tile(name));
+  await user.keyboard('{Enter}');
+  return screen.findByRole('dialog', { name: `${name} | Oak tree` });
+}
+
+it('detaching the shown file shows the following one', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  let files = threeFiles(asset);
+  const a = files[0]!;
+  const api = install(asset, {
+    'files:list': (r) => listOf(files)(r),
+    'files:unassign': (r) => {
+      files = files.filter((f) => f.id !== r.fileId);
+      return { ...a, assetId: null, role: null };
+    },
+  });
+  render(<Harness id={asset.id} />);
+  const dialog = await openFile(user, 'a.png');
+  expect(within(dialog).getByText('1 / 3')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Detach' }));
+
+  const next = await screen.findByRole('dialog', { name: 'b.png | Oak tree' });
+  expect(within(next).getByText('1 / 2')).toBeTruthy();
+  expect(callsOf(api, 'files:unassign')).toEqual([{ fileId: a.id }]);
+});
+
+it('a role change that the active role filter no longer matches moves on to the following file', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  let files = threeFiles(asset);
+  install(asset, {
+    'files:list': (r) => listOf(files.filter((f) => r.role === undefined || f.role === r.role))(r),
+    'files:assign': (r) => {
+      files = files.map((f) => (f.id === r.fileId ? { ...f, role: r.role } : f));
+      return files.find((f) => f.id === r.fileId)!;
+    },
+  });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'reference');
+  const dialog = await openFile(user, 'b.png');
+  expect(within(dialog).getByText('2 / 3')).toBeTruthy();
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Role of b.png' }), 'texture');
+
+  const next = await screen.findByRole('dialog', { name: 'c.png | Oak tree' });
+  expect(within(next).getByText('2 / 2')).toBeTruthy();
+});
+
+it('after stepping, closing the dialog focuses the tile of the file shown last', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  install(asset, { 'files:list': listOf(files) });
+  render(<Harness id={asset.id} />);
+  const dialog = await openFile(user, 'a.png');
+  await user.click(within(dialog).getByRole('button', { name: 'Next file (→)' }));
+  await screen.findByRole('dialog', { name: 'b.png | Oak tree' });
+  await user.click(within(dialog).getByRole('button', { name: 'Next file (→)' }));
+  const last = await screen.findByRole('dialog', { name: 'c.png | Oak tree' });
+  expect(within(last).getByText('3 / 3')).toBeTruthy();
+  expect((within(last).getByRole('button', { name: 'Next file (→)' }) as HTMLButtonElement).disabled).toBe(true);
+
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(tile('c.png')));
 });
 
 it('the tile menu sets the cover once while the call runs', async () => {

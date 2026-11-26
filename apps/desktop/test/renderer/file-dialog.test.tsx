@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
+import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import type { FileActionContext } from '../../src/renderer/src/file-actions';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -17,6 +18,7 @@ function Harness(props: {
   onOpenAsset?(id: string): void;
   onMeasured?(file: FileRecord): void;
   actions?: FileActionContext;
+  list?: ViewerList | null;
 }) {
   const [file, setFile] = useState(props.file);
   const [open, setOpen] = useState(false);
@@ -37,6 +39,7 @@ function Harness(props: {
             setFile(record);
           }}
           onOpenAsset={props.onOpenAsset}
+          list={props.list ?? null}
           onClose={() => setOpen(false)}
         />
       )}
@@ -260,4 +263,70 @@ it('files with dimensions and non-image files are not measured; a non-image keep
   expect(screen.queryByRole('toolbar')).toBeNull();
   expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
   expect(measureCalls(api)).toHaveLength(0);
+});
+
+function listOf(files: FileRecord[], index: number): ViewerList {
+  return {
+    total: files.length,
+    index,
+    slot: (i) => (files[i] === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item: files[i] }),
+    show: vi.fn(),
+    want: vi.fn(),
+  };
+}
+
+const fileList = (count: number) => Array.from({ length: count }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+
+it('the header counts the position in the list and Next shows the following file', async () => {
+  install();
+  const files = fileList(14);
+  const list = listOf(files, 1);
+  render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  expect(screen.getByText('2 / 14')).toBeTruthy();
+  const previous = screen.getByRole('button', { name: 'Previous file (←)' });
+  const next = screen.getByRole('button', { name: 'Next file (→)' });
+  expect(previous.title).toBe('Previous file (←)');
+  expect(next.title).toBe('Next file (→)');
+  await user.click(next);
+  expect(list.show).toHaveBeenCalledWith(2);
+  await user.click(previous);
+  expect(list.show).toHaveBeenCalledWith(0);
+});
+
+it('Previous is disabled on the first file and Next on the last', async () => {
+  install();
+  const files = fileList(3);
+  const { unmount } = render(<Harness file={files[0]!} asset={null} list={listOf(files, 0)} />);
+  await openDialog();
+  expect(screen.getByText('1 / 3')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Previous file (←)' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Next file (→)' }) as HTMLButtonElement).disabled).toBe(false);
+  unmount();
+
+  render(<Harness file={files[2]!} asset={null} list={listOf(files, 2)} />);
+  await openDialog();
+  expect(screen.getByText('3 / 3')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Previous file (←)' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Next file (→)' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('a text file in the list is shown with its placeholder', async () => {
+  install();
+  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' });
+  const files = [fileRecord({ originalName: 'File 0.png' }), text];
+  render(<Harness file={text} asset={null} list={listOf(files, 1)} />);
+  await openDialog();
+  expect(screen.getByText('2 / 2')).toBeTruthy();
+  expect(screen.getByText('TXT')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
+});
+
+it('without a list there is no counter and no arrows', async () => {
+  install();
+  render(<Harness file={fileRecord()} asset={null} />);
+  await openDialog();
+  expect(screen.queryByText(/^\d+ \/ \d+$/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Previous file (←)' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next file (→)' })).toBeNull();
 });
