@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 import { NO_FILE_FILTERS } from '../../src/renderer/src/list-state';
 import { TrashScreen, type TrashListState } from '../../src/renderer/src/screens/TrashScreen';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { installFakeApi, type FakeHandlers } from './fake-api';
+import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 
 const INITIAL: TrashListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
@@ -287,4 +287,43 @@ it('the detail dialog offers Restore and moves on to the next file', async () =>
   await user.click(screen.getByRole('menuitem', { name: 'Restore' }));
   expect(await screen.findByRole('dialog', { name: 'loose.png' })).toBeTruthy();
   expect(callsOf(api, 'files:restoreMany')).toEqual([{ fileIds: [hero.id] }]);
+});
+
+/** Opens hero.png in the viewer and confirms Delete permanently from its menu. */
+async function purgeInDialog(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await screen.findByText('hero.png');
+  await user.click(tile('hero.png'));
+  await user.keyboard('{Enter}');
+  const dialog = await screen.findByRole('dialog', { name: 'hero.png' });
+  await user.click(within(dialog).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
+  const confirm = await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' });
+  await user.click(within(confirm).getByRole('button', { name: 'Delete permanently' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete 1 file permanently?' })).toBeNull());
+  return dialog;
+}
+
+it('a failing Delete permanently from the detail dialog shows the message in the dialog', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  install([hero, loose], { failing: [hero.id] });
+  render(<Harness />);
+  const dialog = await purgeInDialog(user);
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('The file is locked');
+  expect(screen.getByRole('dialog', { name: 'hero.png' })).toBe(dialog);
+});
+
+it('a rejected purge call from the detail dialog shows the message in the dialog', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  install([hero, loose], {
+    handlers: {
+      'files:purgeMany': () => {
+        throw fakeError('storage_unreachable');
+      },
+    },
+  });
+  render(<Harness />);
+  const dialog = await purgeInDialog(user);
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('cannot be reached');
 });

@@ -32,8 +32,17 @@ export type { TrashListState } from '../list-state';
 
 const TRASH = { kind: 'trash' } as const;
 
-/** What the open confirmation will do. */
-type Pending = { kind: 'purge'; files: FileRecord[] } | { kind: 'empty'; total: number };
+/** Hands the outcome of a confirmation back to the one that asked (the detail dialog). */
+interface Settle {
+  resolve(): void;
+  reject(error: unknown): void;
+}
+
+/**
+ * What the open confirmation will do. A purge with `settle` reports its failure there instead of
+ * in the screen's strip or alert, which the full-window viewer covers.
+ */
+type Pending = { kind: 'purge'; files: FileRecord[]; settle?: Settle } | { kind: 'empty'; total: number };
 
 interface Props {
   /** Filters and scroll offset; kept by the shell so that they survive navigation. */
@@ -127,10 +136,26 @@ export function TrashScreen({ state, onStateChange }: Props) {
     setPending({ kind: 'purge', files });
   }
 
+  /** Delete permanently from the dialog: settles when the confirmation ends and rejects with a failure. */
+  function askPurgeFromDialog(file: FileRecord): Promise<void> {
+    if (acting.current) return Promise.resolve();
+    return new Promise((resolve, reject) => setPending({ kind: 'purge', files: [file], settle: { resolve, reject } }));
+  }
+
+  function cancel() {
+    if (pending?.kind === 'purge') pending.settle?.resolve();
+    setPending(null);
+  }
+
   const confirmed = (action: Pending) =>
     exclusive(async () => {
       try {
-        if (action.kind === 'purge') {
+        if (action.kind === 'purge' && action.settle !== undefined) {
+          const { doneIds, failures } = await runFileBatch('files:purgeMany', action.files);
+          left(doneIds);
+          throwFirst(failures);
+          action.settle.resolve();
+        } else if (action.kind === 'purge') {
           const { doneIds, failures } = await runFileBatch('files:purgeMany', action.files);
           setResult(failures.length === 0 ? null : { title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
           left(doneIds);
@@ -141,7 +166,8 @@ export function TrashScreen({ state, onStateChange }: Props) {
           left([]);
         }
       } catch (e) {
-        setError(describeError(e));
+        if (action.kind === 'purge' && action.settle !== undefined) action.settle.reject(e);
+        else setError(describeError(e));
       } finally {
         setPending(null);
       }
@@ -233,7 +259,7 @@ export function TrashScreen({ state, onStateChange }: Props) {
                     cover: null,
                     onDetails: () => {},
                     onRestore: () => restoreOne(shown),
-                    onPurge: () => askPurge([shown]),
+                    onPurge: () => askPurgeFromDialog(shown),
                     onError: setError,
                   }}
                   roleControl={null}
@@ -256,7 +282,7 @@ export function TrashScreen({ state, onStateChange }: Props) {
           confirmLabel={pending?.kind === 'empty' ? EMPTY_TRASH_LABEL : PURGE_LABEL}
           busy={busy}
           onConfirm={() => pending !== null && void confirmed(pending)}
-          onCancel={() => setPending(null)}
+          onCancel={cancel}
         />
       </div>
     </Page>
