@@ -1,12 +1,19 @@
 import { ANALYZE_FILE_JOB, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
-import { createAnalyzeFileHandler, type JobControl, type ModelImageSource, type WorkspaceManager } from '@assetforge/core';
+import {
+  assignUnroutedJobs,
+  createAnalyzeFileHandler,
+  type JobControl,
+  type ModelImageSource,
+  type VisionProvider,
+  type WorkspaceManager,
+} from '@assetforge/core';
 import { createScheduler, DEFAULT_LIMITS, type PauseGate, type Scheduler } from '@assetforge/jobs';
-import type { VisionGateway } from './vision-gateway.js';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
 // The pause gate belongs to the app session and is handed to every scheduler, so a pause outlives
-// closing and reopening a workspace.
+// closing and reopening a workspace. An analysis job runs in the lane of its provider entry (the entry id);
+// limit, claim and pause work per lane.
 
 export interface JobHost extends JobControl {
   /** Starts a scheduler for the open workspace; no-op without one or when one runs. Never rejects. */
@@ -16,22 +23,22 @@ export interface JobHost extends JobControl {
   changes(): number;
   /** For the IPC handlers: a job changed outside the scheduler. */
   changed(): void;
-  /** The code that paused the analysis queue, or null. */
-  paused(): JobErrorCode | null;
-  /** Ends a pause of the analysis queue and lets the scheduler claim again. Never throws. */
-  resume(): void;
+  /** The paused lanes of the analysis queue with their codes, in the order they paused; `null` is the jobs without a provider. */
+  paused(): { lane: string | null; reason: JobErrorCode }[];
+  /** Ends the pause of one lane of the analysis queue and lets the scheduler claim again. Never throws. */
+  resume(lane: string | null): void;
 }
 
 export interface JobHostDeps {
   manager: WorkspaceManager;
-  /** The adapter in force when a job runs; null when no provider is configured. */
-  gateway: Pick<VisionGateway, 'current'>;
+  /** The adapter of a lane (a provider entry id) when a job runs; null when no such entry exists. */
+  vision: (lane: string | null) => VisionProvider | null;
   images: ModelImageSource;
-  /** Provider id recorded with every analysis. */
+  /** Adapter kind recorded with every analysis. */
   provider: string;
-  /** The tagging default model at run time; null when none is set. */
-  defaultModel: () => string | null;
   pause: PauseGate;
+  /** The entry that active analysis jobs without a provider are assigned to when a workspace opens; null when there is none. */
+  firstEntry: () => { id: string; name: string; taggingModel: string | null } | null;
   limits?: Record<ResourceClass, number>;
 }
 
@@ -59,15 +66,17 @@ export function createJobHost(deps: JobHostDeps): JobHost {
         if (scheduler !== null || manager.current() === null) return;
         // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
         const session = await manager.read(async (s) => s);
+        // Before the scheduler claims, so every waiting job runs in the lane the list shows.
+        const entry = deps.firstEntry();
+        if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) changed();
         const created = createScheduler({
           jobs: session.database.jobs,
           handlers: {
             [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
               session,
-              vision: () => deps.gateway.current(),
+              vision: deps.vision,
               images: deps.images,
               provider: deps.provider,
-              defaultModel: deps.defaultModel,
             }),
           },
           limits: deps.limits ?? DEFAULT_LIMITS,
@@ -97,11 +106,11 @@ export function createJobHost(deps: JobHostDeps): JobHost {
     changes: () => changes,
     changed,
 
-    paused: () => pause.reason(ANALYSIS_CLASS),
+    paused: () => pause.paused(ANALYSIS_CLASS),
 
-    resume() {
+    resume(lane) {
       try {
-        pause.resume(ANALYSIS_CLASS);
+        pause.resume(ANALYSIS_CLASS, lane);
       } catch (cause) {
         console.error('The job pause could not be ended', cause);
       }

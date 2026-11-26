@@ -9,7 +9,7 @@ export interface DescribeController {
    * `busy` while another request runs; `cancelled` once it was cancelled, and while a workspace
    * lifecycle step is under way (between `block` and `unblock`). Rejects with `no_workspace_open`.
    */
-  describe(r: { requestId: string; fileId: string; model: string; prompt: string }): Promise<DescribeResult>;
+  describe(r: { requestId: string; fileId: string; model: string; prompt: string; providerId: string }): Promise<DescribeResult>;
   /** Frees the slot at once; the cancelled request answers `cancelled`. An unknown or finished request is left alone. */
   cancel(requestId: string): void;
   /** Cancels the running request and waits until every cancelled run settled. Never rejects. */
@@ -27,7 +27,8 @@ interface ActiveRequest {
 
 export function createDescribeController(deps: {
   manager: WorkspaceManager;
-  vision: () => VisionProvider | null;
+  /** The adapter of a provider entry; null when the entry does not exist. */
+  vision: (providerId: string) => VisionProvider | null;
   images: ModelImageSource;
 }): DescribeController {
   let active: ActiveRequest | null = null;
@@ -50,7 +51,7 @@ export function createDescribeController(deps: {
       const controller = new AbortController();
       const { signal } = controller;
       const run = deps.manager.read((session) =>
-        describeImage({ session, vision: deps.vision, images: deps.images }, { fileId: r.fileId, model: r.model, prompt: r.prompt, signal }),
+        describeImage({ session, vision: () => deps.vision(r.providerId), images: deps.images }, { fileId: r.fileId, model: r.model, prompt: r.prompt, signal }),
       );
       const request: ActiveRequest = { requestId: r.requestId, controller, done: run.then(() => {}, () => {}) };
       active = request;

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { builtInAnalysisPrompt, WorkspaceManager, type ImageProbe, type ModelImageSource, type WorkspaceHost } from '@assetforge/core';
+import { builtInAnalysisPrompt, countActiveAnalysisJobs, WorkspaceManager, type ImageProbe, type ModelImageSource, type WorkspaceHost } from '@assetforge/core';
 import { WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
@@ -13,10 +13,10 @@ import { createDescribeController } from './describe-controller.js';
 import type { AppServices } from './ipc.js';
 import { createJobHost, type JobHost } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
+import { createProviderGateway, type ProviderGateway } from './provider-gateway.js';
+import { createProviderHandlers } from './provider-handlers.js';
+import { createProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
-import { createSettingsHandlers } from './settings-handlers.js';
-import { createVisionGateway, type VisionGateway } from './vision-gateway.js';
-import { createVisionSettingsStore, type VisionSettingsStore } from './vision-settings.js';
 
 export interface CompositionOptions {
   userDataPath: string;
@@ -77,8 +77,7 @@ export function createWorkspaceManager(opts: CompositionOptions): WorkspaceManag
 }
 
 export interface AnalysisServices extends AppServices {
-  store: VisionSettingsStore;
-  gateway: VisionGateway;
+  gateway: ProviderGateway;
   /** One per app session: a pause outlives closing and reopening a workspace. */
   pause: PauseGate;
   jobHost: JobHost;
@@ -89,8 +88,8 @@ export interface AnalysisServices extends AppServices {
 }
 
 /**
- * The vision provider settings, the adapter built from them, the job host with the app session's pause
- * gate and the describe controller. The settings store is the only source of base URL, key and models.
+ * The provider entries, one adapter per entry, the job host with the app session's pause gate and the
+ * describe controller. The provider store is the only source of base URLs, keys and models.
  */
 export function createAnalysisServices(o: {
   manager: WorkspaceManager;
@@ -102,9 +101,9 @@ export function createAnalysisServices(o: {
   log: (line: string) => void;
   limits?: Record<ResourceClass, number>;
 }): AnalysisServices {
-  const store = createVisionSettingsStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
-  // Registers its change listener first, so the adapter is rebuilt before the queue resumes.
-  const gateway = createVisionGateway({ settings: store, create: createOllamaVision, log: o.log });
+  const store = createProviderStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
+  // Registers its change listener first, so the entry's adapter is dropped before its lane resumes.
+  const gateway = createProviderGateway({ store, create: createOllamaVision, log: o.log });
   let jobHost: JobHost | null = null;
   const pause = createPauseGate({
     // A pause or resume changes the summary; the listener must not throw.
@@ -118,17 +117,17 @@ export function createAnalysisServices(o: {
   });
   const host = createJobHost({
     manager: o.manager,
-    gateway,
+    vision: (lane) => gateway.vision(lane),
     images: o.images,
     provider: OLLAMA_PROVIDER,
-    defaultModel: () => store.defaults().taggingModel,
     pause,
+    firstEntry: () => store.first(),
     ...(o.limits === undefined ? {} : { limits: o.limits }),
   });
   jobHost = host;
-  // New settings may fix what paused the queue.
-  store.onChange(() => host.resume());
-  const describe = createDescribeController({ manager: o.manager, vision: () => gateway.current(), images: o.images });
+  // A saved or deleted entry may fix what paused its lane; the other lanes stay as they are.
+  store.onChange((id) => host.resume(id));
+  const describe = createDescribeController({ manager: o.manager, vision: (id) => gateway.vision(id), images: o.images });
   const prompts = createAnalysisPromptStore({
     userData: o.userDataPath,
     newId: randomUUID,
@@ -136,12 +135,18 @@ export function createAnalysisServices(o: {
     log: o.log,
   });
 
+  const providers = createProviderHandlers(store, gateway, {
+    // Without an open workspace no job can be active here; jobs of another workspace fail later as not configured.
+    hasActiveJobs: async (id) =>
+      o.manager.current() !== null && (await o.manager.read((s) => countActiveAnalysisJobs(s, id))) > 0,
+  });
+
   return {
-    store,
+    providerStore: store,
     gateway,
     pause,
     jobHost: host,
-    settings: createSettingsHandlers(store, gateway),
+    providers,
     analysisPrompts: createAnalysisPromptHandlers(prompts),
     prompts,
     describe,
