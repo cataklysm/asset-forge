@@ -64,15 +64,10 @@ export async function importArchive(
     budget.bytes -= bytes;
 
     const results: ImportResult[] = [];
-    let truncated = false;
     for (const [index, entry] of entries.entries()) {
       if (isSkipped(entry)) continue;
       const entryName = entry.name;
       const result = (error: string): ImportResult => ({ sourcePath, entryName, file: null, error, duplicateOf: [] });
-      if (truncated) {
-        results.push(result(ARCHIVE_TRUNCATED_MESSAGE));
-        continue;
-      }
       const fileName = entryName.split(/[\\/]/).pop() ?? '';
       const refused = refusal(entry, fileName);
       if (refused !== null) {
@@ -83,7 +78,7 @@ export async function importArchive(
       try {
         stream = await archive.openEntry(index);
       } catch {
-        truncated = true;
+        // Only this entry fails; a later one may still be readable, so each is tried.
         results.push(result(ARCHIVE_TRUNCATED_MESSAGE));
         continue;
       }

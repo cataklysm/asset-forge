@@ -37,6 +37,7 @@ import { LAYOUT_DIRS } from '../src/paths.js';
 import { foldSearchWord, searchWords, textWords } from '../src/search.js';
 import {
   ArchiveNotReadableError,
+  ArchiveTooLargeError,
   InvalidOperationError,
   NotFoundError,
   SourceNotReadableError,
@@ -1472,11 +1473,14 @@ export interface FakeArchiveEntry {
 
 /**
  * Maps absolute archive paths to `'not-zip'` or a list of entries; an unknown path is not
- * readable. Ignores `maxEntries`, so the caller's own count check is what a test sees.
+ * readable. Like the real reader, `open` rejects with `ArchiveTooLargeError` for more entries
+ * than `maxEntries`, unless `ignoreMaxEntries` lets the caller's own count check show.
  */
 export class FakeArchives extends Map<string, 'not-zip' | FakeArchiveEntry[]> implements ArchiveReader {
   /** Every `open` call. */
   readonly opened: { path: string; maxEntries: number }[] = [];
+  /** When set, `open` does not enforce `maxEntries`. */
+  ignoreMaxEntries = false;
   /** Every index `openEntry` was called with, across archives. */
   readonly openedEntries: number[] = [];
   closed = 0;
@@ -1486,6 +1490,7 @@ export class FakeArchives extends Map<string, 'not-zip' | FakeArchiveEntry[]> im
     const archive = this.get(absolutePath);
     if (archive === undefined) throw new SourceNotReadableError();
     if (archive === 'not-zip') throw new ArchiveNotReadableError();
+    if (!this.ignoreMaxEntries && archive.length > limits.maxEntries) throw new ArchiveTooLargeError();
     const bytes = (e: FakeArchiveEntry) => Buffer.from(e.content ?? '');
     return {
       entries: archive.map((e) => ({

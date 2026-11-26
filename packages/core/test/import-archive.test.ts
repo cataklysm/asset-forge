@@ -242,6 +242,21 @@ describe('importFiles archive limits', () => {
     expect(results).toEqual([failure('/src/big.zip', TOO_LARGE)]);
     expect(archives.opened).toEqual([{ path: '/src/big.zip', maxEntries: MAX_ARCHIVE_ENTRIES }]);
     expect(archives.openedEntries).toEqual([]);
+    // The reader refuses the archive while opening it, so there is nothing to close.
+    expect(archives.closed).toBe(0);
+    expect(db.files.records.size).toBe(0);
+    expect(written(storage)).toEqual([]);
+  });
+
+  it('counts the entries itself when the reader does not enforce the limit', async () => {
+    const { unpack, archives, storage, db } = await setup();
+    archives.ignoreMaxEntries = true;
+    archives.set('/src/big.zip', [{ name: 'a.png', content: 'a' }, ...dirs(MAX_ARCHIVE_ENTRIES)]);
+
+    const results = await unpack(['/src/big.zip']);
+
+    expect(results).toEqual([failure('/src/big.zip', TOO_LARGE)]);
+    expect(archives.openedEntries).toEqual([]);
     expect(archives.closed).toBe(1);
     expect(db.files.records.size).toBe(0);
     expect(written(storage)).toEqual([]);
@@ -278,7 +293,7 @@ describe('importFiles archive limits', () => {
       ['/src/b.png', null, 'complete', null],
     ]);
     expect(archives.opened.map((o) => o.maxEntries)).toEqual([5000, 2000, 2000]);
-    expect(archives.closed).toBe(3);
+    expect(archives.closed).toBe(2);
   });
 
   it('the size limit holds for the whole call', async () => {
@@ -332,12 +347,12 @@ describe('importFiles archive failures', () => {
     expect(written(storage)).toEqual([fine!.file!.relativePath]);
   });
 
-  it('an archive that cannot be read to the end reports every entry not started', async () => {
-    const { unpack, archives, db } = await setup();
+  it('an archive that cannot be read to the end fails each entry that cannot be opened', async () => {
+    const { unpack, archives, db, storage } = await setup();
     archives.set('/src/pack.zip', [
       { name: 'one.png', content: 'one' },
       { name: 'two.png', content: 'two', failOpen: true },
-      { name: 'three.exe', content: 'MZ' },
+      { name: 'three.png', content: 'three', failOpen: true },
       { name: 'dir/', isDirectory: true },
     ]);
 
@@ -346,11 +361,27 @@ describe('importFiles archive failures', () => {
     expect(results[0]).toMatchObject({ entryName: 'one.png', error: null, file: { status: 'complete' } });
     expect(results.slice(1)).toEqual([
       { sourcePath: '/src/pack.zip', entryName: 'two.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] },
-      { sourcePath: '/src/pack.zip', entryName: 'three.exe', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] },
+      { sourcePath: '/src/pack.zip', entryName: 'three.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] },
     ]);
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['one.png']);
-    expect(archives.openedEntries).toEqual([0, 1]);
+    expect(archives.openedEntries).toEqual([0, 1, 2]);
+    expect(written(storage)).toEqual([results[0]!.file!.relativePath]);
     expect(archives.closed).toBe(1);
+  });
+
+  it('an entry that cannot be opened fails only that entry; the next one is imported', async () => {
+    const { unpack, archives, db } = await setup();
+    archives.set('/src/pack.zip', [
+      { name: 'one.png', content: 'one', failOpen: true },
+      { name: 'two.png', content: 'two' },
+    ]);
+
+    const results = await unpack(['/src/pack.zip']);
+
+    expect(results[0]).toEqual({ sourcePath: '/src/pack.zip', entryName: 'one.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] });
+    expect(results[1]).toMatchObject({ entryName: 'two.png', error: null, file: { status: 'complete', sha256: sha('two') } });
+    expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['two.png']);
+    expect(archives.openedEntries).toEqual([0, 1]);
   });
 
   it('an entry whose content already exists reports the earlier file', async () => {
