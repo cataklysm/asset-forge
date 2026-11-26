@@ -176,15 +176,20 @@ export function fakeProviders(
         throw fakeError('invalid_operation', 'A provider with this name already exists');
       const before = request.id === undefined ? undefined : find(request.id);
       if (before === undefined && state.providers.length >= 10) throw fakeError('invalid_operation', 'No more than 10 providers');
+      if (before !== undefined && request.kind !== undefined && request.kind !== before.kind)
+        throw fakeError('invalid_operation', 'The kind of a provider cannot be changed');
+      const kind = before?.kind ?? request.kind ?? 'ollama';
+      const editModel = request.editModel === undefined ? (before?.editModel ?? null) : request.editModel;
+      // A venice entry keeps no vision models, an ollama entry no edit model.
       const next: ProviderView = {
         id: before?.id ?? nextId(),
-        kind: request.kind ?? before?.kind ?? 'ollama',
+        kind,
         name,
         baseUrl: request.baseUrl,
         timeoutSeconds: request.timeoutSeconds,
-        taggingModel: request.taggingModel,
-        promptModel: request.promptModel,
-        editModel: request.editModel === undefined ? (before?.editModel ?? null) : request.editModel,
+        taggingModel: kind === 'venice' ? null : request.taggingModel,
+        promptModel: kind === 'venice' ? null : request.promptModel,
+        editModel: kind === 'ollama' ? null : editModel,
         hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
       };
       state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
@@ -203,7 +208,9 @@ export function fakeProviders(
       return typeof answer === 'function' ? answer() : structuredClone(answer);
     },
     'providers:listImageModels': ({ providerId }) => {
-      if (!state.providers.some((p) => p.id === providerId)) return { ok: false, code: 'provider_not_configured' };
+      const entry = state.providers.find((p) => p.id === providerId);
+      if (entry === undefined) return { ok: false, code: 'provider_not_configured' };
+      if (entry.kind !== 'venice') throw fakeError('invalid_operation', 'This provider cannot generate images');
       return { ok: true, models: [] };
     },
   };
@@ -277,10 +284,10 @@ export function fakeGenerationDefaults(): { [C in GenerationChannel]: NonNullabl
     },
     'generations:forFile': () => ({ madeBy: null, results: [] }),
     'generations:retry': () => {
-      throw fakeError('not_found', 'The generation does not exist');
+      throw fakeError('not_found', 'This generation does not exist');
     },
     'generations:remove': () => {
-      throw fakeError('not_found', 'The generation does not exist');
+      throw fakeError('not_found', 'This generation does not exist');
     },
     'generations:recentPrompts': () => ({ prompts: [] }),
   };

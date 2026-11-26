@@ -1,7 +1,7 @@
 import type { GenerationFile, GenerationStatus, JobErrorCode } from '@assetforge/contracts';
 import type { JobOutcome, NewJob } from '../src/jobs.js';
 import type { GenerationFileRef, GenerationRepository, GenerationRow, NewGeneration } from '../src/ports.js';
-import type { InMemoryJobRepository } from './memory-jobs.js';
+import { restoreInPlace, type InMemoryJobRepository } from './memory-jobs.js';
 
 interface StoredGeneration extends NewGeneration {
   status: GenerationStatus;
@@ -29,7 +29,10 @@ export class InMemoryGenerationRepository implements GenerationRepository {
   constructor(
     private readonly jobs: InMemoryJobRepository,
     private readonly fileState: (fileId: string) => 'live' | 'trashed' | 'unknown' = () => 'live',
-  ) {}
+  ) {
+    // A `settled` callback that settles a generation is rolled back with the job, as in one SQLite transaction.
+    jobs.joinTransactions({ snapshot: () => restoreInPlace(this.rows) });
+  }
 
   private find(id: string): StoredGeneration | undefined {
     return this.rows.find((r) => r.id === id);

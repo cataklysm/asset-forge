@@ -172,6 +172,22 @@ describe('InMemoryGenerationRepository', () => {
     expect(await repo.recentPrompts(1)).toEqual(['first']);
   });
 
+  it('a settle in a throwing settled callback rolls back with the job end, as one transaction', async () => {
+    const { repo, jobs } = setup();
+    for (const n of [1, 2]) await repo.create({ generation: edit(n), input, job: jobFor(n) });
+    await jobs.claimNext({ resourceClass: 'remote_api', types: ['image.generate'], now: T1 });
+    const settleThenThrow = (n: number) => () => {
+      repo.settle({ id: id(n), outcome: { status: 'cancelled' }, now: LATER });
+      throw new Error('boom');
+    };
+
+    await expect(jobs.finish(id(101), { status: 'cancelled', errorCode: null, now: LATER, settled: settleThenThrow(1) })).rejects.toThrow('boom');
+    await expect(jobs.cancelPending({ now: LATER, settled: settleThenThrow(2) })).rejects.toThrow('boom');
+
+    expect(await repo.get(id(1))).toMatchObject({ status: 'pending', finishedAt: null, jobStatus: 'running' });
+    expect(await repo.get(id(2))).toMatchObject({ status: 'pending', finishedAt: null, jobStatus: 'queued' });
+  });
+
   it('reconcile takes the finished job outcome, and provider_outcome_unknown for a missing job', async () => {
     const { repo, jobs } = setup();
     for (const n of [1, 2, 3, 4, 5]) await repo.create({ generation: edit(n), input, job: jobFor(n) });

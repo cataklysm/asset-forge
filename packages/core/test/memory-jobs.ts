@@ -20,6 +20,17 @@ const isWaiting = (status: JobStatus) => status === 'queued' || status === 'retr
 const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
 const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) => !(excludeLanes ?? []).includes(r.lane);
 
+/**
+ * Snapshots `rows` and answers a function that puts them back as they were. Restores in place, so
+ * references callers hold to a row stay valid.
+ */
+export function restoreInPlace<T extends object>(rows: T[]): () => void {
+  const before = rows.map((row) => [row, structuredClone(row)] as const);
+  return () => {
+    rows.splice(0, rows.length, ...before.map(([row, copy]) => Object.assign(row, copy)));
+  };
+}
+
 /** The job queue over an array, following the contract of the SQLite repository. */
 export class InMemoryJobRepository implements JobRepository {
   /** Stored rows; callers may inspect them. Every method returns copies. */
@@ -137,14 +148,21 @@ export class InMemoryJobRepository implements JobRepository {
     });
   }
 
-  /** Runs `work` like a transaction: when it throws, every row is put back as it was. */
+  /** Other in-memory stores rolled back with a job transaction; `snapshot` answers the restore. */
+  private readonly participants: { snapshot(): () => void }[] = [];
+
+  /** Lets another in-memory store (the generations) take part in the transactions of `finish` and `cancelPending`. */
+  joinTransactions(participant: { snapshot(): () => void }): void {
+    this.participants.push(participant);
+  }
+
+  /** Runs `work` like a transaction: when it throws, every row (also of the participants) is put back as it was. */
   private inTransaction<T>(work: () => T): T {
-    const before = this.rows.map((row) => [row, structuredClone(row)] as const);
+    const restores = [restoreInPlace(this.rows), ...this.participants.map((p) => p.snapshot())];
     try {
       return work();
     } catch (error) {
-      // Restores in place, so references callers hold to a row stay valid.
-      this.rows.splice(0, this.rows.length, ...before.map(([row, copy]) => Object.assign(row, copy)));
+      for (const restore of restores) restore();
       throw error;
     }
   }
