@@ -388,3 +388,90 @@ describe('phase 4b acceptance', () => {
     }
   });
 });
+
+describe('editable prompts acceptance', () => {
+  let h: Harness;
+  let mock: MockProvider;
+
+  beforeEach(async () => {
+    h = await createHarness();
+    mock = await startMockProvider({ port: 0 });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
+    await h.ok('workspace:create', { name: 'Analysis', rootPath: join(h.base, 'workspace') });
+  });
+  afterEach(async () => {
+    await h.close();
+    await mock.close();
+  });
+
+  const aiTagsOf = async (fileId: string) => {
+    const files = (await h.ok('files:list', { limit: 100, offset: 0, scope: { kind: 'all' } })).items;
+    return files.find((f) => f.id === fileId)!.tags.filter((t) => t.origin === 'ai');
+  };
+  const analysisOf = (fileId: string) => h.manager.read((s) => s.database.analyses.get(fileId));
+  const filesRequest = (fileId: string, mode: 'apply' | 'propose' = 'apply') => ({
+    target: { kind: 'files' as const, fileIds: [fileId] },
+    model: MOCK_MODEL,
+    mode,
+    force: false,
+  });
+
+  it('analyses with a chosen prompt, records its name and redoes the file with another prompt only on force', async () => {
+    const narrow = await h.ok('analysisPrompts:save', { purpose: 'tagging', name: 'Two tags', text: 'Only the main subject.', maxTags: 2 });
+    const defaultPrompt = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'tagging' && p.name === 'Default')!;
+    const [fileId] = await h.importImages(1);
+    const request = filesRequest(fileId!);
+
+    expect(await h.ok('analysis:enqueue', { ...request, promptId: narrow.id })).toEqual({ enqueued: 1, skipped: NONE_SKIPPED });
+    await h.until((s) => s.succeeded === 1);
+    const tags = await aiTagsOf(fileId!);
+    expect(tags.length).toBeGreaterThan(0);
+    expect(tags.length).toBeLessThanOrEqual(2);
+    expect(await analysisOf(fileId!)).toMatchObject({ model: MOCK_MODEL, promptName: 'Two tags' });
+    const [chat] = mock.requests.filter((r) => r.path === '/api/chat');
+    expect(JSON.stringify(chat!.body)).toContain('Give at most 2 tags.');
+    expect((await h.ok('analysisPrompts:list', {})).lastUsed.tagging).toBe(narrow.id);
+
+    // The fingerprint does not depend on the prompt: another prompt finds the file already analysed.
+    expect(await h.ok('analysis:enqueue', { ...request, promptId: defaultPrompt.id })).toEqual({
+      enqueued: 0,
+      skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 },
+    });
+    expect(await h.ok('analysis:enqueue', { ...request, promptId: defaultPrompt.id, force: true })).toEqual({
+      enqueued: 1,
+      skipped: NONE_SKIPPED,
+    });
+    await h.until((s) => s.succeeded === 2);
+    expect(await analysisOf(fileId!)).toMatchObject({ model: MOCK_MODEL, promptName: 'Default' });
+    expect((await aiTagsOf(fileId!)).length).toBeGreaterThan(2);
+    expect((await h.ok('analysisPrompts:list', {})).lastUsed.tagging).toBe(defaultPrompt.id);
+  });
+
+  it('shows the prompt name in a proposal', async () => {
+    const detailed = await h.ok('analysisPrompts:save', { purpose: 'tagging', name: 'Detailed', text: 'Every detail.', maxTags: 3 });
+    const [fileId] = await h.importImages(1);
+    expect(await h.ok('analysis:enqueue', { ...filesRequest(fileId!, 'propose'), promptId: detailed.id })).toEqual({
+      enqueued: 1,
+      skipped: NONE_SKIPPED,
+    });
+    await h.until((s) => s.succeeded === 1);
+    const { proposal } = await h.ok('analysis:getProposal', { fileId: fileId! });
+    expect(proposal).toMatchObject({ model: MOCK_MODEL, promptName: 'Detailed', stale: false });
+    expect(proposal!.tags.length).toBeGreaterThan(0);
+    expect(proposal!.tags.length).toBeLessThanOrEqual(3);
+    expect(await aiTagsOf(fileId!)).toEqual([]);
+  });
+
+  it('rejects an unknown or wrong-purpose prompt id and queues nothing', async () => {
+    const [fileId] = await h.importImages(1);
+    const imagePrompt = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'image_prompt')!;
+    for (const promptId of [randomUUID(), imagePrompt.id]) {
+      expect(await h.call('analysis:enqueue', { ...filesRequest(fileId!), promptId })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found' },
+      });
+    }
+    expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 0, running: 0, succeeded: 0 });
+    expect((await h.ok('analysisPrompts:list', {})).lastUsed.tagging).toBeNull();
+  });
+});
