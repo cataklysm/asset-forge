@@ -799,6 +799,37 @@ it('the Delete key deletes the selection', async () => {
   await waitFor(() => expect(callsOf(api, 'trash:summary')).toHaveLength(2));
 });
 
+it('a fully successful delete clears the strip of an earlier partly failed one', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const api = installTrashable([c1, c2]);
+  let locked = true;
+  let items = [c1, c2];
+  api.set('files:trashMany', (r) => {
+    const failing = locked ? [c2.id] : [];
+    items = items.filter((f) => !r.fileIds.includes(f.id) || failing.includes(f.id));
+    api.setFiles(items);
+    return {
+      items: r.fileIds.map((fileId) =>
+        failing.includes(fileId)
+          ? { fileId, file: null, error: { code: 'invalid_operation' as const, message: 'The file is locked' } }
+          : { fileId, file: null, error: null },
+      ),
+    };
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  const bar = () => screen.getByText(/selected$/).parentElement!;
+  await user.click(within(bar()).getByRole('button', { name: 'Delete' }));
+  expect(await screen.findByText('1 deleted, 1 failed')).toBeTruthy();
+  await waitFor(() => expect(screen.getByText('1 selected')).toBeTruthy());
+
+  locked = false;
+  await user.click(within(bar()).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(screen.queryByText('1 selected')).toBeNull());
+  expect(screen.queryByText('1 deleted, 1 failed')).toBeNull();
+});
+
 it('the inbox count reloads after a delete', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();

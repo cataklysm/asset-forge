@@ -156,7 +156,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     setError(null);
     try {
       const { doneIds, failures } = await runFileBatch('files:trashMany', files);
-      if (failures.length > 0) setImportResult({ title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
+      setImportResult(failures.length === 0 ? null : { title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
       moved(doneIds);
       trash.refresh();
     } catch (e) {
