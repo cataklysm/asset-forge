@@ -278,6 +278,82 @@ it('reopening starts again from the tagging default with Analyse again off', asy
   expect((screen.getByRole('checkbox', { name: 'Analyse again' }) as HTMLInputElement).checked).toBe(false);
 });
 
+it('with Analyse again the already analysed files move into To analyse', async () => {
+  install({ 'analysis:preview': () => NOTHING_NEW });
+  renderDialog();
+  await previewShown(NOTHING_NEW);
+  expect(count('Already analysed')).toBe('3');
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Analyse again' }));
+  expect(count('To analyse')).toBe('3');
+  expect(count('Already analysed')).toBe('0');
+  expect(count('Already queued')).toBe('2');
+  expect(count('Not analysable')).toBe('1');
+});
+
+it('with Analyse again To analyse adds the analysed files to the new ones, and unchecking restores them', async () => {
+  install();
+  renderDialog();
+  await previewShown();
+  const again = screen.getByRole('checkbox', { name: 'Analyse again' });
+  await userEvent.click(again);
+  expect(count('To analyse')).toBe('10');
+  expect(count('Already analysed')).toBe('0');
+  await userEvent.click(again);
+  expect(count('To analyse')).toBe('7');
+  expect(count('Already analysed')).toBe('3');
+});
+
+it('a rejected preview shows the message, blocks Start with its own reason and can be retried', async () => {
+  let fail = true;
+  const api = install({
+    'analysis:preview': () => {
+      if (fail) throw fakeError('invalid_operation');
+      return PREVIEW;
+    },
+  });
+  renderDialog();
+  expect((await screen.findByRole('alert')).textContent).toBe('invalid_operation');
+  expect(startButton().disabled).toBe(true);
+  expect(startButton().title).toBe('The files could not be counted');
+  const retry = screen.getByRole('button', { name: 'Count again' });
+  expect(retry.className).toBe(ICON_BUTTON);
+  expect(retry.title).toBe('Count again');
+  fail = false;
+  await userEvent.click(retry);
+  await previewShown();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(startButton().disabled).toBe(false);
+  expect(callsOf(api, 'analysis:preview')).toHaveLength(2);
+});
+
+it('while a start is in flight Cancel is disabled and Esc does not close', async () => {
+  const pending = deferred<EnqueueAnalysisResult>();
+  install({ 'analysis:enqueue': () => pending.promise });
+  const { onClose, onStarted } = renderDialog();
+  await previewShown();
+  await userEvent.click(startButton());
+  expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.keyboard('{Escape}');
+  expect(onClose).not.toHaveBeenCalled();
+  expect((screen.getByRole('dialog') as HTMLDialogElement).open).toBe(true);
+  await act(async () => pending.resolve(ENQUEUED));
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  expect(onStarted).toHaveBeenCalledTimes(1);
+});
+
+it('a start that fails after Esc was pressed shows its error in the still open dialog', async () => {
+  const pending = deferred<EnqueueAnalysisResult>();
+  install({ 'analysis:enqueue': () => pending.promise });
+  const { onClose } = renderDialog();
+  await previewShown();
+  await userEvent.click(startButton());
+  await userEvent.keyboard('{Escape}');
+  await act(async () => pending.reject(fakeError('invalid_operation')));
+  expect((await screen.findByRole('alert')).textContent).toBe('invalid_operation');
+  expect(onClose).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
 it('Cancel closes without a request', async () => {
   const api = install();
   const { onClose, onStarted } = renderDialog();

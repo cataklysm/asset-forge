@@ -1,9 +1,10 @@
+import { RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import { useProvider } from '../provider-context';
-import { ALERT, BUTTON, LABEL, MUTED } from '../ui';
+import { ALERT, BUTTON, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
 
@@ -19,6 +20,8 @@ interface Props {
 }
 
 export const ANALYSIS_START_TITLE = 'Analyse';
+const PREVIEW_FAILED = 'The files could not be counted';
+const RETRY_PREVIEW_LABEL = 'Count again';
 
 const COUNTS: readonly { key: keyof AnalysisPreview; label: string; title: string }[] = [
   { key: 'analysable', label: 'To analyse', title: 'Files that will be analysed with this model' },
@@ -51,6 +54,8 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rises with every retry of a failed preview, so the preview effect runs again.
+  const [previewRun, setPreviewRun] = useState(0);
   const startingRef = useRef(false);
 
   // Every opening starts from the stored default with nothing carried over.
@@ -100,18 +105,20 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     return () => {
       superseded = true;
     };
-  }, [open, targetKey, model, configured]);
+  }, [open, targetKey, model, configured, previewRun]);
 
   const nothingToDo = preview !== null && wouldEnqueue(preview, force) === 0;
   const blocked = !configured
     ? 'No vision provider is configured'
     : model === null
       ? 'Choose a model'
-      : previewing || preview === null
-        ? 'The files are being counted'
-        : nothingToDo
-          ? 'Nothing to analyse'
-          : null;
+      : previewError !== null
+        ? PREVIEW_FAILED
+        : previewing || preview === null
+          ? 'The files are being counted'
+          : nothingToDo
+            ? 'Nothing to analyse'
+            : null;
   const canStart = blocked === null && !starting && target !== null;
 
   async function start(event?: FormEvent) {
@@ -133,20 +140,46 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     }
   }
 
-  function openSettings() {
+  /** Cancel, Esc and the backdrop; ignored while a start is in flight, which closes by itself. */
+  function close() {
+    if (startingRef.current) return;
     onClose();
+  }
+
+  function openSettings() {
+    close();
     onOpenSettings();
   }
 
   const shownError = error ?? previewError;
 
+  /** "Analyse again" moves the files already analysed with this model into "To analyse". */
+  function shown(p: AnalysisPreview, key: keyof AnalysisPreview): number {
+    if (key === 'analysable') return wouldEnqueue(p, force);
+    if (key === 'alreadyAnalysed' && force) return 0;
+    return p[key];
+  }
+
   return (
-    <Dialog open={open} title={ANALYSIS_START_TITLE} onClose={onClose}>
+    <Dialog open={open} title={ANALYSIS_START_TITLE} onClose={close}>
       <form className="flex flex-col gap-4" onSubmit={(e) => void start(e)}>
         {shownError !== null && (
-          <p role="alert" className={ALERT}>
-            {shownError}
-          </p>
+          <div className="flex items-start gap-2">
+            <p role="alert" className={`min-w-0 flex-1 ${ALERT}`}>
+              {shownError}
+            </p>
+            {error === null && previewError !== null && (
+              <button
+                type="button"
+                className={ICON_BUTTON}
+                title={RETRY_PREVIEW_LABEL}
+                aria-label={RETRY_PREVIEW_LABEL}
+                onClick={() => setPreviewRun((n) => n + 1)}
+              >
+                <RotateCw size={16} aria-hidden />
+              </button>
+            )}
+          </div>
         )}
         <ModelSelect
           purpose="tagging"
@@ -159,7 +192,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
             <div key={key} className="flex flex-col" title={title}>
               <dt className={LABEL}>{label}</dt>
               <dd className={`text-lg tabular-nums ${preview === null ? MUTED : 'text-text'}`}>
-                {preview === null ? '–' : preview[key]}
+                {preview === null ? '–' : shown(preview, key)}
               </dd>
             </div>
           ))}
@@ -179,7 +212,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
               Settings
             </button>
           )}
-          <button type="button" className={BUTTON} onClick={onClose}>
+          <button type="button" className={BUTTON} disabled={starting} onClick={close}>
             Cancel
           </button>
           <button type="submit" className={BUTTON} disabled={!canStart} title={blocked ?? undefined}>
