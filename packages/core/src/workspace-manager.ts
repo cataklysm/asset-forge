@@ -21,6 +21,7 @@ import {
   WorkspaceNotFoundError,
 } from './errors.js';
 import { listFiles, recoverFileMoves, relocateFile } from './asset-files.js';
+import { sweepTrash } from './file-trash.js';
 import { ensureBuiltInAssetTypes } from './asset-types.js';
 import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
@@ -174,6 +175,11 @@ export class WorkspaceManager {
       await storage.ensureLayout();
       await this.recoverImports(storage, database);
       await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
+      try {
+        await sweepTrash({ storage, files: database.files });
+      } catch {
+        // Best effort: leftover trash binaries are swept on the next open.
+      }
       const summary: WorkspaceSummary = {
         id: manifest.id,
         name: manifest.name,

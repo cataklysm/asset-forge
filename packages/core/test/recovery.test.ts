@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { inboxPath, recoverIncompleteImports, stagingPath, STAGING_DIR, WorkspaceManager } from '../src/index.js';
+import {
+  inboxPath,
+  recoverFileMoves,
+  recoverIncompleteImports,
+  stagingPath,
+  STAGING_DIR,
+  trashPath,
+  WorkspaceManager,
+} from '../src/index.js';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -25,6 +33,79 @@ const pending = (id: string, name: string) => ({
   mimeType: 'image/png',
   importedAt: '2026-01-01T00:00:00.000Z',
   kind: 'image' as const,
+});
+
+const TS = '2026-01-02T00:00:00.000Z';
+const trashMove = (id: string, name: string) => ({
+  fileId: id,
+  kind: 'trash' as const,
+  targetRelativePath: trashPath(id, name),
+  targetAssetId: null,
+  targetRole: null,
+  createdAt: TS,
+});
+
+async function complete(db: Awaited<ReturnType<typeof setup>>['db'], id: string, name: string) {
+  await db.files.insertPending(pending(id, name));
+  await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+}
+
+describe('recoverFileMoves for the trash', () => {
+  it('an interrupted trash move is committed when the binary already moved', async () => {
+    const { storage, db } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result.completed).toEqual([ID1]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS, assetId: null, role: null });
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('an interrupted trash move is aborted when it did not', async () => {
+    const { storage, db } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    storage.files.set(inboxPath(ID1, 'a.png'), Buffer.from('a'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result.discarded).toEqual([ID1]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: inboxPath(ID1, 'a.png'), deletedAt: null });
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  const trashed = async () => {
+    const ctx = await setup();
+    const { storage, db } = ctx;
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    await db.fileMoves.commit(ID1);
+    await db.fileMoves.begin({ ...trashMove(ID1, 'a.png'), kind: 'restore', targetRelativePath: inboxPath(ID1, 'a.png') });
+    return { storage, db };
+  };
+
+  it('an interrupted restore move is committed when the binary already moved', async () => {
+    const { storage, db } = await trashed();
+    storage.files.set(inboxPath(ID1, 'a.png'), Buffer.from('a'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result.completed).toEqual([ID1]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: inboxPath(ID1, 'a.png'), deletedAt: null, trashedAssetId: null });
+  });
+
+  it('an interrupted restore move is aborted when it did not', async () => {
+    const { storage, db } = await trashed();
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result.discarded).toEqual([ID1]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
+  });
 });
 
 describe('recoverIncompleteImports', () => {
@@ -137,6 +218,33 @@ describe('recovery on open', () => {
 
     await expect(manager.open({ rootPath: ROOT })).resolves.toMatchObject({ rootPath: ROOT });
     expect(db.files.records.get(ID1)?.status).toBe('pending');
+  });
+
+  it('opening a workspace sweeps the trash after recovering moves', async () => {
+    const { manager, storage, db } = await setup();
+    // A complete inbox file whose trash move was interrupted after the binary moved.
+    await db.files.insertPending(pending(ID1, 'a.png'));
+    await db.files.markComplete(ID1, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+    await db.fileMoves.begin({ ...trashMove(ID1, 'a.png') });
+    storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
+    const orphan = trashPath(ID3, 'gone.png');
+    storage.files.set(orphan, Buffer.from('orphan'));
+    await manager.close();
+
+    await manager.open({ rootPath: ROOT });
+
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png') });
+    expect(db.files.records.get(ID1)!.deletedAt).not.toBeNull();
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
+    expect(storage.files.has(orphan)).toBe(false);
+  });
+
+  it('still opens when the trash sweep fails', async () => {
+    const { manager, storage } = await setup();
+    storage.files.set(trashPath(ID3, 'gone.png'), Buffer.from('orphan'));
+    await manager.close();
+    storage.failNext('remove', new Error('EBUSY'));
+    await expect(manager.open({ rootPath: ROOT })).resolves.toMatchObject({ rootPath: ROOT });
   });
 
   it('cleans up an interrupted import when the workspace is reopened', async () => {

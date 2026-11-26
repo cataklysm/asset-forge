@@ -22,8 +22,15 @@ export class InMemoryJobRepository implements JobRepository {
   /** Stored rows; callers may inspect them. Every method returns copies. */
   readonly rows: Job[] = [];
 
-  /** `fileName(id)` supplies the original name of a job's file for `list`. */
-  constructor(private readonly fileName: (fileId: string) => string | null = () => null) {}
+  /**
+   * `fileName(id)` supplies the original name of a job's file for `list`. With `fileState`, `enqueue`
+   * skips a job whose file is unknown or in the trash and `retry` skips a job whose file is in the
+   * trash, like the SQLite repository; without it every file counts as live.
+   */
+  constructor(
+    private readonly fileName: (fileId: string) => string | null = () => null,
+    private readonly fileState: (fileId: string) => 'live' | 'trashed' | 'unknown' = () => 'live',
+  ) {}
 
   private keyHeld(dedupeKey: string): boolean {
     return this.rows.some((r) => r.dedupeKey === dedupeKey && isActive(r.status));
@@ -41,6 +48,7 @@ export class InMemoryJobRepository implements JobRepository {
     const inserted: string[] = [];
     for (const j of jobs) {
       if (j.dedupeKey !== null && this.keyHeld(j.dedupeKey)) continue;
+      if (j.fileId !== null && this.fileState(j.fileId) !== 'live') continue;
       if (this.rows.some((r) => r.id === j.id)) throw new Error('UNIQUE constraint failed: job.id');
       this.rows.push({
         ...j,
@@ -71,8 +79,8 @@ export class InMemoryJobRepository implements JobRepository {
     return chosen ? structuredClone(chosen) : null;
   }
 
-  async activeForFile(_fileId: string): Promise<Job[]> {
-    throw new Error('not implemented');
+  async activeForFile(fileId: string): Promise<Job[]> {
+    return this.rows.filter((r) => r.fileId === fileId && isActive(r.status)).sort(oldestFirst).map((r) => structuredClone(r));
   }
 
   async listByStatus(status: JobStatus): Promise<Job[]> {
@@ -128,6 +136,7 @@ export class InMemoryJobRepository implements JobRepository {
   async retry({ id, now }: { id?: string; now: string }): Promise<number> {
     const candidates = this.rows
       .filter((r) => (id === undefined || r.id === id) && (r.status === 'failed' || r.status === 'cancelled'))
+      .filter((r) => r.fileId === null || this.fileState(r.fileId) !== 'trashed')
       .sort((a, b) => oldestFirst(b, a));
     let n = 0;
     for (const row of candidates) {

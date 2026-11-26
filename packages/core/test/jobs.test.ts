@@ -14,11 +14,25 @@ import {
   type JobControl,
   type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, type InMemoryDatabase } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
 const T0 = '2026-01-01T00:00:00.000Z';
+
+/** A complete inbox file row; jobs are only queued for a file that exists. */
+async function addFile(db: InMemoryDatabase, fileId: string): Promise<void> {
+  await db.files.insertPending({
+    id: fileId,
+    storageId: 'storage',
+    originalName: `${fileId}.png`,
+    relativePath: `inbox/${fileId}_${fileId}.png`,
+    mimeType: 'image/png',
+    importedAt: T0,
+    kind: 'image',
+  });
+  await db.files.markComplete(fileId, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+}
 
 class FakeControl implements JobControl {
   readonly cancelled: string[] = [];
@@ -35,9 +49,10 @@ async function setup() {
   const db = fake.databases.get(summary.id)!;
   const session: WorkspaceSession = await manager.read(async (s) => s);
   let n = 0;
-  /** Adds a job for `fileId` (its dedupe key derived from it) and sets its status. */
+  /** Adds a job for `fileId` (its dedupe key derived from it, its file row created when missing) and sets its status. */
   const addJob = async (status: JobStatus, fileId = `file-${++n}`) => {
     const id = `job-${++n}`;
+    if (db.files.records.get(fileId) === undefined) await addFile(db, fileId);
     await db.jobs.enqueue({
       jobs: [{ id, type: 'test', resourceClass: 'cpu', fileId, payload: {}, dedupeKey: `test:${fileId}` }],
       now: T0,

@@ -5,6 +5,7 @@ export * from './analysis-proposals.js';
 export * from './asset-cover.js';
 export * from './asset-files.js';
 export * from './asset-types.js';
+export * from './file-trash.js';
 export * from './assignments.js';
 export * from './assets.js';
 export * from './errors.js';

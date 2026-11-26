@@ -206,6 +206,9 @@ function sha256Of(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
+/** Descending order of two strings. */
+const desc = (a: string, b: string) => (a < b ? 1 : a > b ? -1 : 0);
+
 class InMemoryMeta implements WorkspaceMetaRepository {
   current: WorkspaceMeta | null = null;
 
@@ -249,7 +252,9 @@ class InMemoryTags implements TagRepository {
 
   async suggest(q: { prefix: string; limit: number }): Promise<TagSuggestion[]> {
     const used = new Map<string, number>();
-    for (const a of [...this.assetAssignments, ...this.fileAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
+    // Mirrors the database: a file in the trash does not count.
+    const liveFileAssignments = this.fileAssignments.filter((a) => !(this.files?.isTrashed(a.fileId) ?? false));
+    for (const a of [...this.assetAssignments, ...liveFileAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
     return [...used]
       .filter(([name]) => name.startsWith(q.prefix))
       .sort(([an, ac], [bn, bc]) => bc - ac || (an < bn ? -1 : an > bn ? 1 : 0))
@@ -302,6 +307,7 @@ class InMemoryTags implements TagRepository {
       const rec = this.files!.records.get(id);
       if (!rec) throw new NotFoundError(`File ${id} does not exist`);
       if (rec.status !== 'complete') throw new ValidationFailedError(`File ${id} is not completely imported`);
+      if (rec.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
     }
   }
 
@@ -347,6 +353,11 @@ class InMemoryFiles implements FileRepository {
     private readonly proposals: ProposalRows,
   ) {}
 
+  /** Set by the database: the name of an asset, for `trashedAssetName`. */
+  assetName: (assetId: string) => string | null = () => null;
+  /** Set by the database: deletes every row that references a purged file, like the purge transaction. */
+  onPurge: (fileId: string) => void = () => {};
+
   private withTags(rec: FileRecord): FileRecord {
     // Mirrors the database: a trashed file is never openable.
     return {
@@ -354,7 +365,45 @@ class InMemoryFiles implements FileRepository {
       openable: rec.deletedAt === null && rec.openable,
       tags: this.tags.forFile(rec.id),
       hasProposal: this.proposals.has(rec.id),
+      trashedAssetName: rec.trashedAssetId === null ? null : this.assetName(rec.trashedAssetId),
     };
+  }
+
+  /** True when the file exists and is in the trash. */
+  isTrashed(id: string): boolean {
+    return (this.records.get(id)?.deletedAt ?? null) !== null;
+  }
+
+  /** The commit of a `trash` move: remembers the origin, clears the placement and any chosen cover. */
+  moveToTrash(id: string, r: { relativePath: string; deletedAt: string }): FileRecord {
+    const rec = this.require(id);
+    const next: FileRecord = {
+      ...rec,
+      trashedAssetId: rec.assetId,
+      trashedRole: rec.role,
+      assetId: null,
+      role: null,
+      deletedAt: r.deletedAt,
+      relativePath: r.relativePath,
+      openable: isOpenable(r.relativePath),
+    };
+    this.records.set(id, next);
+    for (const [assetId, fileId] of this.covers) if (fileId === id) this.covers.delete(assetId);
+    return this.withTags(next);
+  }
+
+  /** The commit of a `restore` move: places the file and clears the trash columns; no cover is set. */
+  restoreFromTrash(id: string, placement: FilePlacement): FileRecord {
+    const next: FileRecord = {
+      ...this.require(id),
+      ...placement,
+      openable: isOpenable(placement.relativePath),
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedRole: null,
+    };
+    this.records.set(id, next);
+    return this.withTags(next);
   }
 
   async insertPending(r: {
@@ -410,7 +459,9 @@ class InMemoryFiles implements FileRepository {
   }
 
   async findCompleteBySha256(sha256: string): Promise<FileRecord[]> {
-    return [...this.records.values()].filter((r) => r.status === 'complete' && r.sha256 === sha256).map((r) => this.withTags(r));
+    return [...this.records.values()]
+      .filter((r) => r.status === 'complete' && r.deletedAt === null && r.sha256 === sha256)
+      .map((r) => this.withTags(r));
   }
 
   async listByStatus(status: ImportStatus): Promise<FileRecord[]> {
@@ -434,7 +485,13 @@ class InMemoryFiles implements FileRepository {
 
   async list(q: FileQuery): Promise<FileList> {
     const { scope } = q;
-    if (scope.kind === 'trash') throw new Error('not implemented');
+    const inScope = (r: FileRecord) =>
+      scope.kind === 'trash'
+        ? r.deletedAt !== null
+        : r.deletedAt === null && (scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null));
+    // Newest import first; the trash lists the newest deletion first.
+    const order = (a: FileRecord, b: FileRecord) =>
+      scope.kind === 'trash' ? desc(a.deletedAt!, b.deletedAt!) || desc(a.id, b.id) : desc(a.importedAt, b.importedAt) || desc(a.id, b.id);
     const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
     const tagsOf = (fileId: string) => this.tags.fileAssignments.filter((a) => a.fileId === fileId).map((a) => a.name);
     // Plan decision 1/2: a word is a substring of the folded name or a word prefix of a tag name.
@@ -442,26 +499,33 @@ class InMemoryFiles implements FileRepository {
       foldSearchWord(r.originalName).includes(w) ||
       tagsOf(r.id).some((name) => startsWithToken(textWords(name).map(foldSearchWord), w));
     const sorted = [...this.records.values()]
-      .filter((r) => scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null))
+      .filter(inScope)
       .filter((r) => q.role === undefined || r.role === q.role)
       .filter((r) => q.kind === undefined || r.kind === q.kind)
       .filter((r) => (q.tagNames ?? []).every((name) => tagsOf(r.id).includes(name)))
       .filter((r) => q.hasProposal === undefined || this.proposals.has(r.id) === q.hasProposal)
       .filter((r) => words.every((w) => matchesWord(r, w)))
-      .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+      .sort(order);
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }
 
-  async purge(_id: string): Promise<boolean> {
-    throw new Error('not implemented');
+  async purge(id: string): Promise<boolean> {
+    const rec = this.records.get(id);
+    if (!rec || (rec.deletedAt === null && rec.status !== 'failed')) return false;
+    this.onPurge(id);
+    this.records.delete(id);
+    return true;
   }
 
   async countTrashed(): Promise<number> {
-    throw new Error('not implemented');
+    return [...this.records.values()].filter((r) => r.deletedAt !== null).length;
   }
 
   async listTrashedIds(): Promise<string[]> {
-    throw new Error('not implemented');
+    return [...this.records.values()]
+      .filter((r) => r.deletedAt !== null)
+      .sort((a, b) => desc(a.deletedAt!, b.deletedAt!) || desc(a.id, b.id))
+      .map((r) => r.id);
   }
 
   private require(id: string): FileRecord {
@@ -488,7 +552,8 @@ class InMemoryAnalyses implements FileAnalysisRepository {
 
   private hasContent(fileId: string, sha256: string): boolean {
     const rec = this.files.records.get(fileId);
-    return rec !== undefined && rec.status === 'complete' && rec.sha256 === sha256;
+    // Mirrors the database: nothing is written to a file in the trash.
+    return rec !== undefined && rec.status === 'complete' && rec.deletedAt === null && rec.sha256 === sha256;
   }
 
   async apply(r: {
@@ -547,6 +612,8 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     const proposal = this.proposals.get(r.fileId);
     if (!proposal) return false;
     if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return false;
+    // The proposal of a trashed file is kept for a restore; only a genuinely stale one is deleted.
+    if (this.files.isTrashed(r.fileId)) return false;
     if (proposal.sha256 !== r.sha256 || !this.hasContent(r.fileId, r.sha256)) {
       this.proposals.delete(r.fileId);
       return false;
@@ -618,7 +685,7 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
     const ids = [...new Set(await this.fileIdsOf(r.target))].sort();
     return ids.map((fileId) => {
       const f = this.files.records.get(fileId)!;
-      const analysable = f.status === 'complete' && r.mimeTypes.includes(f.mimeType) && f.sha256 !== null;
+      const analysable = f.status === 'complete' && f.deletedAt === null && r.mimeTypes.includes(f.mimeType) && f.sha256 !== null;
       return { fileId, analysable, analysed: analysable && this.analyses.analysedWith(fileId, r.fingerprint) };
     });
   }
@@ -665,11 +732,19 @@ class InMemoryFileMoves implements FileMoveRepository {
   async commit(fileId: string): Promise<FileRecord> {
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
-    const next = await this.files.setPlacement(fileId, {
-      relativePath: move.targetRelativePath,
-      assetId: move.targetAssetId,
-      role: move.targetRole,
-    });
+    const placement = { relativePath: move.targetRelativePath, assetId: move.targetAssetId, role: move.targetRole };
+    let next: FileRecord;
+    switch (move.kind) {
+      case 'relocate':
+        next = await this.files.setPlacement(fileId, placement);
+        break;
+      case 'trash':
+        next = this.files.moveToTrash(fileId, { relativePath: move.targetRelativePath, deletedAt: move.createdAt });
+        break;
+      case 'restore':
+        next = this.files.restoreFromTrash(fileId, placement);
+        break;
+    }
     this.rows.delete(fileId);
     return next;
   }
@@ -1216,13 +1291,30 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
-  readonly jobs = new InMemoryJobRepository((fileId) => this.files.records.get(fileId)?.originalName ?? null);
+  readonly jobs = new InMemoryJobRepository(
+    (fileId) => this.files.records.get(fileId)?.originalName ?? null,
+    (fileId) => {
+      const rec = this.files.records.get(fileId);
+      return rec === undefined ? 'unknown' : rec.deletedAt === null ? 'live' : 'trashed';
+    },
+  );
   readonly analyses = new InMemoryAnalyses(this.files, this.tags, this.proposals);
   readonly analysisTargets = new InMemoryAnalysisTargets(this.files, this.assets, this.analyses, this.jobs);
   closed = false;
 
   constructor() {
     this.tags.files = this.files;
+    this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
+    // The purge transaction: tags, analysis, proposal, jobs and the move row of the file go with it.
+    this.files.onPurge = (fileId) => {
+      const tags = this.tags.fileAssignments;
+      tags.splice(0, tags.length, ...tags.filter((a) => a.fileId !== fileId));
+      this.analyses.rows.delete(fileId);
+      this.proposals.delete(fileId);
+      const jobs = this.jobs.rows;
+      jobs.splice(0, jobs.length, ...jobs.filter((j) => j.fileId !== fileId));
+      this.fileMoves.rows.delete(fileId);
+    };
   }
 
   /** How often `ensureDerivedData` ran. */
