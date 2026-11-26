@@ -31,6 +31,8 @@ import {
   type AssetView,
 } from '../list-state';
 import { findLoaded, PAGE_SIZE } from '../paged-list';
+import { renameInTags } from '../tag-rename';
+import { useRenamed, useTags } from '../tags-context';
 import { ALERT, BUTTON, ICON_BUTTON, MUTED, SELECT } from '../ui';
 
 const STATUSES = AssetStatusSchema.options;
@@ -80,7 +82,9 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   // key, so a trailing space neither waits nor requests anything.
   const query = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);
   const effective: AssetFilters = { ...filters, query };
-  const key = listKey(effective);
+  // A tag rename changes what the assets carry and what matches: the list reloads.
+  const { renameToken } = useTags();
+  const key = listKey(effective, String(renameToken));
 
   // Where the next mounted view starts; read once by each view when it mounts.
   const restore = useRef<ViewRestore>({
@@ -89,6 +93,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
     focus: state.openedIndex !== null,
   });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
+  const lastToken = useRef(renameToken);
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
   const fetchPage = useCallback(
@@ -106,6 +111,12 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   const total = paged.state.total;
   // Keyed by the displayed list: while a new search loads, the old view stays mounted where it was.
   const viewKey = `${paged.state.key}|${view}`;
+  // The view reloaded after a rename starts where the displayed one is now.
+  if (lastToken.current !== renameToken) {
+    lastToken.current = renameToken;
+    const current = position.current?.viewKey === viewKey ? position.current.get() : null;
+    restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: null, focus: false };
+  }
   const nextWanted =
     total === null
       ? [bootPage]
@@ -129,6 +140,14 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   // The selected asset as last seen, for when no loaded page holds it (any more).
   const lastSelected = useRef<AssetSummary | null>(null);
+  // The reload reaches the loaded pages; this copy follows the rename here.
+  useRenamed((change) => {
+    const asset = lastSelected.current;
+    if (asset === null) return;
+    const tags = renameInTags(asset.tags, change);
+    const coverTags = renameInTags(asset.coverTags, change);
+    if (tags !== asset.tags || coverTags !== asset.coverTags) lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
+  });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   const selectedAsset =
     loadedSelection?.item ??(lastSelected.current?.id === state.selectedId ? lastSelected.current : null);

@@ -1,13 +1,12 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash and editable prompts reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts and tag rename and merge reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **ZIP import.** A ZIP file can be imported into the inbox and directly into an asset; it is unpacked and its contents are imported as individual files. Open for the design: nested folders and nested archives, entries of a refused kind (programs, installers, shortcuts), size and entry-count limits, zip-slip and symlink entries (ReadMe security constraints on archives), and whether the archive itself is kept.
-- **Editable tags.** A tag can be renamed, and two tags can be merged, across the whole workspace (example: analysis returns `front view` while the existing images carry `front`; the owner wants one uniform tag). Open for the design: the origin of a merged tag (manual wins), and the search index. Decided by the owner: a rename or merge does not map future AI results onto the kept tag, and no tag list is appended to the prompt; after a new analysis the owner edits the tags again.
 - **Sources on an asset.** An asset can carry sources (where it or its material comes from). Open for the design: what a source is (URL, free text, author, licence, retrieval date), one or several per asset, whether a source can also sit on a single file, whether sources are searchable, and whether a URL is only stored or can be opened (ReadMe constraints on URL downloads apply if anything is fetched).
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
 - **Several vision providers.** Today exactly one provider can be configured (one base URL, one API key, one default model per purpose). The owner needs several defined side by side: the local Ollama on their own graphics card is not always available (the card is needed for other work), and at times a container on RunPod or a similar host takes over, also to try much larger models. Decided by the owner: the provider is chosen where an analysis is started (the start dialog, the single-image dialog, Image to prompt), not only in the settings, so that switching needs no detour through the settings and the dialog shows which provider is selected and whether it is reachable; a dialog preselects the provider that was used last. Open for the design: what a provider entry holds (name, base URL, key, timeout, default models), how reachability is shown there, one stored key per provider in `safeStorage`, the read-only environment mode, the pause gate and the pause banner per provider, queued jobs whose provider is switched or removed, and the fingerprint skip (it already contains provider and model, so the same file analysed through another provider counts as not analysed).
@@ -49,7 +48,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - The inbox file list orders through a temporary B-tree (no index matches its sort).
 - `files:assignMany` holds the exclusive workspace queue for the whole batch.
 - Tags stored before the letter-or-digit rule that consist only of symbols cannot be removed through the UI; a symbol-only name in the tag filter is rejected with `validation_failed`.
-- Unused tag rows are never deleted and there is no tag rename or merge.
+- Unused tag rows are never deleted (a merge deletes only its source row).
 - A drive-relative source path without a backslash (`C:a.exe::$DATA`) still passes the refused-import check; no file dialog produces such a path.
 - The 200-character limit of the search query counts UTF-16 code units, not characters.
 - `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
@@ -355,6 +354,23 @@ Tests:
 - The read-error test of the prompt store asserts only that it throws, not the error.
 - `chatContents()` is duplicated in `describe.test.ts` and `jobs-ipc.test.ts`; the marking of the prompt used last after a cancelled describe is not asserted in `describe.test.ts`.
 - Renderer: no test for a superseding reload of the prompt list or for the busy guard of the prompt actions; `installFakeApi` consumes two ids per call for the seeded default prompts.
+
+## Tag rename and merge
+
+Deferred by design:
+
+- No tags page listing all tags; a tag is renamed only from an editable tag chip.
+- No rename from read-only chips (gallery tiles, tables, the trash) or from the tag filter.
+- No undo of a rename or merge.
+- An open proposal review dialog keeps the names it loaded: after a rename of one of them, Accept is refused and the dialog must be reopened.
+- A merge target without any assignment (an unused tag row) is offered as a merge with zero counts.
+
+Left from the reviews:
+
+- Renderer: the restore-capture block on a rename reload is repeated in `AssetsScreen`, `ProjectsScreen` and `FileBrowser`, and the `useRenamed` bodies of the inbox, the trash and the asset Files tab are near-identical; both want one shared helper.
+- Renderer: `onRenamedRef` in `tags-context.tsx` is assigned during render (the same pattern as elsewhere in the renderer).
+- Renderer: the gallery's last selected asset is rewritten in a ref and shows only with the reload's re-render; its `matchedTags` are not rewritten.
+- Tests: the position test of the asset Files tab after a rename does not reproduce a jump to the top under jsdom; the large merge test (3000 files) uses inbox files only; the in-memory tag fake does not model `createdAt`.
 
 ## Not covered by any automated check
 

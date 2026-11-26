@@ -2,6 +2,8 @@ import { cleanTagText, normalizeTagName, type TagAssignment } from '@assetforge/
 import { Image as ImageIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { describeError } from '../api';
+import type { TagRename } from '../tag-rename';
+import { useTags } from '../tags-context';
 import { ALERT, LABEL, PANEL_TITLE } from '../ui';
 import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
@@ -50,9 +52,23 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
     [inputRef],
   );
 
-  const removeButtons = () => [...(rowRef.current?.querySelectorAll<HTMLButtonElement>('[data-chip] button') ?? [])];
+  const { openRename } = useTags();
+  const removeButtons = () => [
+    ...(rowRef.current?.querySelectorAll<HTMLButtonElement>('[data-chip] button[data-remove]') ?? []),
+  ];
+
+  /** A finished rename started from a pencil of this row, until its chip has focus again. */
+  const renamedFocus = useRef<TagRename | null>(null);
 
   useEffect(() => {
+    const renamed = renamedFocus.current;
+    // The chip of the old name unmounts once the rename reaches the row; focus moves to the new one.
+    if (renamed !== null && !tags.some((tag) => tag.name === renamed.from)) {
+      renamedFocus.current = null;
+      const index = tags.findIndex((tag) => tag.name === renamed.name);
+      const chip = index < 0 ? undefined : rowRef.current?.querySelectorAll('[data-chip]')[index];
+      (chip?.querySelector<HTMLButtonElement>('button[data-rename]') ?? input.current)?.focus();
+    }
     const pending = pendingFocus.current;
     if (pending === null || tags.some((tag) => tag.name === pending.name)) return;
     pendingFocus.current = null;
@@ -126,11 +142,25 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
             className="max-w-full"
             onKeyDown={(event) => {
               if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+              // The pencil renames; only the chip and its remove button remove.
+              if (event.target instanceof Element && event.target.closest('[data-rename]') !== null) return;
               event.preventDefault();
               void remove(tag.name, index);
             }}
           >
-            <TagChip tag={tag} onRemove={disabled ? undefined : () => void remove(tag.name, index)} />
+            <TagChip
+              tag={tag}
+              onRemove={disabled ? undefined : () => void remove(tag.name, index)}
+              onRename={
+                disabled || openRename === null
+                  ? undefined
+                  : () =>
+                      openRename({ name: tag.name, displayName: tag.displayName }, (change) => {
+                        // Another spelling keeps the chip and its key; the dialog gives the pencil its focus back.
+                        renamedFocus.current = change.from !== change.name ? change : null;
+                      })
+              }
+            />
           </span>
         ))}
         <TagCombobox

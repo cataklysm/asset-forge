@@ -23,6 +23,7 @@ import { useLoad } from '../hooks/useLoad';
 import { useJobs } from '../jobs-context';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel } from '../labels';
 import type { AssetTab } from '../list-state';
+import { useTags } from '../tags-context';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
 
 const ROLES = FileRoleSchema.options;
@@ -62,12 +63,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [fileCountError, setFileCountError] = useState<string | null>(null);
   // A finished job may have changed file records (e.g. AI tags): the Files tab and its count reload.
   const { resultToken } = useJobs();
+  // A tag rename re-reads the asset (its tags) and reloads the Files tab.
+  const { renameToken } = useTags();
   const analysis = useAnalysisDialogs({
     onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
     onChanged: () => setReloadToken((t) => t + 1),
   });
 
-  const loaded = useLoad(() => call('assets:get', { id }), [id]);
+  const loaded = useLoad(() => call('assets:get', { id }), [id, renameToken]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const assignments = useLoad(() => call('assignments:listByAsset', { assetId: id }), [id]);
   const relations = useLoad(() => call('relations:list', { assetId: id }), [id]);
@@ -269,7 +272,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         {tab === 'files' && (
           <AssetFilesTab
             asset={asset}
-            reloadToken={reloadToken + resultToken}
+            reloadToken={reloadToken + resultToken + renameToken}
             onFilesChanged={filesChanged}
             onAssetChange={setAsset}
             onCountChange={setFileCount}

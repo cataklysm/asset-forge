@@ -782,3 +782,105 @@ describe('file trash acceptance', () => {
     }
   });
 });
+
+describe('tag rename and merge acceptance', () => {
+  const page = { limit: 50, offset: 0 };
+
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    }, noopHost, idleJobHost, idleServices);
+    const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
+    const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await raw(channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+    return { call, raw };
+  }
+
+  it('merges a file tag into an asset tag everywhere, proposals included', async () => {
+    const sources = join(base, 'sources');
+    const leftPath = join(sources, 'left.png');
+    const rightPath = join(sources, 'right.png');
+    await writeFile(leftPath, 'left');
+    await writeFile(rightPath, 'right');
+
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const { call, raw } = handlersFor(manager);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const typeId = (await call('assetTypes:list', {}))[0]!.id;
+      const asset = await call('assets:create', { name: 'Lantern', typeId });
+      const results = await call('files:import', {
+        sourcePaths: [leftPath, rightPath],
+        target: { assetId: asset.id, role: 'reference' },
+      });
+      expect(results.map((r) => r.file?.status)).toEqual(['complete', 'complete']);
+      const [tagged, proposed] = results.map((r) => r.file!);
+
+      await call('assets:addTag', { assetId: asset.id, name: 'Front' });
+      await call('files:addTag', { fileId: tagged!.id, name: 'front view' });
+      const stored = await manager.exclusive((s) =>
+        s.database.analyses.propose({
+          fileId: proposed!.id,
+          sha256: proposed!.sha256!,
+          provider: 'ollama',
+          model: 'qwen',
+          promptVersion: 1,
+          tags: [{ name: 'front view', displayName: 'front view' }],
+          promptName: 'Default',
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      expect(stored).toBe(true);
+
+      expect(await call('tags:usage', { name: 'front' })).toEqual({
+        exists: true,
+        name: 'front',
+        displayName: 'Front',
+        assets: 1,
+        files: 0,
+      });
+      expect(await call('tags:usage', { name: 'front view' })).toEqual({
+        exists: true,
+        name: 'front view',
+        displayName: 'front view',
+        assets: 0,
+        files: 1,
+      });
+
+      expect(await raw('tags:rename', { from: 'front view', to: 'front', merge: false })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_operation', message: 'A tag with this name already exists' },
+      });
+      expect(await call('tags:rename', { from: 'front view', to: 'front', merge: true })).toEqual({
+        name: 'front',
+        displayName: 'front',
+        merged: true,
+      });
+
+      const detail = await call('assets:get', { id: asset.id });
+      expect(detail.tags).toEqual([{ name: 'front', displayName: 'front', origin: 'manual' }]);
+      const files = await call('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
+      expect(files.items.find((f) => f.id === tagged!.id)!.tags).toEqual([
+        { name: 'front', displayName: 'front', origin: 'manual' },
+      ]);
+      expect((await call('assets:list', { ...page, query: 'view' })).items).toEqual([]);
+      expect((await call('assets:list', { ...page, tagNames: ['front'] })).items.map((a) => a.id)).toEqual([asset.id]);
+      expect(await call('tags:suggest', { prefix: 'front', limit: 10 })).toEqual([{ name: 'front', displayName: 'front' }]);
+      const { proposal } = await call('analysis:getProposal', { fileId: proposed!.id });
+      expect(proposal!.tags).toEqual([{ name: 'front', displayName: 'front' }]);
+
+      expect(await raw('tags:rename', { from: 'front view', to: 'front', merge: true })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found', message: 'Tag does not exist' },
+      });
+    } finally {
+      await manager.close();
+    }
+  });
+});

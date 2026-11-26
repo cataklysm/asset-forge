@@ -6,7 +6,7 @@ import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE, label } from '../labels';
-import { hasFilters, NO_FILE_FILTERS, type AssetView, type FileFilters } from '../list-state';
+import { hasFilters, NO_FILE_FILTERS, renameInFilters, type AssetView, type FileFilters } from '../list-state';
 import {
   dropSelected,
   eligibleFiles,
@@ -16,6 +16,8 @@ import {
   sharedTags,
   type FileSelection,
 } from '../selection';
+import { renameInRecord, renameInSelection } from '../tag-rename';
+import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
 import { ALERT, BUTTON, SELECT } from '../ui';
@@ -68,6 +70,22 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const acting = useRef(false);
   const batching = useRef(false);
   const trash = useTrash();
+
+  // The filter follows a rename in the render that raises `reloadToken`, so the browser never
+  // loads the list with the old name and reloads it once, where it was.
+  const { lastRename } = useTags();
+  const [filtersRename, setFiltersRename] = useState(lastRename);
+  if (filtersRename !== lastRename) {
+    setFiltersRename(lastRename);
+    if (lastRename !== null) setFilters((current) => renameInFilters(current, lastRename));
+  }
+
+  // The list reloads through `reloadToken`; the copies it does not reach follow the rename here.
+  useRenamed((change) => {
+    setSelection((current) => renameInSelection(current, change));
+    const shown = detailDialog.file;
+    if (shown !== null) detailDialog.update(renameInRecord(shown, change));
+  });
 
   // The tab count is the unfiltered total; a filtered list (or one whose search is still pending) does not count.
   const debouncedQuery = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);

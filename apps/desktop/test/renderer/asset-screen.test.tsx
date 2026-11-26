@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
@@ -20,8 +20,10 @@ import type { AssetTab } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { renameHandlers, renameThroughDialog } from './rename-flow';
 
 const NOW = '2026-01-01T00:00:00.000Z';
 const TYPE: AssetType = {
@@ -858,4 +860,146 @@ it('without a configured provider the header Analyse is disabled with the reason
   const header = (await screen.findByRole('button', { name: 'Analyse' })) as HTMLButtonElement;
   await waitFor(() => expect(header.title).toBe(JOB_ERROR_MESSAGES.provider_not_configured));
   expect(header.disabled).toBe(true);
+});
+
+it('renaming an asset tag re-reads the asset and reloads the files tab', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ tags: [tagOf('Front View')] });
+  const file = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
+  const rename = renameHandlers({ 'front view': 'Front View' });
+  const api = install(asset, {
+    'files:list': listOf([file]),
+    ...rename,
+    'tags:rename': (request) => {
+      api.set('assets:get', () => ({ ...asset, tags: [tagOf('Front')] }));
+      return rename['tags:rename'](request);
+    },
+  });
+  render(
+    <TagsProvider>
+      <Harness id={asset.id} />
+    </TagsProvider>,
+  );
+  const row = await screen.findByRole('group', { name: 'Asset tags' });
+  await screen.findByText('c1.png');
+  const gets = callsOf(api, 'assets:get').length;
+  const lists = callsOf(api, 'files:list').length;
+  await renameThroughDialog(user, 'Front View', 'Front');
+  expect(await within(row).findByRole('button', { name: 'Remove Front' })).toBeTruthy();
+  expect(within(row).queryByRole('button', { name: 'Remove Front View' })).toBeNull();
+  expect(callsOf(api, 'assets:get').length).toBeGreaterThan(gets);
+  await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(lists));
+});
+
+it('files tab: a rename from the Add tags dialog rewrites the shared tags before the reload answers', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const c1 = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference', tags: [tagOf('Front View')] });
+  const c2 = fileRecord({ originalName: 'c2.png', assetId: asset.id, role: 'reference', tags: [tagOf('Front View')] });
+  const rename = renameHandlers({ 'front view': 'Front View' });
+  const api = install(asset, {
+    'files:list': listOf([c1, c2]),
+    ...rename,
+    'tags:rename': (request) => {
+      api.set('files:list', () => deferred<IpcResponse<'files:list'>>().promise);
+      return rename['tags:rename'](request);
+    },
+  });
+  render(
+    <TagsProvider>
+      <Harness id={asset.id} />
+    </TagsProvider>,
+  );
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Shift>}');
+  await user.click(tile('c2.png'));
+  await user.keyboard('{/Shift}');
+  expect(await screen.findByText('2 selected')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Add tags' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Add tags' });
+  const shared = within(dialog).getByRole('group', { name: 'Image tags' });
+  expect(within(shared).getByRole('button', { name: 'Rename Front View' })).toBeTruthy();
+  const lists = callsOf(api, 'files:list').length;
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(lists));
+  expect(await within(shared).findByRole('button', { name: 'Remove Front' })).toBeTruthy();
+  expect(within(shared).queryByRole('button', { name: 'Remove Front View' })).toBeNull();
+});
+
+it('files tab: the tag filter of the tab follows a rename', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ tags: [tagOf('Front View')] });
+  const file = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
+  const api = install(asset, { 'files:list': listOf([file]), ...renameHandlers({ 'front view': 'Front View' }) });
+  render(
+    <TagsProvider>
+      <Harness id={asset.id} />
+    </TagsProvider>,
+  );
+  await screen.findByText('c1.png');
+  await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'front view{Enter}');
+  expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await waitFor(() =>
+    expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.tagNames?.join() === 'front')).toBe(true),
+  );
+  expect(screen.getByRole('button', { name: 'Remove front' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
+});
+
+it('files tab: after a rename no list request carries the old tag name', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ tags: [tagOf('Front View')] });
+  const file = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
+  const api = install(asset, { 'files:list': listOf([file]), ...renameHandlers({ 'front view': 'Front View' }) });
+  render(
+    <TagsProvider>
+      <Harness id={asset.id} />
+    </TagsProvider>,
+  );
+  await screen.findByText('c1.png');
+  await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'front view{Enter}');
+  await waitFor(() =>
+    expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.tagNames?.join() === 'front view')).toBe(true),
+  );
+  const before = callsOf(api, 'files:list').length;
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await waitFor(() =>
+    expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.tagNames?.join() === 'front')).toBe(true),
+  );
+  const after = (callsOf(api, 'files:list') as ListRequest[]).slice(before);
+  expect(after.filter((r) => r.tagNames?.includes('front view'))).toEqual([]);
+});
+
+it('files tab: a rename reloads the list where it was, also with a filter on the renamed tag', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ tags: [tagOf('Front View')] });
+  const files = Array.from({ length: 200 }, (_, i) =>
+    fileRecord({ originalName: `File ${i}.png`, assetId: asset.id, role: 'reference' }),
+  );
+  const api = install(asset, { 'files:list': listOf(files), ...renameHandlers({ 'front view': 'Front View' }) });
+  render(
+    <TagsProvider>
+      <Harness id={asset.id} />
+    </TagsProvider>,
+  );
+  await screen.findByText('File 0.png');
+  await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'front view{Enter}');
+  await screen.findByRole('button', { name: 'Remove front view' });
+  const grid = await waitFor(() => {
+    const current = screen.getByRole('listbox', { name: 'Files' });
+    expect(within(current).getByText('File 0.png')).toBeTruthy();
+    return current;
+  });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await waitFor(() => expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front view')).toBe(true));
+
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await waitFor(() => expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front')).toBe(true));
+  // The reloaded view starts where the old one was, not at the top.
+  await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
+  expect(screen.queryByText('File 0.png')).toBeNull();
+  expect(screen.getByText('File 100.png')).toBeTruthy();
 });

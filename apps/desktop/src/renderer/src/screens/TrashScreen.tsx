@@ -24,6 +24,8 @@ import {
 } from '../labels';
 import type { AssetView, FileFilters, TrashListState } from '../list-state';
 import { dropSelected, NO_SELECTION, refreshSelected, type FileSelection } from '../selection';
+import { renameInRecord, renameInSelection } from '../tag-rename';
+import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
 import { ALERT, BUTTON } from '../ui';
@@ -69,6 +71,14 @@ export function TrashScreen({ state, onStateChange }: Props) {
   const trash = useTrash();
   // Synchronous guard: a second activation before the re-render must not send a second request.
   const acting = useRef(false);
+
+  // A tag rename reloads the list; the selection and the shown file are copies it does not reach.
+  const { renameToken } = useTags();
+  useRenamed((change) => {
+    setSelection((current) => renameInSelection(current, change));
+    const shown = detail.file;
+    if (shown !== null) detail.update(renameInRecord(shown, change));
+  });
 
   // The title and Empty trash use the number of all files in the trash, independent of the filters.
   const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: TRASH }), [reloadToken]);
@@ -234,7 +244,7 @@ export function TrashScreen({ state, onStateChange }: Props) {
           positionRef={positionRef}
           selection={selection}
           onSelectionChange={setSelection}
-          reloadToken={reloadToken}
+          reloadToken={reloadToken + renameToken}
           onOpen={detail.open}
           menuItems={(file) =>
             fileMenuItems(file, {

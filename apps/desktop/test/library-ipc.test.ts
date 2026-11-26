@@ -91,8 +91,10 @@ describe('library IPC', () => {
       'files:assignMany': { fileIds: [uuid], assetId: uuid, role: 'reference' },
       'files:addTagMany': { fileIds: [uuid], name: 'metal' },
       'files:removeTagMany': { fileIds: [uuid], name: 'metal' },
+      'tags:usage': { name: 'metal' },
+      'tags:rename': { from: 'metal', to: 'steel', merge: false },
     };
-    expect(Object.keys(requests)).toHaveLength(33);
+    expect(Object.keys(requests)).toHaveLength(35);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({
@@ -306,6 +308,41 @@ describe('library IPC', () => {
         ok: false,
         error: { code: 'validation_failed' },
       });
+    });
+
+    it('tags:rename renames, refuses an unconfirmed merge and merges', async () => {
+      const { asset, file } = await assetWithFile();
+      await ok('assets:addTag', { assetId: asset.id, name: 'Front View' });
+      await ok('files:addTag', { fileId: file.id, name: 'Front' });
+
+      const renamed = await ok('tags:rename', { from: 'front view', to: ' Frontal ', merge: false });
+      expect(ipcContract['tags:rename'].response.safeParse(renamed).success).toBe(true);
+      expect(renamed).toEqual({ name: 'frontal', displayName: 'Frontal', merged: false });
+      expect((await ok('assets:get', { id: asset.id })).tags).toMatchObject([{ name: 'frontal', displayName: 'Frontal', origin: 'manual' }]);
+
+      expect(await call('tags:rename', { from: 'frontal', to: 'front', merge: false })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_operation', message: 'A tag with this name already exists' },
+      });
+      expect(await ok('tags:rename', { from: 'frontal', to: 'FRONT', merge: true })).toEqual({ name: 'front', displayName: 'FRONT', merged: true });
+      expect((await ok('assets:get', { id: asset.id })).tags).toMatchObject([{ name: 'front', displayName: 'FRONT' }]);
+      expect((await ok('assets:list', { ...page, query: 'frontal' })).total).toBe(0);
+      expect((await ok('assets:list', { ...page, query: 'front' })).total).toBe(1);
+      expect(await call('tags:rename', { from: 'frontal', to: 'x', merge: true })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found', message: 'Tag does not exist' },
+      });
+    });
+
+    it('tags:usage answers for a valid, an unknown and an invalid text', async () => {
+      const { asset, file } = await assetWithFile();
+      await ok('assets:addTag', { assetId: asset.id, name: 'Metal' });
+      await ok('files:addTag', { fileId: file.id, name: 'metal' });
+      const usage = await ok('tags:usage', { name: ' METAL ' });
+      expect(ipcContract['tags:usage'].response.safeParse(usage).success).toBe(true);
+      expect(usage).toEqual({ exists: true, name: 'metal', displayName: 'Metal', assets: 1, files: 1 });
+      expect(await ok('tags:usage', { name: 'wood' })).toEqual({ exists: false, name: 'wood', displayName: '', assets: 0, files: 0 });
+      expect(await ok('tags:usage', { name: '!!!' })).toEqual({ exists: false, name: '', displayName: '', assets: 0, files: 0 });
     });
 
     it('tags:suggest rejects limit 0 and 51', async () => {

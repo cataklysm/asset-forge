@@ -263,3 +263,93 @@ describe('tag proposals', () => {
     expect((await db.files.get(FILE_ID))?.hasProposal).toBe(true);
   });
 });
+
+describe('tag rename and waiting proposals', () => {
+  const tagAsset = (name: string, displayName = name) =>
+    db.tags.addToAsset({ assetId: ASSET_ID, name, displayName, origin: 'manual', newId: uuid(nextTagId++), now: T0 });
+  const rawProposal = (fileId: string) => handle.prepare('select * from file_analysis_proposal where file_id = ?').get(fileId);
+  const pairs = (...names: [string, string][]) => names.map(([name, displayName]) => ({ name, displayName }));
+
+  test('a merge rewrites the source entry with the target display name and keeps the rest of the proposal', async () => {
+    const other = uuid(41);
+    await addFile(other);
+    await tagAsset('front view', 'Front View');
+    await tagAsset('frontal', 'frontal');
+    const held = proposal({ tags: pairs(['front view', 'Front View'], ['metal', 'Metal']), promptName: 'Default' });
+    await db.analyses.propose(held);
+    const third = uuid(44);
+    await addFile(third);
+    await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal'], ['frontal', 'frontal']) }));
+    await db.analyses.propose(proposal({ fileId: third, tags: pairs(['metal', 'Metal']) }));
+    const before = rawProposal(other) as { tags: string };
+    const untouched = rawProposal(third);
+
+    await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: true });
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...held, tags: pairs(['frontal', 'Frontal'], ['metal', 'Metal']), stale: false });
+    // The target entry takes the new display name; nothing else of that proposal changes.
+    expect(rawProposal(other)).toEqual({ ...before, tags: JSON.stringify(pairs(['metal', 'Metal'], ['frontal', 'Frontal'])) });
+    expect(rawProposal(third)).toEqual(untouched);
+  });
+
+  test('a proposal holding source and target keeps one entry at the first position', async () => {
+    await tagAsset('front view', 'Front View');
+    await tagAsset('front', 'Front');
+    await db.analyses.propose(proposal({ tags: pairs(['front view', 'Front View'], ['front', 'Front']) }));
+    await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true });
+    expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'FRONT']));
+  });
+
+  test('a merge gives every kept target entry the new display name, also in proposals without the source', async () => {
+    const other = uuid(42);
+    await addFile(other);
+    await tagAsset('front view', 'Front View');
+    await tagAsset('front', 'Front');
+    await db.analyses.propose(proposal({ tags: pairs(['front', 'Front'], ['front view', 'Front View']) }));
+    await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal'], ['front', 'Front']) }));
+    await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true });
+    expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'FRONT']));
+    expect((await db.analyses.getProposal(other))!.tags).toEqual(pairs(['metal', 'Metal'], ['front', 'FRONT']));
+  });
+
+  test('a display-name-only change rewrites proposals holding the tag and leaves the others alone', async () => {
+    const other = uuid(43);
+    await addFile(other);
+    await tagAsset('front', 'front');
+    await db.analyses.propose(proposal({ tags: pairs(['front', 'front'], ['metal', 'Metal']) }));
+    await db.analyses.propose(proposal({ fileId: other, tags: pairs(['metal', 'Metal']) }));
+    const untouched = rawProposal(other);
+    await db.tags.rename({ from: 'front', name: 'front', displayName: 'Front', merge: false });
+    expect((await db.analyses.getProposal(FILE_ID))!.tags).toEqual(pairs(['front', 'Front'], ['metal', 'Metal']));
+    expect(rawProposal(other)).toEqual(untouched);
+  });
+
+  test('names with LIKE wildcards, quotes and backslashes are rewritten exactly', async () => {
+    const names = ['50%', 'a_b', 'say "hi"', 'back\\slash'];
+    const files = names.map((_, i) => uuid(50 + i));
+    for (const [i, name] of names.entries()) {
+      await addFile(files[i]!);
+      await tagAsset(name);
+      await db.analyses.propose(proposal({ fileId: files[i]!, tags: pairs([name, name], ['metal', 'metal']) }));
+    }
+    const lookalike = uuid(60);
+    await addFile(lookalike);
+    await db.analyses.propose(proposal({ fileId: lookalike, tags: pairs(['50x', '50x']) }));
+    const untouched = rawProposal(lookalike);
+
+    for (const [i, name] of names.entries()) {
+      await db.tags.rename({ from: name, name: `renamed ${i}`, displayName: `Renamed ${i}`, merge: false });
+      expect((await db.analyses.getProposal(files[i]!))!.tags).toEqual(pairs([`renamed ${i}`, `Renamed ${i}`], ['metal', 'metal']));
+    }
+    expect(rawProposal(lookalike)).toEqual(untouched);
+  });
+
+  test('a rewritten proposal is accepted with the new name, not with the old one', async () => {
+    await tagAsset('front view', 'Front View');
+    await db.analyses.propose(proposal({ tags: pairs(['front view', 'Front View'], ['metal', 'metal']) }));
+    await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: false });
+
+    expect(await accept([t('front view', 'Front View')])).toBe(false);
+    expect(await accept([t('frontal', 'Frontal')])).toBe(true);
+    expect(await tagsOf()).toEqual(['frontal/ai']);
+  });
+});

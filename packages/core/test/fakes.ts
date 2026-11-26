@@ -333,6 +333,69 @@ class InMemoryTags implements TagRepository {
     return this.forAsset(assetId);
   }
 
+  /** Set by the database; a rename rewrites the waiting proposals. */
+  proposals: ProposalRows | null = null;
+
+  async usage(name: string): Promise<{ displayName: string; assets: number; files: number } | null> {
+    const tag = this.tags.get(name);
+    if (!tag) return null;
+    return {
+      displayName: tag.displayName,
+      assets: this.assetAssignments.filter((a) => a.name === name).length,
+      // Mirrors the database: a file in the trash does not count.
+      files: this.fileAssignments.filter((a) => a.name === name && !(this.files?.isTrashed(a.fileId) ?? false)).length,
+    };
+  }
+
+  async rename(r: { from: string; name: string; displayName: string; merge: boolean }): Promise<{ merged: boolean }> {
+    const source = this.tags.get(r.from);
+    if (!source) throw new NotFoundError('Tag does not exist');
+    if (r.from === r.name) {
+      if (source.displayName !== r.displayName) {
+        source.displayName = r.displayName;
+        this.rewriteProposals(r);
+      }
+      return { merged: false };
+    }
+    const target = this.tags.get(r.name);
+    if (target && !r.merge) throw new InvalidOperationError('A tag with this name already exists');
+    // Moves each source link to the target; an owner carrying both keeps one link, manual when either was.
+    const move = <T extends { name: string; origin: TagOrigin }>(list: T[], sameOwner: (a: T, b: T) => boolean): void => {
+      const kept: T[] = [];
+      for (const link of list) {
+        if (link.name !== r.from) {
+          kept.push(link);
+          continue;
+        }
+        const other = list.find((a) => a.name === r.name && sameOwner(a, link));
+        if (other === undefined) kept.push({ ...link, name: r.name });
+        else if (link.origin === 'manual') other.origin = 'manual';
+      }
+      list.splice(0, list.length, ...kept);
+    };
+    move(this.assetAssignments, (a, b) => a.assetId === b.assetId);
+    move(this.fileAssignments, (a, b) => a.fileId === b.fileId);
+    this.tags.delete(r.from);
+    if (target) target.displayName = r.displayName;
+    else this.tags.set(r.name, { id: source.id, displayName: r.displayName });
+    this.rewriteProposals(r);
+    return { merged: target !== undefined };
+  }
+
+  /** Mirrors the database: every entry named `from` or `name` becomes `name` spelled `displayName`, first position wins. */
+  private rewriteProposals(r: { from: string; name: string; displayName: string }): void {
+    const touched = (t: { name: string }) => t.name === r.from || t.name === r.name;
+    for (const [fileId, proposal] of this.proposals ?? []) {
+      if (!proposal.tags.some((t) => touched(t) && (t.name !== r.name || t.displayName !== r.displayName))) continue;
+      const tags: { name: string; displayName: string }[] = [];
+      for (const t of proposal.tags) {
+        const entry = touched(t) ? { name: r.name, displayName: r.displayName } : t;
+        if (!tags.some((x) => x.name === entry.name)) tags.push(entry);
+      }
+      this.proposals!.set(fileId, { ...proposal, tags });
+    }
+  }
+
   forAsset(assetId: string): TagAssignment[] {
     return InMemoryTags.sorted(this.assetAssignments.filter((a) => a.assetId === assetId), this.tags);
   }
@@ -1323,6 +1386,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
 
   constructor() {
     this.tags.files = this.files;
+    this.tags.proposals = this.proposals;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     // The purge transaction: tags, analysis, proposal and jobs of the file go with it.

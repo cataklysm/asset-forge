@@ -25,6 +25,7 @@ import {
   type ProjectListState,
 } from '../list-state';
 import { findLoaded } from '../paged-list';
+import { useTags } from '../tags-context';
 import { ALERT, BUTTON, INPUT, MUTED, SELECT } from '../ui';
 
 const STATUSES = ProjectStatusSchema.options;
@@ -47,11 +48,14 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   // Only the text is debounced; status and tags apply at once. Trimmed before it enters the key.
   const query = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);
   const effective: ProjectFilters = { ...filters, query };
-  const key = listKey(effective);
+  // A tag rename changes which projects match and their matching tags: the list reloads.
+  const { renameToken } = useTags();
+  const key = listKey(effective, String(renameToken));
 
   // Where the next mounted table starts; read once by each table when it mounts.
   const restore = useRef<ViewRestore>({ scrollOffset: state.scrollOffset, index: null, focus: false });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
+  const lastToken = useRef(renameToken);
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
   const fetchPage = useCallback(
@@ -66,6 +70,12 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   const total = paged.state.total;
   // Keyed by the displayed list: while a new search loads, the old table stays mounted where it was.
   const viewKey = paged.state.key;
+  // The table reloaded after a rename starts where the displayed one is now.
+  if (lastToken.current !== renameToken) {
+    lastToken.current = renameToken;
+    const current = position.current?.viewKey === viewKey ? position.current.get() : null;
+    restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: null, focus: false };
+  }
   const nextWanted =
     total === null
       ? [0]

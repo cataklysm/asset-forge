@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState, type ReactNode } from 'react';
-import type { FileRecord } from '@assetforge/contracts';
+import type { FileRecord, IpcResponse } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
@@ -9,9 +9,11 @@ import type { FileActionContext } from '../../src/renderer/src/file-actions';
 import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { fileRecord, nextId, tagOf, trashedRecord } from './fixtures';
+import { renameHandlers, renameThroughDialog } from './rename-flow';
 
 const ASSET = { id: nextId(), name: 'Oak tree', tags: [tagOf('Nature')] };
 const ACTIONS: FileActionContext = { cover: null, onDetails: () => {} };
@@ -751,4 +753,29 @@ it('a trashed file from the inbox names the inbox as its origin', async () => {
   render(<Harness file={trashedRecord({ originalName: 'loose.png' })} asset={null} roleControl={null} />);
   await openDialog();
   expect(detailValue('Origin')).toBe('Inbox');
+});
+
+it('renaming an image tag from the open dialog shows the new chip before the list reload answers', async () => {
+  const a = fileRecord({ originalName: 'a.png', tags: [tagOf('Front View')] });
+  const b = fileRecord({ originalName: 'b.png' });
+  const api = installInbox([a, b]);
+  const rename = renameHandlers({ 'front view': 'Front View' });
+  api.set('tags:usage', rename['tags:usage']);
+  api.set('tags:rename', (request) => {
+    api.set('files:list', () => deferred<IpcResponse<'files:list'>>().promise);
+    return rename['tags:rename'](request);
+  });
+  render(
+    <TagsProvider>
+      <InboxHost />
+    </TagsProvider>,
+  );
+  const { user, dialog } = await openInInbox('a.png');
+  const row = within(dialog).getByRole('group', { name: 'Image tags' });
+  const before = api.calls.filter((c) => c.channel === 'files:list').length;
+  await renameThroughDialog(user, 'Front View', 'Front');
+  await waitFor(() => expect(api.calls.filter((c) => c.channel === 'files:list').length).toBeGreaterThan(before));
+  await waitFor(() => expect(within(row).getByRole('button', { name: 'Remove Front' })).toBeTruthy());
+  expect(within(row).queryByRole('button', { name: 'Remove Front View' })).toBeNull();
+  expect(screen.getByRole('dialog', { name: 'a.png' })).toBe(dialog);
 });

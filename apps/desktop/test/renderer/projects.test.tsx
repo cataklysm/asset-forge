@@ -11,11 +11,13 @@ import type {
 } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
-import { NO_PROJECT_FILTERS, type AssetFilters, type ProjectListState } from '../../src/renderer/src/list-state';
+import { NO_PROJECT_FILTERS, renameInFilters, type AssetFilters, type ProjectListState } from '../../src/renderer/src/list-state';
 import { ProjectScreen } from '../../src/renderer/src/screens/ProjectScreen';
 import { ProjectsScreen } from '../../src/renderer/src/screens/ProjectsScreen';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, nextId, pageOf, projectSummary, tagOf } from './fixtures';
+import { renameHandlers, renameThroughDialog, RenameTrigger } from './rename-flow';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -538,4 +540,71 @@ it('the project screen keeps the member pager and member editing', async () => {
     offset: 0,
   });
   expect(screen.getByRole('combobox', { name: 'Search assets' })).toBeTruthy();
+});
+
+/** The projects list inside a `TagsProvider` whose renames rewrite the filters, as the workspace shell does. */
+function RenamingHarness(props: { initial: ProjectListState; tag: { name: string; displayName: string } }) {
+  const [state, setState] = useState(props.initial);
+  return (
+    <TagsProvider onRenamed={(change) => setState((s) => ({ ...s, filters: renameInFilters(s.filters, change) }))}>
+      <RenameTrigger tag={props.tag} />
+      <ProjectsScreen state={state} onStateChange={setState} onOpen={() => {}} onOpenAsset={() => {}} onShowAssets={() => {}} />
+    </TagsProvider>
+  );
+}
+
+function matchingRequests(api: ReturnType<typeof install>) {
+  return api.calls.filter((c) => c.channel === 'assets:list').map((c) => c.request as IpcRequest<'assets:list'>);
+}
+
+it('a rename switches the projects tag filter and the matching content to the new name', async () => {
+  const user = userEvent.setup();
+  const project = projectSummary({ name: 'Forest', assetCount: 1 });
+  const api = install({
+    'projects:list': listOf([project]),
+    'assets:list': () => pageOf([assetSummary({ name: 'Old oak', typeId: TYPE.id })]),
+    ...renameHandlers({ oak: 'Oak' }),
+  });
+  render(
+    <RenamingHarness
+      tag={{ name: 'oak', displayName: 'Oak' }}
+      initial={{ ...INITIAL, filters: { ...NO_PROJECT_FILTERS, tagNames: ['oak'] } }}
+    />,
+  );
+  await screen.findByText('Forest');
+  await user.click(rowOf('Forest'));
+  await within(details()).findByRole('link', { name: 'Old oak' });
+  await renameThroughDialog(user, 'Oak', 'Quercus');
+  await waitFor(() => expect(listRequests(api).some((r) => r.tagNames?.join() === 'quercus')).toBe(true));
+  await waitFor(() =>
+    expect(matchingRequests(api).at(-1)).toEqual({ projectId: project.id, tagNames: ['quercus'], limit: 20, offset: 0 }),
+  );
+  expect(screen.getByRole('button', { name: 'Remove quercus' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove oak' })).toBeNull();
+});
+
+it('a rename outside the filter reloads the projects list and the matching content', async () => {
+  const user = userEvent.setup();
+  const project = projectSummary({ name: 'Forest', assetCount: 1 });
+  const api = install({
+    'projects:list': listOf([project]),
+    'assets:list': () => pageOf([assetSummary({ name: 'Old oak', typeId: TYPE.id })]),
+    ...renameHandlers({ bark: 'Bark' }),
+  });
+  render(
+    <RenamingHarness
+      tag={{ name: 'bark', displayName: 'Bark' }}
+      initial={{ ...INITIAL, filters: { ...NO_PROJECT_FILTERS, tagNames: ['oak'] } }}
+    />,
+  );
+  await screen.findByText('Forest');
+  await user.click(rowOf('Forest'));
+  await within(details()).findByRole('link', { name: 'Old oak' });
+  const lists = listRequests(api).length;
+  const matching = matchingRequests(api).length;
+  await renameThroughDialog(user, 'Bark', 'Rind');
+  await waitFor(() => expect(listRequests(api).length).toBeGreaterThan(lists));
+  await waitFor(() => expect(matchingRequests(api).length).toBeGreaterThan(matching));
+  expect(matchingRequests(api).at(-1)).toEqual({ projectId: project.id, tagNames: ['oak'], limit: 20, offset: 0 });
+  expect(within(details()).getByRole('link', { name: 'Old oak' })).toBeTruthy();
 });
