@@ -2,7 +2,7 @@ import type { FileList, FileRecord, FileRole, FileTarget } from '@assetforge/con
 import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import { assetFilePath, inboxPath } from './paths.js';
-import type { FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
+import type { FileMove, FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
 import { searchWords } from './search.js';
 import { tagName } from './tags.js';
 import type { WorkspaceSession } from './session.js';
@@ -111,23 +111,43 @@ export async function recoverFileMoves(ctx: {
   }
   for (const move of moves) {
     try {
-      const file = await ctx.files.get(move.fileId);
-      const moved =
-        file !== null &&
-        (await ctx.storage.exists(move.targetRelativePath)) &&
-        !(await ctx.storage.exists(file.relativePath));
-      if (moved) {
-        await ctx.fileMoves.commit(move.fileId);
-        result.completed.push(move.fileId);
-      } else {
-        await ctx.fileMoves.abort(move.fileId);
-        result.discarded.push(move.fileId);
-      }
+      if ((await resolveFileMove(ctx, move)) === 'completed') result.completed.push(move.fileId);
+      else result.discarded.push(move.fileId);
     } catch {
       // The row stays and is retried on the next open.
     }
   }
   return result;
+}
+
+type MoveContext = Parameters<typeof recoverFileMoves>[0];
+
+/** The recovery rule for one move row: commit when the target exists and the source is gone, else abort. */
+async function resolveFileMove(ctx: MoveContext, move: FileMove): Promise<'completed' | 'discarded'> {
+  const file = await ctx.files.get(move.fileId);
+  const moved =
+    file !== null &&
+    (await ctx.storage.exists(move.targetRelativePath)) &&
+    !(await ctx.storage.exists(file.relativePath));
+  if (moved) {
+    await ctx.fileMoves.commit(move.fileId);
+    return 'completed';
+  }
+  await ctx.fileMoves.abort(move.fileId);
+  return 'discarded';
+}
+
+/**
+ * Resolves an open move row of one file with the recovery rule, so a move whose commit failed in an
+ * earlier session is completed or discarded before the file is acted on again. Null without a row.
+ * Throws when the row cannot be resolved; it then stays for the next open.
+ */
+export async function resolvePendingFileMove(
+  ctx: MoveContext,
+  fileId: string,
+): Promise<'completed' | 'discarded' | null> {
+  const move = (await ctx.fileMoves.list()).find((m) => m.fileId === fileId);
+  return move === undefined ? null : resolveFileMove(ctx, move);
 }
 
 export function listFiles(s: WorkspaceSession, q: FileQuery): Promise<FileList> {

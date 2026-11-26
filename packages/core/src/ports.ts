@@ -89,7 +89,8 @@ export interface FileRepository {
   list(q: FileQuery): Promise<FileList>; // newest importedAt first
   /**
    * One transaction: deletes the file row and every row that references it, only for a row that is
-   * in the trash or has status `failed`. False otherwise and for an unknown id.
+   * in the trash or has status `failed`. False otherwise and for an unknown id. Rejects with
+   * InvalidOperationError and deletes nothing while the file has an open `file_move` row.
    */
   purge(id: string): Promise<boolean>;
   /** How many files are in the trash. */

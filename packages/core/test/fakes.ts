@@ -359,6 +359,8 @@ class InMemoryFiles implements FileRepository {
   assetName: (assetId: string) => string | null = () => null;
   /** Set by the database: deletes every row that references a purged file, like the purge transaction. */
   onPurge: (fileId: string) => void = () => {};
+  /** Set by the database: whether the file has an open move row. */
+  hasMove: (fileId: string) => boolean = () => false;
 
   private withTags(rec: FileRecord): FileRecord {
     // Mirrors the database: a trashed file is never openable.
@@ -514,6 +516,7 @@ class InMemoryFiles implements FileRepository {
   async purge(id: string): Promise<boolean> {
     const rec = this.records.get(id);
     if (!rec || (rec.deletedAt === null && rec.status !== 'failed')) return false;
+    if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
     this.onPurge(id);
     this.records.delete(id);
     return true;
@@ -1307,7 +1310,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   constructor() {
     this.tags.files = this.files;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
-    // The purge transaction: tags, analysis, proposal, jobs and the move row of the file go with it.
+    this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
+    // The purge transaction: tags, analysis, proposal and jobs of the file go with it.
     this.files.onPurge = (fileId) => {
       const tags = this.tags.fileAssignments;
       tags.splice(0, tags.length, ...tags.filter((a) => a.fileId !== fileId));
@@ -1315,7 +1319,6 @@ export class InMemoryDatabase implements WorkspaceDatabase {
       this.proposals.delete(fileId);
       const jobs = this.jobs.rows;
       jobs.splice(0, jobs.length, ...jobs.filter((j) => j.fileId !== fileId));
-      this.fileMoves.rows.delete(fileId);
     };
   }
 

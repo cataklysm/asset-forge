@@ -251,7 +251,7 @@ describe('file trash repository', () => {
     expect((await db.files.findCompleteBySha256(SHA)).map((f) => f.id)).toEqual([b]);
   });
 
-  test('purge removes the row with its tags, analysis, proposal, jobs and move row', async () => {
+  test('purge removes the row with its tags, analysis, proposal and jobs', async () => {
     expect(handle.pragma('foreign_keys', { simple: true })).toBe(1);
     const seedDependents = async (f: string) => {
       await tagFile(f, 'metal');
@@ -285,12 +285,10 @@ describe('file trash repository', () => {
     await seedDependents(doomed);
     await seedDependents(kept);
     await trash(doomed);
-    // A move row left behind by an interrupted restore.
-    await db.fileMoves.begin({ ...trashMove(doomed), kind: 'restore' });
 
     await expect(db.files.purge(doomed)).resolves.toBe(true);
     await expect(db.files.get(doomed)).resolves.toBeNull();
-    for (const table of ['file_tag', 'file_analysis', 'file_analysis_proposal', 'job', 'file_move']) {
+    for (const table of ['file_tag', 'file_analysis', 'file_analysis_proposal', 'job']) {
       expect({ table, n: countOf(table, doomed) }).toEqual({ table, n: 0 });
     }
     expect(countOf('file_tag', kept)).toBe(2);
@@ -298,6 +296,19 @@ describe('file trash repository', () => {
     expect(countOf('file_analysis_proposal', kept)).toBe(1);
     expect(countOf('job', kept)).toBe(1);
     await expect(db.files.get(kept)).resolves.toMatchObject({ id: kept });
+  });
+
+  test('purge refuses a file with an open move row and deletes nothing', async () => {
+    const f = await addFile('moving.png', { assetId: PUMP, role: 'reference' });
+    await tagFile(f, 'metal');
+    await trash(f);
+    // A move row left behind by a restore whose commit failed.
+    await db.fileMoves.begin({ ...trashMove(f), kind: 'restore' });
+
+    await expect(db.files.purge(f)).rejects.toMatchObject({ code: 'invalid_operation', message: 'The file is being moved' });
+    await expect(db.files.get(f)).resolves.toMatchObject({ id: f });
+    expect(countOf('file_tag', f)).toBe(1);
+    expect(countOf('file_move', f)).toBe(1);
   });
 
   test('purge refuses a live complete file and an unknown id', async () => {

@@ -1,4 +1,5 @@
 import type { FileRecord } from '@assetforge/contracts';
+import { resolvePendingFileMove } from './asset-files.js';
 import { AssetForgeError, InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
 import { cancelJob, type JobControl } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
@@ -47,6 +48,11 @@ async function requireReachable(s: WorkspaceSession): Promise<void> {
   if (!(await s.storage.isReachable())) {
     throw new StorageUnreachableError('The storage of this workspace is not reachable');
   }
+}
+
+/** Resolves an open move row of the file left by an earlier failed commit (see `recoverFileMoves`). */
+function resolvePendingMove(s: WorkspaceSession, fileId: string): Promise<'completed' | 'discarded' | null> {
+  return resolvePendingFileMove({ storage: s.storage, files: s.database.files, fileMoves: s.database.fileMoves }, fileId);
 }
 
 /** Cancels every active job of the file; a running one is only asked to stop, not awaited. */
@@ -121,9 +127,14 @@ export function trashFiles(s: WorkspaceSession, control: JobControl, fileIds: re
 /** Returns trashed files to their asset and role, or to the inbox when that asset is gone. */
 export function restoreFiles(s: WorkspaceSession, fileIds: readonly string[]): Promise<FileBatchItem[]> {
   return eachFile(fileIds, async (fileId) => {
-    const file = await requireFile(s, fileId);
+    let file = await requireFile(s, fileId);
     if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
     await requireReachable(s);
+    if ((await resolvePendingMove(s, file.id)) !== null) {
+      file = await requireFile(s, fileId);
+      // An earlier restore whose commit failed has just been completed.
+      if (file.deletedAt === null) return file;
+    }
     if (!(await s.storage.exists(file.relativePath))) {
       // A storage that dropped after the first check answers the storage error, not "missing".
       await requireReachable(s);
@@ -158,9 +169,14 @@ export function restoreFiles(s: WorkspaceSession, fileIds: readonly string[]): P
  */
 export function purgeFiles(s: WorkspaceSession, control: JobControl, fileIds: readonly string[]): Promise<FileBatchItem[]> {
   return eachFile(fileIds, async (fileId) => {
-    const file = await requireFile(s, fileId);
+    let file = await requireFile(s, fileId);
     if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
     await requireReachable(s);
+    if ((await resolvePendingMove(s, file.id)) !== null) {
+      file = await requireFile(s, fileId);
+      // An earlier restore whose commit failed has just been completed: the file is live again.
+      if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
+    }
     await cancelFileJobs(s, control, file.id);
     if (!(await s.database.files.purge(file.id))) throw new InvalidOperationError('The file is not in the trash');
     if (file.relativePath.startsWith(`${TRASH_DIR}/`)) {

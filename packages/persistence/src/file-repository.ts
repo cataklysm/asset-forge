@@ -328,13 +328,16 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
       return db.transaction((tx) => {
         const row = tx.select({ deletedAt: file.deletedAt, status: file.status }).from(file).where(eq(file.id, id)).get();
         if (!row || (row.deletedAt === null && row.status !== 'failed')) return false;
+        // An open move may have put the binary outside the trash; it is resolved first, never dropped.
+        if (tx.select({ fileId: fileMove.fileId }).from(fileMove).where(eq(fileMove.fileId, id)).get()) {
+          throw new InvalidOperationError('The file is being moved');
+        }
         // Dependents first, so the foreign keys hold at every statement. A chosen cover is cleared by
         // its `set null` rule (only a failed inbox file could still be one; a trashed file is none).
         tx.delete(fileTag).where(eq(fileTag.fileId, id)).run();
         tx.delete(fileAnalysis).where(eq(fileAnalysis.fileId, id)).run();
         tx.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, id)).run();
         tx.delete(job).where(eq(job.fileId, id)).run();
-        tx.delete(fileMove).where(eq(fileMove.fileId, id)).run();
         const left = assetOfFile(tx, id);
         tx.delete(file).where(eq(file.id, id)).run();
         reindexAssets(tx, [left]);

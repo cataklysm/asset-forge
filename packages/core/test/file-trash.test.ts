@@ -7,6 +7,7 @@ import {
   InvalidOperationError,
   NotFoundError,
   purgeFiles,
+  recoverFileMoves,
   relocateFile,
   restoreFiles,
   stagingPath,
@@ -497,6 +498,94 @@ describe('sweepTrash', () => {
 
     storage.failNext('list', new Error('EIO'));
     expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [], skipped: [] });
+  });
+});
+
+describe('an open move row before restore and purge', () => {
+  /** A trashed inbox file whose restore moved the binary back but whose commit failed. */
+  async function failedRestoreCommit() {
+    const ctx = await setup();
+    const { session, storage, db, importOne, control } = ctx;
+    const file = await importOne('a.png');
+    ok(await trashFiles(session, control, [file.id]));
+    vi.spyOn(db.fileMoves, 'commit').mockRejectedValueOnce(new Error('database is locked'));
+    const [failed] = await restoreFiles(session, [file.id]);
+    expect(failed!.error).not.toBeNull();
+    expect(db.files.records.get(file.id)!.deletedAt).not.toBeNull();
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
+    return { ...ctx, file };
+  }
+
+  it('purge after a restore whose commit failed completes the restore instead of orphaning the binary', async () => {
+    const { session, storage, db, file, control } = await failedRestoreCommit();
+
+    const [item] = await purgeFiles(session, control, [file.id]);
+
+    expect(item!.error).toBeInstanceOf(InvalidOperationError);
+    expect(item!.error!.message).toBe('The file is not in the trash');
+    expect(db.files.records.get(file.id)).toMatchObject({ relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('empty trash after a restore whose commit failed completes the restore instead of orphaning the binary', async () => {
+    const { session, storage, db, file, control } = await failedRestoreCommit();
+
+    expect(await emptyTrash(session, control)).toEqual({ purged: 0, failed: 1 });
+
+    expect(db.files.records.get(file.id)).toMatchObject({ relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('a second restore after a failed commit completes the first one', async () => {
+    const { session, storage, db, file } = await failedRestoreCommit();
+
+    const [restored] = ok(await restoreFiles(session, [file.id]));
+
+    expect(restored).toMatchObject({ id: file.id, relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('purge with a move row that did not happen discards it and purges', async () => {
+    const { session, storage, db, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    const [trashed] = ok(await trashFiles(session, control, [file.id]));
+    await db.fileMoves.begin({ fileId: file.id, kind: 'restore', targetRelativePath: inboxPath(file.id, 'a.png'), targetAssetId: null, targetRole: null, createdAt: TS });
+
+    expect(await purgeFiles(session, control, [file.id])).toEqual([{ fileId: file.id, file: null, error: null }]);
+
+    expect(db.files.records.has(file.id)).toBe(false);
+    expect(storage.files.has(trashed!.relativePath)).toBe(false);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('purge is refused while the move row cannot be resolved; recovery then makes the file live', async () => {
+    const { session, storage, db, file, control } = await failedRestoreCommit();
+    vi.spyOn(db.fileMoves, 'commit').mockRejectedValueOnce(new Error('database is locked'));
+
+    const [item] = await purgeFiles(session, control, [file.id]);
+
+    expect(item!.error).not.toBeNull();
+    expect(db.files.records.get(file.id)!.deletedAt).not.toBeNull();
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
+
+    await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+    expect(db.files.records.get(file.id)).toMatchObject({ relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
+  });
+
+  it('the repository refuses to purge a file with an open move row', async () => {
+    const { db, session, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    ok(await trashFiles(session, control, [file.id]));
+    await db.fileMoves.begin({ fileId: file.id, kind: 'restore', targetRelativePath: inboxPath(file.id, 'a.png'), targetAssetId: null, targetRole: null, createdAt: TS });
+
+    await expect(db.files.purge(file.id)).rejects.toThrow(new InvalidOperationError('The file is being moved'));
+    expect(db.files.records.has(file.id)).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
   });
 });
 

@@ -284,7 +284,6 @@ Deferred by design:
 Found during the build:
 
 - The port doc comments in `packages/core/src/ports.ts` do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
-- `purgeFiles` (through `FileRepository.purge`) drops a pending `file_move` row of the file, so after a restore whose commit failed (the binary already back in the inbox or asset folder, the row still in the trash) a purge removes the row and can leave the binary orphaned outside `.assetforge/trash/`, where the sweep never looks.
 - A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open.
 - The trash sweep treats "no row" as "purged". It is skipped only in the open that creates the database, so on the following open of a re-opened kept folder (or a database restored from a backup) the binaries still in `.assetforge/trash/` are removed. More robust: record purges as tombstones in the purge transaction and let the sweep remove only binaries of tombstoned ids.
 
