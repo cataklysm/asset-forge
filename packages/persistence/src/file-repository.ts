@@ -12,7 +12,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
-import { asset, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
+import { asset, file, fileAnalysis, fileAnalysisProposal, fileMove, fileTag, job, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
@@ -120,16 +120,32 @@ export function clearCoverOutside(tx: Pick<BetterSQLite3Database, 'update'>, fil
     .run();
 }
 
+/**
+ * Not in the trash. The unary `+` keeps `file_deleted_at_idx` out of the plan: nearly every row is
+ * live, and without statistics SQLite would otherwise prefer it to the scope's `asset_id` key.
+ */
+const live = () => sql`+${qualified(file, file.deletedAt)} is null`;
+
+/**
+ * In the trash. `unlikely` tells the planner that few rows are, so `file_deleted_at_idx` drives the
+ * trash list even under expensive filters (it would otherwise scan `file`).
+ */
+const trashed = () => sql`unlikely(${qualified(file, file.deletedAt)} is not null)`;
+
+/**
+ * The scope condition. A trashed file has no asset (the repositories keep that invariant), so the
+ * asset scope excludes it without a condition; every scope that reads files without an asset does not.
+ */
 const scopeMatches = (scope: FileScope) => {
   switch (scope.kind) {
     case 'all':
-      return undefined;
+      return live();
     case 'inbox':
-      return isNull(file.assetId);
+      return and(isNull(file.assetId), live());
     case 'asset':
       return eq(file.assetId, scope.assetId);
     case 'trash':
-      throw new Error('not implemented');
+      return trashed();
   }
 };
 
@@ -170,8 +186,15 @@ export function fileListWhere(tx: ListTx, q: Omit<FileQuery, 'limit' | 'offset'>
   return { where: and(...conditions) };
 }
 
+/** Newest import first; in the trash newest deletion first. */
 const pageQuery = (tx: ListTx, q: FileQuery, where: SQL | undefined) =>
-  tx.select().from(file).where(where).orderBy(desc(file.importedAt), desc(file.id)).limit(q.limit).offset(q.offset);
+  tx
+    .select()
+    .from(file)
+    .where(where)
+    .orderBy(...(q.scope.kind === 'trash' ? [desc(file.deletedAt), desc(file.id)] : [desc(file.importedAt), desc(file.id)]))
+    .limit(q.limit)
+    .offset(q.offset);
 
 const countQuery = (tx: ListTx, where: SQL | undefined) => tx.select({ n: count() }).from(file).where(where);
 
@@ -237,7 +260,7 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
             tx
               .select()
               .from(file)
-              .where(and(eq(file.sha256, sha256), eq(file.status, 'complete')))
+              .where(and(eq(file.sha256, sha256), eq(file.status, 'complete'), live())) // a trashed file is no duplicate
               .orderBy(asc(file.importedAt), asc(file.id))
               .all(),
           ),
@@ -297,14 +320,34 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         { behavior: 'deferred' },
       );
     },
-    async purge() {
-      throw new Error('not implemented');
+    async purge(id) {
+      return db.transaction((tx) => {
+        const row = tx.select({ deletedAt: file.deletedAt, status: file.status }).from(file).where(eq(file.id, id)).get();
+        if (!row || (row.deletedAt === null && row.status !== 'failed')) return false;
+        // Dependents first, so the foreign keys hold at every statement. A chosen cover is cleared by
+        // its `set null` rule (only a failed inbox file could still be one; a trashed file is none).
+        tx.delete(fileTag).where(eq(fileTag.fileId, id)).run();
+        tx.delete(fileAnalysis).where(eq(fileAnalysis.fileId, id)).run();
+        tx.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, id)).run();
+        tx.delete(job).where(eq(job.fileId, id)).run();
+        tx.delete(fileMove).where(eq(fileMove.fileId, id)).run();
+        const left = assetOfFile(tx, id);
+        tx.delete(file).where(eq(file.id, id)).run();
+        reindexAssets(tx, [left]);
+        return true;
+      });
     },
     async countTrashed() {
-      throw new Error('not implemented');
+      return db.select({ n: count() }).from(file).where(trashed()).get()?.n ?? 0;
     },
     async listTrashedIds() {
-      throw new Error('not implemented');
+      return db
+        .select({ id: file.id })
+        .from(file)
+        .where(trashed())
+        .orderBy(desc(file.deletedAt), desc(file.id))
+        .all()
+        .map((r) => r.id);
     },
   };
 }

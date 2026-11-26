@@ -32,6 +32,8 @@ const PROJECT_COUNT = 5;
 const LARGE_PROJECT_COUNT = 200;
 const MEMBERS_PER_PROJECT = 50;
 const INBOX_FILE_COUNT = 2_000;
+/** Files in the trash: no asset, like the inbox, so the inbox totals also prove they are excluded. */
+const TRASH_FILE_COUNT = 500;
 
 const TS = '2026-01-01T00:00:00.000Z';
 const uuid = (prefix: number, n: number) =>
@@ -114,6 +116,7 @@ let orm: BetterSQLite3Database;
 let typeIds: string[];
 const seeded: SeededAsset[] = [];
 const seededInbox: SeededInboxFile[] = [];
+const seededTrash: SeededInboxFile[] = [];
 /** Member assets by project id, over the small and the large projects. */
 const seededMembers = new Map<string, SeededAsset[]>();
 
@@ -134,6 +137,7 @@ function seed(): void {
      values (?, ?, ?, ?, ?, ?, 'application/octet-stream', 1, ?, ?, ?, ?)`,
   );
   const insertFileTag = sqlite.prepare(`insert into file_tag (file_id, tag_id, origin, created_at) values (?, ?, ?, ?)`);
+  const trashFile = sqlite.prepare(`update file set deleted_at = ? where id = ?`);
   const insertProjectAsset = sqlite.prepare(
     `insert into project_asset (project_id, asset_id, assigned_at, updated_at) values (?, ?, ?, ?)`,
   );
@@ -200,6 +204,19 @@ function seed(): void {
       insertFile.run(id, STORAGE, null, null, f.name, `inbox/${id}/${f.name}`, 'a'.repeat(64), f.kind, 'complete', importedAt);
       insertFileTag.run(id, uuid(2, f.tag), 'manual', TS);
       seededInbox.push(f);
+    }
+    // Trashed files: named and tagged like inbox files, with distinct deletion times.
+    for (let i = 0; i < TRASH_FILE_COUNT; i++) {
+      const id = uuid(7, i);
+      const f: SeededInboxFile = {
+        name: `${pick(DESCRIPTION_WORDS)}-${pick(NOUNS)}-${i}.${i % 2 === 0 ? 'png' : 'glb'}`,
+        kind: i % 2 === 0 ? 'image' : 'model',
+        tag: ASSET_TAG_COUNT + Math.floor(next() * (TAG_COUNT - ASSET_TAG_COUNT)),
+      };
+      insertFile.run(id, STORAGE, null, null, f.name, `.assetforge/trash/${id}_${f.name}`, 'a'.repeat(64), f.kind, 'complete', TS);
+      trashFile.run(new Date(Date.UTC(2026, 1, 1, 0, 0, i)).toISOString(), id);
+      insertFileTag.run(id, uuid(2, f.tag), 'manual', TS);
+      seededTrash.push(f);
     }
   })();
 }
@@ -427,6 +444,44 @@ describe('file list plans', () => {
         expect({ name, q, violations: violations(plan(statement)) }).toEqual({ name, q, violations: [] });
       }
     }
+  });
+
+  test('the trash scope with every filter reads file through file_deleted_at_idx and file_tag and tag only by key', () => {
+    for (const q of queries()) {
+      const statements = fileListSql(orm, { scope: { kind: 'trash' }, limit: 60, offset: 0, ...q });
+      expect(statements).not.toBeNull();
+      for (const [name, statement] of Object.entries(statements!)) {
+        const lines = plan(statement);
+        const fileAccess = lines.filter((l) => /^(SCAN|SEARCH) file\b/.test(l));
+        expect({ name, q, fileAccess }).toEqual({
+          name,
+          q,
+          fileAccess: [expect.stringMatching(/^SEARCH file USING (?:COVERING )?INDEX file_deleted_at_idx \(deleted_at>\?\)$/)],
+        });
+        const rest = lines.filter((l) => !fileAccess.includes(l));
+        expect({ name, q, violations: violations(rest) }).toEqual({ name, q, violations: [] });
+      }
+    }
+  });
+
+  test('trash totals match a brute-force count and the page is newest deletion first', async () => {
+    for (const q of queries()) {
+      const words = searchWords(q.query ?? '').map(foldSearchWord);
+      const expected = seededTrash.filter(
+        (f) =>
+          q.role === undefined &&
+          (q.kind === undefined || f.kind === q.kind) &&
+          (q.tagNames ?? []).every((name) => tagLabel(f.tag) === name) &&
+          words.every((w) => f.name.includes(w) || tagLabel(f.tag).startsWith(w)),
+      ).length;
+      const result = await db.files.list({ scope: { kind: 'trash' }, limit: 60, offset: 0, ...q });
+      expect(result.total).toBe(expected);
+      expect(result.items).toHaveLength(Math.min(60, expected));
+      const deleted = result.items.map((f) => f.deletedAt!);
+      expect(deleted).toEqual([...deleted].sort().reverse());
+    }
+    expect((await db.files.list({ scope: { kind: 'trash' }, limit: 1, offset: 0 })).items[0]?.id).toBe(uuid(7, TRASH_FILE_COUNT - 1));
+    await expect(db.files.countTrashed()).resolves.toBe(TRASH_FILE_COUNT);
   });
 
   test('inbox totals over 2 000 files match a brute-force count', async () => {
