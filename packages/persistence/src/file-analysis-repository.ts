@@ -59,7 +59,7 @@ function writeAnalysis(
 }
 
 /** The stored tag list; anything but an array of `{ name, displayName }` strings reads as []. */
-function parseTags(json: string): Proposal['tags'] {
+export function parseTags(json: string): Proposal['tags'] {
   let value: unknown;
   try {
     value = JSON.parse(json);

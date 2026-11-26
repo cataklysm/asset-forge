@@ -361,3 +361,256 @@ describe('tags of trashed files', () => {
     expect(before()).toEqual(snapshot);
   });
 });
+
+describe('tag usage and rename', () => {
+  const T0 = '2025-12-31T00:00:00.000Z';
+  const T2 = '2026-01-02T00:00:00.000Z';
+
+  const tagAssetAt = (assetId: string, name: string, origin: TagOrigin, now: string, displayName = name) =>
+    db.tags.addToAsset({ assetId, name, displayName, origin, newId: uuid(nextTagId++), now });
+  const tagFileAt = (fileId: string, name: string, origin: TagOrigin, now: string, displayName = name) =>
+    db.tags.addToFile({ fileId, name, displayName, origin, newId: uuid(nextTagId++), now });
+  const tagRow = (name: string) => handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
+  const assetLinks = () => handle.prepare('select * from asset_tag order by asset_id, tag_id, origin').all();
+  const fileLinks = () => handle.prepare('select * from file_tag order by file_id, tag_id, origin').all();
+  const dump = () => ({
+    tag: handle.prepare('select * from tag order by id').all(),
+    assetTag: assetLinks(),
+    fileTag: fileLinks(),
+    proposal: handle.prepare('select * from file_analysis_proposal order by file_id').all(),
+    search: handle.prepare('select rowid, * from asset_search order by rowid').all(),
+  });
+  const place = (fileId: string, assetId: string) =>
+    db.files.setPlacement(fileId, { relativePath: `assets/${assetId}/${fileId}.png`, assetId, role: 'reference' });
+
+  async function trash(fileId: string): Promise<void> {
+    await db.fileMoves.begin({
+      fileId,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${fileId}_f.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T1,
+    });
+    await db.fileMoves.commit(fileId);
+  }
+
+  test('usage counts assets carrying the tag and files not in the trash', async () => {
+    const a = await addAsset(10);
+    const b = await addAsset(11);
+    const viaFile = await addAsset(12);
+    const live = await addFile(20);
+    const onAsset = await addFile(21);
+    const gone = await addFile(22);
+    await place(onAsset, viaFile.id);
+    await tagAsset(a.id, 'front view', 'manual', 'Front View');
+    await tagAsset(b.id, 'front view', 'ai');
+    await tagFile(live, 'front view', 'ai');
+    await tagFile(onAsset, 'front view');
+    await tagFile(gone, 'front view');
+    await trash(gone);
+    // The asset tagged only through one of its files counts under files only.
+    expect(await db.tags.usage('front view')).toEqual({ displayName: 'Front View', assets: 2, files: 2 });
+  });
+
+  test('usage of a tag without links counts zero; of an unknown name it is null', async () => {
+    const a = await addAsset(10);
+    await tagAsset(a.id, 'lonely', 'manual', 'Lonely');
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'lonely' });
+    expect(await db.tags.usage('lonely')).toEqual({ displayName: 'Lonely', assets: 0, files: 0 });
+    expect(await db.tags.usage('unknown')).toBeNull();
+  });
+
+  test('rename of an unknown tag throws not_found', async () => {
+    await expect(db.tags.rename({ from: 'nope', name: 'x', displayName: 'x', merge: true })).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'Tag does not exist',
+    });
+  });
+
+  test('rename to a free name keeps the tag row and leaves the links alone', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await tagAsset(a.id, 'front view', 'manual', 'Front View');
+    await tagFile(f, 'front view', 'ai', 'Front View');
+    const before = tagRow('front view')!;
+    const links = { asset: assetLinks(), file: fileLinks() };
+
+    expect(await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: false })).toEqual({ merged: false });
+    expect(tagRow('front view')).toBeUndefined();
+    expect(tagRow('frontal')).toEqual({ ...before, name: 'frontal', display_name: 'Frontal' });
+    expect({ asset: assetLinks(), file: fileLinks() }).toEqual(links);
+    expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'frontal', displayName: 'Frontal', origin: 'manual' }]);
+    expect((await db.files.get(f))!.tags).toEqual([{ name: 'frontal', displayName: 'Frontal', origin: 'ai' }]);
+  });
+
+  test.each([false, true])('rename to the same name changes only the display name (merge %s)', async (merge) => {
+    const a = await addAsset(10);
+    await tagAsset(a.id, 'front', 'manual', 'front');
+    const before = dump();
+    const row = tagRow('front')!;
+    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({ merged: false });
+    expect(tagRow('front')).toEqual({ ...row, display_name: 'FRONT' });
+    expect({ ...dump(), tag: before.tag }).toEqual(before);
+
+    // An identical display name writes nothing.
+    const changes = () => (handle.prepare('select total_changes() as n').get() as { n: number }).n;
+    const written = changes();
+    const same = dump();
+    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({ merged: false });
+    expect(dump()).toEqual(same);
+    expect(changes()).toBe(written);
+  });
+
+  // [source origin, target origin, expected origin]; null: the owner does not carry that tag.
+  const cases: [TagOrigin | null, TagOrigin | null, TagOrigin][] = [
+    ['ai', 'manual', 'manual'],
+    ['manual', 'ai', 'manual'],
+    ['ai', 'ai', 'ai'],
+    ['manual', 'manual', 'manual'],
+    ['ai', null, 'ai'],
+    [null, 'manual', 'manual'],
+  ];
+  // The source is older on even owners, the target on odd ones.
+  const sourceAt = (i: number) => (i % 2 === 0 ? T0 : T2);
+  const targetAt = (i: number) => (i % 2 === 0 ? T2 : T0);
+  // Both: the earlier one; one of them: its own.
+  const expectedAt = (i: number, source: TagOrigin | null, target: TagOrigin | null) =>
+    source && target ? T0 : source ? sourceAt(i) : targetAt(i);
+
+  test('a merge leaves every file with one link to the target, manual when either was', async () => {
+    const files: string[] = [];
+    for (const [i, [source, target]] of cases.entries()) {
+      const f = await addFile(20 + i);
+      files.push(f);
+      if (source) await tagFileAt(f, 'front view', source, sourceAt(i), 'Front View');
+      if (target) await tagFileAt(f, 'front', target, targetAt(i), 'Front');
+    }
+    const target = tagRow('front')!;
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({ merged: true });
+    expect(tagRow('front view')).toBeUndefined();
+    expect(tagRow('front')).toEqual({ ...target, display_name: 'FRONT' });
+    expect(fileLinks()).toEqual(
+      cases.map(([source, targetOrigin, expected], i) => ({
+        file_id: files[i],
+        tag_id: target.id,
+        origin: expected,
+        created_at: expectedAt(i, source, targetOrigin),
+      })),
+    );
+  });
+
+  test('a merge leaves every asset with one link to the target, manual when either was', async () => {
+    const assets: string[] = [];
+    for (const [i, [source, target]] of cases.entries()) {
+      const a = await addAsset(10 + i);
+      assets.push(a.id);
+      if (source) await tagAssetAt(a.id, 'front view', source, sourceAt(i), 'Front View');
+      if (target) await tagAssetAt(a.id, 'front', target, targetAt(i), 'Front');
+    }
+    const target = tagRow('front')!;
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({ merged: true });
+    expect(tagRow('front view')).toBeUndefined();
+    expect(tagRow('front')).toEqual({ ...target, display_name: 'FRONT' });
+    expect(assetLinks()).toEqual(
+      cases.map(([source, targetOrigin, expected], i) => ({
+        asset_id: assets[i],
+        tag_id: target.id,
+        origin: expected,
+        created_at: expectedAt(i, source, targetOrigin),
+      })),
+    );
+  });
+
+  test('a file in the trash is merged too and carries the new name after a restore', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await place(f, a.id);
+    await tagFile(f, 'front view', 'manual');
+    await tagAsset(a.id, 'front', 'ai');
+    await trash(f);
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({ merged: true });
+    await db.fileMoves.begin({
+      fileId: f,
+      kind: 'restore',
+      targetRelativePath: `assets/${a.id}/${f}.png`,
+      targetAssetId: a.id,
+      targetRole: 'reference',
+      createdAt: T2,
+    });
+    await db.fileMoves.commit(f);
+    expect((await db.files.get(f))!.tags).toEqual([{ name: 'front', displayName: 'Front', origin: 'manual' }]);
+  });
+
+  test('a merge without merge true throws and writes nothing', async () => {
+    const a = await addAsset(10);
+    const b = await addAsset(11);
+    const f = await addFile(20);
+    await place(f, a.id);
+    await tagAsset(a.id, 'front view', 'ai');
+    await tagAsset(b.id, 'front', 'manual');
+    await tagFile(f, 'front view', 'manual');
+    await tagFile(f, 'front', 'ai');
+    await db.analyses.propose({
+      fileId: f,
+      sha256: 'a'.repeat(64),
+      provider: 'ollama',
+      model: 'm',
+      promptVersion: 1,
+      promptName: 'Default',
+      tags: [{ name: 'front view', displayName: 'Front View' }],
+      createdAt: T1,
+    });
+    const before = dump();
+    await expect(db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: false })).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'A tag with this name already exists',
+    });
+    expect(dump()).toEqual(before);
+  });
+
+  test('a merge succeeds when the source or the target has no links', async () => {
+    const a = await addAsset(10);
+    await tagAsset(a.id, 'empty source');
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'empty source' });
+    await tagAsset(a.id, 'front');
+    expect(await db.tags.rename({ from: 'empty source', name: 'front', displayName: 'front', merge: true })).toEqual({ merged: true });
+    expect(tagRow('empty source')).toBeUndefined();
+    expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'front', displayName: 'front', origin: 'manual' }]);
+
+    await tagAsset(a.id, 'empty target');
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'empty target' });
+    expect(await db.tags.rename({ from: 'front', name: 'empty target', displayName: 'Empty Target', merge: true })).toEqual({ merged: true });
+    expect(tagRow('front')).toBeUndefined();
+    expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'empty target', displayName: 'Empty Target', origin: 'manual' }]);
+  });
+
+  test('a merge over 3000 files, 1500 of them carrying both tags, succeeds', async () => {
+    // Guards the bound-parameter limit: the merge must not list owner ids in the statement.
+    const template = await addFile(20);
+    await tagFile(template, 'front view', 'manual');
+    await tagFile(template, 'front', 'ai');
+    const source = tagRow('front view')!.id as string;
+    const target = tagRow('front')!.id as string;
+    const row = handle.prepare('select * from file where id = ?').get(template) as Record<string, unknown>;
+    const columns = Object.keys(row);
+    const insertFile = handle.prepare(`insert into file (${columns.join(', ')}) values (${columns.map((c) => `@${c}`).join(', ')})`);
+    const insertLink = handle.prepare('insert into file_tag (file_id, tag_id, origin, created_at) values (?, ?, ?, ?)');
+    handle.transaction(() => {
+      for (let i = 1; i < 3000; i++) {
+        const id = uuid(100000 + i);
+        insertFile.run({ ...row, id, relative_path: `inbox/${id}/f.png` });
+        insertLink.run(id, source, 'manual', T1);
+        if (i < 1500) insertLink.run(id, target, 'ai', T1);
+      }
+    })();
+
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'front', merge: true })).toEqual({ merged: true });
+    expect(handle.prepare('select count(*) as n, count(distinct file_id) as files from file_tag where tag_id = ?').get(target)).toEqual({
+      n: 3000,
+      files: 3000,
+    });
+    expect(handle.prepare("select count(*) as n from file_tag where origin = 'manual'").get()).toEqual({ n: 3000 });
+    expect(tagRow('front view')).toBeUndefined();
+  });
+});

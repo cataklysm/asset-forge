@@ -1,9 +1,10 @@
 import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { parseTags } from './file-analysis-repository.js';
 import { toRecords } from './file-repository.js';
-import { assetTag, file, fileTag, tag } from './schema.js';
+import { assetTag, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
 
 /**
@@ -81,6 +82,70 @@ function linkFileTags(tx: Writer, fileIds: readonly string[], tagId: string, ori
   );
   const fresh = ids.filter((id) => !carried.has(id));
   if (fresh.length > 0) tx.insert(fileTag).values(fresh.map((fileId) => ({ fileId, tagId, origin, createdAt: now }))).run();
+}
+
+/** Table and owner column of a link table; constants, never user input. */
+type LinkTable = { table: SQL; owner: SQL };
+const ASSET_LINKS: LinkTable = { table: sql.raw('asset_tag'), owner: sql.raw('asset_id') };
+const FILE_LINKS: LinkTable = { table: sql.raw('file_tag'), owner: sql.raw('file_id') };
+
+type RenameTx = Pick<BetterSQLite3Database, 'select' | 'insert' | 'update' | 'delete' | 'run' | 'all' | 'get'>;
+
+/** The assets whose index holds the tag: those carrying it and those with a file carrying it. */
+function affectedAssets(tx: RenameTx, tagId: string): string[] {
+  return tx
+    .all<{ assetId: string }>(sql`
+      select asset_id as assetId from asset_tag where tag_id = ${tagId}
+      union
+      select f.asset_id from file_tag as ft join file as f on f.id = ft.file_id
+      where ft.tag_id = ${tagId} and f.asset_id is not null`)
+    .map((row) => row.assetId);
+}
+
+/**
+ * Moves every link of `sourceId` to `targetId` with set-based statements (no owner id lists, so
+ * any number of links fits). An owner carrying both keeps its target link, raised to manual when
+ * a source link was manual and dated to the earlier of the two; a link that only moves keeps its
+ * origin and createdAt.
+ */
+function mergeLinks(tx: RenameTx, { table, owner }: LinkTable, sourceId: string, targetId: string): void {
+  tx.run(sql`
+    update ${table} set origin = 'manual'
+    where tag_id = ${targetId} and origin = 'ai'
+      and ${owner} in (select s.${owner} from ${table} as s where s.tag_id = ${sourceId} and s.origin = 'manual')
+      and ${owner} not in (select m.${owner} from ${table} as m where m.tag_id = ${targetId} and m.origin = 'manual')`);
+  tx.run(sql`
+    update ${table} set created_at = (
+      select min(s.created_at) from ${table} as s where s.tag_id = ${sourceId} and s.${owner} = ${table}.${owner})
+    where tag_id = ${targetId}
+      and created_at > (select min(s.created_at) from ${table} as s where s.tag_id = ${sourceId} and s.${owner} = ${table}.${owner})`);
+  tx.run(sql`
+    delete from ${table}
+    where tag_id = ${sourceId} and ${owner} in (select t.${owner} from ${table} as t where t.tag_id = ${targetId})`);
+  tx.run(sql`update ${table} set tag_id = ${targetId} where tag_id = ${sourceId}`);
+}
+
+/**
+ * Replaces `from` in every waiting proposal with `name` and `displayName`; a list that then holds
+ * the name twice keeps the first. `instr` on the JSON text narrows the rows (no LIKE wildcards);
+ * only lists that really hold the name are written.
+ */
+function rewriteProposals(tx: RenameTx, r: { from: string; name: string; displayName: string }): void {
+  const rows = tx
+    .select({ fileId: fileAnalysisProposal.fileId, tags: fileAnalysisProposal.tags })
+    .from(fileAnalysisProposal)
+    .where(sql`instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.from)}) > 0`)
+    .all();
+  for (const row of rows) {
+    const tags = parseTags(row.tags);
+    if (!tags.some((t) => t.name === r.from)) continue;
+    const rewritten: { name: string; displayName: string }[] = [];
+    for (const t of tags) {
+      const entry = t.name === r.from ? { name: r.name, displayName: r.displayName } : t;
+      if (!rewritten.some((x) => x.name === entry.name)) rewritten.push(entry);
+    }
+    tx.update(fileAnalysisProposal).set({ tags: JSON.stringify(rewritten) }).where(eq(fileAnalysisProposal.fileId, row.fileId)).run();
+  }
 }
 
 export function createTagRepository(db: BetterSQLite3Database): TagRepository {
@@ -164,11 +229,42 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
         .orderBy(asc(tag.name), asc(assetTag.origin))
         .all();
     },
-    async usage(): Promise<{ displayName: string; assets: number; files: number } | null> {
-      throw new Error('not implemented');
+    async usage(name): Promise<{ displayName: string; assets: number; files: number } | null> {
+      const row = db.get<{ displayName: string; assets: number; files: number } | undefined>(sql`
+        select t.display_name as displayName,
+          (select count(distinct at.asset_id) from asset_tag as at where at.tag_id = t.id) as assets,
+          (select count(distinct ft.file_id) from file_tag as ft
+            join file as f on f.id = ft.file_id and f.deleted_at is null
+            where ft.tag_id = t.id) as files
+        from tag as t where t.name = ${name}`);
+      return row ?? null;
     },
-    async rename(): Promise<{ merged: boolean }> {
-      throw new Error('not implemented');
+    async rename(r): Promise<{ merged: boolean }> {
+      return db.transaction((tx) => {
+        const source = tx.select().from(tag).where(eq(tag.name, r.from)).get();
+        if (!source) throw new NotFoundError('Tag does not exist');
+        if (r.from === r.name) {
+          // Only how the name is written changes; the index holds normalised names.
+          if (source.displayName !== r.displayName) tx.update(tag).set({ displayName: r.displayName }).where(eq(tag.id, source.id)).run();
+          return { merged: false };
+        }
+        const target = tx.select().from(tag).where(eq(tag.name, r.name)).get();
+        if (target && !r.merge) throw new InvalidOperationError('A tag with this name already exists');
+
+        const affected = affectedAssets(tx, source.id);
+        if (target) {
+          mergeLinks(tx, ASSET_LINKS, source.id, target.id);
+          mergeLinks(tx, FILE_LINKS, source.id, target.id);
+          // The foreign keys have no `on delete`: the links are gone or repointed before this.
+          tx.delete(tag).where(eq(tag.id, source.id)).run();
+          tx.update(tag).set({ displayName: r.displayName }).where(eq(tag.id, target.id)).run();
+        } else {
+          tx.update(tag).set({ name: r.name, displayName: r.displayName }).where(eq(tag.id, source.id)).run();
+        }
+        rewriteProposals(tx, r);
+        reindexAssets(tx, affected);
+        return { merged: target !== undefined };
+      });
     },
   };
 }

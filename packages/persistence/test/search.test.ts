@@ -197,6 +197,25 @@ describe('search index triggers', () => {
     await db.files.markFailed(failing, 'x');
     await expect(found('barrel')).resolves.toEqual([]);
   });
+
+  test('a rename and a merge reindex the assets tagged themselves and through a complete file', async () => {
+    await db.assets.insert(asset(1, 'Crate'));
+    await db.assets.insert(asset(2, 'Barrel'));
+    await db.assets.insert(asset(3, 'Chest'));
+    await tagAsset(uuid(1), 'mossy');
+    await tagFile(await addFile(uuid(2), 'barrel.png'), 'mossy');
+    await tagAsset(uuid(3), 'weathered');
+    const sorted = async (query: string) => (await found(query)).sort();
+    await expect(sorted('mossy')).resolves.toEqual(['Barrel', 'Crate']);
+
+    await db.tags.rename({ from: 'mossy', name: 'lichen', displayName: 'Lichen', merge: false });
+    await expect(sorted('mossy')).resolves.toEqual([]);
+    await expect(sorted('lichen')).resolves.toEqual(['Barrel', 'Crate']);
+
+    await db.tags.rename({ from: 'lichen', name: 'weathered', displayName: 'Weathered', merge: true });
+    await expect(sorted('lichen')).resolves.toEqual([]);
+    await expect(sorted('weathered')).resolves.toEqual(['Barrel', 'Chest', 'Crate']);
+  });
 });
 
 describe('search queries', () => {
