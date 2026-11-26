@@ -14,7 +14,7 @@ import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
 import { createJobHost } from '../src/main/job-host.js';
 import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, type Harness } from './analysis-harness.js';
-import { idleServices } from './idle-job-host.js';
+import { servicesWithPrompts } from './idle-job-host.js';
 
 /** The tags the mock answers for these image bytes. */
 async function mockTagsOf(mock: MockProvider, bytes: Uint8Array, headers: Record<string, string> = {}): Promise<string[]> {
@@ -80,7 +80,7 @@ describe('phase 4a acceptance', () => {
         workspaceClosing: () => jobHost.workspaceClosing(),
       },
       jobHost,
-      idleServices,
+      servicesWithPrompts(join(base, 'userData')),
     );
     const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);

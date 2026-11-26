@@ -1,7 +1,6 @@
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import {
   acceptProposal,
-  builtInAnalysisPrompt,
   cancelAllJobs,
   cancelJob,
   clearFinishedJobs,
@@ -15,6 +14,7 @@ import {
   retryJob,
   type WorkspaceManager,
 } from '@assetforge/core';
+import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
 import type { IpcHandlers } from './ipc.js';
 import type { JobHost } from './job-host.js';
@@ -42,7 +42,12 @@ export type JobHandlers = Pick<
   | 'jobs:clearFinished'
 >;
 
-export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost, describe: DescribeController): JobHandlers {
+export function createJobHandlers(
+  manager: WorkspaceManager,
+  jobs: JobHost,
+  describe: DescribeController,
+  prompts: AnalysisPromptStore,
+): JobHandlers {
   /** A job row changed outside the scheduler: raise the counter and let the scheduler look for work. */
   const touched = () => {
     jobs.changed();
@@ -54,9 +59,15 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost, desc
       manager.read((s) => previewAnalysis(s, { target: r.target, model: r.model, provider: OLLAMA_PROVIDER })),
     'analysis:enqueue': async (r) => {
       const { target, model, mode, force } = r;
-      // Stopgap until the prompt store is wired (Task 4).
-      const prompt = { name: 'Default', text: builtInAnalysisPrompt('tagging').text, maxTags: 15 };
-      const result = await manager.read((s) => enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER, prompt }));
+      // Inside the read, so without a workspace the call answers no_workspace_open whatever the id.
+      const result = await manager.read(async (s) => {
+        const prompt = prompts.resolve('tagging', r.promptId);
+        const { name, text, maxTags } = prompt;
+        const counts = await enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER, prompt: { name, text, maxTags } });
+        // Also when nothing was queued: the owner chose this prompt. Never throws.
+        prompts.markUsed(prompt);
+        return counts;
+      });
       if (result.enqueued > 0) touched();
       return result;
     },
@@ -69,7 +80,15 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost, desc
       await manager.exclusive((s) => discardProposal(s, r.fileId));
       return {};
     },
-    'analysis:describe': (r) => manager.read(() => describe.describe(r)),
+    'analysis:describe': (r) =>
+      // Inside the read, so without a workspace the call answers no_workspace_open whatever the id.
+      manager.read(async () => {
+        const prompt = prompts.resolve('image_prompt', r.promptId);
+        const result = await describe.describe({ requestId: r.requestId, fileId: r.fileId, model: r.model, prompt: prompt.text });
+        // A busy answer never ran this prompt; every other answer did, or was cancelled after it started.
+        if (result.ok || result.code !== 'busy') prompts.markUsed(prompt);
+        return result;
+      }),
     'analysis:cancelDescribe': async (r) => {
       await manager.read(async () => describe.cancel(r.requestId));
       return {};

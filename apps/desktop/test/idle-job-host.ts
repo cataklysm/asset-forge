@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { builtInAnalysisPrompt } from '@assetforge/core';
+import { createAnalysisPromptHandlers } from '../src/main/analysis-prompt-handlers.js';
+import { createAnalysisPromptStore } from '../src/main/analysis-prompts.js';
 import type { AppServices, HostActions } from '../src/main/ipc.js';
 import type { JobHost } from '../src/main/job-host.js';
 
@@ -56,6 +60,12 @@ export const idleServices: AppServices = {
     unblock: () => {},
   },
 };
+
+/** The idle services with a real analysis prompt store in `userData`, for tests that enqueue analyses. */
+export function servicesWithPrompts(userData: string, log: (line: string) => void = () => {}): AppServices {
+  const prompts = createAnalysisPromptStore({ userData, newId: randomUUID, builtIn: builtInAnalysisPrompt, log });
+  return { ...idleServices, prompts, analysisPrompts: createAnalysisPromptHandlers(prompts) };
+}
 
 /** Host actions that do nothing. */
 export const noopHost: HostActions = {

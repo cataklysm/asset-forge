@@ -103,7 +103,7 @@ export function createWorkspaceHandlers(
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe),
+    ...createJobHandlers(manager, jobs, services.describe, services.prompts),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
     // App-level settings and analysis prompts: not behind the workspace guard.

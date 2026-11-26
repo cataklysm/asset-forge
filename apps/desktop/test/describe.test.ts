@@ -41,6 +41,12 @@ async function chats(n: number): Promise<void> {
   }
 }
 
+function chatContents(): string[] {
+  return mock.requests
+    .filter((r) => r.path === '/api/chat')
+    .map((r) => (r.body as { messages: { content: string }[] }).messages[0]!.content);
+}
+
 async function until(check: () => boolean): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (!check()) {
@@ -176,6 +182,66 @@ describe('analysis:describe', () => {
     });
     for (const line of h.logs) expect(line).not.toContain('wrong-key-not-real');
     expect(h.logs.filter((l) => !l.startsWith('Vision provider failed:'))).toEqual([]);
+  });
+
+  it('sends the chosen prompt text and remembers it after an answer, also a failed one', async () => {
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+    const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
+
+    expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id })).toMatchObject({ ok: true });
+    expect(chatContents().at(-1)).toBe('Paint it.');
+    expect((await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt).toBe(paint.id);
+
+    // Without an id the prompt used last runs.
+    await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL });
+    expect(chatContents().at(-1)).toBe('Paint it.');
+
+    const sketch = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Sketch', text: 'Sketch it.' });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: 'wrong-key-not-real' });
+    expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, promptId: sketch.id })).toEqual({
+      ok: false,
+      code: 'provider_unauthorized',
+    });
+    expect((await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt).toBe(sketch.id);
+  });
+
+  it('does not remember a prompt that answered busy, that is unknown or that ran without a workspace', async () => {
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY, failures: ['hang'] });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
+    const tagging = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'tagging')!;
+    const lastUsed = async () => (await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt;
+
+    for (const promptId of [paint.id, ids.d]) {
+      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: ids.b, model: MOCK_MODEL, promptId })).toMatchObject({
+        ok: false,
+        error: { code: 'no_workspace_open' },
+      });
+    }
+    expect(await lastUsed()).toBeNull();
+
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+    for (const promptId of [ids.d, tagging.id]) {
+      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId })).toEqual({
+        ok: false,
+        error: { code: 'not_found', message: 'The analysis prompt does not exist' },
+      });
+    }
+    expect(chatContents()).toEqual([]);
+
+    const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
+    await chats(1);
+    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id })).toEqual({
+      ok: false,
+      code: 'busy',
+    });
+    expect(await lastUsed()).toBeNull();
+    await h.ok('analysis:cancelDescribe', { requestId: ids.a });
+    expect(await first).toEqual({ ok: false, code: 'cancelled' });
   });
 
   it('answers not configured without settings and file_unavailable for an unknown file', async () => {
