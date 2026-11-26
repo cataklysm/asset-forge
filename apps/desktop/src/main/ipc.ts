@@ -98,7 +98,7 @@ export function createWorkspaceHandlers(
       await lifecycle(() => manager.close());
       return null;
     },
-    ...createLibraryHandlers(manager, dialogs, host),
+    ...createLibraryHandlers(manager, dialogs, host, jobs),
     ...createJobHandlers(manager, jobs, services.describe),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),

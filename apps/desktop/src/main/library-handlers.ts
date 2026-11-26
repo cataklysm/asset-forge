@@ -7,6 +7,7 @@ import {
   assignFiles,
   createAsset,
   createProject,
+  emptyTrash,
   getAsset,
   getAssetDetail,
   getProject,
@@ -27,17 +28,24 @@ import {
   removeRelation,
   removeWorkflow,
   measureFile,
+  purgeFiles,
   resolveFilePath,
+  restoreFiles,
   setAssetCover,
   startWorkflow,
   suggestTags,
+  trashCount,
+  trashFiles,
+  type FileBatchItem,
   updateAsset,
   updateAssignment,
   updateProject,
   updateWorkflowStep,
   type WorkspaceManager,
 } from '@assetforge/core';
+import type { FileBatchResult, IpcChannel } from '@assetforge/contracts';
 import { toIpcError, type Dialogs, type HostActions, type IpcHandlers } from './ipc.js';
+import type { JobHost } from './job-host.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
@@ -93,30 +101,36 @@ export function createLibraryHandlers(
   manager: WorkspaceManager,
   dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
   host: Pick<HostActions, 'openPath' | 'showItemInFolder'>,
+  jobs: Pick<JobHost, 'cancel' | 'changed' | 'wake'>,
 ): LibraryHandlers {
+  /** Runs a channel that may have cancelled jobs; raises the counter and wakes the scheduler even when it fails. */
+  const touchingJobs = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } finally {
+      jobs.changed();
+      jobs.wake();
+    }
+  };
+
   return {
     'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null),
     'files:list': (r) => manager.listFiles(r),
     'files:assign': (r) =>
       manager.exclusive((s) => relocateFile(s, r.fileId, { assetId: r.assetId, role: r.role })),
     'files:unassign': (r) => manager.exclusive((s) => relocateFile(s, r.fileId, null)),
-    'files:assignMany': async (r) => {
-      const results = await manager.exclusive((s) => assignFiles(s, r));
-      return {
-        items: results.map(({ fileId, file, error }) => ({
-          fileId,
-          file,
-          error: error === null ? null : toIpcError(error, 'files:assignMany'),
-        })),
-      };
-    },
+    'files:assignMany': async (r) => batch('files:assignMany', await manager.exclusive((s) => assignFiles(s, r))),
 
-    // The trash channels; the use cases behind them are not built yet.
-    'files:trashMany': notImplemented,
-    'files:restoreMany': notImplemented,
-    'files:purgeMany': notImplemented,
-    'trash:empty': notImplemented,
-    'trash:summary': notImplemented,
+    // Deleting and purging cancel the jobs of a file, and a restore makes its finished jobs retryable
+    // again, so the job counter goes up and the scheduler looks again afterwards, also when an item failed.
+    'files:trashMany': (r) =>
+      touchingJobs(async () => batch('files:trashMany', await manager.exclusive((s) => trashFiles(s, jobs, r.fileIds)))),
+    'files:restoreMany': (r) =>
+      touchingJobs(async () => batch('files:restoreMany', await manager.exclusive((s) => restoreFiles(s, r.fileIds)))),
+    'files:purgeMany': (r) =>
+      touchingJobs(async () => batch('files:purgeMany', await manager.exclusive((s) => purgeFiles(s, jobs, r.fileIds)))),
+    'trash:empty': () => touchingJobs(() => manager.exclusive((s) => emptyTrash(s, jobs))),
+    'trash:summary': async () => ({ count: await manager.read((s) => trashCount(s)) }),
 
     'assetTypes:list': () => manager.read((s) => listAssetTypes(s)),
 
@@ -192,7 +206,13 @@ export function createLibraryHandlers(
   };
 }
 
-/** A channel whose use case does not exist yet; reaches the renderer as `internal_error`. */
-async function notImplemented(): Promise<never> {
-  throw new Error('not implemented');
+/** Per-item results for the renderer: each error mapped like a channel error, so no cause or path leaks. */
+function batch(channel: IpcChannel, items: FileBatchItem[]): FileBatchResult {
+  return {
+    items: items.map(({ fileId, file, error }) => ({
+      fileId,
+      file,
+      error: error === null ? null : toIpcError(error, channel),
+    })),
+  };
 }

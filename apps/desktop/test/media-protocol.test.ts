@@ -11,6 +11,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 import { ORIGINAL_MAX_EDGE, ORIGINAL_MIME_TYPES } from '@assetforge/contracts';
 import {
   StorageUnreachableError,
+  trashFiles,
+  trashPath,
   type OriginalSource,
   type PreviewSource,
   type WorkspaceManager,
@@ -422,6 +424,22 @@ describe('media protocol', () => {
       await expectBare404(await handleMediaRequest({ url: url(ID), method }, fakeDeps()));
     }
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it('serves the preview and the original of a trashed file', async () => {
+    const file = await importFile('pump.png', 'png bytes');
+    await manager.exclusive((s) => s.database.files.setDimensions(file.id, { width: 4, height: 3 }));
+    const [item] = await manager.exclusive((s) => trashFiles(s, { wake: () => {}, cancel: async () => {} }, [file.id]));
+    expect(item!.error).toBeNull();
+
+    const seen = await inspect(await handleMediaRequest({ url: url(file.id), method: 'GET' }, realDeps()));
+    expect(seen.status).toBe(200);
+    expect(seen.body).toEqual(WEBP);
+    expect(get.mock.calls[0]![0].sourcePath).toBe(join(root, trashPath(file.id, 'pump.png')));
+
+    const original = await inspect(await handleMediaRequest({ url: originalUrl(file.id), method: 'GET' }, realDeps()));
+    expect(original.status).toBe(200);
+    expect(Buffer.from(original.body).toString()).toBe('png bytes');
   });
 
   it('unknown, incomplete and non-image files answer 404', async () => {

@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcContract, type IpcChannel } from '@assetforge/contracts';
-import { assetFilePath, type WorkspaceManager } from '@assetforge/core';
+import { assetFilePath, TRASH_DIR, trashPath, type WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
@@ -448,6 +449,152 @@ describe('library IPC', () => {
       const files = await ok('files:list', { ...page, scope: { kind: 'all' } });
       expect(files.items.every((f: any) => f.tags.length === 0)).toBe(true);
       expect(await ok('tags:suggest', { prefix: '', limit: 10 })).toEqual([]);
+    });
+  });
+
+  describe('trash', () => {
+    const root = () => join(base, 'workspace');
+
+    async function filesIn(names: string[], target?: { assetId: string; role: string }) {
+      const sources = names.map((n) => join(base, n));
+      for (const source of sources) await writeFile(source, source);
+      const imported = await ok<{ file: { id: string } }[]>('files:import', { sourcePaths: sources, target });
+      return imported.map((r) => r.file.id);
+    }
+
+    async function createAsset() {
+      const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+      return (await ok('assets:create', { name: 'A', typeId: type!.id })).id as string;
+    }
+
+    const listIds = async (scope: unknown) =>
+      (await ok('files:list', { ...page, scope })).items.map((f: any) => f.id);
+
+    it('the trash channels answer no_workspace_open without a workspace', async () => {
+      const requests: [IpcChannel, unknown][] = [
+        ['files:trashMany', { fileIds: [uuid] }],
+        ['files:restoreMany', { fileIds: [uuid] }],
+        ['files:purgeMany', { fileIds: [uuid] }],
+        ['trash:empty', {}],
+        ['trash:summary', {}],
+      ];
+      for (const [channel, request] of requests) {
+        expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
+      }
+    });
+
+    it('the batch trash channels answer invalid_request for 0, 1001 and duplicate ids', async () => {
+      await openWorkspace();
+      const many = Array.from({ length: 1001 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+      const invalid = { ok: false, error: { code: 'invalid_request' } };
+      for (const channel of ['files:trashMany', 'files:restoreMany', 'files:purgeMany'] as const) {
+        for (const fileIds of [[], many, [uuid, uuid]]) {
+          expect(await call(channel, { fileIds }), channel).toMatchObject(invalid);
+        }
+      }
+    });
+
+    it('files:trashMany returns one item per file and keeps going after a failing one', async () => {
+      await openWorkspace();
+      const [a, b] = (await filesIn(['a.png', 'b.png'])) as [string, string];
+      const exclusive = vi.spyOn(manager, 'exclusive');
+      const res = await ok('files:trashMany', { fileIds: [a, uuid, b] });
+      expect(exclusive).toHaveBeenCalled();
+      expect(ipcContract['files:trashMany'].response.safeParse(res).success).toBe(true);
+      expect(res.items.map((i: any) => i.fileId)).toEqual([a, uuid, b]);
+      expect(res.items.map((i: any) => i.error?.code ?? null)).toEqual([null, 'not_found', null]);
+      expect(res.items[0].file).toMatchObject({ id: a, assetId: null, role: null, relativePath: trashPath(a, 'a.png') });
+      expect(res.items[0].file.deletedAt).not.toBeNull();
+      expect(res.items[1].file).toBeNull();
+      expect(JSON.stringify(res)).not.toContain(base);
+
+      const again = await ok('files:trashMany', { fileIds: [a] });
+      expect(again.items[0].error).toEqual({ code: 'invalid_operation', message: 'The file is already in the trash' });
+    });
+
+    it('files:restoreMany and files:purgeMany round trip on disk', async () => {
+      await openWorkspace();
+      const assetId = await createAsset();
+      const [placed] = (await filesIn(['p.png'], { assetId, role: 'reference' })) as [string];
+      const [loose, other] = (await filesIn(['l.png', 'o.png'])) as [string, string];
+      const assetPath = assetFilePath(assetId, 'reference', placed, 'p.png');
+      expect(existsSync(join(root(), assetPath))).toBe(true);
+
+      await ok('files:trashMany', { fileIds: [placed, loose] });
+      expect(existsSync(join(root(), assetPath))).toBe(false);
+      expect(existsSync(join(root(), trashPath(placed, 'p.png')))).toBe(true);
+      expect(existsSync(join(root(), TRASH_DIR, `${loose}_l.png`))).toBe(true);
+      expect(await listIds({ kind: 'inbox' })).toEqual([other]);
+      expect(await listIds({ kind: 'all' })).toEqual([other]);
+      expect(await listIds({ kind: 'asset', assetId })).toEqual([]);
+      expect((await listIds({ kind: 'trash' })).sort()).toEqual([placed, loose].sort());
+      const trashed = (await ok('files:list', { ...page, scope: { kind: 'trash' } })).items.find((f: any) => f.id === placed);
+      expect(trashed).toMatchObject({ trashedAssetId: assetId, trashedAssetName: 'A', trashedRole: 'reference' });
+
+      const restored = await ok('files:restoreMany', { fileIds: [placed, other] });
+      expect(ipcContract['files:restoreMany'].response.safeParse(restored).success).toBe(true);
+      expect(restored.items[0].file).toMatchObject({ assetId, role: 'reference', relativePath: assetPath, deletedAt: null });
+      expect(restored.items[1].error).toEqual({ code: 'invalid_operation', message: 'The file is not in the trash' });
+      expect(existsSync(join(root(), assetPath))).toBe(true);
+      expect(await listIds({ kind: 'asset', assetId })).toEqual([placed]);
+      expect(await listIds({ kind: 'trash' })).toEqual([loose]);
+
+      const purged = await ok('files:purgeMany', { fileIds: [loose, placed] });
+      expect(ipcContract['files:purgeMany'].response.safeParse(purged).success).toBe(true);
+      expect(purged.items).toEqual([
+        { fileId: loose, file: null, error: null },
+        { fileId: placed, file: null, error: { code: 'invalid_operation', message: 'The file is not in the trash' } },
+      ]);
+      expect(existsSync(join(root(), TRASH_DIR, `${loose}_l.png`))).toBe(false);
+      expect(await listIds({ kind: 'trash' })).toEqual([]);
+      expect(await call('files:measure', { fileId: loose })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    });
+
+    it('trash:summary counts', async () => {
+      await openWorkspace();
+      const ids = await filesIn(['a.png', 'b.png', 'c.png']);
+      expect(await ok('trash:summary', {})).toEqual({ count: 0 });
+      await ok('files:trashMany', { fileIds: ids.slice(0, 2) });
+      expect(await ok('trash:summary', {})).toEqual({ count: 2 });
+    });
+
+    it('trash:empty returns purged and failed', async () => {
+      await openWorkspace();
+      const ids = await filesIn(['a.png', 'b.png', 'c.png']);
+      await ok('files:trashMany', { fileIds: ids });
+      const session = await manager.read(async (s) => s);
+      vi.spyOn(session.database.files, 'purge').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
+      const exclusive = vi.spyOn(manager, 'exclusive');
+      expect(await ok('trash:empty', {})).toEqual({ purged: 2, failed: 1 });
+      expect(exclusive).toHaveBeenCalled();
+      expect(await ok('trash:summary', {})).toEqual({ count: 1 });
+      expect(await ok('trash:empty', {})).toEqual({ purged: 1, failed: 0 });
+      expect(await ok('trash:summary', {})).toEqual({ count: 0 });
+    });
+
+    it('files:addTag, files:assign and files:unassign answer invalid_operation for a trashed file', async () => {
+      await openWorkspace();
+      const assetId = await createAsset();
+      const [id] = (await filesIn(['a.png'])) as [string];
+      await ok('files:trashMany', { fileIds: [id] });
+      const refused = { ok: false, error: { code: 'invalid_operation', message: 'The file is in the trash' } };
+      expect(await call('files:addTag', { fileId: id, name: 'oak' })).toEqual(refused);
+      expect(await call('files:removeTag', { fileId: id, name: 'oak' })).toEqual(refused);
+      expect(await call('files:assign', { fileId: id, assetId, role: 'reference' })).toEqual(refused);
+      expect(await call('files:unassign', { fileId: id })).toEqual(refused);
+      expect(await call('assets:setCover', { assetId, fileId: id })).toEqual(refused);
+      const many = await ok('files:assignMany', { fileIds: [id], assetId, role: 'reference' });
+      expect(many.items[0].error).toEqual(refused.error);
+      expect(await call('files:addTagMany', { fileIds: [id], name: 'oak' })).toEqual(refused);
+    });
+
+    it('files:measure still serves a trashed file', async () => {
+      await openWorkspace();
+      const [id] = (await filesIn(['a.png'])) as [string];
+      await ok('files:trashMany', { fileIds: [id] });
+      measure.mockResolvedValue({ width: 4, height: 3 });
+      expect(await ok('files:measure', { fileId: id })).toMatchObject({ id, width: 4, height: 3 });
+      expect(measure.mock.lastCall![0]).toBe(join(base, 'workspace', trashPath(id, 'a.png')));
     });
   });
 

@@ -144,6 +144,16 @@ describe('file shell IPC', () => {
     }
   });
 
+  it('files:openExternal and files:showInFolder answer invalid_operation for a trashed file', async () => {
+    const { file } = await setup('model.blend');
+    await ok('files:trashMany', { fileIds: [file.id] });
+    const refused = { ok: false, error: { code: 'invalid_operation', message: 'The file is in the trash' } };
+    expect(await call('files:openExternal', { fileId: file.id })).toEqual(refused);
+    expect(await call('files:showInFolder', { fileId: file.id })).toEqual(refused);
+    expect(openPath).not.toHaveBeenCalled();
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+
   it('workspace:open and workspace:create call workspaceOpened once each', async () => {
     await ok('workspace:create', { name: 'Test', rootPath: root });
     expect(workspaceOpened).toHaveBeenCalledTimes(1);

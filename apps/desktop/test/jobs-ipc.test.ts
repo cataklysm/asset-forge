@@ -229,6 +229,43 @@ describe('job IPC', () => {
     expect((await ok('jobs:list', page)).total).toBe(0);
   });
 
+  it('files:trashMany raises the job change counter', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    const before = (await ok('jobs:summary', {})).changes;
+    await ok('files:trashMany', { fileIds: [fileId!] });
+    expect((await ok('jobs:summary', {})).changes).toBeGreaterThan(before);
+  });
+
+  it('files:trashMany cancels the running job of the file through the scheduler', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', filesRequest([fileId!]));
+    await until((s) => s.running === 1);
+    const result = await ok('files:trashMany', { fileIds: [fileId!] });
+    expect(result.items[0]).toMatchObject({ fileId, error: null });
+    await until((s) => s.running === 0 && s.cancelled === 1);
+  });
+
+  it('jobs:retry answers invalid_operation for a job of a trashed file', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', filesRequest([fileId!]));
+    await until((s) => s.running === 1);
+    await ok('files:trashMany', { fileIds: [fileId!] });
+    await until((s) => s.running === 0 && s.cancelled === 1);
+    const [job] = (await ok('jobs:list', page)).items;
+
+    expect(await call('jobs:retry', { jobId: job!.id })).toEqual({
+      ok: false,
+      error: { code: 'invalid_operation', message: 'The file of this job is in the trash' },
+    });
+    expect(await ok('jobs:retryFailed', {})).toEqual({ retried: 0 });
+  });
+
   it('puts a running job back to queued when another workspace opens', async () => {
     const rejections: unknown[] = [];
     const onRejection = (reason: unknown) => rejections.push(reason);
