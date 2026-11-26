@@ -12,9 +12,11 @@ import {
   removeAssetTag,
   removeFileTag,
   removeFileTags,
+  renameTag,
   ValidationFailedError,
   suggestTags,
   tagName,
+  tagUsage,
   WorkspaceManager,
   type ImportContext,
   type WorkspaceSession,
@@ -293,5 +295,199 @@ describe('trashed files', () => {
     await expect(addFileTags(ctx.session, { fileIds: [live, trashed], name: 'Wood' })).rejects.toThrow('The file is in the trash');
     await expect(removeFileTags(ctx.session, { fileIds: [live, trashed], name: 'Metal' })).rejects.toThrow('The file is in the trash');
     expect((await ctx.db.files.get(live))!.tags.map((t) => t.name)).toEqual(['metal']);
+  });
+});
+
+describe('rename and merge', () => {
+  type Ctx = Awaited<ReturnType<typeof setup>>;
+  type Origin = 'manual' | 'ai';
+  let seq = 800;
+  const tagAsset = (ctx: Ctx, assetId: string, name: string, displayName: string, origin: Origin) =>
+    ctx.db.tags.addToAsset({ assetId, name, displayName, origin, newId: uuid(seq++), now: T1 });
+  const tagFile = (ctx: Ctx, fileId: string, name: string, displayName: string, origin: Origin) =>
+    ctx.db.tags.addToFile({ fileId, name, displayName, origin, newId: uuid(seq++), now: T1 });
+  const fileTags = async (ctx: Ctx, fileId: string) =>
+    (await ctx.db.files.get(fileId))!.tags.map((t) => [t.name, t.displayName, t.origin]);
+  const assetTags = async (ctx: Ctx, assetId: string) =>
+    (await ctx.db.tags.listForAsset(assetId)).map((t) => [t.name, t.displayName, t.origin]);
+  const propose = (ctx: Ctx, fileId: string, tags: { name: string; displayName: string }[]) =>
+    ctx.db.analyses.propose({
+      fileId,
+      sha256: 'a'.repeat(64),
+      tags,
+      provider: 'ollama',
+      model: 'm',
+      promptVersion: 1,
+      promptName: 'Default',
+      createdAt: T1,
+    });
+
+  it('tagUsage counts assets carrying the tag and files not in the trash', async () => {
+    const ctx = await setup();
+    const live = await addFile(ctx, 1);
+    const trashed = await addFile(ctx, 2);
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    await tagFile(ctx, live, 'front view', 'Front View', 'ai');
+    await tagFile(ctx, trashed, 'front view', 'Front View', 'manual');
+    await trashForTest(ctx.session, [trashed]);
+    expect(await tagUsage(ctx.session, { name: '  Front   View ' })).toEqual({
+      exists: true,
+      name: 'front view',
+      displayName: 'Front View',
+      assets: 1,
+      files: 1,
+    });
+  });
+
+  it('tagUsage of an unknown or invalid text answers exists false', async () => {
+    const ctx = await setup();
+    expect(await tagUsage(ctx.session, { name: 'unknown' })).toEqual({ exists: false, name: 'unknown', displayName: '', assets: 0, files: 0 });
+    const empty = { exists: false, name: '', displayName: '', assets: 0, files: 0 };
+    expect(await tagUsage(ctx.session, { name: '!!!' })).toEqual(empty);
+    expect(await tagUsage(ctx.session, { name: '' })).toEqual(empty);
+  });
+
+  it('renames a tag to a free name and keeps the origins', async () => {
+    const ctx = await setup();
+    const file = await addFile(ctx, 1);
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    await tagFile(ctx, file, 'front view', 'Front View', 'ai');
+    expect(await renameTag(ctx.session, { from: 'front view', to: 'Frontal', merge: false })).toEqual({
+      name: 'frontal',
+      displayName: 'Frontal',
+      merged: false,
+    });
+    expect(await assetTags(ctx, ctx.asset.id)).toEqual([['frontal', 'Frontal', 'manual']]);
+    expect(await fileTags(ctx, file)).toEqual([['frontal', 'Frontal', 'ai']]);
+    expect((await tagUsage(ctx.session, { name: 'front view' })).exists).toBe(false);
+  });
+
+  it.each([false, true])('a different spelling of the same name sets the display name (merge %s)', async (merge) => {
+    const ctx = await setup();
+    await tagAsset(ctx, ctx.asset.id, 'front', 'front', 'manual');
+    expect(await renameTag(ctx.session, { from: 'front', to: 'FRONT', merge })).toEqual({ name: 'front', displayName: 'FRONT', merged: false });
+    expect(await assetTags(ctx, ctx.asset.id)).toEqual([['front', 'FRONT', 'manual']]);
+  });
+
+  it('normalises from', async () => {
+    const ctx = await setup();
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    expect(await renameTag(ctx.session, { from: ' Front  View ', to: 'x', merge: false })).toEqual({ name: 'x', displayName: 'x', merged: false });
+  });
+
+  it.each(['nope', '!!!'])('an unknown or invalid from %j fails with not_found', async (from) => {
+    const ctx = await setup();
+    const error = await renameTag(ctx.session, { from, to: 'x', merge: false }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as Error).message).toBe('Tag does not exist');
+  });
+
+  it.each(['!!!', 'x'.repeat(65)])('an invalid to fails with validation_failed and changes nothing', async (to) => {
+    const ctx = await setup();
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    const error = await renameTag(ctx.session, { from: 'front view', to, merge: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ValidationFailedError);
+    expect((error as Error).message).toBe('A tag needs a letter or digit and at most 64 characters');
+    expect(await assetTags(ctx, ctx.asset.id)).toEqual([['front view', 'Front View', 'manual']]);
+  });
+
+  it('an existing target without merge fails with invalid_operation and changes nothing', async () => {
+    const ctx = await setup();
+    const file = await addFile(ctx, 1);
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'ai');
+    await tagAsset(ctx, ctx.other.id, 'front', 'Front', 'manual');
+    await tagFile(ctx, file, 'front view', 'Front View', 'manual');
+    await tagFile(ctx, file, 'front', 'Front', 'ai');
+    const error = await renameTag(ctx.session, { from: 'front view', to: 'front', merge: false }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('A tag with this name already exists');
+    expect(await assetTags(ctx, ctx.asset.id)).toEqual([['front view', 'Front View', 'ai']]);
+    expect(await assetTags(ctx, ctx.other.id)).toEqual([['front', 'Front', 'manual']]);
+    expect(await fileTags(ctx, file)).toEqual([
+      ['front', 'Front', 'ai'],
+      ['front view', 'Front View', 'manual'],
+    ]);
+  });
+
+  // [source origin, target origin, expected origin]; null: the owner does not carry that tag.
+  const cases: [Origin | null, Origin | null, Origin][] = [
+    ['ai', 'manual', 'manual'],
+    ['manual', 'ai', 'manual'],
+    ['ai', 'ai', 'ai'],
+    ['manual', 'manual', 'manual'],
+    ['ai', null, 'ai'],
+    [null, 'manual', 'manual'],
+  ];
+
+  it('a merge leaves every file carrying the target once, manual when either was manual', async () => {
+    const ctx = await setup();
+    const files: string[] = [];
+    for (const [i, [source, target]] of cases.entries()) {
+      const file = await addFile(ctx, i + 1);
+      files.push(file);
+      if (source) await tagFile(ctx, file, 'front view', 'Front View', source);
+      if (target) await tagFile(ctx, file, 'front', 'Front', target);
+    }
+    expect(await renameTag(ctx.session, { from: 'front view', to: 'front', merge: true })).toEqual({
+      name: 'front',
+      displayName: 'front',
+      merged: true,
+    });
+    for (const [i, [, , expected]] of cases.entries()) {
+      expect(await fileTags(ctx, files[i]!)).toEqual([['front', 'front', expected]]);
+    }
+    expect((await tagUsage(ctx.session, { name: 'front view' })).exists).toBe(false);
+  });
+
+  it('a merge leaves every asset carrying the target once, manual when either was manual', async () => {
+    const ctx = await setup();
+    const typeId = (await ctx.db.assetTypes.list())[0]!.id;
+    const assets: string[] = [];
+    for (const [i, [source, target]] of cases.entries()) {
+      const asset = await createAsset(ctx.session, { name: `A${i}`, typeId });
+      assets.push(asset.id);
+      if (source) await tagAsset(ctx, asset.id, 'front view', 'Front View', source);
+      if (target) await tagAsset(ctx, asset.id, 'front', 'Front', target);
+    }
+    expect(await renameTag(ctx.session, { from: 'front view', to: 'front', merge: true })).toEqual({
+      name: 'front',
+      displayName: 'front',
+      merged: true,
+    });
+    for (const [i, [, , expected]] of cases.entries()) {
+      expect(await assetTags(ctx, assets[i]!)).toEqual([['front', 'front', expected]]);
+    }
+  });
+
+  it('merge true without an existing target is a plain rename', async () => {
+    const ctx = await setup();
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    expect(await renameTag(ctx.session, { from: 'front view', to: 'Frontal', merge: true })).toEqual({
+      name: 'frontal',
+      displayName: 'Frontal',
+      merged: false,
+    });
+  });
+
+  it('rewrites waiting proposals that hold the source', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const b = await addFile(ctx, 2);
+    await tagAsset(ctx, ctx.asset.id, 'front view', 'Front View', 'manual');
+    await tagAsset(ctx, ctx.other.id, 'front', 'Front', 'manual');
+    expect(await propose(ctx, a, [{ name: 'front view', displayName: 'Front View' }, { name: 'metal', displayName: 'Metal' }])).toBe(true);
+    await renameTag(ctx.session, { from: 'front view', to: 'Frontal', merge: false });
+    expect((await ctx.db.analyses.getProposal(a))!.tags).toEqual([
+      { name: 'frontal', displayName: 'Frontal' },
+      { name: 'metal', displayName: 'Metal' },
+    ]);
+
+    expect(await propose(ctx, b, [{ name: 'frontal', displayName: 'Frontal' }, { name: 'front', displayName: 'Front' }])).toBe(true);
+    await renameTag(ctx.session, { from: 'frontal', to: 'front', merge: true });
+    expect((await ctx.db.analyses.getProposal(b))!.tags).toEqual([{ name: 'front', displayName: 'front' }]);
+    expect((await ctx.db.analyses.getProposal(a))!.tags).toEqual([
+      { name: 'front', displayName: 'front' },
+      { name: 'metal', displayName: 'Metal' },
+    ]);
   });
 });

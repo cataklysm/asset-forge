@@ -164,5 +164,11 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
         .orderBy(asc(tag.name), asc(assetTag.origin))
         .all();
     },
+    async usage(): Promise<{ displayName: string; assets: number; files: number } | null> {
+      throw new Error('not implemented');
+    },
+    async rename(): Promise<{ merged: boolean }> {
+      throw new Error('not implemented');
+    },
   };
 }

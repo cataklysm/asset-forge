@@ -91,8 +91,10 @@ describe('library IPC', () => {
       'files:assignMany': { fileIds: [uuid], assetId: uuid, role: 'reference' },
       'files:addTagMany': { fileIds: [uuid], name: 'metal' },
       'files:removeTagMany': { fileIds: [uuid], name: 'metal' },
+      'tags:usage': { name: 'metal' },
+      'tags:rename': { from: 'metal', to: 'steel', merge: false },
     };
-    expect(Object.keys(requests)).toHaveLength(33);
+    expect(Object.keys(requests)).toHaveLength(35);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({

@@ -5,7 +5,9 @@ import {
   normalizeTagPrefix,
   type AssetDetail,
   type FileRecord,
+  type TagRenameResult,
   type TagSuggestion,
+  type TagUsage,
 } from '@assetforge/contracts';
 import { getAssetDetail } from './asset-cover.js';
 import { NotFoundError, ValidationFailedError } from './errors.js';
@@ -19,6 +21,30 @@ export function tagName(input: string): { name: string; displayName: string } {
     throw new ValidationFailedError(`A tag needs a letter or digit and at most ${MAX_TAG_LENGTH} characters`);
   }
   return { name, displayName: cleanTagText(input) };
+}
+
+/** How much the tag named by `r.name` (free text) touches; a text that is no valid tag name answers `exists: false`. */
+export async function tagUsage(s: WorkspaceSession, r: { name: string }): Promise<TagUsage> {
+  const name = normalizeTagName(r.name);
+  if (name === null) return { exists: false, name: '', displayName: '', assets: 0, files: 0 };
+  const usage = await s.database.tags.usage(name);
+  if (usage === null) return { exists: false, name, displayName: '', assets: 0, files: 0 };
+  return { exists: true, name, ...usage };
+}
+
+/**
+ * Renames the tag `r.from` workspace-wide to `r.to`; onto an existing other tag only with `merge`
+ * (otherwise `invalid_operation`). An unknown `from` fails with `not_found`, an invalid `to` with `validation_failed`.
+ */
+export async function renameTag(
+  s: WorkspaceSession,
+  r: { from: string; to: string; merge: boolean },
+): Promise<TagRenameResult> {
+  const from = normalizeTagName(r.from);
+  if (from === null) throw new NotFoundError('Tag does not exist');
+  const tag = tagName(r.to);
+  const { merged } = await s.database.tags.rename({ from, ...tag, merge: r.merge });
+  return { ...tag, merged };
 }
 
 export function suggestTags(

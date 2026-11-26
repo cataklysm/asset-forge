@@ -326,6 +326,17 @@ export interface TagRepository {
   /** Like `addToFiles`, deleting the assignment whatever its origin; a file without it is left alone. */
   removeFromFiles(r: { fileIds: readonly string[]; name: string }): Promise<FileRecord[]>;
   listForAsset(assetId: string): Promise<TagAssignment[]>; // by name, then origin
+  /** The tag with this normalised name: its display name, the assets that carry it themselves and the files not in the trash that carry it. Null without a tag row. */
+  usage(name: string): Promise<{ displayName: string; assets: number; files: number } | null>;
+  /**
+   * One transaction. `from` and `name` are normalised. Throws NotFoundError('Tag does not exist') without a tag `from`.
+   * from === name: sets the display name. Otherwise, no tag `name`: renames the row (name and display name).
+   * Otherwise a merge: throws InvalidOperationError('A tag with this name already exists') unless `merge`; moves every
+   * link of `from` to `name` (an owner carrying both keeps one link, manual when either was manual, with the earlier
+   * createdAt), sets the target's display name and deletes the source row.
+   * Except for from === name: rewrites waiting proposals that hold `from` and reindexes the assets affected.
+   */
+  rename(r: { from: string; name: string; displayName: string; merge: boolean }): Promise<{ merged: boolean }>;
 }
 
 /** The persistent job queue of a workspace. Every transition is guarded by the status it starts from. */

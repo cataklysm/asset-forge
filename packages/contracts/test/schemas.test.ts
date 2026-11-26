@@ -431,6 +431,20 @@ describe('tag channels', () => {
     const id = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
     expect(ipcContract['assets:addTag'].request.safeParse({ assetId: id, name: 'x'.repeat(201) }).success).toBe(false);
   });
+
+  it('tags:usage takes free text up to 200 characters', () => {
+    const usage = ipcContract['tags:usage'].request;
+    expect(usage.safeParse({ name: 'Front View' }).success).toBe(true);
+    expect(usage.safeParse({ name: '' }).success).toBe(true);
+    expect(usage.safeParse({ name: 'x'.repeat(201) }).success).toBe(false);
+  });
+
+  it('tags:rename requires a boolean merge', () => {
+    const rename = ipcContract['tags:rename'].request;
+    expect(rename.safeParse({ from: 'front view', to: 'Front', merge: false }).success).toBe(true);
+    expect(rename.safeParse({ from: 'front view', to: 'Front' }).success).toBe(false);
+    expect(rename.safeParse({ from: 'front view', to: 'Front', merge: 'yes' }).success).toBe(false);
+  });
 });
 
 describe('file batch channels', () => {

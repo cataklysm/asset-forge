@@ -25,6 +25,21 @@ export type MatchedTag = z.infer<typeof MatchedTagSchema>;
 export const TagSuggestionSchema = z.object({ name: z.string(), displayName: z.string() });
 export type TagSuggestion = z.infer<typeof TagSuggestionSchema>;
 
+/** How much one tag name touches: assets carrying it themselves and files not in the trash carrying it. */
+export const TagUsageSchema = z.object({
+  exists: z.boolean(),
+  /** Normalised; '' when the text is not a valid tag name. */
+  name: z.string(),
+  /** '' when the tag does not exist. */
+  displayName: z.string(),
+  assets: z.number().int().min(0),
+  files: z.number().int().min(0),
+});
+export type TagUsage = z.infer<typeof TagUsageSchema>;
+
+export const TagRenameResultSchema = z.object({ name: z.string(), displayName: z.string(), merged: z.boolean() });
+export type TagRenameResult = z.infer<typeof TagRenameResultSchema>;
+
 /** Trimmed, whitespace-collapsed and NFC-normalised; case is kept. */
 export function cleanTagText(input: string): string {
   return input.normalize('NFC').trim().replace(/\s+/gu, ' ');

@@ -27,6 +27,7 @@ import {
   removeFileTags,
   removeRelation,
   removeWorkflow,
+  renameTag,
   measureFile,
   purgeFiles,
   resolveFilePath,
@@ -34,6 +35,7 @@ import {
   setAssetCover,
   startWorkflow,
   suggestTags,
+  tagUsage,
   trashCount,
   trashFiles,
   type FileBatchItem,
@@ -73,6 +75,8 @@ export type LibraryHandlers = Pick<
   | 'assets:update'
   | 'assets:setCover'
   | 'tags:suggest'
+  | 'tags:usage'
+  | 'tags:rename'
   | 'assets:addTag'
   | 'assets:removeTag'
   | 'files:addTag'
@@ -151,6 +155,8 @@ export function createLibraryHandlers(
     'assets:setCover': (r) => manager.exclusive((s) => setAssetCover(s, r)),
 
     'tags:suggest': (r) => manager.read((s) => suggestTags(s, r)),
+    'tags:usage': (r) => manager.read((s) => tagUsage(s, r)),
+    'tags:rename': (r) => manager.exclusive((s) => renameTag(s, r)),
     'assets:addTag': (r) => manager.exclusive((s) => addAssetTag(s, r)),
     'assets:removeTag': (r) => manager.exclusive((s) => removeAssetTag(s, r)),
     'files:addTag': (r) => manager.exclusive((s) => addFileTag(s, r)),
