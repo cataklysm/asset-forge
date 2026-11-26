@@ -28,16 +28,24 @@ interface Props {
   roleControl: ReactNode;
   /** Receives the updated file after `files:addTag` / `files:removeTag`. */
   onFileChange(file: FileRecord): void;
-  /** Receives the file with its dimensions after `files:measure`; must not reload the list. */
-  onMeasured(file: FileRecord): void;
+  /**
+   * Receives the dimensions `files:measure` found for the file with id `fileId`; merges only them
+   * into the shown record and must not reload the list.
+   */
+  onMeasured(fileId: string, size: Dimensions): void;
   onOpenAsset?(assetId: string): void;
   /** The list of the file browser the dialog was opened from; steps through it. */
   list: ViewerList | null;
   onClose(): void;
 }
 
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
 export function FileDetailDialog({
-  file,
+  file: given,
   asset,
   actions,
   roleControl,
@@ -48,6 +56,13 @@ export function FileDetailDialog({
   onClose,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Files imported before dimensions were stored are measured once per dialog. The result is
+  // remembered, so a record without dimensions (the list's, when the viewer steps back to the file)
+  // shows it at once; failed measurements are not repeated and show nothing.
+  const measured = useRef(new Map<string, Dimensions | 'pending' | 'failed'>());
+  const remembered = measured.current.get(given.id);
+  const file =
+    given.width === null && typeof remembered === 'object' ? { ...given, width: remembered.width, height: remembered.height } : given;
   // Error and viewer controls belong to the file they came from; stepping on leaves them behind.
   const [failure, setFailure] = useState<{ fileId: string; message: string } | null>(null);
   const [stage, setStage] = useState<{ fileId: string; controls: ViewerControls } | null>(null);
@@ -60,21 +75,26 @@ export function FileDetailDialog({
   const complete = file.status === 'complete';
   const viewable = complete && file.previewable;
 
-  // Files imported before dimensions were stored are measured once when shown; failures are ignored.
-  const measured = useRef(new Set<string>());
   const onMeasuredRef = useRef(onMeasured);
   onMeasuredRef.current = onMeasured;
   const unmeasured = viewable && file.width === null;
   useEffect(() => {
-    if (!unmeasured || measured.current.has(file.id)) return;
-    measured.current.add(file.id);
-    call('files:measure', { fileId: file.id }).then(
+    if (!unmeasured || measured.current.has(fileId)) return;
+    const results = measured.current;
+    results.set(fileId, 'pending');
+    call('files:measure', { fileId }).then(
       (record) => {
-        if (record.width !== null && record.height !== null) onMeasuredRef.current(record);
+        if (record.width === null || record.height === null) {
+          results.set(fileId, 'failed');
+          return;
+        }
+        const size = { width: record.width, height: record.height };
+        results.set(fileId, size);
+        onMeasuredRef.current(fileId, size);
       },
-      () => {},
+      () => results.set(fileId, 'failed'),
     );
-  }, [file.id, unmeasured]);
+  }, [fileId, unmeasured]);
 
   // Fullscreen shows the toolbar and the stage; the state follows the browser's event.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -146,114 +166,114 @@ export function FileDetailDialog({
   return (
     <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
       <div ref={rootRef} className="h-full">
-      <div className="absolute right-4 top-4 flex items-center gap-2">
-        {list !== null && (
-          <>
-            <span className={`text-sm tabular-nums ${MUTED}`}>
-              {list.index + 1} / {list.total}
-            </span>
-            <button
-              type="button"
-              aria-label="Previous file (←)"
-              title="Previous file (←)"
-              className={ICON_BUTTON}
-              disabled={list.index <= 0}
-              onClick={() => list.show(list.index - 1)}
-            >
-              <ChevronLeft size={18} aria-hidden />
-            </button>
-            <button
-              type="button"
-              aria-label="Next file (→)"
-              title="Next file (→)"
-              className={ICON_BUTTON}
-              disabled={list.index >= list.total - 1}
-              onClick={() => list.show(list.index + 1)}
-            >
-              <ChevronRight size={18} aria-hidden />
-            </button>
-          </>
-        )}
-        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={close}>
-          <X size={18} aria-hidden />
-        </button>
-      </div>
-      <div className="flex h-full min-h-0 gap-5">
-        <div className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto pr-1">
-          <section aria-label="Details" className="space-y-2">
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-              <dt className={LABEL}>Name</dt>
-              <dd className="break-all">{file.originalName}</dd>
-              <dt className={LABEL}>Type</dt>
-              <dd className="break-all">{file.mimeType}</dd>
-              <dt className={LABEL}>Dimensions</dt>
-              <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
-              <dt className={LABEL}>Size</dt>
-              <dd>{formatBytes(file.sizeBytes)}</dd>
-              <dt className={LABEL}>Imported</dt>
-              <dd>{formatDateTime(file.importedAt)}</dd>
-              {!complete && (
-                <>
-                  <dt className={LABEL}>Status</dt>
-                  <dd>{label(file.status)}</dd>
-                </>
+        <div className="absolute right-4 top-4 flex items-center gap-2">
+          {list !== null && (
+            <>
+              <span className={`text-sm tabular-nums ${MUTED}`}>
+                {list.index + 1} / {list.total}
+              </span>
+              <button
+                type="button"
+                aria-label="Previous file (←)"
+                title="Previous file (←)"
+                className={ICON_BUTTON}
+                disabled={list.index <= 0}
+                onClick={() => list.show(list.index - 1)}
+              >
+                <ChevronLeft size={18} aria-hidden />
+              </button>
+              <button
+                type="button"
+                aria-label="Next file (→)"
+                title="Next file (→)"
+                className={ICON_BUTTON}
+                disabled={list.index >= list.total - 1}
+                onClick={() => list.show(list.index + 1)}
+              >
+                <ChevronRight size={18} aria-hidden />
+              </button>
+            </>
+          )}
+          <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={close}>
+            <X size={18} aria-hidden />
+          </button>
+        </div>
+        <div className="flex h-full min-h-0 gap-5">
+          <div className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto pr-1">
+            <section aria-label="Details" className="space-y-2">
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+                <dt className={LABEL}>Name</dt>
+                <dd className="break-all">{file.originalName}</dd>
+                <dt className={LABEL}>Type</dt>
+                <dd className="break-all">{file.mimeType}</dd>
+                <dt className={LABEL}>Dimensions</dt>
+                <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
+                <dt className={LABEL}>Size</dt>
+                <dd>{formatBytes(file.sizeBytes)}</dd>
+                <dt className={LABEL}>Imported</dt>
+                <dd>{formatDateTime(file.importedAt)}</dd>
+                {!complete && (
+                  <>
+                    <dt className={LABEL}>Status</dt>
+                    <dd>{label(file.status)}</dd>
+                  </>
+                )}
+              </dl>
+              {file.error !== null && (
+                <p role="alert" className={ALERT}>
+                  {file.error}
+                </p>
               )}
-            </dl>
-            {file.error !== null && (
+            </section>
+            {/* Keyed by file: stepping on starts the controls afresh. */}
+            <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
+            {complete && (
+              <TagRow
+                key={`tags-${file.id}`}
+                label="Image tags"
+                kind="file"
+                tags={file.tags}
+                onAdd={(name) => changeTag('files:addTag', name)}
+                onRemove={(name) => changeTag('files:removeTag', name)}
+              />
+            )}
+            {asset !== null && (
+              <>
+                <hr className={`border-t ${BORDER}`} />
+                <div className="space-y-2">
+                  <div>
+                    <span className={LABEL}>Asset </span>
+                    {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
+                  </div>
+                  <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} />
+                </div>
+              </>
+            )}
+            {error !== null && (
               <p role="alert" className={ALERT}>
-                {file.error}
+                {error}
               </p>
             )}
-          </section>
-          {/* Keyed by file: stepping on starts the controls afresh. */}
-          <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
-          {complete && (
-            <TagRow
-              key={`tags-${file.id}`}
-              label="Image tags"
-              kind="file"
-              tags={file.tags}
-              onAdd={(name) => changeTag('files:addTag', name)}
-              onRemove={(name) => changeTag('files:removeTag', name)}
-            />
-          )}
-          {asset !== null && (
-            <>
-              <hr className={`border-t ${BORDER}`} />
-              <div className="space-y-2">
-                <div>
-                  <span className={LABEL}>Asset </span>
-                  {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
+            <div>
+              <Menu label="More" items={items} align="start" side="top" />
+            </div>
+          </div>
+          <div ref={stageBox} className={`flex min-w-0 flex-1 flex-col gap-3 ${fullscreen ? 'bg-surface p-4' : ''}`}>
+            {viewable ? (
+              <>
+                <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />}</div>
+                <div className="min-h-0 flex-1">
+                  <ImageStage file={file} onControls={setControls} />
                 </div>
-                <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} />
+              </>
+            ) : (
+              <div className={`flex min-h-0 w-full flex-1 items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
+                {complete ? formatLabel(file.originalName) : label(file.status)}
               </div>
-            </>
-          )}
-          {error !== null && (
-            <p role="alert" className={ALERT}>
-              {error}
-            </p>
-          )}
-          <div>
-            <Menu label="More" items={items} align="start" side="top" />
+            )}
+            {list !== null && list.total >= 2 && <FilmStrip list={list} />}
           </div>
         </div>
-        <div ref={stageBox} className={`flex min-w-0 flex-1 flex-col gap-3 ${fullscreen ? 'bg-surface p-4' : ''}`}>
-          {viewable ? (
-            <>
-              <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />}</div>
-              <div className="min-h-0 flex-1">
-                <ImageStage file={file} onControls={setControls} />
-              </div>
-            </>
-          ) : (
-            <div className={`flex min-h-0 w-full flex-1 items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
-              {complete ? formatLabel(file.originalName) : label(file.status)}
-            </div>
-          )}
-          {list !== null && list.total >= 2 && <FilmStrip list={list} />}
-        </div>
-      </div>
       </div>
     </Dialog>
   );

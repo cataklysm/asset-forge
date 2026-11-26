@@ -256,7 +256,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                 }}
                 roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} />}
                 onFileChange={fileChanged}
-                onMeasured={detailDialog.update}
+                onMeasured={detailDialog.setDimensions}
                 list={list}
                 onClose={closeDetail}
               />

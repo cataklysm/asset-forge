@@ -62,8 +62,10 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
     setFile((current) => (current?.id === record.id ? record : current));
   }
 
-  /** The id of the file the dialog shows; read synchronously, e.g. right after an action. */
-  const openId = () => opened.current?.id ?? null;
+  /** Merges measured dimensions into the shown file when it has id `id`; other fields stay as they are. */
+  function setDimensions(id: string, size: { width: number; height: number }) {
+    setFile((current) => (current?.id === id ? { ...current, width: size.width, height: size.height } : current));
+  }
 
-  return { file, open, show, close, update, openId };
+  return { file, open, show, close, update, setDimensions };
 }

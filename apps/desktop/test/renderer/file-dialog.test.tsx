@@ -1,11 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import type { FileActionContext } from '../../src/renderer/src/file-actions';
+import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, tagOf } from './fixtures';
 
@@ -16,7 +17,7 @@ function Harness(props: {
   file: FileRecord;
   asset?: typeof ASSET | null;
   onOpenAsset?(id: string): void;
-  onMeasured?(file: FileRecord): void;
+  onMeasured?(fileId: string, size: { width: number; height: number }): void;
   actions?: FileActionContext;
   list?: ViewerList | null;
 }) {
@@ -34,9 +35,9 @@ function Harness(props: {
           actions={props.actions ?? ACTIONS}
           roleControl={<span>role control</span>}
           onFileChange={setFile}
-          onMeasured={(record) => {
-            props.onMeasured?.(record);
-            setFile(record);
+          onMeasured={(id, size) => {
+            props.onMeasured?.(id, size);
+            setFile((current) => (current.id === id ? { ...current, ...size } : current));
           }}
           onOpenAsset={props.onOpenAsset}
           list={props.list ?? null}
@@ -218,7 +219,7 @@ it('a previewable file without dimensions is measured once and handed to onMeasu
   const onMeasured = vi.fn();
   render(<Harness file={file} asset={null} onMeasured={onMeasured} />);
   await openDialog();
-  await waitFor(() => expect(onMeasured).toHaveBeenCalledWith(measured));
+  await waitFor(() => expect(onMeasured).toHaveBeenCalledWith(file.id, { width: 1600, height: 2000 }));
   expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
   expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: file.id }]);
   expect(onMeasured).toHaveBeenCalledTimes(1);
@@ -434,4 +435,89 @@ it('a rejected requestFullscreen leaves the button unpressed', async () => {
   } finally {
     fs.restore();
   }
+});
+
+it('typing ArrowRight in the image tag input or in the open More menu does not step on', async () => {
+  install();
+  const files = fileList(3);
+  const list = listOf(files, 1);
+  render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), '{ArrowRight}');
+  expect(list.show).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  expect(screen.getByRole('menu', { name: 'More' })).toBeTruthy();
+  await user.keyboard('{ArrowRight}');
+  expect(list.show).not.toHaveBeenCalled();
+});
+
+/** A host as the file browsers wire it: the list delivers its own records, measured or not. */
+function Browsing({ files }: { files: FileRecord[] }) {
+  const container = useRef<HTMLDivElement>(null);
+  const detail = useFileDialog(container);
+  const [index, setIndex] = useState(0);
+  const list: ViewerList = {
+    total: files.length,
+    index,
+    slot: (i) => (files[i] === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item: files[i] }),
+    show: (i) => {
+      const next = files[i];
+      if (next === undefined) return;
+      setIndex(i);
+      detail.show(next);
+    },
+    want: () => {},
+  };
+  return (
+    <div ref={container}>
+      <button type="button" onClick={() => detail.open(files[0]!)}>
+        Opener
+      </button>
+      {detail.file !== null && (
+        <FileDetailDialog
+          file={detail.file}
+          asset={null}
+          actions={ACTIONS}
+          roleControl={<span>role control</span>}
+          onFileChange={detail.update}
+          onMeasured={detail.setDimensions}
+          list={list}
+          onClose={detail.close}
+        />
+      )}
+    </div>
+  );
+}
+
+it('a measured file keeps its dimensions when the viewer steps away and back', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  const b = fileRecord({ originalName: 'b.png', width: 800, height: 600 });
+  const api = install({ 'files:measure': (r) => ({ ...a, id: r.fileId, width: 1600, height: 2000 }) });
+  render(<Browsing files={[a, b]} />);
+  const user = await openDialog();
+  await waitFor(() => expect(detailValue('Dimensions')).toBe('1600 × 2000 px'));
+  await user.click(screen.getByRole('button', { name: 'Next file (→)' }));
+  expect(detailValue('Dimensions')).toBe('800 × 600 px');
+  await user.click(screen.getByRole('button', { name: 'Previous file (←)' }));
+  expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
+  expect(screen.queryByRole('img', { name: 'Preview only' })).toBeNull();
+  expect((screen.getByRole('button', { name: '100%' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: a.id }]);
+});
+
+it('a change made while the measurement is in flight is kept and gains the dimensions', async () => {
+  const a = fileRecord({ originalName: 'a.png' });
+  const measure = deferred<FileRecord>();
+  install({
+    'files:measure': () => measure.promise,
+    'files:addTag': () => ({ ...a, tags: [tagOf('Bark', 'manual')] }),
+  });
+  render(<Browsing files={[a]} />);
+  const user = await openDialog();
+  await user.type(screen.getByRole('combobox', { name: 'Add image tag' }), 'Bark{Enter}');
+  await screen.findByRole('button', { name: 'Remove Bark' });
+  measure.resolve({ ...a, width: 1600, height: 2000 });
+  await waitFor(() => expect(detailValue('Dimensions')).toBe('1600 × 2000 px'));
+  expect(screen.getByRole('button', { name: 'Remove Bark' })).toBeTruthy();
 });
