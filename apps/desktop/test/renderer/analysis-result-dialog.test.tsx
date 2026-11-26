@@ -518,6 +518,29 @@ describe('AnalysisResultDialog', () => {
     expect(button('Settings')).toBeTruthy();
   });
 
+  it('Settings while an accept is in flight neither closes nor navigates', async () => {
+    const file = fileRecord();
+    const pending = deferred<IpcResponse<'analysis:acceptProposal'>>();
+    const { api, onOpenSettings, onClose, onChanged } = setup(file, {
+      stored: { proposal: proposalOf(), job: null },
+      settings: { ...CONFIGURED, taggingModel: null },
+      models: { ok: true, models: [{ name: 'text-only', vision: false }] },
+      handlers: { 'analysis:acceptProposal': () => pending.promise },
+    });
+    const user = userEvent.setup();
+    await screen.findByRole('checkbox', { name: 'Wood' });
+    const settings = await screen.findByRole('button', { name: 'Settings' });
+    await user.click(button('Accept'));
+    await waitFor(() => expect(callsOf(api, 'analysis:acceptProposal')).toHaveLength(1));
+    await user.click(settings);
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({}));
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).not.toHaveBeenCalled();
+  });
+
   it('without a chosen model Analyse is disabled with a title', async () => {
     const file = fileRecord();
     setup(file, { settings: { ...CONFIGURED, taggingModel: null } });

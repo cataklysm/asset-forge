@@ -248,6 +248,8 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   function openSettings() {
     if (settingsBlocked !== null) return;
+    // Never navigate away while this opening's accept, discard, cancel or analyse is in flight.
+    if (busyRef.current === openingRef.current) return;
     onClose();
     onOpenSettings();
   }
