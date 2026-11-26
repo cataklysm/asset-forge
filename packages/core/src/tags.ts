@@ -59,7 +59,7 @@ export async function removeAssetTag(
 ): Promise<AssetDetail> {
   const tag = tagName(r.name);
   await requireAsset(s, r.assetId);
-  await s.database.tags.removeFromAsset({ assetId: r.assetId, name: tag.name, origin: 'manual' });
+  await s.database.tags.removeFromAsset({ assetId: r.assetId, name: tag.name });
   return getAssetDetail(s, r.assetId);
 }
 
@@ -99,13 +99,13 @@ export async function addFileTags(
   });
 }
 
-/** Removes one manual tag from several files, all or nothing like `addFileTags`; AI tags stay. */
+/** Removes one manual tag from several files, all or nothing like `addFileTags`; an AI assignment of the tag goes too. */
 export async function removeFileTags(
   s: WorkspaceSession,
   r: { fileIds: readonly string[]; name: string },
 ): Promise<FileRecord[]> {
   const tag = tagName(r.name);
-  return s.database.tags.removeFromFiles({ fileIds: r.fileIds, name: tag.name, origin: 'manual' });
+  return s.database.tags.removeFromFiles({ fileIds: r.fileIds, name: tag.name });
 }
 
 export async function removeFileTag(
@@ -114,6 +114,6 @@ export async function removeFileTag(
 ): Promise<FileRecord> {
   const tag = tagName(r.name);
   await requireFile(s, r.fileId);
-  await s.database.tags.removeFromFile({ fileId: r.fileId, name: tag.name, origin: 'manual' });
+  await s.database.tags.removeFromFile({ fileId: r.fileId, name: tag.name });
   return requireFile(s, r.fileId);
 }

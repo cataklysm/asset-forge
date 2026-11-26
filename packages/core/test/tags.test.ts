@@ -126,6 +126,29 @@ describe('file tags', () => {
   });
 });
 
+describe('manual wins', () => {
+  it('adding by hand over an ai tag leaves one manual assignment', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    const b = await addFile(ctx, 2);
+    await ctx.db.tags.addToFile({ fileId: a, name: 'oak', displayName: 'Oak', origin: 'ai', newId: uuid(900), now: T1 });
+    expect((await addFileTag(ctx.session, { fileId: a, name: 'Oak' })).tags).toEqual([{ name: 'oak', displayName: 'Oak', origin: 'manual' }]);
+    await ctx.db.tags.addToFile({ fileId: a, name: 'oak', displayName: 'Oak', origin: 'ai', newId: uuid(901), now: T1 });
+    expect((await ctx.session.database.files.get(a))!.tags.map((t) => t.origin)).toEqual(['manual']);
+
+    await ctx.db.tags.addToFile({ fileId: b, name: 'oak', displayName: 'Oak', origin: 'ai', newId: uuid(902), now: T1 });
+    const records = await addFileTags(ctx.session, { fileIds: [a, b], name: 'Oak' });
+    expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([['manual'], ['manual']]);
+  });
+
+  it('removing by hand removes an ai tag from a file', async () => {
+    const ctx = await setup();
+    const a = await addFile(ctx, 1);
+    await ctx.db.tags.addToFile({ fileId: a, name: 'oak', displayName: 'Oak', origin: 'ai', newId: uuid(900), now: T1 });
+    expect((await removeFileTag(ctx.session, { fileId: a, name: 'oak' })).tags).toEqual([]);
+  });
+});
+
 describe('file tag batches', () => {
   it('addFileTags is all or nothing', async () => {
     const ctx = await setup();
@@ -150,13 +173,13 @@ describe('file tag batches', () => {
     const a = await addFile(ctx, 1);
     const b = await addFile(ctx, 2);
     const c = await addFile(ctx, 3);
-    await addFileTags(ctx.session, { fileIds: [a, b], name: 'Oak' });
     await ctx.db.tags.addToFile({ fileId: a, name: 'oak', displayName: 'oak', origin: 'ai', newId: uuid(900), now: T1 });
+    await addFileTags(ctx.session, { fileIds: [b], name: 'Oak' });
 
     const records = await removeFileTags(ctx.session, { fileIds: [c, a, b], name: 'OAK' });
     expect(records.map((r) => r.id)).toEqual([c, a, b]);
-    // Only the manual assignment goes; the AI one stays distinguishable and untouched.
-    expect(records.map((r) => r.tags)).toEqual([[], [{ name: 'oak', displayName: 'Oak', origin: 'ai' }], []]);
+    // An AI assignment goes like a manual one.
+    expect(records.map((r) => r.tags)).toEqual([[], [], []]);
   });
 
   it('removeFileTags is all or nothing', async () => {

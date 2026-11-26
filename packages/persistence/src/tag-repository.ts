@@ -1,4 +1,4 @@
-import type { FileRecord, TagAssignment, TagSuggestion } from '@assetforge/contracts';
+import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@assetforge/contracts';
 import { NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -53,6 +53,35 @@ export function ensureTag(
   return tx.select({ id: tag.id }).from(tag).where(eq(tag.name, r.name)).get()!.id;
 }
 
+type Writer = Pick<BetterSQLite3Database, 'insert' | 'delete' | 'select'>;
+
+/** An owner carries a tag at most once and manual wins: a manual add replaces an ai link, an ai add yields to any link. */
+function linkAssetTag(tx: Writer, assetId: string, tagId: string, origin: TagOrigin, now: string): void {
+  if (origin === 'manual') {
+    tx.delete(assetTag).where(and(eq(assetTag.assetId, assetId), eq(assetTag.tagId, tagId), eq(assetTag.origin, 'ai'))).run();
+  }
+  const carried = tx.select({ tagId: assetTag.tagId }).from(assetTag).where(and(eq(assetTag.assetId, assetId), eq(assetTag.tagId, tagId))).get();
+  if (!carried) tx.insert(assetTag).values({ assetId, tagId, origin, createdAt: now }).run();
+}
+
+/** Same rule as `linkAssetTag`, for each file of the list. */
+function linkFileTags(tx: Writer, fileIds: readonly string[], tagId: string, origin: TagOrigin, now: string): void {
+  const ids = [...new Set(fileIds)];
+  if (origin === 'manual') {
+    tx.delete(fileTag).where(and(inArray(fileTag.fileId, ids), eq(fileTag.tagId, tagId), eq(fileTag.origin, 'ai'))).run();
+  }
+  const carried = new Set(
+    tx
+      .select({ fileId: fileTag.fileId })
+      .from(fileTag)
+      .where(and(inArray(fileTag.fileId, ids), eq(fileTag.tagId, tagId)))
+      .all()
+      .map((row) => row.fileId),
+  );
+  const fresh = ids.filter((id) => !carried.has(id));
+  if (fresh.length > 0) tx.insert(fileTag).values(fresh.map((fileId) => ({ fileId, tagId, origin, createdAt: now }))).run();
+}
+
 export function createTagRepository(db: BetterSQLite3Database): TagRepository {
   return {
     async suggest({ prefix, limit }): Promise<TagSuggestion[]> {
@@ -74,23 +103,14 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
     async addToAsset(r) {
       db.transaction((tx) => {
         const tagId = ensureTag(tx, r);
-        tx.insert(assetTag)
-          .values({ assetId: r.assetId, tagId, origin: r.origin, createdAt: r.now })
-          .onConflictDoNothing()
-          .run();
+        linkAssetTag(tx, r.assetId, tagId, r.origin, r.now);
         reindexAsset(tx, r.assetId);
       });
     },
     async removeFromAsset(r) {
       db.transaction((tx) => {
         tx.delete(assetTag)
-          .where(
-            and(
-              eq(assetTag.assetId, r.assetId),
-              eq(assetTag.origin, r.origin),
-              eq(assetTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
-            ),
-          )
+          .where(and(eq(assetTag.assetId, r.assetId), eq(assetTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`)))
           .run();
         reindexAsset(tx, r.assetId);
       });
@@ -98,23 +118,14 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
     async addToFile(r) {
       db.transaction((tx) => {
         const tagId = ensureTag(tx, r);
-        tx.insert(fileTag)
-          .values({ fileId: r.fileId, tagId, origin: r.origin, createdAt: r.now })
-          .onConflictDoNothing()
-          .run();
+        linkFileTags(tx, [r.fileId], tagId, r.origin, r.now);
         reindexAssets(tx, [assetOfFile(tx, r.fileId)]);
       });
     },
     async removeFromFile(r) {
       db.transaction((tx) => {
         tx.delete(fileTag)
-          .where(
-            and(
-              eq(fileTag.fileId, r.fileId),
-              eq(fileTag.origin, r.origin),
-              eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
-            ),
-          )
+          .where(and(eq(fileTag.fileId, r.fileId), eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`)))
           .run();
         reindexAssets(tx, [assetOfFile(tx, r.fileId)]);
       });
@@ -123,10 +134,7 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
       return db.transaction((tx) => {
         const rows = completeFiles(tx, r.fileIds);
         const tagId = ensureTag(tx, r);
-        tx.insert(fileTag)
-          .values(rows.map((row) => ({ fileId: row.id, tagId, origin: r.origin, createdAt: r.now })))
-          .onConflictDoNothing()
-          .run();
+        linkFileTags(tx, r.fileIds, tagId, r.origin, r.now);
         return finishBatch(tx, rows);
       });
     },
@@ -137,7 +145,6 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           .where(
             and(
               inArray(fileTag.fileId, [...r.fileIds]),
-              eq(fileTag.origin, r.origin),
               eq(fileTag.tagId, sql`(select ${tag.id} from ${tag} where ${tag.name} = ${r.name})`),
             ),
           )

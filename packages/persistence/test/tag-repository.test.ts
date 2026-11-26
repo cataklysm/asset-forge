@@ -82,31 +82,42 @@ describe('tag repository', () => {
     expect(await db.tags.listForAsset(a.id)).toHaveLength(1);
   });
 
-  test('manual and ai assignments of one tag coexist and a delete by origin leaves the other', async () => {
+  test('a manual add replaces an ai assignment and an ai add yields to any assignment', async () => {
     const a = await addAsset(10);
     const f = await addFile(20);
-    await tagAsset(a.id, 'hero', 'manual');
     await tagAsset(a.id, 'hero', 'ai');
-    await tagFile(f, 'hero', 'manual');
     await tagFile(f, 'hero', 'ai');
-    expect((await db.tags.listForAsset(a.id)).map((t) => t.origin)).toEqual(['ai', 'manual']);
-
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'hero', origin: 'ai' });
+    await tagAsset(a.id, 'hero', 'manual');
+    await tagFile(f, 'hero', 'manual');
     expect((await db.tags.listForAsset(a.id)).map((t) => t.origin)).toEqual(['manual']);
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'hero', origin: 'manual' });
-    expect(await db.tags.listForAsset(a.id)).toEqual([]);
+    expect((await db.files.get(f))!.tags.map((t) => t.origin)).toEqual(['manual']);
 
-    await db.tags.removeFromFile({ fileId: f, name: 'hero', origin: 'manual' });
-    expect((await db.files.get(f))!.tags.map((t) => t.origin)).toEqual(['ai']);
-    await db.tags.removeFromFile({ fileId: f, name: 'hero', origin: 'ai' });
+    await tagAsset(a.id, 'hero', 'ai');
+    await tagFile(f, 'hero', 'ai');
+    expect((await db.tags.listForAsset(a.id)).map((t) => t.origin)).toEqual(['manual']);
+    expect((await db.files.get(f))!.tags.map((t) => t.origin)).toEqual(['manual']);
+
+    await tagAsset(a.id, 'solo', 'ai');
+    await tagAsset(a.id, 'solo', 'ai');
+    expect((await db.tags.listForAsset(a.id)).filter((t) => t.name === 'solo').map((t) => t.origin)).toEqual(['ai']);
+  });
+
+  test('a removal deletes the assignment whatever its origin', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await tagAsset(a.id, 'hero', 'ai');
+    await tagFile(f, 'hero', 'ai');
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'hero' });
+    expect(await db.tags.listForAsset(a.id)).toEqual([]);
+    await db.tags.removeFromFile({ fileId: f, name: 'hero' });
     expect((await db.files.get(f))!.tags).toEqual([]);
   });
 
   test('removing a missing tag or assignment is a no-op', async () => {
     const a = await addAsset(10);
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'nope', origin: 'manual' });
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'nope' });
     await tagAsset(a.id, 'x');
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'x', origin: 'ai' });
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'other' });
     expect(await db.tags.listForAsset(a.id)).toHaveLength(1);
   });
 
@@ -119,7 +130,7 @@ describe('tag repository', () => {
     await tagFile(f, 'scenic');
     await tagFile(f, 'sci fi');
     await tagAsset(a.id, 'gone');
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'gone', origin: 'manual' });
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'gone' });
     await tagAsset(a.id, 'other');
 
     expect(await db.tags.suggest({ prefix: 'sc', limit: 10 })).toEqual([
@@ -160,31 +171,29 @@ describe('tag repository', () => {
     });
     await tagFile(f1, 'b');
     await tagFile(f1, 'a', 'ai');
-    await tagFile(f1, 'a', 'manual');
     await tagFile(f2, 'c');
 
     const got = (await db.files.get(f1))!;
     expect(got.kind).toBe('image');
     expect(got.tags).toEqual([
       { name: 'a', displayName: 'a', origin: 'ai' },
-      { name: 'a', displayName: 'a', origin: 'manual' },
       { name: 'b', displayName: 'b', origin: 'manual' },
     ]);
     const listed = (await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } })).items;
-    expect(listed.find((f) => f.id === f1)!.tags).toHaveLength(3);
+    expect(listed.find((f) => f.id === f1)!.tags).toHaveLength(2);
     expect(listed.find((f) => f.id === f2)!.tags).toEqual([{ name: 'c', displayName: 'c', origin: 'manual' }]);
     const model = listed.find((f) => f.id === uuid(22))!;
     expect(model.kind).toBe('model');
     expect(model.tags).toEqual([]);
     expect((await db.files.listByStatus('complete')).find((f) => f.id === f2)!.tags).toHaveLength(1);
-    expect((await db.files.findCompleteBySha256('a'.repeat(64))).find((f) => f.id === f1)!.tags).toHaveLength(3);
+    expect((await db.files.findCompleteBySha256('a'.repeat(64))).find((f) => f.id === f1)!.tags).toHaveLength(2);
   });
 });
 
 describe('file tag batches', () => {
   const batch = (fileIds: string[], name = 'oak') => ({ fileIds, name, displayName: 'Oak', origin: 'manual' as const, now: T1 });
   const addMany = (fileIds: string[], name?: string) => db.tags.addToFiles({ ...batch(fileIds, name), newId: uuid(nextTagId++) });
-  const removeMany = (fileIds: string[], name = 'oak', origin: TagOrigin = 'manual') => db.tags.removeFromFiles({ fileIds, name, origin });
+  const removeMany = (fileIds: string[], name = 'oak') => db.tags.removeFromFiles({ fileIds, name });
 
   async function addPendingFile(n: number): Promise<string> {
     const id = uuid(n);
@@ -228,21 +237,31 @@ describe('file tag batches', () => {
     expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 2 });
   });
 
-  test('removeFromFiles is all or nothing, removes one origin and ignores files without the tag', async () => {
+  test('addToFiles lets manual win per file and ai yield', async () => {
+    const a = await addFile(20);
+    const b = await addFile(21);
+    await tagFile(a, 'oak', 'ai');
+    const records = await addMany([a, b]);
+    expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([['manual'], ['manual']]);
+    const again = await db.tags.addToFiles({ ...batch([a, b]), origin: 'ai', newId: uuid(nextTagId++) });
+    expect(again.map((r) => r.tags.map((t) => t.origin))).toEqual([['manual'], ['manual']]);
+  });
+
+  test('removeFromFiles is all or nothing, removes any origin and ignores files without the tag', async () => {
     const a = await addFile(20);
     const b = await addFile(21);
     const c = await addFile(22);
     const pending = await addPendingFile(23);
-    await addMany([a, b]);
     await tagFile(a, 'oak', 'ai');
+    await addMany([b]);
 
     await expect(removeMany([a, pending])).rejects.toMatchObject({ code: 'validation_failed' });
     await expect(removeMany([uuid(999), a])).rejects.toMatchObject({ code: 'not_found' });
-    expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 3 });
+    expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 2 });
 
     const records = await removeMany([c, a, b]);
     expect(records.map((r) => r.id)).toEqual([c, a, b]);
-    expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([[], ['ai'], []]);
+    expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([[], [], []]);
     expect((await removeMany([a], 'unknown')).map((r) => r.tags)).toHaveLength(1);
   });
 

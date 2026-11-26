@@ -85,10 +85,10 @@ const addFile = async (assetId: string, originalName: string, role: FileRole = '
 
 const tagAsset = (assetId: string, name: string) =>
   db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
-const untagAsset = (assetId: string, name: string) => db.tags.removeFromAsset({ assetId, name, origin: 'manual' });
+const untagAsset = (assetId: string, name: string) => db.tags.removeFromAsset({ assetId, name });
 const tagFile = (fileId: string, name: string) =>
   db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: newId(), now: TS });
-const untagFile = (fileId: string, name: string) => db.tags.removeFromFile({ fileId, name, origin: 'manual' });
+const untagFile = (fileId: string, name: string) => db.tags.removeFromFile({ fileId, name });
 
 describe('search index triggers', () => {
   test('asset insert and update reindex', async () => {
@@ -365,7 +365,7 @@ describe('list item tags', () => {
   test('list items carry asset tags and the tags of the effective cover', async () => {
     await db.assets.insert(asset(1, 'A'));
     await tagAs(uuid(1), 'oak', 'Oak');
-    await db.tags.addToAsset({ assetId: uuid(1), name: 'oak', displayName: 'Oak', origin: 'ai', newId: newId(), now: TS });
+    await db.tags.addToAsset({ assetId: uuid(1), name: 'fir', displayName: 'Fir', origin: 'ai', newId: newId(), now: TS });
     const chosen = await addFile(uuid(1), 'a.png');
     await tagFile(chosen, 'bark');
     await tagFile(await addFile(uuid(1), 'b.png'), 'moss');
@@ -376,14 +376,14 @@ describe('list item tags', () => {
 
     const items = await list();
     expect(byName(items, 'A').tags).toEqual([
-      { name: 'oak', displayName: 'Oak', origin: 'ai' },
+      { name: 'fir', displayName: 'Fir', origin: 'ai' },
       { name: 'oak', displayName: 'Oak', origin: 'manual' },
     ]);
     expect(byName(items, 'A').coverTags.map((t) => t.name)).toEqual(['bark']);
     expect(byName(items, 'B')).toMatchObject({ tags: [], coverTags: [] });
     expect(byName(items, 'C').coverTags.map((t) => t.name)).toEqual(['leaf']);
     expect(byName(items, 'A').matchedTags).toBeUndefined();
-    expect(byName(await list({ query: 'a' }), 'A')).toMatchObject({ tags: [{ name: 'oak' }, { name: 'oak' }] });
+    expect(byName(await list({ query: 'a' }), 'A')).toMatchObject({ tags: [{ name: 'fir' }, { name: 'oak' }] });
   });
 
   test('with tagNames every item reports where each requested tag was found', async () => {

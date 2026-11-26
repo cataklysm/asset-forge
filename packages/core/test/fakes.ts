@@ -254,26 +254,34 @@ class InMemoryTags implements TagRepository {
 
   async addToAsset(r: { assetId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
     this.ensureTag(r);
-    if (!this.assetAssignments.some((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin)) {
-      this.assetAssignments.push({ assetId: r.assetId, name: r.name, origin: r.origin });
+    const list = this.assetAssignments;
+    if (r.origin === 'manual') {
+      const kept = list.filter((a) => !(a.assetId === r.assetId && a.name === r.name && a.origin === 'ai'));
+      list.splice(0, list.length, ...kept);
     }
+    if (!list.some((a) => a.assetId === r.assetId && a.name === r.name)) list.push({ assetId: r.assetId, name: r.name, origin: r.origin });
   }
 
-  async removeFromAsset(r: { assetId: string; name: string; origin: TagOrigin }): Promise<void> {
-    const i = this.assetAssignments.findIndex((a) => a.assetId === r.assetId && a.name === r.name && a.origin === r.origin);
-    if (i >= 0) this.assetAssignments.splice(i, 1);
+  async removeFromAsset(r: { assetId: string; name: string }): Promise<void> {
+    const list = this.assetAssignments;
+    const kept = list.filter((a) => !(a.assetId === r.assetId && a.name === r.name));
+    list.splice(0, list.length, ...kept);
   }
 
   async addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
     this.ensureTag(r);
-    if (!this.fileAssignments.some((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin)) {
-      this.fileAssignments.push({ fileId: r.fileId, name: r.name, origin: r.origin });
+    const list = this.fileAssignments;
+    if (r.origin === 'manual') {
+      const kept = list.filter((a) => !(a.fileId === r.fileId && a.name === r.name && a.origin === 'ai'));
+      list.splice(0, list.length, ...kept);
     }
+    if (!list.some((a) => a.fileId === r.fileId && a.name === r.name)) list.push({ fileId: r.fileId, name: r.name, origin: r.origin });
   }
 
-  async removeFromFile(r: { fileId: string; name: string; origin: TagOrigin }): Promise<void> {
-    const i = this.fileAssignments.findIndex((a) => a.fileId === r.fileId && a.name === r.name && a.origin === r.origin);
-    if (i >= 0) this.fileAssignments.splice(i, 1);
+  async removeFromFile(r: { fileId: string; name: string }): Promise<void> {
+    const list = this.fileAssignments;
+    const kept = list.filter((a) => !(a.fileId === r.fileId && a.name === r.name));
+    list.splice(0, list.length, ...kept);
   }
 
   /** Set by the database; the batches check and return file records. */
@@ -298,7 +306,7 @@ class InMemoryTags implements TagRepository {
     return this.recordsOf(r.fileIds);
   }
 
-  async removeFromFiles(r: { fileIds: readonly string[]; name: string; origin: TagOrigin }): Promise<FileRecord[]> {
+  async removeFromFiles(r: { fileIds: readonly string[]; name: string }): Promise<FileRecord[]> {
     await this.requireCompleteFiles(r.fileIds);
     for (const fileId of r.fileIds) await this.removeFromFile({ ...r, fileId });
     return this.recordsOf(r.fileIds);
