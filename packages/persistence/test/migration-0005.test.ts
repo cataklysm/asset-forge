@@ -20,7 +20,7 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0
 let dir: string;
 let dbPath: string;
 
-/** Applies only the migrations up to 0003, the way a phase 3a build left the database. */
+/** Applies only the migrations up to 0004, the way a phase 3b build left the database. */
 async function createDatabaseUpTo0004(): Promise<void> {
   const folder = join(dir, 'upto0004-migrations');
   await mkdir(join(folder, 'meta'), { recursive: true });

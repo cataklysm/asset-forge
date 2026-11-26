@@ -43,6 +43,8 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - A drive-relative source path without a backslash (`C:a.exe::$DATA`) still passes the refused-import check; no file dialog produces such a path.
 - The 200-character limit of the search query counts UTF-16 code units, not characters.
 - `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
+- `files:measure` runs inside `manager.exclusive`; other writers wait for the probe.
+- Decoder byte limit of 256 MiB: an uncompressed 16-bit RGBA 8K TIFF (about 265 MB) gets neither dimensions nor a preview. Raising the limit is an owner decision.
 
 ## IPC and security
 
@@ -92,6 +94,8 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - The row "Open" link has `tabIndex -1`; focus is not restored to a neighbour after a removal; the Workspaces screen has no `h1`.
 - The dialog label "Type" shows the MIME type; the design says "format".
 - Image viewer, left out on purpose: neighbouring files are not preloaded; 16-bit and wide-gamut TIFF are converted to 8-bit sRGB in the PNG rendition; the viewer cannot be opened from the asset gallery (only from file lists).
+- Image viewer zoom: a fast Ctrl+wheel can lose zoom steps; `devicePixelRatio` is read at render only (no `matchMedia` resolution listener), so "100 %" is stale after a monitor or scaling change until the next render; a `reduced` rendition at 100 % is upscaled by a non-integer factor.
+- Image viewer browsing: stepping on and a pending `show` wait until Retry when the slot's own page failed; focus falls to `body` when the focused Previous/Next button becomes disabled at the end of the list, after which the shortcut keys only work again after a click into the dialog; `ViewerList.want` has a new identity on every render.
 - Small inconsistencies: the asset breadcrumb is "Assets" only while the project one adds the name; `AssetsScreen` does not refresh `lastSelected` from a loaded page as `ProjectsScreen` does; role selects use `INPUT` instead of `SELECT`.
 
 ## Code structure
@@ -105,6 +109,8 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - The tag-id lookup is triplicated in persistence; `ipc.ts` and `library-handlers.ts` import each other.
 - `AssetsScreen`, `AssetScreen` and `FileBrowser` are large and want splitting.
 - `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
+- `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
+- The preview worker pool doc comments still say "none" for failed jobs.
 
 ## Tooling and tests
 
@@ -125,6 +131,10 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - The test setup emulates Esc, and the native-close fallback of the dialog is untested; some tests assert class substrings.
 - No test for superseding on a tag change; missing tests for `usePagedList` retry, the Workspaces busy state, the asset Files tab batch tags and the inbox assign failure strip.
 - `console.info` output in the tag scale test.
+- Flaky jsdom tests under load (pre-existing, timing-sensitive): inbox "filters and scroll offset survive navigation", assets and projects "list state round trip".
+- Preview worker pool: the reverse eviction case (thumb evicted, `full` untouched) is untested.
+- Media protocol tests: the cancel test cannot fail; the upper-case UUID parity test only compares nullness.
+- Image viewer tests: no tests for the anchored scroll offsets and for Fit following a stage resize; `show(125)` alone and a file shifting across a page boundary are untested; the rejected-fullscreen test would pass without the `catch`; no test for the film strip scrolling the current tile into view; no end-to-end test "import stores oriented dimensions" through the real composition.
 
 ## Not covered by any automated check
 
