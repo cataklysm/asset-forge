@@ -16,7 +16,7 @@ import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } fro
 import { createWorkspaceManager } from './composition.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
-import { findSourceIn, handleMediaRequest, MEDIA_SCHEME } from './media-protocol.js';
+import { findOriginalIn, findSourceIn, handleMediaRequest, MEDIA_SCHEME, openFile } from './media-protocol.js';
 import { isTrustedSender } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 
@@ -170,7 +170,13 @@ function start(): void {
     .whenReady()
     .then(() => {
       protocol.handle(MEDIA_SCHEME, (request) =>
-        handleMediaRequest(request, { findSource: findSourceIn(manager), previews, readFile }),
+        handleMediaRequest(request, {
+          findSource: findSourceIn(manager),
+          findOriginal: findOriginalIn(manager),
+          previews,
+          readFile,
+          openFile,
+        }),
       );
       mainWindow = createMainWindow(windowOptions);
       mainWindow.on('closed', () => {

@@ -126,7 +126,7 @@ Each asset can have any number of files. **Asset type, file type and file role a
 
 File roles include `reference`, `concept`, `generated`, `working`, `model`, `texture`, `final` and `other`. Roles are extensible; actual preview capability follows from the file format and the available decoders.
 
-For each file, at least the ID, asset ID, relative storage path, original file name, MIME type, file size, checksum, role and import timestamp are recorded. Where applicable, dimensions, source, license information, tags, generation ID and a predecessor file are added.
+For each file, at least the ID, asset ID, relative storage path, original file name, MIME type, file size, checksum, role and import timestamp are recorded. Where applicable, dimensions, source, license information, tags, generation ID and a predecessor file are added. Image dimensions (width and height in pixels, after orientation) are measured in the worker pool at import and stored on the file row; for an existing file whose dimensions are still unknown, `files:measure` measures and stores them on demand, without a workspace scan. Unknown dimensions stay `null`.
 
 ### 4.1 Import
 
@@ -515,7 +515,7 @@ Resource consumption is an architectural characteristic and not merely a later o
 
 - Gallery and list views are virtualized and loaded page by page; never decode all original images of a library at once or transfer them to the renderer.
 - Preview images are generated on request, cached persistently and keyed by the file's SHA-256, the preview size and a preview format version — never by file ID — so identical content shares a preview and a changed file never shows a stale one.
-- By default, small gallery thumbnails (e.g. 256 px) and larger detail previews (e.g. 1024 px). Original images are loaded only for an explicit detail view or for processing.
+- By default, small gallery thumbnails (e.g. 256 px) and larger detail previews (e.g. 1024 px). Original images are loaded only for an explicit detail view (the image viewer, through the `original` address of the media protocol, or the lossless `full` rendition for TIFF and for images above 8192 px; §16) or for processing.
 - Large imports, downloads, hash computations and exports use streams with backpressure. No unnecessary Base64 for large IPC transfers; encoding that a provider specifically requires stays confined to individual bounded jobs.
 - Media is provided to the renderer through a controlled internal protocol or suitable bounded streams. No unrestricted `file://` access.
 - The 3D viewer is initialized only when needed. Geometries, materials and textures that are no longer visible are released; unnecessary render loops are paused.
@@ -545,6 +545,7 @@ These values are configurable development defaults and not measured performance 
 | Remote generations | 2 concurrent per provider, plus a global limit |
 | Thumbnail cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
 | Detail preview cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
+| Full-size rendition cache (`cache/full`) | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
 | Gallery page size | 60 entries (implemented constant) |
 | API container in the server profile | Starting value 1 vCPU / 512 MiB RAM |
 | PostgreSQL in the server profile | Starting value 1 vCPU / 512 MiB–1 GiB RAM |
@@ -567,7 +568,7 @@ Baseline measurements of phase 3b (development machine, not thresholds): on a sy
 
 - Renderer with `contextIsolation`, disabled Node integration and sandbox, as far as compatible with the application. Preload exposes only narrowly scoped, typed IPC operations; arguments and senders are validated.
 - Paths, file names, archive imports, symlinks and junctions are checked. Storage operations must not break out of the intended workspace. External file contents and model responses are untrusted.
-- The `assetforge-media://` protocol serves only cached previews (`assetforge-media://preview/<file id>?size=thumb|detail`, WebP); every malformed or unknown request is a bare 404 and originals are never served through it. "Open externally" is offered only for files of kind image, model or document, except SVG, and program imports are refused (§4).
+- The `assetforge-media://` protocol serves two kinds of addresses, both GET only and spelled exactly (no further segment, query, fragment, credentials or port). Cached previews: `assetforge-media://preview/<file id>?size=thumb|detail` (WebP) and `?size=full`, a lossless PNG of at most 8192 px on the longest edge, cached in its own directory `cache/full` with its own 2 GiB budget, streamed with `Cache-Control: no-store`. Unchanged originals: `assetforge-media://original/<file id>`, only for complete files with a checksum whose stored MIME type is PNG, JPEG, WebP, GIF or AVIF and whose stored dimensions are known and at most 8192 px on the longest edge; the file is streamed from the path the storage adapter resolves for the file row, with `Content-Type` from the stored MIME type, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. Every other request, every refusal and every error is a bare 404. "Open externally" is offered only for files of kind image, model or document, except SVG, and program imports are refused (§4).
 - Image decoders get size/pixel limits; large or corrupt files are rejected in a controlled manner. No automatic execution of imported scripts, HTML contents or programs.
 - API keys are stored via the OS-backed secret backend and decrypted only in the responsible host/provider layer. If no suitable secret backend is available, no silent plaintext fallback is used. Server mode uses separate server-side secret configuration.
 - Private provider base URLs (e.g. local Ollama) are explicitly configurable. Arbitrary internet reference downloads, by contrast, must not unintentionally reach internal services. Redirects, addresses, protocols and limits are checked accordingly.

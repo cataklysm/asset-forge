@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NotFoundError,
   resolveFilePath,
+  resolveOriginalSource,
   resolvePreviewSource,
   StorageUnreachableError,
   ValidationFailedError,
@@ -53,6 +54,85 @@ describe('resolvePreviewSource', () => {
     expect(await resolvePreviewSource(session, file.id)).toBeNull();
     db.files.records.set(file.id, { ...file, sha256: null });
     expect(await resolvePreviewSource(session, file.id)).toBeNull();
+  });
+});
+
+describe('resolveOriginalSource', () => {
+  it('returns path and stored type for a complete native image up to the edge limit', async () => {
+    const { session, db, file } = await setup('photo.jpg');
+    db.files.records.set(file.id, { ...file, mimeType: 'image/jpeg', width: 7680, height: 4320 });
+    expect(await resolveOriginalSource(session, file.id)).toEqual({
+      absolutePath: `/memory/${file.relativePath}`,
+      mimeType: 'image/jpeg',
+    });
+  });
+
+  it('serves an imported png whose dimensions were measured', async () => {
+    const { session, file } = await setup();
+    expect(file).toMatchObject({ mimeType: 'image/png', width: 640, height: 480 });
+    expect(await resolveOriginalSource(session, file.id)).toEqual({
+      absolutePath: `/memory/${file.relativePath}`,
+      mimeType: 'image/png',
+    });
+  });
+
+  it('ignores unknown files', async () => {
+    const { session } = await setup();
+    expect(await resolveOriginalSource(session, UNKNOWN_ID)).toBeNull();
+  });
+
+  it('ignores pending and failed files', async () => {
+    const { session, db, file } = await setup();
+    db.files.records.set(file.id, { ...file, status: 'pending' });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+    db.files.records.set(file.id, { ...file, status: 'failed', error: 'x' });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it('ignores a complete file without checksum', async () => {
+    const { session, db, file } = await setup();
+    db.files.records.set(file.id, { ...file, sha256: null });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it.each(['image/tiff', 'image/svg+xml', 'text/html', 'IMAGE/PNG'])('ignores %s', async (mimeType) => {
+    const { session, db, file } = await setup();
+    db.files.records.set(file.id, { ...file, mimeType });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it('ignores unknown dimensions', async () => {
+    const { session, db, file } = await setup();
+    db.files.records.set(file.id, { ...file, width: null, height: null });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+    db.files.records.set(file.id, { ...file, width: 100, height: null });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it('ignores an image above the edge limit', async () => {
+    const { session, db, file } = await setup();
+    db.files.records.set(file.id, { ...file, width: 8193, height: 10 });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+    db.files.records.set(file.id, { ...file, width: 10, height: 8193 });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it('ignores a text file imported as png, whose dimensions could not be measured', async () => {
+    const fake = createFakeHost();
+    fake.probe.result = null;
+    const manager = new WorkspaceManager(fake.host);
+    await manager.create({ name: 'Demo', rootPath: ROOT });
+    fake.sources.set('/src/x.png', Buffer.from('<html><script>alert(1)</script></html>'));
+    const [imported] = await manager.importFiles(['/src/x.png']);
+    const file = imported!.file!;
+    expect(file).toMatchObject({ status: 'complete', mimeType: 'image/png', width: null, height: null });
+    expect(await manager.read((s) => resolveOriginalSource(s, file.id))).toBeNull();
+  });
+
+  it('propagates StorageUnreachableError when the storage is unreachable', async () => {
+    const { session, storage, file } = await setup();
+    storage.reachable = false;
+    await expect(resolveOriginalSource(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
   });
 });
 
