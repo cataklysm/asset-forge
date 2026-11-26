@@ -6,7 +6,7 @@ import {
 } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
-import { ALERT, INPUT } from '../ui';
+import { ALERT, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 
 type Patch = Parameters<typeof call<'assignments:update'>>[1]['patch'];
@@ -39,7 +39,7 @@ export function AssignmentFields({ assignment, onChanged }: Props) {
   return (
     <div className="flex flex-wrap items-start gap-2">
       <select
-        className={INPUT}
+        className={SELECT}
         aria-label="Priority"
         value={assignment.priority}
         onChange={(e) => void save({ priority: AssignmentPrioritySchema.parse(e.target.value) })}
@@ -51,7 +51,7 @@ export function AssignmentFields({ assignment, onChanged }: Props) {
         ))}
       </select>
       <select
-        className={INPUT}
+        className={SELECT}
         aria-label="Approval"
         value={assignment.approvalStatus}
         onChange={(e) => void save({ approvalStatus: ApprovalStatusSchema.parse(e.target.value) })}
@@ -64,6 +64,9 @@ export function AssignmentFields({ assignment, onChanged }: Props) {
       </select>
       <CommitInput
         label="Intended use"
+        variant="inline"
+        placeholder="Intended use"
+        className="h-9"
         value={assignment.intendedUse}
         maxLength={500}
         onCommit={(intendedUse) => save({ intendedUse })}
@@ -71,12 +74,15 @@ export function AssignmentFields({ assignment, onChanged }: Props) {
       <CommitInput
         label="Notes"
         multiline
+        variant="inline"
+        placeholder="Notes"
+        className="min-w-64 flex-1"
         value={assignment.notes}
         maxLength={5000}
         onCommit={(notes) => save({ notes })}
       />
       {error !== null && (
-        <p role="alert" className={ALERT}>
+        <p role="alert" className={`w-full ${ALERT}`}>
           {error}
         </p>
       )}

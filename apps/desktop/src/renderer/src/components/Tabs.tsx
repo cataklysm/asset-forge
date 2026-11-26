@@ -47,7 +47,7 @@ export function Tabs<T extends string>({ tabs, active, onChange, label, children
   }
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div role="tablist" aria-label={label} onKeyDown={onKeyDown} className="flex gap-1 border-b border-line">
         {tabs.map((tab) => {
           const selected = tab.id === active;
@@ -70,12 +70,13 @@ export function Tabs<T extends string>({ tabs, active, onChange, label, children
               } ${FOCUS}`}
             >
               {tab.label}
+              {tab.count != null && ' '}
               {tab.count != null && <span className="tabular-nums text-muted">{tab.count}</span>}
             </button>
           );
         })}
       </div>
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(active)} tabIndex={0} className={`min-h-0 flex-1 ${FOCUS}`}>
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(active)} tabIndex={0} className={`flex min-h-0 flex-1 flex-col ${FOCUS}`}>
         {children}
       </div>
     </div>

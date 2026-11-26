@@ -52,6 +52,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
   const [projectsOffset, setProjectsOffset] = useState(0);
   const [inboxOffset, setInboxOffset] = useState(0);
   const setAssetList = (assetList: AssetListState) => setShell((current) => ({ ...current, assetList }));
+  const setAssetTab = (assetTab: AssetTab) => setShell((current) => ({ ...current, assetTab }));
 
   async function closeWorkspace() {
     try {
@@ -76,19 +77,32 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
       onNavigate={navigate}
       onClose={() => void closeWorkspace()}
     >
-      {view.name === 'assets' ? (
-        // Redesigned screens render a `Page` and bring their own padding.
+      {view.name === 'assets' || view.name === 'asset' ? (
+        // Redesigned screens bring their own padding.
         <>
           {error !== null && (
             <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
               {error}
             </p>
           )}
-          <AssetsScreen
-            state={shell.assetList}
-            onStateChange={setAssetList}
-            onOpen={(id) => setView({ name: 'asset', id })}
-          />
+          {view.name === 'assets' ? (
+            <AssetsScreen
+              state={shell.assetList}
+              onStateChange={setAssetList}
+              onOpen={(id) => setView({ name: 'asset', id })}
+            />
+          ) : (
+            <AssetScreen
+              key={view.id}
+              id={view.id}
+              tab={shell.assetTab}
+              onTabChange={setAssetTab}
+              onBack={() => setView({ name: 'assets' })}
+              onOpenAsset={(id) => setView({ name: 'asset', id })}
+              onOpenProject={(id) => setView({ name: 'project', id })}
+              onBusyChange={setBusy}
+            />
+          )}
         </>
       ) : (
         /* The other screens still bring their own layout until they are redesigned. */
@@ -101,8 +115,6 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
 
           {view.name === 'inbox' ? (
             <FilesScreen offset={inboxOffset} onOffsetChange={setInboxOffset} onBusyChange={setBusy} />
-          ) : view.name === 'asset' ? (
-            <AssetScreen key={view.id} id={view.id} onNavigate={setView} onBusyChange={setBusy} />
           ) : view.name === 'project' ? (
             <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
           ) : (

@@ -1,78 +1,105 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AssetStatusSchema,
   FileRoleSchema,
   RelationKindSchema,
-  type FileRecord,
+  type AssetDetail,
   type FileRole,
-  type ImportResult,
   type RelationKind,
 } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
-import { FileDetailDialog } from '../components/FileDetailDialog';
-import { FileRoleSelect } from '../components/FileRoleControls';
-import { FileGrid } from '../components/FileGrid';
-import { useFileDetail } from '../components/useFileDetail';
-import { Pager } from '../components/Pager';
+import { Link } from '../components/Link';
+import { ResultStrip, type ResultFailure } from '../components/ResultStrip';
+import { TagRow } from '../components/TagRow';
+import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
 import { useLoad } from '../hooks/useLoad';
 import { label, relationLabel } from '../labels';
-import type { View } from '../nav';
-import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
+import type { AssetTab } from '../list-state';
+import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
 
-const PAGE_SIZE = 50;
 const ROLES = FileRoleSchema.options;
+const IMPORT_BUSY = 'Import in progress';
+
+type Patch = Parameters<typeof call<'assets:update'>>[1]['patch'];
 
 interface Props {
   id: string;
-  onNavigate(view: View): void;
-  onBusyChange?(busy: boolean): void;
+  tab: AssetTab;
+  onTabChange(tab: AssetTab): void;
+  onBack(): void;
+  onOpenAsset(id: string): void;
+  onOpenProject(id: string): void;
+  onBusyChange(busy: boolean): void;
 }
 
-export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
-  const [offset, setOffset] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [projectToAdd, setProjectToAdd] = useState('');
-  const [importRole, setImportRole] = useState<FileRole>('reference');
-  const [relationKind, setRelationKind] = useState<RelationKind>('uses');
-  const [importing, setImporting] = useState(false);
-  const [results, setResults] = useState<ImportResult[] | null>(null);
+/** The file name of a picked source path; the rest of the path never reaches the screen. */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
 
-  const asset = useLoad(() => call('assets:get', { id }), [id]);
+/** Runs a mutation and reports its error through `setError`; resolves to whether it succeeded. */
+async function attempt(setError: (message: string | null) => void, action: () => Promise<unknown>): Promise<boolean> {
+  setError(null);
+  try {
+    await action();
+    return true;
+  } catch (e) {
+    setError(describeError(e));
+    return false;
+  }
+}
+
+export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenProject, onBusyChange }: Props) {
+  const [error, setError] = useState<string | null>(null);
+  const [importRole, setImportRole] = useState<FileRole>('reference');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [fileCount, setFileCount] = useState<number | null>(null);
+  const [fileCountError, setFileCountError] = useState<string | null>(null);
+
+  const loaded = useLoad(() => call('assets:get', { id }), [id]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const assignments = useLoad(() => call('assignments:listByAsset', { assetId: id }), [id]);
-  const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
   const relations = useLoad(() => call('relations:list', { assetId: id }), [id]);
-  const files = useLoad(
-    () => call('files:list', { limit: PAGE_SIZE, offset, scope: { kind: 'asset', assetId: id } }),
-    [id, offset],
-  );
+  // The asset returned by a mutation replaces the loaded one until the next load.
+  const [asset, setAsset] = useState<AssetDetail | null>(null);
+  useEffect(() => setAsset(loaded.data), [loaded.data]);
+
+  // The Files tab count: the unfiltered total, refreshed after every change to the files.
+  useEffect(() => {
+    let cancelled = false;
+    call('files:list', { limit: 1, offset: 0, scope: { kind: 'asset', assetId: id } })
+      .then((page) => {
+        if (cancelled) return;
+        setFileCount(page.total);
+        setFileCountError(null);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setFileCountError(describeError(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadToken]);
 
   useEffect(() => {
-    onBusyChange?.(importing);
-    return () => onBusyChange?.(false);
+    onBusyChange(importing);
+    return () => onBusyChange(false);
   }, [importing, onBusyChange]);
 
-  /** Runs a mutation; shows its error and reports whether it succeeded. */
-  async function run(action: () => Promise<unknown>): Promise<boolean> {
-    setError(null);
-    try {
-      await action();
-      return true;
-    } catch (e) {
-      setError(describeError(e));
-      return false;
-    }
+  function filesChanged() {
+    setReloadToken((t) => t + 1);
+    loaded.reload();
   }
 
-  const saveAsset = (patch: Parameters<typeof call<'assets:update'>>[1]['patch']) =>
-    run(async () => {
-      await call('assets:update', { id, patch });
-      asset.reload();
-    });
+  const saveAsset = (patch: Patch) =>
+    attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
 
   async function importFiles() {
     setError(null);
@@ -80,11 +107,12 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
     try {
       const sourcePaths = await call('dialog:pickFiles', {});
       if (sourcePaths.length === 0) return;
-      setResults(
-        await call('files:import', { sourcePaths, target: { assetId: id, role: importRole } }),
+      const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole } });
+      const failures = results.flatMap((r, index) =>
+        r.error === null ? [] : [{ key: `${index}:${r.sourcePath}`, name: baseName(r.sourcePath), message: r.error }],
       );
-      if (offset === 0) files.reload();
-      else setOffset(0);
+      setImportResult({ title: `${results.length - failures.length} imported, ${failures.length} failed`, failures });
+      filesChanged();
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -92,340 +120,334 @@ export function AssetScreen({ id, onNavigate, onBusyChange }: Props) {
     }
   }
 
-  const data = asset.data;
-  const filesSection = useRef<HTMLElement>(null);
-  const importButton = useRef<HTMLButtonElement>(null);
-  const typeItems = types.data ?? [];
+  const breadcrumb = (
+    <nav aria-label="Breadcrumb" className={`text-sm ${MUTED}`}>
+      <Link onFollow={onBack} disabled={importing} title={importing ? IMPORT_BUSY : undefined}>
+        Assets
+      </Link>
+    </nav>
+  );
+
+  if (asset === null) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+        {breadcrumb}
+        {loaded.error !== null ? (
+          <p role="alert" className={ALERT}>
+            {loaded.error}
+          </p>
+        ) : (
+          <p className={MUTED}>Loading…</p>
+        )}
+      </div>
+    );
+  }
+
+  const headerErrors = [error, types.error].filter((e): e is string => e !== null);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+      {breadcrumb}
+      <header className="space-y-2">
+        <h1 className="sr-only">{asset.name}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <CommitInput
+            label="Name"
+            variant="inline"
+            className={`h-12 min-w-64 flex-1 ${PAGE_TITLE}`}
+            value={asset.name}
+            maxLength={200}
+            onCommit={(name) => saveAsset({ name })}
+          />
+          <select
+            className={SELECT}
+            aria-label="Type"
+            value={asset.typeId}
+            onChange={(e) => void saveAsset({ typeId: e.target.value })}
+          >
+            {(types.data ?? []).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className={SELECT}
+            aria-label="Status"
+            value={asset.status}
+            onChange={(e) => void saveAsset({ status: AssetStatusSchema.parse(e.target.value) })}
+          >
+            {AssetStatusSchema.options.map((s) => (
+              <option key={s} value={s}>
+                {label(s)}
+              </option>
+            ))}
+          </select>
+          <div className="ml-auto flex items-center gap-2">
+            <select
+              className={SELECT}
+              aria-label="Role for imported files"
+              title="Import as"
+              value={importRole}
+              onChange={(e) => setImportRole(FileRoleSchema.parse(e.target.value))}
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {label(r)}
+                </option>
+              ))}
+            </select>
+            <button type="button" className={BUTTON} disabled={importing} onClick={() => void importFiles()}>
+              Import files
+            </button>
+            {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-start gap-4">
+          <CommitInput
+            label="Description"
+            multiline
+            variant="inline"
+            placeholder="Description"
+            className="min-w-64 flex-1"
+            value={asset.description}
+            maxLength={5000}
+            onCommit={(description) => saveAsset({ description })}
+          />
+          <div className="min-w-64 flex-1">
+            <TagRow
+              label="Asset tags"
+              kind="asset"
+              tags={asset.tags}
+              onAdd={async (name) => setAsset(await call('assets:addTag', { assetId: id, name }))}
+              onRemove={async (name) => setAsset(await call('assets:removeTag', { assetId: id, name }))}
+            />
+          </div>
+        </div>
+        {headerErrors.map((message) => (
+          <p key={message} role="alert" className={ALERT}>
+            {message}
+          </p>
+        ))}
+      </header>
+
+      {importResult !== null && (
+        <ResultStrip
+          title={importResult.title}
+          failures={importResult.failures}
+          onDismiss={() => setImportResult(null)}
+        />
+      )}
+
+      <Tabs<AssetTab>
+        label="Asset sections"
+        active={tab}
+        onChange={onTabChange}
+        tabs={[
+          { id: 'files', label: 'Files', count: fileCount },
+          { id: 'workflow', label: 'Workflow' },
+          { id: 'projects', label: 'Projects', count: assignments.data?.length ?? null },
+          { id: 'relations', label: 'Relations', count: relations.data?.length ?? null },
+        ]}
+      >
+        {tab === 'files' && fileCountError !== null && (
+          <p role="alert" className={`mt-4 ${ALERT}`}>
+            {fileCountError}
+          </p>
+        )}
+        {tab === 'files' && (
+          <AssetFilesTab
+            asset={asset}
+            reloadToken={reloadToken}
+            onFilesChanged={filesChanged}
+            onAssetChange={setAsset}
+            onCountChange={setFileCount}
+          />
+        )}
+        {tab === 'workflow' && (
+          <div className="pt-4">
+            <WorkflowSection assetId={id} assetTypeId={asset.typeId} />
+          </div>
+        )}
+        {tab === 'projects' && (
+          <ProjectsPanel
+            asset={asset}
+            assignments={assignments}
+            disabled={importing}
+            onOpenProject={onOpenProject}
+          />
+        )}
+        {tab === 'relations' && (
+          <RelationsPanel assetId={id} relations={relations} disabled={importing} onOpenAsset={onOpenAsset} />
+        )}
+      </Tabs>
+    </div>
+  );
+}
+
+type Loaded<T> = { data: T | null; error: string | null; reload(): void };
+
+interface ProjectsPanelProps {
+  asset: AssetDetail;
+  assignments: Loaded<Awaited<ReturnType<typeof call<'assignments:listByAsset'>>>>;
+  disabled: boolean;
+  onOpenProject(id: string): void;
+}
+
+function ProjectsPanel({ asset, assignments, disabled, onOpenProject }: ProjectsPanelProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [projectToAdd, setProjectToAdd] = useState('');
+  const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
+
   const assigned = assignments.data ?? [];
   const assignedIds = new Set(assigned.map((a) => a.projectId));
   const unassigned = (projects.data?.items ?? []).filter((p) => !assignedIds.has(p.id));
-  const effectiveProject = unassigned.some((p) => p.id === projectToAdd)
-    ? projectToAdd
-    : (unassigned[0]?.id ?? '');
-
-  const fileItems = files.data?.items ?? [];
-  const groups = ROLES.map((role) => ({
-    role,
-    items: fileItems.filter((f) => f.role === role),
-  })).filter((g) => g.items.length > 0);
-
-  async function setCover(fileId: string | null) {
-    await call('assets:setCover', { assetId: id, fileId });
-    asset.reload();
-  }
-
-  const detail = useFileDetail(files.data?.items ?? null, filesSection, importButton);
-
-  function reloadFiles() {
-    files.reload();
-    asset.reload();
-  }
-
-  async function detachFile() {
-    if (detail.file === null) return;
-    await call('files:unassign', { fileId: detail.file.id });
-    reloadFiles();
-  }
-
-  const loadErrors = [asset, types, assignments, projects, relations, files]
-    .map((l) => l.error)
-    .filter((e): e is string => e !== null);
-
-  const failed = results?.filter((r) => r.error !== null) ?? [];
-  const imported = results?.filter((r) => r.file !== null && r.error === null).length ?? 0;
+  const effectiveProject = unassigned.some((p) => p.id === projectToAdd) ? projectToAdd : (unassigned[0]?.id ?? '');
+  const errors = [error, assignments.error, projects.error].filter((e): e is string => e !== null);
 
   return (
-    <section className="space-y-6" aria-label="Asset">
-      <div>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={importing}
-          title={importing ? 'Import in progress' : undefined}
-          onClick={() => onNavigate({ name: 'assets' })}
-        >
-          Back
-        </button>
-      </div>
-
-      {error !== null && (
-        <p role="alert" className={ALERT}>
-          {error}
-        </p>
-      )}
-      {loadErrors.map((message) => (
+    <div className="space-y-3 pt-4">
+      {errors.map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
       ))}
-
-      {data === null ? (
-        asset.error === null && <p className={MUTED}>Loading…</p>
-      ) : (
-        <>
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <CommitInput
-                label="Name"
-                value={data.name}
-                maxLength={200}
-                onCommit={(name) => saveAsset({ name })}
-              />
-              <select
-                className={INPUT}
-                aria-label="Type"
-                value={data.typeId}
-                onChange={(e) => void saveAsset({ typeId: e.target.value })}
-              >
-                {typeItems.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={INPUT}
-                aria-label="Status"
-                value={data.status}
-                onChange={(e) =>
-                  void saveAsset({ status: AssetStatusSchema.parse(e.target.value) })
-                }
-              >
-                {AssetStatusSchema.options.map((s) => (
-                  <option key={s} value={s}>
-                    {label(s)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <CommitInput
-              label="Description"
-              multiline
-              value={data.description}
-              maxLength={5000}
-              onCommit={(description) => saveAsset({ description })}
-            />
-          </div>
-
-          <WorkflowSection assetId={id} assetTypeId={data.typeId} />
-
-          <section className="space-y-2" aria-label="Projects">
-            <h2 className="text-lg font-semibold">Projects</h2>
-            {assigned.length === 0 && assignments.data !== null && (
-              <p className={MUTED}>Not assigned to any project</p>
-            )}
-            <ul className="space-y-2">
-              {assigned.map((a) => (
-                <li key={a.projectId} className={`space-y-1 border-b pb-2 ${BORDER}`}>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={BUTTON}
-                      disabled={importing}
-                      onClick={() => onNavigate({ name: 'project', id: a.projectId })}
-                    >
-                      {a.project.name}
-                    </button>
-                    <button
-                      type="button"
-                      className={BUTTON}
-                      aria-label={`Remove ${data.name} from ${a.project.name}`}
-                      title="Removes the assignment only; the asset and its files are kept"
-                      onClick={() =>
-                        void run(async () => {
-                          await call('assignments:remove', { projectId: a.projectId, assetId: id });
-                          assignments.reload();
-                        })
-                      }
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <AssignmentFields assignment={a} onChanged={() => assignments.reload()} />
-                </li>
-              ))}
-            </ul>
+      {assignments.data !== null && assigned.length === 0 && <p className={MUTED}>Not assigned to any project</p>}
+      <ul className="space-y-2">
+        {assigned.map((a) => (
+          <li key={a.projectId} className={`space-y-2 border-b pb-2 ${BORDER}`}>
             <div className="flex items-center gap-2">
-              <select
-                className={INPUT}
-                aria-label="Project to add"
-                value={effectiveProject}
-                onChange={(e) => setProjectToAdd(e.target.value)}
+              <Link
+                onFollow={() => onOpenProject(a.projectId)}
+                disabled={disabled}
+                title={disabled ? IMPORT_BUSY : undefined}
               >
-                {unassigned.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                {a.project.name}
+              </Link>
               <button
                 type="button"
                 className={BUTTON}
-                disabled={effectiveProject === ''}
+                aria-label={`Remove ${asset.name} from ${a.project.name}`}
+                title="Removes the assignment only; the asset and its files are kept"
                 onClick={() =>
-                  void run(async () => {
-                    await call('assignments:assign', { projectId: effectiveProject, assetId: id });
+                  void attempt(setError, async () => {
+                    await call('assignments:remove', { projectId: a.projectId, assetId: asset.id });
                     assignments.reload();
                   })
                 }
               >
-                Add to project
+                Remove
               </button>
             </div>
-          </section>
+            <AssignmentFields assignment={a} onChanged={() => assignments.reload()} />
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-2">
+        <select
+          className={SELECT}
+          aria-label="Project to add"
+          value={effectiveProject}
+          onChange={(e) => setProjectToAdd(e.target.value)}
+        >
+          {unassigned.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={effectiveProject === ''}
+          onClick={() =>
+            void attempt(setError, async () => {
+              await call('assignments:assign', { projectId: effectiveProject, assetId: asset.id });
+              assignments.reload();
+            })
+          }
+        >
+          Add to project
+        </button>
+      </div>
+    </div>
+  );
+}
 
-          <section className="space-y-2" aria-label="Files" ref={filesSection}>
-            <h2 className="text-lg font-semibold">Files</h2>
-            {files.data !== null && files.data.total === 0 && <p className={MUTED}>No files</p>}
-            {groups.map((g) => (
-              <div key={g.role}>
-                <h3 className={`font-medium ${MUTED}`}>{label(g.role)}</h3>
-                <FileGrid
-                  files={g.items}
-                  coverFileId={data?.coverFileId ?? null}
-                  onSelect={detail.select}
-                />
-              </div>
-            ))}
-            {detail.file !== null && (
-              <FileDetailDialog
-                file={detail.file}
-                asset={data === null ? null : { id: data.id, name: data.name, tags: data.tags }}
-                actions={{
-                  cover: {
-                    isEffective: data?.coverFileId === detail.file.id,
-                    isChosen: data?.coverIsChosen === true && data.coverFileId === detail.file.id,
-                  },
-                  onDetails: () => {},
-                  onSetCover: setCover,
-                  onDetach: detachFile,
-                }}
-                roleControl={<FileRoleSelect file={detail.file} onChanged={reloadFiles} />}
-                onFileChange={reloadFiles}
-                onClose={detail.close}
-              />
-            )}
-            {files.data !== null && files.data.total > PAGE_SIZE && (
-              <Pager
-                offset={offset}
-                limit={PAGE_SIZE}
-                total={files.data.total}
-                onChange={setOffset}
-              />
-            )}
-            <div className="flex items-center gap-2">
-              <select
-                className={INPUT}
-                aria-label="Role for imported files"
-                value={importRole}
-                onChange={(e) => setImportRole(FileRoleSchema.parse(e.target.value))}
+interface RelationsPanelProps {
+  assetId: string;
+  relations: Loaded<Awaited<ReturnType<typeof call<'relations:list'>>>>;
+  disabled: boolean;
+  onOpenAsset(id: string): void;
+}
+
+function RelationsPanel({ assetId, relations, disabled, onOpenAsset }: RelationsPanelProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [kind, setKind] = useState<RelationKind>('uses');
+  const errors = [error, relations.error].filter((e): e is string => e !== null);
+
+  return (
+    <div className="space-y-3 pt-4">
+      {errors.map((message) => (
+        <p key={message} role="alert" className={ALERT}>
+          {message}
+        </p>
+      ))}
+      {relations.data !== null && relations.data.length === 0 && <p className={MUTED}>No relations</p>}
+      <ul className="space-y-1">
+        {(relations.data ?? []).map((r) => {
+          const relation = relationLabel(r.kind, r.direction);
+          return (
+            <li key={`${r.fromAssetId}:${r.toAssetId}:${r.kind}`} className="flex items-center gap-2">
+              <span className={MUTED}>{relation}</span>
+              <Link
+                onFollow={() => onOpenAsset(r.other.id)}
+                disabled={disabled}
+                title={disabled ? IMPORT_BUSY : undefined}
               >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {label(r)}
-                  </option>
-                ))}
-              </select>
+                {r.other.name}
+              </Link>
               <button
-                ref={importButton}
                 type="button"
                 className={BUTTON}
-                disabled={importing}
-                onClick={() => void importFiles()}
-              >
-                Import files
-              </button>
-              {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
-            </div>
-            {results !== null && (
-              <div className="space-y-1">
-                <p>
-                  {imported} imported, {failed.length} failed
-                </p>
-                {failed.length > 0 && (
-                  <ul className="list-disc pl-5 text-sm text-red-800 dark:text-red-300">
-                    {failed.map((r) => (
-                      <li key={r.file?.id ?? r.sourcePath}>
-                        {r.sourcePath}: {r.error}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="space-y-2" aria-label="Relations">
-            <h2 className="text-lg font-semibold">Relations</h2>
-            {relations.data !== null && relations.data.length === 0 && (
-              <p className={MUTED}>No relations</p>
-            )}
-            <ul className="space-y-1">
-              {(relations.data ?? []).map((r) => (
-                <li
-                  key={`${r.fromAssetId}:${r.toAssetId}:${r.kind}`}
-                  className="flex items-center gap-2"
-                >
-                  <span className={MUTED}>{relationLabel(r.kind, r.direction)}</span>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    disabled={importing}
-                    onClick={() => onNavigate({ name: 'asset', id: r.other.id })}
-                  >
-                    {r.other.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    aria-label={`Remove relation ${relationLabel(r.kind, r.direction)} ${r.other.name}`}
-                    title="Removes the relation only; both assets and their files are kept"
-                    onClick={() =>
-                      void run(async () => {
-                        await call('relations:remove', {
-                          fromAssetId: r.fromAssetId,
-                          toAssetId: r.toAssetId,
-                          kind: r.kind,
-                        });
-                        relations.reload();
-                      })
-                    }
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <div className="space-y-2">
-              <select
-                className={INPUT}
-                aria-label="Relation kind"
-                value={relationKind}
-                onChange={(e) => setRelationKind(RelationKindSchema.parse(e.target.value))}
-              >
-                {RelationKindSchema.options.map((k) => (
-                  <option key={k} value={k}>
-                    {relationLabel(k, 'outgoing')}
-                  </option>
-                ))}
-              </select>
-              <AssetPicker
-                excludeIds={[id]}
-                onPick={async (other) => {
-                  await run(async () => {
-                    await call('relations:add', {
-                      fromAssetId: id,
-                      toAssetId: other.id,
-                      kind: relationKind,
-                    });
+                aria-label={`Remove relation ${relation} ${r.other.name}`}
+                title="Removes the relation only; both assets and their files are kept"
+                onClick={() =>
+                  void attempt(setError, async () => {
+                    await call('relations:remove', { fromAssetId: r.fromAssetId, toAssetId: r.toAssetId, kind: r.kind });
                     relations.reload();
-                  });
-                }}
-              />
-            </div>
-          </section>
-        </>
-      )}
-    </section>
+                  })
+                }
+              >
+                Remove
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-wrap items-start gap-2">
+        <select
+          className={SELECT}
+          aria-label="Relation kind"
+          value={kind}
+          onChange={(e) => setKind(RelationKindSchema.parse(e.target.value))}
+        >
+          {RelationKindSchema.options.map((k) => (
+            <option key={k} value={k}>
+              {relationLabel(k, 'outgoing')}
+            </option>
+          ))}
+        </select>
+        <AssetPicker
+          excludeIds={[assetId]}
+          onPick={async (other) => {
+            await attempt(setError, async () => {
+              await call('relations:add', { fromAssetId: assetId, toAssetId: other.id, kind });
+              relations.reload();
+            });
+          }}
+        />
+      </div>
+    </div>
   );
 }

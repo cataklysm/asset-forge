@@ -4,7 +4,7 @@ import { call, describeError } from '../api';
 import { useLoad } from '../hooks/useLoad';
 import { label } from '../labels';
 import { formatProgress, pickTemplate } from '../progress';
-import { ALERT, BORDER, BUTTON, INPUT, MUTED } from '../ui';
+import { ALERT, BORDER, BUTTON, MUTED, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 
 interface Props {
@@ -66,8 +66,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
     .filter((e): e is string => e !== null);
 
   return (
-    <section className="space-y-2" aria-label="Workflow">
-      <h2 className="text-lg font-semibold">Workflow</h2>
+    <section className="space-y-3" aria-label="Workflow">
       {error !== null && (
         <p role="alert" className={ALERT}>
           {error}
@@ -99,7 +98,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
                 <span>{step.name}</span>
                 {!step.mandatory && <span className={MUTED}>Optional</span>}
                 <select
-                  className={INPUT}
+                  className={SELECT}
                   aria-label={`State of ${step.name}`}
                   value={step.state}
                   onChange={(e) =>
@@ -119,6 +118,9 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
                 <CommitInput
                   label={`Notes for ${step.name}`}
                   multiline
+                  variant="inline"
+                  placeholder="Notes"
+                  className="min-w-64 flex-1"
                   value={step.notes}
                   maxLength={5000}
                   onCommit={(notes) => updateStep(step.id, { notes })}
@@ -148,7 +150,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
       {!workflow && resolved && loaded.error === null && (
         <div className="flex items-center gap-2">
           <select
-            className={INPUT}
+            className={SELECT}
             aria-label="Workflow template"
             value={effectiveTemplate}
             disabled={!ready}
