@@ -1,6 +1,6 @@
 # Editable analysis prompts — named prompts chosen at the analysis start — design
 
-Status: draft for the owner's approval, 2026-11-26.
+Status: approved by the owner, 2026-11-26.
 
 ## Intent
 
@@ -97,8 +97,8 @@ Channels that work without a workspace, like the settings channels:
 
 Changed channels:
 
-- `analysis:enqueue` gains `promptId`. The main process resolves it to a `tagging` prompt and hands name, text and limit to the core use case. An unknown ID or one of the wrong purpose is rejected with `not_found` before anything is queued.
-- `analysis:describe` gains `promptId` (an `image_prompt` prompt). An unknown or wrong-purpose ID is a rejected call with `not_found`, not a `{ ok: false }` result; `DescribeResult` is unchanged.
+- `analysis:enqueue` gains an optional `promptId`; without one the prompt used last for the purpose is taken, otherwise the first. The main process resolves it to a `tagging` prompt and hands name, text and limit to the core use case. An unknown ID or one of the wrong purpose is rejected with `not_found` before anything is queued.
+- `analysis:describe` gains an optional `promptId` (an `image_prompt` prompt), with the same fallback. An unknown or wrong-purpose ID is a rejected call with `not_found`, not a `{ ok: false }` result; `DescribeResult` is unchanged.
 
 **Used last** (author's call): the prompt is stored as used last once the request was accepted — for enqueue when the use case returned, whatever its counts (also with nothing newly queued); for describe when the request was started, whatever its outcome, but not when it answered `busy`. Writing it is best effort: a failed write is logged with one fixed warning and never turns an accepted analysis into an error.
 
