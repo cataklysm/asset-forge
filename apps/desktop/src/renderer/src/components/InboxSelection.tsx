@@ -1,8 +1,8 @@
 import { useId, useRef, useState, type RefObject } from 'react';
-import { FileRoleSchema, type Asset, type FileRole } from '@assetforge/contracts';
+import { FileRoleSchema, type Asset, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
-import { eligibleFiles, NONE_ELIGIBLE, refreshSelected, sharedTags, type FileSelection } from '../selection';
+import { eligibleFiles, NONE_ELIGIBLE, sharedTags, type FileSelection } from '../selection';
 import { ALERT, BUTTON, LABEL, MUTED, SECTION_TITLE, SELECT } from '../ui';
 import { AssetPicker } from './AssetPicker';
 import { assignFailures, ResultStrip, type ResultFailure } from './ResultStrip';
@@ -12,13 +12,15 @@ const ROLES = FileRoleSchema.options;
 
 interface Props {
   selection: FileSelection;
-  onSelectionChange(s: FileSelection): void;
   /** The shared tag input; the selection bar's "Add tags" focuses it. */
   tagInputRef: RefObject<HTMLInputElement | null>;
   /** After an assign: the files that moved to the asset. The host drops them and reloads. */
   onAssigned(movedIds: string[]): void;
-  /** After the shared tags changed: the host reloads the list. */
-  onFilesChanged(): void;
+  /**
+   * After the shared tags changed: the changed records. The host refreshes its current selection
+   * with them (the answer may arrive after the selection changed) and reloads.
+   */
+  onFilesChanged(items: FileRecord[]): void;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -30,7 +32,7 @@ function plural(count: number, one: string, many: string): string {
  * assign to an asset and the selected names. Files that are not completely imported are marked
  * and left out of tagging and assigning.
  */
-export function InboxSelection({ selection, onSelectionChange, tagInputRef, onAssigned, onFilesChanged }: Props) {
+export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChanged }: Props) {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [role, setRole] = useState<FileRole>('reference');
   const [busy, setBusy] = useState(false);
@@ -39,7 +41,7 @@ export function InboxSelection({ selection, onSelectionChange, tagInputRef, onAs
   // Synchronous guard: a second activation before the re-render must not send a second request.
   const assigning = useRef(false);
   const assignId = useId();
-  // Batch answers arrive later; they refresh the selection as it is then.
+  // Assign answers arrive later; names come from the selection as it is then.
   const latest = useRef(selection);
   latest.current = selection;
 
@@ -51,8 +53,7 @@ export function InboxSelection({ selection, onSelectionChange, tagInputRef, onAs
 
   async function changeTags(channel: 'files:addTagMany' | 'files:removeTagMany', name: string) {
     const { items } = await call(channel, { fileIds: eligibleIds, name });
-    onSelectionChange(refreshSelected(latest.current, items));
-    onFilesChanged();
+    onFilesChanged(items);
   }
 
   async function assign() {

@@ -98,7 +98,12 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   /** A changed record: the dialog and the selection show it, and the list reloads. */
   function fileChanged(file: FileRecord) {
     detail.update(file);
-    setSelection((current) => refreshSelected(current, [file]));
+    filesChanged([file]);
+  }
+
+  /** Changed records refresh the selection as it is now; files no longer selected stay unselected. */
+  function filesChanged(items: readonly FileRecord[]) {
+    setSelection((current) => refreshSelected(current, items));
     reload();
   }
 
@@ -133,10 +138,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
         selection.selected.size > 0 ? (
           <InboxSelection
             selection={selection}
-            onSelectionChange={setSelection}
             tagInputRef={tagInputRef}
             onAssigned={moved}
-            onFilesChanged={reload}
+            onFilesChanged={filesChanged}
           />
         ) : undefined
       }

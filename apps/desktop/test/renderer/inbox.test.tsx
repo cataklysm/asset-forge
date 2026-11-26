@@ -180,6 +180,26 @@ it('shared image tags show only tags every eligible file carries; removing one r
   expect(callsOf(api, 'files:removeTagMany')).toEqual([{ fileIds: [c1.id, c2.id], name: 'bark' }]);
 });
 
+it('a late shared-tag answer does not bring back a cleared selection', async () => {
+  const user = userEvent.setup();
+  const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('bark')] });
+  const c2 = fileRecord({ originalName: 'c2.png', tags: [tagOf('bark')] });
+  const answer = deferred<{ items: FileRecord[] }>();
+  install([c1, c2], { 'files:removeTagMany': () => answer.promise });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  const row = within(column()).getByRole('group', { name: 'Shared image tags' });
+  await user.click(within(row).getByRole('button', { name: 'Remove bark' }));
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(screen.queryByRole('complementary')).toBeNull();
+
+  answer.resolve({ items: [c1, c2].map((f) => ({ ...f, tags: [] })) });
+  await waitFor(() => expect(screen.getByText('c1.png')).toBeTruthy());
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(screen.queryByRole('complementary')).toBeNull();
+  expect(screen.queryByText('2 selected')).toBeNull();
+});
+
 it('Add tags in the selection bar focuses the shared tag input', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();
