@@ -73,6 +73,9 @@ function fakePool() {
       await utimes(job.targetPath, seconds, seconds);
       return 'ok';
     },
+    async jpeg() {
+      return null;
+    },
     async measure() {
       return null;
     },
@@ -280,6 +283,7 @@ describe('preview cache', () => {
         return real.run(job);
       },
       measure: (path) => real.measure(path),
+      jpeg: (path) => real.jpeg(path),
       close: () => real.close(),
     };
     const s = service(counting);

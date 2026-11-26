@@ -16,15 +16,18 @@ export interface PreviewJob {
 /** `none` means no preview could be produced for the source. */
 export type PreviewResult = 'ok' | 'none';
 
-export type WorkerJob = { kind: 'render'; job: PreviewJob } | { kind: 'measure'; sourcePath: string };
+export type WorkerJob =
+  | { kind: 'render'; job: PreviewJob }
+  | { kind: 'measure'; sourcePath: string }
+  | { kind: 'jpeg'; sourcePath: string };
 
 export interface WorkerRequest {
   id: number;
   work: WorkerJob;
 }
 
-/** A render answers `PreviewResult`; a measurement answers `ImageSize` or `null`. */
+/** A render answers `PreviewResult`; a measurement answers `ImageSize` or `null`; a jpeg answers bytes or `null`. */
 export interface WorkerResponse {
   id: number;
-  result: PreviewResult | ImageSize | null;
+  result: PreviewResult | ImageSize | Uint8Array | null;
 }

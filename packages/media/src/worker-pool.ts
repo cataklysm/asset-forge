@@ -15,6 +15,8 @@ export interface WorkerPool {
   run(job: PreviewJob): Promise<PreviewResult>;
   /** Image dimensions after EXIF orientation. Never rejects: a crash, a timeout, a closed pool or an unreadable image resolve `null`. */
   measure(sourcePath: string): Promise<ImageSize | null>;
+  /** A JPEG of the image for a vision model. Never rejects: a crash, a timeout, a closed pool, an invalid answer or an unreadable image resolve `null`. */
+  jpeg(sourcePath: string): Promise<Uint8Array | null>;
   /** Terminates all workers; queued and running jobs resolve `none`. */
   close(): Promise<void>;
 }
@@ -22,7 +24,7 @@ export interface WorkerPool {
 export const POOL_SIZE = 2;
 export const JOB_TIMEOUT_MS = 30_000;
 
-type TaskResult = PreviewResult | ImageSize | null;
+type TaskResult = PreviewResult | ImageSize | Uint8Array | null;
 
 interface Task {
   work: WorkerJob;
@@ -56,6 +58,7 @@ function isSize(value: unknown): value is ImageSize {
 /** The result a task accepts from a worker; anything else counts as a failure. */
 function validResult(task: Task, result: unknown): TaskResult {
   if (task.work.kind === 'render') return result === 'ok' ? 'ok' : 'none';
+  if (task.work.kind === 'jpeg') return result instanceof Uint8Array && result.byteLength > 0 ? result : null;
   return isSize(result) ? { width: result.width, height: result.height } : null;
 }
 
@@ -163,6 +166,9 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     },
     measure(sourcePath) {
       return submit({ kind: 'measure', sourcePath }, null) as Promise<ImageSize | null>;
+    },
+    jpeg(sourcePath) {
+      return submit({ kind: 'jpeg', sourcePath }, null) as Promise<Uint8Array | null>;
     },
     async close() {
       closed = true;

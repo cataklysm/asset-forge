@@ -63,3 +63,26 @@ export async function measureImage(
     return null;
   }
 }
+
+export const MODEL_JPEG_EDGE = 1024;
+export const MODEL_JPEG_QUALITY = 85;
+
+/** A JPEG of the image for a vision model; null when the source cannot be decoded within the preview limits. Never throws. */
+export async function modelJpeg(
+  sourcePath: string,
+  limits: PreviewLimits = DEFAULT_LIMITS,
+): Promise<Uint8Array | null> {
+  try {
+    const info = await stat(sourcePath);
+    if (!info.isFile() || info.size > limits.maxBytes) return null;
+    const bytes = await sharp(sourcePath, { limitInputPixels: limits.maxPixels, animated: false, pages: 1 })
+      .rotate()
+      .resize({ width: MODEL_JPEG_EDGE, height: MODEL_JPEG_EDGE, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: MODEL_JPEG_QUALITY })
+      .toBuffer();
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  } catch {
+    return null;
+  }
+}

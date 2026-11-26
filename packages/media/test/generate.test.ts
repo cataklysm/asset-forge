@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_LIMITS, generatePreview, measureImage } from '../src/generate.js';
+import { DEFAULT_LIMITS, generatePreview, measureImage, MODEL_JPEG_EDGE, MODEL_JPEG_QUALITY, modelJpeg } from '../src/generate.js';
 
 let dir: string;
 
@@ -259,5 +259,72 @@ describe('generatePreview as lossless png', () => {
     await solid(30, 20).png().toFile(sourcePath);
     expect(await generatePreview({ sourcePath, targetPath, longestEdge: 256, format: 'webp' })).toBe('ok');
     expect((await meta(targetPath)).format).toBe('webp');
+  });
+});
+
+describe('modelJpeg', () => {
+  it('uses an edge of 1024 and a quality of 85', () => {
+    expect(MODEL_JPEG_EDGE).toBe(1024);
+    expect(MODEL_JPEG_QUALITY).toBe(85);
+  });
+
+  it('bounds the longest edge and starts with the JPEG signature', async () => {
+    const sourcePath = join(dir, 'a.png');
+    await solid(3000, 2000).png().toFile(sourcePath);
+    const bytes = await modelJpeg(sourcePath);
+    expect(bytes).not.toBeNull();
+    expect([bytes?.[0], bytes?.[1]]).toEqual([0xff, 0xd8]);
+    expect(await sharp(bytes as Uint8Array).metadata()).toMatchObject({ format: 'jpeg', width: 1024, height: 683 });
+  });
+
+  it('never upscales', async () => {
+    const sourcePath = join(dir, 'a.png');
+    await solid(200, 100).png().toFile(sourcePath);
+    expect(await sharp((await modelJpeg(sourcePath)) as Uint8Array).metadata()).toMatchObject({
+      width: 200,
+      height: 100,
+    });
+  });
+
+  it('applies EXIF orientation', async () => {
+    const sourcePath = join(dir, 'a.jpg');
+    await solid(40, 20).jpeg().withMetadata({ orientation: 6 }).toFile(sourcePath);
+    expect(await sharp((await modelJpeg(sourcePath)) as Uint8Array).metadata()).toMatchObject({
+      width: 20,
+      height: 40,
+    });
+  });
+
+  it('flattens transparency onto white', async () => {
+    const sourcePath = join(dir, 'a.png');
+    await sharp({ create: { width: 16, height: 16, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .png()
+      .toFile(sourcePath);
+    const { data } = await sharp((await modelJpeg(sourcePath)) as Uint8Array)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect([data[0], data[1], data[2]].every((value) => (value ?? 0) >= 250)).toBe(true);
+  });
+
+  it('yields null for a non-image, a missing path and a directory', async () => {
+    const text = join(dir, 'a.png');
+    await writeFile(text, 'not an image');
+    expect(await modelJpeg(text)).toBeNull();
+    expect(await modelJpeg(join(dir, 'missing.png'))).toBeNull();
+    expect(await modelJpeg(dir)).toBeNull();
+  });
+
+  it('yields null above the pixel or byte limit', async () => {
+    const sourcePath = join(dir, 'a.png');
+    await solid(20, 20).png().toFile(sourcePath);
+    expect(await modelJpeg(sourcePath, { maxPixels: 100, maxBytes: 1 << 20 })).toBeNull();
+    expect(await modelJpeg(sourcePath, { maxPixels: 1_000_000, maxBytes: 10 })).toBeNull();
+  });
+
+  it('writes nothing to disk', async () => {
+    const sourcePath = join(dir, 'a.png');
+    await solid(20, 20).png().toFile(sourcePath);
+    await modelJpeg(sourcePath);
+    expect(await readdir(dir)).toEqual(['a.png']);
   });
 });

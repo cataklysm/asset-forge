@@ -162,6 +162,30 @@ describe('createWorkerPool', () => {
     expect(size).toEqual({ width: 1, height: 1 });
   });
 
+  it('renders a jpeg through the real worker', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'assetforge-pool-'));
+    dirs.push(dir);
+    const sourcePath = join(dir, 'a.png');
+    await sharp({ create: { width: 300, height: 200, channels: 3, background: '#38a' } })
+      .png()
+      .toFile(sourcePath);
+    const p = pool({ workerUrl: TEST_WORKER_URL, size: 1, timeoutMs: 30_000 });
+    const bytes = await p.jpeg(sourcePath);
+    expect(await sharp(bytes as Uint8Array).metadata()).toMatchObject({ format: 'jpeg', width: 300, height: 200 });
+    expect(await p.jpeg(join(dir, 'missing.png'))).toBeNull();
+  });
+
+  it('jpeg resolves null after a crash, on an invalid answer, on a timeout and on a closed pool', async () => {
+    const crashing = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    expect(await crashing.jpeg('a-crash')).toBeNull();
+    // The test worker answers 'ok', which is no byte array.
+    expect(await crashing.jpeg('b')).toBeNull();
+    const hanging = pool({ workerUrl: hangUrl, size: 1, timeoutMs: 200 });
+    expect(await hanging.jpeg('a-hang')).toBeNull();
+    await crashing.close();
+    expect(await crashing.jpeg('c')).toBeNull();
+  });
+
   it.each([0, -1, 1.5, Number.NaN])('rejects a pool size of %s at once', (size) => {
     expect(() => createWorkerPool({ workerUrl: crashUrl, size, timeoutMs: 1_000 })).toThrow(RangeError);
   });
