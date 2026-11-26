@@ -74,21 +74,33 @@ The prompts do not live in the workspace database: they describe how the owner w
 
 `vision.analyze_file` gets payload version 3: `{ version: 3, model, mode, prompt: { name, text, maxTags } }`. The prompt is copied into the payload when the job is queued, so later edits or a deletion do not change or break a queued job, and the handler needs no access to the app-level store (author's call). Version 1 and 2 payloads run with the built-in tagging text and the limit 20, as they were queued.
 
-The copy costs up to 2000 characters per job. Job lists must not carry the prompt text to the renderer; a job view may carry the prompt's name.
+The copy costs up to 2000 characters per job. Job views do not carry the prompt to the renderer.
+
+One active job per file stays the rule (dedupe key `vision.analyze_file:<fileId>`). A file already queued with another prompt counts as `alreadyQueued` and keeps the prompt it was queued with; the queued job is not rewritten (author's call). The recorded prompt name makes visible which prompt a result came from.
+
+### Recorded prompt name
+
+Migration `0010` adds a nullable `prompt_name` to `file_analysis` and `file_analysis_proposal`; the handler writes the payload's prompt name with the result, and rows from before stay `null`. `ProposalViewSchema` gains `promptName: string | null`. The name is a record of what was used, not a reference: renaming or deleting the prompt later does not change it (author's call).
+
+### Relation to the prompt library
+
+The prompt library of ReadMe §7.1 (phase 5: versioned workspace entities with variables, for generation) is a different thing. These are app-level analysis instructions. To keep the names apart, everything here is called "analysis prompt": the type `AnalysisPrompt`, the channels `analysisPrompts:*`, the file `analysis-prompts.json`. The ReadMe gets a sentence telling the two apart (author's call).
 
 ### IPC (`packages/contracts`)
 
 Channels that work without a workspace, like the settings channels:
 
-- `prompts:list` → `{ prompts, lastUsed: { tagging, imagePrompt } }`.
-- `prompts:save` `{ id?, purpose, name, text, maxTags? }` → the saved prompt. Without `id` it creates one. Refusals: `invalid_operation` for a name already used in that purpose or the limit of 50 prompts, `not_found` for an unknown `id`. The purpose of an existing prompt cannot change.
-- `prompts:delete` `{ id }` → `invalid_operation` for the last prompt of a purpose, `not_found` for an unknown one.
-- `prompts:reset` `{ id }` → the prompt with the built-in text (and limit) of its purpose; the name stays.
+- `analysisPrompts:list` → `{ prompts, lastUsed: { tagging, imagePrompt } }`.
+- `analysisPrompts:save` `{ id?, purpose, name, text, maxTags? }` → the saved prompt. Without `id` it creates one. Refusals: `invalid_operation` for a name already used in that purpose or the limit of 50 prompts, `not_found` for an unknown `id`. The purpose of an existing prompt cannot change.
+- `analysisPrompts:delete` `{ id }` → `invalid_operation` for the last prompt of a purpose, `not_found` for an unknown one.
+- `analysisPrompts:reset` `{ id }` → the prompt with the built-in text (and limit) of its purpose; the name stays.
 
 Changed channels:
 
-- `analysis:enqueue` gains `promptId`. The main process resolves it to a `tagging` prompt, hands the composed parts to the core use case, and after a successful enqueue stores it as used last. An unknown ID or one of the wrong purpose answers `not_found`.
-- `analysis:describe` gains `promptId` (an `image_prompt` prompt), with the same rules.
+- `analysis:enqueue` gains `promptId`. The main process resolves it to a `tagging` prompt and hands name, text and limit to the core use case. An unknown ID or one of the wrong purpose is rejected with `not_found` before anything is queued.
+- `analysis:describe` gains `promptId` (an `image_prompt` prompt). An unknown or wrong-purpose ID is a rejected call with `not_found`, not a `{ ok: false }` result; `DescribeResult` is unchanged.
+
+**Used last** (author's call): the prompt is stored as used last once the request was accepted — for enqueue when the use case returned, whatever its counts (also with nothing newly queued); for describe when the request was started, whatever its outcome, but not when it answered `busy`. Writing it is best effort: a failed write is logged with one fixed warning and never turns an accepted analysis into an error.
 
 ### Core
 
@@ -120,11 +132,11 @@ Analyse 37 files
   [ ] Analyse again                         [ Cancel ] [ Start ]
 ```
 
-A proposal and the Jobs screen show the name of the prompt a job ran with where they show the model.
+The result dialog shows the name of the prompt a proposal was made with next to its model (see "Recorded prompt name"). The Jobs screen does not change: it shows no model today and gets no prompt column (author's call).
 
 ### Error handling
 
-Fixed messages only. A prompt file that cannot be read or written answers the settings channels with the existing storage-style error of the provider settings; the dialogs then cannot start, in the same way as a failed settings load (`provider-gate.ts` treats it as its own state).
+Fixed messages only. A prompt file that cannot be read or written (other than the corrupt case above) fails the `analysisPrompts:*` call like a failed provider-settings call does today, as `internal_error`. A failed `analysisPrompts:list` blocks the start in the dialogs as its own state, in the way `provider-gate.ts` treats a failed settings load.
 
 ### Documentation
 
@@ -134,7 +146,8 @@ ReadMe: the analysis section (prompts, composition, tag limit, fingerprint rule)
 
 - Contracts and core: prompt validation (lengths, limit range, unique names regardless of case, last prompt not deletable, 50 per purpose); the composed tagging text for a prompt; the cut at `maxTags` for 1, 15 and 50; payload v1 and v2 still run with the built-in text and limit 20; a job queued with a prompt that is edited or deleted afterwards runs with the copied text.
 - Fingerprint: a file analysed with prompt A is skipped for prompt B and for an edited A without `force`, and redone with `force`.
-- Main process: seeding on first start and after a purpose lost its prompts; a corrupt file is set aside and reseeded; last used is stored after a successful enqueue and describe, not after a refused one; an unknown or wrong-purpose `promptId` answers `not_found`; the channels work without an open workspace.
+- Persistence: migration `0010` on a database with existing analysis and proposal rows; the prompt name is written with an analysis and a proposal and read back in the proposal view.
+- Main process: seeding on first start and after a purpose lost its prompts; a corrupt file is set aside and reseeded; last used is stored after an accepted enqueue (also with nothing newly queued) and a started describe, not after `not_found` or `busy`; a failed last-used write does not fail the call; an unknown or wrong-purpose `promptId` is rejected with `not_found` and queues nothing; a file already queued keeps its prompt; the channels work without an open workspace.
 - Renderer (jsdom): the settings section (create, edit, save, reset, delete, the refusals); the three dialogs preselect the prompt used last and send the chosen `promptId`; nothing but names in the layout.
 
 ## Left to the builder
