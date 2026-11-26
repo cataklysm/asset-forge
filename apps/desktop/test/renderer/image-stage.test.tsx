@@ -7,6 +7,7 @@ import { ViewerToolbar } from '../../src/renderer/src/components/ViewerToolbar';
 import { fileRecord } from './fixtures';
 
 const STAGE = { width: 1000, height: 800 };
+let stageSize: { width: number; height: number } = STAGE;
 
 const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')!;
 const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')!;
@@ -16,20 +17,23 @@ function setDpr(value: number) {
 }
 
 beforeEach(() => {
-  // The stage measures 1000 × 800; every other element keeps the size from setup.ts.
-  const isStage = (element: HTMLElement) => element.getAttribute('aria-label') === 'Image';
+  // The stage and the frame around it measure 1000 × 800 (unless a test sets `stageSize`); every
+  // other element keeps the size from setup.ts.
+  const isImage = (element: Element | null) => element?.getAttribute('aria-label') === 'Image';
+  const isStage = (element: HTMLElement) => isImage(element) || isImage(element.firstElementChild);
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
     get(this: HTMLElement) {
-      return isStage(this) ? STAGE.width : 1280;
+      return isStage(this) ? stageSize.width : 1280;
     },
   });
   Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
     configurable: true,
     get(this: HTMLElement) {
-      return isStage(this) ? STAGE.height : 800;
+      return isStage(this) ? stageSize.height : 800;
     },
   });
+  stageSize = STAGE;
   setDpr(1);
 });
 
@@ -276,4 +280,52 @@ it('another file resets zoom and rotation and mounts exactly one large image', (
   expect(box().style.width).toBe('1000px');
   const larges = images().filter((img) => img.src.startsWith('assetforge-media://original/'));
   expect(larges.map((img) => img.src)).toEqual([`assetforge-media://original/${second.id}`]);
+});
+
+const overflow = () => stage().className.split(/\s+/).filter((c) => c.startsWith('overflow-'));
+
+it('Fit never makes the box larger than the stage with a fractional devicePixelRatio', () => {
+  const cases = [
+    { dpr: 1.5, stage: { width: 1001, height: 800 }, image: [4000, 2000] },
+    { dpr: 1.5, stage: { width: 1001, height: 701 }, image: [1000, 4000] },
+    { dpr: 1.5, stage: { width: 1001, height: 667 }, image: [3001, 2000] },
+    { dpr: 1.25, stage: { width: 1001, height: 601 }, image: [5003, 3001] },
+  ] as const;
+  for (const { dpr, stage: size, image } of cases) {
+    setDpr(dpr);
+    stageSize = size;
+    for (const rotate of [false, true]) {
+      const file = png(image[0], image[1]);
+      const { unmount } = render(<Viewer file={file} />);
+      if (rotate) fireEvent.click(button('Rotate'));
+      expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
+      const width = px(box().style.width);
+      const height = px(box().style.height);
+      expect(width).toBeLessThanOrEqual(size.width);
+      expect(height).toBeLessThanOrEqual(size.height);
+      expect(px(box().style.left) + width).toBeLessThanOrEqual(size.width);
+      expect(px(box().style.top) + height).toBeLessThanOrEqual(size.height);
+      unmount();
+    }
+  }
+});
+
+it('Fit mode never scrolls; a percentage larger than the stage does', () => {
+  setDpr(1.5);
+  stageSize = { width: 1001, height: 800 };
+  render(<Viewer file={png(4000, 2000)} />);
+  expect(overflow()).toEqual(['overflow-hidden']);
+  // The content is never forced larger than the stage's client area.
+  const content = box().parentElement!;
+  expect(content.style.minWidth).toBe('100%');
+  expect(content.style.minHeight).toBe('100%');
+  expect(px(content.style.width)).toBeLessThanOrEqual(stageSize.width);
+  expect(px(content.style.height)).toBeLessThanOrEqual(stageSize.height);
+
+  fireEvent.click(button('100%'));
+  expect(overflow()).toEqual(['overflow-auto']);
+  expect(px(content.style.width)).toBeGreaterThan(stageSize.width);
+
+  fireEvent.click(button('Fit'));
+  expect(overflow()).toEqual(['overflow-hidden']);
 });

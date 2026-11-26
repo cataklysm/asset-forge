@@ -56,8 +56,13 @@ interface Anchor extends Point {
 }
 
 function Stage({ file, onControls }: Props) {
+  // The frame's size is the space the stage has; it does not depend on the stage's scrollbars, so
+  // fitting into it cannot feed back into itself. The stage's own client area (smaller by the
+  // scrollbars a percentage may need) only centres the box.
+  const frameRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const stage = useElementSize(stageRef) ?? EMPTY;
+  const frame = useElementSize(frameRef) ?? EMPTY;
+  const client = useElementSize(stageRef) ?? EMPTY;
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fit' });
   const [rotation, setRotation] = useState<Rotation>(0);
   const [natural, setNatural] = useState<Size>(EMPTY);
@@ -71,15 +76,22 @@ function Stage({ file, onControls }: Props) {
   const image: Size = large !== null ? { width: file.width ?? 0, height: file.height ?? 0 } : natural;
   const dpr = window.devicePixelRatio || 1;
   // Sizes and offsets lie on the device-pixel grid: a fractional one would make the browser
-  // resample, and with `pixelated` it doubles or drops a row or column at 100 %.
-  const snap = (value: number) => Math.round(value * dpr) / dpr;
-  const exact = effectivePercent(zoom, image, stage, dpr, rotation);
+  // resample, and with `pixelated` it doubles or drops a row or column at 100 %. They are rounded
+  // down, so a box fitted into the stage never ends up larger than it (the epsilon keeps exact
+  // image-pixel sizes such as 1001 device pixels at 100 % from dropping a pixel to float error).
+  const snap = (value: number) => Math.floor(value * dpr + 1e-6) / dpr;
+  const fit = zoom.mode === 'fit';
+  const exact = effectivePercent(zoom, image, frame, dpr, rotation);
   const unsnapped = cssSize(image, exact, dpr);
   const element: Size = { width: snap(unsnapped.width), height: snap(unsnapped.height) };
   const box = rotated(element, rotation);
-  const content: Size = { width: Math.max(stage.width, box.width), height: Math.max(stage.height, box.height) };
+  // Fit never scrolls, so the stage's client area is the frame; a percentage centres in the client area.
+  const stage = fit ? frame : client;
   // The box is centred in a stage larger than itself.
-  const offset: Point = { x: snap((content.width - box.width) / 2), y: snap((content.height - box.height) / 2) };
+  const offset: Point = {
+    x: snap(Math.max(0, stage.width - box.width) / 2),
+    y: snap(Math.max(0, stage.height - box.height) / 2),
+  };
   const marker =
     source === 'reduced' ? `Reduced from ${file.width} × ${file.height} px` : large === null ? 'Preview only' : null;
 
@@ -194,13 +206,13 @@ function Stage({ file, onControls }: Props) {
   const layerClass = 'absolute max-w-none select-none';
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={frameRef} className="relative h-full w-full">
       <div
         ref={stageRef}
         role="region"
         aria-label="Image"
         tabIndex={0}
-        className={`h-full w-full cursor-grab select-none overflow-auto rounded-control bg-raised active:cursor-grabbing ${FOCUS}`}
+        className={`h-full w-full cursor-grab select-none ${fit ? 'overflow-hidden' : 'overflow-auto'} bg-raised active:cursor-grabbing ${FOCUS}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
@@ -209,7 +221,11 @@ function Stage({ file, onControls }: Props) {
           if (canActual) zoomTo(zoom.mode === 'fit' ? { mode: 'percent', percent: 100 } : { mode: 'fit' }, pointerOf(event));
         }}
       >
-        <div className="relative" style={{ width: `${content.width}px`, height: `${content.height}px` }}>
+        {/* As large as the box, at least the client area: it overflows only when the box really does. */}
+        <div
+          className="relative"
+          style={{ minWidth: '100%', minHeight: '100%', width: `${box.width}px`, height: `${box.height}px` }}
+        >
           <div
             className="absolute"
             style={{ left: `${offset.x}px`, top: `${offset.y}px`, width: `${box.width}px`, height: `${box.height}px` }}
