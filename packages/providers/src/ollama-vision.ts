@@ -13,6 +13,12 @@ const MAX_LISTED_MODELS = 100;
 const SHOW_CONCURRENCY = 4;
 const SHOW_TIMEOUT_MS = 10_000;
 
+/** Upper bound for the whole `listModels` call (`/api/tags` plus every `/api/show`). */
+export const LIST_MODELS_TIMEOUT_MS = 10_000;
+
+/** Largest delay `setTimeout` accepts; the deadline of `listModels` is the real bound of its `/api/tags` call. */
+const MAX_TIMER_MS = 2_147_483_647;
+
 class ResponseTooLarge extends Error {}
 
 /** Releases a body that will not be read. Failures are irrelevant: the answer is already decided. */
@@ -52,6 +58,8 @@ export interface OllamaVisionOptions {
   /** The API key in force at call time; null for none. */
   apiKey?: () => string | null;
   timeoutMs?: number;
+  /** Bound for the whole `listModels` call; default `min(timeoutMs, LIST_MODELS_TIMEOUT_MS)`. */
+  listTimeoutMs?: number;
   fetch?: typeof fetch;
   /** Told the code and HTTP status of every failed call. */
   onFailure?: (code: JobErrorCode, status: number | null) => void;
@@ -73,6 +81,7 @@ interface Request {
 export function createOllamaVision(options: OllamaVisionOptions): VisionProvider {
   const base = options.baseUrl.replace(/\/+$/, '');
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const listTimeoutMs = options.listTimeoutMs ?? Math.min(timeoutMs, LIST_MODELS_TIMEOUT_MS);
   const fetchImpl = options.fetch ?? fetch;
 
   /**
@@ -229,27 +238,42 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
       return chat({ image, prompt, model, signal });
     },
 
-    async listModels(signal) {
-      const names = await request({ path: '/api/tags', signal, timeoutMs }, (body) => {
-        const models = (body as { models?: unknown } | null)?.models;
-        if (!Array.isArray(models)) throw new TypeError('no model list');
-        return models
-          .map((entry) => (entry as { name?: unknown } | null)?.name)
-          .filter((name): name is string => ModelNameSchema.safeParse(name).success)
-          .slice(0, MAX_LISTED_MODELS);
-      });
+    async listModels(callerSignal) {
+      callerSignal.throwIfAborted();
+      const deadline = new AbortController();
+      const timer = setTimeout(() => deadline.abort(), listTimeoutMs);
+      const signal = AbortSignal.any([callerSignal, deadline.signal]);
+      try {
+        const names = await request({ path: '/api/tags', signal, timeoutMs: MAX_TIMER_MS }, (body) => {
+          const models = (body as { models?: unknown } | null)?.models;
+          if (!Array.isArray(models)) throw new TypeError('no model list');
+          return models
+            .map((entry) => (entry as { name?: unknown } | null)?.name)
+            .filter((name): name is string => ModelNameSchema.safeParse(name).success)
+            .slice(0, MAX_LISTED_MODELS);
+        });
 
-      const vision: (boolean | null)[] = new Array<boolean | null>(names.length).fill(null);
-      let next = 0;
-      const worker = async (): Promise<void> => {
-        while (next < names.length) {
-          const index = next;
-          next += 1;
-          vision[index] = await hasVision(names[index]!, signal);
+        const vision: (boolean | null)[] = new Array<boolean | null>(names.length).fill(null);
+        let next = 0;
+        const worker = async (): Promise<void> => {
+          while (next < names.length) {
+            const index = next;
+            next += 1;
+            vision[index] = await hasVision(names[index]!, signal);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(SHOW_CONCURRENCY, names.length) }, worker));
+        return names.map((name, index) => ({ name, vision: vision[index] ?? null }));
+      } catch (error) {
+        // A caller abort stays as it is; an expired deadline is one timeout, reported once.
+        if (!callerSignal.aborted && deadline.signal.aborted) {
+          options.onFailure?.('provider_timeout', null);
+          throw new JobError('provider_timeout');
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(SHOW_CONCURRENCY, names.length) }, worker));
-      return names.map((name, index) => ({ name, vision: vision[index] ?? null }));
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }
