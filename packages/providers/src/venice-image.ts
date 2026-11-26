@@ -13,6 +13,9 @@ const VIOLATION_HEADER = 'x-venice-is-content-violation';
 /** Codes that mean the connection was never made, so nothing was sent and nothing can have been charged. */
 const NOTHING_SENT = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 
+/** The answer types accepted from an edit or upscale; anything else is an unusable answer. */
+const ANSWER_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
 const EXTENSIONS: Record<ImageInput['mimeType'], string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
 export interface VeniceImageOptions {
@@ -162,16 +165,23 @@ export function createVeniceImage(options: VeniceImageOptions): ImageProvider {
   const base = options.baseUrl.replace(/\/+$/, '');
   const fetchImpl = options.fetch ?? fetch;
 
-  /** Headers with the bearer key read now; a key that cannot be sent cannot authenticate. */
-  function headers(): Headers | null {
-    const key = options.apiKey();
+  /**
+   * Headers with the bearer key read now, or the code of the failure: a key supplier that throws is
+   * `internal_error`, a key that cannot be sent cannot authenticate. Neither error is kept: both may quote the key.
+   */
+  function headers(): Headers | JobErrorCode {
+    let key: string | null;
+    try {
+      key = options.apiKey();
+    } catch {
+      return 'internal_error';
+    }
     try {
       const result = new Headers();
       if (key) result.set('authorization', `Bearer ${key}`);
       return result;
     } catch {
-      // The header error quotes the value, so it is never kept.
-      return null;
+      return 'provider_unauthorized';
     }
   }
 
@@ -198,7 +208,7 @@ export function createVeniceImage(options: VeniceImageOptions): ImageProvider {
 
     try {
       const requestHeaders = headers();
-      if (requestHeaders === null) throw failure('provider_unauthorized');
+      if (typeof requestHeaders === 'string') throw failure(requestHeaders);
 
       let response: Response;
       try {
@@ -216,7 +226,7 @@ export function createVeniceImage(options: VeniceImageOptions): ImageProvider {
       }
       const length = declaredLength(response);
       const mimeType = (response.headers.get('content-type') ?? 'image/png').split(';')[0]!.trim().toLowerCase();
-      if (!response.body || (length !== null && length > IMAGE_ANSWER_MAX_BYTES) || !mimeType.startsWith('image/')) {
+      if (!response.body || (length !== null && length > IMAGE_ANSWER_MAX_BYTES) || !ANSWER_TYPES.has(mimeType)) {
         await discard(response);
         throw failure('provider_outcome_unknown');
       }
@@ -284,7 +294,7 @@ export function createVeniceImage(options: VeniceImageOptions): ImageProvider {
 
       try {
         const requestHeaders = headers();
-        if (requestHeaders === null) throw failure('provider_unauthorized');
+        if (typeof requestHeaders === 'string') throw failure(requestHeaders);
         let response: Response;
         try {
           response = await fetchImpl(`${base}/models?type=inpaint`, { method: 'GET', headers: requestHeaders, signal, redirect: 'manual' });

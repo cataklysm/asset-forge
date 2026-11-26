@@ -435,14 +435,19 @@ describe('Venice image adapter, error mapping', () => {
   it('cuts an answer streaming past the cap with provider_outcome_unknown', async () => {
     const chunk = new Uint8Array(1024 ** 2);
     let sent = 0;
+    let cancelled = false;
     const { adapter, failures } = stubbed(
       () =>
         new Response(
           new ReadableStream<Uint8Array>({
             pull(controller) {
-              if (sent >= 101) return controller.close();
+              // Far more than the cap, so only a cancel can end the source early.
+              if (sent >= 200) return controller.close();
               sent += 1;
               controller.enqueue(chunk);
+            },
+            cancel() {
+              cancelled = true;
             },
           }),
           { headers: { 'content-type': 'image/png' } },
@@ -457,8 +462,58 @@ describe('Venice image adapter, error mapping', () => {
     );
     expect((error as JobError).code).toBe('provider_outcome_unknown');
     expect(received).toBeLessThanOrEqual(IMAGE_ANSWER_MAX_BYTES);
-    expect(sent).toBeLessThan(101 + 1);
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+    expect(sent).toBeLessThan(200);
     expect(failures).toEqual([['provider_outcome_unknown', 200]]);
+  });
+
+  it.each(['image/svg+xml', 'image/gif', 'text/html'])('maps a 200 answer of type %s to provider_outcome_unknown', async (type) => {
+    const { adapter, failures } = stubbed(() => new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': type } }));
+    expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
+    expect(failures).toEqual([['provider_outcome_unknown', 200]]);
+  });
+
+  it.each([
+    ['image/png', 'image/png'],
+    ['image/jpeg', 'image/jpeg'],
+    ['image/webp; charset=binary', 'image/webp'],
+    [null, 'image/png'],
+  ])('accepts a 200 answer of type %s', async (type, mimeType) => {
+    const { adapter } = stubbed(() => {
+      const response = new Response(new Uint8Array(png(1, 1)));
+      if (type === null) response.headers.delete('content-type');
+      else response.headers.set('content-type', type);
+      return response;
+    });
+    const result = await adapter.upscaleImage({ image: input, scale: 2, signal: signal() });
+    expect(result.mimeType).toBe(mimeType);
+    await bytesOf(result.stream);
+  });
+
+  it('maps a throwing key supplier to internal_error without a cause and sends nothing', async () => {
+    const calls: unknown[] = [];
+    const { adapter, failures } = stubbed(() => status(200), {
+      apiKey: () => {
+        throw new Error(`store failed ${KEY}`);
+      },
+      fetch: async () => {
+        calls.push(1);
+        return status(200);
+      },
+    });
+    for (const pending of [edit(adapter), adapter.upscaleImage({ image: input, scale: 2, signal: signal() }), adapter.listEditModels(signal())]) {
+      const error = (await failureOf(pending)) as JobError;
+      expect(error).toBeInstanceOf(JobError);
+      expect(error.code).toBe('internal_error');
+      expect(error.cause).toBeUndefined();
+      expect(error.message).not.toContain(KEY);
+    }
+    expect(calls).toEqual([]);
+    expect(failures).toEqual([
+      ['internal_error', null],
+      ['internal_error', null],
+      ['internal_error', null],
+    ]);
   });
 
   it('refuses a declared length past the cap before reading', async () => {
