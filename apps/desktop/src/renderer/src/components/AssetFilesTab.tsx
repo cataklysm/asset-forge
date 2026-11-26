@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react';
 import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from '@assetforge/contracts';
-import { analysableFiles, NONE_ANALYSABLE, startAnalysis } from '../analysis';
+import { analysableFiles, enqueueTitle, singleAnalysable } from '../analysis';
 import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
-import { useJobs } from '../jobs-context';
 import { label } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, type AssetView, type FileFilters } from '../list-state';
 import {
@@ -18,6 +17,7 @@ import {
   type FileSelection,
 } from '../selection';
 import { ALERT, BUTTON, SELECT } from '../ui';
+import { SelectionAnalysisButtons, useAnalysisDialogs } from './AnalysisDialogs';
 import { Dialog } from './Dialog';
 import { FileBrowser } from './FileBrowser';
 import { FileDetailDialog } from './FileDetailDialog';
@@ -56,7 +56,11 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const containerRef = useRef<HTMLDivElement>(null);
   const detailDialog = useFileDialog(containerRef);
   const detail = detailDialog.file;
-  const { refresh: refreshJobs } = useJobs();
+  const analysis = useAnalysisDialogs({
+    onStarted: (started) => setResult({ title: enqueueTitle(started), failures: [] }),
+    onChanged: onFilesChanged,
+    onLeave: () => detailDialog.close(),
+  });
   // Synchronous guards: a second activation before the re-render must not send a second request.
   const acting = useRef(false);
   const batching = useRef(false);
@@ -167,16 +171,12 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       onFilesChanged();
     });
 
-  /** Enqueues an analysis of `files`; the outcome shows in the result strip, the selection is kept. */
-  const analyse = (files: readonly FileRecord[]) =>
-    batch(async () => {
-      try {
-        setResult(await startAnalysis(files));
-        refreshJobs();
-      } catch (e) {
-        setError(describeError(e));
-      }
-    });
+  const fileActions = (file: FileRecord) => ({
+    onAnalyse: () => analysis.analyseFiles([file]),
+    onReviewTags: () => analysis.review(file),
+    onImageToPrompt: () => analysis.prompt(file),
+    analysisBlocked: analysis.blocked,
+  });
 
   const coverOf = (file: FileRecord) => ({
     isEffective: file.id === asset.coverFileId,
@@ -185,6 +185,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   const noneEligible = eligible.length === 0;
   const toAnalyse = analysableFiles(selection);
+  const single = singleAnalysable(selection);
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 pt-4">
@@ -207,15 +208,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         >
           Add tags
         </button>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={toAnalyse.length === 0 || batchBusy}
-          title={toAnalyse.length === 0 ? NONE_ANALYSABLE : undefined}
-          onClick={() => void analyse(toAnalyse)}
-        >
-          Analyse
-        </button>
+        <SelectionAnalysisButtons analysis={analysis} files={toAnalyse} single={single} />
         <button
           type="button"
           className={BUTTON}
@@ -256,10 +249,14 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
             onDetails: () => openDetail(file),
             onSetCover: (fileId) => reported(() => setCover(fileId))(),
             onDetach: reported(() => detach(file)),
-            onAnalyse: () => void analyse([file]),
+            ...fileActions(file),
             onError: setError,
           })
         }
+        analysis={{
+          onAnalyseAll: (filter) => analysis.start({ kind: 'fileFilter', filter }),
+          blocked: analysis.blocked,
+        }}
         emptyText="No files"
         onTotal={(total) => {
           if (total !== null && unfiltered) onCountChange(total);
@@ -277,7 +274,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                   onDetails: () => {},
                   onSetCover: setCover,
                   onDetach: () => detach(detail),
-                  onAnalyse: () => void analyse([detail]),
+                  ...fileActions(detail),
                   onError: setError,
                 }}
                 roleControl={<FileRoleSelect file={detail} onChanged={fileChanged} fullWidth />}
@@ -289,6 +286,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
             ),
         }}
       />
+      {analysis.dialogs}
 
       <Dialog open={dialog === 'tags'} title="Add tags" onClose={() => setDialog(null)}>
         <div className="space-y-4">

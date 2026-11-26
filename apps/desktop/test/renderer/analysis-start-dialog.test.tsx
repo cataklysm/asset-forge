@@ -12,6 +12,7 @@ import type {
 import { expect, it, vi } from 'vitest';
 import { AnalysisStartDialog } from '../../src/renderer/src/components/AnalysisStartDialog';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
+import { SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -263,6 +264,59 @@ it('offers no settings button when the provider is configured with a vision mode
   renderDialog();
   await previewShown();
   expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+});
+
+it('offers the settings when the model list call itself fails and no model is stored', async () => {
+  install(
+    {
+      'settings:listVisionModels': () => {
+        throw fakeError('internal_error');
+      },
+    },
+    { ...CONFIGURED, taggingModel: null },
+  );
+  renderDialog();
+  expect(await screen.findByRole('button', { name: 'Settings' })).toBeTruthy();
+  expect(startButton().disabled).toBe(true);
+});
+
+it('offers no settings next to a Start that works, even when the model list failed', async () => {
+  install({}, CONFIGURED, { ok: false, code: 'provider_unreachable' });
+  renderDialog();
+  await previewShown();
+  expect(startButton().disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+});
+
+it('while the settings load Start says so, and a failed load is not "not configured"', async () => {
+  const settings = deferred<VisionSettingsView>();
+  install({ 'settings:getVision': () => settings.promise });
+  renderDialog();
+  await waitFor(() => expect(startButton().title).toBe(START_LOADING));
+  await act(async () => settings.reject(fakeError('internal_error')));
+  await waitFor(() => expect(startButton().title).toBe(SETTINGS_LOAD_FAILED));
+  expect(startButton().disabled).toBe(true);
+});
+
+it('a failed start keeps the retry of a preview that failed afterwards', async () => {
+  let previewFails = false;
+  install({
+    'analysis:enqueue': () => {
+      throw fakeError('invalid_operation');
+    },
+    'analysis:preview': () => {
+      if (previewFails) throw fakeError('not_found');
+      return PREVIEW;
+    },
+  });
+  renderDialog();
+  await previewShown();
+  await userEvent.click(startButton());
+  await screen.findByRole('alert');
+  previewFails = true;
+  await userEvent.selectOptions(modelSelect(), 'vision-a');
+  expect(await screen.findByRole('button', { name: 'Count again' })).toBeTruthy();
+  expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['invalid_operation', 'This item no longer exists.']);
 });
 
 it('reopening starts again from the tagging default with Analyse again off', async () => {

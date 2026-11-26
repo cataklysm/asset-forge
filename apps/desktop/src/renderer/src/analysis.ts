@@ -1,6 +1,5 @@
-import type { FileRecord } from '@assetforge/contracts';
-import { call } from './api';
-import type { ResultFailure } from './components/ResultStrip';
+import type { EnqueueAnalysisResult, FileRecord } from '@assetforge/contracts';
+import { SKIP_LABELS } from './labels';
 import type { FileSelection } from './selection';
 
 /** Tooltip of the Analyse button when the selection holds no analysable image. */
@@ -16,18 +15,21 @@ export function analysableFiles(sel: FileSelection): FileRecord[] {
   return [...sel.selected.values()].filter(analysable);
 }
 
-/** Stand-in model name until the renderer offers the model choice. */
-// phase 4b stub: Task 12 (removed with the model choice)
-export const TEMP_MODEL = 'unset';
+/** The only selected file when the selection is exactly one analysable image, else null. */
+export function singleAnalysable(sel: FileSelection): FileRecord | null {
+  if (sel.selected.size !== 1) return null;
+  const [file] = sel.selected.values();
+  return file !== undefined && analysable(file) ? file : null;
+}
 
-/** Calls analysis:enqueue for the files in apply mode; the title is "<n> queued, <m> skipped". */
-export async function startAnalysis(files: readonly FileRecord[]): Promise<{ title: string; failures: ResultFailure[] }> {
-  const { enqueued, skipped } = await call('analysis:enqueue', {
-    target: { kind: 'files', fileIds: files.map((f) => f.id) },
-    model: TEMP_MODEL,
-    mode: 'apply',
-    force: true,
-  });
-  const skippedCount = skipped.notFound + skipped.notAnalysable + skipped.alreadyQueued + skipped.alreadyAnalysed;
-  return { title: `${enqueued} queued, ${skippedCount} skipped`, failures: [] };
+const SKIP_ORDER = ['alreadyAnalysed', 'alreadyQueued', 'notAnalysable', 'notFound'] as const;
+
+/** The result strip title of a start: "<n> queued" and each skip reason that is not zero. */
+export function enqueueTitle(result: EnqueueAnalysisResult): string {
+  const parts = [`${result.enqueued} queued`];
+  for (const reason of SKIP_ORDER) {
+    const count = result.skipped[reason];
+    if (count > 0) parts.push(`${count} ${SKIP_LABELS[reason]}`);
+  }
+  return parts.join(', ');
 }

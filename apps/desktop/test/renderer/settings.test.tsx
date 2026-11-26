@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
@@ -12,7 +12,7 @@ import { ModelSelect } from '../../src/renderer/src/components/ModelSelect';
 import { ProviderSettingsProvider, useProvider } from '../../src/renderer/src/provider-context';
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 
 const TEST_KEY = 'test-key-not-real';
 
@@ -194,6 +194,102 @@ it('Remove key sends apiKey null', async () => {
   await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
   expect((callsOf(api, 'settings:setVision')[0]!.request as SetRequest).apiKey).toBeNull();
   await waitFor(() => expect(screen.queryByText('Stored')).toBeNull());
+});
+
+it('Remove key sends the stored settings, not unsaved edits, and keeps the edits in the form', async () => {
+  const user = userEvent.setup();
+  const api = install();
+  renderScreen();
+  await loaded();
+  await user.clear(field('Timeout (s)'));
+  await user.type(field('Timeout (s)'), '30');
+  await user.click(button('Remove key'));
+  await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
+  expect(callsOf(api, 'settings:setVision')[0]!.request).toEqual({
+    baseUrl: 'http://127.0.0.1:11500',
+    timeoutSeconds: 90,
+    taggingModel: 'vision-b',
+    promptModel: 'vision-a',
+    apiKey: null,
+  });
+  await waitFor(() => expect(screen.queryByText('Stored')).toBeNull());
+  expect(field('Timeout (s)').value).toBe('30');
+});
+
+it('an edit made while a save runs survives the answer', async () => {
+  const user = userEvent.setup();
+  const answer = deferred<VisionSettingsView>();
+  install(STORED, MODELS, { 'settings:setVision': () => answer.promise });
+  renderScreen();
+  await loaded();
+  await user.click(button('Save'));
+  await user.clear(field('Timeout (s)'));
+  await user.type(field('Timeout (s)'), '45');
+  await act(async () => answer.resolve(STORED));
+  expect(field('Timeout (s)').value).toBe('45');
+});
+
+it('a newer settings reload wins over an older one that answers later', async () => {
+  const first = deferred<VisionSettingsView>();
+  let calls = 0;
+  installFakeApi({
+    'settings:getVision': () => {
+      calls += 1;
+      return calls === 1 ? first.promise : { ...STORED, baseUrl: 'http://127.0.0.1:11501' };
+    },
+    'settings:listVisionModels': () => MODELS,
+  });
+  let reload: (() => Promise<void>) | null = null;
+  function Probe() {
+    const state = useProvider();
+    reload = state.reload;
+    return <p>{state.settings?.baseUrl ?? 'none'}</p>;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await act(async () => {
+    await reload!();
+  });
+  expect(screen.getByText('http://127.0.0.1:11501')).toBeTruthy();
+  await act(async () => first.resolve(STORED));
+  expect(screen.getByText('http://127.0.0.1:11501')).toBeTruthy();
+});
+
+it('a superseded model request that fails does not reject into the caller', async () => {
+  const slow = deferred<ListModelsResult>();
+  let calls = 0;
+  installFakeApi({
+    'settings:getVision': () => STORED,
+    'settings:listVisionModels': () => {
+      calls += 1;
+      return calls === 2 ? slow.promise : MODELS;
+    },
+  });
+  let refresh: (() => Promise<void>) | null = null;
+  function Probe() {
+    const state = useProvider();
+    refresh = state.refreshModels;
+    return <p>{state.models?.ok === true ? 'models' : 'none'}</p>;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await screen.findByText('models');
+  let older: Promise<void> | null = null;
+  act(() => {
+    older = refresh!();
+  });
+  await act(async () => {
+    await refresh!();
+  });
+  await act(async () => slow.reject(fakeError('internal_error')));
+  await expect(older!).resolves.toBeUndefined();
+  expect(screen.getByText('models')).toBeTruthy();
 });
 
 it('an empty base URL is saved as null', async () => {

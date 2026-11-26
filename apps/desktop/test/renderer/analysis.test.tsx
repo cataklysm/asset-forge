@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analysable, analysableFiles, NONE_ANALYSABLE, startAnalysis, TEMP_MODEL } from '../../src/renderer/src/analysis';
+import {
+  analysable,
+  analysableFiles,
+  enqueueTitle,
+  NONE_ANALYSABLE,
+  singleAnalysable,
+} from '../../src/renderer/src/analysis';
 import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
 import { selectAll } from '../../src/renderer/src/selection';
-import { installFakeApi } from './fake-api';
 import { fileRecord, nonImageRecord } from './fixtures';
 
 const labels = (ctx: FileActionContext, file = fileRecord()) => fileMenuItems(file, ctx).map((item) => item.label);
@@ -32,23 +37,58 @@ describe('analysis', () => {
     expect(labels({ cover: null, onDetails: () => {} })).not.toContain('Analyse');
   });
 
-  it('startAnalysis sends the ids as an applied file target and counts the skipped files', async () => {
-    const a = fileRecord({ originalName: 'a.png' });
-    const b = fileRecord({ originalName: 'b.png' });
-    const c = fileRecord({ originalName: 'c.png' });
-    const api = installFakeApi({
-      'analysis:enqueue': () => ({
-        enqueued: 1,
-        skipped: { notFound: 1, notAnalysable: 0, alreadyQueued: 1, alreadyAnalysed: 0 },
-      }),
-    });
-    const result = await startAnalysis([a, b, c]);
-    expect(api.calls).toEqual([
-      {
-        channel: 'analysis:enqueue',
-        request: { target: { kind: 'files', fileIds: [a.id, b.id, c.id] }, model: TEMP_MODEL, mode: 'apply', force: true },
-      },
+  it('the menu adds Review tags with a proposal and Image to prompt, both after Analyse', () => {
+    const onReviewTags = vi.fn();
+    const onImageToPrompt = vi.fn();
+    const ctx: FileActionContext = { cover: null, onDetails: () => {}, onAnalyse: () => {}, onReviewTags, onImageToPrompt };
+    expect(labels(ctx)).toEqual(['Details', 'Open externally', 'Show in folder', 'Analyse', 'Image to prompt']);
+    const items = fileMenuItems(fileRecord({ hasProposal: true }), ctx);
+    expect(items.map((item) => item.label)).toEqual([
+      'Details',
+      'Open externally',
+      'Show in folder',
+      'Analyse',
+      'Review tags',
+      'Image to prompt',
     ]);
-    expect(result).toEqual({ title: '1 queued, 2 skipped', failures: [] });
+    items.find((item) => item.label === 'Review tags')!.onSelect();
+    items.find((item) => item.label === 'Image to prompt')!.onSelect();
+    expect(onReviewTags).toHaveBeenCalledTimes(1);
+    expect(onImageToPrompt).toHaveBeenCalledTimes(1);
+    expect(labels(ctx, nonImageRecord('tree.blend', { hasProposal: true }))).not.toContain('Image to prompt');
+  });
+
+  it('a blocked provider disables Analyse and Image to prompt with the reason, never Review tags', () => {
+    const blocked = 'Not configured';
+    const ctx: FileActionContext = {
+      cover: null,
+      onDetails: () => {},
+      onAnalyse: () => {},
+      onReviewTags: () => {},
+      onImageToPrompt: () => {},
+      analysisBlocked: blocked,
+    };
+    const items = fileMenuItems(fileRecord({ hasProposal: true }), ctx);
+    const byLabel = (name: string) => items.find((item) => item.label === name)!;
+    expect(byLabel('Analyse')).toMatchObject({ disabled: true, title: blocked });
+    expect(byLabel('Image to prompt')).toMatchObject({ disabled: true, title: blocked });
+    expect(byLabel('Review tags').disabled).toBeUndefined();
+  });
+
+  it('singleAnalysable is the only selected file when it is an analysable image', () => {
+    const png = fileRecord();
+    expect(singleAnalysable(selectAll([png]))).toBe(png);
+    expect(singleAnalysable(selectAll([png, fileRecord()]))).toBeNull();
+    expect(singleAnalysable(selectAll([nonImageRecord('a.pdf')]))).toBeNull();
+    expect(singleAnalysable(selectAll([]))).toBeNull();
+  });
+
+  it('enqueueTitle counts the queued files and each skip reason that is not zero', () => {
+    expect(enqueueTitle({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } })).toBe(
+      '3 queued',
+    );
+    expect(enqueueTitle({ enqueued: 0, skipped: { notFound: 1, notAnalysable: 2, alreadyQueued: 3, alreadyAnalysed: 4 } })).toBe(
+      '0 queued, 4 already analysed, 3 already queued, 2 not analysable, 1 not found',
+    );
   });
 });

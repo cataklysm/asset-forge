@@ -10,6 +10,7 @@ import {
 } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
+import { SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -128,6 +129,60 @@ it('while running Generate is disabled and Cancel sends analysis:cancelDescribe;
   expect(promptField().value).toBe('');
   expect(button('Generate').disabled).toBe(false);
   expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+});
+
+it('Cancel then Generate again: the late answer of the cancelled call does not touch the new one', async () => {
+  const user = userEvent.setup();
+  const first = deferred<DescribeResult>();
+  const second = deferred<DescribeResult>();
+  const answers = [first, second];
+  install(CONFIGURED, MODELS, { 'analysis:describe': () => answers.shift()!.promise });
+  render(ui({}));
+  await ready();
+  await user.click(button('Generate'));
+  await user.click(button('Cancel'));
+  await user.click(button('Generate'));
+  expect(button('Generate').title).toBe('The prompt is being generated');
+  await act(async () => first.resolve({ ok: true, text: 'old text' }));
+  expect(promptField().value).toBe('');
+  expect(button('Generate').disabled).toBe(true);
+  expect(button('Cancel')).toBeTruthy();
+  await act(async () => second.resolve({ ok: true, text: TEXT }));
+  expect(promptField().value).toBe(TEXT);
+  expect(button('Generate').disabled).toBe(false);
+});
+
+it('a copy that works clears the message of one that failed', async () => {
+  const user = userEvent.setup();
+  install();
+  render(ui({}));
+  await ready();
+  await user.click(button('Generate'));
+  await waitFor(() => expect(promptField().value).toBe(TEXT));
+  const write = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('denied'));
+  await user.click(button('Copy'));
+  expect((await screen.findByRole('alert')).textContent).toBe('The text could not be copied');
+  write.mockResolvedValueOnce(undefined);
+  await user.click(button('Copy'));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});
+
+it('a model list refused as unauthorized offers Settings', async () => {
+  install(CONFIGURED, { ok: false, code: 'provider_unauthorized' });
+  render(ui({}));
+  expect(await screen.findByRole('button', { name: 'Settings' })).toBeTruthy();
+});
+
+it('a failed settings load is not "not configured" and offers no Settings', async () => {
+  install(CONFIGURED, MODELS, {
+    'settings:getVision': () => {
+      throw fakeError('internal_error');
+    },
+  });
+  render(ui({}));
+  await waitFor(() => expect(button('Generate').title).toBe(SETTINGS_LOAD_FAILED));
+  expect(button('Generate').disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
 });
 
 it('shows the text in a read-only field and Copy writes exactly the text', async () => {

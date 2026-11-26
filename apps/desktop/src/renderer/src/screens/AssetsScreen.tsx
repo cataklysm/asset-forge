@@ -1,13 +1,16 @@
 import { LayoutGrid, List, Plus, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AssetStatusSchema, FileRoleSchema, type AssetSummary, type FileKind } from '@assetforge/contracts';
+import { enqueueTitle } from '../analysis';
 import { call } from '../api';
+import { AnalyseAllButton, useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetGrid, type AssetViewProps } from '../components/AssetGrid';
 import { AssetSelection } from '../components/AssetSelection';
 import { AssetTable } from '../components/AssetTable';
 import { FilterBar } from '../components/FilterBar';
 import { NewAssetDialog } from '../components/NewAssetDialog';
 import { Page } from '../components/Page';
+import { ResultStrip } from '../components/ResultStrip';
 import { SearchField } from '../components/SearchField';
 import { TagFilter } from '../components/TagFilter';
 import { pagesForRows } from '../gallery';
@@ -15,7 +18,7 @@ import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValu
 import { useLoad } from '../hooks/useLoad';
 import { usePagedList } from '../hooks/usePagedList';
 import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import { ANALYSE_ASSETS_TITLE, label } from '../labels';
 import {
   hasFilters,
   listKey,
@@ -63,6 +66,9 @@ interface Props {
 export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   const [view, setView] = useState<AssetView>(() => readView(deviceStorage()));
   const [creating, setCreating] = useState(false);
+  const [started, setStarted] = useState<string | null>(null);
+  // The gallery lists assets, not proposals: an accepted or discarded proposal changes nothing here.
+  const analysis = useAnalysisDialogs({ onStarted: (result) => setStarted(enqueueTitle(result)), onChanged: () => {} });
 
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
@@ -249,6 +255,11 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
             ))}
           </select>
           <div className="ml-auto flex items-center gap-2">
+            <AnalyseAllButton
+              blocked={analysis.blocked}
+              title={ANALYSE_ASSETS_TITLE}
+              onClick={() => analysis.start({ kind: 'assetFilter', filter: toAssetQuery(effective) })}
+            />
             {VIEWS.map(({ view: v, tooltip, icon: Icon }) => (
               <button
                 key={v}
@@ -305,6 +316,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           {message}
         </p>
       ))}
+      {started !== null && <ResultStrip title={started} failures={[]} onDismiss={() => setStarted(null)} />}
     </div>
   );
 
@@ -320,7 +332,15 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
         </button>
       }
       toolbar={toolbar}
-      detail={<AssetSelection asset={selectedAsset} typeName={typeName} onOpen={openSelected} />}
+      detail={
+        <AssetSelection
+          asset={selectedAsset}
+          typeName={typeName}
+          onOpen={openSelected}
+          analyseBlocked={analysis.blocked}
+          onAnalyse={(assetId) => analysis.start({ kind: 'asset', assetId })}
+        />
+      }
     >
       <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
         {failedPage !== null ? (
@@ -352,6 +372,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           onOpen(id);
         }}
       />
+      {analysis.dialogs}
     </Page>
   );
 }

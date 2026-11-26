@@ -8,6 +8,7 @@ import { retryIndex, slotAt } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
 import { fileItemHandlers, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { Menu } from './Menu';
+import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 
 const HEADER_HEIGHT = 32;
@@ -136,6 +137,7 @@ function TableRows(props: FileViewProps & { scrollRef: RefObject<HTMLDivElement 
                 </span>
                 <span role="gridcell" className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-medium">{file.originalName}</span>
+                  {file.hasProposal && <ProposalMarker />}
                   {file.status !== 'complete' && (
                     <span className={`shrink-0 ${file.status === 'failed' ? 'text-danger' : MUTED}`}>
                       {label(file.status)}

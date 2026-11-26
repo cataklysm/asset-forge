@@ -27,8 +27,11 @@ interface Polled {
   resultToken: number;
 }
 
-const sameSummary = (a: JobSummary, b: JobSummary) =>
-  (Object.keys(a) as (keyof JobSummary)[]).every((key) => a[key] === b[key]);
+/** Every count by value, and the pause by its reason (each poll parses a new `paused` object). */
+export const sameSummary = (a: JobSummary, b: JobSummary) =>
+  (Object.keys(a) as (keyof JobSummary)[]).every((key) =>
+    key === 'paused' ? a.paused?.reason === b.paused?.reason : a[key] === b[key],
+  );
 
 /**
  * Polls `jobs:summary` on mount and every `JOB_POLL_MS` while mounted, one request at a time.

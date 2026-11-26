@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { AssetAssignment, AssetSummary, AssetType, IpcRequest } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type AssetAssignment, type AssetSummary, type AssetType, type IpcRequest } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { NO_FILTERS, type AssetListState } from '../../src/renderer/src/list-state';
+import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AssetsScreen } from '../../src/renderer/src/screens/AssetsScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, nextId, pageOf, projectSummary, tagOf } from './fixtures';
@@ -208,6 +209,86 @@ it('arrow keys move focus and selection together', async () => {
   // Roving tab index: only the active tile is reachable with Tab.
   const tabbable = screen.getAllByRole('gridcell').filter((cell) => cell.tabIndex === 0);
   expect(tabbable).toEqual([itemOf('Asset 6')]);
+});
+
+const ANALYSIS: FakeHandlers = {
+  'settings:getVision': () => ({
+    baseUrl: 'http://127.0.0.1:11500',
+    timeoutSeconds: 120,
+    taggingModel: 'vision-a',
+    promptModel: null,
+    hasApiKey: false,
+    fromEnvironment: false,
+    canStoreKey: true,
+  }),
+  'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
+  'analysis:preview': () => ({ analysable: 3, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
+  'analysis:enqueue': () => ({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } }),
+};
+
+function renderWithProvider(initial: AssetListState = INITIAL) {
+  return render(
+    <ProviderSettingsProvider>
+      <Harness initial={initial} />
+    </ProviderSettingsProvider>,
+  );
+}
+
+it('Analyse all starts the current asset filter and shows the outcome', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'assets:list': listOf(many(2)), ...ANALYSIS });
+  renderWithProvider({ ...INITIAL, filters: { ...NO_FILTERS, status: 'in_review', tagNames: ['oak'] } });
+  await screen.findByText('Asset 0');
+  await user.click(screen.getByRole('button', { name: 'Analyse all' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
+    target: { kind: 'assetFilter', filter: { status: 'in_review', tagNames: ['oak'] } },
+    model: 'vision-a',
+  });
+  await user.click(screen.getByRole('button', { name: 'Start' }));
+  expect(within(await screen.findByRole('status')).getByText('3 queued')).toBeTruthy();
+});
+
+it('Analyse in the Selection column starts the selected asset', async () => {
+  const user = userEvent.setup();
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
+  const api = install({ 'assets:list': listOf([oak]), ...ANALYSIS });
+  renderWithProvider();
+  await user.click(await screen.findByText('Oak tree'));
+  await user.click(within(selectionColumn()).getByRole('button', { name: 'Analyse' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'analysis:preview')).toBe(true));
+  expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
+    target: { kind: 'asset', assetId: oak.id },
+    model: 'vision-a',
+  });
+});
+
+it('without a configured provider Analyse all and the Selection Analyse are disabled', async () => {
+  const user = userEvent.setup();
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
+  install({
+    'assets:list': listOf([oak]),
+    ...ANALYSIS,
+    'settings:getVision': () => ({
+      baseUrl: null,
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      hasApiKey: false,
+      fromEnvironment: false,
+      canStoreKey: true,
+    }),
+  });
+  renderWithProvider();
+  await user.click(await screen.findByText('Oak tree'));
+  const all = screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement;
+  await waitFor(() => expect(all.title).toBe(JOB_ERROR_MESSAGES.provider_not_configured));
+  expect(all.disabled).toBe(true);
+  const one = within(selectionColumn()).getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
+  expect(one.disabled).toBe(true);
+  expect(one.title).toBe(JOB_ERROR_MESSAGES.provider_not_configured);
 });
 
 it('the table view shows the columns and keeps the selection rules', async () => {

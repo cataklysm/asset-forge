@@ -1,7 +1,12 @@
 import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { JOB_ERROR_MESSAGES, type JobErrorCode } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
+import { RESUME_LABEL, RESUME_TITLE } from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
+
+/** Pause reasons the user fixes on the settings screen: the banner offers the way there. */
+const SETTINGS_REASONS: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured']);
 
 export type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
 
@@ -12,6 +17,10 @@ interface Props {
   busy: boolean;
   /** Queued, running and waiting jobs; shown beside the Jobs entry when above zero. */
   activeJobs: number;
+  /** Why the provider queue stopped claiming work; shows the pause banner. */
+  paused?: JobErrorCode | null;
+  /** Resumes the paused queue (`jobs:resume`); a rejection shows in the banner. */
+  onResume?(): Promise<void>;
   onNavigate(section: Section): void;
   onClose(): void;
   children: ReactNode;
@@ -30,13 +39,45 @@ const BUSY_TITLE = 'Import in progress';
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 
 /** The application frame: header, navigation, the alert region and the page slot. */
-export function AppShell({ workspaceName, rootPath, section, busy, activeJobs, onNavigate, onClose, children }: Props) {
+export function AppShell({
+  workspaceName,
+  rootPath,
+  section,
+  busy,
+  activeJobs,
+  paused = null,
+  onResume = async () => {},
+  onNavigate,
+  onClose,
+  children,
+}: Props) {
   const [unreachable, setUnreachable] = useState(false);
   // Bumped by Retry; keys the page so it reloads from scratch.
   const [reloadKey, setReloadKey] = useState(0);
   const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => onStorageUnreachable(() => setUnreachable(true)), []);
+
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const resumingRef = useRef(false);
+  // A new pause reason (or none) drops the error of an earlier resume.
+  useEffect(() => setResumeError(null), [paused]);
+
+  async function resume() {
+    if (resumingRef.current) return;
+    resumingRef.current = true;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await onResume();
+    } catch (e) {
+      setResumeError(describeError(e));
+    } finally {
+      resumingRef.current = false;
+      setResuming(false);
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -115,6 +156,29 @@ export function AppShell({ workspaceName, rootPath, section, busy, activeJobs, o
               >
                 Retry
               </button>
+            </div>
+          )}
+          {paused !== null && (
+            <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
+              <span>{resumeError ?? JOB_ERROR_MESSAGES[paused]}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                {SETTINGS_REASONS.has(paused) && (
+                  <button
+                    type="button"
+                    className={BUTTON}
+                    aria-disabled={busy || undefined}
+                    title={busy ? BUSY_TITLE : undefined}
+                    onClick={() => {
+                      if (!busy) onNavigate('settings');
+                    }}
+                  >
+                    Settings
+                  </button>
+                )}
+                <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
+                  {RESUME_LABEL}
+                </button>
+              </div>
             </div>
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">

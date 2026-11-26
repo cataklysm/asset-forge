@@ -1,14 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { FileRecord, IpcRequest, JobSummary } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type JobSummary, type VisionSettingsView } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
+import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { applyFiles, assetSummary, enqueueAll, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
@@ -355,73 +356,238 @@ it('assigning in the detail dialog moves on to the following file; assigning the
   await screen.findByText('Inbox is empty');
 });
 
-it('the tile menu analyses a complete image and shows the outcome', async () => {
+const VISION: VisionSettingsView = {
+  baseUrl: 'http://127.0.0.1:11500',
+  timeoutSeconds: 120,
+  taggingModel: 'vision-a',
+  promptModel: 'vision-a',
+  hasApiKey: false,
+  fromEnvironment: false,
+  canStoreKey: true,
+};
+const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null };
+
+/** The provider, job and analysis channels the dialogs use; `settings` decides whether a provider is configured. */
+function analysisHandlers(settings: VisionSettingsView = VISION): FakeHandlers {
+  return {
+    'settings:getVision': () => settings,
+    'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
+    'jobs:summary': () => NO_JOBS,
+    'analysis:getProposal': () => ({ proposal: null, job: null }),
+    'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
+    'analysis:enqueue': () => ({ enqueued: 1, skipped: { ...NONE_SKIPPED, alreadyQueued: 1 } }),
+  };
+}
+
+/** The inbox inside the job and provider contexts, as the workspace shell mounts it. */
+function renderWithProvider() {
+  return render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <Harness />
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+}
+
+async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(within(tile(name)).getByRole('button', { name: 'File actions' }));
+}
+
+it('the tile menu Analyse opens the result dialog of the image; other files get no Analyse', async () => {
   const user = userEvent.setup();
   const { c1 } = files();
   const blend = nonImageRecord('tree.blend');
-  const api = install([c1, blend], { 'analysis:enqueue': enqueueAll });
-  render(<Harness />);
+  const api = install([c1, blend], analysisHandlers());
+  renderWithProvider();
   await screen.findByText('tree.blend');
-  await user.click(within(tile('tree.blend')).getByRole('button', { name: 'File actions' }));
+  await openMenu(user, 'tree.blend');
   expect(screen.queryByRole('menuitem', { name: 'Analyse' })).toBeNull();
   await user.keyboard('{Escape}');
-  await user.click(within(tile('c1.png')).getByRole('button', { name: 'File actions' }));
+  await openMenu(user, 'c1.png');
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
-  expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id])]);
+  const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
+  expect(within(dialog).getByRole('combobox', { name: 'Tagging model' })).toBeTruthy();
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: c1.id }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([]);
 });
 
-it('the detail dialog analyses the shown image', async () => {
+it('the detail dialog Analyse opens the result dialog above it', async () => {
   const user = userEvent.setup();
   const { c1 } = files();
-  const api = install([c1], { 'analysis:enqueue': enqueueAll });
-  render(<Harness />);
+  const api = install([c1], analysisHandlers());
+  renderWithProvider();
   await screen.findByText('c1.png');
   await user.click(tile('c1.png'));
   await user.keyboard('{Enter}');
-  const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
-  await user.click(within(dialog).getByRole('button', { name: 'More' }));
+  const detail = await screen.findByRole('dialog', { name: 'c1.png' });
+  await user.click(within(detail).getByRole('button', { name: 'More' }));
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
-  await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id])]));
+  await waitFor(() => expect(screen.getAllByRole('dialog', { name: 'c1.png' })).toHaveLength(2));
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: c1.id }]);
 });
 
-it('Analyse in the selection bar sends only the images and counts the skipped ones; the selection is kept', async () => {
+it('Analyse on several selected files opens the start dialog for the images; Start shows the counts in the strip', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();
   const doc = nonImageRecord('notes.pdf');
-  const api = install([c1, c2, doc], {
-    'analysis:enqueue': () => ({ enqueued: 1, skipped: { ...NONE_SKIPPED, alreadyQueued: 1 } }),
-  });
-  render(<Harness />);
+  const api = install([c1, c2, doc], analysisHandlers());
+  renderWithProvider();
   await selectRange(user, 'c1.png', 'notes.pdf');
+  expect(screen.queryByRole('button', { name: 'Image to prompt' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a' }]);
+  await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
-  expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id, c2.id])]);
+  expect(within(strip).getByText('1 queued, 1 already queued')).toBeTruthy();
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([
+    { target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a', mode: 'apply', force: false },
+  ]);
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
 
-it('Analyse is disabled for a selection without images, and a rejected call shows the alert', async () => {
+it('Analyse is disabled for a selection without images; one image adds Image to prompt, a proposal Review tags', async () => {
   const user = userEvent.setup();
-  const { c1 } = files();
+  const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
   const doc = nonImageRecord('notes.pdf');
-  install([doc, c1], {
-    'analysis:enqueue': () => {
-      throw fakeError('not_found');
-    },
-  });
-  render(<Harness />);
+  const api = install([doc, proposed], analysisHandlers());
+  renderWithProvider();
   await screen.findByText('notes.pdf');
   await user.click(tile('notes.pdf'));
   const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
   expect(analyse.disabled).toBe(true);
   expect(analyse.title).toBe(NONE_ANALYSABLE);
+  expect(screen.queryByRole('button', { name: 'Image to prompt' })).toBeNull();
 
-  await user.click(tile('c1.png'));
+  await user.click(tile('proposed.png'));
   expect(analyse.disabled).toBe(false);
-  await user.click(analyse);
-  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
-  expect(screen.getByText('1 selected')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Image to prompt' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Review tags' }));
+  await screen.findByRole('dialog', { name: 'proposed.png' });
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: proposed.id }]);
+});
+
+it('Image to prompt in the selection bar opens the prompt dialog', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  install([c1], analysisHandlers());
+  renderWithProvider();
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.click(screen.getByRole('button', { name: 'Image to prompt' }));
+  expect(await screen.findByRole('dialog', { name: 'Image to prompt' })).toBeTruthy();
+});
+
+it('Analyse all sends the current filters of the inbox as a file filter target', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const api = install([c1], analysisHandlers());
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <Harness initial={{ filters: { ...NO_FILE_FILTERS, tagNames: ['oak'], kind: 'image' }, scrollOffset: 0 }} />
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  await screen.findByText('c1.png');
+  await user.click(screen.getByRole('button', { name: 'Analyse all' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({
+    target: { kind: 'fileFilter', filter: { scope: { kind: 'inbox' }, tagNames: ['oak'], kind: 'image' } },
+    model: 'vision-a',
+  });
+});
+
+it('the proposal filter lists only files with a proposal, marks them and blocks Analyse all', async () => {
+  const user = userEvent.setup();
+  const plain = fileRecord({ originalName: 'plain.png' });
+  const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
+  const api = install([plain, proposed], {
+    ...analysisHandlers(),
+    'files:list': (request: ListRequest) => {
+      const items = request.hasProposal === true ? [proposed] : [plain, proposed];
+      return pageOf(items.slice(request.offset, request.offset + request.limit), items.length);
+    },
+  });
+  renderWithProvider();
+  await screen.findByText('plain.png');
+  expect(within(tile('proposed.png')).getByRole('img', { name: 'Tag proposal' }).title).toBe('Tag proposal waiting for review');
+  expect(within(tile('plain.png')).queryByRole('img', { name: 'Tag proposal' })).toBeNull();
+
+  const toggle = screen.getByRole('button', { name: 'Proposals' });
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  await user.click(toggle);
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('plain.png')).toBeNull());
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(callsOf(api, 'files:list').some((r) => (r as ListRequest).hasProposal === true)).toBe(true);
+  const all = screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement;
+  expect(all.disabled).toBe(true);
+  expect(all.title).toBe('Turn off the proposal filter to analyse all');
+});
+
+it('the detail dialog and the table row mark a file with a proposal', async () => {
+  const user = userEvent.setup();
+  const plain = fileRecord({ originalName: 'plain.png' });
+  const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
+  install([plain, proposed], analysisHandlers());
+  renderWithProvider();
+  await screen.findByText('plain.png');
+  await openMenu(user, 'proposed.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Details' }));
+  const detail = await screen.findByRole('dialog', { name: 'proposed.png' });
+  expect(within(detail).getAllByRole('img', { name: 'Tag proposal' }).length).toBeGreaterThan(0);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+  await user.click(screen.getByRole('button', { name: 'Show as table' }));
+  const row = (await screen.findByText('proposed.png')).closest<HTMLElement>('[role="row"]');
+  const plainRow = screen.getByText('plain.png').closest<HTMLElement>('[role="row"]');
+  expect(row).not.toBeNull();
+  expect(within(row!).getByRole('img', { name: 'Tag proposal' }).title).toBe('Tag proposal waiting for review');
+  expect(within(plainRow!).queryByRole('img', { name: 'Tag proposal' })).toBeNull();
+});
+
+it('Review tags in the menu opens the proposal; accepting it reloads the list', async () => {
+  const user = userEvent.setup();
+  const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
+  const api = install([proposed], {
+    ...analysisHandlers(),
+    'analysis:getProposal': () => ({
+      proposal: { model: 'vision-a', createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
+      job: null,
+    }),
+    'analysis:acceptProposal': () => ({}),
+  });
+  renderWithProvider();
+  await screen.findByText('proposed.png');
+  await openMenu(user, 'proposed.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Review tags' }));
+  const dialog = await screen.findByRole('dialog', { name: 'proposed.png' });
+  const lists = callsOf(api, 'files:list').length;
+  await user.click(await within(dialog).findByRole('button', { name: 'Accept' }));
+  await waitFor(() => expect(callsOf(api, 'analysis:acceptProposal')).toHaveLength(1));
+  await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(lists));
+});
+
+it('without a configured provider the analysis entries are disabled with the reason', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  install([c1], analysisHandlers({ ...VISION, baseUrl: null }));
+  renderWithProvider();
+  await screen.findByText('c1.png');
+  const reason = JOB_ERROR_MESSAGES.provider_not_configured;
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement).title).toBe(reason));
+  expect((screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(tile('c1.png'));
+  const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
+  expect([analyse.disabled, analyse.title]).toEqual([true, reason]);
+  await openMenu(user, 'c1.png');
+  const item = screen.getByRole('menuitem', { name: 'Analyse' });
+  expect(item.getAttribute('aria-disabled')).toBe('true');
+  expect(item.title).toBe(reason);
 });
 
 const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: null };

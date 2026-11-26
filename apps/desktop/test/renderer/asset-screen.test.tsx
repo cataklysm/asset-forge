@@ -1,20 +1,25 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type {
-  AssetAssignment,
-  AssetDetail,
-  AssetRelationView,
-  AssetType,
-  FileRecord,
-  IpcRequest,
+import {
+  JOB_ERROR_MESSAGES,
+  type AssetAssignment,
+  type AssetDetail,
+  type AssetRelationView,
+  type AssetType,
+  type FileRecord,
+  type IpcRequest,
+  type VisionSettingsView,
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
+import { JobsProvider } from '../../src/renderer/src/jobs-context';
+import { ANALYSE_ASSET_TITLE } from '../../src/renderer/src/labels';
 import type { AssetTab } from '../../src/renderer/src/list-state';
+import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { applyFiles, enqueueAll, fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const NOW = '2026-01-01T00:00:00.000Z';
 const TYPE: AssetType = {
@@ -595,59 +600,141 @@ it('workflow tab: start, step state without skipped for mandatory steps, and rem
   );
 });
 
-it('files tab: the tile menu analyses a complete image and shows the outcome', async () => {
+const VISION: VisionSettingsView = {
+  baseUrl: 'http://127.0.0.1:11500',
+  timeoutSeconds: 120,
+  taggingModel: 'vision-a',
+  promptModel: 'vision-a',
+  hasApiKey: false,
+  fromEnvironment: false,
+  canStoreKey: true,
+};
+
+/** The provider, job and analysis channels the dialogs use. */
+function analysisHandlers(settings: VisionSettingsView = VISION): FakeHandlers {
+  return {
+    'settings:getVision': () => settings,
+    'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
+    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null }),
+    'analysis:getProposal': () => ({ proposal: null, job: null }),
+    'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 0 }),
+    'analysis:enqueue': () => ({ enqueued: 2, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 } }),
+  };
+}
+
+function renderWithProvider(id: string) {
+  return render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <Harness id={id} />
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+}
+
+/** The Analyse button of the selection bar (the header has one for the whole asset). */
+function selectionAnalyse(): HTMLButtonElement {
+  const button = screen
+    .getAllByRole('button', { name: 'Analyse' })
+    .find((b) => b.title !== ANALYSE_ASSET_TITLE && b.closest('header') === null);
+  if (button === undefined) throw new Error('no selection Analyse');
+  return button as HTMLButtonElement;
+}
+
+it('files tab: the tile menu Analyse opens the result dialog of a complete image', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
   const blend = nonImageRecord('tree.blend', { assetId: asset.id, role: 'working' });
-  const api = install(asset, {
-    'files:list': listOf([leaf, blend]),
-    'analysis:enqueue': enqueueAll,
-  });
-  render(<Harness id={asset.id} />);
+  const api = install(asset, { 'files:list': listOf([leaf, blend]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
   await screen.findByText('tree.blend');
   await user.click(within(tile('tree.blend')).getByRole('button', { name: 'File actions' }));
   expect(screen.queryByRole('menuitem', { name: 'Analyse' })).toBeNull();
   await user.keyboard('{Escape}');
   await user.click(within(tile('leaf.png')).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
-  expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([leaf.id])]);
+  await screen.findByRole('dialog', { name: 'leaf.png' });
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: leaf.id }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([]);
 });
 
-it('files tab: Analyse in the selection bar sends only the analysable images and counts the skipped ones', async () => {
+it('files tab: Analyse in the selection bar opens the start dialog for the analysable images; Start fills the strip', async () => {
+  const user = userEvent.setup();
   const asset = assetDetail();
-  const { user, api, c1, c2 } = await selectThree(asset, {
-    'analysis:enqueue': () => ({ enqueued: 1, skipped: { ...NONE_SKIPPED, alreadyQueued: 1 } }),
-  });
-  await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  const c1 = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
+  const c2 = fileRecord({ originalName: 'c2.png', assetId: asset.id, role: 'reference' });
+  const bad = fileRecord({ originalName: 'bad.png', assetId: asset.id, role: 'reference', status: 'failed', sha256: null });
+  const api = install(asset, { 'files:list': listOf([c1, c2, bad]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Shift>}');
+  await user.click(tile('bad.png'));
+  await user.keyboard('{/Shift}');
+  expect(await screen.findByText('3 selected')).toBeTruthy();
+  await user.click(selectionAnalyse());
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a' }]);
+  await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
-  expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id, c2.id])]);
+  expect(within(strip).getByText('2 queued, 1 already analysed')).toBeTruthy();
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
 
-it('files tab: Analyse is disabled without images, and a rejected call shows the alert', async () => {
+it('files tab: Analyse is disabled without images', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const doc = nonImageRecord('notes.pdf', { assetId: asset.id, role: 'reference' });
   const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
-  install(asset, {
-    'files:list': listOf([doc, leaf]),
-    'analysis:enqueue': () => {
-      throw fakeError('not_found');
-    },
-  });
-  render(<Harness id={asset.id} />);
+  install(asset, { 'files:list': listOf([doc, leaf]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
   await screen.findByText('notes.pdf');
   await user.click(tile('notes.pdf'));
-  const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
-  expect(analyse.disabled).toBe(true);
-  expect(analyse.title).toBe(NONE_ANALYSABLE);
-
+  expect(selectionAnalyse().disabled).toBe(true);
+  expect(selectionAnalyse().title).toBe(NONE_ANALYSABLE);
   await user.click(tile('leaf.png'));
-  expect(analyse.disabled).toBe(false);
-  await user.click(analyse);
-  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
-  expect(screen.getByText('1 selected')).toBeTruthy();
+  expect(selectionAnalyse().disabled).toBe(false);
+});
+
+it('files tab: Analyse all sends the asset scope with the current filters', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'texture' });
+  const api = install(asset, { 'files:list': listOf([leaf]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
+  await screen.findByText('leaf.png');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'texture');
+  await user.click(screen.getByRole('button', { name: 'Analyse all' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({
+    target: { kind: 'fileFilter', filter: { scope: { kind: 'asset', assetId: asset.id }, role: 'texture' } },
+    model: 'vision-a',
+  });
+});
+
+it('the header Analyse starts the whole asset', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const api = install(asset, analysisHandlers());
+  renderWithProvider(asset.id);
+  const header = await screen.findByRole('button', { name: 'Analyse' });
+  expect(header.title).toBe(ANALYSE_ASSET_TITLE);
+  await user.click(header);
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'asset', assetId: asset.id }, model: 'vision-a' });
+  await user.click(screen.getByRole('button', { name: 'Start' }));
+  expect(within(await screen.findByRole('status')).getByText('2 queued, 1 already analysed')).toBeTruthy();
+});
+
+it('without a configured provider the header Analyse is disabled with the reason', async () => {
+  const asset = assetDetail();
+  install(asset, analysisHandlers({ ...VISION, baseUrl: null }));
+  renderWithProvider(asset.id);
+  const header = (await screen.findByRole('button', { name: 'Analyse' })) as HTMLButtonElement;
+  await waitFor(() => expect(header.title).toBe(JOB_ERROR_MESSAGES.provider_not_configured));
+  expect(header.disabled).toBe(true);
 });

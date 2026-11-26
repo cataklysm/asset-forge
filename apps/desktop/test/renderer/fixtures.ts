@@ -1,5 +1,4 @@
-import type { AssetSummary, FileRecord, IpcRequest, IpcResponse, ProjectSummary, TagAssignment, TagOrigin } from '@assetforge/contracts';
-import { TEMP_MODEL } from '../../src/renderer/src/analysis';
+import type { AssetSummary, FileRecord, IpcResponse, ProjectSummary, TagAssignment, TagOrigin } from '@assetforge/contracts';
 
 let counter = 0;
 /** Deterministic, unique UUID-shaped ids. */
@@ -94,13 +93,3 @@ export const NONE_SKIPPED: IpcResponse<'analysis:enqueue'>['skipped'] = {
   alreadyQueued: 0,
   alreadyAnalysed: 0,
 };
-
-/** The analysis:enqueue request the renderer sends for these files. */
-export function applyFiles(fileIds: string[]): IpcRequest<'analysis:enqueue'> {
-  return { target: { kind: 'files', fileIds }, model: TEMP_MODEL, mode: 'apply', force: true };
-}
-
-/** An analysis:enqueue answer that queues every requested file. */
-export function enqueueAll(r: IpcRequest<'analysis:enqueue'>): IpcResponse<'analysis:enqueue'> {
-  return { enqueued: r.target.kind === 'files' ? r.target.fileIds.length : 0, skipped: NONE_SKIPPED };
-}

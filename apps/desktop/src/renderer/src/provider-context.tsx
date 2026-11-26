@@ -9,6 +9,8 @@ export interface ProviderState {
   models: ListModelsResult | null;
   /** True while the settings or the model list load. */
   loading: boolean;
+  /** True when the last settings load failed (not the same as "not configured"). */
+  settingsFailed: boolean;
   /** Loads the settings again, then the model list; rejects when the settings cannot be read. */
   reload(): Promise<void>;
   /** Asks the provider again (`refresh: true`) instead of the main process cache. */
@@ -21,6 +23,7 @@ const EMPTY: ProviderState = {
   settings: null,
   models: null,
   loading: false,
+  settingsFailed: false,
   reload: async () => {},
   refreshModels: async () => {},
   save: () => Promise.reject(new Error('No provider settings')),
@@ -36,6 +39,7 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   const [settings, setSettings] = useState<VisionSettingsView | null>(null);
   const [models, setModels] = useState<ListModelsResult | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsFailed, setSettingsFailed] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const disposed = useRef(false);
   // Only the newest model request may set the list; an older answer arriving later is dropped.
@@ -53,7 +57,9 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
       const result = await call('settings:listVisionModels', refresh ? { refresh: true } : {});
       if (!disposed.current && request === modelRequest.current) setModels(result);
     } catch (e) {
-      if (!disposed.current && request === modelRequest.current) setModels(null);
+      // A superseded request fails quietly: the newer one decides what the UI shows.
+      if (request !== modelRequest.current) return;
+      if (!disposed.current) setModels(null);
       throw e;
     } finally {
       if (!disposed.current && request === modelRequest.current) setModelsLoading(false);
@@ -66,15 +72,23 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
     setSettings(view);
   }, []);
 
+  // Only the newest reload may take its answer; an older one arriving later is dropped.
+  const reloadRequest = useRef(0);
   const reload = useCallback(async () => {
+    const request = ++reloadRequest.current;
     setSettingsLoading(true);
     let view: VisionSettingsView;
     try {
       view = await call('settings:getVision', {});
+    } catch (e) {
+      if (request !== reloadRequest.current) return;
+      if (!disposed.current) setSettingsFailed(true);
+      throw e;
     } finally {
-      if (!disposed.current) setSettingsLoading(false);
+      if (!disposed.current && request === reloadRequest.current) setSettingsLoading(false);
     }
-    if (disposed.current) return;
+    if (disposed.current || request !== reloadRequest.current) return;
+    setSettingsFailed(false);
     take(view);
     await loadModels(view, false).catch(() => {});
   }, [loadModels, take]);
@@ -103,8 +117,8 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   );
 
   const value = useMemo<ProviderState>(
-    () => ({ settings, models, loading: settingsLoading || modelsLoading, reload, refreshModels, save }),
-    [settings, models, settingsLoading, modelsLoading, reload, refreshModels, save],
+    () => ({ settings, models, loading: settingsLoading || modelsLoading, settingsFailed, reload, refreshModels, save }),
+    [settings, models, settingsLoading, modelsLoading, settingsFailed, reload, refreshModels, save],
   );
 
   return <ProviderContext.Provider value={value}>{children}</ProviderContext.Provider>;

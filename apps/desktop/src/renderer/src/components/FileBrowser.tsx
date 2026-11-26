@@ -1,4 +1,4 @@
-import { LayoutGrid, List, Search, type LucideIcon } from 'lucide-react';
+import { LayoutGrid, List, Search, Sparkles, type LucideIcon } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { FileRoleSchema, type FileKind, type FileRecord, type FileScope } from '@assetforge/contracts';
+import { FileRoleSchema, type FileKind, type FileListFilter, type FileRecord, type FileScope } from '@assetforge/contracts';
 import { call } from '../api';
 import { columnsForWidth, pagesForRows, rowItems } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -21,7 +21,7 @@ import {
   type ViewRestore,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import { label, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
 import { findLoaded, PAGE_SIZE, retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import {
@@ -35,10 +35,12 @@ import {
   type ItemAt,
 } from '../selection';
 import { BUTTON, FOCUS, ICON_BUTTON, ITEM_HOVER, MUTED, SELECT, TILE_TITLE } from '../ui';
+import { AnalyseAllButton } from './AnalysisDialogs';
 import { FileTable } from './FileTable';
 import { FileFrame, fileItemHandlers, fileMeta, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { FilterBar } from './FilterBar';
 import { Menu, type MenuItem } from './Menu';
+import { ProposalMarker } from './ProposalMarker';
 import { SearchField } from './SearchField';
 import { TagFilter } from './TagFilter';
 import { TagList } from './TagList';
@@ -86,6 +88,14 @@ export interface FileBrowserProps {
   /** Shown below `emptyText` (e.g. the inbox's "Import files"). */
   emptyAction?: ReactNode;
   onTotal?(total: number | null): void;
+  /**
+   * The proposal filter and "Analyse all" in the toolbar. `onAnalyseAll` receives the filter the
+   * list shows; `blocked` disables it with that tooltip (e.g. the provider is not configured).
+   */
+  analysis?: {
+    onAnalyseAll(filter: FileListFilter): void;
+    blocked: string | null;
+  };
   /** The host's file detail dialog, which browses this list. */
   viewer?: {
     /** The file the host's dialog shows; null when closed. */
@@ -121,9 +131,13 @@ export function FileBrowser(props: FileBrowserProps) {
   // Only the text is debounced, trimmed before it enters the key; the role is ignored while hidden.
   const query = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);
   const effective: FileFilters = { ...filters, query, role: showRoleFilter ? filters.role : '' };
-  const scopeText = JSON.stringify(scope);
+  // Only files with a tag proposal; a list filter, never part of an analysis target.
+  const [proposals, setProposals] = useState(false);
+  const withProposals = props.analysis !== undefined && proposals;
+  const scopeText = JSON.stringify([scope, withProposals]);
   const filterKey = listKey(effective, scopeText);
-  const key = listKey(effective, JSON.stringify([scope, reloadToken]));
+  const key = listKey(effective, JSON.stringify([scope, withProposals, reloadToken]));
+  const filtered = hasFilters(effective) || withProposals;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const restore = useRef<ViewRestore>(props.restore ?? TOP);
@@ -131,7 +145,13 @@ export function FileBrowser(props: FileBrowserProps) {
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
   const fetchPage = useCallback(
-    (offset: number, limit: number) => call('files:list', { limit, offset, ...toFileQuery(scope, effective) }),
+    (offset: number, limit: number) =>
+      call('files:list', {
+        limit,
+        offset,
+        ...toFileQuery(scope, effective),
+        ...(withProposals ? { hasProposal: true } : {}),
+      }),
     // `key` encodes the scope and every filter value used above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key],
@@ -437,7 +457,14 @@ export function FileBrowser(props: FileBrowserProps) {
         <FilterBar
           resultCount={total === null ? null : `${total} ${total === 1 ? 'file' : 'files'}`}
           countTitle={total !== null && total > MAX_SELECTION ? `At most ${MAX_SELECTION} files can be selected` : undefined}
-          onClear={hasFilters(showRoleFilter ? filters : { ...filters, role: '' }) ? () => setFilter(NO_FILE_FILTERS) : null}
+          onClear={
+            hasFilters(showRoleFilter ? filters : { ...filters, role: '' }) || withProposals
+              ? () => {
+                  setProposals(false);
+                  setFilter(NO_FILE_FILTERS);
+                }
+              : null
+          }
         >
           <>
             <SearchField
@@ -474,7 +501,28 @@ export function FileBrowser(props: FileBrowserProps) {
                 </option>
               ))}
             </select>
+            {props.analysis !== undefined && (
+              <button
+                type="button"
+                className={BUTTON}
+                aria-pressed={proposals}
+                title={PROPOSALS_TITLE}
+                onClick={() => {
+                  restore.current = TOP;
+                  setProposals((on) => !on);
+                }}
+              >
+                <Sparkles size={16} aria-hidden className="text-ai" />
+                {PROPOSALS_LABEL}
+              </button>
+            )}
             <div className="ml-auto flex items-center gap-2">
+              {props.analysis !== undefined && (
+                <AnalyseAllButton
+                  blocked={withProposals ? PROPOSALS_BLOCK_ANALYSE_ALL : props.analysis.blocked}
+                  onClick={() => props.analysis?.onAnalyseAll(toFileQuery(scope, effective))}
+                />
+              )}
               {VIEWS.map(({ view: v, tooltip, icon: Icon }) => (
                 <button
                   key={v}
@@ -511,8 +559,8 @@ export function FileBrowser(props: FileBrowserProps) {
               ))}
             </div>
           ) : viewProps === null ? (
-            hasFilters(effective) || props.emptyAction === undefined ? (
-              <p className={MUTED}>{hasFilters(effective) ? 'No matching files' : emptyText}</p>
+            filtered || props.emptyAction === undefined ? (
+              <p className={MUTED}>{filtered ? 'No matching files' : emptyText}</p>
             ) : (
               <div className="flex flex-col items-start gap-3">
                 <p className={MUTED}>{emptyText}</p>
@@ -698,7 +746,10 @@ function GridItem(
             {file.id === coverFileId && <span className={`absolute bottom-2 left-2 ${BADGE}`}>Cover</span>}
           </div>
           <div className="px-3 py-3">
-            <p className={`leading-6 ${TILE_TITLE}`}>{file.originalName}</p>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className={`min-w-0 flex-1 leading-6 ${TILE_TITLE}`}>{file.originalName}</p>
+              {file.hasProposal && <ProposalMarker />}
+            </div>
             <p className={`truncate text-sm leading-5 ${MUTED}`}>{fileMeta(file, showRole)}</p>
             <div className="mt-2">
               <TagList tags={file.tags} kind="file" max={3} />

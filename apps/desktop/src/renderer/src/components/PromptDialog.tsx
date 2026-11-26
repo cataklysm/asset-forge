@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import { SETTINGS_LOAD_FAILED, START_LOADING } from '../labels';
 import { useProvider } from '../provider-context';
 import { ALERT, BUTTON, FOCUS } from '../ui';
 import { Dialog } from './Dialog';
@@ -21,6 +22,10 @@ export const PROMPT_BUSY_MESSAGE = 'Another prompt is being generated';
 const NO_PROMPT_MODEL_TITLE = 'Choose a prompt model';
 const NO_VISION_MODEL_TITLE = 'The provider offers no model that can read images';
 const COPY_FAILED_MESSAGE = 'The text could not be copied';
+const GENERATING_TITLE = 'The prompt is being generated';
+const NO_FILE_TITLE = 'No image to describe';
+/** Model list failures the settings screen fixes: the dialog offers the way there. */
+const SETTINGS_CODES: ReadonlySet<string> = new Set(['provider_unauthorized', 'provider_not_configured']);
 
 /**
  * Image2Prompt: describes one image with a chosen model and shows the text to copy. The text lives
@@ -37,7 +42,7 @@ export function PromptDialog({ open, file, onClose, onOpenSettings }: Props) {
 }
 
 function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
-  const { settings, models, loading } = useProvider();
+  const { settings, models, loading, settingsFailed } = useProvider();
   // Null until the user picks one: until then the stored prompt default is shown.
   const [chosen, setChosen] = useState<{ model: string | null } | null>(null);
   const [running, setRunning] = useState(false);
@@ -48,20 +53,32 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
 
   const model = chosen !== null ? chosen.model : (settings?.promptModel ?? null);
   const configured = settings !== null && settings.baseUrl !== null;
-  const notConfigured = !loading && !configured;
+  // Only loaded settings without a base URL are "not configured"; a failed load is not.
+  const notConfigured = !loading && settings !== null && settings.baseUrl === null;
   const noVisionModel = models !== null && models.ok && models.models.every((m) => m.vision === false);
   const modelRefused =
     models !== null && models.ok && models.models.some((m) => m.name === model && m.vision === false);
+  // A model list the provider refused for a reason the settings screen fixes.
+  const listRefused = models !== null && !models.ok && SETTINGS_CODES.has(models.code);
 
-  const blockedTitle = notConfigured
-    ? JOB_ERROR_MESSAGES.provider_not_configured
-    : !configured
-      ? undefined
-      : noVisionModel
-        ? NO_VISION_MODEL_TITLE
-        : model === null || modelRefused
-          ? NO_PROMPT_MODEL_TITLE
-          : undefined;
+  const blockedTitle =
+    settings === null && loading
+      ? START_LOADING
+      : settings === null && settingsFailed
+        ? SETTINGS_LOAD_FAILED
+        : notConfigured
+          ? JOB_ERROR_MESSAGES.provider_not_configured
+          : !configured
+            ? START_LOADING
+            : noVisionModel
+              ? NO_VISION_MODEL_TITLE
+              : model === null || modelRefused
+                ? NO_PROMPT_MODEL_TITLE
+                : running
+                  ? GENERATING_TITLE
+                  : file === null
+                    ? NO_FILE_TITLE
+                    : undefined;
   const canGenerate = configured && !running && file !== null && model !== null && !modelRefused && !noVisionModel;
 
   function cancel() {
@@ -101,6 +118,8 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
     if (text === null) return;
     try {
       await navigator.clipboard.writeText(text);
+      // A copy that works drops the message of an earlier one that failed.
+      setError((current) => (current === COPY_FAILED_MESSAGE ? null : current));
     } catch {
       setError(COPY_FAILED_MESSAGE);
     }
@@ -134,7 +153,7 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
             Cancel
           </button>
         )}
-        {(notConfigured || noVisionModel) && (
+        {(notConfigured || noVisionModel || listRefused) && (
           <button type="button" className={BUTTON} onClick={openSettings}>
             Settings
           </button>

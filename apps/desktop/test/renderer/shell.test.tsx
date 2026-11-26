@@ -1,12 +1,12 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import type { JobSummary } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type JobSummary } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
-import { JOB_POLL_MS } from '../../src/renderer/src/jobs-context';
+import { JOB_POLL_MS, sameSummary } from '../../src/renderer/src/jobs-context';
 import { fakeError, installFakeApi } from './fake-api';
 
 type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
@@ -97,9 +97,13 @@ it('Ctrl+F focuses the page search field', async () => {
 
 const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: null };
 
-function workspaceShell(summary: () => JobSummary) {
+function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}) {
   const api = installFakeApi({
     'jobs:summary': summary,
+    'jobs:resume': () => {
+      onResume();
+      return {};
+    },
     'assets:list': () => ({ items: [], total: 0 }),
     'assetTypes:list': () => [],
     'projects:list': () => ({ items: [], total: 0 }),
@@ -143,6 +147,67 @@ it('the Jobs entry shows no number while idle and the active count otherwise', a
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('a paused queue shows the reason; Resume calls jobs:resume and the banner goes', async () => {
+  const user = userEvent.setup();
+  let summary: JobSummary = { ...IDLE, queued: 2, paused: { reason: 'provider_unreachable' } };
+  const api = workspaceShell(
+    () => summary,
+    () => {
+      summary = { ...summary, paused: null, changes: summary.changes + 1 };
+    },
+  );
+  const banner = await screen.findByRole('alert');
+  expect(banner.textContent).toContain(JOB_ERROR_MESSAGES.provider_unreachable);
+  expect(within(banner).queryByRole('button', { name: 'Settings' })).toBeNull();
+  await user.click(within(banner).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  expect(api.calls.filter((c) => c.channel === 'jobs:resume')).toHaveLength(1);
+});
+
+it.each(['provider_unauthorized', 'provider_not_configured'] as const)(
+  'a queue paused by %s offers Settings',
+  async (reason) => {
+    const user = userEvent.setup();
+    workspaceShell(() => ({ ...IDLE, paused: { reason } }));
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain(JOB_ERROR_MESSAGES[reason]);
+    await user.click(within(banner).getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
+  },
+);
+
+it('the banner shows a failed resume and keeps the pause', async () => {
+  const user = userEvent.setup();
+  const onResume = vi.fn(() => {
+    throw fakeError('internal_error');
+  });
+  render(
+    <AppShell
+      workspaceName="Studio"
+      rootPath="D:/work/studio"
+      section="assets"
+      busy={false}
+      activeJobs={0}
+      paused="provider_unreachable"
+      onResume={async () => onResume()}
+      onNavigate={() => {}}
+      onClose={() => {}}
+    >
+      <p>content</p>
+    </AppShell>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).not.toContain(JOB_ERROR_MESSAGES.provider_unreachable));
+  expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
+});
+
+it('sameSummary tells a changed pause reason apart', () => {
+  expect(sameSummary({ ...IDLE, paused: { reason: 'provider_unreachable' } }, { ...IDLE, paused: { reason: 'provider_unreachable' } })).toBe(true);
+  expect(sameSummary({ ...IDLE, paused: { reason: 'provider_unreachable' } }, { ...IDLE, paused: { reason: 'provider_unauthorized' } })).toBe(false);
+  expect(sameSummary(IDLE, { ...IDLE, paused: { reason: 'provider_unreachable' } })).toBe(false);
+  expect(sameSummary(IDLE, { ...IDLE, failed: 1 })).toBe(false);
 });
 
 it('choosing Jobs shows the Jobs page', async () => {

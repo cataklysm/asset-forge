@@ -9,7 +9,7 @@ import {
 } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
-import { jobStatusLabel } from '../labels';
+import { jobStatusLabel, SETTINGS_LOAD_FAILED, START_LOADING } from '../labels';
 import { useProvider } from '../provider-context';
 import { AI_CHIP, ALERT, BUTTON, FOCUS, MUTED } from '../ui';
 import { Dialog } from './Dialog';
@@ -31,6 +31,7 @@ export const NOT_ANALYSABLE = 'This file cannot be analysed';
 export const NO_VISION_MODEL = 'The provider offers no model that can analyse images';
 export const MODEL_NOT_VISION = 'This model cannot analyse images';
 export const CHOOSE_MODEL = 'Choose a model';
+export const MODEL_NOT_LISTED = 'The provider does not offer this model';
 /** Tooltip of the disabled Accept and of the marker of a stale proposal. */
 export const STALE_TITLE = 'The file changed after the analysis';
 const FAILED_FALLBACK = JOB_ERROR_MESSAGES.internal_error;
@@ -66,7 +67,7 @@ const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
  */
 export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSettings }: Props) {
   const { changeToken, refresh } = useJobs();
-  const { settings, models, loading: providerLoading } = useProvider();
+  const { settings, models, loading: providerLoading, settingsFailed: providerFailed } = useProvider();
   const fileId = open && file !== null ? file.id : null;
 
   const [shown, setShown] = useState<Shown | null>(null);
@@ -252,15 +253,24 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   const list = models !== null && models.ok ? models.models : null;
   const noVisionModel = list !== null && !list.some((m) => m.vision !== false);
   const chosenNotVision = list !== null && list.some((m) => m.name === model && m.vision === false);
-  const blocked = !configured
-    ? JOB_ERROR_MESSAGES.provider_not_configured
-    : noVisionModel
-      ? NO_VISION_MODEL
-      : model === null
-        ? CHOOSE_MODEL
-        : chosenNotVision
-          ? MODEL_NOT_VISION
-          : null;
+  // A stored default the provider no longer offers.
+  const notListed = list !== null && model !== null && !list.some((m) => m.name === model);
+  const blocked =
+    settings === null && providerLoading
+      ? START_LOADING
+      : settings === null && providerFailed
+        ? SETTINGS_LOAD_FAILED
+        : !configured
+          ? JOB_ERROR_MESSAGES.provider_not_configured
+          : noVisionModel
+            ? NO_VISION_MODEL
+            : model === null
+              ? CHOOSE_MODEL
+              : notListed
+                ? MODEL_NOT_LISTED
+                : chosenNotVision
+                  ? MODEL_NOT_VISION
+                  : null;
   const offerSettings = !providerLoading && (!configured || noVisionModel);
 
   const current = shown !== null && shown.fileId === fileId ? shown : null;

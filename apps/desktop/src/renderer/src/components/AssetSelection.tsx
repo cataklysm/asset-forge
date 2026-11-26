@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AssetSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { label } from '../labels';
+import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label } from '../labels';
 import { ALERT, BUTTON, LABEL, SECTION_TITLE } from '../ui';
 import { matchedNames } from './AssetGrid';
 import { CoverImage } from './CoverImage';
@@ -11,12 +11,16 @@ interface Props {
   asset: AssetSummary | null;
   typeName(id: string): string;
   onOpen(): void;
+  /** Opens the start dialog for the images of the asset; without it there is no Analyse button. */
+  onAnalyse?(assetId: string): void;
+  /** Why no analysis can start, as tooltip of the disabled Analyse button. */
+  analyseBlocked?: string | null;
 }
 
 type Projects = { assetId: string; names: string[] } | { assetId: string; error: string };
 
 /** The Selection column of the assets screen: a summary of the selected asset. */
-export function AssetSelection({ asset, typeName, onOpen }: Props) {
+export function AssetSelection({ asset, typeName, onOpen, onAnalyse, analyseBlocked = null }: Props) {
   const [projects, setProjects] = useState<Projects | null>(null);
   const assetId = asset?.id ?? null;
 
@@ -84,10 +88,21 @@ export function AssetSelection({ asset, typeName, onOpen }: Props) {
               )}
             </section>
           )}
-          <div>
+          <div className="flex flex-wrap gap-2">
             <button type="button" className={BUTTON} onClick={onOpen}>
               Open asset
             </button>
+            {onAnalyse !== undefined && (
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={analyseBlocked !== null}
+                title={analyseBlocked ?? ANALYSE_ASSET_TITLE}
+                onClick={() => onAnalyse(asset.id)}
+              >
+                {ANALYSE_LABEL}
+              </button>
+            )}
           </div>
         </>
       )}

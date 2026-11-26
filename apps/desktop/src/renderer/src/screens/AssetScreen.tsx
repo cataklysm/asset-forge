@@ -7,7 +7,9 @@ import {
   type FileRole,
   type RelationKind,
 } from '@assetforge/contracts';
+import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
+import { useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
@@ -19,7 +21,7 @@ import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
 import { useLoad } from '../hooks/useLoad';
 import { useJobs } from '../jobs-context';
-import { label, relationLabel } from '../labels';
+import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel } from '../labels';
 import type { AssetTab } from '../list-state';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
 
@@ -60,6 +62,10 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [fileCountError, setFileCountError] = useState<string | null>(null);
   // A finished job may have changed file records (e.g. AI tags): the Files tab and its count reload.
   const { resultToken } = useJobs();
+  const analysis = useAnalysisDialogs({
+    onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
+    onChanged: () => setReloadToken((t) => t + 1),
+  });
 
   const loaded = useLoad(() => call('assets:get', { id }), [id]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
@@ -197,6 +203,15 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
               Import files
             </button>
             {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={analysis.blocked !== null}
+              title={analysis.blocked ?? ANALYSE_ASSET_TITLE}
+              onClick={() => analysis.start({ kind: 'asset', assetId: id })}
+            >
+              {ANALYSE_LABEL}
+            </button>
           </div>
         </div>
         <div className="flex flex-wrap items-start gap-4">
@@ -277,6 +292,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
           <RelationsPanel assetId={id} relations={relations} disabled={importing} onOpenAsset={onOpenAsset} />
         )}
       </Tabs>
+      {analysis.dialogs}
     </div>
   );
 }

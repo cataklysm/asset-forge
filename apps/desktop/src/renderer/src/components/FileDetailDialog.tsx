@@ -14,6 +14,7 @@ import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
 import { Menu } from './Menu';
+import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 import { TagRow } from './TagRow';
 import { ViewerToolbar } from './ViewerToolbar';
@@ -186,6 +187,7 @@ export function FileDetailDialog({
         <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
           <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
             <span className="truncate">{file.originalName}</span>
+            {file.hasProposal && <ProposalMarker />}
             {asset !== null && (
               <>
                 <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />

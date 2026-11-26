@@ -22,6 +22,7 @@ import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ALERT } from '../ui';
+import { OpenSettingsProvider } from './AnalysisDialogs';
 import { AppShell, type Section } from './AppShell';
 
 interface Props {
@@ -48,9 +49,19 @@ function sectionOf(view: View): Section {
 }
 
 /** The app frame with the number of active jobs of the surrounding `JobsProvider`. */
-function JobsAppShell(props: Omit<ComponentProps<typeof AppShell>, 'activeJobs'>) {
-  const { active } = useJobs();
-  return <AppShell {...props} activeJobs={active} />;
+function JobsAppShell(props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'paused' | 'onResume'>) {
+  const { active, summary, refresh } = useJobs();
+  return (
+    <AppShell
+      {...props}
+      activeJobs={active}
+      paused={summary?.paused?.reason ?? null}
+      onResume={async () => {
+        await call('jobs:resume', {});
+        refresh();
+      }}
+    />
+  );
 }
 
 export function WorkspaceShell({ workspace, onClosed }: Props) {
@@ -96,6 +107,12 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
           onClose={() => void closeWorkspace()}
         >
           {/* The screens bring their own padding. */}
+          <OpenSettingsProvider
+            onOpenSettings={() => {
+              // A running import keeps the screen, as it does for the navigation.
+              if (!busy) navigate('settings');
+            }}
+          >
           {error !== null && (
             <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
               {error}
@@ -135,6 +152,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
               onShowAssets={showAssets}
             />
           )}
+          </OpenSettingsProvider>
         </JobsAppShell>
       </ProviderSettingsProvider>
     </JobsProvider>

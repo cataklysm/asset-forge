@@ -97,26 +97,44 @@ export function SettingsScreen() {
   const locked = settings.fromEnvironment;
   const timeoutSeconds = timeoutOf(current.timeout);
   const blocked = locked || busy;
-  const update = (patch: Partial<Form>) => setForm({ ...current, ...patch });
+  const update = (patch: Partial<Form>) => setForm((f) => (f === null ? f : { ...f, ...patch }));
 
-  /** `apiKey` undefined: keep the stored key (or send the typed one); null: delete it. */
-  async function submit(apiKey: string | null | undefined, test: boolean) {
-    if (busyRef.current || timeoutSeconds === null) return;
+  /**
+   * `apiKey` undefined: saves the form and keeps the stored key (or sends the typed one); null:
+   * deletes the stored key and leaves everything else as stored, so unsaved edits stay unsaved.
+   */
+  async function submit(apiKey: null | undefined, test: boolean) {
+    if (busyRef.current) return;
+    const removing = apiKey === null;
+    if (!removing && timeoutSeconds === null) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
+    const sent = current;
     const typed = current.apiKey;
-    const input: SetVisionSettings = {
-      baseUrl: current.baseUrl.trim() === '' ? null : current.baseUrl.trim(),
-      timeoutSeconds,
-      taggingModel: current.taggingModel,
-      promptModel: current.promptModel,
-    };
-    if (apiKey === null) input.apiKey = null;
-    else if (typed !== '') input.apiKey = typed;
+    const input: SetVisionSettings = removing
+      ? {
+          baseUrl: settings!.baseUrl,
+          timeoutSeconds: settings!.timeoutSeconds,
+          taggingModel: settings!.taggingModel,
+          promptModel: settings!.promptModel,
+          apiKey: null,
+        }
+      : {
+          baseUrl: current.baseUrl.trim() === '' ? null : current.baseUrl.trim(),
+          timeoutSeconds: timeoutSeconds!,
+          taggingModel: current.taggingModel,
+          promptModel: current.promptModel,
+        };
+    if (!removing && typed !== '') input.apiKey = typed;
     try {
       const view = await save(input);
-      setForm(formOf(view));
+      // Edits made while the save ran stay; only the key that was sent leaves the field.
+      setForm((f) => {
+        if (f === null || removing) return f;
+        if (f === sent) return formOf(view);
+        return { ...f, apiKey: f.apiKey === typed ? '' : f.apiKey };
+      });
       if (test) {
         await refreshModels();
         setTested(true);
@@ -186,7 +204,7 @@ export function SettingsScreen() {
                 type="button"
                 className={BUTTON_INLINE}
                 aria-label="Remove key"
-                disabled={blocked || timeoutSeconds === null}
+                disabled={blocked}
                 onClick={() => void submit(null, false)}
               >
                 Remove

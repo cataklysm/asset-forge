@@ -14,12 +14,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AnalysisResultDialog,
   CHOOSE_MODEL,
+  MODEL_NOT_LISTED,
   NO_VISION_MODEL,
   NOT_ANALYSABLE,
   PROPOSAL_CHANGED,
   STALE_TITLE,
 } from '../../src/renderer/src/components/AnalysisResultDialog';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
+import { SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AI_CHIP, BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -523,6 +525,24 @@ describe('AnalysisResultDialog', () => {
     expect(button('Analyse').disabled).toBe(true);
     expect(button('Analyse').title).toBe(CHOOSE_MODEL);
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+  });
+
+  it('a stored default the provider does not offer blocks Analyse with the reason', async () => {
+    const file = fileRecord();
+    setup(file, { settings: { ...CONFIGURED, taggingModel: 'gone-model' } });
+    await providerReady();
+    expect(button('Analyse').disabled).toBe(true);
+    expect(button('Analyse').title).toBe(MODEL_NOT_LISTED);
+  });
+
+  it('while the settings load Analyse says so instead of "not configured"', async () => {
+    const file = fileRecord();
+    const settings = deferred<VisionSettingsView>();
+    setup(file, { handlers: { 'settings:getVision': () => settings.promise } });
+    await waitFor(() => expect(button('Analyse').title).toBe(START_LOADING));
+    expect(button('Analyse').title).not.toBe(JOB_ERROR_MESSAGES.provider_not_configured);
+    await act(async () => settings.reject(fakeError('internal_error')));
+    await waitFor(() => expect(button('Analyse').title).toBe(SETTINGS_LOAD_FAILED));
   });
 
   it('uses only the shared button styles', async () => {
