@@ -13,13 +13,15 @@ interface Props {
   label: string;
   items: MenuItem[];
   icon?: ReactNode;
+  /** Tab index of the trigger; -1 keeps it out of the tab order (e.g. inside a roving tab index list). */
+  tabIndex?: number;
 }
 
 /**
  * A menu button. Opening focuses the menu itself; ↑/↓ (wrapping), Home and End move between the
  * enabled items, Enter or Space selects, Esc or Tab closes. Focus returns to the trigger.
  */
-export function Menu({ label, items, icon }: Props) {
+export function Menu({ label, items, icon, tabIndex }: Props) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -116,6 +118,7 @@ export function Menu({ label, items, icon }: Props) {
         className={ICON_BUTTON}
         aria-label={label}
         title={label}
+        tabIndex={tabIndex}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
