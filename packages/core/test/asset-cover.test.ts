@@ -215,6 +215,7 @@ describe('asset cover', () => {
     const target = assetFilePath(ctx.other.id, 'reference', file.id, 'a.png');
     await ctx.db.fileMoves.begin({
       fileId: file.id,
+      kind: 'relocate',
       targetRelativePath: target,
       targetAssetId: ctx.other.id,
       targetRole: 'reference',

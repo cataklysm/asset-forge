@@ -16,7 +16,12 @@ import { asset, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
-const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[], hasProposal: boolean): FileRecord => ({
+const toRecord = (
+  row: typeof file.$inferSelect,
+  tags: TagAssignment[],
+  hasProposal: boolean,
+  trashedAssetName: string | null,
+): FileRecord => ({
   id: row.id,
   storageId: row.storageId,
   assetId: row.assetId,
@@ -30,15 +35,22 @@ const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[], hasPropo
   error: row.error,
   importedAt: row.importedAt,
   previewable: isPreviewable(row.mimeType),
-  openable: isOpenable(row.relativePath),
+  openable: row.deletedAt === null && isOpenable(row.relativePath), // a trashed file is never opened
   kind: FileKindSchema.catch('other').parse(row.kind), // the column has no CHECK; an unknown value reads as 'other'
   width: row.width,
   height: row.height,
   tags,
   hasProposal,
+  deletedAt: row.deletedAt,
+  trashedAssetId: row.trashedAssetId,
+  trashedAssetName,
+  trashedRole: row.trashedRole,
 });
 
-/** Turns rows into records; the file tags of all rows come from one query, their proposals from another. */
+/**
+ * Turns rows into records; the file tags of all rows come from one query, their proposals from
+ * another, and the names of the trashed files' origin assets from a third (only when there are any).
+ */
 export function toRecords(tx: Pick<BetterSQLite3Database, 'select'>, rows: (typeof file.$inferSelect)[]): FileRecord[] {
   if (rows.length === 0) return [];
   const byFile = new Map<string, TagAssignment[]>();
@@ -72,7 +84,25 @@ export function toRecords(tx: Pick<BetterSQLite3Database, 'select'>, rows: (type
       .all()
       .map((p) => p.fileId),
   );
-  return rows.map((row) => toRecord(row, byFile.get(row.id) ?? [], proposed.has(row.id)));
+  const originIds = [...new Set(rows.flatMap((r) => (r.trashedAssetId === null ? [] : [r.trashedAssetId])))];
+  const originNames = new Map(
+    originIds.length === 0
+      ? []
+      : tx
+          .select({ id: asset.id, name: asset.name })
+          .from(asset)
+          .where(inArray(asset.id, originIds))
+          .all()
+          .map((a) => [a.id, a.name] as const),
+  );
+  return rows.map((row) =>
+    toRecord(
+      row,
+      byFile.get(row.id) ?? [],
+      proposed.has(row.id),
+      row.trashedAssetId === null ? null : (originNames.get(row.trashedAssetId) ?? null),
+    ),
+  );
 }
 
 export function toRecordWithTags(tx: Pick<BetterSQLite3Database, 'select'>, row: typeof file.$inferSelect): FileRecord {
@@ -98,6 +128,8 @@ const scopeMatches = (scope: FileScope) => {
       return isNull(file.assetId);
     case 'asset':
       return eq(file.assetId, scope.assetId);
+    case 'trash':
+      throw new Error('not implemented');
   }
 };
 
@@ -264,6 +296,15 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         },
         { behavior: 'deferred' },
       );
+    },
+    async purge() {
+      throw new Error('not implemented');
+    },
+    async countTrashed() {
+      throw new Error('not implemented');
+    },
+    async listTrashedIds() {
+      throw new Error('not implemented');
     },
   };
 }

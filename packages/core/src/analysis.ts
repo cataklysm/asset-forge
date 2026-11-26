@@ -52,7 +52,9 @@ export function cleanAnalysisTags(answer: unknown): { name: string; displayName:
   return result;
 }
 
-/** Complete, of a previewable MIME type and with a checksum. */
+/** Complete, not in the trash, of a previewable MIME type and with a checksum. */
 export function isAnalysable(file: FileRecord): boolean {
-  return file.status === 'complete' && isPreviewable(file.mimeType) && file.sha256 !== null;
+  return (
+    file.status === 'complete' && file.deletedAt === null && isPreviewable(file.mimeType) && file.sha256 !== null
+  );
 }

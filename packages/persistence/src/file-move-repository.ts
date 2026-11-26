@@ -7,6 +7,7 @@ import { assetOfFile, reindexAssets } from './search-index.js';
 
 const toMove = (row: typeof fileMove.$inferSelect): FileMove => ({
   fileId: row.fileId,
+  kind: row.kind,
   targetRelativePath: row.targetRelativePath,
   targetAssetId: row.targetAssetId,
   targetRole: row.targetRole,
@@ -23,6 +24,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
         tx.insert(fileMove)
           .values({
             fileId: move.fileId,
+            kind: move.kind,
             targetRelativePath: move.targetRelativePath,
             targetAssetId: move.targetAssetId,
             targetRole: move.targetRole,
@@ -33,6 +35,7 @@ export function createFileMoveRepository(db: BetterSQLite3Database): FileMoveRep
     },
     async commit(fileId) {
       // Throwing inside the transaction rolls back every statement.
+      // Every kind still commits as `relocate`; the trash and restore commits are not built yet.
       return db.transaction((tx) => {
         const move = tx.select().from(fileMove).where(eq(fileMove.fileId, fileId)).get();
         if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);

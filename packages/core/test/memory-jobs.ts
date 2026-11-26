@@ -71,6 +71,10 @@ export class InMemoryJobRepository implements JobRepository {
     return chosen ? structuredClone(chosen) : null;
   }
 
+  async activeForFile(_fileId: string): Promise<Job[]> {
+    throw new Error('not implemented');
+  }
+
   async listByStatus(status: JobStatus): Promise<Job[]> {
     return this.rows.filter((r) => r.status === status).sort(oldestFirst).map((r) => structuredClone(r));
   }

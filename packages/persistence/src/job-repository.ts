@@ -72,6 +72,9 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
       const row = newest(isActive) ?? newest();
       return row ? toJob(row) : null;
     },
+    async activeForFile() {
+      throw new Error('not implemented');
+    },
     async enqueue({ jobs, now }): Promise<string[]> {
       return db.transaction((tx) => {
         const inserted: string[] = [];

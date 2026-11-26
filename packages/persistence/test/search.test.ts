@@ -159,6 +159,7 @@ describe('search index triggers', () => {
     await db.assets.insert(asset(2, 'Bravo'));
     const target = (fileId: string) => ({
       fileId,
+      kind: 'relocate' as const,
       targetRelativePath: `assets/${uuid(2)}/${fileId}.bin`,
       targetAssetId: uuid(2),
       targetRole: 'reference' as const,

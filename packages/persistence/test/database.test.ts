@@ -86,6 +86,10 @@ describe('workspace database', () => {
       openable: true,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
     });
     expect(() => FileRecordSchema.parse(list.items[0])).not.toThrow();
   });

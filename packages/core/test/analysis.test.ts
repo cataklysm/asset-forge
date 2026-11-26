@@ -5,11 +5,47 @@ import {
   ANALYSIS_SCHEMA,
   addFileTag,
   cleanAnalysisTags,
+  isAnalysable,
   JobError,
   MAX_ANALYSIS_TAGS,
 } from '../src/index.js';
+import type { FileRecord } from '@assetforge/contracts';
 import { jobFor, PROVIDER, rejectsWith, setup, UNKNOWN_ID } from './analysis-setup.js';
 
+describe('isAnalysable', () => {
+  const complete: FileRecord = {
+    id: '22222222-2222-4222-8222-222222222222',
+    storageId: '33333333-3333-4333-8333-333333333333',
+    assetId: null,
+    role: null,
+    originalName: 'a.png',
+    relativePath: 'inbox/a.png',
+    mimeType: 'image/png',
+    sizeBytes: 3,
+    sha256: 'a'.repeat(64),
+    status: 'complete',
+    error: null,
+    importedAt: '2026-11-26T10:00:00.000Z',
+    previewable: true,
+    openable: true,
+    kind: 'image',
+    width: null,
+    height: null,
+    tags: [],
+    hasProposal: false,
+    deletedAt: null,
+    trashedAssetId: null,
+    trashedAssetName: null,
+    trashedRole: null,
+  };
+
+  it('is true for a complete previewable image and false once it is in the trash', () => {
+    expect(isAnalysable(complete)).toBe(true);
+    expect(
+      isAnalysable({ ...complete, relativePath: '.assetforge/trash/a.png', openable: false, deletedAt: '2026-11-26T11:00:00.000Z' }),
+    ).toBe(false);
+  });
+});
 
 describe('cleanAnalysisTags', () => {
   it('drops non-strings, invalid and duplicate tags', () => {

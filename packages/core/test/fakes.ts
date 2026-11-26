@@ -348,7 +348,13 @@ class InMemoryFiles implements FileRepository {
   ) {}
 
   private withTags(rec: FileRecord): FileRecord {
-    return { ...rec, tags: this.tags.forFile(rec.id), hasProposal: this.proposals.has(rec.id) };
+    // Mirrors the database: a trashed file is never openable.
+    return {
+      ...rec,
+      openable: rec.deletedAt === null && rec.openable,
+      tags: this.tags.forFile(rec.id),
+      hasProposal: this.proposals.has(rec.id),
+    };
   }
 
   async insertPending(r: {
@@ -380,6 +386,10 @@ class InMemoryFiles implements FileRepository {
       height: null,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
     });
   }
 
@@ -424,6 +434,7 @@ class InMemoryFiles implements FileRepository {
 
   async list(q: FileQuery): Promise<FileList> {
     const { scope } = q;
+    if (scope.kind === 'trash') throw new Error('not implemented');
     const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
     const tagsOf = (fileId: string) => this.tags.fileAssignments.filter((a) => a.fileId === fileId).map((a) => a.name);
     // Plan decision 1/2: a word is a substring of the folded name or a word prefix of a tag name.
@@ -439,6 +450,18 @@ class InMemoryFiles implements FileRepository {
       .filter((r) => words.every((w) => matchesWord(r, w)))
       .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
+  }
+
+  async purge(_id: string): Promise<boolean> {
+    throw new Error('not implemented');
+  }
+
+  async countTrashed(): Promise<number> {
+    throw new Error('not implemented');
+  }
+
+  async listTrashedIds(): Promise<string[]> {
+    throw new Error('not implemented');
   }
 
   private require(id: string): FileRecord {

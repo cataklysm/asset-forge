@@ -33,6 +33,13 @@ export const FileRecordSchema = z.object({
   tags: z.array(TagAssignmentSchema), // file tags only
   /** A tag proposal of an analysis waits for the owner's decision. */
   hasProposal: z.boolean(),
+  /** When the file was moved to the trash; null while it is not in the trash. */
+  deletedAt: z.string().nullable(),
+  /** The asset a trashed file came from (null for an inbox file, or when that asset is gone). */
+  trashedAssetId: z.uuid().nullable(),
+  trashedAssetName: z.string().nullable(),
+  /** The role a trashed file had in that asset. */
+  trashedRole: FileRoleSchema.nullable(),
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 
@@ -44,11 +51,12 @@ export const ImportResultSchema = z.object({
 });
 export type ImportResult = z.infer<typeof ImportResultSchema>;
 
-/** Which files a list covers: every file, the unassigned inbox, or the files of one asset. */
+/** Which files a list covers: every file, the unassigned inbox, the files of one asset, or the trash. */
 export const FileScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('all') }),
   z.object({ kind: z.literal('inbox') }),
   z.object({ kind: z.literal('asset'), assetId: z.uuid() }),
+  z.object({ kind: z.literal('trash') }),
 ]);
 export type FileScope = z.infer<typeof FileScopeSchema>;
 
@@ -69,8 +77,11 @@ export const FileIdsSchema = z
   .max(1000)
   .refine((ids) => new Set(ids).size === ids.length, 'duplicate ids');
 
-/** One result per requested file, in request order: the placed record or the error of that file. */
-export const AssignManyResultSchema = z.object({
+/**
+ * One result per requested file, in request order: the resulting record or the error of that file.
+ * A purged file, and a failed file removed outright, has neither (`file: null, error: null`).
+ */
+export const FileBatchResultSchema = z.object({
   items: z.array(
     z.object({
       fileId: z.uuid(),
@@ -79,7 +90,22 @@ export const AssignManyResultSchema = z.object({
     }),
   ),
 });
-export type AssignManyResult = z.infer<typeof AssignManyResultSchema>;
+export type FileBatchResult = z.infer<typeof FileBatchResultSchema>;
+
+/** The result of `files:assignMany`; the same shape as every per-item file batch. */
+export const AssignManyResultSchema = FileBatchResultSchema;
+export type AssignManyResult = FileBatchResult;
+
+/** The outcome of emptying the trash. */
+export const EmptyTrashResultSchema = z.object({
+  purged: z.number().int().min(0),
+  failed: z.number().int().min(0),
+});
+export type EmptyTrashResult = z.infer<typeof EmptyTrashResultSchema>;
+
+/** The number of files in the trash. */
+export const TrashSummarySchema = z.object({ count: z.number().int().min(0) });
+export type TrashSummary = z.infer<typeof TrashSummarySchema>;
 
 export const FileRecordsSchema = z.object({ items: z.array(FileRecordSchema) });
 export type FileRecords = z.infer<typeof FileRecordsSchema>;

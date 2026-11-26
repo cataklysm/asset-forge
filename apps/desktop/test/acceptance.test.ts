@@ -317,6 +317,7 @@ describe('phase 2a acceptance', () => {
       await first.exclusive(async (s) => {
         await s.database.fileMoves.begin({
           fileId: file.id,
+          kind: 'relocate',
           targetRelativePath: newPath,
           targetAssetId: asset.id,
           targetRole: 'reference',

@@ -40,6 +40,7 @@ const FILE_ROLES = vocabulary(FileRoleSchema);
 const IMPORT_STATUSES = vocabulary(ImportStatusSchema);
 const STEP_STATES = vocabulary(WorkflowStepStateSchema);
 const TAG_ORIGINS = ['manual', 'ai'] as const;
+const FILE_MOVE_KINDS = ['relocate', 'trash', 'restore'] as const;
 const JOB_STATUSES = vocabulary(JobStatusSchema);
 const RESOURCE_CLASSES = vocabulary(ResourceClassSchema);
 
@@ -168,9 +169,15 @@ export const file = sqliteTable(
     status: text('status', { enum: IMPORT_STATUSES }).notNull(),
     error: text('error'),
     importedAt: text('imported_at').notNull(),
+    // The trash (migration 0008). `deleted_at is not null` implies `asset_id` and `role` are null; the
+    // repositories enforce it, not a CHECK, so that 0008 only adds columns and does not rebuild `file`.
+    deletedAt: text('deleted_at'),
+    trashedAssetId: text('trashed_asset_id').references(() => asset.id, { onDelete: 'set null' }),
+    trashedRole: text('trashed_role', { enum: FILE_ROLES }),
   },
   (t) => [
     uniqueIndex('file_storage_id_relative_path_unique').on(t.storageId, t.relativePath),
+    index('file_deleted_at_idx').on(t.deletedAt),
     index('file_sha256_idx').on(t.sha256),
     index('file_status_idx').on(t.status),
     index('file_imported_at_idx').on(t.importedAt),
@@ -194,6 +201,7 @@ export const fileMove = sqliteTable(
     targetAssetId: text('target_asset_id').references(() => asset.id),
     targetRole: text('target_role', { enum: FILE_ROLES }),
     createdAt: text('created_at').notNull(),
+    kind: text('kind', { enum: FILE_MOVE_KINDS }).notNull().default('relocate'),
   },
   (t) => [
     check('file_move_target_role_check', oneOf(t.targetRole, FILE_ROLES)),

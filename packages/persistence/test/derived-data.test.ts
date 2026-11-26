@@ -105,6 +105,7 @@ async function buildLibrary(): Promise<void> {
   const moving = await addFile(uuid(1), 'blueprint.png');
   await db.fileMoves.begin({
     fileId: moving,
+    kind: 'relocate',
     targetRelativePath: `assets/${uuid(3)}/${moving}.bin`,
     targetAssetId: uuid(3),
     targetRole: 'reference',

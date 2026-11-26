@@ -353,6 +353,7 @@ describe('file placement and moves', () => {
   };
   const move = (n: number, patch: Partial<FileMove> = {}): FileMove => ({
     fileId: fileId(n),
+    kind: 'relocate',
     targetRelativePath: `assets/${uuid(1)}/references/f${n}.png`,
     targetAssetId: uuid(1),
     targetRole: 'reference',

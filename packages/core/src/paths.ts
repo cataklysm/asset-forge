@@ -5,7 +5,9 @@ import { sanitizeFileName } from './file-names.js';
 export const MANIFEST_PATH = 'workspace.json';
 export const INBOX_DIR = 'inbox';
 export const STAGING_DIR = '.assetforge/staging';
-export const LAYOUT_DIRS = ['assets', 'inbox', 'exports', '.assetforge/staging'] as const;
+/** Where trashed files wait until they are restored or purged. */
+export const TRASH_DIR = '.assetforge/trash';
+export const LAYOUT_DIRS = ['assets', 'inbox', 'exports', STAGING_DIR, TRASH_DIR] as const;
 
 export function stagingPath(fileId: string): string {
   return `${STAGING_DIR}/${fileId}.part`;
@@ -13,6 +15,10 @@ export function stagingPath(fileId: string): string {
 
 export function inboxPath(fileId: string, originalName: string): string {
   return `${INBOX_DIR}/${fileId}_${sanitizeFileName(originalName)}`;
+}
+
+export function trashPath(fileId: string, originalName: string): string {
+  return `${TRASH_DIR}/${fileId}_${sanitizeFileName(originalName)}`;
 }
 
 /** The directory inside an asset's folder that holds the files of a role. */

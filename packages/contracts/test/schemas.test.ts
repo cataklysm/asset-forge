@@ -5,7 +5,10 @@ import {
   AssetRelationViewSchema,
   AssetSummarySchema,
   AssetWorkflowSchema,
+  AssignManyResultSchema,
+  FileBatchResultSchema,
   FileRecordSchema,
+  FileScopeSchema,
   IpcErrorSchema,
   NameInputSchema,
   normalizeTagName,
@@ -60,6 +63,10 @@ describe('FileRecordSchema', () => {
       height: null,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);
     const { kind: _k, ...withoutKind } = record;
@@ -68,6 +75,46 @@ describe('FileRecordSchema', () => {
     const { openable: _o, ...withoutOpenable } = record;
     expect(() => FileRecordSchema.parse(withoutPreviewable)).toThrow();
     expect(() => FileRecordSchema.parse(withoutOpenable)).toThrow();
+    const { deletedAt: _d, ...withoutDeletedAt } = record;
+    expect(() => FileRecordSchema.parse(withoutDeletedAt)).toThrow();
+  });
+
+  it('parses a trashed record with its origin', () => {
+    const record = {
+      id: uuid,
+      storageId: uuid,
+      assetId: null,
+      role: null,
+      originalName: 'a.png',
+      relativePath: '.assetforge/trash/a.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      sha256: null,
+      status: 'complete',
+      error: null,
+      importedAt: now,
+      previewable: true,
+      openable: false,
+      kind: 'image',
+      width: null,
+      height: null,
+      tags: [],
+      hasProposal: false,
+      deletedAt: now,
+      trashedAssetId: uuid,
+      trashedAssetName: 'Oak',
+      trashedRole: 'reference',
+    };
+    expect(FileRecordSchema.parse(record)).toEqual(record);
+    expect(FileRecordSchema.safeParse({ ...record, trashedRole: 'bogus' }).success).toBe(false);
+    expect(FileRecordSchema.safeParse({ ...record, trashedAssetId: 'nope' }).success).toBe(false);
+  });
+});
+
+describe('FileScopeSchema', () => {
+  it('accepts the trash scope', () => {
+    expect(FileScopeSchema.safeParse({ kind: 'trash' }).success).toBe(true);
+    expect(ipcContract['files:list'].request.safeParse({ limit: 10, offset: 0, scope: { kind: 'trash' } }).success).toBe(true);
   });
 });
 
@@ -411,5 +458,46 @@ describe('file batch channels', () => {
       response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'not_found', message: 'm' } }] }).success,
     ).toBe(true);
     expect(response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'bogus', message: 'm' } }] }).success).toBe(false);
+  });
+});
+
+describe('trash channels', () => {
+  const uuidN = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const channels = ['files:trashMany', 'files:restoreMany', 'files:purgeMany'] as const;
+
+  it.each(channels)('%s accepts 1 and 1000 distinct ids', (channel) => {
+    const { request } = ipcContract[channel];
+    expect(request.safeParse({ fileIds: [uuidN(1)] }).success).toBe(true);
+    expect(request.safeParse({ fileIds: Array.from({ length: 1000 }, (_, i) => uuidN(i)) }).success).toBe(true);
+  });
+
+  it.each(channels)('%s rejects 0, 1001 and duplicate ids', (channel) => {
+    const { request } = ipcContract[channel];
+    expect(request.safeParse({ fileIds: [] }).success).toBe(false);
+    expect(request.safeParse({ fileIds: Array.from({ length: 1001 }, (_, i) => uuidN(i)) }).success).toBe(false);
+    expect(request.safeParse({ fileIds: [uuidN(1), uuidN(1)] }).success).toBe(false);
+  });
+
+  it.each(channels)('%s answers per-item results; a purged item has neither file nor error', (channel) => {
+    const { response } = ipcContract[channel];
+    expect(response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: null }] }).success).toBe(true);
+    expect(
+      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'invalid_operation', message: 'm' } }] })
+        .success,
+    ).toBe(true);
+  });
+
+  it('AssignManyResultSchema is the neutral batch result', () => {
+    expect(AssignManyResultSchema).toBe(FileBatchResultSchema);
+  });
+
+  it('trash:empty and trash:summary take an empty request and answer counts', () => {
+    expect(ipcContract['trash:empty'].request.safeParse({}).success).toBe(true);
+    expect(ipcContract['trash:empty'].response.safeParse({ purged: 2, failed: 0 }).success).toBe(true);
+    expect(ipcContract['trash:empty'].response.safeParse({ purged: -1, failed: 0 }).success).toBe(false);
+    expect(ipcContract['trash:empty'].response.safeParse({ purged: 1.5, failed: 0 }).success).toBe(false);
+    expect(ipcContract['trash:summary'].request.safeParse({}).success).toBe(true);
+    expect(ipcContract['trash:summary'].response.safeParse({ count: 0 }).success).toBe(true);
+    expect(ipcContract['trash:summary'].response.safeParse({ count: -1 }).success).toBe(false);
   });
 });

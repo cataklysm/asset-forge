@@ -3,12 +3,15 @@ import type { IpcError } from './errors';
 import { TagSuggestionSchema } from './tags';
 import {
   AssignManyResultSchema,
+  EmptyTrashResultSchema,
+  FileBatchResultSchema,
   FileIdsSchema,
   FileListSchema,
   FileRecordSchema,
   FileRecordsSchema,
   FileTargetSchema,
   ImportResultSchema,
+  TrashSummarySchema,
 } from './files';
 import {
   ApprovalStatusSchema,
@@ -126,6 +129,29 @@ export const ipcContract = {
   'files:assignMany': {
     request: z.object({ fileIds: FileIdsSchema, assetId: IdSchema, role: FileRoleSchema }),
     response: AssignManyResultSchema,
+  },
+  /** Moves each complete file to the trash and removes each failed file outright; per item, in request order. */
+  'files:trashMany': {
+    request: z.object({ fileIds: FileIdsSchema }),
+    response: FileBatchResultSchema,
+  },
+  /** Moves each trashed file back to its asset and role, or to the inbox; per item. */
+  'files:restoreMany': {
+    request: z.object({ fileIds: FileIdsSchema }),
+    response: FileBatchResultSchema,
+  },
+  /** Removes each trashed file for good; per item, a purged item carries neither file nor error. */
+  'files:purgeMany': {
+    request: z.object({ fileIds: FileIdsSchema }),
+    response: FileBatchResultSchema,
+  },
+  'trash:empty': {
+    request: EmptyRequestSchema,
+    response: EmptyTrashResultSchema,
+  },
+  'trash:summary': {
+    request: EmptyRequestSchema,
+    response: TrashSummarySchema,
   },
   'assetTypes:list': {
     request: EmptyRequestSchema,

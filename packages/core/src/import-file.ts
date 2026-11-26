@@ -112,6 +112,10 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       height: size?.height ?? null,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
     };
     return { sourcePath, file, error: null, duplicateOf };
   } catch (error) {
@@ -149,6 +153,10 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       height: null,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
     };
     return { sourcePath, file, error: message, duplicateOf: [] };
   }

@@ -189,6 +189,7 @@ describe('relocateFile', () => {
     const { session, db, asset, file } = await setup();
     await db.fileMoves.begin({
       fileId: file.id,
+      kind: 'relocate',
       targetRelativePath: assetFilePath(asset.id, 'reference', file.id, 'pump.png'),
       targetAssetId: asset.id,
       targetRole: 'reference',
@@ -236,6 +237,7 @@ describe('recoverFileMoves', () => {
     const target = assetFilePath(ctx.asset.id, 'reference', ctx.file.id, 'pump.png');
     await ctx.db.fileMoves.begin({
       fileId: ctx.file.id,
+      kind: 'relocate',
       targetRelativePath: target,
       targetAssetId: ctx.asset.id,
       targetRole: 'reference',

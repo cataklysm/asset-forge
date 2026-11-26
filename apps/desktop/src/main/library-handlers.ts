@@ -49,6 +49,11 @@ export type LibraryHandlers = Pick<
   | 'files:assign'
   | 'files:unassign'
   | 'files:assignMany'
+  | 'files:trashMany'
+  | 'files:restoreMany'
+  | 'files:purgeMany'
+  | 'trash:empty'
+  | 'trash:summary'
   | 'assetTypes:list'
   | 'projects:list'
   | 'projects:get'
@@ -105,6 +110,13 @@ export function createLibraryHandlers(
         })),
       };
     },
+
+    // The trash channels; the use cases behind them are not built yet.
+    'files:trashMany': notImplemented,
+    'files:restoreMany': notImplemented,
+    'files:purgeMany': notImplemented,
+    'trash:empty': notImplemented,
+    'trash:summary': notImplemented,
 
     'assetTypes:list': () => manager.read((s) => listAssetTypes(s)),
 
@@ -178,4 +190,9 @@ export function createLibraryHandlers(
       return { removed: await manager.exclusive((s) => removeWorkflow(s, r.assetId)) };
     },
   };
+}
+
+/** A channel whose use case does not exist yet; reaches the renderer as `internal_error`. */
+async function notImplemented(): Promise<never> {
+  throw new Error('not implemented');
 }

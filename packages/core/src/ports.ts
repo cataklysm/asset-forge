@@ -87,6 +87,15 @@ export interface FileRepository {
   /** Rejects with NotFoundError for an unknown id. Clears the chosen cover of any other asset than `placement.assetId` that uses this file. */
   setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>;
   list(q: FileQuery): Promise<FileList>; // newest importedAt first
+  /**
+   * One transaction: deletes the file row and every row that references it, only for a row that is
+   * in the trash or has status `failed`. False otherwise and for an unknown id.
+   */
+  purge(id: string): Promise<boolean>;
+  /** How many files are in the trash. */
+  countTrashed(): Promise<number>;
+  /** The ids of every file in the trash, newest deletion first. */
+  listTrashedIds(): Promise<string[]>;
 }
 
 export interface Page {
@@ -113,9 +122,13 @@ export interface FilePlacement {
   role: FileRole | null;
 }
 
+/** What the commit of a move does: place the file, send it to the trash, or bring it back from there. */
+export type FileMoveKind = 'relocate' | 'trash' | 'restore';
+
 /** Journal entry of a file move in progress: written before the file moves, removed with the commit. */
 export interface FileMove {
   fileId: string;
+  kind: FileMoveKind;
   targetRelativePath: string;
   targetAssetId: string | null;
   targetRole: FileRole | null;
@@ -339,6 +352,8 @@ export interface JobRepository {
    * when there is one, otherwise the newest job whatever its status; null when there is none.
    */
   latestForFile(fileId: string, type: string): Promise<Job | null>;
+  /** Every job of the file in `queued`, `retry_wait`, `running` or `waiting_remote`. */
+  activeForFile(fileId: string): Promise<Job[]>;
 }
 
 /** Provenance of the latest analysis of a file: the content that was analysed, by what and when. */

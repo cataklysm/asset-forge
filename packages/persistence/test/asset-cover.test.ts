@@ -168,7 +168,7 @@ describe('asset cover repository', () => {
     await db.assets.setCover(a.id, cover, T2);
     const move = (assetId: string, role: FileRole) =>
       db.fileMoves
-        .begin({ fileId: cover, targetRelativePath: `assets/${assetId}/${role}/${cover}`, targetAssetId: assetId, targetRole: role, createdAt: T2 })
+        .begin({ fileId: cover, kind: 'relocate', targetRelativePath: `assets/${assetId}/${role}/${cover}`, targetAssetId: assetId, targetRole: role, createdAt: T2 })
         .then(() => db.fileMoves.commit(cover));
 
     await move(a.id, 'texture');

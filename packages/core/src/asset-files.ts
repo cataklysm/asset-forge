@@ -40,6 +40,7 @@ export async function relocateFile(
 
   await s.database.fileMoves.begin({
     fileId: file.id,
+    kind: 'relocate',
     targetRelativePath: relativePath,
     targetAssetId: assetId,
     targetRole: role,

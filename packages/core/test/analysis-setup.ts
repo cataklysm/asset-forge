@@ -43,6 +43,10 @@ export async function setup() {
       height: null,
       tags: [],
       hasProposal: false,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: null,
       ...patch,
     };
     db.files.records.set(id, record);

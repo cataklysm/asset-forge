@@ -49,6 +49,10 @@ export function fileRecord(p: Partial<FileRecord> = {}): FileRecord {
     height: null,
     tags: [],
     hasProposal: false,
+    deletedAt: null,
+    trashedAssetId: null,
+    trashedAssetName: null,
+    trashedRole: null,
     ...p,
   };
 }
