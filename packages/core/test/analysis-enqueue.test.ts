@@ -13,8 +13,13 @@ import { trashForTest } from './fakes.js';
 
 const MODEL = 'llava:13b';
 
-function request(target: AnalysisTarget, patch: { mode?: 'apply' | 'propose'; force?: boolean; model?: string } = {}) {
-  return { target, model: MODEL, mode: 'apply' as const, force: false, provider: PROVIDER, ...patch };
+const PROMPT = { name: 'Detail', text: 'T', maxTags: 30 };
+
+function request(
+  target: AnalysisTarget,
+  patch: { mode?: 'apply' | 'propose'; force?: boolean; model?: string; prompt?: typeof PROMPT } = {},
+) {
+  return { target, model: MODEL, mode: 'apply' as const, force: false, provider: PROVIDER, prompt: PROMPT, ...patch };
 }
 
 function analysed(c: Setup, fileId: string, model = MODEL): void {
@@ -34,7 +39,7 @@ function spyEnqueue(c: Setup): NewJob[][] {
 }
 
 describe('enqueueAnalysis', () => {
-  it('enqueues a v2 job per analysable file and counts the rest', async () => {
+  it('enqueues a v3 job per analysable file and counts the rest', async () => {
     const c = await setup();
     const queued = await c.importOne('queued.png');
     const pending = c.seedFile({ status: 'pending', sha256: null });
@@ -51,7 +56,7 @@ describe('enqueueAnalysis', () => {
       type: ANALYZE_FILE_JOB,
       resourceClass: 'local_gpu',
       status: 'queued',
-      payload: { version: 2, model: MODEL, mode: 'apply' },
+      payload: { version: 3, model: MODEL, mode: 'apply', prompt: PROMPT },
       dedupeKey: `vision.analyze_file:${c.file.id}`,
     });
   });
@@ -97,7 +102,7 @@ describe('enqueueAnalysis', () => {
     analysed(c, c.file.id);
     const result = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { mode: 'propose' }));
     expect(result).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 2, model: MODEL, mode: 'propose' });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 3, model: MODEL, mode: 'propose', prompt: PROMPT });
   });
 
   it('refuses propose for anything but a one-file list', async () => {
@@ -137,6 +142,30 @@ describe('enqueueAnalysis', () => {
     const result = await enqueueAnalysis(c.session, request({ kind: 'asset', assetId }));
     expect(result).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } });
     expect(c.db.jobs.rows.map((j) => j.fileId)).toEqual([a.id]);
+  });
+
+  it('writes the prompt into the payload of every job', async () => {
+    const c = await setup();
+    for (let i = 0; i < 3; i++) c.seedFile();
+    await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
+    expect(c.db.jobs.rows).toHaveLength(4);
+    for (const job of c.db.jobs.rows) expect(job.payload).toEqual({ version: 3, model: MODEL, mode: 'apply', prompt: PROMPT });
+  });
+
+  it('counts a file analysed with another prompt as analysed unless forced', async () => {
+    const c = await setup();
+    analysed(c, c.file.id);
+    c.db.analyses.rows.set(c.file.id, { ...c.db.analyses.rows.get(c.file.id)!, promptName: 'A' });
+    const promptB = { name: 'B', text: 'Second', maxTags: 7 };
+
+    expect(await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB }))).toEqual({
+      enqueued: 0,
+      skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 1 },
+    });
+    expect(
+      await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB, force: true })),
+    ).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 3, model: MODEL, mode: 'apply', prompt: promptB });
   });
 
   it('does not call enqueue when nothing is to be queued', async () => {

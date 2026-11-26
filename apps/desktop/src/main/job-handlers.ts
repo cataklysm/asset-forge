@@ -1,6 +1,7 @@
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import {
   acceptProposal,
+  builtInAnalysisPrompt,
   cancelAllJobs,
   cancelJob,
   clearFinishedJobs,
@@ -53,7 +54,9 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost, desc
       manager.read((s) => previewAnalysis(s, { target: r.target, model: r.model, provider: OLLAMA_PROVIDER })),
     'analysis:enqueue': async (r) => {
       const { target, model, mode, force } = r;
-      const result = await manager.read((s) => enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER }));
+      // Stopgap until the prompt store is wired (Task 4).
+      const prompt = { name: 'Default', text: builtInAnalysisPrompt('tagging').text, maxTags: 15 };
+      const result = await manager.read((s) => enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER, prompt }));
       if (result.enqueued > 0) touched();
       return result;
     },

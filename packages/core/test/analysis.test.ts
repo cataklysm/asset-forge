@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   ANALYSIS_PROMPT,
   ANALYSIS_PROMPT_VERSION,
+  ANALYSIS_FORMAT_LINE,
   ANALYSIS_SCHEMA,
   addFileTag,
+  builtInAnalysisPrompt,
   cleanAnalysisTags,
+  composeTaggingRequest,
+  IMAGE_PROMPT,
   isAnalysable,
   JobError,
+  LEGACY_TAG_LIMIT,
   MAX_ANALYSIS_TAGS,
 } from '../src/index.js';
 import type { FileRecord } from '@assetforge/contracts';
@@ -50,22 +55,78 @@ describe('isAnalysable', () => {
 
 describe('cleanAnalysisTags', () => {
   it('drops non-strings, invalid and duplicate tags', () => {
-    expect(cleanAnalysisTags({ tags: ['Red  Car', 'red car', 7, '', 'x'.repeat(200), null] })).toEqual([
+    expect(cleanAnalysisTags({ tags: ['Red  Car', 'red car', 7, '', 'x'.repeat(200), null] }, LEGACY_TAG_LIMIT)).toEqual([
       { name: 'red car', displayName: 'Red Car' },
     ]);
   });
 
-  it('keeps the first 20 distinct tags', () => {
+  it('keeps the first distinct tags up to the limit', () => {
     const tags = Array.from({ length: 500 }, (_, i) => `tag ${i}`);
-    const cleaned = cleanAnalysisTags({ tags });
-    expect(cleaned).toHaveLength(MAX_ANALYSIS_TAGS);
+    const cleaned = cleanAnalysisTags({ tags }, LEGACY_TAG_LIMIT);
+    expect(LEGACY_TAG_LIMIT).toBe(20);
     expect(cleaned.map((t) => t.name)).toEqual(tags.slice(0, 20));
+  });
+
+  it('counts the limit after dropping repeats and unusable entries', () => {
+    expect(cleanAnalysisTags({ tags: ['a', 'A', 'b', '', 3, 'c'] }, 2)).toEqual([
+      { name: 'a', displayName: 'a' },
+      { name: 'b', displayName: 'b' },
+    ]);
+    expect(cleanAnalysisTags({ tags: ['a', 'A', 'b', '', 3, 'c'] }, 1)).toEqual([{ name: 'a', displayName: 'a' }]);
+  });
+
+  it('keeps 50 of 60 distinct tags at the upper bound', () => {
+    const tags = Array.from({ length: 60 }, (_, i) => `tag ${i}`);
+    expect(MAX_ANALYSIS_TAGS).toBe(50);
+    expect(cleanAnalysisTags({ tags }, MAX_ANALYSIS_TAGS)).toHaveLength(50);
   });
 
   it('yields nothing for answers of another shape', () => {
     for (const answer of [{}, 'text', { tags: 'a' }, null, undefined, 42, ['a', 'b'], { tags: { 0: 'a' } }, { tags: [[], {}, 1] }]) {
-      expect(cleanAnalysisTags(answer)).toEqual([]);
+      expect(cleanAnalysisTags(answer, LEGACY_TAG_LIMIT)).toEqual([]);
     }
+  });
+});
+
+describe('composeTaggingRequest', () => {
+  it('appends the limit line and the format line to the text', () => {
+    expect(composeTaggingRequest({ text: 'Look at the armour.', maxTags: 25 })).toBe(
+      'Look at the armour.\nGive at most 25 tags.\n' + ANALYSIS_FORMAT_LINE,
+    );
+    expect(ANALYSIS_FORMAT_LINE).toBe('Answer only with JSON of the form {"tags": ["...", "..."]}.');
+  });
+});
+
+describe('builtInAnalysisPrompt', () => {
+  it('has a tagging text with 15 tags and neither a format nor a count', () => {
+    const tagging = builtInAnalysisPrompt('tagging');
+    expect(tagging.maxTags).toBe(15);
+    expect(tagging.text).not.toContain('JSON');
+    expect(tagging.text).not.toMatch(/\d tags/);
+    expect(tagging.text).toBe(
+      [
+        'Describe this image with short tags in English, all in lower case.',
+        'Cover what is shown, the materials and the dominant colours.',
+        'Include exactly one view tag, for example "front view", "side view", "three-quarter view", "top view" or "close-up".',
+        'Include exactly one style tag, for example "photorealistic", "stylized", "concept art", "line drawing" or "pixel art".',
+      ].join('\n'),
+    );
+  });
+
+  it('returns the image prompt without a tag limit', () => {
+    expect(builtInAnalysisPrompt('image_prompt')).toEqual({ text: IMAGE_PROMPT, maxTags: null });
+  });
+
+  it('leaves the legacy prompt of v1 and v2 jobs unchanged', () => {
+    expect(ANALYSIS_PROMPT).toBe(
+      [
+        'Describe this image with 8 to 15 short tags in English, all in lower case.',
+        'Cover what is shown, the materials and the dominant colours.',
+        'Include exactly one view tag, for example "front view", "side view", "three-quarter view", "top view" or "close-up".',
+        'Include exactly one style tag, for example "photorealistic", "stylized", "concept art", "line drawing" or "pixel art".',
+        'Answer only with JSON of the form {"tags": ["...", "..."]}.',
+      ].join('\n'),
+    );
   });
 });
 
@@ -331,6 +392,70 @@ describe('the analyze file handler with a v2 payload', () => {
     configure({ vision: null, model: 'mock-vision' });
     await rejectsWith(handler.run(jobFor(file.id, apply), new AbortController().signal), 'provider_not_configured');
     expect(images.calls).toEqual([]);
+  });
+});
+
+describe('the analyze file handler with a v3 payload', () => {
+  const prompt = { name: 'Detail', text: 'Look at the armour.', maxTags: 3 };
+  const ten = Array.from({ length: 10 }, (_, i) => `tag ${i}`);
+
+  it('sends the composed request, applies at most maxTags tags and records the prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: ten };
+    await handler.run(jobFor(file.id, { version: 3, model: 'llava:13b', mode: 'apply', prompt }), new AbortController().signal);
+    expect(vision.calls).toHaveLength(1);
+    expect(vision.calls[0]!.prompt).toBe(composeTaggingRequest(prompt));
+    expect(vision.calls[0]!.prompt.endsWith('Give at most 3 tags.\n' + ANALYSIS_FORMAT_LINE)).toBe(true);
+    expect(vision.calls[0]!.schema).toBe(ANALYSIS_SCHEMA);
+    expect(vision.calls[0]!.model).toBe('llava:13b');
+    expect(db.tags.forFile(file.id).map((t) => t.name).sort()).toEqual(['tag 0', 'tag 1', 'tag 2']);
+    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'llava:13b', promptVersion: ANALYSIS_PROMPT_VERSION, promptName: 'Detail' });
+  });
+
+  it('stores a proposal of at most maxTags tags with the prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: ten };
+    await handler.run(jobFor(file.id, { version: 3, model: 'llava:13b', mode: 'propose', prompt }), new AbortController().signal);
+    expect(await db.analyses.getProposal(file.id)).toMatchObject({
+      promptName: 'Detail',
+      tags: [
+        { name: 'tag 0', displayName: 'tag 0' },
+        { name: 'tag 1', displayName: 'tag 1' },
+        { name: 'tag 2', displayName: 'tag 2' },
+      ],
+    });
+    expect(await db.analyses.get(file.id)).toBeNull();
+  });
+});
+
+describe('legacy payloads in the handler', () => {
+  const thirty = Array.from({ length: 30 }, (_, i) => `tag ${i}`);
+
+  it('a v2 job sends the legacy prompt, keeps 20 of 30 tags and records no prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: thirty };
+    await handler.run(jobFor(file.id, { version: 2, model: 'llava:13b', mode: 'apply' }), new AbortController().signal);
+    expect(vision.calls[0]!.prompt).toBe(ANALYSIS_PROMPT);
+    expect(db.tags.forFile(file.id)).toHaveLength(20);
+    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'llava:13b', promptName: null });
+  });
+
+  it('a v2 proposal keeps 20 of 30 tags and records no prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: thirty };
+    await handler.run(jobFor(file.id, { version: 2, model: 'llava:13b', mode: 'propose' }), new AbortController().signal);
+    const proposal = await db.analyses.getProposal(file.id);
+    expect(proposal?.tags).toHaveLength(20);
+    expect(proposal?.promptName).toBeNull();
+  });
+
+  it('a v1 job sends the legacy prompt with the default model, keeps 20 of 30 tags and records no prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: thirty };
+    await handler.run(jobFor(file.id), new AbortController().signal);
+    expect(vision.calls[0]).toMatchObject({ prompt: ANALYSIS_PROMPT, model: 'mock-vision' });
+    expect(db.tags.forFile(file.id)).toHaveLength(20);
+    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'mock-vision', promptName: null });
   });
 });
 

@@ -1,5 +1,5 @@
 import type { DescribeResult } from '@assetforge/contracts';
-import { describeImage, JobError, type ModelImageSource, type VisionProvider, type WorkspaceManager } from '@assetforge/core';
+import { describeImage, IMAGE_PROMPT, JobError, type ModelImageSource, type VisionProvider, type WorkspaceManager } from '@assetforge/core';
 
 // Image2Prompt requests: one at a time, cancellable by id, all cancelled when the workspace closes.
 // Kept free of Electron imports. A provider failure answers its code; it is never logged here.
@@ -50,7 +50,8 @@ export function createDescribeController(deps: {
       const controller = new AbortController();
       const { signal } = controller;
       const run = deps.manager.read((session) =>
-        describeImage({ session, vision: deps.vision, images: deps.images }, { fileId: r.fileId, model: r.model, signal }),
+        // Stopgap until the prompt store is wired (Task 4).
+        describeImage({ session, vision: deps.vision, images: deps.images }, { fileId: r.fileId, model: r.model, prompt: IMAGE_PROMPT, signal }),
       );
       const request: ActiveRequest = { requestId: r.requestId, controller, done: run.then(() => {}, () => {}) };
       active = request;
