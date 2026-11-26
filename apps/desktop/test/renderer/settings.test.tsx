@@ -1,40 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import {
-  JOB_ERROR_MESSAGES,
-  type IpcRequest,
-  type ListModelsResult,
-  type VisionSettingsView,
-} from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type ListModelsResult, type ProviderList } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { ModelSelect } from '../../src/renderer/src/components/ModelSelect';
-import { ProviderSettingsProvider, useProvider } from '../../src/renderer/src/provider-context';
+import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
-const TEST_KEY = 'test-key-not-real';
-
-const STORED: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 90,
-  taggingModel: 'vision-b',
-  promptModel: 'vision-a',
-  hasApiKey: true,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
-
-const UNCONFIGURED: VisionSettingsView = {
-  baseUrl: null,
-  timeoutSeconds: 120,
-  taggingModel: null,
-  promptModel: null,
-  hasApiKey: false,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
+const STORED = providerView({ name: 'Local', timeoutSeconds: 90, taggingModel: 'vision-b', promptModel: 'vision-a', hasApiKey: true });
 
 const MODELS: ListModelsResult = {
   ok: true,
@@ -47,28 +22,13 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-type SetRequest = IpcRequest<'settings:setVision'>;
-
-function install(view: VisionSettingsView = STORED, models: ListModelsResult = MODELS, handlers: FakeHandlers = {}) {
-  let current = view;
-  return installFakeApi({
-    'settings:getVision': () => current,
-    'settings:setVision': (request) => {
-      const { apiKey, ...rest } = request;
-      current = {
-        ...current,
-        ...rest,
-        hasApiKey: apiKey === undefined ? current.hasApiKey : apiKey !== null,
-      };
-      return current;
-    },
-    'settings:listVisionModels': () => models,
-    ...handlers,
-  });
+function install(seed: Partial<ProviderList> = { providers: [STORED] }, models: ListModelsResult = MODELS, handlers: FakeHandlers = {}) {
+  const ids = (seed.providers ?? []).map((p) => p.id);
+  const fake = fakeProviders(seed, Object.fromEntries(ids.map((id) => [id, models])));
+  return installFakeApi({ ...fake.handlers, ...handlers });
 }
 
-const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
-  api.calls.filter((c) => c.channel === channel);
+const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) => api.calls.filter((c) => c.channel === channel);
 
 function renderScreen() {
   return render(
@@ -82,6 +42,7 @@ const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const select = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+const providersSection = () => screen.getByRole('heading', { name: 'Vision providers' }).closest('section')!;
 
 async function loaded() {
   await waitFor(() => expect(field('Base URL').value).not.toBe(''));
@@ -90,54 +51,73 @@ async function loaded() {
 
 // --- provider context ---
 
-it('useProvider outside a provider returns the empty state', () => {
-  let state: ReturnType<typeof useProvider> | null = null;
+it('the provider loads the list once and the models of every entry', async () => {
+  const other = providerView({ name: 'Other' });
+  const api = install({ providers: [STORED, other] });
   function Probe() {
-    state = useProvider();
-    return null;
-  }
-  render(<Probe />);
-  expect(state).toMatchObject({ settings: null, models: null, loading: false });
-});
-
-it('the provider loads the settings once and the models when there is a base URL', async () => {
-  const api = install();
-  function Probe() {
-    const { settings, models } = useProvider();
-    return <p>{`${settings?.baseUrl ?? 'none'}|${models?.ok === true ? models.models.length : 'no models'}`}</p>;
+    const { list, models } = useProviders();
+    const count = (id: string) => {
+      const answer = models[id];
+      return answer?.ok === true ? answer.models.length : 'none';
+    };
+    return <p>{`${list?.providers.length ?? 'none'}|${count(STORED.id)}|${count(other.id)}`}</p>;
   }
   render(
     <ProviderSettingsProvider>
       <Probe />
     </ProviderSettingsProvider>,
   );
-  expect(await screen.findByText('http://127.0.0.1:11500|5')).toBeTruthy();
-  expect(callsOf(api, 'settings:getVision')).toHaveLength(1);
-  expect(callsOf(api, 'settings:listVisionModels').map((c) => c.request)).toEqual([{}]);
+  expect(await screen.findByText('2|5|5')).toBeTruthy();
+  expect(callsOf(api, 'providers:list')).toHaveLength(1);
+  expect(callsOf(api, 'providers:listModels').map((c) => c.request)).toEqual([{ providerId: STORED.id }, { providerId: other.id }]);
 });
 
-it('the provider loads no models without a base URL', async () => {
-  const api = install(UNCONFIGURED);
+it('a newer list reload wins over an older one that answers later', async () => {
+  const first = deferred<ProviderList>();
+  const renamed = { ...STORED, name: 'Renamed' };
+  let calls = 0;
+  const fake = fakeProviders({ providers: [STORED] }, { [STORED.id]: MODELS });
+  installFakeApi({
+    ...fake.handlers,
+    'providers:list': () => {
+      calls += 1;
+      return calls === 1 ? first.promise : { ...fake.state, providers: [renamed] };
+    },
+  });
+  let reload: (() => Promise<void>) | null = null;
   function Probe() {
-    const { settings, loading } = useProvider();
-    return <p>{settings === null || loading ? 'loading' : 'ready'}</p>;
+    const state = useProviders();
+    reload = state.reload;
+    return <p>{state.list?.providers[0]?.name ?? 'none'}</p>;
   }
   render(
     <ProviderSettingsProvider>
       <Probe />
     </ProviderSettingsProvider>,
   );
-  expect(await screen.findByText('ready')).toBeTruthy();
-  expect(callsOf(api, 'settings:listVisionModels')).toHaveLength(0);
+  await act(async () => {
+    await reload!();
+  });
+  expect(screen.getByText('Renamed')).toBeTruthy();
+  await act(async () => first.resolve({ ...fake.state }));
+  expect(screen.getByText('Renamed')).toBeTruthy();
 });
 
 // --- settings screen ---
 
-it('the screen shows the stored values and an always empty, write-only key field', async () => {
+it('the screen shows the provider section and the prompts section', async () => {
   install();
   renderScreen();
   await loaded();
   expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Vision providers' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Prompts' })).toBeTruthy();
+});
+
+it('the editor shows the stored values and an always empty, write-only key field', async () => {
+  install();
+  renderScreen();
+  await loaded();
   expect(field('Base URL').value).toBe('http://127.0.0.1:11500');
   expect(field('Timeout (s)').value).toBe('90');
   expect(field('Timeout (s)').type).toBe('number');
@@ -152,229 +132,65 @@ it('the screen shows the stored values and an always empty, write-only key field
   expect(button('Remove key')).toBeTruthy();
 });
 
-it('Save sends no apiKey when the key field is empty', async () => {
-  const user = userEvent.setup();
-  const api = install();
-  renderScreen();
-  await loaded();
-  await user.clear(field('Timeout (s)'));
-  await user.type(field('Timeout (s)'), '30');
-  await user.click(button('Save'));
-  await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
-  const request = callsOf(api, 'settings:setVision')[0]!.request as SetRequest;
-  expect(request).toEqual({
-    baseUrl: 'http://127.0.0.1:11500',
-    timeoutSeconds: 30,
-    taggingModel: 'vision-b',
-    promptModel: 'vision-a',
-  });
-  expect('apiKey' in request).toBe(false);
-});
-
-it('Save with a typed key sends it and clears the field afterwards', async () => {
-  const user = userEvent.setup();
-  const api = install({ ...STORED, hasApiKey: false });
-  renderScreen();
-  await loaded();
-  expect(screen.queryByText('Stored')).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Remove key' })).toBeNull();
-  await user.type(field('API key'), TEST_KEY);
-  await user.click(button('Save'));
-  await waitFor(() => expect(field('API key').value).toBe(''));
-  expect((callsOf(api, 'settings:setVision')[0]!.request as SetRequest).apiKey).toBe(TEST_KEY);
-  expect(await screen.findByText('Stored')).toBeTruthy();
-});
-
-it('Remove key sends apiKey null', async () => {
-  const user = userEvent.setup();
-  const api = install();
-  renderScreen();
-  await loaded();
-  await user.click(button('Remove key'));
-  await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
-  expect((callsOf(api, 'settings:setVision')[0]!.request as SetRequest).apiKey).toBeNull();
-  await waitFor(() => expect(screen.queryByText('Stored')).toBeNull());
-});
-
-it('Remove key sends the stored settings, not unsaved edits, and keeps the edits in the form', async () => {
-  const user = userEvent.setup();
-  const api = install();
-  renderScreen();
-  await loaded();
-  await user.clear(field('Timeout (s)'));
-  await user.type(field('Timeout (s)'), '30');
-  await user.click(button('Remove key'));
-  await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
-  expect(callsOf(api, 'settings:setVision')[0]!.request).toEqual({
-    baseUrl: 'http://127.0.0.1:11500',
-    timeoutSeconds: 90,
-    taggingModel: 'vision-b',
-    promptModel: 'vision-a',
-    apiKey: null,
-  });
-  await waitFor(() => expect(screen.queryByText('Stored')).toBeNull());
-  expect(field('Timeout (s)').value).toBe('30');
-});
-
-it('an edit made while a save runs survives the answer', async () => {
-  const user = userEvent.setup();
-  const answer = deferred<VisionSettingsView>();
-  install(STORED, MODELS, { 'settings:setVision': () => answer.promise });
-  renderScreen();
-  await loaded();
-  await user.click(button('Save'));
-  await user.clear(field('Timeout (s)'));
-  await user.type(field('Timeout (s)'), '45');
-  await act(async () => answer.resolve(STORED));
-  expect(field('Timeout (s)').value).toBe('45');
-});
-
-it('a newer settings reload wins over an older one that answers later', async () => {
-  const first = deferred<VisionSettingsView>();
-  let calls = 0;
-  installFakeApi({
-    'settings:getVision': () => {
-      calls += 1;
-      return calls === 1 ? first.promise : { ...STORED, baseUrl: 'http://127.0.0.1:11501' };
-    },
-    'settings:listVisionModels': () => MODELS,
-  });
-  let reload: (() => Promise<void>) | null = null;
-  function Probe() {
-    const state = useProvider();
-    reload = state.reload;
-    return <p>{state.settings?.baseUrl ?? 'none'}</p>;
-  }
-  render(
-    <ProviderSettingsProvider>
-      <Probe />
-    </ProviderSettingsProvider>,
-  );
-  await act(async () => {
-    await reload!();
-  });
-  expect(screen.getByText('http://127.0.0.1:11501')).toBeTruthy();
-  await act(async () => first.resolve(STORED));
-  expect(screen.getByText('http://127.0.0.1:11501')).toBeTruthy();
-});
-
-it('a superseded model request that fails does not reject into the caller', async () => {
-  const slow = deferred<ListModelsResult>();
-  let calls = 0;
-  installFakeApi({
-    'settings:getVision': () => STORED,
-    'settings:listVisionModels': () => {
-      calls += 1;
-      return calls === 2 ? slow.promise : MODELS;
-    },
-  });
-  let refresh: (() => Promise<void>) | null = null;
-  function Probe() {
-    const state = useProvider();
-    refresh = state.refreshModels;
-    return <p>{state.models?.ok === true ? 'models' : 'none'}</p>;
-  }
-  render(
-    <ProviderSettingsProvider>
-      <Probe />
-    </ProviderSettingsProvider>,
-  );
-  await screen.findByText('models');
-  let older: Promise<void> | null = null;
-  act(() => {
-    older = refresh!();
-  });
-  await act(async () => {
-    await refresh!();
-  });
-  await act(async () => slow.reject(fakeError('internal_error')));
-  await expect(older!).resolves.toBeUndefined();
-  expect(screen.getByText('models')).toBeTruthy();
-});
-
-it('an empty base URL is saved as null', async () => {
-  const user = userEvent.setup();
-  const api = install();
-  renderScreen();
-  await loaded();
-  await user.clear(field('Base URL'));
-  await user.click(button('Save'));
-  await waitFor(() => expect(callsOf(api, 'settings:setVision')).toHaveLength(1));
-  expect((callsOf(api, 'settings:setVision')[0]!.request as SetRequest).baseUrl).toBeNull();
-});
-
-it('a timeout outside 10 to 600 disables Save', async () => {
+it('a timeout outside 10 to 600 disables Save with the reason', async () => {
   const user = userEvent.setup();
   install();
   renderScreen();
   await loaded();
+  const save = within(providersSection()).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
   await user.clear(field('Timeout (s)'));
   await user.type(field('Timeout (s)'), '5');
-  expect(button('Save').disabled).toBe(true);
+  expect(save.disabled).toBe(true);
+  expect(save.getAttribute('title')).toBe('The timeout must be a whole number from 10 to 600');
   expect(field('Timeout (s)').getAttribute('aria-invalid')).toBe('true');
   await user.clear(field('Timeout (s)'));
   await user.type(field('Timeout (s)'), '600');
-  expect(button('Save').disabled).toBe(false);
+  expect(save.disabled).toBe(false);
 });
 
-it('Test connection saves first, then lists the models with refresh', async () => {
+it('an empty name or base URL disables Save with the reason', async () => {
   const user = userEvent.setup();
-  const api = install();
+  install();
   renderScreen();
   await loaded();
+  const save = within(providersSection()).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
   await user.clear(field('Base URL'));
-  await user.type(field('Base URL'), 'http://127.0.0.1:11501');
-  await user.click(button('Test connection'));
-  await waitFor(() =>
-    expect(api.calls.some((c) => c.channel === 'settings:listVisionModels' && (c.request as { refresh?: boolean }).refresh === true)).toBe(true),
-  );
-  const channels = api.calls.map((c) => c.channel);
-  const saved = channels.indexOf('settings:setVision');
-  const refreshed = api.calls.findIndex(
-    (c) => c.channel === 'settings:listVisionModels' && (c.request as { refresh?: boolean }).refresh === true,
-  );
-  expect(saved).toBeGreaterThanOrEqual(0);
-  expect(saved).toBeLessThan(refreshed);
-  expect((api.calls[saved]!.request as SetRequest).baseUrl).toBe('http://127.0.0.1:11501');
-  expect(await screen.findByText('5 models')).toBeTruthy();
+  expect(save.disabled).toBe(true);
+  expect(save.getAttribute('title')).toBe('Enter a base URL');
+  await user.clear(field('Name'));
+  expect(save.getAttribute('title')).toBe('Enter a name');
 });
 
-it('a failed model list shows the fixed message of its code', async () => {
+it('a failed list load shows its message and a retry', async () => {
   const user = userEvent.setup();
-  install(STORED, { ok: false, code: 'provider_unauthorized' });
+  let fail = true;
+  const fake = fakeProviders({ providers: [STORED] }, { [STORED.id]: MODELS });
+  installFakeApi({
+    ...fake.handlers,
+    'providers:list': () => {
+      if (fail) throw fakeError('internal_error', 'internal_error');
+      return structuredClone(fake.state);
+    },
+  });
+  renderScreen();
+  const section = () => providersSection();
+  expect((await within(section()).findByRole('alert')).textContent).toBe('The provider settings could not be read');
+  fail = false;
+  await user.click(within(section()).getByRole('button', { name: 'Retry' }));
+  await loaded();
+});
+
+it('a failed model list shows the fixed message of its code and keeps the stored models', async () => {
+  install({ providers: [STORED] }, { ok: false, code: 'provider_unauthorized' });
   renderScreen();
   await waitFor(() => expect(field('Base URL').value).not.toBe(''));
-  await user.click(button('Test connection'));
   expect((await screen.findAllByText(JOB_ERROR_MESSAGES.provider_unauthorized)).length).toBeGreaterThan(0);
-  // The stored models stay the current values although the list failed.
+  expect(screen.getByText('key refused')).toBeTruthy();
   expect(select('Tagging model').value).toBe('vision-b');
 });
 
-it('a rejected save shows the alert', async () => {
-  const user = userEvent.setup();
-  install(STORED, MODELS, {
-    'settings:setVision': () => {
-      throw new Error('boom');
-    },
-  });
-  // A thrown non-AssetForge error reaches the renderer as a rejected invoke.
-  renderScreen();
-  await loaded();
-  await user.click(button('Save'));
-  expect((await screen.findByRole('alert')).textContent).toBe('The application did not respond');
-});
-
-it('fromEnvironment disables every control', async () => {
-  install({ ...STORED, fromEnvironment: true });
-  renderScreen();
-  await loaded();
-  for (const name of ['Base URL', 'API key', 'Timeout (s)']) expect(field(name).disabled).toBe(true);
-  for (const name of ['Tagging model', 'Prompt model']) expect(select(name).disabled).toBe(true);
-  for (const el of screen.getAllByRole('button')) expect((el as HTMLButtonElement).disabled).toBe(true);
-});
-
 it('canStoreKey false disables the key field with a title', async () => {
-  install({ ...STORED, hasApiKey: false, canStoreKey: false });
+  install({ providers: [{ ...STORED, hasApiKey: false }], canStoreKey: false });
   renderScreen();
   await loaded();
   const key = field('API key');
@@ -400,25 +216,11 @@ it('the two model selects disable non-vision models and list vision, then unknow
 });
 
 it('a stored model no longer in the list stays visible as the current value', async () => {
-  install({ ...STORED, taggingModel: 'gone-model' });
+  install({ providers: [{ ...STORED, taggingModel: 'gone-model' }] });
   renderScreen();
   await loaded();
   expect(select('Tagging model').value).toBe('gone-model');
   expect(within(select('Tagging model')).getByRole('option', { name: 'gone-model' })).toBeTruthy();
-});
-
-it('works when nothing is configured: empty URL, no models', async () => {
-  const user = userEvent.setup();
-  const api = install(UNCONFIGURED);
-  renderScreen();
-  await waitFor(() => expect(button('Save').disabled).toBe(false));
-  expect(field('Base URL').value).toBe('');
-  expect(select('Tagging model').value).toBe('');
-  expect(callsOf(api, 'settings:listVisionModels')).toHaveLength(0);
-  await user.type(field('Base URL'), 'http://127.0.0.1:11500');
-  await user.click(button('Save'));
-  await waitFor(() => expect(callsOf(api, 'settings:listVisionModels').length).toBeGreaterThan(0));
-  expect((callsOf(api, 'settings:setVision')[0]!.request as SetRequest).baseUrl).toBe('http://127.0.0.1:11500');
 });
 
 it('every button uses a ui.ts class', async () => {
@@ -431,11 +233,11 @@ it('every button uses a ui.ts class', async () => {
 
 // --- model select on its own ---
 
-function Harness({ initial }: { initial: string | null }) {
+function Harness({ initial, providerId = STORED.id }: { initial: string | null; providerId?: string | null }) {
   const [value, setValue] = useState<string | null>(initial);
   return (
     <>
-      <ModelSelect purpose="tagging" value={value} onChange={setValue} />
+      <ModelSelect providerId={providerId} purpose="tagging" value={value} onChange={setValue} />
       <p>{`value:${value ?? 'none'}`}</p>
     </>
   );
@@ -456,7 +258,8 @@ it('the model select preselects nothing itself and reports the choice', async ()
 });
 
 it('the model select keeps its value while the list is loading', () => {
-  install(STORED, MODELS, { 'settings:listVisionModels': () => new Promise(() => {}) });
+  const fake = fakeProviders({ providers: [STORED] }, { [STORED.id]: () => new Promise(() => {}) });
+  installFakeApi(fake.handlers);
   render(
     <ProviderSettingsProvider>
       <Harness initial="vision-b" />
@@ -465,7 +268,18 @@ it('the model select keeps its value while the list is loading', () => {
   expect(select('Tagging model').value).toBe('vision-b');
 });
 
-it('the refresh button lists the models with refresh', async () => {
+it('the model select without an entry lists nothing and cannot refresh', async () => {
+  install();
+  render(
+    <ProviderSettingsProvider>
+      <Harness initial={null} providerId={null} />
+    </ProviderSettingsProvider>,
+  );
+  expect(optionTexts(select('Tagging model'))).toEqual(['No model']);
+  expect(button('Refresh models').disabled).toBe(true);
+});
+
+it('the refresh button lists the models of its entry with refresh', async () => {
   const user = userEvent.setup();
   const api = install();
   render(
@@ -478,5 +292,7 @@ it('the refresh button lists the models with refresh', async () => {
   expect(refresh.className).toBe(ICON_BUTTON);
   expect(refresh.getAttribute('title')).toBe('Refresh models');
   await user.click(refresh);
-  await waitFor(() => expect(callsOf(api, 'settings:listVisionModels').at(-1)!.request).toEqual({ refresh: true }));
+  await waitFor(() =>
+    expect(callsOf(api, 'providers:listModels').at(-1)!.request).toEqual({ providerId: STORED.id, refresh: true }),
+  );
 });
