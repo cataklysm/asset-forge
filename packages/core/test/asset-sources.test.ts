@@ -45,6 +45,12 @@ function expectNotAddress(input: string) {
 }
 
 describe('normalizeSourceUrl', () => {
+  it('checks the length again after normalisation', () => {
+    const typed = 'https://example.org/' + ' a'.repeat(700);
+    expect(typed.length).toBeLessThan(MAX_SOURCE_URL_LENGTH);
+    expectNotAddress(typed);
+  });
+
   it('exposes its limits', () => {
     expect(MAX_ASSET_SOURCES).toBe(50);
     expect(MAX_SOURCE_URL_LENGTH).toBe(2000);

@@ -718,7 +718,7 @@ describe('library IPC', () => {
     it('answers a fixed message when the browser cannot be started', async () => {
       const { asset } = await twoAssets();
       const added = await ok('assets:addSource', { assetId: asset.id, url: 'https://example.org/' });
-      openExternal.mockRejectedValue(new Error('C:\secret'));
+      openExternal.mockRejectedValue(new Error('C:\\secret'));
       expect(await call('assets:openSource', { assetId: asset.id, sourceId: added.sources[0].id })).toEqual({
         ok: false,
         error: { code: 'invalid_operation', message: 'This source could not be opened' },
