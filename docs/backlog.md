@@ -197,10 +197,10 @@ Deferred by design:
 - Image2Prompt runs outside the scheduler, so it can overlap one running analysis on the same GPU (Ollama queues the requests).
 - The pause of the analysis queue is not persisted; a restart starts unpaused.
 - A file has one AI tag set, not one per model, and there is no proposal history.
-- `settings:listVisionModels` has no cancel channel; a slow server holds the request until its timeout.
+- `providers:listModels` has no cancel channel (`provider-handlers.ts`); a slow server holds the request until its timeout.
 - The Settings screen is reachable only inside an open workspace, although the settings are app-level.
 - The two "Before paid providers" entries of phase 4a still apply.
-- `jobs:resume` is app-level: it works without an open workspace and resumes the one pause gate of the app session.
+- `jobs:resume { providerId }` is app-level: it works without an open workspace and resumes one lane of the app session's pause gate.
 - The "Proposals" toggle of the file lists is local to `FileBrowser` and does not survive navigation (the list state assumes string filter values, and "Analyse all" would have to leave the toggle out of its filter).
 - The pause banner sits in the shell behind the backdrop of a modal dialog: behind a form-size dialog it stays faintly visible but cannot be used, and the file detail dialog covers it almost completely.
 - With a selection, the asset Files tab shows two Analyse buttons (the asset's in the header and the selection's), told apart only by their tooltips.
@@ -213,17 +213,16 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 - A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
 - A failure while building the request headers throws `provider_unauthorized` directly instead of going through `fail`, so an abort at that point would be reported as `provider_unauthorized`; not reachable today, because `throwIfAborted` runs just before and the header build is synchronous.
 
-Settings (`apps/desktop/src/main/vision-settings.ts`):
+Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
-- A change listener that throws in the `finally` of a save masks an error of the key write.
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
-- The key's origin binding lives only in the plaintext settings file (`vision-settings.ts:160,177-181`): a process with write access to `userData` can replace the base URL and keep the credential file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
+- The key's origin binding lives only in the plaintext settings file (an entry's stored base URL): a process with write access to `userData` can replace an entry's base URL and keep its key file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
 
 Main process (`apps/desktop/src/main`):
 
 - Cancelled Image2Prompt runs keep running in the media worker pool until they settle; the set of settling runs is unbounded, so repeated Generate and Cancel can pile them up (pass the signal into `images.jpeg` or cap the set).
-- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every settings save even when the queue is not paused (`job-host.ts`).
-- The provider id reaches core by two routes: `composition.ts:120` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts:53,56` imports it for `analysis:preview` and `analysis:enqueue`. Both use the one constant today; a second vision provider must keep them equal.
+- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every save or delete of a provider entry even when the queue is not paused (`job-host.ts`).
+- The provider id reaches core by two routes: `composition.ts` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts` imports it for `analysis:preview` and `analysis:enqueue`. `OLLAMA_PROVIDER` stays the one adapter kind and the provider id of the fingerprint, not an entry id, so the same model through two entries counts as already analysed; a second kind of provider must keep both routes equal.
 
 Mock provider (`docker/mock-provider/server.mjs`):
 
@@ -417,7 +416,7 @@ Found in the final review and not fixed:
 
 Deferred by design:
 
-- No second kind of provider (OpenAI-compatible servers, vLLM, a llama.cpp server, RunPod serverless); every entry speaks the Ollama API and `OLLAMA_PROVIDER` stays the one adapter kind (it is also the provider id in the fingerprint, so the same model through two entries counts as already analysed).
+- No second kind of provider (OpenAI-compatible servers, vLLM, a llama.cpp server, RunPod serverless); every entry speaks the Ollama API (see the note on the provider id routes under "Main process").
 - No automatic failover: the app never moves jobs or switches a provider by itself.
 - No starting, stopping or loading anything on a provider (pods, Ollama model load control).
 - No setting for parallel analyses per provider; each provider runs one at a time.
