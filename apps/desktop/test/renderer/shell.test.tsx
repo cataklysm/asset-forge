@@ -1,12 +1,15 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
+import type { JobSummary } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
+import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
+import { JOB_POLL_MS } from '../../src/renderer/src/jobs-context';
 import { fakeError, installFakeApi } from './fake-api';
 
-type Section = 'assets' | 'projects' | 'inbox';
+type Section = 'assets' | 'projects' | 'inbox' | 'jobs';
 
 function shell(
   props: { section?: Section | null; busy?: boolean; onNavigate?(s: Section): void; onClose?(): void },
@@ -18,6 +21,7 @@ function shell(
       rootPath="D:/work/studio"
       section={props.section === undefined ? 'assets' : props.section}
       busy={props.busy ?? false}
+      activeJobs={0}
       onNavigate={props.onNavigate ?? (() => {})}
       onClose={props.onClose ?? (() => {})}
     >
@@ -89,4 +93,53 @@ it('Ctrl+F focuses the page search field', async () => {
   render(shell({}, <input aria-label="Search" data-search-field="" />));
   await user.keyboard('{Control>}f{/Control}');
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
+});
+
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9 };
+
+function workspaceShell(summary: () => JobSummary) {
+  const api = installFakeApi({
+    'jobs:summary': summary,
+    'assets:list': () => ({ items: [], total: 0 }),
+    'assetTypes:list': () => [],
+    'projects:list': () => ({ items: [], total: 0 }),
+  });
+  render(
+    <WorkspaceShell
+      workspace={{ id: '00000000-0000-4000-8000-00000000f001', name: 'W', rootPath: 'root', lastOpenedAt: '2026-01-01T00:00:00.000Z' }}
+      onClosed={() => {}}
+    />,
+  );
+  return api;
+}
+
+it('the Jobs entry shows no number while idle and the active count otherwise', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    let summary = IDLE;
+    const api = workspaceShell(() => summary);
+    await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:summary')).toBe(true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('link', { name: 'Jobs' }).textContent).toBe('Jobs');
+
+    summary = { ...IDLE, queued: 2, running: 1, changes: 10 };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    const busy = await screen.findByRole('link', { name: 'Jobs, 3 active' });
+    expect(busy.textContent).toBe('Jobs3');
+    expect(screen.queryByRole('link', { name: 'Jobs' })).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('choosing Jobs shows the Jobs page', async () => {
+  const user = userEvent.setup();
+  workspaceShell(() => IDLE);
+  await user.click(screen.getByRole('link', { name: /Jobs/ }));
+  expect(await screen.findByRole('heading', { level: 2, name: 'Jobs' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Jobs/ }).getAttribute('aria-current')).toBe('page');
 });

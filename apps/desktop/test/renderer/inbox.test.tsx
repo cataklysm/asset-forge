@@ -8,6 +8,9 @@ import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/lis
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { act } from '@testing-library/react';
+import type { JobSummary } from '@assetforge/contracts';
+import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
@@ -422,4 +425,87 @@ it('Analyse is disabled for a selection without images, and a rejected call show
   await user.click(analyse);
   expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
   expect(screen.getByText('1 selected')).toBeTruthy();
+});
+
+const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1 };
+
+/** The inbox under a job provider; `succeed()` makes the next poll report a finished job. */
+function withJobs(files: FileRecord[]) {
+  let summary = JOBS_IDLE;
+  const api = install(files, { 'jobs:summary': () => summary });
+  return {
+    api,
+    async succeed() {
+      summary = { ...summary, queued: summary.queued - 1, succeeded: summary.succeeded + 1, changes: summary.changes + 1 };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      });
+    },
+  };
+}
+
+it('a poll with risen succeeded reloads the inbox and keeps the scroll position', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const items = Array.from({ length: 200 }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+    const jobs = withJobs(items);
+    render(
+      <JobsProvider>
+        <Harness />
+      </JobsProvider>,
+    );
+    await screen.findByText('File 0.png');
+    const grid = screen.getByRole('listbox', { name: 'Files' });
+    Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+
+    // A poll without a result reloads nothing.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    jobs.api.calls.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    expect(callsOf(jobs.api, 'files:list')).toEqual([]);
+
+    await jobs.succeed();
+    await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    // The title count reloads as well.
+    expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 1, offset: 0, scope: { kind: 'inbox' } });
+    // The reloaded view starts where the old one was, not at the top.
+    await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
+    expect(screen.queryByText('File 0.png')).toBeNull();
+    expect(screen.getByText('File 100.png')).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('a poll with risen succeeded shows the fresh record in the open detail dialog', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const c1 = fileRecord({ originalName: 'c1.png' });
+    const c2 = fileRecord({ originalName: 'c2.png' });
+    const jobs = withJobs([c1, c2]);
+    render(
+      <JobsProvider>
+        <Harness />
+      </JobsProvider>,
+    );
+    await screen.findByText('c1.png');
+    await user.click(tile('c1.png'));
+    await user.keyboard('{Enter}');
+    const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
+    expect(within(dialog).queryByText('Moss')).toBeNull();
+
+    jobs.api.set('files:list', listOf(() => [{ ...c1, tags: [tagOf('Moss', 'ai')] }, c2]));
+    await jobs.succeed();
+    expect(await within(dialog).findByText('Moss')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'c1.png' })).toBe(dialog);
+  } finally {
+    vi.useRealTimers();
+  }
 });

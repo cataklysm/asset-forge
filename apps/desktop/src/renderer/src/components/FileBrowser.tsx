@@ -263,6 +263,21 @@ export function FileBrowser(props: FileBrowserProps) {
     // `ask` reads the latest props itself.
   }, [paged.state, paged.pending, viewedId, pendingShow]);
 
+  // A reload that brings a new record of the viewed file hands it to the viewer once, so the open
+  // dialog shows the fresh data (e.g. tags added by an analysis job).
+  const handed = useRef<FileRecord | null>(null);
+  useEffect(() => {
+    if (viewedId === null) {
+      handed.current = null;
+      return;
+    }
+    const record = findLoaded(paged.state, viewedId)?.item ?? null;
+    if (record === null) return;
+    const previous = handed.current;
+    handed.current = record;
+    if (previous !== null && previous.id === record.id && previous !== record) latest.current.props.viewer?.onView(record);
+  }, [paged.state, viewedId]);
+
   // After the viewer closed, the tile of the file shown last comes into view and takes the focus.
   const lastViewed = useRef<string | null>(viewedId);
   useEffect(() => {

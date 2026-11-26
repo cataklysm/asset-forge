@@ -1,15 +1,17 @@
-import { ArrowLeft, FolderOpen, Inbox, Package, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
-import { BORDER, BUTTON, FOCUS, WARNING, WORKSPACE_TITLE } from '../ui';
+import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 
-export type Section = 'assets' | 'projects' | 'inbox';
+export type Section = 'assets' | 'projects' | 'inbox' | 'jobs';
 
 interface Props {
   workspaceName: string;
   rootPath: string;
   section: Section | null;
   busy: boolean;
+  /** Queued, running and waiting jobs; shown beside the Jobs entry when above zero. */
+  activeJobs: number;
   onNavigate(section: Section): void;
   onClose(): void;
   children: ReactNode;
@@ -19,6 +21,7 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'assets', label: 'Assets', icon: Package },
   { section: 'projects', label: 'Projects', icon: FolderOpen },
   { section: 'inbox', label: 'Inbox', icon: Inbox },
+  { section: 'jobs', label: 'Jobs', icon: ListChecks },
 ];
 
 const BUSY_TITLE = 'Import in progress';
@@ -26,7 +29,7 @@ const BUSY_TITLE = 'Import in progress';
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 
 /** The application frame: header, navigation, the alert region and the page slot. */
-export function AppShell({ workspaceName, rootPath, section, busy, onNavigate, onClose, children }: Props) {
+export function AppShell({ workspaceName, rootPath, section, busy, activeJobs, onNavigate, onClose, children }: Props) {
   const [unreachable, setUnreachable] = useState(false);
   // Bumped by Retry; keys the page so it reloads from scratch.
   const [reloadKey, setReloadKey] = useState(0);
@@ -71,25 +74,30 @@ export function AppShell({ workspaceName, rootPath, section, busy, onNavigate, o
 
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Main" className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
-          {NAV.map(({ section: target, label, icon: Icon }) => (
-            <a
-              key={target}
-              href="#"
-              aria-current={section === target ? 'page' : undefined}
-              aria-disabled={busy || undefined}
-              title={busy ? BUSY_TITLE : undefined}
-              onClick={(event) => {
-                event.preventDefault();
-                if (!busy) onNavigate(target);
-              }}
-              className={`flex h-10 items-center gap-2.5 rounded-control px-3 text-text aria-[current=page]:bg-nav-active aria-disabled:opacity-50 ${
-                busy ? '' : 'hover:bg-raised'
-              } ${FOCUS}`}
-            >
-              <Icon size={18} aria-hidden />
-              {label}
-            </a>
-          ))}
+          {NAV.map(({ section: target, label, icon: Icon }) => {
+            const count = target === 'jobs' && activeJobs > 0 ? activeJobs : null;
+            return (
+              <a
+                key={target}
+                href="#"
+                aria-label={count === null ? undefined : `${label}, ${count} active`}
+                aria-current={section === target ? 'page' : undefined}
+                aria-disabled={busy || undefined}
+                title={busy ? BUSY_TITLE : undefined}
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (!busy) onNavigate(target);
+                }}
+                className={`flex h-10 items-center gap-2.5 rounded-control px-3 text-text aria-[current=page]:bg-nav-active aria-disabled:opacity-50 ${
+                  busy ? '' : 'hover:bg-raised'
+                } ${FOCUS}`}
+              >
+                <Icon size={18} aria-hidden />
+                {label}
+                {count !== null && <span className={`ml-auto text-sm tabular-nums ${MUTED}`}>{count}</span>}
+              </a>
+            );
+          })}
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">

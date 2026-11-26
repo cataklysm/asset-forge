@@ -18,6 +18,7 @@ import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
 import { useLoad } from '../hooks/useLoad';
+import { useJobs } from '../jobs-context';
 import { label, relationLabel } from '../labels';
 import type { AssetTab } from '../list-state';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
@@ -57,6 +58,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [reloadToken, setReloadToken] = useState(0);
   const [fileCount, setFileCount] = useState<number | null>(null);
   const [fileCountError, setFileCountError] = useState<string | null>(null);
+  // A finished job may have changed file records (e.g. AI tags): the Files tab and its count reload.
+  const { resultToken } = useJobs();
 
   const loaded = useLoad(() => call('assets:get', { id }), [id]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
@@ -81,7 +84,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [id, reloadToken]);
+  }, [id, reloadToken, resultToken]);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -251,7 +254,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         {tab === 'files' && (
           <AssetFilesTab
             asset={asset}
-            reloadToken={reloadToken}
+            reloadToken={reloadToken + resultToken}
             onFilesChanged={filesChanged}
             onAssetChange={setAsset}
             onCountChange={setFileCount}

@@ -5,6 +5,7 @@ import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
+import { useJobs } from '../jobs-context';
 import { label } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, type AssetView, type FileFilters } from '../list-state';
 import {
@@ -166,10 +167,12 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     });
 
   /** Enqueues an analysis of `files`; the outcome shows in the result strip, the selection is kept. */
+  const { refresh: refreshJobs } = useJobs();
   const analyse = (files: readonly FileRecord[]) =>
     batch(async () => {
       try {
         setResult(await startAnalysis(files));
+        refreshJobs();
       } catch (e) {
         setError(describeError(e));
       }

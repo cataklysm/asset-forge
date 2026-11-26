@@ -13,6 +13,7 @@ import { fileMenuItems } from '../file-actions';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
+import { useJobs } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
 import { ALERT, BUTTON, MUTED } from '../ui';
@@ -47,8 +48,11 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const importingRef = useRef(false);
   const analysingRef = useRef(false);
 
+  // A finished job may have changed records (e.g. AI tags): the list and the count reload.
+  const { resultToken, refresh: refreshJobs } = useJobs();
+
   // The title shows the number of all inbox files, independent of the filters.
-  const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken]);
+  const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken, resultToken]);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -116,6 +120,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     setError(null);
     try {
       setImportResult(await startAnalysis(files));
+      refreshJobs();
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -203,7 +208,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           positionRef={positionRef}
           selection={selection}
           onSelectionChange={setSelection}
-          reloadToken={reloadToken}
+          reloadToken={reloadToken + resultToken}
           onOpen={detail.open}
           menuItems={(file) =>
             fileMenuItems(file, { cover: null, onDetails: () => detail.open(file), onAnalyse: () => void analyse([file]), onError: setError })
