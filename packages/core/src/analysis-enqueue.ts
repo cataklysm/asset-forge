@@ -24,7 +24,7 @@ function fingerprintOf(r: { provider: string; model: string }): AnalysisFingerpr
 /** What an enqueue of the target with this model would do, by file count. */
 export async function previewAnalysis(
   s: WorkspaceSession,
-  r: { target: AnalysisTarget; model: string; provider: string },
+  r: { target: AnalysisTarget; model: string; provider: string; entry: { id: string; name: string } },
 ): Promise<AnalysisPreview> {
   return s.database.analysisTargets.count({ target: r.target, fingerprint: fingerprintOf(r), mimeTypes: PREVIEWABLE_MIME_TYPES });
 }
@@ -34,11 +34,21 @@ export async function previewAnalysis(
  * of at most `ENQUEUE_CHUNK`. Not all or nothing: files that are unknown (listed ids only), not
  * analysable, already queued or — in mode `apply` without `force` — already analysed with this
  * fingerprint are counted as skipped. Mode `propose` takes exactly one listed file and implies `force`.
- * Every job carries payload v3 with a copy of `prompt`.
+ * Every job runs in the lane of the provider entry and carries payload v4 with a copy of `prompt` and of the entry name.
  */
 export async function enqueueAnalysis(
   s: WorkspaceSession,
-  r: { target: AnalysisTarget; model: string; mode: AnalysisMode; force: boolean; provider: string; prompt: AnalyzeFilePrompt },
+  r: {
+    target: AnalysisTarget;
+    model: string;
+    mode: AnalysisMode;
+    force: boolean;
+    /** The adapter kind recorded in the fingerprint, never an entry id. */
+    provider: string;
+    prompt: AnalyzeFilePrompt;
+    /** The provider entry the jobs run on. */
+    entry: { id: string; name: string };
+  },
 ): Promise<EnqueueAnalysisResult> {
   const { target } = r;
   if (r.mode === 'propose' && !(target.kind === 'files' && target.fileIds.length === 1)) {
@@ -48,7 +58,7 @@ export async function enqueueAnalysis(
   // The prompt is copied into every job, so later edits or a deletion do not reach waiting jobs.
   // It is not part of the fingerprint: a file analysed with another prompt still counts as analysed.
   const prompt: AnalyzeFilePrompt = { name: r.prompt.name, text: r.prompt.text, maxTags: r.prompt.maxTags };
-  const payload: AnalyzeFilePayload = { version: 3, model: r.model, mode: r.mode, prompt };
+  const payload: AnalyzeFilePayload = { version: 4, model: r.model, mode: r.mode, prompt, providerName: r.entry.name };
   const fingerprint = fingerprintOf(r);
   const result: EnqueueAnalysisResult = {
     enqueued: 0,
@@ -75,6 +85,7 @@ export async function enqueueAnalysis(
           type: ANALYZE_FILE_JOB,
           resourceClass: 'local_gpu',
           fileId: entry.fileId,
+          lane: r.entry.id,
           payload,
           dedupeKey: `${ANALYZE_FILE_JOB}:${entry.fileId}`,
         });

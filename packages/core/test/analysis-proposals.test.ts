@@ -54,6 +54,7 @@ describe('getProposal', () => {
       force: true,
       provider: PROVIDER,
       prompt: { name: 'Detail', text: 'T', maxTags: 15 },
+      entry: { id: 'environment', name: 'Environment' },
     });
     const jobId = c.db.jobs.rows[0]!.id;
 
@@ -82,8 +83,8 @@ describe('getProposal', () => {
         startedAt: null,
         finishedAt: null,
         runAfter: null,
-        providerId: null,
-        providerName: null,
+        providerId: 'environment',
+        providerName: 'Environment',
         model: MODEL,
       },
     });
