@@ -260,7 +260,7 @@ describe('ZipArchiveReader', () => {
     const missing = path.join(tmp, 'nope.zip');
     const err = await reader.open(missing, LIMITS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SourceNotReadableError);
-    expect((err as Error).message).toBe(`Cannot read source file: ${missing}`);
+    expect((err as Error).message).toBe('This file cannot be read');
     await expect(reader.open(tmp, LIMITS)).rejects.toBeInstanceOf(SourceNotReadableError);
   });
 

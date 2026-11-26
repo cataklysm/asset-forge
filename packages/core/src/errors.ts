@@ -28,7 +28,12 @@ export class TrashFailedError extends define('trash_failed') {}
 export class InvalidManifestError extends define('invalid_manifest') {}
 export class NoWorkspaceOpenError extends define('no_workspace_open') {}
 export class PathEscapeError extends define('path_escape') {}
-export class SourceNotReadableError extends define('source_not_readable') {}
+/** A source that is missing, not a regular file or not readable; the message never names the path. */
+export class SourceNotReadableError extends AssetForgeError {
+  constructor(options?: { cause?: unknown }) {
+    super('source_not_readable', 'This file cannot be read', options);
+  }
+}
 export class ChecksumMismatchError extends define('checksum_mismatch') {}
 export class StorageAccessDeniedError extends define('storage_access_denied') {}
 export class StorageFullError extends define('storage_full') {}

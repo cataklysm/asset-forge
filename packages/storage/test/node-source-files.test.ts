@@ -30,9 +30,9 @@ describe('NodeSourceFiles', () => {
     await expect(new NodeSourceFiles().open(tmp)).rejects.toBeInstanceOf(SourceNotReadableError);
   });
 
-  it('rejects a missing path', async () => {
-    await expect(new NodeSourceFiles().open(path.join(tmp, 'nope'))).rejects.toBeInstanceOf(
-      SourceNotReadableError,
-    );
+  it('rejects a missing path with a message that carries no path', async () => {
+    const err = await new NodeSourceFiles().open(path.join(tmp, 'nope')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceNotReadableError);
+    expect((err as Error).message).toBe('This file cannot be read');
   });
 });

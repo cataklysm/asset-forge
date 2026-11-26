@@ -23,7 +23,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - File names are truncated by code points, so long non-ASCII names can exceed a 255-byte limit (ext4, Samba).
 - The same folder reached through a drive letter and a UNC path is reported as `workspace_duplicate`.
 - `EPERM` from a locked file is reported as `storage_access_denied`.
-- Error messages that carry absolute paths to the renderer: `PathEscapeError` for a dangling link (`packages/storage/src/local-storage.ts`), "Cannot read source file: …" on import, and "Storage is not reachable: …" on workspace create/open.
+- Error messages that carry absolute paths to the renderer: `PathEscapeError` for a dangling link (`packages/storage/src/local-storage.ts`) and "Storage is not reachable: …" on workspace create/open.
 - Non-domain import errors are not logged anywhere; the recovery results (imports and file moves) are not logged either.
 - Pre-migration database backup; migrations path for the packaged app.
 - Hashing moves off the main event loop once jobs exist.

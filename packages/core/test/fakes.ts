@@ -1450,7 +1450,7 @@ export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles 
   async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
     this.opened.push(absolutePath);
     const data = this.get(absolutePath);
-    if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
+    if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError();
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
     return { name, stream: Readable.from([data]) };
   }
@@ -1484,7 +1484,7 @@ export class FakeArchives extends Map<string, 'not-zip' | FakeArchiveEntry[]> im
   async open(absolutePath: string, limits: { maxEntries: number }): Promise<OpenArchive> {
     this.opened.push({ path: absolutePath, maxEntries: limits.maxEntries });
     const archive = this.get(absolutePath);
-    if (archive === undefined) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
+    if (archive === undefined) throw new SourceNotReadableError();
     if (archive === 'not-zip') throw new ArchiveNotReadableError();
     const bytes = (e: FakeArchiveEntry) => Buffer.from(e.content ?? '');
     return {

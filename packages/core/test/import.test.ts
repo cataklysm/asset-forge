@@ -297,12 +297,10 @@ describe('importFile', () => {
 
       const domain: SourceFiles = {
         open: async () => {
-          throw new SourceNotReadableError('Cannot read source file: /src/a.png');
+          throw new SourceNotReadableError();
         },
       };
-      expect((await importFile({ ...ctx, sources: domain }, '/src/a.png')).error).toBe(
-        'Cannot read source file: /src/a.png',
-      );
+      expect((await importFile({ ...ctx, sources: domain }, '/src/a.png')).error).toBe('This file cannot be read');
     });
   });
 

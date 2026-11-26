@@ -126,7 +126,7 @@ async function openRegularFile(absolutePath: string): Promise<number> {
     return fd;
   } catch (cause) {
     if (fd !== undefined) await closeFd(fd).catch(() => undefined);
-    throw new SourceNotReadableError(`Cannot read source file: ${absolutePath}`, { cause });
+    throw new SourceNotReadableError({ cause });
   }
 }
 

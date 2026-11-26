@@ -17,7 +17,7 @@ export class NodeSourceFiles implements SourceFiles {
       return { name: path.basename(absolutePath), stream };
     } catch (cause) {
       await handle?.close().catch(() => undefined);
-      throw new SourceNotReadableError(`Cannot read source file: ${absolutePath}`, { cause });
+      throw new SourceNotReadableError({ cause });
     }
   }
 }
