@@ -7,6 +7,7 @@ import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
+import { idleJobHost } from './idle-job-host.js';
 
 let base: string;
 let root: string;
@@ -14,13 +15,15 @@ let manager: WorkspaceManager;
 let handlers: IpcHandlers;
 const openPath = vi.fn<(absolutePath: string) => Promise<string>>();
 const showItemInFolder = vi.fn<(absolutePath: string) => void>();
-const workspaceOpened = vi.fn<() => void>();
-const host: HostActions = { openPath, showItemInFolder, workspaceOpened };
+const workspaceOpened = vi.fn<() => Promise<void>>();
+const workspaceClosing = vi.fn<() => Promise<void>>();
+const host: HostActions = { openPath, showItemInFolder, workspaceOpened, workspaceClosing };
 
 beforeEach(async () => {
   openPath.mockReset().mockResolvedValue('');
   showItemInFolder.mockReset();
-  workspaceOpened.mockReset();
+  workspaceOpened.mockReset().mockResolvedValue();
+  workspaceClosing.mockReset().mockResolvedValue();
   base = await mkdtemp(join(tmpdir(), 'af-shell-ipc-'));
   root = join(base, 'workspace');
   manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
@@ -33,6 +36,7 @@ beforeEach(async () => {
       confirmRemoveWorkflow: async () => false,
     },
     host,
+    idleJobHost,
   );
 });
 afterEach(async () => {
@@ -168,6 +172,33 @@ describe('file shell IPC', () => {
       ok: false,
     });
     expect(workspaceOpened).not.toHaveBeenCalled();
+  });
+
+  it('lifecycle channels call workspaceClosing before the manager and workspaceOpened only while one is open', async () => {
+    const order: string[] = [];
+    workspaceClosing.mockImplementation(async () => {
+      order.push(`closing:${manager.current()?.name ?? 'none'}`);
+    });
+    workspaceOpened.mockImplementation(async () => {
+      order.push(`opened:${manager.current()?.name ?? 'none'}`);
+    });
+    await ok('workspace:create', { name: 'Test', rootPath: root });
+    await ok('workspace:close', {});
+    await ok('workspace:open', { rootPath: root });
+    expect(await call('workspace:open', { rootPath: join(base, 'does-not-exist') })).toMatchObject({ ok: false });
+    expect(order).toEqual(['closing:none', 'opened:Test', 'closing:Test', 'closing:none', 'opened:Test', 'closing:Test']);
+  });
+
+  it('runs concurrent lifecycle channels one after the other', async () => {
+    const order: string[] = [];
+    workspaceClosing.mockImplementation(async () => {
+      order.push(`closing:${manager.current()?.name ?? 'none'}`);
+    });
+    workspaceOpened.mockImplementation(async () => {
+      order.push(`opened:${manager.current()?.name ?? 'none'}`);
+    });
+    await Promise.all([ok('workspace:create', { name: 'Test', rootPath: root }), ok('workspace:close', {})]);
+    expect(order).toEqual(['closing:none', 'opened:Test', 'closing:Test']);
   });
 
   it('assets:setCover returns the detail and rejects a foreign file', async () => {

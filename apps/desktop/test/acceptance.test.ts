@@ -20,6 +20,7 @@ import {
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
+import { idleJobHost, noopHost } from './idle-job-host.js';
 
 let base: string;
 let userDataPath: string;
@@ -196,8 +197,6 @@ interface WritableRawDatabase {
 }
 const WritableDatabase = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => WritableRawDatabase;
 
-const noopHost = { openPath: async () => '', showItemInFolder: () => {}, workspaceOpened: () => {} };
-
 describe('phase 2a acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
@@ -207,7 +206,7 @@ describe('phase 2a acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost);
+    }, noopHost, idleJobHost);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -417,7 +416,7 @@ describe('phase 2b acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost);
+    }, noopHost, idleJobHost);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -556,7 +555,7 @@ describe('phase 3b acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost);
+    }, noopHost, idleJobHost);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);

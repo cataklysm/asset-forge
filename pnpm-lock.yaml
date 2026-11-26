@@ -23,12 +23,18 @@ importers:
       '@assetforge/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@assetforge/jobs':
+        specifier: workspace:*
+        version: link:../../packages/jobs
       '@assetforge/media':
         specifier: workspace:*
         version: link:../../packages/media
       '@assetforge/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@assetforge/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@assetforge/storage':
         specifier: workspace:*
         version: link:../../packages/storage

@@ -7,6 +7,7 @@ import { assetFilePath, type WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { idleJobHost, noopHost } from './idle-job-host.js';
 
 let base: string;
 let manager: WorkspaceManager;
@@ -29,7 +30,7 @@ beforeEach(async () => {
     pickFiles: async () => [],
     confirmRemoveWorkspace: async () => 'cancel',
     confirmRemoveWorkflow: confirmWorkflow,
-  }, { openPath: async () => '', showItemInFolder: () => {}, workspaceOpened: () => {} });
+  }, noopHost, idleJobHost);
 });
 afterEach(async () => {
   await manager.close();

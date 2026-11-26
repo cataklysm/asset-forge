@@ -14,8 +14,10 @@
   "dependencies": {
     "@assetforge/contracts": "workspace:*",
     "@assetforge/core": "workspace:*",
+    "@assetforge/jobs": "workspace:*",
     "@assetforge/media": "workspace:*",
     "@assetforge/persistence": "workspace:*",
+    "@assetforge/providers": "workspace:*",
     "@assetforge/storage": "workspace:*",
     "@tanstack/react-virtual": "^3.14.28",
     "better-sqlite3": "^13.2.0",

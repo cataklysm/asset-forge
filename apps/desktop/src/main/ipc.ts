@@ -7,8 +7,10 @@ import {
   type WorkspaceSummary,
 } from '@assetforge/contracts';
 import { join } from 'node:path';
-import { AssetForgeError, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
+import { AssetForgeError, SerialQueue, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
 import type { z } from 'zod';
+import { createJobHandlers } from './job-handlers.js';
+import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
@@ -33,8 +35,10 @@ export interface HostActions {
   /** Electron shell.openPath: resolves '' on success, an error text otherwise. */
   openPath(absolutePath: string): Promise<string>;
   showItemInFolder(absolutePath: string): void;
-  /** Called after workspace:open or workspace:create succeeded. Must not throw. */
-  workspaceOpened(): void;
+  /** Called after a workspace lifecycle channel when a workspace is open afterwards. Never rejects. */
+  workspaceOpened(): Promise<void>;
+  /** Called before a workspace lifecycle channel calls the manager. Never rejects. */
+  workspaceClosing(): Promise<void>;
 }
 
 export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
@@ -43,49 +47,56 @@ export function createWorkspaceHandlers(
   manager: WorkspaceManager,
   dialogs: Dialogs,
   host: HostActions,
+  jobs: JobHost,
 ): IpcHandlers {
+  // The open workspace's jobs stop before the manager may close it, outside `exclusive` (a job may
+  // wait for that queue), and start again for whatever workspace is open afterwards, also after a failure.
+  // Lifecycle channels run one at a time, so a second one cannot close a workspace whose jobs were just started.
+  const lifecycleQueue = new SerialQueue();
+  const lifecycle = <T>(fn: () => Promise<T>): Promise<T> =>
+    lifecycleQueue.run(async () => {
+      await notify(host, 'workspaceClosing');
+      try {
+        return await fn();
+      } finally {
+        if (manager.current() !== null) await notify(host, 'workspaceOpened');
+      }
+    });
+
   return {
     'workspace:list': () => manager.list(),
     'workspace:current': async () => manager.current(),
-    'workspace:create': async (request) => {
-      const summary = await manager.create(request);
-      notifyWorkspaceOpened(host);
-      return summary;
-    },
+    'workspace:create': (request) => lifecycle(() => manager.create(request)),
     'workspace:resolveCreatePath': async (request) =>
       join(request.parentPath, workspaceFolderName(request.name)),
-    'workspace:open': async (request) => {
-      const summary = await manager.open(request);
-      notifyWorkspaceOpened(host);
-      return summary;
-    },
+    'workspace:open': (request) => lifecycle(() => manager.open(request)),
     'workspace:remove': async ({ id }) => {
       const workspace = (await manager.list()).find((w) => w.id === id);
       if (!workspace) return { removed: false, folderTrashed: false };
       const choice = await dialogs.confirmRemoveWorkspace(workspace);
       if (choice === 'cancel') return { removed: false, folderTrashed: false };
-      const { folderTrashed } = await manager.remove({
-        id,
-        trashFolder: choice === 'forget_and_trash_folder',
-      });
+      const { folderTrashed } = await lifecycle(() =>
+        manager.remove({ id, trashFolder: choice === 'forget_and_trash_folder' }),
+      );
       return { removed: true, folderTrashed };
     },
     'workspace:close': async () => {
-      await manager.close();
+      await lifecycle(() => manager.close());
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host),
+    ...createJobHandlers(manager, jobs),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
   };
 }
 
-/** The workspace is already open here, so a failing hook must not fail the channel. */
-function notifyWorkspaceOpened(host: HostActions): void {
+/** The hooks never reject by contract; a broken one must not fail the channel either. */
+async function notify(host: HostActions, hook: 'workspaceOpened' | 'workspaceClosing'): Promise<void> {
   try {
-    host.workspaceOpened();
+    await host[hook]();
   } catch (error) {
-    console.error('The workspace-opened hook failed', error);
+    console.error(`The ${hook} hook failed`, error);
   }
 }
 

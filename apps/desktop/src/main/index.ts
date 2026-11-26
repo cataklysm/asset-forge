@@ -13,8 +13,11 @@ import {
 } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
 import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from '@assetforge/media';
+import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { createWorkspaceManager } from './composition.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
+import { createJobHost } from './job-host.js';
+import { readVisionConfig } from './vision-config.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
 import { findOriginalIn, findSourceIn, handleMediaRequest, MEDIA_SCHEME, openFile } from './media-protocol.js';
 import { isTrustedSender } from './sender.js';
@@ -116,14 +119,31 @@ function start(): void {
 
   const appUrl = getAppUrl(windowOptions);
 
-  const handlers = createWorkspaceHandlers(manager, dialogs, {
-    openPath: (path) => shell.openPath(path),
-    showItemInFolder: (path) => shell.showItemInFolder(path),
-    // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
-    workspaceOpened: () => {
-      void previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
-    },
+  const vision = readVisionConfig(process.env, (message) => console.warn(message));
+  const jobHost = createJobHost({
+    manager,
+    vision: createOllamaVision(vision),
+    images: { jpeg: (path) => pool.jpeg(path) },
+    provider: OLLAMA_PROVIDER,
+    model: vision.model,
   });
+
+  const handlers = createWorkspaceHandlers(
+    manager,
+    dialogs,
+    {
+      openPath: (path) => shell.openPath(path),
+      showItemInFolder: (path) => shell.showItemInFolder(path),
+      workspaceOpened: async () => {
+        // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
+        void previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
+        // A channel that was already running when quitting began must not start jobs on a closing database.
+        if (shutdown === 'running') await jobHost.workspaceOpened();
+      },
+      workspaceClosing: () => jobHost.workspaceClosing(),
+    },
+    jobHost,
+  );
   for (const channel of Object.keys(ipcContract)) {
     ipcMain.handle(channel, (event, request: unknown): Promise<IpcResult<unknown>> => {
       if (shutdown !== 'running') {
@@ -155,8 +175,10 @@ function start(): void {
     event.preventDefault();
     if (shutdown === 'closing') return;
     shutdown = 'closing';
-    manager
-      .close()
+    // Jobs stop before their database closes; workspaceClosing never rejects.
+    jobHost
+      .workspaceClosing()
+      .then(() => manager.close())
       .catch((error: unknown) => console.error('Closing the workspace failed', error))
       .then(() => previews.close())
       .catch((error: unknown) => console.error('Closing the preview service failed', error))

@@ -29,6 +29,7 @@ import {
   NameInputSchema,
   NotesInputSchema,
   PageRequestSchema,
+  pageOf,
   ProjectAssignmentSchema,
   ProjectListSchema,
   ProjectMemberListSchema,
@@ -44,6 +45,7 @@ import {
   WorkflowTemplateSchema,
 } from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
+import { EnqueueAnalysisResultSchema, JobStatusSchema, JobSummarySchema, JobViewSchema } from './jobs';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -308,6 +310,45 @@ export const ipcContract = {
   'workflows:remove': {
     request: z.object({ assetId: IdSchema }),
     response: z.object({ removed: z.boolean() }),
+  },
+  /** Not all or nothing: analysable files are enqueued, the others are reported as skipped. */
+  'analysis:enqueue': {
+    request: z.object({ fileIds: FileIdsSchema }),
+    response: EnqueueAnalysisResultSchema,
+  },
+  /** Newest first. */
+  'jobs:list': {
+    request: PageRequestSchema.extend({ status: JobStatusSchema.optional() }),
+    response: pageOf(JobViewSchema),
+  },
+  'jobs:summary': {
+    request: EmptyRequestSchema,
+    response: JobSummarySchema,
+  },
+  /** A finished job is left alone. */
+  'jobs:cancel': {
+    request: z.object({ jobId: IdSchema }),
+    response: z.object({}),
+  },
+  /** Every queued, waiting and running job. */
+  'jobs:cancelAll': {
+    request: EmptyRequestSchema,
+    response: z.object({ cancelled: z.number().int().nonnegative() }),
+  },
+  /** `invalid_operation` unless the job is failed or cancelled and its file has no active job. */
+  'jobs:retry': {
+    request: z.object({ jobId: IdSchema }),
+    response: z.object({}),
+  },
+  /** Every failed or cancelled job whose file has no active job. */
+  'jobs:retryFailed': {
+    request: EmptyRequestSchema,
+    response: z.object({ retried: z.number().int().nonnegative() }),
+  },
+  /** Deletes every succeeded, failed and cancelled job. */
+  'jobs:clearFinished': {
+    request: EmptyRequestSchema,
+    response: z.object({ removed: z.number().int().nonnegative() }),
   },
   'dialog:pickDirectory': {
     request: EmptyRequestSchema,

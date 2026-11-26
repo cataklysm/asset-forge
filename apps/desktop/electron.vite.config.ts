@@ -9,8 +9,10 @@ import type { Plugin } from 'vite';
 const WORKSPACE_PACKAGES = [
   '@assetforge/contracts',
   '@assetforge/core',
+  '@assetforge/jobs',
   '@assetforge/media',
   '@assetforge/persistence',
+  '@assetforge/providers',
   '@assetforge/storage',
 ];
 
