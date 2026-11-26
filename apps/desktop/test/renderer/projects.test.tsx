@@ -319,8 +319,11 @@ it('list state round trip keeps filters, scroll offset and selection', async () 
   await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'active');
   const expected = { limit: 60, offset: 0, query: 'oak', tagNames: ['bark'], status: 'active' };
   await waitFor(() => expect(listRequests(api).at(-1)).toEqual(expected));
+  // The last request only proves it was sent: wait until the list has settled on the new page,
+  // so the click cannot hit a stale row that is about to be replaced.
+  await waitFor(() => expect(document.querySelector('[aria-busy]')).toBeNull());
   await user.click(await screen.findByText('Project 2'));
-  expect(rowOf('Project 2').getAttribute('aria-selected')).toBe('true');
+  await waitFor(() => expect(rowOf('Project 2').getAttribute('aria-selected')).toBe('true'));
 
   const grid = screen.getByRole('grid', { name: 'Projects' });
   Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
