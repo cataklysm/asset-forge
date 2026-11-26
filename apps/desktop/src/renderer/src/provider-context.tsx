@@ -11,11 +11,11 @@ import { ApiError, call } from './api';
 export type ProviderStatus = 'checking' | 'ready' | 'unreachable' | 'unauthorized' | 'no_vision_model' | 'error';
 
 export interface ProvidersState {
-  /** Null until the first answer, or when loading failed. */
+  /** Null until the first answer; a later failed reload keeps the list held. */
   list: ProviderList | null;
   /** True while the list loads. */
   loading: boolean;
-  /** True when the last list load failed (not the same as "no provider"). */
+  /** True when loading failed and no list is held (not the same as "no provider"). */
   failed: boolean;
   /** The model list answer per entry; undefined before the first answer and while a request runs. */
   models: Readonly<Record<string, ListModelsResult | undefined>>;
@@ -105,9 +105,9 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
       next = await call('providers:list', {});
     } catch (e) {
       if (request !== reloadRequest.current) return;
+      // A list already held stays; only without one is the load a failure the screens show.
       if (!disposed.current) {
-        takeList(null);
-        setFailed(true);
+        if (listRef.current === null) setFailed(true);
         setLoading(false);
       }
       throw e;

@@ -56,6 +56,46 @@ it('useProviders outside a provider returns the empty state', () => {
   expect(state).toMatchObject({ list: null, loading: false, failed: false, models: {} });
 });
 
+it('a failed reload keeps the list already held and does not count as failed', async () => {
+  const api = installFakeApi(fakeProviders({ providers: [LOCAL, RUNPOD] }).handlers);
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(state?.list?.providers).toHaveLength(2));
+  api.set('providers:list', () => {
+    throw fakeError('internal_error', 'internal_error');
+  });
+  let rejected = false;
+  await act(async () => {
+    await state!.reload().catch(() => {
+      rejected = true;
+    });
+  });
+  expect(rejected).toBe(true);
+  expect(state!.list?.providers.map((p) => p.name)).toEqual(['Local', 'RunPod']);
+  expect(state!.failed).toBe(false);
+  expect(state!.loading).toBe(false);
+});
+
+it('a failed first load holds no list and counts as failed', async () => {
+  installFakeApi({
+    ...fakeProviders().handlers,
+    'providers:list': () => {
+      throw fakeError('internal_error', 'internal_error');
+    },
+  });
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(state?.failed).toBe(true));
+  expect(state!.list).toBeNull();
+  expect(state!.loading).toBe(false);
+});
+
 it('the options name each entry with its state from the answers', async () => {
   const fake = fakeProviders({ providers: [LOCAL, RUNPOD] }, { [LOCAL.id]: UNREACHABLE, [RUNPOD.id]: READY });
   installFakeApi(fake.handlers);

@@ -179,7 +179,7 @@ export function ProviderSettings() {
                     type="button"
                     className={BUTTON_INLINE}
                     aria-pressed={!editingNew && p.id === selected?.id}
-                    disabled={locked}
+                    disabled={locked || busy}
                     onClick={() => select(p.id)}
                   >
                     <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>

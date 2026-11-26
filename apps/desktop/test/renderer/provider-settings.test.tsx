@@ -1,10 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IpcRequest, ListModelsResult, ProviderList } from '@assetforge/contracts';
+import type { IpcRequest, ListModelsResult, ProviderList, ProviderView } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { ProviderSettings } from '../../src/renderer/src/components/ProviderSettings';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
-import { fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
 const TEST_KEY = 'test-key-not-real';
 const ACTIVE_JOBS = 'This provider still has active jobs; move or cancel them first';
@@ -148,6 +148,26 @@ it('New then Save sends no id and selects the new entry', async () => {
   await waitFor(() => expect(entryNames()).toEqual(['Local', 'RunPod', 'Studio']));
   expect(within(list()).getByRole('button', { name: 'Studio' }).getAttribute('aria-pressed')).toBe('true');
   expect(button('Delete').disabled).toBe(false);
+});
+
+it('an edit made while a save runs survives the answer, and the entries wait for it', async () => {
+  const user = userEvent.setup();
+  const answer = deferred<ProviderView>();
+  const { api } = install(undefined, { 'providers:save': () => answer.promise });
+  renderSection();
+  await loaded();
+  await user.clear(field('Timeout (s)'));
+  await user.type(field('Timeout (s)'), '30');
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  for (const el of within(list()).getAllByRole('button')) expect((el as HTMLButtonElement).disabled).toBe(true);
+  expect(button('New').disabled).toBe(true);
+  await user.clear(field('Timeout (s)'));
+  await user.type(field('Timeout (s)'), '45');
+  await act(async () => answer.resolve({ ...LOCAL, timeoutSeconds: 30 }));
+  expect(field('Timeout (s)').value).toBe('45');
+  for (const el of within(list()).getAllByRole('button')) expect((el as HTMLButtonElement).disabled).toBe(false);
+  expect(button('New').disabled).toBe(false);
 });
 
 it('a refused save shows its message', async () => {

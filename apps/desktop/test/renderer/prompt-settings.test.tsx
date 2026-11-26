@@ -1,13 +1,13 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IpcRequest, VisionSettingsView } from '@assetforge/contracts';
+import type { IpcRequest } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { PromptSettings } from '../../src/renderer/src/components/PromptSettings';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { fakeAnalysisPrompts, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { BUILT_IN_TAGGING_TEXT, imagePrompt, taggingPrompt } from './fixtures';
 
 const DEFAULT_TAGGING = taggingPrompt();
@@ -223,15 +223,9 @@ it('uses only the shared button styles', async () => {
 
 // --- inside the settings screen ---
 
-const VIEW: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 120,
-  taggingModel: 'vision-a',
-  promptModel: 'vision-a',
-  hasApiKey: false,
-  fromEnvironment: true,
-  canStoreKey: true,
-};
+const ENVIRONMENT = providerView({ id: 'environment', name: 'Environment' });
+
+const section = (name: string) => screen.getByRole('heading', { name }).closest('section')! as HTMLElement;
 
 function renderSettings() {
   return render(
@@ -244,23 +238,22 @@ function renderSettings() {
 }
 
 it('the section is editable in the environment mode of the provider settings', async () => {
-  install({
-    'settings:getVision': () => VIEW,
-    'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
-  });
+  install(fakeProviders({ providers: [ENVIRONMENT], fromEnvironment: true }).handlers);
   renderSettings();
   await screen.findByText('From environment');
   await loaded();
-  expect((field('Name') as HTMLInputElement).disabled).toBe(false);
+  expect((within(section('Vision providers')).getByLabelText('Name') as HTMLInputElement).disabled).toBe(true);
+  expect((within(section('Prompts')).getByLabelText('Name') as HTMLInputElement).disabled).toBe(false);
 });
 
 it('the section is there when the provider settings cannot be read', async () => {
   install({
-    'settings:getVision': () => {
+    'providers:list': () => {
       throw fakeError('internal_error', 'internal_error');
     },
   });
   renderSettings();
-  await screen.findByRole('button', { name: 'Retry' });
+  await waitFor(() => expect(within(section('Vision providers')).getByRole('button', { name: 'Retry' })).toBeTruthy());
   await loaded();
+  expect(within(section('Prompts')).queryByRole('button', { name: 'Retry' })).toBeNull();
 });
