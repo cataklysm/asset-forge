@@ -285,8 +285,6 @@ Found during the build — core and persistence:
 
 - The port doc comments in `packages/core/src/ports.ts` do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
 - A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open, and a restore or purge of that file that resolves it fails with the same refusal.
-- The trash sweep treats "no row" as "purged". It is skipped only in the open that creates the database, so on the following open of a re-opened kept folder (or a database restored from a backup) the binaries still in `.assetforge/trash/` are removed. More robust: record purges as tombstones in the purge transaction and let the sweep remove only binaries of tombstoned ids.
-- The sweep's UUID regex is case-insensitive (`packages/core/src/file-trash.ts`), while ids are stored lower-case and looked up case-sensitively, so a foreign entry with an upper-case UUID prefix in `.assetforge/trash/` counts as "no row" and is removed.
 - `analysis:discardProposal` has no trash guard (`packages/core/src/analysis-proposals.ts`, `discardProposal`): it deletes the waiting proposal of a trashed file, which a restore should bring back. The renderer does not offer it in the trash.
 - The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).
 - A purge that loses a race to another purge answers "The file is not in the trash" although the file is gone.
