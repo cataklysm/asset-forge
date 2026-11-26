@@ -140,7 +140,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - The test setup emulates Esc, and the native-close fallback of the dialog is untested; some tests assert class substrings.
 - No test for superseding on a tag change; missing tests for `usePagedList` retry, the Workspaces busy state, the asset Files tab batch tags and the inbox assign failure strip.
 - `console.info` output in the tag scale test.
-- Flaky jsdom tests under load (pre-existing, timing-sensitive): inbox "filters and scroll offset survive navigation", assets and projects "list state round trip".
+- Flaky jsdom test under load (pre-existing, timing-sensitive): inbox "filters and scroll offset survive navigation". The assets and projects "list state round trip" tests, which failed the same way, were hardened in phase 4b: they now wait until the list has settled (no `aria-busy` left) before the click and wait for `aria-selected` after it. Their failure was not reproduced, so the root cause is unconfirmed.
 - Preview worker pool: the reverse eviction case (thumb evicted, `full` untouched) is untested.
 - Media protocol tests: the cancel test cannot fail; the upper-case UUID parity test only compares nullness.
 - Image viewer tests: no tests for the anchored scroll offsets and for Fit following a stage resize; `show(125)` alone and a file shifting across a page boundary are untested; the rejected-fullscreen test would pass without the `catch`; no test for the film strip scrolling the current tile into view; no end-to-end test "import stores oriented dimensions" through the real composition.
@@ -172,7 +172,7 @@ Found during the build:
 - `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
 - Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
 - `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
-- Inbox and asset Files tab (`InboxScreen.tsx`, `AssetFilesTab.tsx`): the `importResult` state also holds the analysis counts (rename to `result`); the counts of a start replace an import failure list in the shared strip even when it was not read yet.
+- Inbox and asset screen (`InboxScreen.tsx:39,78`, `AssetScreen.tsx:59,66`): the `importResult` state also holds the analysis counts (rename to `result`); the counts of a start replace an import failure list in the shared strip even when it was not read yet.
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
@@ -206,7 +206,7 @@ Deferred by design:
 - The two "Before paid providers" entries of phase 4a still apply.
 - `jobs:resume` is app-level: it works without an open workspace and resumes the one pause gate of the app session.
 - The "Proposals" toggle of the file lists is local to `FileBrowser` and does not survive navigation (the list state assumes string filter values, and "Analyse all" would have to leave the toggle out of its filter).
-- The pause banner sits in the shell behind the backdrop of a modal dialog, so a pause is not visible while a dialog is open.
+- The pause banner sits in the shell behind the backdrop of a modal dialog: behind a form-size dialog it stays faintly visible but cannot be used, and the file detail dialog covers it almost completely.
 - With a selection, the asset Files tab shows two Analyse buttons (the asset's in the header and the selection's), told apart only by their tooltips.
 
 Provider adapter (`packages/providers/src/ollama-vision.ts`):
@@ -215,16 +215,23 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 - `invalid_response` for a `message.content` that is not JSON is logged with HTTP status 200.
 - A timeout that fires after the answer arrived relabels the outcome as `provider_timeout`.
 - A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
+- A failure while building the request headers throws `provider_unauthorized` directly instead of going through `fail`, so an abort at that point would be reported as `provider_unauthorized`; not reachable today, because `throwIfAborted` runs just before and the header build is synchronous.
 
 Settings (`apps/desktop/src/main/vision-settings.ts`):
 
 - A change listener that throws in the `finally` of a save masks an error of the key write.
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
+- The key's origin binding lives only in the plaintext settings file (`vision-settings.ts:160,177-181`): a process with write access to `userData` can replace the base URL and keep the credential file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
 
 Main process (`apps/desktop/src/main`):
 
 - Cancelled Image2Prompt runs keep running in the media worker pool until they settle; the set of settling runs is unbounded, so repeated Generate and Cancel can pile them up (pass the signal into `images.jpeg` or cap the set).
 - `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every settings save even when the queue is not paused (`job-host.ts`).
+- The provider id reaches core by two routes: `composition.ts:120` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts:53,56` imports it for `analysis:preview` and `analysis:enqueue`. Both use the one constant today; a second vision provider must keep them equal.
+
+Mock provider (`docker/mock-provider/server.mjs`):
+
+- Every request, including the image body and the headers, is kept in memory for the life of the process (`server.mjs:83`). Possible fix: record only when a `record` option is set, or cap the array.
 
 Scheduler and pause gate (`packages/jobs`):
 
@@ -238,20 +245,26 @@ Persistence:
 - A wrong `sha256` passed to the repository's `acceptProposal` deletes a valid proposal (core always passes the stored one).
 - The proposal reader (`parseTags` in `file-analysis-repository.ts`) returns an empty tag list for stored JSON that does not parse or is not an array and drops malformed entries, where the list readers throw; it does not validate tag names.
 - No query-plan test for the reader page statement or the new index `job (file_id, type, created_at, id)`.
+- The analysis target reader (`analysis-target-reader.ts:17-26`) answers an empty target for a filter tag name that does not normalise (no letter or digit, too long), so `analysis:preview` and `analysis:enqueue` answer zero counts where `files:list` and `assets:list` reject the same filter with `validation_failed`.
+- No test pins that the reader's SQL predicate (`analysableSql` over `PREVIEWABLE_MIME_TYPES`: complete, listed MIME type, checksum present) agrees with `isAnalysable` in core (`analysis.ts:57`) and with the renderer's `analysable` (`file.previewable`, which `isPreviewable` derives, without the checksum); unverified beyond reading the code.
 
 Renderer:
 
 - Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract, which carries only `fileId` and `names`.
-- A file that is analysed and also queued is counted only as `alreadyAnalysed`, so with "Analyse again" the start dialog can count it to analyse and the start then reports 0 queued without saying why; there is no dedicated dialog state for 0 enqueued (only the strip's "0 queued, …").
+- The preview counts a file that is analysed and also queued only as `alreadyAnalysed`, so with "Analyse again" the start dialog counts it under "To analyse" (`wouldEnqueue`, `AnalysisStartDialog.tsx:41-42`) while "Already queued" shows 0; the enqueue with `force` then answers it as `alreadyQueued` and the strip shows "0 queued, 1 already queued". There is no dedicated dialog state for 0 enqueued (only the strip).
+- A propose request for a file that already has an active apply job is shown as the dialog's own job (`AnalysisResultDialog.tsx:166-175`, `packages/core/src/analysis-enqueue.ts:74`): the dedupe key is per file, the enqueue answers `alreadyQueued`, and the dialog treats that as success. After "Analyse all", opening one of its files and clicking Analyse shows Queued or Running; on success the tags are applied without review and the dialog ends empty. Possible fix: carry `mode` in the `JobView` of `analysis:getProposal` and show a fixed "already being analysed in a batch" state.
+- The prompt dialog shows the tagging wording of the shared provider gate: `NO_VISION_MODEL` and `MODEL_NOT_VISION` (`labels.ts:88,91`) say "analyse images".
 - `ModelSelect` shows a failed model list twice on the Settings screen, and a stale refresh error stays visible after a good list arrived.
 - The prompt dialog loses focus when its state changes (Generate disabled, Cancel unmounted).
 - The result dialog's busy state can flicker for one frame after a file switch.
 
 Renderer tests:
 
-- No test for a double click on Start or Accept.
 - The settings route of `AssetFilesTab` (closing the file detail dialog before Settings opens) has no dedicated test, only the inbox's; the result dialog's disabled Settings during an import is covered only by a shell test.
-- Not tested: the proposal toggle on the Files tab, the debounced query reaching "Analyse all", the gallery filters reaching the `assetFilter` target, and Image to prompt from the detail dialog menu.
+- Not tested: the proposal toggle on the Files tab, the debounced query reaching "Analyse all", and Image to prompt from the detail dialog menu. Of the gallery filters only status and tags are asserted in the `assetFilter` target (`assets.test.tsx`); query, type, project, role and kind are not.
+- No test proves that the asset Files tab and its count reload when the jobs `resultToken` advances (`AssetScreen.tsx:93,272` use `reloadToken + resultToken`; the asset screen tests use a static `jobs:summary`).
+- Settings: the reload race and a superseded model request that fails are tested; a superseded model request that succeeds after the newer one is not.
+- Start dialog: no test for Settings clicked while a start is in flight (the `startingRef` guard in `openSettings`), and none for a preview answer of a previous target arriving after the target changed (only a model change is tested).
 
 Core tests:
 
@@ -261,4 +274,4 @@ Core tests:
 
 ## Not covered by any automated check
 
-The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return.
+The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
