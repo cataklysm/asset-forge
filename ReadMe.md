@@ -92,11 +92,11 @@ Relations between assets can be, for example, `uses`, `variant_of`, `part_of` or
 
 The renderer is dark only. Its colours, radii and fonts are design tokens in the `@theme` block of `index.css` (`bg`, `surface`, `raised`, `line`, `text`, `muted`, `accent`, `danger`, ...); no component uses colour literals or light/dark variants, and a test scans the renderer sources for them. The window background equals the `bg` token (no white flash at start) and the window cannot be made smaller than 1024 x 680.
 
-**Shell.** `AppShell` is the frame of an open workspace: a header with the workspace name, its path and the "Workspaces" button; a navigation (Assets, Projects, Inbox); and the page slot. While an import runs, the navigation and the "Workspaces" button are disabled with the tooltip "Import in progress". When the storage is unreachable, a warning banner with a Retry button appears above the page; Retry remounts the page, so it loads from scratch. `Ctrl+F` focuses the search field of the current page. The list state of the screens (filters, scroll offset, opened or selected item, asset tab) lives in `WorkspaceShell` and survives navigation within a workspace; it is dropped with the workspace.
+**Shell.** `AppShell` is the frame of an open workspace: a header with the workspace name, its path and the "Workspaces" button; a navigation (Assets, Projects, Inbox, Jobs); and the page slot. While an import runs, the navigation and the "Workspaces" button are disabled with the tooltip "Import in progress". When the storage is unreachable, a warning banner with a Retry button appears above the page; Retry remounts the page, so it loads from scratch. `Ctrl+F` focuses the search field of the current page. The list state of the screens (filters, scroll offset, opened or selected item, asset tab) lives in `WorkspaceShell` and survives navigation within a workspace; it is dropped with the workspace.
 
 **Detail column.** The Assets, Projects and Inbox screens show a right-hand detail column next to the list. On the gallery it is the "Selection" column of the selected asset (type, status, tags, cover image with its file tags, file count, projects, "Open asset"); on the project list it shows the selected project and, while a tag filter is set, the matching member assets; in the inbox it holds the batch actions for the selected files. The asset screen and the project screen use the full width.
 
-**Tag attribution.** Asset tags and file tags are never shown in one undifferentiated row. File tags are preceded by one image icon per row, and rows are labelled "Asset tags" or "Image tags" wherever both appear. A chip carries its origin (`manual` or `ai`) already; the visual difference for `ai` comes with the analysis phase. Tag filter chips show the normalised tag name.
+**Tag attribution.** Asset tags and file tags are never shown in one undifferentiated row. File tags are preceded by one image icon per row, and rows are labelled "Asset tags" or "Image tags" wherever both appear. A chip carries its origin (`manual` or `ai`). An AI tag chip is drawn in its own colour (the token `--color-ai`, a violet clearly apart from the cyan accent, at least 4.5:1 on `bg` and `surface`; class constant `AI_CHIP`), has the tooltip "AI tag" and a remove button named "Remove AI tag <name>". Filter chips and the matched-tag chips of the gallery and project list carry no origin and keep their look. Tag filter chips show the normalised tag name.
 
 **Search and filters.** The search field applies its text after 250 ms without typing; clearing it (Esc) applies at once. A newer request supersedes an older one: only the answer to the latest query is shown. The previous results stay visible until the first page of the new result arrives, so typing causes no "Loading..." flash.
 
@@ -107,10 +107,12 @@ The renderer is dark only. Its colours, radii and fonts are design tokens in the
 | Channel | Semantics |
 | --- | --- |
 | `files:assignMany` | Per item. Each file is relocated on its own (a journaled move, no shared transaction) in request order; a failing file does not stop the others. The response lists, per file, the placed record or an error with the usual code and message. The whole batch holds the exclusive workspace queue. |
-| `files:addTagMany` | All or nothing. One transaction: an unknown file fails the call with `not_found`, a file that is not complete with `validation_failed`, and nothing is written. A file that already has the tag is left alone; every affected asset is reindexed once. |
-| `files:removeTagMany` | All or nothing like `files:addTagMany`. Removes the manual tag; AI tags stay, and a file without the tag is left alone. |
+| `files:addTagMany` | All or nothing. One transaction: an unknown file fails the call with `not_found`, a file that is not complete with `validation_failed`, and nothing is written. A file that already has the tag manually is left alone; a file that carries it as an AI tag gets it as a manual one instead (§6); every affected asset is reindexed once. |
+| `files:removeTagMany` | All or nothing like `files:addTagMany`. Removes the tag whatever its origin, manual or AI; a file without the tag is left alone. |
 
 After a batch the inbox lists the failures of `files:assignMany` per file; the files that were placed leave the list.
+
+**Analysis and jobs** (phase 4a). The file menu (tile, table row, "More" in the file detail dialog) offers "Analyse" for complete images of a previewable MIME type. The selection bars of the inbox and of the asset Files tab have an "Analyse" button that sends only the analysable files of the selection; it is disabled, with a tooltip, when the selection holds none. The outcome appears in the existing result strip as "<n> queued, <m> skipped", with every skipped file and its reason (file not found, not an image that can be analysed, already queued); the selection is kept. While a workspace is open the shell polls `jobs:summary` every 2 s. The Jobs entry of the navigation shows the number of active jobs (queued, running and waiting) when there are any. When the number of succeeded jobs rose since the last poll, the mounted file lists reload (stale-while-loading) and an open file detail dialog shows the fresh record, so new AI tags appear without navigating; a failed poll keeps the last state and is not reported. The Jobs screen is an endless table, newest first, with the columns Job ("Analyse image"), File (plain text), Status, Attempt ("<n> / 3"), Created and Error, a status filter, row actions "Cancel job" (queued, running, waiting) and "Retry job" (failed, cancelled), and the page actions "Cancel all", "Retry failed" and "Clear finished", each disabled when there is nothing to act on. A job waiting for its next try shows "Retrying" with the time in its tooltip. The list reloads whenever the summary reports a change.
 
 ## 4. Files, References and Versions
 
@@ -193,23 +195,29 @@ The user can queue single images, a selection, entire assets or all not-yet-anal
 
 The analysis uses a bounded preview suitable for the model instead of always transferring the full original. The original remains unchanged. Results are validated against a structured schema, normalized, and in the case of invalid responses treated as an error or as a reviewable suggestion.
 
-Example of an analysis result (illustrative):
+Only tags are stored. There is no stored image description, no suggested asset type and no separate view or style field: view and style arrive as tags of their own. Example of an analysis answer (illustrative):
 
 ```json
 {
-  "description": "Exterior reference of a roadside service station at dusk.",
-  "tags": ["building", "service station", "roadside", "dusk", "exterior"],
-  "suggestedAssetType": "Building",
-  "view": "three-quarter",
-  "style": "photorealistic"
+  "tags": ["building", "service station", "roadside", "dusk", "exterior", "three-quarter view", "photorealistic"]
 }
 ```
 
-Tags are supported at both file and asset level. File tags can be aggregated as suggestions for tagging the asset. Manual and AI-generated tags remain distinguishable; repeated analyses do not overwrite manually maintained tags. Source, model, analysis timestamp and, where applicable, review status are stored.
+Image2Prompt is a planned function (phase 4b) that derives a generation prompt from an image; its text is shown for use and is not saved.
 
-Implemented so far (phase 3b): tags on assets and on files. A tag has a normalised name (trimmed, inner whitespace collapsed, NFC, lower case, NFC again; 1 to 64 characters, otherwise `validation_failed`) and a display name, the spelling it was first entered with. An assignment records its origin (`manual` or `ai`); the key is (owner, tag, origin), so a manual and an AI assignment of the same tag coexist and removing by origin cannot hit the other. Phase 3b only creates manual assignments. Adding an existing assignment and removing a missing one are no-ops. Tag rows are never deleted and there is no rename or merge; suggestions (`tags:suggest`, limit 1 to 50) offer only tags that are in use, by name prefix, most used first. Asset detail and file records carry their tags. The IPC channels are `tags:suggest`, `assets:addTag`, `assets:removeTag`, `files:addTag` and `files:removeTag`. The editing UI (tag rows, suggestions) is not built yet; it follows in the UI phase.
+Tags are supported at both file and asset level. File tags can be aggregated as suggestions for tagging the asset. Manual and AI-generated tags remain distinguishable, and **an owner carries a tag at most once, manual wins**: an analysis never adds an AI assignment for a tag the owner carries manually; adding a tag by hand to an owner that carries it as AI turns it into a manual one (this is how a suggestion is adopted); removing a tag by hand removes it whatever its origin. A re-analysis replaces the earlier AI tags of the file and never touches manual ones. A tag the owner removed can come back when the same file is analysed again: nothing remembers a rejection. The provenance of an analysis (analysed content, provider, model, prompt version, time) is stored per file in `file_analysis`; a review status is not stored.
 
-A fingerprint of file content, provider/model identifier and analysis template version makes it possible to skip already analyzed contents when the configuration is unchanged. A re-analysis must be deliberately triggerable.
+Implemented so far (phase 3b): tags on assets and on files. A tag has a normalised name (trimmed, inner whitespace collapsed, NFC, lower case, NFC again; 1 to 64 characters, otherwise `validation_failed`) and a display name, the spelling it was first entered with. An assignment records its origin (`manual` or `ai`); the key is still (owner, tag, origin), but since phase 4a the repositories keep at most one assignment per owner and tag (the rule above; no migration of the tag tables). Adding an existing assignment and removing a missing one are no-ops. Tag rows are never deleted and there is no rename or merge; suggestions (`tags:suggest`, limit 1 to 50) offer only tags that are in use, by name prefix, most used first. Search, filters and suggestions treat both origins alike. Asset detail and file records carry their tags. The IPC channels are `tags:suggest`, `assets:addTag`, `assets:removeTag`, `files:addTag` and `files:removeTag`; the tag rows and suggestions of the UI are described in §3.3.
+
+Implemented so far (phase 4a): batch analysis of selected image files against a vision provider that speaks the Ollama HTTP API, by default the deterministic mock provider (§14). `analysis:enqueue` takes 1 to 1000 distinct file ids and creates one persistent job of type `vision.analyze_file` per file (§15.2); it is not all or nothing: a file that is unknown, not complete, without a checksum or not of a previewable image MIME type, or that already has an active analysis job, is reported as skipped with its reason and the others are queued. A single file is analysed like a batch of one. One run of the job:
+
+1. **Read.** The file must exist, be complete, have a previewable MIME type and a checksum; otherwise the job fails with `file_unavailable`. The media worker pool renders a JPEG for the model (longest edge at most 1024 px, quality 85, EXIF-oriented, alpha flattened onto white, the byte and pixel limits of previews, not cached). When no JPEG can be produced because the file was assigned or moved meanwhile, it is read once more from its new path; otherwise, and for an unreachable storage, the job fails with `file_unavailable`.
+2. **Ask.** The provider receives the JPEG, the analysis prompt (`ANALYSIS_PROMPT_VERSION = 1`: 8 to 15 short English lower-case tags covering what is shown, materials, dominant colours, exactly one view tag and exactly one style tag) and a JSON schema. No database or storage access happens during the call, and the call never runs inside a transaction or the workspace's serial queue.
+3. **Write.** The answer is parsed tolerantly: it must be an object with a `tags` array; entries that are not strings or not valid tags are dropped, the rest is cleaned like a manual tag, made distinct by normalised name and cut to 20. No tag left is `invalid_response`. One transaction then checks that the file still exists, is complete and has the checksum read in step 1 (otherwise `file_unavailable`, nothing written), replaces the file's AI tags by the new ones except those it carries manually, writes the `file_analysis` row (provider `ollama`, the configured model) and reindexes the asset. A run that was cancelled before the transaction writes nothing.
+
+Not yet implemented (phase 4b): the real Ollama instance with authentication (API key through `safeStorage`) and a provider settings UI, the result dialog that lets the user review the tags of a single image before accepting them, skipping already analysed content by fingerprint, "analyse everything not yet analysed", starting from an asset selection, and Image2Prompt. Phase 4a sends no credentials.
+
+A fingerprint of file content, provider/model identifier and analysis template version makes it possible to skip already analyzed contents when the configuration is unchanged. A re-analysis must be deliberately triggerable. Phase 4b builds the fingerprint on `file_analysis`; in phase 4a a file is analysed again only when the user asks for it.
 
 ### 6.2 Search
 
@@ -368,16 +376,16 @@ The following model is a starting point and not a finished SQL schema. IDs are m
 | FileVersion / FileRelation | File lineage and versions of mutable working files |
 | Tag | Normalized tag with display name |
 | AssetTag / FileTag | n:m assignment, manual or AI origin |
-| AnalysisResult | Model, analysis version, structured results |
+| AnalysisResult | Provenance of an analysis: analysed content, provider, model, prompt version, time (`file_analysis`); the results themselves are AI tags |
 | WorkflowTemplate / WorkflowStepDefinition | Versioned production template and steps |
 | AssetWorkflow / AssetWorkflowStep | Concrete production state and step status |
 | Prompt / PromptVersion | Reusable prompt templates and versions |
 | Provider / ProviderModel | Configuration and capability metadata, no plaintext secrets |
 | Generation / GenerationInput / GenerationOutput | Generation, inputs used and result files |
-| Job / JobAttempt | Persistent tasks, execution attempts and external job IDs |
+| Job / JobAttempt | Persistent tasks, execution attempts and external job IDs (a job keeps an attempt counter and the error of its latest run; an attempt history table is added when a job type needs it, at the latest for paid jobs in phase 5) |
 | ActivityEvent | Domain change history |
 
-Implemented so far (phases 1 and 2), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types with a default workflow template, no metadata schema yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum), `file_move` (move intents, §9.4), `workflow_template`, `workflow_template_version` and `workflow_step_definition` (the WorkflowTemplate / WorkflowStepDefinition entities), and `asset_workflow` and `asset_workflow_step` (one workflow per asset, each step row references a step definition of the template version the workflow refers to). Phase 3a adds `asset.cover_file_id` (the cover file chosen by the user, null for the automatic cover; cleared when the file is deleted, detached or moved to another asset). Phase 3b (migration `0004`) adds `tag` (normalised unique name, display name), `asset_tag` and `file_tag` (owner, tag and origin as key), `file.kind` (indexed with the asset, and `file (asset_id, status)` is indexed for the reindex and filter queries), `asset_search` (an FTS5 table over name, description, tags and file names, hand-written in the migration because Drizzle cannot express it), `asset_search_map` (the rowid of an asset's FTS row) and `workspace.derived_data_version`. The index is derived data: every repository method that changes something searchable rewrites the asset's row inside its own transaction, and a derived-data step on open (after migrations, built-in types and templates, also for a new workspace) recomputes all file kinds and rebuilds the index in batches of 500 assets, yielding to the event loop between batches, whenever the stored version differs from the constant in the adapter; the stamp is written last, so an interrupted run repeats on the next open. Everything else in the table above does not exist yet.
+Implemented so far (phases 1 and 2), as tables: `workspace`, `storage` (the storage a file row refers to by ID), `asset_type` (built-in types with a default workflow template, no metadata schema yet), `asset`, `project`, `project_asset`, `asset_relation`, `file` (the AssetFile entity: storage ID, relative path, optional asset and role, checksum), `file_move` (move intents, §9.4), `workflow_template`, `workflow_template_version` and `workflow_step_definition` (the WorkflowTemplate / WorkflowStepDefinition entities), and `asset_workflow` and `asset_workflow_step` (one workflow per asset, each step row references a step definition of the template version the workflow refers to). Phase 3a adds `asset.cover_file_id` (the cover file chosen by the user, null for the automatic cover; cleared when the file is deleted, detached or moved to another asset). Phase 3b (migration `0004`) adds `tag` (normalised unique name, display name), `asset_tag` and `file_tag` (owner, tag and origin as key), `file.kind` (indexed with the asset, and `file (asset_id, status)` is indexed for the reindex and filter queries), `asset_search` (an FTS5 table over name, description, tags and file names, hand-written in the migration because Drizzle cannot express it), `asset_search_map` (the rowid of an asset's FTS row) and `workspace.derived_data_version`. The index is derived data: every repository method that changes something searchable rewrites the asset's row inside its own transaction, and a derived-data step on open (after migrations, built-in types and templates, also for a new workspace) recomputes all file kinds and rebuilds the index in batches of 500 assets, yielding to the event loop between batches, whenever the stored version differs from the constant in the adapter; the stamp is written last, so an interrupted run repeats on the next open. The image viewer (migration `0005`) adds `file.width` and `file.height` (stored image dimensions). Phase 4a (migration `0006`) adds `job` and `file_analysis`. `job` holds `type`, `resource_class` and `status` (both with check constraints over the values of §15.2), an optional `file_id` (the subject of the job), a JSON `payload` validated per type with a `version`, a `dedupe_key`, the `attempt` counter, `run_after`, the `error_code` and fixed `error_message` of the latest run, and the times `created_at`, `started_at` (latest run), `finished_at` and `updated_at`. It is indexed by (status, resource class, created at, id) for claiming, and a partial unique index on `dedupe_key` over the active statuses keeps one active analysis job per file (`vision.analyze_file:<file id>`). There is no `JobAttempt` table. `file_analysis` has one row per analysed file (primary key `file_id`): the `sha256` of the analysed content, `provider`, `model`, `prompt_version` and `analysed_at`; a new analysis replaces it, clearing finished jobs leaves it, and phase 4a reads it only in tests. Everything else in the table above does not exist yet.
 
 Particularly important indexes: project assignments, asset type and status, file-to-asset assignment, tags, checksums, job status and job start time. Project-asset assignments and normalized tag assignments must not contain unintended duplicates. Type-dependent metadata can additionally be stored as validated JSON; regularly filtered core fields remain relational columns.
 
@@ -462,8 +470,8 @@ Electron stays on the host in order to make sensible use of native windows, file
 
 | Service / profile | Purpose | Activation |
 | --- | --- | --- |
-| `ollama` / `ai` | Local vision and text models | Only for local AI development |
-| `mock-provider` / `mock` | Simulated provider API with deterministic results and failure cases | For reproducible development and integration tests |
+| `ollama` / `ai` | Local vision and text models | Not shipped: the owner's own Ollama instance is used, configured in phase 4b |
+| `mock-provider` / `mock` | Simulated provider API with deterministic results and failure cases | Implemented (phase 4a), on `127.0.0.1:11500`; for reproducible development and integration tests |
 | `postgres` / `server` | Database for the later server mode | Only in the server profile |
 | `api` / `server` | Optional central API host | Only in the server profile |
 
@@ -477,11 +485,13 @@ All server services get health checks, persistent data volumes where required, c
 - Production data and development data are kept separate. Tests use a temporary test workspace and small fixtures.
 - GPU access is optional and requires a compatible host/Docker configuration, for example Windows with WSL2 and NVIDIA GPU support. CPU operation must be possible as a separate mode without requiring a GPU.
 
+The mock provider (phase 4a) is `docker/mock-provider/server.mjs`, plain Node without dependencies, with a type declaration beside it so tests start it in-process. It speaks the Ollama HTTP API: `GET /api/tags` lists the model `mock-vision`; `POST /api/chat` answers in Ollama's shape with `{"tags": [...]}` as content, eight tags chosen deterministically from a fixed vocabulary by a hash of the first image (six subject, material or colour tags, one view tag, one style tag); a request without an image gets HTTP 400 and one for another model HTTP 404. In-process, tests can script the next answers (an HTTP status, an invalid content or no answer at all). Run directly it reads `MOCK_PORT`, `MOCK_HOST` and `MOCK_DELAY_MS`. The Compose service `mock-provider` runs it on `node:22-alpine` with the file mounted read-only, listens on `0.0.0.0` inside the container, is published as `127.0.0.1:11500:11500`, passes `MOCK_DELAY_MS` through (default 0) and has no volumes.
+
 ### 14.2 Planned Development Commands
 
 The following commands are target conventions. They only work once the Compose file, services and package scripts are implemented in the repository.
 
-Already working (phase 1, no Docker needed): `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm typecheck`, a single test via `pnpm --filter @assetforge/<package> test <file> -t "<name>"` (without a `--` separator, which pnpm would pass on literally and thereby disable the filter), and `pnpm --filter @assetforge/persistence db:generate`. The persistence and desktop tests run under Electron's Node because of the better-sqlite3 ABI. Only the Docker Compose commands below are still planned.
+Already working (phase 1, no Docker needed): `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm typecheck`, a single test via `pnpm --filter @assetforge/<package> test <file> -t "<name>"` (without a `--` separator, which pnpm would pass on literally and thereby disable the filter), and `pnpm --filter @assetforge/persistence db:generate`. The persistence and desktop tests run under Electron's Node because of the better-sqlite3 ABI. Since phase 4a `docker compose --profile mock up -d` and its `down` work as well; the `server` profile is still planned, and there is no `ai` profile (§14.1).
 
 ```bash
 pnpm install
@@ -489,23 +499,20 @@ pnpm install
 # Desktop / local-first: SQLite on the host
 pnpm dev
 
-# Optional: deterministic mock provider in local Docker
+# Optional: deterministic mock provider in local Docker (127.0.0.1:11500)
 docker compose --profile mock up -d
-
-# Optional: Ollama in local Docker
-docker compose --profile ai up -d
 
 # Later: central API host and PostgreSQL in local Docker
 docker compose --profile server up -d
 
 # Tests and cleanup
 pnpm test
-docker compose --profile ai --profile mock --profile server down
+docker compose --profile mock --profile server down
 ```
 
 `down` should preserve persistent volumes by default. Deleting model data or database volumes is a separate, explicitly destructive operation.
 
-Configuration is done via `.env.example` and local, non-committed `.env` files. Intended variables are, for example, `OLLAMA_BASE_URL`, `MOCK_PROVIDER_BASE_URL`, `ASSETFORGE_API_URL`, `ASSETFORGE_WORKSPACE_PATH` and, on the server side, `DATABASE_URL`. Real credentials do not belong in Git, example configurations or container images.
+Configuration is done via `.env.example` and local, non-committed `.env` files. Implemented (phase 4a), documented in `.env.example`: `ASSETFORGE_VISION_BASE_URL` (default `http://127.0.0.1:11500`, the mock) and `ASSETFORGE_VISION_MODEL` (default `mock-vision`), read once from the environment of the desktop main process at start, and `MOCK_DELAY_MS` for the mock service. The base URL must be `http:` or `https:` without user info, otherwise the default is used and a warning that does not contain the value is logged; a trailing slash is removed, and an empty model means the default. These two variables are a seam that stored provider settings replace in phase 4b; they have no UI. Still intended for later: `ASSETFORGE_API_URL`, `ASSETFORGE_WORKSPACE_PATH` and, on the server side, `DATABASE_URL`. Real credentials do not belong in Git, example configurations or container images.
 
 ## 15. Resource Usage and Performance
 
@@ -533,6 +540,10 @@ On restart, active jobs are checked against stored information. Local operations
 
 Cancelling terminates the actual operation where possible. Remote jobs that cannot be cancelled are shown as such and are not falsely reported as stopped at the vendor. A clean shutdown stops accepting new jobs, persists intermediate states and closes resources in a controlled manner.
 
+Implemented so far (phase 4a): jobs live in the `job` table of the workspace database (§10); there is no cross-workspace queue. The scheduler (`createScheduler` in `packages/jobs`, no Electron, SQLite or HTTP) runs pluggable handlers, one per job type, each with a resource class and a policy for interrupted runs (`requeue`, or `fail` for paid work with an unclear outcome). It is event-driven — it looks for work on start, on a wake-up after enqueue, retry or cancel, when a job ends and when the timer for the earliest `run_after` fires — and never polls the table. Claiming is first in, first out by creation time per resource class up to that class's limit (`DEFAULT_LIMITS`: cpu 2, io 2, local GPU 1, remote API 2); a `retry_wait` job whose time has come competes by its creation time. A job runs at most 3 times (`MAX_ATTEMPTS`); the second run waits 5 s, the third 30 s (`RETRY_DELAYS_MS`). Retried are `provider_unreachable`, `provider_timeout`, `provider_unavailable` (HTTP 5xx or 429) and `invalid_response`; `provider_rejected` (any other 4xx), `file_unavailable` and `internal_error` fail at once. A stored error is exactly one `JobErrorCode` and its fixed English message, never a URL, response body, cause message or path; a handler that throws anything else ends the job as `internal_error`, and the cause is only logged in the main process. Cancelling a running job aborts its signal, and the job ends `cancelled` whatever the handler does, unless it had already succeeded. On start, jobs found `running` are put back to `queued` without consuming an attempt (`requeue`) or failed with `internal_error` (`fail`); a job whose type has no handler is never claimed. `stop` aborts running jobs, waits for them and puts them back to `queued`; after it resolved, the scheduler makes no repository call. The desktop host runs one scheduler per open workspace: it starts it after a workspace opened and stops it, outside the workspace's serial queue, before a workspace is opened, created, closed or removed, and on quit. A failed job, cancel and retry are data in the job row, not IPC errors. The IPC channels are `analysis:enqueue` (§6), `jobs:list` (paged, newest first, optional status filter; a `JobView` carries the original file name), `jobs:summary` (counts of queued, running, waiting — `retry_wait` and `waiting_remote` together —, failed, cancelled and succeeded jobs, plus `changes`, an in-memory counter of the host that rises whenever a job of the open workspace changes status), `jobs:cancel` (a finished job is left alone), `jobs:cancelAll` (every queued, waiting and running job), `jobs:retry` (`invalid_operation` unless the job is failed or cancelled and its file has no active job; the attempt counter is reset), `jobs:retryFailed` (every failed or cancelled job whose file has no active job, at most one per file) and `jobs:clearFinished` (deletes succeeded, failed and cancelled rows). The status `waiting_remote` exists but nothing sets it yet; remote job IDs and polling come with phase 5. An unreachable provider makes every job wait and retry twice, then fail (about 35 s per file with the local GPU limit of 1); "Cancel all" ends a batch at once, and asset management is unaffected.
+
+The vision adapter (`createOllamaVision` in `packages/providers`) calls `POST <base URL>/api/chat` with the model, `stream: false`, the JSON schema as `format`, temperature 0 and the image as Base64 in the message, parses `message.content` as JSON (not JSON is `invalid_response`) and maps failures to the codes above; it honours the caller's abort signal and times out after 120 s (`provider_timeout`). It sends no authentication header in phase 4a.
+
 ### 15.3 Conservative Starting Values
 
 These values are configurable development defaults and not measured performance requirements. They must be profiled on the target hardware and with real models.
@@ -541,7 +552,7 @@ These values are configurable development defaults and not measured performance 
 | --- | --- |
 | CPU / thumbnail workers | 2 concurrent (implemented constant; a job times out after 30 s) |
 | File imports / downloads | 2–4 concurrent, with a bounded buffer |
-| Local vision / GPU jobs | 1 concurrent per configured GPU resource pool |
+| Local vision / GPU jobs | 1 concurrent per configured GPU resource pool (implemented: one `local_gpu` limit of 1 per workspace scheduler) |
 | Remote generations | 2 concurrent per provider, plus a global limit |
 | Thumbnail cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
 | Detail preview cache | 2 GiB, LRU cleanup (implemented constant, not yet configurable) |
@@ -583,20 +594,21 @@ Baseline measurements of phase 3b (development machine, not thresholds): on a sy
 | 1 – Foundation | Electron, workspace, SQLite, storage, migrations | Create, close and reopen a workspace; file import and metadata are preserved. |
 | 2 – Asset Management | Projects, types, roles, asset relations, workflows | Use one asset in several projects; remove assignments without losing files; trace status. |
 | 3 – Library | Gallery, thumbnails, tags, search, filters, external files | Search a large library without loading all originals; open a BLEND file externally. |
-| 4 – AI Analysis | Docker Ollama, vision adapter, persistent jobs, batch tagging | Start, interrupt and resume a batch; manual tags are preserved. |
+| 4a – Jobs & Batch Tagging | Persistent jobs and scheduler, vision adapter, mock provider, batch tagging, Jobs screen | Start, interrupt and resume a batch against the mock provider; manual tags are preserved. |
+| 4b – AI Analysis | The owner's Ollama with authentication and provider settings, result dialog for single images, fingerprint skip, Image2Prompt | Tag images with the real vision model; review a single result before accepting it; unchanged content is not analysed again. |
 | 5 – Prompts & Studio | Prompt versioning, provider registry, mock API, first real image provider | Run a generation with reference images and permanently associate prompt, parameters and result. |
 | 6 – Reliability & Export | Backup, restore, storage errors, versions, limits, tests | Consistent restore to a new local path; handle NAS outages and job restarts without silent data loss. |
 | 7 – Extensions | 3D preview, 3D providers, additional models, embeddings | Integrate optional features without changing existing assets or other providers. |
 | 8 – Server Mode | API, PostgreSQL, local Docker integration, multi-user concept | Several clients use the same central data set with controlled write access. |
 
-Implemented so far: phase 1, phase 2 (2a asset management, 2b workflows), phase 3a (gallery, previews, cover, open externally) and the backend of phase 3b (tags, full-text search, filters, file kinds). The search, filter and tag UI of phase 3 follows in the UI phase.
+Implemented so far: phase 1, phase 2 (2a asset management, 2b workflows), phase 3 (3a gallery, previews, cover, open externally; 3b tags, full-text search, filters, file kinds; the UI redesign with the search, filter and tag UI; the image viewer) and phase 4a (jobs and batch tagging against the mock provider). Phase 4 is split: 4a builds the persistent job queue every later long operation needs and proves it end to end without a GPU; 4b connects the real model.
 
 Tests for storage consistency, migrations and job restart begin as early as phase 1. A rudimentary backup concept is required from the first persistent version onward; the full backup/restore workflow and failure-case tests are accepted in phase 6. Phases 7 and 8 are deliberately not part of the initial MVP.
 
 ## 18. Open Decisions
 
 - Final product name and trademark availability; AssetForge is a working title.
-- First concretely supported vision and image generation models and their API contracts.
+- First concretely supported image generation models and their API contracts. Decided for vision: the first model is `qwen3.5:9b` on the owner's Ollama instance, changeable as a setting; it arrives with phase 4b.
 - Exact UI for configurable asset types, metadata fields and workflow templates.
 - Whether physical deduplication across multiple assets is needed after the MVP.
 - Handling of complex external working-file dependencies and optional checkouts in server mode.

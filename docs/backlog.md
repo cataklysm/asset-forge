@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer and phase 4a reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -135,6 +135,37 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - Preview worker pool: the reverse eviction case (thumb evicted, `full` untouched) is untested.
 - Media protocol tests: the cancel test cannot fail; the upper-case UUID parity test only compares nullness.
 - Image viewer tests: no tests for the anchored scroll offsets and for Fit following a stage resize; `show(125)` alone and a file shifting across a page boundary are untested; the rejected-fullscreen test would pass without the `catch`; no test for the film strip scrolling the current tile into view; no end-to-end test "import stores oriented dimensions" through the real composition.
+
+## Phase 4a
+
+Deferred by design:
+
+- No circuit breaker for an unreachable provider: with the local GPU limit of 1 a batch fails one file after another, each after about 35 s; "Cancel all" ends it. A possible fix is "stop the queue after N consecutive unreachable failures".
+- No attempt history: a job keeps only its attempt counter and the error of its latest run (ReadMe §10). Needed at the latest for paid jobs in phase 5.
+- The file name on the Jobs screen is plain text, not a link to the file.
+- Job rows are only removed by "Clear finished"; there is no age-based cleanup of finished jobs.
+
+Found during the build:
+
+- Tag cleaning (`cleanTagText`, shared by manual and AI tags) does not strip control and format characters (`\p{Cc}`, `\p{Cf}`: NUL, zero-width characters, bidi overrides), so a model answer can produce invisible or visually spoofed tags. Fixing it changes stored names and needs a `DERIVED_DATA_VERSION` bump.
+- Scheduler (`packages/jobs/src/scheduler.ts`): a concurrent second `start()` runs the recovery twice and could release a live run; a cancel during `stop` is dropped instead of marking the run cancelled; a failing pass skips the remaining resource classes and keeps the old timer; non-`JobError` causes during `stop` are not logged; the delay fallback is unreachable.
+- A handler that ignores its abort signal hangs `stop` and with it the workspace close and quit.
+- Ollama adapter (`packages/providers/src/ollama-vision.ts`): a non-2xx answer whose body cannot be read is classified `provider_unreachable` instead of by its status; `response.text()` is unbounded; `fetch` follows redirects (use `redirect: 'error'`).
+- Job repository: the `exceptId` parameter of `keyHeld` in `job-repository.ts` is unused; a cancelled `retry_wait` job keeps its `run_after` and its old error.
+- The "an AI assignment yields to any existing one" rule is coded twice (`FileAnalysisRepository.apply` and `linkFileTags`).
+- Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
+- The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
+- `job.file_id` and `file_analysis.file_id` reference `file` without a delete rule; once files can be deleted, their jobs and analysis rows must be handled.
+
+Tests:
+
+- No test pins the exact text of every job error message.
+- In-memory job fake (`packages/core/test/memory-jobs.ts`): `enqueue` is not atomic on an id collision; it clones payloads with `structuredClone` while SQLite round-trips JSON; the fake has no tests of its own.
+- The core tag tests lack the asset-tag cases of the manual-wins fake.
+- Missing persistence tests: `FileAnalysisRepository.apply` for an inbox file, rejection of an unknown `job.file_id` by the foreign key.
+- Mock provider: its test does not pin the style tag or that the tags come from the vocabulary; scripted numeric and `'hang'` failures bypass `delayMs` and are consumed before the model and image checks.
+- Ollama adapter: no tests for an HTTP 200 with an empty body and for a signal that is already aborted; the `closedPortUrl` test can flake.
+- The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
 
 ## Not covered by any automated check
 
