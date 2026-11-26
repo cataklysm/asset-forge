@@ -126,3 +126,39 @@ it('the asset link follows to the asset', async () => {
   await user.click(screen.getByRole('link', { name: 'Oak tree' }));
   expect(onOpenAsset).toHaveBeenCalledWith(ASSET.id);
 });
+
+it('cover and detach menu items carry their tooltips', async () => {
+  install();
+  const file = fileRecord({ assetId: ASSET.id, role: 'reference' });
+  const actions: FileActionContext = {
+    cover: { isEffective: false, isChosen: false },
+    onDetails: () => {},
+    onSetCover: () => {},
+    onDetach: () => {},
+  };
+  render(<Harness file={file} actions={actions} />);
+  const user = await openDialog();
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  expect(screen.getByRole('menuitem', { name: 'Use as cover' }).getAttribute('title')).toBe(
+    'Show this image as the asset cover',
+  );
+  expect(screen.getByRole('menuitem', { name: 'Detach' }).getAttribute('title')).toBe(
+    'The file is kept and moves to the inbox',
+  );
+});
+
+it('the chosen cover item offers the automatic cover with its tooltip', async () => {
+  install();
+  const file = fileRecord({ assetId: ASSET.id, role: 'reference' });
+  const actions: FileActionContext = {
+    cover: { isEffective: true, isChosen: true },
+    onDetails: () => {},
+    onSetCover: () => {},
+  };
+  render(<Harness file={file} actions={actions} />);
+  const user = await openDialog();
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  expect(screen.getByRole('menuitem', { name: 'Use automatic cover' }).getAttribute('title')).toBe(
+    'Return to the first image as the cover',
+  );
+});

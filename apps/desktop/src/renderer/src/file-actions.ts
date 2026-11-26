@@ -28,9 +28,9 @@ export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuIte
   if (complete) items.push({ label: 'Show in folder', onSelect: shell('files:showInFolder') });
   const { cover, onSetCover, onDetach } = ctx;
   if (cover !== null && onSetCover !== undefined) {
-    if (cover.isChosen) items.push({ label: 'Use automatic cover', onSelect: () => onSetCover(null) });
-    else if (complete && file.previewable) items.push({ label: 'Use as cover', onSelect: () => onSetCover(file.id) });
+    if (cover.isChosen) items.push({ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) });
+    else if (complete && file.previewable) items.push({ label: 'Use as cover', title: 'Show this image as the asset cover', onSelect: () => onSetCover(file.id) });
   }
-  if (onDetach !== undefined) items.push({ label: 'Detach', onSelect: onDetach });
+  if (onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: onDetach });
   return items;
 }
