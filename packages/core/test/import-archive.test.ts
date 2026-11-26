@@ -11,6 +11,7 @@ import {
   inboxPath,
   MAX_ARCHIVE_BYTES,
   MAX_ARCHIVE_ENTRIES,
+  MAX_ARCHIVE_ENTRY_NAME_LENGTH,
   REFUSED_IMPORT_MESSAGE,
   STAGING_DIR,
   WorkspaceManager,
@@ -193,6 +194,41 @@ describe('importFiles unpacking archives', () => {
     expect(archives.openedEntries).toEqual([10]);
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['ok.png']);
     expect(written(storage)).toEqual([results.at(-1)!.file!.relativePath]);
+  });
+
+  it('refuses an entry whose type only shows after the name is truncated', async () => {
+    const { unpack, archives, storage, db } = await setup();
+    const name = `${'a'.repeat(96)}.exe.${'b'.repeat(16)}`;
+    archives.set('/src/pack.zip', [
+      { name: `dir/${name}`, content: 'MZ' },
+      { name: 'ok.png', content: 'ok' },
+    ]);
+
+    const results = await unpack(['/src/pack.zip']);
+
+    expect(results[0]).toEqual({ sourcePath: '/src/pack.zip', entryName: `dir/${name}`, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(results[1]).toMatchObject({ entryName: 'ok.png', error: null, file: { status: 'complete' } });
+    expect(archives.openedEntries).toEqual([1]);
+    expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['ok.png']);
+    expect(written(storage)).toEqual([results[1]!.file!.relativePath]);
+  });
+
+  it('refuses an entry whose file name is longer than 255 characters', async () => {
+    const { unpack, archives, db } = await setup();
+    expect(MAX_ARCHIVE_ENTRY_NAME_LENGTH).toBe(255);
+    const fits = `${'a'.repeat(251)}.png`;
+    const tooLong = `${'b'.repeat(252)}.png`;
+    archives.set('/src/pack.zip', [
+      { name: `deep/${fits}`, content: 'fits' },
+      { name: `deep/${tooLong}`, content: 'long' },
+    ]);
+
+    const results = await unpack(['/src/pack.zip']);
+
+    expect(results[0]).toMatchObject({ entryName: `deep/${fits}`, error: null, file: { status: 'complete' } });
+    expect(results[1]).toEqual({ sourcePath: '/src/pack.zip', entryName: `deep/${tooLong}`, file: null, error: ARCHIVE_ENTRY_REFUSED_MESSAGE, duplicateOf: [] });
+    expect(archives.openedEntries).toEqual([0]);
+    expect(db.files.records.size).toBe(1);
   });
 
   it('an archive of only refused entries answers one refusal each', async () => {

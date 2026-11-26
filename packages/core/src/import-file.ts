@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
 import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
-import { mimeFromFileName } from './file-names.js';
+import { mimeFromFileName, sanitizeFileName } from './file-names.js';
 import { fileKind, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, ImageProbe, SourceFiles, Storage } from './ports.js';
@@ -30,6 +30,15 @@ export function safeErrorMessage(error: unknown, fallback: string): string {
 /** Message of the result for a file whose type is never imported; contains no path. */
 export const REFUSED_IMPORT_MESSAGE: string = new ValidationFailedError('This file type cannot be imported').message;
 
+/**
+ * True when a source or archive entry of this name is never imported: by its own name, or by the
+ * name it would be stored under, since truncation can drop a long fake extension and expose a
+ * refused one (`<96 × a>.exe.<16 × b>` is stored as `<96 × a>.exe`).
+ */
+export function isRefusedImportName(fileName: string): boolean {
+  return isRefusedImport(fileName) || isRefusedImport(sanitizeFileName(fileName));
+}
+
 const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
 
 /** An opened source: a file on disk (`entryName` null) or an entry of the archive at `sourcePath`. */
@@ -48,7 +57,7 @@ export interface ImportSource {
  */
 export async function importFile(ctx: ImportContext, sourcePath: string): Promise<ImportResult> {
   const sourceName = sourcePath.slice(Math.max(sourcePath.lastIndexOf('/'), sourcePath.lastIndexOf('\\')) + 1);
-  if (isRefusedImport(sourceName)) {
+  if (isRefusedImportName(sourceName)) {
     return { sourcePath, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
   }
 

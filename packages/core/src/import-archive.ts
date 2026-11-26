@@ -1,13 +1,15 @@
 import type { ImportResult } from '@assetforge/contracts';
 import { ArchiveTooLargeError, ValidationFailedError } from './errors.js';
-import { importStream, REFUSED_IMPORT_MESSAGE, safeErrorMessage, type ImportContext } from './import-file.js';
-import { isRefusedImport, isZipArchive } from './media-types.js';
+import { importStream, isRefusedImportName, REFUSED_IMPORT_MESSAGE, safeErrorMessage, type ImportContext } from './import-file.js';
+import { isZipArchive } from './media-types.js';
 import type { ArchiveEntry, ArchiveReader } from './ports.js';
 
 /** At most this many entries (directories included) per `files:import` call, over all its archives. */
 export const MAX_ARCHIVE_ENTRIES = 5000;
 /** At most this many declared uncompressed bytes per `files:import` call, over all its archives. */
 export const MAX_ARCHIVE_BYTES = 20 * 1024 ** 3;
+/** An entry whose file name (last path segment) is longer than this many characters is refused. */
+export const MAX_ARCHIVE_ENTRY_NAME_LENGTH = 255;
 
 export const ARCHIVE_EMPTY_MESSAGE: string = new ValidationFailedError('This archive contains no files').message;
 export const ARCHIVE_ENTRY_REFUSED_MESSAGE: string = new ValidationFailedError('This archive entry cannot be imported').message;
@@ -28,10 +30,16 @@ function isSkipped(entry: ArchiveEntry): boolean {
 
 /** The message refusing an entry, or null when it is imported. */
 function refusal(entry: ArchiveEntry, fileName: string): string | null {
-  if (entry.isSymlink || entry.isUnsupported || fileName === '' || CONTROL_CHARACTER.test(fileName)) {
+  if (
+    entry.isSymlink ||
+    entry.isUnsupported ||
+    fileName === '' ||
+    fileName.length > MAX_ARCHIVE_ENTRY_NAME_LENGTH ||
+    CONTROL_CHARACTER.test(fileName)
+  ) {
     return ARCHIVE_ENTRY_REFUSED_MESSAGE;
   }
-  if (isRefusedImport(fileName) || isZipArchive(fileName)) return REFUSED_IMPORT_MESSAGE;
+  if (isRefusedImportName(fileName) || isZipArchive(fileName)) return REFUSED_IMPORT_MESSAGE;
   return null;
 }
 

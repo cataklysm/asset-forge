@@ -4,6 +4,7 @@ import {
   importFile,
   inboxPath,
   REFUSED_IMPORT_MESSAGE,
+  sanitizeFileName,
   SourceNotReadableError,
   STAGING_DIR,
   StorageFullError,
@@ -361,6 +362,20 @@ describe('refused imports', () => {
       expect(result).toEqual({ sourcePath: p, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     }
     expect(sources.opened).toEqual([]);
+  });
+
+  it('refuses a type that only shows after the name is truncated', async () => {
+    const { manager, sources, storage, db } = await setup();
+    const name = `${'a'.repeat(96)}.exe.${'b'.repeat(16)}`;
+    expect(sanitizeFileName(name).endsWith('.exe')).toBe(true);
+    sources.set(`/src/${name}`, Buffer.from('MZ'));
+
+    const [result] = await manager.importFiles([`/src/${name}`]);
+
+    expect(result).toEqual({ sourcePath: `/src/${name}`, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(sources.opened).toEqual([]);
+    expect(db.files.records.size).toBe(0);
+    expect(stagingEntries(storage)).toEqual([]);
   });
 });
 
