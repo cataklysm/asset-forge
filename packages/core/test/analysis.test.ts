@@ -15,7 +15,7 @@ import {
   MAX_ANALYSIS_TAGS,
 } from '../src/index.js';
 import type { FileRecord } from '@assetforge/contracts';
-import { jobFor, PROVIDER, rejectsWith, setup, UNKNOWN_ID } from './analysis-setup.js';
+import { jobFor, LEGACY_V4, PROVIDER, rejectsWith, setup, UNKNOWN_ID } from './analysis-setup.js';
 import { trashForTest } from './fakes.js';
 
 describe('isAnalysable', () => {
@@ -136,12 +136,27 @@ describe('the analyze file handler', () => {
     expect(handler).toMatchObject({ resourceClass: 'local_gpu', onInterrupted: 'requeue' });
   });
 
-  it('fails provider_not_configured without a provider or a model, before reading the image', async () => {
-    const { db, file, vision, images, handler, configure } = await setup();
-    configure({ vision: null, model: 'mock-vision' });
-    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'provider_not_configured');
-    configure({ vision, model: null });
-    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'provider_not_configured');
+  it('asks for the provider of the job lane', async () => {
+    const { file, handler, lanes } = await setup();
+    await handler.run(jobFor(file.id, LEGACY_V4, 'lane-b'), new AbortController().signal);
+    await handler.run(jobFor(file.id, LEGACY_V4, null), new AbortController().signal);
+    expect(lanes).toEqual(['lane-b', null]);
+  });
+
+  it('fails provider_not_configured when the lane has no provider, before reading the image', async () => {
+    const { db, file, vision, images, handler, configure, lanes } = await setup();
+    configure({ vision: null });
+    await rejectsWith(handler.run(jobFor(file.id, LEGACY_V4, 'x'), new AbortController().signal), 'provider_not_configured');
+    expect(lanes).toEqual(['x']);
+    expect(images.calls).toEqual([]);
+    expect(vision.calls).toEqual([]);
+    expect(await db.analyses.get(file.id)).toBeNull();
+    expect(await db.analyses.getProposal(file.id)).toBeNull();
+  });
+
+  it('fails provider_not_configured for a v1 payload without asking the provider', async () => {
+    const { db, file, vision, images, handler } = await setup();
+    await rejectsWith(handler.run(jobFor(file.id, { version: 1 }), new AbortController().signal), 'provider_not_configured');
     expect(images.calls).toEqual([]);
     expect(vision.calls).toEqual([]);
     expect(await db.analyses.get(file.id)).toBeNull();
@@ -328,13 +343,6 @@ describe('the analyze file handler with a v2 payload', () => {
     expect(db.tags.forFile(file.id).map((t) => t.name)).toEqual(['front view', 'metal', 'photorealistic', 'red car']);
   });
 
-  it('applies without a default model', async () => {
-    const { db, file, vision, handler, configure } = await setup();
-    configure({ vision, model: null });
-    await handler.run(jobFor(file.id, apply), new AbortController().signal);
-    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'llava:13b' });
-  });
-
   it('removes a waiting proposal when it applies', async () => {
     const { db, file, handler } = await setup();
     await handler.run(jobFor(file.id, propose), new AbortController().signal);
@@ -389,7 +397,7 @@ describe('the analyze file handler with a v2 payload', () => {
 
   it('fails provider_not_configured without a provider, before reading the image', async () => {
     const { file, images, handler, configure } = await setup();
-    configure({ vision: null, model: 'mock-vision' });
+    configure({ vision: null });
     await rejectsWith(handler.run(jobFor(file.id, apply), new AbortController().signal), 'provider_not_configured');
     expect(images.calls).toEqual([]);
   });
@@ -449,13 +457,38 @@ describe('legacy payloads in the handler', () => {
     expect(proposal?.promptName).toBeNull();
   });
 
-  it('a v1 job sends the legacy prompt with the default model, keeps 20 of 30 tags and records no prompt name', async () => {
+  it('a v4 job without a prompt sends the legacy prompt, keeps 20 of 30 tags and records no prompt name', async () => {
     const { db, file, vision, handler } = await setup();
     vision.answer = { tags: thirty };
-    await handler.run(jobFor(file.id), new AbortController().signal);
-    expect(vision.calls[0]).toMatchObject({ prompt: ANALYSIS_PROMPT, model: 'mock-vision' });
+    await handler.run(jobFor(file.id, { ...LEGACY_V4, model: 'llava:13b' }), new AbortController().signal);
+    expect(vision.calls[0]).toMatchObject({ prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA, model: 'llava:13b' });
     expect(db.tags.forFile(file.id)).toHaveLength(20);
-    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'mock-vision', promptName: null });
+    expect(await db.analyses.get(file.id)).toMatchObject({ provider: PROVIDER, model: 'llava:13b', promptName: null });
+  });
+});
+
+describe('the analyze file handler with a v4 payload', () => {
+  const prompt = { name: 'Detail', text: 'Look at the armour.', maxTags: 3 };
+  const ten = Array.from({ length: 10 }, (_, i) => `tag ${i}`);
+
+  it('sends the composed request, cuts at maxTags and records the prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: ten };
+    const payload = { version: 4, model: 'llava:13b', mode: 'apply', prompt, providerName: 'RunPod' };
+    await handler.run(jobFor(file.id, payload), new AbortController().signal);
+    expect(vision.calls[0]).toMatchObject({ prompt: composeTaggingRequest(prompt), model: 'llava:13b' });
+    expect(db.tags.forFile(file.id).map((t) => t.name).sort()).toEqual(['tag 0', 'tag 1', 'tag 2']);
+    expect(await db.analyses.get(file.id)).toMatchObject({ provider: PROVIDER, model: 'llava:13b', promptName: 'Detail' });
+  });
+
+  it('stores a proposal of at most maxTags tags with the prompt name', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.answer = { tags: ten };
+    const payload = { version: 4, model: 'llava:13b', mode: 'propose', prompt, providerName: 'RunPod' };
+    await handler.run(jobFor(file.id, payload), new AbortController().signal);
+    expect(await db.analyses.getProposal(file.id)).toMatchObject({ promptName: 'Detail', model: 'llava:13b' });
+    expect((await db.analyses.getProposal(file.id))?.tags).toHaveLength(3);
+    expect(await db.analyses.get(file.id)).toBeNull();
   });
 });
 

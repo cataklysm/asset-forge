@@ -1,6 +1,7 @@
 export * from './analysis.js';
 export * from './analysis-enqueue.js';
 export * from './analysis-handler.js';
+export * from './analysis-payload.js';
 export * from './analysis-proposals.js';
 export * from './asset-cover.js';
 export * from './asset-sources.js';
@@ -16,6 +17,7 @@ export * from './measure-file.js';
 export * from './media-types.js';
 export * from './import-archive.js';
 export * from './import-file.js';
+export * from './job-lanes.js';
 export * from './jobs.js';
 export * from './paths.js';
 export * from './projects.js';

@@ -79,10 +79,10 @@ async function requireJob(s: WorkspaceSession, jobId: string): Promise<Job> {
   return job;
 }
 
-/** Newest first. */
+/** Newest first; with `lane` only the jobs of that lane. */
 export function listJobs(
   s: WorkspaceSession,
-  q: { limit: number; offset: number; status?: JobStatus },
+  q: { limit: number; offset: number; status?: JobStatus; lane?: string },
 ): Promise<{ items: JobView[]; total: number }> {
   return s.database.jobs.list(q);
 }

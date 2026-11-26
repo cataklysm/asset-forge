@@ -56,13 +56,11 @@ async function readModelImage(
  */
 export function createAnalyzeFileHandler(deps: {
   session: WorkspaceSession;
-  /** The provider in force when a job runs; null when none is configured. */
-  vision: () => VisionProvider | null;
+  /** The provider of the job's lane (its entry id) when the job runs; null when that entry does not exist or cannot be used. */
+  vision: (lane: string | null) => VisionProvider | null;
   images: ModelImageSource;
-  /** Provider id recorded with every analysis. */
+  /** Adapter kind recorded in the fingerprint of every analysis. */
   provider: string;
-  /** The tagging default model at run time, for v1 payloads; null when none is set. */
-  defaultModel: () => string | null;
 }): JobHandler {
   const { session: s, images } = deps;
 
@@ -74,15 +72,17 @@ export function createAnalyzeFileHandler(deps: {
       if (job.fileId === null || !parsed.success) throw new JobError('internal_error');
       const fileId = job.fileId;
       const payload = parsed.data;
-      // v1 rows of phase 4a apply with the default model in force when they run.
-      const { model, mode } = payload.version === 1 ? { model: deps.defaultModel(), mode: 'apply' as const } : payload;
-      // v3 runs with the analysis prompt copied at enqueue; v1 and v2 with the unchanged legacy prompt.
+      // A v1 row carries no model; it only runs once it was assigned to a provider (and became v4).
+      if (payload.version === 1) throw new JobError('provider_not_configured');
+      const { model, mode } = payload;
+      // v3 and v4 run with the analysis prompt copied at enqueue; v2 and v4 without a prompt with the unchanged legacy prompt.
+      const copied = payload.version === 2 ? null : payload.prompt;
       const request =
-        payload.version === 3
-          ? { prompt: composeTaggingRequest(payload.prompt), limit: payload.prompt.maxTags, promptName: payload.prompt.name }
+        copied !== null
+          ? { prompt: composeTaggingRequest(copied), limit: copied.maxTags, promptName: copied.name }
           : { prompt: ANALYSIS_PROMPT, limit: LEGACY_TAG_LIMIT, promptName: null };
-      const vision = deps.vision();
-      if (vision === null || model === null) throw new JobError('provider_not_configured');
+      const vision = deps.vision(job.lane);
+      if (vision === null) throw new JobError('provider_not_configured');
       const { image, sha256 } = await readModelImage(s, images, fileId);
       signal.throwIfAborted();
       const answer = await vision.analyzeImage({ image, prompt: request.prompt, schema: ANALYSIS_SCHEMA, model, signal });
