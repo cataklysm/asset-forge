@@ -1,6 +1,8 @@
 # File trash — delete, restore and purge files — design
 
-Status: draft for the owner's approval, 2026-11-26.
+Status: approved by the owner and implemented, 2026-11-26.
+
+Changed during the build (ReadMe §9.4 and §10 are authoritative): the sweep on workspace open does not remove every trash binary without a row — that would empty the trash of a workspace opened with a new database. A purge records a tombstone (`file_purge`, migration `0009`) in the transaction that deletes the row, and the sweep removes only binaries with a tombstone and no row. Restore and purge first resolve an open move row of the file with the recovery rule, and a purge is refused while one exists.
 
 ## Intent
 

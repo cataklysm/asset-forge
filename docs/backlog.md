@@ -288,6 +288,9 @@ Found during the build — core and persistence:
 - `analysis:discardProposal` has no trash guard (`packages/core/src/analysis-proposals.ts`, `discardProposal`): it deletes the waiting proposal of a trashed file, which a restore should bring back. The renderer does not offer it in the trash.
 - The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).
 - A purge that loses a race to another purge answers "The file is not in the trash" although the file is gone.
+- `purgeFiles` (`packages/core/src/file-trash.ts`) deletes the tombstone after `remove` returned, but `remove` also returns without error when the storage dropped just before. The binary then stays in the trash directory with neither a row nor a tombstone and no sweep removes it (leaked disk space, no data loss). Delete the tombstone only when the storage is still reachable afterwards, as the sweep does.
+- `resolveFileMove` (`packages/core/src/asset-files.ts`) treats a storage that drops between the reachability check and its `exists` calls as "target missing" and aborts the move row. A purge that follows can then leave a restored binary outside the trash without a row. Re-check reachability before the abort, or after a discarded row in restore and purge.
+- Binaries left in `.assetforge/trash/` by a purge before migration `0009` have no tombstone and are never swept.
 
 Found during the build — main process and jobs:
 
