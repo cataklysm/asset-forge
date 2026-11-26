@@ -338,6 +338,17 @@ export const ASPECT_LABEL = 'Aspect';
 export const RESOLUTION_LABEL = 'Resolution';
 export const SAFE_MODE_LABEL = 'Safe mode';
 export const GENERATE_BUTTON = 'Generate';
+/** The aspect (or resolution) option that leaves the model's default. */
+export const MODEL_DEFAULT_OPTION = 'Default';
+export const PROMPT_LENGTH_TITLE = 'The prompt must have 1 to 8000 characters';
+export const PROMPT_TOO_LONG_TITLE = 'The prompt is longer than this model allows';
+export const SOURCE_IMAGE_LABEL = 'Source image';
+export const CLOSE_LABEL = 'Close';
+
+/** 'Upscale 2×'. */
+export function upscaleLabel(scale: 2 | 4): string {
+  return `${UPSCALE_LABEL} ${UPSCALE_SCALE_LABELS[scale]}`;
+}
 
 /** The results of the studio; `RETRY_LABEL` above is shared. */
 export const RESULTS_LABEL = 'Results';
