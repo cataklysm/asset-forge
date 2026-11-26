@@ -25,12 +25,13 @@ export interface SchedulerOptions {
   /** Called after every status change the scheduler made. Must not throw. */
   onChange?(): void;
   log?(message: string, cause: unknown): void;
-  /** Outlives the scheduler: a class it reports paused claims nothing, and every run end is recorded in it. */
+  /** Outlives the scheduler: a lane it reports paused claims nothing, and every run end is recorded in it. */
   pause?: PauseGate;
 }
 
 interface ActiveRun {
   resourceClass: ResourceClass;
+  lane: string | null;
   controller: AbortController;
   cancelled: boolean;
   /** The handler has settled; a cancel no longer changes the outcome. */
@@ -42,7 +43,8 @@ type Outcome = { ok: true } | { ok: false; error: unknown };
 
 /**
  * Event-driven job scheduler: it looks for work on `start`, on `wake`, when a job ends and when the timer for the
- * earliest `run_after` fires. Claims first in, first out per resource class up to that class's limit.
+ * earliest `run_after` fires. Claims first in, first out per resource class and lane, up to the class's limit in
+ * every lane; jobs without a lane share the lane `null`.
  */
 export function createScheduler(options: SchedulerOptions): Scheduler {
   const { jobs, handlers } = options;
@@ -75,13 +77,19 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   const pendingCancels = new Set<Promise<void>>();
 
   const iso = () => now().toISOString();
+  /** Running jobs of the class per lane. */
   const runningOf = (rc: ResourceClass) => {
-    let n = 0;
-    for (const run of active.values()) if (run.resourceClass === rc) n++;
+    const n = new Map<string | null, number>();
+    for (const run of active.values()) if (run.resourceClass === rc) n.set(run.lane, (n.get(run.lane) ?? 0) + 1);
     return n;
   };
 
-  const paused = (rc: ResourceClass) => options.pause !== undefined && options.pause.reason(rc) !== null;
+  /** Lanes the class may not claim from: the paused ones and those already running the class's limit. */
+  const excludedLanes = (rc: ResourceClass): (string | null)[] => {
+    const excluded = new Set<string | null>(options.pause ? options.pause.paused(rc).map((p) => p.lane) : []);
+    for (const [lane, n] of runningOf(rc)) if (n >= limits[rc]) excluded.add(lane);
+    return [...excluded];
+  };
 
   /** Tells the gate how a run ended, before the next pass decides whether its class may claim again. */
   function record(job: Job, run: ActiveRun, outcome: Outcome): void {
@@ -93,7 +101,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       else if (!stopping && outcome.error instanceof JobError) result = outcome.error.code;
     }
     try {
-      options.pause.record(job.resourceClass, result);
+      options.pause.record(job.resourceClass, job.lane, result);
     } catch (cause) {
       log('Job pause gate failed', cause);
     }
@@ -107,13 +115,11 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   async function pass(): Promise<void> {
     let earliest: number | null = null;
     for (const [rc, types] of typesOf) {
-      if (types.length === 0) continue;
-      // A paused class needs no timer either: the caller wakes the scheduler after resume.
-      if (paused(rc)) continue;
-      while (runningOf(rc) < limits[rc]) {
+      if (types.length === 0 || limits[rc] <= 0) continue;
+      // The excluded lanes are worked out again before every claim: a run may end or a lane pause in between.
+      for (;;) {
         if (stopping) return;
-        if (paused(rc)) break;
-        const job = await jobs.claimNext({ resourceClass: rc, types, now: iso() });
+        const job = await jobs.claimNext({ resourceClass: rc, types, now: iso(), excludeLanes: excludedLanes(rc) });
         if (!job) break;
         if (stopping) {
           await jobs.release(job.id, iso());
@@ -123,11 +129,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         changed();
       }
       if (stopping) return;
-      // A full class gets a pass when one of its jobs ends; only classes with room need the timer.
-      if (runningOf(rc) < limits[rc] && !paused(rc)) {
-        const next = await jobs.nextRunAfter(types);
-        if (next !== null) earliest = Math.min(earliest ?? Infinity, Date.parse(next));
-      }
+      // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
+      // resume; only the other lanes need the timer.
+      const next = await jobs.nextRunAfter(types, excludedLanes(rc));
+      if (next !== null) earliest = Math.min(earliest ?? Infinity, Date.parse(next));
     }
     if (stopping) return;
     cancelTimer();
@@ -171,6 +176,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     const handler = handlers[job.type]!;
     const run: ActiveRun = {
       resourceClass: job.resourceClass,
+      lane: job.lane,
       controller: new AbortController(),
       cancelled: false,
       settled: false,

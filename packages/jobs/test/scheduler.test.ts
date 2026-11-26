@@ -89,11 +89,11 @@ function setup(o: {
   });
   let seq = 0;
   /** Enqueues jobs one millisecond apart, so their created_at gives the order. */
-  const enqueue = async (type: string, resourceClass: ResourceClass, count = 1): Promise<string[]> => {
+  const enqueue = async (type: string, resourceClass: ResourceClass, count = 1, lane: string | null = null): Promise<string[]> => {
     const ids: string[] = [];
     for (let i = 0; i < count; i++) {
       const id = `job-${String(++seq).padStart(3, '0')}`;
-      await fake.enqueue({ jobs: [{ id, type, resourceClass, fileId: null, payload: { version: 1 }, dedupeKey: null }], now: iso() });
+      await fake.enqueue({ jobs: [{ id, type, resourceClass, fileId: null, lane, payload: { version: 1 }, dedupeKey: null }], now: iso() });
       ids.push(id);
       t += 1;
     }
@@ -504,10 +504,10 @@ describe('createScheduler with a pause gate', () => {
     expect(gpu.runs.at(-1)!.job.id).toBe(b);
     await failRun(gpu, b, new JobError('provider_unavailable'));
     expect(gpu.runs.at(-1)!.job.id).toBe(c);
-    expect(pause.reason('local_gpu')).toBeNull();
+    expect(pause.reason('local_gpu', null)).toBeNull();
     await failRun(gpu, c, new JobError('provider_timeout'));
 
-    expect(pause.reason('local_gpu')).toBe('provider_timeout');
+    expect(pause.reason('local_gpu', null)).toBe('provider_timeout');
     // The tripping job follows its normal path and keeps its attempt.
     expect(s.row(c)).toMatchObject({ status: 'retry_wait', attempt: 1, errorCode: 'provider_timeout' });
     expect(s.row(d)).toMatchObject({ status: 'queued', attempt: 0 });
@@ -536,10 +536,10 @@ describe('createScheduler with a pause gate', () => {
     await s.scheduler.start();
     await failRun(gpu, a, new JobError('provider_unauthorized'));
     expect(s.row(a)).toMatchObject({ status: 'failed', errorCode: 'provider_unauthorized' });
-    expect(pause.reason('local_gpu')).toBe('provider_unauthorized');
+    expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
     expect(s.row(b).status).toBe('queued');
 
-    pause.resume('local_gpu');
+    pause.resume('local_gpu', null);
     await flush();
     expect(gpu.runs).toHaveLength(1);
     s.scheduler.wake();
@@ -558,7 +558,7 @@ describe('createScheduler with a pause gate', () => {
     expect(s.row(a)).toMatchObject({ status: 'retry_wait', attempt: 1 });
     expect(s.timers).toHaveLength(0);
 
-    pause.resume('local_gpu');
+    pause.resume('local_gpu', null);
     s.scheduler.wake();
     await flush();
     expect(s.timers.map((x) => x.ms)).toEqual([5_000]);
@@ -574,7 +574,7 @@ describe('createScheduler with a pause gate', () => {
     const [a, b] = (await s.enqueue('gpu', 'local_gpu', 2)) as [string, string];
     await s.scheduler.start();
     await failRun(gpu, a, new JobError('provider_not_configured'));
-    expect(pause.reason('local_gpu')).toBe('provider_not_configured');
+    expect(pause.reason('local_gpu', null)).toBe('provider_not_configured');
     expect(s.row(b).status).toBe('queued');
     expect(gpu.runs).toHaveLength(1);
   });
@@ -590,7 +590,7 @@ describe('createScheduler with a pause gate', () => {
     gpu.runOf(ids[2]!).resolve();
     await flush();
     await failRun(gpu, ids[3]!, new JobError('provider_unreachable'));
-    expect(pause.reason('local_gpu')).toBeNull();
+    expect(pause.reason('local_gpu', null)).toBeNull();
     expect(gpu.runs.at(-1)!.job.id).toBe(ids[4]);
   });
 
@@ -601,7 +601,7 @@ describe('createScheduler with a pause gate', () => {
     const [a, b, c] = (await s.enqueue('gpu', 'local_gpu', 3)) as [string, string, string];
     await s.scheduler.start();
     await failRun(gpu, a, new JobError('provider_unauthorized'));
-    expect(pause.reason('local_gpu')).toBe('provider_unauthorized');
+    expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
     expect(s.row(b).status).toBe('running');
     expect(gpu.runOf(b).signal.aborted).toBe(false);
 
@@ -609,7 +609,7 @@ describe('createScheduler with a pause gate', () => {
     await flush();
     expect(s.row(b).status).toBe('succeeded');
     expect(s.row(c).status).toBe('queued');
-    expect(pause.reason('local_gpu')).toBe('provider_unauthorized');
+    expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
   });
 
   it('keeps the pause for a second scheduler handed the same gate', async () => {
@@ -635,7 +635,7 @@ describe('createScheduler with a pause gate', () => {
     expect(gpu.runs).toHaveLength(1);
     expect(s.row(b).status).toBe('queued');
 
-    pause.resume('local_gpu');
+    pause.resume('local_gpu', null);
     next.wake();
     await flush();
     expect(gpu.runs.map((r) => r.job.id)).toEqual([a, b]);
@@ -645,11 +645,12 @@ describe('createScheduler with a pause gate', () => {
   });
 
   it('records ok, the JobError code, or other for every run end', async () => {
-    const seen: [ResourceClass, string][] = [];
+    const seen: [ResourceClass, string | null, string][] = [];
     const spy: PauseGate = {
       reason: () => null,
-      record: (rc, outcome) => void seen.push([rc, outcome]),
+      record: (rc, lane, outcome) => void seen.push([rc, lane, outcome]),
       resume: () => {},
+      paused: () => [],
     };
     const cpu = controlled('cpu');
     const s = setup({ handlers: { t: cpu.handler }, limits: { ...DEFAULT_LIMITS, cpu: 5 }, pause: spy });
@@ -668,11 +669,11 @@ describe('createScheduler with a pause gate', () => {
     await stopping;
 
     expect(seen).toEqual([
-      ['cpu', 'ok'],
-      ['cpu', 'invalid_response'],
-      ['cpu', 'other'],
-      ['cpu', 'other'],
-      ['cpu', 'other'],
+      ['cpu', null, 'ok'],
+      ['cpu', null, 'invalid_response'],
+      ['cpu', null, 'other'],
+      ['cpu', null, 'other'],
+      ['cpu', null, 'other'],
     ]);
     expect(s.row(released).status).toBe('queued');
   });
@@ -686,6 +687,7 @@ describe('createScheduler with a pause gate', () => {
         throw failure;
       },
       resume: () => {},
+      paused: () => [],
     };
     const s = setup({ handlers: { t: cpu.handler }, pause: broken });
     const [id] = (await s.enqueue('t', 'cpu')) as [string];
@@ -708,7 +710,143 @@ describe('createScheduler with a pause gate', () => {
     expect(changes.n).toBe(0);
     await failRun(gpu, b, new JobError('provider_not_configured'));
     expect(changes.n).toBe(1);
-    pause.resume('local_gpu');
+    pause.resume('local_gpu', null);
     expect(changes.n).toBe(2);
+  });
+});
+
+describe('createScheduler with lanes', () => {
+  const gpuLimit = { ...DEFAULT_LIMITS, local_gpu: 1 };
+
+  it('holds the limit per lane: a1 and b1 run together, a2 starts when a1 settles', async () => {
+    const gpu = controlled('local_gpu');
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit });
+    const [a1, a2] = (await s.enqueue('gpu', 'local_gpu', 2, 'a')) as [string, string];
+    const [b1] = (await s.enqueue('gpu', 'local_gpu', 1, 'b')) as [string];
+    await s.scheduler.start();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([a1, b1]);
+    expect(s.row(a2).status).toBe('queued');
+
+    gpu.runOf(b1).resolve();
+    await flush();
+    expect(gpu.runs).toHaveLength(2);
+    expect(s.row(a2).status).toBe('queued');
+
+    gpu.runOf(a1).resolve();
+    await flush();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([a1, b1, a2]);
+    expect(s.row(a2).status).toBe('running');
+  });
+
+  it('keeps lane null apart from named lanes', async () => {
+    const gpu = controlled('local_gpu');
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit });
+    const [n1, n2] = (await s.enqueue('gpu', 'local_gpu', 2)) as [string, string];
+    const [a1] = (await s.enqueue('gpu', 'local_gpu', 1, 'a')) as [string];
+    await s.scheduler.start();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([n1, a1]);
+    expect(s.row(n2).status).toBe('queued');
+  });
+
+  it('keeps b running while lane a is paused, and runs a after resume and wake', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit, pause });
+    const [a1, a2] = (await s.enqueue('gpu', 'local_gpu', 2, 'a')) as [string, string];
+    const [b1, b2] = (await s.enqueue('gpu', 'local_gpu', 2, 'b')) as [string, string];
+    await s.scheduler.start();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([a1, b1]);
+
+    gpu.runOf(a1).reject(new JobError('provider_unauthorized'));
+    await flush();
+    expect(pause.reason('local_gpu', 'a')).toBe('provider_unauthorized');
+    expect(pause.reason('local_gpu', 'b')).toBeNull();
+    expect(s.row(a2).status).toBe('queued');
+
+    gpu.runOf(b1).resolve();
+    await flush();
+    expect(s.row(b2).status).toBe('running');
+    gpu.runOf(b2).resolve();
+    await flush();
+    expect(s.row(a2).status).toBe('queued');
+
+    pause.resume('local_gpu', 'a');
+    await flush();
+    expect(s.row(a2).status).toBe('queued');
+    s.scheduler.wake();
+    await flush();
+    expect(s.row(a2)).toMatchObject({ status: 'running', attempt: 1 });
+  });
+
+  it('arms no timer for a retry_wait job in a paused lane, and one for a free lane', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit, pause });
+    const [a] = (await s.enqueue('gpu', 'local_gpu', 1, 'a')) as [string];
+    const [b] = (await s.enqueue('gpu', 'local_gpu', 1, 'b')) as [string];
+    Object.assign(s.row(a), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString() });
+    Object.assign(s.row(b), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 30_000).toISOString() });
+    pause.record('local_gpu', 'a', 'provider_unauthorized');
+    await s.scheduler.start();
+    expect(s.timers.map((x) => x.ms)).toEqual([30_000]);
+
+    pause.record('local_gpu', 'b', 'provider_unauthorized');
+    s.scheduler.wake();
+    await flush();
+    expect(s.timers).toHaveLength(0);
+
+    pause.resume('local_gpu', 'a');
+    s.scheduler.wake();
+    await flush();
+    expect(s.timers.map((x) => x.ms)).toEqual([5_000]);
+  });
+
+  it('arms no timer for a retry_wait job of a full lane', async () => {
+    const gpu = controlled('local_gpu');
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit });
+    const [a1, a2] = (await s.enqueue('gpu', 'local_gpu', 2, 'a')) as [string, string];
+    Object.assign(s.row(a2), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString() });
+    await s.scheduler.start();
+    expect(s.row(a1).status).toBe('running');
+    expect(s.timers).toHaveLength(0);
+  });
+
+  it('pauses only the lane of a job failing provider_not_configured', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit, pause });
+    const [a1, a2] = (await s.enqueue('gpu', 'local_gpu', 2, 'a')) as [string, string];
+    const [n1, n2] = (await s.enqueue('gpu', 'local_gpu', 2)) as [string, string];
+    await s.scheduler.start();
+    gpu.runOf(a1).reject(new JobError('provider_not_configured'));
+    await flush();
+    expect(pause.paused('local_gpu')).toEqual([{ lane: 'a', reason: 'provider_not_configured' }]);
+    gpu.runOf(n1).resolve();
+    await flush();
+    expect(s.row(n2).status).toBe('running');
+    expect(s.row(a2).status).toBe('queued');
+  });
+
+  it('records the run end under the lane of its job', async () => {
+    const seen: [ResourceClass, string | null, string][] = [];
+    const spy: PauseGate = {
+      reason: () => null,
+      record: (rc, lane, outcome) => void seen.push([rc, lane, outcome]),
+      resume: () => {},
+      paused: () => [],
+    };
+    const gpu = controlled('local_gpu');
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit, pause: spy });
+    const [a] = (await s.enqueue('gpu', 'local_gpu', 1, 'a')) as [string];
+    const [n] = (await s.enqueue('gpu', 'local_gpu')) as [string];
+    await s.scheduler.start();
+    gpu.runOf(a).reject(new JobError('provider_timeout'));
+    await flush();
+    gpu.runOf(n).resolve();
+    await flush();
+    expect(seen).toEqual([
+      ['local_gpu', 'a', 'provider_timeout'],
+      ['local_gpu', null, 'ok'],
+    ]);
   });
 });
