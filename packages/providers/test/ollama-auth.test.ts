@@ -1,3 +1,4 @@
+import { inspect } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { JobError } from '@assetforge/core';
 import type { JobErrorCode } from '@assetforge/contracts';
@@ -173,6 +174,41 @@ describe('authentication', () => {
       ['provider_unavailable', 500],
       ['invalid_response', 200],
     ]);
+  });
+
+  it.each([
+    ['a newline', 'test-key\nnot-real'],
+    ['a NUL', 'test-key\0not-real'],
+  ])('refuses a key with %s as provider_unauthorized without a cause and without a request', async (_name, key) => {
+    const reports: unknown[][] = [];
+    const stub = recording(ollamaLike);
+    const vision = createOllamaVision({
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: () => key,
+      fetch: stub.fetch,
+      onFailure: (...args: unknown[]) => void reports.push(args),
+    });
+    const error = await failureOf(vision.describeImage({ image, prompt, model: 'm1', signal: signal() }));
+    expect(error).toBeInstanceOf(JobError);
+    expect((error as JobError).code).toBe('provider_unauthorized');
+    expect((error as JobError).cause).toBeUndefined();
+    const shown = inspect(error, { depth: 10 });
+    for (const part of [key, JSON.stringify(key), 'test-key', 'not-real']) expect(shown).not.toContain(part);
+    expect(stub.calls).toHaveLength(0);
+    expect(reports).toEqual([['provider_unauthorized', null]]);
+  });
+
+  it('keeps a network error that quotes the key out of the thrown error', async () => {
+    const vision = createOllamaVision({
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: () => KEY,
+      fetch: async () => {
+        throw new TypeError(`fetch failed: authorization Bearer ${KEY}`);
+      },
+    });
+    const error = await failureOf(vision.describeImage({ image, prompt, model: 'm1', signal: signal() }));
+    expect((error as JobError).code).toBe('provider_unreachable');
+    expect(inspect(error, { depth: 10 })).not.toContain(KEY);
   });
 
   it('does not report a caller abort', async () => {

@@ -111,6 +111,24 @@ describe('listModels', () => {
     ]);
   });
 
+  it('reports a failing /api/tags but stays silent about swallowed show failures', async () => {
+    const reports: unknown[][] = [];
+    const onFailure = (...args: unknown[]) => void reports.push(args);
+    const shows = server(
+      () => json(200, { models: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }),
+      (model) => (model === 'a' ? json(403, {}) : model === 'b' ? json(500, {}) : Promise.reject(new TypeError('x'))),
+    );
+    const models = await createOllamaVision({ baseUrl: BASE, fetch: shows.fetch, onFailure }).listModels(signal());
+    expect(models.map((model) => model.vision)).toEqual([null, null, null]);
+    expect(reports).toEqual([]);
+    const tags = server(
+      () => json(401, {}),
+      () => json(200, {}),
+    );
+    await failureOf(createOllamaVision({ baseUrl: BASE, fetch: tags.fetch, onFailure }).listModels(signal()));
+    expect(reports).toEqual([['provider_unauthorized', 401]]);
+  });
+
   it('gives each show its own 10 s limit', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const stub = server(

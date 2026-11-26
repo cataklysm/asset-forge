@@ -62,6 +62,8 @@ interface Request {
   body?: unknown;
   signal: AbortSignal;
   timeoutMs: number;
+  /** When true, a failure is not reported through `onFailure`; the caller swallows it. */
+  silent?: boolean;
 }
 
 /**
@@ -93,11 +95,17 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
     };
 
     try {
-      const headers: Record<string, string> = {};
-      if (r.body !== undefined) headers['content-type'] = 'application/json';
       // Read per request: a key changed or removed in the settings applies to the next call.
       const key = options.apiKey?.() ?? null;
-      if (key) headers.authorization = `Bearer ${key}`;
+      let headers: Headers;
+      try {
+        headers = new Headers();
+        if (r.body !== undefined) headers.set('content-type', 'application/json');
+        if (key) headers.set('authorization', `Bearer ${key}`);
+      } catch {
+        // The header error quotes the value, so it is never kept: a key that cannot be sent cannot authenticate.
+        throw new JobError('provider_unauthorized');
+      }
 
       let response: Response;
       try {
@@ -108,8 +116,9 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
           signal: combined,
           redirect: 'manual',
         });
-      } catch (error) {
-        return fail('provider_unreachable', error);
+      } catch {
+        // No cause: a fetch error may quote the request, and the request carries the key.
+        return fail('provider_unreachable', undefined);
       }
       status = response.status;
 
@@ -142,7 +151,7 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
         text = await readCapped(response);
       } catch (error) {
         if (error instanceof ResponseTooLarge) return fail('invalid_response', error);
-        return fail('provider_unreachable', error);
+        return fail('provider_unreachable', undefined);
       }
 
       let body: unknown;
@@ -158,7 +167,7 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
       }
     } catch (error) {
       // Only the code and the status leave the adapter; a caller abort is not a provider failure.
-      if (error instanceof JobError && !r.signal.aborted) options.onFailure?.(error.code, status);
+      if (error instanceof JobError && !r.signal.aborted && !r.silent) options.onFailure?.(error.code, status);
       throw error;
     } finally {
       clearTimeout(timer);
@@ -190,7 +199,9 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
   /** The model's capabilities: true/false when reported, null when not or when `show` fails. */
   async function hasVision(model: string, signal: AbortSignal): Promise<boolean | null> {
     try {
-      return await request({ path: '/api/show', body: { model }, signal, timeoutMs: SHOW_TIMEOUT_MS }, (body) => {
+      // Silent: a failed show is not a provider failure, it only leaves this model unknown.
+      const show = { path: '/api/show', body: { model }, signal, timeoutMs: SHOW_TIMEOUT_MS, silent: true } as const;
+      return await request(show, (body) => {
         const capabilities = (body as { capabilities?: unknown } | null)?.capabilities;
         if (!Array.isArray(capabilities)) return null;
         return capabilities.includes('vision');
