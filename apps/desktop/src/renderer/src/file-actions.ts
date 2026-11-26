@@ -2,11 +2,14 @@ import type { FileRecord } from '@assetforge/contracts';
 import { analysable } from './analysis';
 import { call, describeError } from './api';
 import type { MenuItem } from './components/Menu';
+import type { StudioState } from './studio-context';
 import {
   ANALYSE_LABEL,
   ANALYSE_TITLE,
   DELETE_LABEL,
   DELETE_TITLE,
+  GENERATE_LABEL,
+  GENERATE_TITLE,
   IMAGE_TO_PROMPT_LABEL,
   PURGE_LABEL,
   PURGE_TITLE,
@@ -15,6 +18,8 @@ import {
   IMAGE_TO_PROMPT_TITLE,
   REVIEW_TAGS_LABEL,
   REVIEW_TAGS_TITLE,
+  UPSCALE_TITLE,
+  upscaleLabel,
 } from './labels';
 
 export interface FileActionContext {
@@ -40,13 +45,16 @@ export interface FileActionContext {
   onRestore?(): void;
   /** Removes a trashed file from disk; offered only for files in the trash. */
   onPurge?(): void;
+  /** Offers Generate from image and the upscales for a complete previewable file; disabled with its `blocked` as tooltip. */
+  studio?: StudioState;
 }
 
 /**
  * The actions of one file's "…" menu. A trashed file offers only Details, Restore and Delete
  * permanently. A live file offers Details; Open externally and Show in folder for completely
  * imported files (opening only when the type may be opened); Analyse, Review tags (with a
- * proposal) and Image to prompt for analysable images when the host offers them; the cover choice
+ * proposal) and Image to prompt for analysable images when the host offers them; Generate from
+ * image and the upscales for complete previewable files when the host offers the studio; the cover choice
  * where the file belongs to an asset; Detach when the host offers it; Delete last.
  */
 export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuItem[] {
@@ -72,6 +80,19 @@ export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuIte
       items.push({ label: REVIEW_TAGS_LABEL, title: REVIEW_TAGS_TITLE, onSelect: onReviewTags });
     }
     if (onImageToPrompt !== undefined) items.push(provider(IMAGE_TO_PROMPT_LABEL, IMAGE_TO_PROMPT_TITLE, onImageToPrompt));
+  }
+  const { studio } = ctx;
+  if (studio !== undefined && complete && file.previewable) {
+    const generation = (label: string, title: string, onSelect: () => void): MenuItem =>
+      studio.blocked === null ? { label, title, onSelect } : { label, title: studio.blocked, disabled: true, onSelect };
+    items.push(generation(GENERATE_LABEL, GENERATE_TITLE, () => studio.open(file)));
+    for (const scale of [2, 4] as const) {
+      items.push(
+        generation(upscaleLabel(scale), UPSCALE_TITLE, () => {
+          studio.upscale(file, scale).catch((error: unknown) => ctx.onError?.(describeError(error)));
+        }),
+      );
+    }
   }
   if (cover !== null && onSetCover !== undefined) {
     if (cover.isChosen) items.push({ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) });

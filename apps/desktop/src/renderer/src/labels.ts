@@ -2,6 +2,7 @@ import {
   ANALYSIS_TAG_LIMIT_MAX,
   ANALYSIS_TAG_LIMIT_MIN,
   type AnalysisPromptPurpose,
+  type GenerationParameters,
   type GenerationStatus,
   type JobStatus,
   type ProviderKind,
@@ -329,6 +330,12 @@ export const GENERATE_TITLE = 'Edit this image with an image model';
 export const UPSCALE_LABEL = 'Upscale';
 export const UPSCALE_SCALE_LABELS: Record<2 | 4, string> = { 2: '2×', 4: '4×' };
 export const NO_IMAGE_PROVIDER_TITLE = 'Add an image provider in Settings first';
+export const UPSCALE_TITLE = 'Enlarge this image with the image provider';
+
+/** 'Upscale 4×'. */
+export function upscaleLabel(scale: 2 | 4): string {
+  return `${UPSCALE_LABEL} ${UPSCALE_SCALE_LABELS[scale]}`;
+}
 export const STUDIO_TITLE = 'Studio';
 
 /** The form of the studio (GenerationStudio). */
@@ -359,6 +366,15 @@ export const GENERATION_STATUS_LABELS: Record<GenerationStatus | 'running', stri
 export const GENERATED_FROM_LABEL = 'Generated from';
 export const COPY_PROMPT_TITLE = 'Copy prompt';
 export const PARAMETERS_LABEL = 'Parameters';
+export const MODEL_LABEL = 'Model';
+export const COPY_PROMPT_FAILED = 'The prompt could not be copied';
+
+/** '16:9 · 2K · Safe mode' for an edit (a value left to the model is not named), 'Upscale 4×' for an upscale. */
+export function generationParametersText(parameters: GenerationParameters): string {
+  if ('scale' in parameters) return upscaleLabel(parameters.scale);
+  const parts = [parameters.aspectRatio, parameters.resolution, parameters.safeMode ? SAFE_MODE_LABEL : `${SAFE_MODE_LABEL} off`];
+  return parts.filter((part): part is string => part !== null).join(' · ');
+}
 
 /** The type column of the Jobs screen. */
 export const JOB_TYPE_LABELS: Record<string, string> = {

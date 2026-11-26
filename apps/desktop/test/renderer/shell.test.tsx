@@ -224,6 +224,22 @@ it('Move jobs on a line opens the move dialog with that provider as the fixed so
   expect(screen.queryByRole('dialog', { name: 'Move jobs' })).toBeNull();
 });
 
+it('the line of a paused Venice lane offers Resume and Settings but no Move jobs', async () => {
+  const user = userEvent.setup();
+  const VENICE_ID = '00000000-0000-4000-8000-00000000c001';
+  const venice: PausedProvider = { providerId: VENICE_ID, providerName: 'Venice', kind: 'venice', reason: 'provider_unauthorized' };
+  const { api, onNavigate } = jobsShell(() => ({ ...IDLE, paused: [venice, PAUSED_LOCAL] }));
+  const banner = await screen.findByRole('alert');
+  const line = within(banner).getByRole('group', { name: 'Venice' });
+  expect(within(line).queryByRole('button', { name: 'Move jobs' })).toBeNull();
+  expect(within(within(banner).getByRole('group', { name: 'Local Ollama' })).getByRole('button', { name: 'Move jobs' })).toBeTruthy();
+  await user.click(within(line).getByRole('button', { name: 'Settings' }));
+  expect(onNavigate).toHaveBeenCalledWith('settings');
+  await user.click(within(line).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:resume')).toBe(true));
+  expect(api.calls.find((c) => c.channel === 'jobs:resume')?.request).toEqual({ providerId: VENICE_ID });
+});
+
 it('no paused provider shows no banner', async () => {
   const { api } = jobsShell(() => IDLE);
   await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:summary')).toBe(true));

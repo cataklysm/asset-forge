@@ -19,6 +19,7 @@ import { useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
   JOB_STATUS_LABELS,
+  JOB_TYPE_LABELS,
   JOBS_PROVIDER_HEADER,
   jobStatusLabel,
   MOVE_JOBS_LABEL,
@@ -44,7 +45,7 @@ const COLUMNS =
 const HEADERS = ['Job', 'File', JOBS_PROVIDER_HEADER, 'Status', 'Attempt', 'Created', 'Error'];
 
 function jobLabel(type: string): string {
-  return type === ANALYZE_FILE_JOB ? 'Analyse image' : type;
+  return JOB_TYPE_LABELS[type] ?? type;
 }
 
 /** The index of the row that holds the focus inside `root`, or null. */

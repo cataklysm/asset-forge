@@ -42,6 +42,10 @@ const laneValue = (id: string | null) => id ?? '';
 const isTarget = (list: ProviderList | null, id: string | null) =>
   id !== null && list?.providers.some((p) => p.id === id && p.kind === 'ollama') === true;
 
+/** Whether `id` names a listed image entry: its generation jobs never move, so it is no source either. */
+const isImageLane = (list: ProviderList | null, id: string | null) =>
+  id !== null && list?.providers.some((p) => p.id === id && p.kind === 'venice') === true;
+
 /** The target a move preselects: the default `ollama` entry unless it is the source, else the first other one. */
 function pickTarget(state: Pick<ProvidersState, 'list'>, source: string | null | undefined): string | null {
   const preferred = defaultProviderId(state, 'ollama');
@@ -56,7 +60,8 @@ function pickTarget(state: Pick<ProvidersState, 'list'>, source: string | null |
 export function MoveJobsDialog({ source, onClose }: Props) {
   const providers = useProviders();
   const { refresh } = useJobs();
-  const [lanes, setLanes] = useState<WaitingByProvider[] | null>(null);
+  const [allLanes, setLanes] = useState<WaitingByProvider[] | null>(null);
+  const lanes = allLanes === null ? null : allLanes.filter((l) => !isImageLane(providers.list, l.providerId));
   const [lanesError, setLanesError] = useState<string | null>(null);
   // The From choice when no source is given; undefined until one is chosen.
   const [chosenSource, setChosenSource] = useState<string | null | undefined>(undefined);

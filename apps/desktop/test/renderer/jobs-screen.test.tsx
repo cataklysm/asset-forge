@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ANALYZE_FILE_JOB, type IpcRequest, type JobSummary, type JobView } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type IpcRequest, type JobSummary, type JobView } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
@@ -107,8 +107,8 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
   ]);
 
   const cells = (row: HTMLElement) => within(row).getAllByRole('gridcell').map((c) => c.textContent);
-  expect(cells(rowOf('running.png'))).toEqual(['Analyse image', 'running.png', 'No provider', 'Running', '1 / 3', formatDateTime(CREATED), '', '']);
-  expect(cells(rowOf('retrying.png'))).toEqual(['Analyse image', 'retrying.png', 'No provider', 'Retrying', '2 / 3', formatDateTime(CREATED), '', '']);
+  expect(cells(rowOf('running.png'))).toEqual(['Analysis', 'running.png', 'No provider', 'Running', '1 / 3', formatDateTime(CREATED), '', '']);
+  expect(cells(rowOf('retrying.png'))).toEqual(['Analysis', 'retrying.png', 'No provider', 'Retrying', '2 / 3', formatDateTime(CREATED), '', '']);
   expect(within(rowOf('retrying.png')).getByText('Retrying').closest('[title]')?.getAttribute('title')).toBe(
     `Next try at ${formatDateTime(RUN_AFTER)}`,
   );
@@ -122,6 +122,13 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
     'The provider could not be reached',
     '',
   ]);
+});
+
+it('a generation job is labelled Generation', async () => {
+  install({ 'jobs:list': listOf([job({ type: IMAGE_GENERATE_JOB, fileName: 'oak.png' })]) });
+  renderScreen();
+  await screen.findByText('oak.png');
+  expect(within(rowOf('oak.png')).getAllByRole('gridcell')[0]!.textContent).toBe('Generation');
 });
 
 it('the status filter asks for that status and offers All plus the seven labels', async () => {
@@ -439,4 +446,25 @@ it('Move jobs in the toolbar opens the move dialog with a source select, and clo
   expect(screen.queryByRole('dialog', { name: 'Move jobs' })).toBeNull();
   await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(lists));
   expect(api.calls.some((c) => c.channel === 'jobs:reroute')).toBe(false);
+});
+
+it('the move dialog does not offer the lane of a Venice entry as a source', async () => {
+  const user = userEvent.setup();
+  const venice = providerView({ kind: 'venice', name: 'Venice', taggingModel: null, promptModel: null, editModel: 'mock-edit' });
+  install({
+    ...fakeProviders({ providers: [LOCAL, venice] }).handlers,
+    'providers:listImageModels': () => ({ ok: true, models: [] }),
+    'jobs:list': listOf([job({ fileName: 'local.png', providerId: LOCAL.id, providerName: 'Local Ollama' })]),
+    'jobs:waitingByProvider': () => [
+      { providerId: venice.id, providerName: 'Venice', waiting: 4 },
+      { providerId: LOCAL.id, providerName: 'Local Ollama', waiting: 7 },
+    ],
+  });
+  renderScreen();
+  await screen.findByText('local.png');
+  await user.click(screen.getByRole('button', { name: 'Move jobs' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Move jobs' });
+  const from = within(dialog).getByRole('combobox', { name: 'From' }) as HTMLSelectElement;
+  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['Local Ollama']));
+  expect(within(dialog).getByText('7 waiting')).toBeTruthy();
 });
