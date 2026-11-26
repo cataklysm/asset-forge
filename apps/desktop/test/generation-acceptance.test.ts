@@ -130,6 +130,30 @@ describe('generation studio end to end', () => {
     expect(await generation(sourceId, busy.id)).toMatchObject({ status: 'failed', errorCode: 'provider_unavailable' });
   });
 
+  it('cancels a running and a queued generation when their source goes to the trash, and never sends them again', async () => {
+    const { assetId } = await setup();
+    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const running = [await started(edit(sourceId, MOCK_PROMPT_SLOW)), await started(edit(sourceId, MOCK_PROMPT_SLOW))];
+    await h.until((s) => s.running === 2);
+    const deadline = Date.now() + 10_000;
+    while (mock!.imageRequests.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    // The remote limit is two per lane, so the third waits in the queue.
+    const queued = await started(edit(sourceId, 'Make it night'));
+    expect(await h.ok('jobs:summary', {})).toMatchObject({ running: 2, queued: 1 });
+
+    expect(await h.ok('files:trashMany', { fileIds: [sourceId] })).toMatchObject({ items: [{ error: null }] });
+    await h.until((s) => s.cancelled === 3 && active(s) === 0);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const { results } = await h.ok('generations:forFile', { fileId: sourceId });
+    expect(new Map(results.map((g) => [g.id, g.status]))).toEqual(
+      new Map([...running, queued].map((g) => [g.id, 'cancelled'])),
+    );
+    // One request for each running generation, none for the queued one, and none repeated.
+    expect(mock!.imageRequests).toHaveLength(2);
+    expect((await filesOf(assetId)).map((f) => f.id)).toEqual([]);
+  });
+
   it('fails a slow edit interrupted by closing as provider_outcome_unknown and sends it only once', async () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });

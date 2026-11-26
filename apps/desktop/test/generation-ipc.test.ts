@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +20,12 @@ import type { ProviderGateway } from '../src/main/provider-gateway.js';
 import type { ProviderEntry, ProviderStore } from '../src/main/provider-store.js';
 import { createHarness, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 import { pngOf } from './png-fixture.js';
+
+// Passes through; only lets a test see which files were read whole.
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  return { ...actual, readFile: vi.fn(actual.readFile) };
+});
 
 const UNKNOWN = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 const page = { limit: 100, offset: 0 };
@@ -195,6 +201,21 @@ describe('generation IPC', () => {
     expect(await h.ok('generations:recentPrompts', {})).toEqual({ prompts: [MOCK_PROMPT_NO_BALANCE] });
     noKeyInResponses();
     for (const line of h.logs) expect(line).not.toContain(TEST_KEY);
+  });
+
+  it('names a paused venice lane whose entry was deleted after the provider stored with its generation', async () => {
+    const { entry, fileId } = await ready();
+    await start(edit(fileId, MOCK_PROMPT_NO_BALANCE));
+    await h.until((s) => s.paused.length > 0);
+    await start(edit(fileId, 'night'));
+    // Without a workspace the entry can be deleted; its queued generation then fails as not configured.
+    await h.ok('workspace:close', {});
+    expect(await h.ok('providers:delete', { id: entry.id })).toEqual({});
+    await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
+    const summary = await h.until((s) => s.paused.length > 0 && s.queued === 0 && s.running === 0);
+    expect(summary.paused).toEqual([
+      { providerId: entry.id, providerName: 'Venice', kind: 'venice', reason: 'provider_not_configured' },
+    ]);
   });
 
   it('cancels a running generation through jobs:cancelAll and refuses to delete its entry while it runs', async () => {
@@ -375,6 +396,35 @@ describe('generation image source', () => {
     expect(
       await source.read({ absolutePath: original, mimeType: 'image/png', sha256, sizeBytes: IMAGE_INPUT_MAX_BYTES + 1 }, signal),
     ).toEqual({ data: new Uint8Array(bytes), mimeType: 'image/png' });
+  });
+
+  it('never reads an original that grew past the limit since its size was stored', async () => {
+    const path = join(dir, 'oak.png');
+    await writeFile(path, Buffer.alloc(64));
+    const get = vi.fn(async () => null);
+    const source = createGenerationImageSource({ get }, { maxBytes: 16 });
+    const read = vi.mocked(readFile);
+    read.mockClear();
+    try {
+      expect(await source.read({ absolutePath: path, mimeType: 'image/png', sha256, sizeBytes: 8 }, signal)).toBeNull();
+      expect(read).not.toHaveBeenCalledWith(path, expect.anything());
+    } finally {
+      read.mockClear();
+    }
+  });
+
+  it('answers null when the rendition is evicted before it is read', async () => {
+    const original = join(dir, 'oak.tif');
+    await writeFile(original, 'tiff bytes');
+    const rendition = join(dir, 'full.png');
+    await writeFile(rendition, pngOf(4, 4));
+    const source = createGenerationImageSource({ get: async () => rendition });
+    // The cache removes it after it was found and measured.
+    vi.mocked(readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+    expect(await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal)).toBeNull();
+    // Without a rendition file at all, too.
+    const missing = createGenerationImageSource({ get: async () => join(dir, 'gone.png') });
+    expect(await missing.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal)).toBeNull();
   });
 
   it('answers null without a rendition or for a rendition over the limit', async () => {

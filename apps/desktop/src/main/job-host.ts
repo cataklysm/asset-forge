@@ -147,6 +147,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
       await scheduler?.cancel(jobId);
     },
 
+    // Without a scheduler nothing runs; a generation left pending is closed by the reconcile on the next open.
     cancelAll: async () => (scheduler === null ? 0 : scheduler.cancelAll()),
 
     changes: () => changes,

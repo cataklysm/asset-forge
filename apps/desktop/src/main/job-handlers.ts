@@ -22,6 +22,7 @@ import {
   retryJob,
   type ImageProviderDirectory,
   type WorkspaceManager,
+  type WorkspaceSession,
 } from '@assetforge/core';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
@@ -30,6 +31,13 @@ import type { JobHost } from './job-host.js';
 import { CANNOT_ANALYSE, type ProviderStore } from './provider-store.js';
 
 const GENERATION_NOT_FOUND = 'This generation does not exist';
+
+/** The provider name stored with the generation of the lane's newest generation job; null when there is none. */
+async function generationLaneName(s: WorkspaceSession, lane: string | null): Promise<string | null> {
+  const parsed = ImageGeneratePayloadSchema.safeParse(await s.database.jobs.latestPayloadOfLane(IMAGE_GENERATE_JOB, lane));
+  if (!parsed.success) return null;
+  return (await s.database.generations.get(parsed.data.generationId))?.providerName ?? null;
+}
 
 // Kept free of Electron imports. Every repository call is one atomic transaction, so these run
 // through `read` rather than the serial queue; accepting and discarding a proposal change tags and
@@ -170,7 +178,7 @@ export function createJobHandlers(
         for (const { lane, reason, resourceClass } of jobs.paused()) {
           // A generation lane pauses only for a venice entry; an analysis lane only for an ollama one.
           const kind: ProviderKind = resourceClass === 'remote_api' ? 'venice' : 'ollama';
-          const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : null);
+          const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : await generationLaneName(s, lane));
           paused.push({ providerId: lane, providerName, kind, reason });
         }
         return { ...counts, changes: jobs.changes(), paused };
