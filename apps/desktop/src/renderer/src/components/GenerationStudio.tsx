@@ -22,7 +22,7 @@ import { formatLabel } from '../media-url';
 import { useImageProviderChoice } from '../provider-choice';
 import { useProviders } from '../provider-context';
 import { imageProviderGate } from '../provider-gate';
-import { constrain, formFromGeneration, readSafeMode, writeSafeMode, type StudioForm as Form } from '../studio-state';
+import { constrain, formFromGeneration, readSafeMode, tileState, writeSafeMode, type StudioForm as Form } from '../studio-state';
 import { ALERT, BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
 import { CoverImage } from './CoverImage';
 import { Dialog } from './Dialog';
@@ -68,10 +68,27 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   }
 
   const [results, setResults] = useState<Generation[] | null>(null);
+  const [upscales, setUpscales] = useState<Generation[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Another source image starts from a fresh form and its own results; safe mode stays as remembered.
+  const [shownFileId, setShownFileId] = useState(file.id);
+  if (shownFileId !== file.id) {
+    setShownFileId(file.id);
+    setFields((current) => ({ prompt: '', aspectRatio: null, resolution: null, safeMode: current.safeMode }));
+    setPendingModel(null);
+    setResults(null);
+    setUpscales([]);
+    setSelectedId(null);
+    setStartError(null);
+    setActionError(null);
+    setLoadError(null);
+  }
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -89,11 +106,34 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
     const seq = ++readSeq.current;
     try {
       const answer = await call('generations:forFile', { fileId: file.id });
-      if (!disposed.current && seq === readSeq.current) setResults([...answer.results].sort(newestFirst));
+      if (disposed.current || seq !== readSeq.current) return;
+      setResults([...answer.results].sort(newestFirst));
+      setLoadError(null);
     } catch (e) {
-      if (!disposed.current && seq === readSeq.current) setActionError(messageOf(e));
+      if (!disposed.current && seq === readSeq.current) setLoadError(messageOf(e));
     }
   }, [file.id]);
+
+  const selected = results?.find((g) => g.id === selectedId && tileState(g) === 'ready') ?? null;
+  const selectedFileId = selected?.outputs[0]?.fileId ?? null;
+
+  // The upscales of the selected result, one level deep; only the newest read may set them.
+  const upscaleSeq = useRef(0);
+  const loadUpscales = useCallback(async () => {
+    const seq = ++upscaleSeq.current;
+    if (selectedFileId === null) {
+      setUpscales([]);
+      return;
+    }
+    try {
+      const answer = await call('generations:forFile', { fileId: selectedFileId });
+      if (disposed.current || seq !== upscaleSeq.current) return;
+      setUpscales(answer.results.filter((g) => g.kind === 'upscale').sort(newestFirst));
+      setLoadError(null);
+    } catch (e) {
+      if (!disposed.current && seq === upscaleSeq.current) setLoadError(messageOf(e));
+    }
+  }, [selectedFileId]);
 
   const loadRecent = useCallback(async () => {
     try {
@@ -107,6 +147,10 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   useEffect(() => {
     void loadResults();
   }, [loadResults, changeToken]);
+
+  useEffect(() => {
+    void loadUpscales();
+  }, [loadUpscales, changeToken]);
 
   useEffect(() => {
     void loadRecent();
@@ -133,6 +177,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   function changed() {
     refresh();
     void loadResults();
+    void loadUpscales();
   }
 
   async function generate() {
@@ -204,16 +249,22 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       if (disposed.current) return;
       const error = answer.items.find((item) => item.error !== null)?.error ?? null;
       if (error !== null) setActionError(error.message);
-      else setSelectedId(null);
+      else if (fileId === selectedFileId) setSelectedId(null);
       changed();
     });
 
   function applySettings(g: Generation) {
     const next = formFromGeneration(g, form);
     setFields({ prompt: next.prompt, aspectRatio: next.aspectRatio, resolution: next.resolution, safeMode: next.safeMode });
+    setStartError(null);
+    setPendingModel(null);
     if (next.providerId === providerId) {
       if (next.model !== model) choice.setModel(next.model);
-    } else if (next.providerId !== null) {
+      return;
+    }
+    // A result of an entry that is gone (or no longer an image entry) keeps the selected entry and model.
+    const listed = providers.list?.providers.some((p) => p.id === next.providerId && p.kind === 'venice') ?? false;
+    if (next.providerId !== null && listed) {
       choice.setProvider(next.providerId);
       setPendingModel({ providerId: next.providerId, model: next.model });
     }
@@ -221,12 +272,13 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
 
   function change(patch: Partial<Fields>) {
     if (patch.safeMode !== undefined) writeSafeMode(patch.safeMode);
+    setStartError(null);
     setFields((current) => ({ ...current, ...patch }));
   }
 
   const title = `${STUDIO_TITLE} ${file.originalName}`;
   return (
-    <Dialog open title={title} onClose={onClose} size="detail">
+    <Dialog open title={title} onClose={onClose} size="detail" initialFocusRef={promptRef}>
       <div className="flex h-full flex-col">
         <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
           <h2 title={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
@@ -242,17 +294,19 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
           <section aria-label={SOURCE_IMAGE_LABEL} className={`flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r p-5 ${BORDER}`}>
             <CoverImageFrame file={file} />
           </section>
-          <section aria-label={STUDIO_TITLE} className={`w-96 shrink-0 overflow-y-auto border-r p-5 ${BORDER}`}>
+          <div className={`w-96 shrink-0 overflow-y-auto border-r p-5 ${BORDER}`}>
             <StudioForm
               form={form}
               model={imageModel}
               recentPrompts={recent}
               onProvider={(id) => {
                 setPendingModel(null);
+                setStartError(null);
                 choice.setProvider(id);
               }}
               onModel={(next) => {
                 setPendingModel(null);
+                setStartError(null);
                 choice.setModel(next);
               }}
               onChange={change}
@@ -260,16 +314,18 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
               startError={startError}
               busy={starting}
               onGenerate={() => void generate()}
+              promptRef={promptRef}
             />
-          </section>
+          </div>
           <section className="min-w-0 flex-1 overflow-y-auto p-5" aria-busy={results === null || busy || undefined}>
-            {actionError !== null && (
+            {(actionError ?? loadError) !== null && (
               <p role="alert" className={`mb-4 ${ALERT}`}>
-                {actionError}
+                {actionError ?? loadError}
               </p>
             )}
             <StudioResults
               generations={results ?? []}
+              upscales={upscales}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onOpen={onOpenFile}

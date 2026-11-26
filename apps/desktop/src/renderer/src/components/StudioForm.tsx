@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type RefObject } from 'react';
 import { GENERATION_PROMPT_MAX, type ImageModel } from '@assetforge/contracts';
 import {
   ASPECT_LABEL,
@@ -27,8 +27,11 @@ interface Props {
   blocked: string | null;
   /** Why the last start failed, as the tooltip of Generate; null after a start that went through. */
   startError: string | null;
+  /** A start is in flight: only Generate waits for it. */
   busy: boolean;
   onGenerate(): void;
+  /** The prompt textarea, focused when the studio opens. */
+  promptRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
 /** A select of the values a model states; `withDefault` adds the option that leaves the model's default. */
@@ -38,14 +41,12 @@ function ValueSelect({
   value,
   withDefault,
   onChange,
-  disabled,
 }: {
   label: string;
   values: readonly string[];
   value: string | null;
   withDefault: boolean;
   onChange(value: string | null): void;
-  disabled: boolean;
 }) {
   return (
     <select
@@ -53,7 +54,6 @@ function ValueSelect({
       aria-label={label}
       title={label}
       value={value ?? ''}
-      disabled={disabled}
       onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
     >
       {withDefault && <option value="">{MODEL_DEFAULT_OPTION}</option>}
@@ -78,16 +78,19 @@ export function StudioForm({
   startError,
   busy,
   onGenerate,
+  promptRef,
 }: Props) {
   const promptId = useId();
   const limit = Math.min(model?.promptCharacterLimit ?? GENERATION_PROMPT_MAX, GENERATION_PROMPT_MAX);
   const ratios = model?.aspectRatios ?? null;
   const resolutions = model?.resolutions ?? null;
+  // A listed default resolution is filled in by `constrain`; without one the model may choose.
+  const resolutionDefault = model?.defaultResolution == null || resolutions === null || !resolutions.includes(model.defaultResolution);
 
   return (
     <div className="flex flex-col gap-3">
-      <ProviderSelect kind="venice" value={form.providerId} onChange={onProvider} disabled={busy} />
-      <EditModelSelect providerId={form.providerId} value={form.model} onChange={onModel} disabled={busy || form.providerId === null} />
+      <ProviderSelect kind="venice" value={form.providerId} onChange={onProvider} />
+      <EditModelSelect providerId={form.providerId} value={form.model} onChange={onModel} disabled={form.providerId === null} />
       <div className="flex items-center justify-between gap-2">
         <label htmlFor={promptId} className={LABEL}>
           {PROMPT_LABEL}
@@ -97,7 +100,6 @@ export function StudioForm({
             className={`min-w-0 max-w-48 ${SELECT}`}
             aria-label={RECENT_PROMPTS_LABEL}
             value=""
-            disabled={busy}
             onChange={(e) => {
               if (e.target.value !== '') onChange({ prompt: e.target.value });
             }}
@@ -113,11 +115,11 @@ export function StudioForm({
       </div>
       <textarea
         id={promptId}
+        ref={promptRef}
         className={TEXTAREA}
         value={form.prompt}
         maxLength={GENERATION_PROMPT_MAX}
         title={`${form.prompt.length} / ${limit}`}
-        disabled={busy}
         onChange={(e) => onChange({ prompt: e.target.value })}
       />
       {(ratios !== null || resolutions !== null) && (
@@ -129,7 +131,6 @@ export function StudioForm({
               value={form.aspectRatio}
               withDefault
               onChange={(aspectRatio) => onChange({ aspectRatio })}
-              disabled={busy}
             />
           )}
           {resolutions !== null && (
@@ -137,9 +138,8 @@ export function StudioForm({
               label={RESOLUTION_LABEL}
               values={resolutions}
               value={form.resolution}
-              withDefault={form.resolution === null}
+              withDefault={resolutionDefault}
               onChange={(resolution) => onChange({ resolution })}
-              disabled={busy}
             />
           )}
         </div>
@@ -149,7 +149,6 @@ export function StudioForm({
           type="checkbox"
           className={`accent-accent ${FOCUS}`}
           checked={form.safeMode}
-          disabled={busy}
           onChange={(e) => onChange({ safeMode: e.target.checked })}
         />
         {SAFE_MODE_LABEL}

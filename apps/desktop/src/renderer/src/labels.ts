@@ -344,6 +344,7 @@ export const PROMPT_LENGTH_TITLE = 'The prompt must have 1 to 8000 characters';
 export const PROMPT_TOO_LONG_TITLE = 'The prompt is longer than this model allows';
 export const SOURCE_IMAGE_LABEL = 'Source image';
 export const CLOSE_LABEL = 'Close';
+export const UPSCALES_LABEL = 'Upscales';
 
 /** 'Upscale 2×'. */
 export function upscaleLabel(scale: 2 | 4): string {

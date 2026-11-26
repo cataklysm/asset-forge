@@ -24,10 +24,11 @@ import {
   ASPECT_LABEL,
   SAFE_MODE_LABEL,
   TRASHED_MARK,
+  UPSCALES_LABEL,
 } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { SAFE_MODE_KEY } from '../../src/renderer/src/studio-state';
-import { fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId } from './fixtures';
 
 const MOCK_EDIT: ImageModel = {
@@ -42,6 +43,16 @@ const MOCK_EDIT_BASIC: ImageModel = {
   name: 'mock-edit-basic',
   aspectRatios: null,
   resolutions: null,
+  defaultResolution: null,
+  promptCharacterLimit: null,
+  price: null,
+};
+
+/** A model that states resolutions but no default one. */
+const RES_ONLY: ImageModel = {
+  name: 'res-only',
+  aspectRatios: null,
+  resolutions: ['1K', '2K'],
   defaultResolution: null,
   promptCharacterLimit: null,
   price: null,
@@ -85,6 +96,8 @@ interface Options {
   /** The image provider entries; none by default is not wanted, so `[VENICE]` unless given. */
   providers?: ProviderView[];
   results?: Generation[];
+  /** The generations made from other files, by file id. */
+  byFile?: Record<string, Generation[]>;
   recent?: string[];
   handlers?: FakeHandlers;
 }
@@ -92,12 +105,15 @@ interface Options {
 function setup(options: Options = {}) {
   const file = fileRecord({ originalName: 'file.png' });
   const providers = options.providers ?? [VENICE];
-  const state = { results: options.results ?? [], summary: IDLE };
+  const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
   const api = installFakeApi({
     ...fakeProviders({ providers, lastUsedImageId: providers[0]?.id ?? null }).handlers,
-    'providers:listImageModels': () => ({ ok: true, models: [MOCK_EDIT, MOCK_EDIT_BASIC] }),
+    'providers:listImageModels': () => ({ ok: true, models: [MOCK_EDIT, MOCK_EDIT_BASIC, RES_ONLY] }),
     'jobs:summary': () => state.summary,
-    'generations:forFile': () => ({ madeBy: null, results: structuredClone(state.results) }),
+    'generations:forFile': ({ fileId }) => ({
+      madeBy: null,
+      results: structuredClone(fileId === file.id ? state.results : (state.byFile[fileId] ?? [])),
+    }),
     'generations:recentPrompts': () => ({ prompts: options.recent ?? [] }),
     'generations:start': (request) => ({ ok: true, generation: generation(file, { status: 'pending', jobStatus: 'queued', outputs: [], prompt: 'prompt' in request ? request.prompt : null }) }),
     'generations:retry': ({ generationId }) => ({ ...state.results.find((g) => g.id === generationId)!, status: 'pending' }),
@@ -107,14 +123,15 @@ function setup(options: Options = {}) {
   });
   const onClose = vi.fn();
   const onOpenFile = vi.fn();
-  render(
+  const ui = (shown: FileRecord) => (
     <JobsProvider>
       <ProviderSettingsProvider>
-        <GenerationStudio file={file} onClose={onClose} onOpenFile={onOpenFile} />
+        <GenerationStudio file={shown} onClose={onClose} onOpenFile={onOpenFile} />
       </ProviderSettingsProvider>
-    </JobsProvider>,
+    </JobsProvider>
   );
-  return { api, file, state, onClose, onOpenFile };
+  const view = render(ui(file));
+  return { api, file, state, onClose, onOpenFile, rerender: (shown: FileRecord) => view.rerender(ui(shown)) };
 }
 
 const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
@@ -247,7 +264,11 @@ describe('GenerationStudio', () => {
       ]),
     );
     const failed = screen.getByRole('listitem', { name: GENERATION_STATUS_LABELS.failed });
-    expect(failed.title).toBe(JOB_ERROR_MESSAGES.provider_content_refused);
+    const mark = within(failed).getByText(GENERATION_STATUS_LABELS.failed);
+    expect(mark.title).toBe(JOB_ERROR_MESSAGES.provider_content_refused);
+    expect(failed.getAttribute('aria-description')).toBe(JOB_ERROR_MESSAGES.provider_content_refused);
+    expect(within(screen.getByRole('listitem', { name: TRASHED_MARK })).getByText('x.png').title).toBe('x.png');
+    expect(within(screen.getByRole('listitem', { name: DELETED_MARK })).getByText('x.png').title).toBe('x.png');
     const user = userEvent.setup();
     await user.click(within(failed).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(callsOf(api, 'generations:retry')).toHaveLength(1));
@@ -347,5 +368,212 @@ describe('GenerationStudio', () => {
     state.results = [generation(file)];
     state.summary = { ...IDLE, changes: 1 };
     await waitFor(() => expect(tileNames()).toEqual(['file edit 1.png']), { timeout: 5000 });
+  });
+
+  it('shows the upscales of the selected result with their actions', async () => {
+    const file = fileRecord();
+    const ready = generation(file);
+    const outputId = ready.outputs[0]!.fileId!;
+    const resultFile = { fileId: outputId, name: 'file edit 1.png', sha256: 'b'.repeat(64), trashed: false };
+    const upscaled = generation(file, {
+      kind: 'upscale',
+      model: null,
+      prompt: null,
+      parameters: { v: 1, scale: 4 },
+      inputs: [resultFile],
+      outputs: [{ fileId: nextId(), name: 'file edit 1 4x.png', sha256: 'd'.repeat(64), trashed: false }],
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+    const failed = generation(file, {
+      kind: 'upscale',
+      status: 'failed',
+      errorCode: 'provider_rejected',
+      jobStatus: 'failed',
+      model: null,
+      prompt: null,
+      parameters: { v: 1, scale: 2 },
+      inputs: [resultFile],
+      outputs: [],
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    // An edit made from the result is not an upscale and stays out of the studio.
+    const edit = generation(file, { inputs: [resultFile], createdAt: '2026-01-04T00:00:00.000Z' });
+    edit.outputs[0]!.name = 'edit of edit.png';
+    const { api, onOpenFile } = setup({ results: [ready], byFile: { [outputId]: [failed, upscaled, edit] } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+
+    const list = await screen.findByRole('list', { name: UPSCALES_LABEL });
+    await waitFor(() =>
+      expect(within(list).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
+        'file edit 1 4x.png',
+        GENERATION_STATUS_LABELS.failed,
+      ]),
+    );
+    expect(callsOf(api, 'generations:forFile').map((c) => c.request)).toContainEqual({ fileId: outputId });
+
+    const tile = within(list).getByRole('listitem', { name: 'file edit 1 4x.png' });
+    expect(within(tile).getAllByRole('button').map((b) => b.textContent)).toEqual(['Open', 'Delete']);
+    await user.click(within(tile).getByRole('button', { name: 'Open' }));
+    expect(onOpenFile).toHaveBeenCalledWith(upscaled.outputs[0]!.fileId);
+    await user.click(within(tile).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(callsOf(api, 'files:trashMany')).toHaveLength(1));
+    expect(callsOf(api, 'files:trashMany')[0]!.request).toEqual({ fileIds: [upscaled.outputs[0]!.fileId] });
+
+    const failedTile = within(list).getByRole('listitem', { name: GENERATION_STATUS_LABELS.failed });
+    await user.click(within(failedTile).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(callsOf(api, 'generations:retry')).toHaveLength(1));
+    expect(callsOf(api, 'generations:retry')[0]!.request).toEqual({ generationId: failed.id });
+  });
+
+  it('an upscale start shows the new upscale under the selected result', async () => {
+    const file = fileRecord();
+    const ready = generation(file);
+    const outputId = ready.outputs[0]!.fileId!;
+    const queued = generation(file, {
+      kind: 'upscale',
+      status: 'pending',
+      jobStatus: 'queued',
+      model: null,
+      prompt: null,
+      parameters: { v: 1, scale: 2 },
+      outputs: [],
+    });
+    const holder: { state?: { byFile: Record<string, Generation[]> } } = {};
+    const { state } = setup({
+      results: [ready],
+      handlers: {
+        'generations:start': () => {
+          holder.state!.byFile[outputId] = [queued];
+          return { ok: true, generation: queued };
+        },
+      },
+    });
+    holder.state = state;
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Upscale 2×'));
+    const list = await screen.findByRole('list', { name: UPSCALES_LABEL });
+    await waitFor(() =>
+      expect(within(list).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
+        GENERATION_STATUS_LABELS.pending,
+      ]),
+    );
+  });
+
+  it('Use settings of another entry selects that entry and its model', async () => {
+    const other: ProviderView = { ...VENICE, id: nextId(), name: 'Venice B', editModel: 'mock-edit' };
+    const file = fileRecord();
+    const fromOther = generation(file, { providerId: other.id, providerName: other.name, model: 'mock-edit-basic' });
+    setup({ providers: [VENICE, other], results: [fromOther] });
+    await modelsReady();
+    expect(combobox('Provider').value).toBe(VENICE.id);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    await waitFor(() => expect(combobox('Provider').value).toBe(other.id));
+    expect(combobox(EDIT_MODEL_LABEL).value).toBe('mock-edit-basic');
+    expect(promptBox().value).toBe('make it blue');
+  });
+
+  it('Use settings of a result whose entry is gone keeps the selected entry and fills the rest', async () => {
+    const file = fileRecord();
+    const orphan = generation(file, { providerId: nextId(), providerName: 'Gone', model: 'mock-edit-basic', prompt: 'paint it red' });
+    setup({ results: [orphan] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    expect(promptBox().value).toBe('paint it red');
+    expect(combobox('Provider').value).toBe(VENICE.id);
+    expect(combobox(EDIT_MODEL_LABEL).value).toBe('mock-edit');
+    // Nothing waits for the gone entry: a later model choice stands.
+    await user.selectOptions(combobox(EDIT_MODEL_LABEL), 'res-only');
+    expect(combobox(EDIT_MODEL_LABEL).value).toBe('res-only');
+  });
+
+  it('another file starts from a fresh state', async () => {
+    const made = generation(fileRecord());
+    const { rerender } = setup({
+      handlers: {
+        'generations:start': () => ({ ok: false, code: 'provider_rejected' }),
+        'generations:forFile': ({ fileId }) => ({ madeBy: null, results: fileId === 'other' ? [] : [made] }),
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe(JOB_ERROR_MESSAGES.provider_rejected));
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    expect(screen.getByRole('button', { name: 'Use settings' })).toBeTruthy();
+
+    rerender(fileRecord({ id: 'other', originalName: 'other.png' }));
+    await waitFor(() => expect(tileNames()).toEqual([]));
+    expect(promptBox().value).toBe('');
+    expect(button(GENERATE_BUTTON).title).toBe('The prompt must have 1 to 8000 characters');
+    expect(screen.queryByRole('button', { name: 'Use settings' })).toBeNull();
+  });
+
+  it('a field change clears the start error', async () => {
+    setup({ handlers: { 'generations:start': () => ({ ok: false, code: 'provider_rejected' }) } });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe(JOB_ERROR_MESSAGES.provider_rejected));
+    await user.type(promptBox(), '!');
+    expect(button(GENERATE_BUTTON).title).toBe('');
+  });
+
+  it('a failed results load clears on the next successful read', async () => {
+    let fail = true;
+    const { state } = setup({
+      handlers: {
+        'generations:forFile': () => {
+          if (fail) throw fakeError('internal_error', 'Unexpected error');
+          return { madeBy: null, results: [] };
+        },
+      },
+    });
+    await screen.findByRole('alert');
+    fail = false;
+    state.summary = { ...IDLE, changes: 1 };
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull(), { timeout: 5000 });
+  });
+
+  it('keeps the form usable while a start is in flight', async () => {
+    const pending = deferred<{ ok: false; code: 'provider_rejected' }>();
+    setup({ handlers: { 'generations:start': () => pending.promise } });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(GENERATE_BUTTON));
+    expect(button(GENERATE_BUTTON).disabled).toBe(true);
+    expect(promptBox().disabled).toBe(false);
+    expect(combobox(EDIT_MODEL_LABEL).disabled).toBe(false);
+    expect((screen.getByRole('checkbox', { name: SAFE_MODE_LABEL }) as HTMLInputElement).disabled).toBe(false);
+    pending.resolve({ ok: false, code: 'provider_rejected' });
+    await waitFor(() => expect(button(GENERATE_BUTTON).disabled).toBe(false));
+  });
+
+  it('offers Default resolution for a model without a default one', async () => {
+    setup();
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.selectOptions(combobox(EDIT_MODEL_LABEL), 'res-only');
+    expect(optionsOf(combobox(RESOLUTION_LABEL))).toEqual(['Default', '1K', '2K']);
+    await user.selectOptions(combobox(RESOLUTION_LABEL), '2K');
+    expect(optionsOf(combobox(RESOLUTION_LABEL))).toEqual(['Default', '1K', '2K']);
+    await user.selectOptions(combobox(RESOLUTION_LABEL), 'Default');
+    expect(combobox(RESOLUTION_LABEL).value).toBe('');
+  });
+
+  it('focuses the prompt on opening and names no region after the dialog', async () => {
+    setup();
+    await modelsReady();
+    expect(document.activeElement).toBe(promptBox());
+    expect(screen.queryByRole('region', { name: 'Studio' })).toBeNull();
   });
 });
