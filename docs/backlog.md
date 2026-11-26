@@ -1,13 +1,12 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a and phase 4b reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b and file trash reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **ZIP import.** A ZIP file can be imported into the inbox and directly into an asset; it is unpacked and its contents are imported as individual files. Open for the design: nested folders and nested archives, entries of a refused kind (programs, installers, shortcuts), size and entry-count limits, zip-slip and symlink entries (ReadMe security constraints on archives), and whether the archive itself is kept.
-- **Delete files, not only detach.** A file (an image in particular) can be deleted from the asset screen and the inbox, single and as a batch. Follows the persistence rule "logical / trash first; physical deletion checks all references"; open for the design: trash and restore, the asset cover, relations and lineage that point at the file, and cached previews.
 - **Editable analysis prompts.** The prompts sent to the vision provider for tagging and for Image to prompt can be edited to fit the owner's needs. Open for the design: where they are stored (per workspace or app-wide), and reset to the built-in text. Decided by the owner: an edited prompt does not invalidate earlier results — files already analysed stay skipped, and a re-analysis remains an explicit choice (`force`). The edit must therefore not change the fingerprint.
 - **Editable tags.** A tag can be renamed, and two tags can be merged, across the whole workspace (example: analysis returns `front view` while the existing images carry `front`; the owner wants one uniform tag). Open for the design: the origin of a merged tag (manual wins), and the search index. Decided by the owner: a rename or merge does not map future AI results onto the kept tag, and no tag list is appended to the prompt; after a new analysis the owner edits the tags again.
 - **Sources on an asset.** An asset can carry sources (where it or its material comes from). Open for the design: what a source is (URL, free text, author, licence, retrieval date), one or several per asset, whether a source can also sit on a single file, whether sources are searchable, and whether a URL is only stored or can be opened (ReadMe constraints on URL downloads apply if anything is fetched).
@@ -169,7 +168,6 @@ Found during the build:
 - The "an AI assignment yields to any existing one" rule is coded twice (`FileAnalysisRepository.apply` and `linkFileTags`).
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
-- `job.file_id` and `file_analysis.file_id` reference `file` without a delete rule; once files can be deleted, their jobs and analysis rows must be handled.
 - Before paid providers: `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
 - Before paid providers: `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs.
 - `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
@@ -274,6 +272,25 @@ Core tests:
 - The fingerprint tests do not cover every field separately for a waiting proposal (checksum, prompt version).
 - The fake proposal reader skips tag normalisation.
 - `viewOf` in `analysis-proposals.ts` duplicates the `JobView` mapping of the job use cases.
+
+## File trash
+
+Deferred by design:
+
+- Nothing empties the trash automatically; there is no retention period (owner decision).
+- Assets and projects cannot be deleted.
+- The trash is in the app only, not the operating system's recycle bin.
+
+Found during the build:
+
+- The port doc comments in `packages/core/src/ports.ts` do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
+- `purgeFiles` (through `FileRepository.purge`) drops a pending `file_move` row of the file, so after a restore whose commit failed (the binary already back in the inbox or asset folder, the row still in the trash) a purge removes the row and can leave the binary orphaned outside `.assetforge/trash/`, where the sweep never looks.
+- A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open.
+- The role filter is offered on the Trash screen although trashed files have no role, so any role filter there yields an empty list.
+
+Tests:
+
+- Not tested: a file trashed while the analysis handler re-reads the image; the order of the trash check and the stale check when accepting a proposal; the `retryJob` race in which the file is trashed between the check and the retry and the caller gets the "active job" message.
 
 ## Not covered by any automated check
 
