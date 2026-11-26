@@ -20,7 +20,11 @@ export function readVisionConfig(
   return { baseUrl, model: rawModel ? rawModel : DEFAULT_VISION_MODEL };
 }
 
-function usableBaseUrl(raw: string): string | null {
+/**
+ * The base URL rule: http or https, no user info, no query, no fragment (not even a bare `?`/`#`).
+ * Returns the URL without trailing slashes, or null when it is not usable.
+ */
+export function usableBaseUrl(raw: string): string | null {
   // A bare `?` or `#` leaves search and hash empty but stays in `href`.
   if (raw.includes('?') || raw.includes('#')) return null;
   let url: URL;
