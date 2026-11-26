@@ -9,7 +9,7 @@ import {
   type JobView,
 } from '@assetforge/contracts';
 import type { Job, JobRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq, inArray, isNotNull, lte, min, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, min, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import { file, job } from './schema.js';
@@ -47,6 +47,20 @@ function keyHeld(tx: Pick<BetterSQLite3Database, 'select'>, dedupeKey: string): 
   return tx.select({ id: job.id }).from(job).where(and(eq(job.dedupeKey, dedupeKey), isActive)).limit(1).get() !== undefined;
 }
 
+/** True when the file exists and is not in the trash. */
+function liveFile(tx: Pick<BetterSQLite3Database, 'select'>, fileId: string): boolean {
+  return (
+    tx
+      .select({ id: file.id })
+      .from(file)
+      .where(and(eq(file.id, fileId), isNull(file.deletedAt)))
+      .get() !== undefined
+  );
+}
+
+/** A job without a file, or one whose file is not in the trash. */
+const notOfTrashedFile = sql`not exists (select 1 from ${file} where ${file.id} = ${job.fileId} and ${file.deletedAt} is not null)`;
+
 export function createJobRepository(db: BetterSQLite3Database): JobRepository {
   /** Applies `set` to the job if it is `running`; true when a row changed. */
   const fromRunning = (id: string, set: SQLiteUpdateSetSource<typeof job>): boolean =>
@@ -72,13 +86,21 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
       const row = newest(isActive) ?? newest();
       return row ? toJob(row) : null;
     },
-    async activeForFile() {
-      throw new Error('not implemented');
+    async activeForFile(fileId): Promise<Job[]> {
+      return db
+        .select()
+        .from(job)
+        .where(and(eq(job.fileId, fileId), isActive))
+        .orderBy(asc(job.createdAt), asc(job.id))
+        .all()
+        .map(toJob);
     },
     async enqueue({ jobs, now }): Promise<string[]> {
       return db.transaction((tx) => {
         const inserted: string[] = [];
         for (const j of jobs) {
+          // A job for a file that is unknown or in the trash is skipped like a held key.
+          if (j.fileId !== null && !liveFile(tx, j.fileId)) continue;
           if (j.dedupeKey !== null && keyHeld(tx, j.dedupeKey)) continue;
           tx.insert(job)
             .values({
@@ -174,7 +196,7 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
         const candidates = tx
           .select({ id: job.id, dedupeKey: job.dedupeKey })
           .from(job)
-          .where(and(one(id), inArray(job.status, ['failed', 'cancelled'])))
+          .where(and(one(id), inArray(job.status, ['failed', 'cancelled']), notOfTrashedFile))
           .orderBy(desc(job.createdAt), desc(job.id))
           .all();
         let requeued = 0;

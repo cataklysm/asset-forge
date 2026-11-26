@@ -240,4 +240,24 @@ describe('tag proposals', () => {
     expect(await ids()).toEqual([FILE_ID, other]);
     expect((await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, hasProposal: true })).total).toBe(1);
   });
+
+  test('acceptProposal on a trashed file returns false and keeps the proposal', async () => {
+    await db.analyses.propose(proposal());
+    await db.fileMoves.begin({
+      fileId: FILE_ID,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${FILE_ID}_f.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T2,
+    });
+    await db.fileMoves.commit(FILE_ID);
+
+    expect(await accept([t('metal')], { now: T3 })).toBe(false);
+    // The proposal waits for the file to come back from the trash.
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
+    expect(rowCount('file_tag')).toBe(0);
+    expect(await db.analyses.get(FILE_ID)).toBeNull();
+    expect((await db.files.get(FILE_ID))?.hasProposal).toBe(true);
+  });
 });

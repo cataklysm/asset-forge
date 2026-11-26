@@ -366,3 +366,92 @@ describe('job repository', () => {
     expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(22) });
   });
 });
+
+describe('jobs of trashed files', () => {
+  const TRASHED_ID = uuid(3);
+
+  /** A second, complete file of the workspace. */
+  async function addOtherFile(): Promise<void> {
+    await db.files.insertPending({
+      id: TRASHED_ID,
+      storageId: STORAGE_ID,
+      originalName: 'Gone.png',
+      relativePath: `inbox/${TRASHED_ID}/Gone.png`,
+      mimeType: 'image/png',
+      importedAt: T0,
+      kind: 'image',
+    });
+    await db.files.markComplete(TRASHED_ID, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+  }
+  /** Moves that file to the trash through a committed `trash` move. */
+  async function trash(): Promise<void> {
+    await db.fileMoves.begin({
+      fileId: TRASHED_ID,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${TRASHED_ID}_Gone.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T1,
+    });
+    await db.fileMoves.commit(TRASHED_ID);
+  }
+  /** Enqueues a `remote_api` job for the file and fails it. */
+  async function failedFor(n: number, fileId: string | null, now: string): Promise<void> {
+    await enqueue(now, newJob(n, { fileId, resourceClass: 'remote_api' }));
+    expect((await claim(now, 'remote_api'))?.id).toBe(uuid(n));
+    await db.jobs.finish(uuid(n), { status: 'failed', errorCode: 'provider_rejected', now });
+  }
+
+  test('activeForFile returns queued, retry_wait, running and waiting_remote jobs of the file only', async () => {
+    await addOtherFile();
+    await enqueue(T0, newJob(10, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(12, { fileId: FILE_ID }));
+    await enqueue(T0, newJob(13, { fileId: FILE_ID }), newJob(14, { fileId: FILE_ID }), newJob(15, { fileId: FILE_ID }));
+    await enqueue(T0, newJob(16, { fileId: TRASHED_ID }), newJob(17));
+    const set = (n: number, status: string) => handle.prepare('update job set status = ? where id = ?').run(status, uuid(n));
+    set(10, 'running');
+    set(11, 'retry_wait');
+    set(12, 'waiting_remote');
+    set(14, 'failed');
+    set(15, 'cancelled');
+    const active = await db.jobs.activeForFile(FILE_ID);
+    expect(active.map((j) => [j.id, j.status])).toEqual([
+      [uuid(10), 'running'],
+      [uuid(11), 'retry_wait'],
+      [uuid(12), 'waiting_remote'],
+      [uuid(13), 'queued'],
+    ]);
+    await expect(db.jobs.activeForFile(uuid(99))).resolves.toEqual([]);
+  });
+
+  test('enqueue skips a trashed file', async () => {
+    await addOtherFile();
+    await trash();
+    expect(await enqueue(T2, newJob(10, { fileId: FILE_ID }), newJob(11, { fileId: TRASHED_ID }))).toEqual([uuid(10)]);
+    expect(handle.prepare('select id from job').all()).toEqual([{ id: uuid(10) }]);
+  });
+
+  test('enqueue skips an unknown file', async () => {
+    expect(await enqueue(T2, newJob(10, { fileId: uuid(99) }), newJob(11))).toEqual([uuid(11)]);
+    expect(handle.prepare('select id from job').all()).toEqual([{ id: uuid(11) }]);
+  });
+
+  test('retry by id returns 0 for a job of a trashed file', async () => {
+    await addOtherFile();
+    await failedFor(10, TRASHED_ID, T0);
+    await trash();
+    expect(await db.jobs.retry({ id: uuid(10), now: T2 })).toBe(0);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'failed' });
+  });
+
+  test('retry of all failed skips jobs of trashed files', async () => {
+    await addOtherFile();
+    await failedFor(10, TRASHED_ID, T0);
+    await failedFor(11, FILE_ID, T0);
+    await failedFor(12, null, T0);
+    await trash();
+    expect(await db.jobs.retry({ now: T2 })).toBe(2);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'failed' });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'queued' });
+    expect(await db.jobs.get(uuid(12))).toMatchObject({ status: 'queued' });
+  });
+});

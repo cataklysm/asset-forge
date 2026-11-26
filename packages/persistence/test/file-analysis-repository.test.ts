@@ -166,3 +166,49 @@ describe('file analysis repository', () => {
     expect((await db.assets.list({ limit: 10, offset: 0, query: 'corro' })).total).toBe(0);
   });
 });
+
+describe('analysis of a trashed file', () => {
+  const LIVE_ID = uuid(5);
+
+  /** Sends FILE_ID to the trash through a committed `trash` move; LIVE_ID stays in the inbox. */
+  async function setup(): Promise<void> {
+    await addFile(LIVE_ID);
+    await db.fileMoves.begin({
+      fileId: FILE_ID,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${FILE_ID}_f.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T1,
+    });
+    await db.fileMoves.commit(FILE_ID);
+  }
+  const fileRows = (table: string, fileId: string) =>
+    (handle.prepare(`select count(*) as n from ${table} where file_id = ?`).get(fileId) as { n: number }).n;
+
+  test('apply writes nothing to a trashed file', async () => {
+    await setup();
+    expect(await apply()).toBe(false);
+    expect(fileRows('file_tag', FILE_ID)).toBe(0);
+    expect(fileRows('file_analysis', FILE_ID)).toBe(0);
+    expect(await apply({ fileId: LIVE_ID })).toBe(true);
+    expect(fileRows('file_tag', LIVE_ID)).toBe(2);
+  });
+
+  test('propose writes nothing to a trashed file', async () => {
+    await setup();
+    const proposal = (fileId: string) => ({
+      fileId,
+      sha256: SHA,
+      provider: 'ollama',
+      model: 'qwen',
+      promptVersion: 1,
+      tags: [{ name: 'rusty', displayName: 'rusty' }],
+      createdAt: T2,
+    });
+    expect(await db.analyses.propose(proposal(FILE_ID))).toBe(false);
+    expect(fileRows('file_analysis_proposal', FILE_ID)).toBe(0);
+    expect(await db.analyses.propose(proposal(LIVE_ID))).toBe(true);
+    expect(fileRows('file_analysis_proposal', LIVE_ID)).toBe(1);
+  });
+});

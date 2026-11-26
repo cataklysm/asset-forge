@@ -304,3 +304,60 @@ describe('file tag batches', () => {
     expect((await db.assets.list({ limit: 10, offset: 0, query: 'sci' })).items).toEqual([]);
   });
 });
+
+describe('tags of trashed files', () => {
+  async function trash(fileId: string): Promise<void> {
+    await db.fileMoves.begin({
+      fileId,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${fileId}_f.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T1,
+    });
+    await db.fileMoves.commit(fileId);
+  }
+
+  test('suggest does not count a trashed file', async () => {
+    const a = await addAsset(10);
+    const live = await addFile(20);
+    const gone1 = await addFile(21);
+    const gone2 = await addFile(22);
+    await tagAsset(a.id, 'stone');
+    await tagFile(gone1, 'steel');
+    await tagFile(gone2, 'steel');
+    await tagFile(gone1, 'stale'); // carried only by trashed files
+    await tagFile(live, 'stale');
+    await tagFile(gone2, 'stump');
+    await trash(gone1);
+    await trash(gone2);
+
+    // steel has no live owner; stone and stale have one each; stump has none.
+    expect(await db.tags.suggest({ prefix: 'st', limit: 10 })).toEqual([
+      { name: 'stale', displayName: 'stale' },
+      { name: 'stone', displayName: 'stone' },
+    ]);
+    await tagAsset(a.id, 'steel');
+    expect((await db.tags.suggest({ prefix: 'ste', limit: 10 })).map((t) => t.name)).toEqual(['steel']);
+  });
+
+  test('batch tagging refuses a trashed file and tags none', async () => {
+    const live = await addFile(20);
+    const gone = await addFile(21);
+    await tagFile(gone, 'oak');
+    await trash(gone);
+    const before = () => ({
+      tags: handle.prepare('select count(*) as n from tag').get(),
+      fileTags: handle.prepare('select file_id, origin from file_tag order by file_id').all(),
+    });
+    const snapshot = before();
+
+    const add = db.tags.addToFiles({ fileIds: [live, gone], name: 'pine', displayName: 'pine', origin: 'manual', newId: uuid(nextTagId++), now: T1 });
+    await expect(add).rejects.toMatchObject({ code: 'invalid_operation', message: 'The file is in the trash' });
+    await expect(db.tags.removeFromFiles({ fileIds: [gone, live], name: 'oak' })).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'The file is in the trash',
+    });
+    expect(before()).toEqual(snapshot);
+  });
+});

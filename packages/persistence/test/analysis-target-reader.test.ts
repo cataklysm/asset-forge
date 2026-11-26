@@ -251,3 +251,67 @@ describe('analysis target reader', () => {
     expect(await count(target)).toMatchObject({ analysable: 1201 });
   });
 });
+
+describe('trashed files as analysis targets', () => {
+  /** Sends the analysable inbox image I_OTHER and the asset file A_CONCEPT to the trash. */
+  async function trashSome(): Promise<void> {
+    for (const id of [I_OTHER, A_CONCEPT]) {
+      await db.fileMoves.begin({
+        fileId: id,
+        kind: 'trash',
+        targetRelativePath: `.assetforge/trash/${id}_f.png`,
+        targetAssetId: null,
+        targetRole: null,
+        createdAt: T1,
+      });
+      await db.fileMoves.commit(id);
+    }
+  }
+
+  test('a trashed file is not analysable for a files target', async () => {
+    await trashSome();
+    expect(await page({ kind: 'files', fileIds: [I_RUST, I_OTHER, A_CONCEPT] })).toEqual([
+      { fileId: I_RUST, analysable: true, analysed: false },
+      { fileId: I_OTHER, analysable: false, analysed: false },
+      { fileId: A_CONCEPT, analysable: false, analysed: false },
+    ]);
+  });
+
+  test('a trashed file is not analysable for a fileFilter target', async () => {
+    await trashSome();
+    expect(await ids({ kind: 'fileFilter', filter: { scope: { kind: 'inbox' } } })).toEqual([I_RUST, I_TEXT, I_PENDING]);
+    expect(await ids({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } })).not.toContain(I_OTHER);
+    expect(await page({ kind: 'fileFilter', filter: { scope: { kind: 'trash' } } })).toEqual([
+      { fileId: I_OTHER, analysable: false, analysed: false },
+      { fileId: A_CONCEPT, analysable: false, analysed: false },
+    ]);
+  });
+
+  test('count agrees with page', async () => {
+    await trashSome();
+    const targets: AnalysisTarget[] = [
+      { kind: 'files', fileIds: [I_RUST, I_OTHER, A_CONCEPT, I_TEXT] },
+      { kind: 'fileFilter', filter: { scope: { kind: 'trash' } } },
+      { kind: 'fileFilter', filter: { scope: { kind: 'all' } } },
+    ];
+    for (const target of targets) {
+      const entries = await page(target);
+      const preview = await count(target);
+      expect({ target, preview }).toEqual({
+        target,
+        preview: {
+          analysable: entries.filter((e) => e.analysable).length,
+          alreadyAnalysed: 0,
+          alreadyQueued: 0,
+          notAnalysable: entries.filter((e) => !e.analysable).length,
+        },
+      });
+    }
+    expect(await count({ kind: 'fileFilter', filter: { scope: { kind: 'trash' } } })).toEqual({
+      analysable: 0,
+      alreadyAnalysed: 0,
+      alreadyQueued: 0,
+      notAnalysable: 2,
+    });
+  });
+});

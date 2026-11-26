@@ -221,7 +221,7 @@ describe('file trash repository', () => {
     await addFile('rusty-live.png');
     await tagFile(tex, 'metal');
     await tagFile(other, 'metal');
-    for (const f of [tex, mesh, other]) await trash(f);
+    // The proposal is made before the trash; a trashed file takes no new one.
     await db.analyses.propose({
       fileId: other,
       sha256: SHA,
@@ -231,6 +231,7 @@ describe('file trash repository', () => {
       tags: [{ name: 'x', displayName: 'x' }],
       createdAt: TS,
     });
+    for (const f of [tex, mesh, other]) await trash(f);
 
     const trashScope = { kind: 'trash' } as const;
     await expect(ids(trashScope, { query: 'rusty' })).resolves.toMatchObject({ total: 2 });

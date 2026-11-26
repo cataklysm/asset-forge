@@ -7,14 +7,19 @@ import { ensureTag } from './tag-repository.js';
 
 type WriteTx = Pick<BetterSQLite3Database, 'select' | 'insert' | 'delete' | 'run' | 'all' | 'get'>;
 
-/** The file's asset when it exists, is complete and has this sha256; undefined otherwise. */
+/** The file's asset when it exists, is complete, is not in the trash and has this sha256; undefined otherwise. */
 function matchingFile(tx: WriteTx, fileId: string, sha256: string): { assetId: string | null } | undefined {
   const row = tx
-    .select({ assetId: file.assetId, status: file.status, sha256: file.sha256 })
+    .select({ assetId: file.assetId, status: file.status, sha256: file.sha256, deletedAt: file.deletedAt })
     .from(file)
     .where(eq(file.id, fileId))
     .get();
-  return row && row.status === 'complete' && row.sha256 === sha256 ? { assetId: row.assetId } : undefined;
+  return row && row.status === 'complete' && row.deletedAt === null && row.sha256 === sha256 ? { assetId: row.assetId } : undefined;
+}
+
+/** True when the file exists and is in the trash. */
+function inTrash(tx: WriteTx, fileId: string): boolean {
+  return tx.select({ deletedAt: file.deletedAt }).from(file).where(eq(file.id, fileId)).get()?.deletedAt != null;
 }
 
 /**
@@ -130,6 +135,8 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
       return db.transaction((tx) => {
         const row = tx.select().from(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, r.fileId)).get();
         if (!row) return false;
+        // A trashed file keeps its proposal for a restore; nothing is written meanwhile.
+        if (inTrash(tx, r.fileId)) return false;
         // A choice outside the stored proposal is refused without touching it.
         if (r.tags.length === 0) return false;
         const proposed = new Set(parseTags(row.tags).map((t) => t.name));

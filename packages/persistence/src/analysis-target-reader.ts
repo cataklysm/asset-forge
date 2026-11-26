@@ -59,10 +59,10 @@ function targetWhere(tx: Tx, target: AnalysisTarget): { where: SQL | undefined }
   }
 }
 
-/** Complete, with a checksum and of one of the MIME types (core's `isAnalysable`). */
+/** Complete, not in the trash, with a checksum and of one of the MIME types (core's `isAnalysable`). */
 function analysableSql(mimeTypes: readonly string[]): SQL {
   if (mimeTypes.length === 0) return sql`0`;
-  return sql`(${qualified(file, file.status)} = 'complete' and ${fileSha256} is not null and ${qualified(file, file.mimeType)} in (${sql.join(
+  return sql`(${qualified(file, file.status)} = 'complete' and ${qualified(file, file.deletedAt)} is null and ${fileSha256} is not null and ${qualified(file, file.mimeType)} in (${sql.join(
     [...new Set(mimeTypes)].map((m) => sql`${m}`),
     sql`, `,
   )}))`;

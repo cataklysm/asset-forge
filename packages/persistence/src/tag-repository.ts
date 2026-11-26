@@ -1,5 +1,5 @@
 import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@assetforge/contracts';
-import { NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
+import { InvalidOperationError, NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { toRecords } from './file-repository.js';
@@ -7,8 +7,8 @@ import { assetTag, file, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
 
 /**
- * The rows of a batch in request order; throws for an unknown file and then for a file that is
- * not complete, before the caller writes anything.
+ * The rows of a batch in request order; throws for an unknown file, then for a file that is not
+ * complete and then for a file in the trash, before the caller writes anything.
  */
 function completeFiles(tx: Pick<BetterSQLite3Database, 'select'>, fileIds: readonly string[]): (typeof file.$inferSelect)[] {
   const byId = new Map(
@@ -26,6 +26,7 @@ function completeFiles(tx: Pick<BetterSQLite3Database, 'select'>, fileIds: reado
   });
   const incomplete = rows.find((row) => row.status !== 'complete');
   if (incomplete) throw new ValidationFailedError(`File ${incomplete.id} is not completely imported`);
+  if (rows.some((row) => row.deletedAt !== null)) throw new InvalidOperationError('The file is in the trash');
   return rows;
 }
 
@@ -86,6 +87,7 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
   return {
     async suggest({ prefix, limit }): Promise<TagSuggestion[]> {
       // A range over the unique name index; LIKE would treat % and _ in the prefix as wildcards.
+      // Assignments of files in the trash do not count.
       return db.all<TagSuggestion>(sql`
         select ${tag.name} as name, ${tag.displayName} as displayName
         from ${tag}
@@ -93,6 +95,7 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           select ${assetTag.tagId} as tag_id from ${assetTag}
           union all
           select ${fileTag.tagId} as tag_id from ${fileTag}
+          join ${file} on ${file.id} = ${fileTag.fileId} and ${file.deletedAt} is null
         ) as u on u.tag_id = ${tag.id}
         where ${tag.name} >= ${prefix} and ${tag.name} < ${prefix + PREFIX_END}
         group by ${tag.id}
