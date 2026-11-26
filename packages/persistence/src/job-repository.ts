@@ -59,9 +59,15 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
   const one = (id: string | undefined): SQL | undefined => (id === undefined ? undefined : eq(job.id, id));
 
   return {
-    // phase 4b stub: Task 2
-    async latestForFile(_fileId, _type): Promise<Job | null> {
-      throw new Error('not implemented');
+    async latestForFile(fileId, type): Promise<Job | null> {
+      const row = db
+        .select()
+        .from(job)
+        .where(and(eq(job.fileId, fileId), eq(job.type, type)))
+        .orderBy(desc(job.createdAt), desc(job.id))
+        .limit(1)
+        .get();
+      return row ? toJob(row) : null;
     },
     async enqueue({ jobs, now }): Promise<string[]> {
       return db.transaction((tx) => {

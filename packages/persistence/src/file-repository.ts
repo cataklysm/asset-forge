@@ -12,11 +12,11 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
-import { asset, file, fileTag, tag } from './schema.js';
+import { asset, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
-const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRecord => ({
+const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[], hasProposal: boolean): FileRecord => ({
   id: row.id,
   storageId: row.storageId,
   assetId: row.assetId,
@@ -35,10 +35,10 @@ const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRec
   width: row.width,
   height: row.height,
   tags,
-  hasProposal: false, // phase 4b stub: Task 2
+  hasProposal,
 });
 
-/** Turns rows into records; the file tags of all rows come from one query. */
+/** Turns rows into records; the file tags of all rows come from one query, their proposals from another. */
 export function toRecords(tx: Pick<BetterSQLite3Database, 'select'>, rows: (typeof file.$inferSelect)[]): FileRecord[] {
   if (rows.length === 0) return [];
   const byFile = new Map<string, TagAssignment[]>();
@@ -59,7 +59,20 @@ export function toRecords(tx: Pick<BetterSQLite3Database, 'select'>, rows: (type
     if (list) list.push(assignment);
     else byFile.set(fileId, [assignment]);
   }
-  return rows.map((row) => toRecord(row, byFile.get(row.id) ?? []));
+  const proposed = new Set(
+    tx
+      .select({ fileId: fileAnalysisProposal.fileId })
+      .from(fileAnalysisProposal)
+      .where(
+        inArray(
+          fileAnalysisProposal.fileId,
+          rows.map((r) => r.id),
+        ),
+      )
+      .all()
+      .map((p) => p.fileId),
+  );
+  return rows.map((row) => toRecord(row, byFile.get(row.id) ?? [], proposed.has(row.id)));
 }
 
 export function toRecordWithTags(tx: Pick<BetterSQLite3Database, 'select'>, row: typeof file.$inferSelect): FileRecord {
@@ -91,15 +104,20 @@ const scopeMatches = (scope: FileScope) => {
 type ListTx = Pick<BetterSQLite3Database, 'select'>;
 
 /**
- * The WHERE of a file list: scope, role, kind, every tag on the file itself, and every query word
- * a substring of the folded file name or a word prefix of one of the file's tags (Plan decision 2).
- * Null when a requested tag does not exist, so nothing can match.
+ * The WHERE of a file list: scope, role, kind, a waiting proposal or none, every tag on the file
+ * itself, and every query word a substring of the folded file name or a word prefix of one of the
+ * file's tags (Plan decision 2). Null when a requested tag does not exist, so nothing can match.
+ * Written against the outer `file` row; also the file filter of analysis targets.
  */
-function fileListWhere(tx: ListTx, q: Omit<FileQuery, 'limit' | 'offset'>): { where: SQL | undefined } | null {
+export function fileListWhere(tx: ListTx, q: Omit<FileQuery, 'limit' | 'offset'>): { where: SQL | undefined } | null {
   const fileId = qualified(file, file.id);
   const conditions: (SQL | undefined)[] = [scopeMatches(q.scope)];
   if (q.role !== undefined) conditions.push(eq(file.role, q.role));
   if (q.kind !== undefined) conditions.push(eq(file.kind, q.kind));
+  if (q.hasProposal !== undefined) {
+    const proposed = sql`exists (select 1 from ${fileAnalysisProposal} where ${qualified(fileAnalysisProposal, fileAnalysisProposal.fileId)} = ${fileId})`;
+    conditions.push(q.hasProposal ? proposed : sql`not ${proposed}`);
+  }
   const names = [...new Set(q.tagNames ?? [])];
   if (names.length > 0) {
     const tagIds = tx.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();

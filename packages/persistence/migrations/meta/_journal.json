@@ -50,6 +50,13 @@
       "when": 1795688562889,
       "tag": "0006_cuddly_micromacro",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795696225936,
+      "tag": "0007_daffy_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

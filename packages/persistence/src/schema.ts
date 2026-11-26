@@ -347,6 +347,8 @@ export const job = sqliteTable(
     uniqueIndex('job_active_dedupe_idx')
       .on(t.dedupeKey)
       .where(oneOf(t.status, ACTIVE_JOB_STATUSES)),
+    // The newest job of a type for one file (`latestForFile`).
+    index('job_file_id_type_created_at_idx').on(t.fileId, t.type, t.createdAt, t.id),
     check('job_resource_class_check', oneOf(t.resourceClass, RESOURCE_CLASSES)),
     check('job_status_check', oneOf(t.status, JOB_STATUSES)),
   ],
@@ -362,6 +364,19 @@ export const fileAnalysis = sqliteTable('file_analysis', {
   model: text('model').notNull(),
   promptVersion: integer('prompt_version').notNull(),
   analysedAt: text('analysed_at').notNull(),
+});
+
+/** A tag proposal waiting for the owner; one per file, replaced by the next one. `tags` is a JSON array of `{ name, displayName }`. */
+export const fileAnalysisProposal = sqliteTable('file_analysis_proposal', {
+  fileId: text('file_id')
+    .primaryKey()
+    .references(() => file.id),
+  sha256: text('sha256').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  promptVersion: integer('prompt_version').notNull(),
+  tags: text('tags').notNull(),
+  createdAt: text('created_at').notNull(),
 });
 
 /** Maps an asset to the integer rowid of its row in the hand-written FTS5 table `asset_search`. */

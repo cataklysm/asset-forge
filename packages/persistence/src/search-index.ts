@@ -1,4 +1,4 @@
-import type { AssetQuery } from '@assetforge/core';
+import { searchWords, type AssetQuery } from '@assetforge/core';
 import { eq, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetFilter } from './asset-filters.js';
@@ -63,18 +63,39 @@ export function matchExpression(words: readonly string[]): string {
   return words.map((w) => `"${w.replaceAll('"', '""')}"*`).join(' AND ');
 }
 
+/** `from ... where ...` of a search over the assets matching every word and the list filters; null when a requested tag does not exist. */
+function searchFrom(tx: Tx, q: Omit<AssetQuery, 'limit' | 'offset'> & { words: readonly string[] }): SQL | null {
+  const filter = assetFilter(tx, q);
+  if (filter === null) return null;
+  return sql`from asset_search
+    cross join ${assetSearchMap} as m on m.rowid = asset_search.rowid
+    cross join ${asset} on ${qualified(asset, asset.id)} = m.asset_id
+    where asset_search match ${matchExpression(q.words)}${filter.where === undefined ? sql`` : sql` and ${filter.where}`}`;
+}
+
+/**
+ * A `select` of the ids of every asset the asset list would show for these filters, unordered and
+ * unpaged, for use as a subquery; null when a requested tag does not exist, so nothing can match.
+ */
+export function matchingAssetIds(tx: Tx, q: Omit<AssetQuery, 'limit' | 'offset'>): SQL | null {
+  const words = q.query === undefined ? [] : searchWords(q.query);
+  if (words.length > 0) {
+    const from = searchFrom(tx, { ...q, words });
+    return from === null ? null : sql`select ${qualified(asset, asset.id)} ${from}`;
+  }
+  const filter = assetFilter(tx, q);
+  if (filter === null) return null;
+  return sql`select ${qualified(asset, asset.id)} from ${asset}${filter.where === undefined ? sql`` : sql` where ${filter.where}`}`;
+}
+
 /**
  * The two statements of a search: one page of asset ids (`id`) and the total (`n`) over the same
  * FROM and WHERE. Null when a requested tag does not exist, so nothing can match. Exported for the
  * query plan test; callers use `searchAssets`.
  */
 export function searchStatements(tx: Tx, q: AssetQuery & { words: string[] }): { page: SQL; count: SQL } | null {
-  const filter = assetFilter(tx, q);
-  if (filter === null) return null;
-  const from = sql`from asset_search
-    cross join ${assetSearchMap} as m on m.rowid = asset_search.rowid
-    cross join ${asset} on ${qualified(asset, asset.id)} = m.asset_id
-    where asset_search match ${matchExpression(q.words)}${filter.where === undefined ? sql`` : sql` and ${filter.where}`}`;
+  const from = searchFrom(tx, q);
+  if (from === null) return null;
   return {
     page: sql`select ${qualified(asset, asset.id)} as id ${from}
         order by bm25(asset_search, 10.0, 1.0, 4.0, 2.0), lower(${qualified(asset, asset.name)}), ${qualified(asset, asset.id)}

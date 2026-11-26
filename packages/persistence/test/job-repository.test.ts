@@ -330,4 +330,19 @@ describe('job repository', () => {
     const failed = await db.jobs.list({ limit: 10, offset: 0, status: 'failed' });
     expect(failed).toMatchObject({ total: 1, items: [{ id: uuid(13), errorCode: 'provider_rejected', errorMessage: JOB_ERROR_MESSAGES.provider_rejected }] });
   });
+
+  test('latestForFile returns the newest job of the type for the file, whatever its status', async () => {
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toBeNull();
+    await enqueue(T0, newJob(10, { fileId: FILE_ID }));
+    expect((await claim(T1))?.id).toBe(uuid(10));
+    await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1 });
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(10), status: 'failed' });
+
+    await enqueue(T2, newJob(12, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(13, { fileId: FILE_ID, type: 'other.type' }));
+    await enqueue(T3, newJob(14));
+    // Same created_at: the higher id wins.
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(12), status: 'queued' });
+    expect(await db.jobs.latestForFile(FILE_ID, 'other.type')).toMatchObject({ id: uuid(13) });
+    expect(await db.jobs.latestForFile(uuid(99), TYPE)).toBeNull();
+  });
 });
