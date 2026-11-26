@@ -36,9 +36,14 @@ async function addFile(db: InMemoryDatabase, fileId: string): Promise<void> {
 
 class FakeControl implements JobControl {
   readonly cancelled: string[] = [];
+  cancelAllCalls = 0;
   wake(): void {}
   async cancel(jobId: string): Promise<void> {
     this.cancelled.push(jobId);
+  }
+  async cancelAll(): Promise<number> {
+    this.cancelAllCalls++;
+    return 5;
   }
 }
 
@@ -93,17 +98,15 @@ describe('job use cases', () => {
     await expect(cancelJob(session, control, UNKNOWN_ID)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('cancels all pending jobs and aborts each running one once', async () => {
+  it('cancels all jobs through the control and answers its count', async () => {
     const { db, session, addJob, control } = await setup();
     await addJob('queued');
-    await addJob('retry_wait');
-    await addJob('waiting_remote');
-    const r1 = await addJob('running');
-    const r2 = await addJob('running');
-    await addJob('succeeded');
+    await addJob('running');
     expect(await cancelAllJobs(session, control)).toBe(5);
-    expect([...control.cancelled].sort()).toEqual([r1, r2].sort());
-    expect(db.jobs.rows.filter((r) => r.status === 'cancelled')).toHaveLength(3);
+    expect(control.cancelAllCalls).toBe(1);
+    expect(control.cancelled).toEqual([]);
+    // The scheduler ends the jobs itself, with each handler's `settled`; the use case writes nothing.
+    expect(db.jobs.rows.map((r) => r.status).sort()).toEqual(['queued', 'running']);
   });
 
   it('retries a failed job', async () => {
