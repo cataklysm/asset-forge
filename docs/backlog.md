@@ -77,6 +77,21 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - After assigning a file from the inbox detail dialog, focus is lost when its tile leaves the list.
 - The assign busy guard of the inbox selection column does not survive a remount of the column.
 - Body text uses Tailwind `text-sm` (14 px) in buttons and tables where the design names 15 px.
+- Retry on the storage banner during an import remounts the page and clears the busy block; navigation and "Import files" are free while the main process still imports, and the result strip is lost.
+- Ctrl+F ignores an open modal: it swallows the key and focuses the field behind the dialog.
+- A stale `assets:get` can overwrite a newer mutation result on the asset screen, and `fileCountError` stays after a successful reload.
+- `FileBrowser` refreshes the selection from the last rendered props instead of a functional update; `usePagedList` has side effects in render, and `retry` and `loadThrough` act on the non-displayed state.
+- Batch tag changes on the asset Files tab bypass the `batching` guard, `nameOf` there closes over the render-time selection (the inbox uses a ref), and cover and detach from the menu have no busy guard.
+- `AssignFileControl.assign` has no in-flight guard; two different picks in quick succession make the second fail with a domain error.
+- Ctrl+A after a failed page silently selects a partial result; a failed first page shows Retry without a message (assets, projects, file browser).
+- A stale assign failure strip in the inbox selection column stays for later selections.
+- The Selection column is empty after a remount while the selected page is not loaded.
+- A failing asset-type load is silent in `ProjectDetails`, and so is a failing library count in `AssetsScreen`.
+- Candidate, not verified: the tile menu in the last visible row and the "More" menu at the bottom of the file dialog panel may be clipped.
+- `TagCombobox` ignores IME composition, can keep a stale active option, and `aria-controls` points at a list that is not rendered; `TagFilter` loses focus at 10 tags.
+- The row "Open" link has `tabIndex -1`; focus is not restored to a neighbour after a removal; the Workspaces screen has no `h1`.
+- The dialog label "Type" shows the MIME type; the design says "format".
+- Small inconsistencies: the asset breadcrumb is "Assets" only while the project one adds the name; `AssetsScreen` does not refresh `lastSelected` from a loaded page as `ProjectsScreen` does; role selects use `INPUT` instead of `SELECT`.
 
 ## Code structure
 
@@ -84,6 +99,11 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - `safeErrorMessage` lives in `import-file.ts` although file moves use it too.
 - The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
 - The session and the import context are built from near-identical lambdas in the workspace manager.
+- "Details" is removed from the dialog menu by its label, with dummy `onDetails` handlers in both hosts.
+- `ROLES = FileRoleSchema.options` is declared six times in the renderer; `{ name: section } as View` in `WorkspaceShell`.
+- The tag-id lookup is triplicated in persistence; `ipc.ts` and `library-handlers.ts` import each other.
+- `AssetsScreen`, `AssetScreen` and `FileBrowser` are large and want splitting.
+- `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
 
 ## Tooling and tests
 
@@ -99,6 +119,11 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - `check-sharp.mjs` is a manual gate and not part of `pnpm test`; it has no worker `exit` listener.
 - No test for `workflows:remove` with an unknown asset; the `handlersFor` helper is duplicated in `acceptance.test.ts`.
 - `noopHost` is duplicated in three test files.
+- Fake and SQLite repositories differ in error precedence for batch tag channels.
+- A `toHaveLength(1)` assertion in `tag-repository.test.ts` is vacuous.
+- The test setup emulates Esc, and the native-close fallback of the dialog is untested; some tests assert class substrings.
+- No test for superseding on a tag change; missing tests for `usePagedList` retry, the Workspaces busy state, the asset Files tab batch tags and the inbox assign failure strip.
+- `console.info` output in the tag scale test.
 
 ## Not covered by any automated check
 

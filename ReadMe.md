@@ -521,7 +521,7 @@ Resource consumption is an architectural characteristic and not merely a later o
 - The 3D viewer is initialized only when needed. Geometries, materials and textures that are no longer visible are released; unnecessary render loops are paused.
 - No permanent full workspace scans. Changes are processed in a targeted, debounced way with a periodic or manual consistency check. Network file systems need a fallback for unreliable watchers.
 - Lists keep their previous results on screen while a new query or filter loads, so changing a filter does not flash an empty or "Loading..." state; a superseded request is dropped.
-- Search queries are debounced, paginated and index-backed. The debounce (250 ms, with a newer request superseding an older one) is a renderer rule for the UI phase; the backend pages search results like the list and answers every query from the FTS index through indexed joins, never by scanning all assets. Database transactions stay short; long file or API operations take place outside DB transactions.
+- Search queries are debounced, paginated and index-backed. The renderer debounces (250 ms, with a newer request superseding an older one; section 3.3); the backend pages search results like the list and answers every query from the FTS index through indexed joins, never by scanning all assets. Database transactions stay short; long file or API operations take place outside DB transactions.
 
 ### 15.2 Jobs and Workers
 
