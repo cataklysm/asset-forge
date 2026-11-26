@@ -1,6 +1,7 @@
 import type {
   AnalysisPrompt,
   AnalysisPromptList,
+  AssetDetail,
   ErrorCode,
   ImportResult,
   IpcChannel,
@@ -111,6 +112,55 @@ export function fakeAnalysisPrompts(seed?: Partial<AnalysisPromptList>): {
           ? { ...prompt, text: BUILT_IN_TAGGING_TEXT, maxTags: 15 }
           : { ...prompt, text: BUILT_IN_IMAGE_PROMPT_TEXT },
       );
+    },
+  };
+  return { state, handlers };
+}
+
+type SourceChannel = 'assets:get' | 'assets:addSource' | 'assets:removeSource' | 'assets:openSource';
+
+/**
+ * In-memory handlers for the source channels of one asset (and its `assets:get`), refusing what the
+ * main process refuses with its fixed messages. `opened` records the source IDs asked to be opened.
+ */
+export function fakeAssetSources(asset: AssetDetail): {
+  state: { asset: AssetDetail; opened: string[] };
+  handlers: { [C in SourceChannel]: NonNullable<FakeHandlers[C]> };
+} {
+  const state = { asset: structuredClone(asset), opened: [] as string[] };
+  const find = (assetId: string) => {
+    if (assetId !== state.asset.id) throw fakeError('not_found', 'The asset does not exist');
+    return state.asset;
+  };
+  const normalised = (text: string) => {
+    try {
+      const url = new URL(text.trim());
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== '') return url.href;
+    } catch {
+      // Falls through to the refusal below.
+    }
+    throw fakeError('validation_failed', 'This is not a web address');
+  };
+  const handlers: { [C in SourceChannel]: NonNullable<FakeHandlers[C]> } = {
+    'assets:get': ({ id }) => structuredClone(find(id)),
+    'assets:addSource': ({ assetId, url }) => {
+      const current = find(assetId);
+      const href = normalised(url);
+      if (current.sources.some((s) => s.url === href)) throw fakeError('invalid_operation', 'This source already exists');
+      if (current.sources.length >= 50) throw fakeError('invalid_operation', 'This asset cannot take more sources');
+      state.asset = { ...current, sources: [...current.sources, { id: nextId(), url: href, createdAt: current.updatedAt }] };
+      return structuredClone(state.asset);
+    },
+    'assets:removeSource': ({ assetId, sourceId }) => {
+      const current = find(assetId);
+      if (!current.sources.some((s) => s.id === sourceId)) throw fakeError('not_found', 'The source does not exist');
+      state.asset = { ...current, sources: current.sources.filter((s) => s.id !== sourceId) };
+      return structuredClone(state.asset);
+    },
+    'assets:openSource': ({ assetId, sourceId }) => {
+      if (!find(assetId).sources.some((s) => s.id === sourceId)) throw fakeError('not_found', 'The source does not exist');
+      state.opened.push(sourceId);
+      return null;
     },
   };
   return { state, handlers };

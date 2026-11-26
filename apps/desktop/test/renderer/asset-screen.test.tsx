@@ -21,7 +21,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { deferred, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeAssetSources, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -1064,4 +1064,86 @@ it('files tab: a rename reloads the list where it was, also with a filter on the
   await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
   expect(screen.queryByText('File 0.png')).toBeNull();
   expect(screen.getByText('File 100.png')).toBeTruthy();
+});
+
+function sourceOf(url: string) {
+  return { id: nextId(), url, createdAt: NOW };
+}
+
+it('the header lists the sources; add, remove and open send their requests', async () => {
+  const user = userEvent.setup();
+  const oak = sourceOf('https://example.org/doors/oak-12');
+  const asset = assetDetail({ sources: [oak] });
+  const fake = fakeAssetSources(asset);
+  const api = install(asset, fake.handlers);
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  expect(block.closest('header')).not.toBeNull();
+  expect(within(block).getByRole('link', { name: oak.url })).toBeTruthy();
+
+  await user.type(within(block).getByRole('textbox', { name: 'Add URL' }), 'https://textures.example.com/wood{Enter}');
+  expect(await within(block).findByRole('link', { name: 'https://textures.example.com/wood' })).toBeTruthy();
+  expect(callsOf(api, 'assets:addSource')).toEqual([{ assetId: asset.id, url: 'https://textures.example.com/wood' }]);
+  await waitFor(() => expect((within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement).value).toBe(''));
+
+  await user.click(within(block).getByRole('link', { name: oak.url }));
+  expect(callsOf(api, 'assets:openSource')).toEqual([{ assetId: asset.id, sourceId: oak.id }]);
+  expect(fake.state.opened).toEqual([oak.id]);
+
+  const oakRow = within(block).getByRole('link', { name: oak.url }).closest('li') as HTMLElement;
+  await user.click(within(oakRow).getByRole('button', { name: 'Remove source' }));
+  await waitFor(() => expect(within(block).queryByRole('link', { name: oak.url })).toBeNull());
+  expect(callsOf(api, 'assets:removeSource')).toEqual([{ assetId: asset.id, sourceId: oak.id }]);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('adding a duplicate source shows the error in the header and keeps the text', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ sources: [sourceOf('https://example.org/')] });
+  install(asset, fakeAssetSources(asset).handlers);
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  const field = within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement;
+  await user.type(field, 'https://example.org{Enter}');
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toBe('This source already exists');
+  expect(alert.closest('header')).not.toBeNull();
+  await waitFor(() => expect(field.disabled).toBe(false));
+  expect(field.value).toBe('https://example.org');
+  expect(within(block).getAllByRole('link')).toHaveLength(1);
+});
+
+it('a source that cannot be opened shows the error in the header', async () => {
+  const user = userEvent.setup();
+  const oak = sourceOf('https://example.org/');
+  const asset = assetDetail({ sources: [oak] });
+  install(asset, {
+    ...fakeAssetSources(asset).handlers,
+    'assets:openSource': () => {
+      throw fakeError('invalid_operation', 'This source could not be opened');
+    },
+  });
+  render(<Harness id={asset.id} />);
+  await user.click(await screen.findByRole('link', { name: oak.url }));
+  expect((await screen.findByRole('alert')).textContent).toBe('This source could not be opened');
+});
+
+it('during an import the Add URL input and the remove buttons are disabled, open stays usable', async () => {
+  const user = userEvent.setup();
+  const oak = sourceOf('https://example.org/');
+  const asset = assetDetail({ sources: [oak] });
+  const picked = deferred<string[]>();
+  const fake = fakeAssetSources(asset);
+  install(asset, { ...fake.handlers, 'dialog:pickFiles': () => picked.promise });
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  const field = within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement;
+  expect(field.disabled).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Import files' }));
+  expect(field.disabled).toBe(true);
+  expect((within(block).getByRole('button', { name: 'Remove source' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(within(block).getByRole('link', { name: oak.url }));
+  expect(fake.state.opened).toEqual([oak.id]);
+  picked.resolve([]);
+  await waitFor(() => expect(field.disabled).toBe(false));
 });

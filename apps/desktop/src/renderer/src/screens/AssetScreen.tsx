@@ -16,6 +16,7 @@ import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
 import { Link } from '../components/Link';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
+import { SourceList } from '../components/SourceList';
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
@@ -110,6 +111,11 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
 
   const saveAsset = (patch: Patch) =>
     attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
+
+  /** Like `attempt`, but rejects after reporting, so that the source list keeps the typed text. */
+  async function reported(action: () => Promise<unknown>): Promise<void> {
+    if (!(await attempt(setError, action))) throw new Error('reported');
+  }
 
   async function importFiles() {
     setError(null);
@@ -239,6 +245,17 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
               tags={asset.tags}
               onAdd={async (name) => setAsset(await call('assets:addTag', { assetId: id, name }))}
               onRemove={async (name) => setAsset(await call('assets:removeTag', { assetId: id, name }))}
+            />
+          </div>
+          <div className="min-w-64 flex-1">
+            <SourceList
+              sources={asset.sources}
+              disabled={importing}
+              onAdd={(url) => reported(async () => setAsset(await call('assets:addSource', { assetId: id, url })))}
+              onRemove={(sourceId) =>
+                reported(async () => setAsset(await call('assets:removeSource', { assetId: id, sourceId })))
+              }
+              onOpen={(sourceId) => reported(() => call('assets:openSource', { assetId: id, sourceId }))}
             />
           </div>
         </div>

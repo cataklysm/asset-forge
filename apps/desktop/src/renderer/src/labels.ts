@@ -176,6 +176,13 @@ export const EMPTY_TRASH_LABEL = 'Empty trash';
 export const EMPTY_TRASH_TITLE = 'Removes every file in the trash from disk; asks first';
 export const CANCEL_LABEL = 'Cancel';
 
+/** The sources block in the asset header (SourceList). */
+export const SOURCES_LABEL = 'Sources';
+export const ADD_SOURCE_PLACEHOLDER = 'Add URL';
+export const COPY_SOURCE_TITLE = 'Copy URL';
+export const REMOVE_SOURCE_TITLE = 'Remove source';
+export const COPY_SOURCE_FAILED = 'The URL could not be copied';
+
 /** The choice before importing picked ZIP archives (ZipChoiceDialog). */
 export const ZIP_ARCHIVE_TITLE = 'ZIP archive';
 export const UNPACK_LABEL = 'Unpack';
