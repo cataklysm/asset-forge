@@ -76,6 +76,7 @@ describe('phase 4a acceptance', () => {
       {
         openPath: async () => '',
         showItemInFolder: () => {},
+        openExternal: async () => {},
         workspaceOpened: () => (holdScheduler ? Promise.resolve() : jobHost.workspaceOpened()),
         workspaceClosing: () => jobHost.workspaceClosing(),
       },

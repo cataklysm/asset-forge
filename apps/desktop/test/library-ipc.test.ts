@@ -15,11 +15,14 @@ let manager: WorkspaceManager;
 let handlers: IpcHandlers;
 const measure = vi.fn(async (_path: string): Promise<{ width: number; height: number } | null> => null);
 const confirmWorkflow = vi.fn(async (_assetName: string) => false);
+const openExternal = vi.fn(async (_url: string): Promise<void> => {});
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 
 beforeEach(async () => {
   confirmWorkflow.mockClear();
+  openExternal.mockReset();
+  openExternal.mockResolvedValue(undefined);
   measure.mockReset();
   measure.mockResolvedValue(null);
   base = await mkdtemp(join(tmpdir(), 'af-lib-ipc-'));
@@ -31,7 +34,7 @@ beforeEach(async () => {
     pickFiles: async () => [],
     confirmRemoveWorkspace: async () => 'cancel',
     confirmRemoveWorkflow: confirmWorkflow,
-  }, noopHost, idleJobHost, idleServices);
+  }, { ...noopHost, openExternal }, idleJobHost, idleServices);
 });
 afterEach(async () => {
   await manager.close();
@@ -93,8 +96,11 @@ describe('library IPC', () => {
       'files:removeTagMany': { fileIds: [uuid], name: 'metal' },
       'tags:usage': { name: 'metal' },
       'tags:rename': { from: 'metal', to: 'steel', merge: false },
+      'assets:addSource': { assetId: uuid, url: 'https://example.org/' },
+      'assets:removeSource': { assetId: uuid, sourceId: uuid },
+      'assets:openSource': { assetId: uuid, sourceId: uuid },
     };
-    expect(Object.keys(requests)).toHaveLength(35);
+    expect(Object.keys(requests)).toHaveLength(38);
     for (const [channel, request] of Object.entries(requests)) {
       expect(ipcContract[channel as IpcChannel].request.safeParse(request).success, channel).toBe(true);
       expect(await call(channel as IpcChannel, request), channel).toMatchObject({
@@ -670,6 +676,65 @@ describe('library IPC', () => {
       measure.mockResolvedValue({ width: 4, height: 3 });
       expect(await ok('files:measure', { fileId: id })).toMatchObject({ id, width: 4, height: 3 });
       expect(measure.mock.lastCall![0]).toBe(join(base, 'workspace', trashPath(id, 'a.png')));
+    });
+  });
+
+  describe('sources', () => {
+    async function twoAssets() {
+      await openWorkspace();
+      const [type] = await ok<{ id: string }[]>('assetTypes:list', {});
+      const asset = await ok('assets:create', { name: 'Door', typeId: type!.id });
+      const other = await ok('assets:create', { name: 'Window', typeId: type!.id });
+      return { asset, other };
+    }
+
+    it('adds a source that assets:get shows and opens exactly the stored address', async () => {
+      const { asset } = await twoAssets();
+      const added = await ok('assets:addSource', { assetId: asset.id, url: '  https://Example.org/doors?x=1 ' });
+      expect(ipcContract['assets:addSource'].response.safeParse(added).success).toBe(true);
+      expect(added.sources).toMatchObject([{ url: 'https://example.org/doors?x=1' }]);
+      const got = await ok('assets:get', { id: asset.id });
+      expect(got.sources).toEqual(added.sources);
+
+      expect(await ok('assets:openSource', { assetId: asset.id, sourceId: added.sources[0].id })).toBeNull();
+      expect(openExternal).toHaveBeenCalledTimes(1);
+      expect(openExternal).toHaveBeenCalledWith('https://example.org/doors?x=1');
+
+      const removed = await ok('assets:removeSource', { assetId: asset.id, sourceId: added.sources[0].id });
+      expect(ipcContract['assets:removeSource'].response.safeParse(removed).success).toBe(true);
+      expect(removed.sources).toEqual([]);
+    });
+
+    it('refuses to open a source of another asset', async () => {
+      const { asset, other } = await twoAssets();
+      const foreign = await ok('assets:addSource', { assetId: other.id, url: 'https://example.org/' });
+      expect(await call('assets:openSource', { assetId: asset.id, sourceId: foreign.sources[0].id })).toMatchObject({
+        ok: false,
+        error: { code: 'not_found' },
+      });
+      expect(openExternal).not.toHaveBeenCalled();
+    });
+
+    it('answers a fixed message when the browser cannot be started', async () => {
+      const { asset } = await twoAssets();
+      const added = await ok('assets:addSource', { assetId: asset.id, url: 'https://example.org/' });
+      openExternal.mockRejectedValue(new Error('C:\secret'));
+      expect(await call('assets:openSource', { assetId: asset.id, sourceId: added.sources[0].id })).toEqual({
+        ok: false,
+        error: { code: 'invalid_operation', message: 'This source could not be opened' },
+      });
+    });
+
+    it('refuses a file address and a non-string url', async () => {
+      const { asset } = await twoAssets();
+      expect(await call('assets:addSource', { assetId: asset.id, url: 'file:///x' })).toMatchObject({
+        ok: false,
+        error: { code: 'validation_failed', message: 'This is not a web address' },
+      });
+      expect(await call('assets:addSource', { assetId: asset.id, url: 42 })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' },
+      });
     });
   });
 

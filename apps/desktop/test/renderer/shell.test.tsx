@@ -379,7 +379,7 @@ it('a rename on the asset screen rewrites the gallery filter that is not mounted
   const { projectCount: _p, fileCount: _f, workflowProgress: _w, coverTags: _c, ...detail } = summary;
   const api = workspaceShell(() => IDLE, () => {}, {
     'assets:list': () => pageOf([summary]),
-    'assets:get': () => ({ ...detail, coverIsChosen: false }),
+    'assets:get': () => ({ ...detail, coverIsChosen: false, sources: [] }),
     'assignments:listByAsset': () => [],
     'relations:list': () => [],
     'files:list': () => pageOf([]),

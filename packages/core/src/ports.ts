@@ -7,6 +7,7 @@ import type {
   AssetAssignment,
   AssetRelation,
   AssetRelationView,
+  AssetSource,
   AssetStatus,
   AssetType,
   FileList,
@@ -364,6 +365,17 @@ export interface TagRepository {
   rename(r: { from: string; name: string; displayName: string; merge: boolean }): Promise<{ merged: boolean }>;
 }
 
+/** Source URLs of assets; an asset carries a URL at most once (compared as stored, i.e. as normalised `href`). */
+export interface AssetSourceRepository {
+  listByAsset(assetId: string): Promise<AssetSource[]>; // by createdAt, then id
+  get(id: string): Promise<(AssetSource & { assetId: string }) | null>;
+  countByAsset(assetId: string): Promise<number>;
+  /** False, writing nothing, when the asset already has this URL. */
+  insert(row: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean>;
+  /** False when no row has this id. */
+  remove(id: string): Promise<boolean>;
+}
+
 /** The persistent job queue of a workspace. Every transition is guarded by the status it starts from. */
 export interface JobRepository {
   /** One transaction. Inserts each job as `queued`, attempt 0; a job whose dedupe key is held by an active job (or by an earlier job of the same call) is skipped. Returns the inserted ids. */
@@ -528,6 +540,7 @@ export interface WorkspaceDatabase {
   workflowTemplates: WorkflowTemplateRepository;
   assetWorkflows: AssetWorkflowRepository;
   tags: TagRepository;
+  assetSources: AssetSourceRepository;
   jobs: JobRepository;
   analyses: FileAnalysisRepository;
   analysisTargets: AnalysisTargetReader;

@@ -380,11 +380,34 @@ describe('asset cover', () => {
   });
 
   it('AssetDetailSchema requires coverFileId and coverIsChosen', () => {
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true, tags: [] }).success).toBe(true);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, tags: [] }).success).toBe(true);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, tags: [] }).success).toBe(false);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false, tags: [] }).success).toBe(false);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true, tags: [], sources: [] }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, tags: [], sources: [] }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, tags: [], sources: [] }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false, tags: [], sources: [] }).success).toBe(false);
+    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, sources: [] }).success).toBe(false);
+  });
+
+  it('AssetDetailSchema requires sources', () => {
+    const source = { id: uuid, url: 'https://example.org/', createdAt: now };
+    const detail = { ...asset, coverFileId: null, coverIsChosen: false, tags: [] };
+    expect(AssetDetailSchema.safeParse({ ...detail, sources: [source] }).success).toBe(true);
+    expect(AssetDetailSchema.safeParse(detail).success).toBe(false);
+  });
+
+  it('assets:addSource takes an asset id and a url of at most 2000 characters', () => {
+    const add = ipcContract['assets:addSource'].request;
+    expect(add.safeParse({ assetId: uuid, url: 'https://example.org' }).success).toBe(true);
+    expect(add.safeParse({ assetId: uuid, url: 'x'.repeat(2001) }).success).toBe(false);
+    expect(add.safeParse({ url: 'https://example.org' }).success).toBe(false);
+  });
+
+  it('assets:removeSource and assets:openSource take an asset id and a source id', () => {
+    for (const channel of ['assets:removeSource', 'assets:openSource'] as const) {
+      const request = ipcContract[channel].request;
+      expect(request.safeParse({ assetId: uuid, sourceId: uuid }).success).toBe(true);
+      expect(request.safeParse({ assetId: uuid, sourceId: 'x' }).success).toBe(false);
+      expect(request.safeParse({ assetId: uuid }).success).toBe(false);
+    }
   });
 
   it('SetCoverRequestSchema accepts a file id or null and requires both keys', () => {

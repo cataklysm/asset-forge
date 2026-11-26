@@ -1,4 +1,5 @@
 import {
+  addAssetSource,
   addAssetTag,
   addFileTag,
   addFileTags,
@@ -21,6 +22,7 @@ import {
   listRelations,
   listWorkflowTemplates,
   relocateFile,
+  removeAssetSource,
   removeAssetTag,
   removeAssignment,
   removeFileTag,
@@ -28,6 +30,7 @@ import {
   removeRelation,
   removeWorkflow,
   renameTag,
+  resolveAssetSourceUrl,
   measureFile,
   purgeFiles,
   resolveFilePath,
@@ -79,6 +82,9 @@ export type LibraryHandlers = Pick<
   | 'tags:rename'
   | 'assets:addTag'
   | 'assets:removeTag'
+  | 'assets:addSource'
+  | 'assets:removeSource'
+  | 'assets:openSource'
   | 'files:addTag'
   | 'files:removeTag'
   | 'files:addTagMany'
@@ -104,7 +110,7 @@ export type LibraryHandlers = Pick<
 export function createLibraryHandlers(
   manager: WorkspaceManager,
   dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
-  host: Pick<HostActions, 'openPath' | 'showItemInFolder'>,
+  host: Pick<HostActions, 'openPath' | 'showItemInFolder' | 'openExternal'>,
   jobs: Pick<JobHost, 'cancel' | 'changed' | 'wake'>,
 ): LibraryHandlers {
   /** Runs a channel that may have cancelled jobs; raises the counter and wakes the scheduler even when it fails. */
@@ -159,6 +165,20 @@ export function createLibraryHandlers(
     'tags:rename': (r) => manager.exclusive((s) => renameTag(s, r)),
     'assets:addTag': (r) => manager.exclusive((s) => addAssetTag(s, r)),
     'assets:removeTag': (r) => manager.exclusive((s) => removeAssetTag(s, r)),
+
+    'assets:addSource': (r) => manager.exclusive((s) => addAssetSource(s, r)),
+    'assets:removeSource': (r) => manager.exclusive((s) => removeAssetSource(s, r)),
+    // Only a stored source of the open workspace is opened, checked by the URL rule again.
+    'assets:openSource': async (r) => {
+      const url = await manager.read((s) => resolveAssetSourceUrl(s, r));
+      try {
+        await host.openExternal(url);
+      } catch {
+        // The shell's error may carry paths or the address; it is never forwarded.
+        throw new InvalidOperationError('This source could not be opened');
+      }
+      return null;
+    },
     'files:addTag': (r) => manager.exclusive((s) => addFileTag(s, r)),
     'files:removeTag': (r) => manager.exclusive((s) => removeFileTag(s, r)),
     'files:addTagMany': async (r) => ({ items: await manager.exclusive((s) => addFileTags(s, r)) }),

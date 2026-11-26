@@ -17,7 +17,7 @@ const openPath = vi.fn<(absolutePath: string) => Promise<string>>();
 const showItemInFolder = vi.fn<(absolutePath: string) => void>();
 const workspaceOpened = vi.fn<() => Promise<void>>();
 const workspaceClosing = vi.fn<() => Promise<void>>();
-const host: HostActions = { openPath, showItemInFolder, workspaceOpened, workspaceClosing };
+const host: HostActions = { openPath, showItemInFolder, openExternal: async () => {}, workspaceOpened, workspaceClosing };
 
 beforeEach(async () => {
   openPath.mockReset().mockResolvedValue('');

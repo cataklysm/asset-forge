@@ -54,7 +54,8 @@ export function suggestTags(
   return s.database.tags.suggest({ prefix: normalizeTagPrefix(r.prefix), limit: r.limit });
 }
 
-async function requireAsset(s: WorkspaceSession, assetId: string): Promise<void> {
+/** Throws `not_found` for an unknown asset. */
+export async function requireAsset(s: WorkspaceSession, assetId: string): Promise<void> {
   if ((await s.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
 }
 

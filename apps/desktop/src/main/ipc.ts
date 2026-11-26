@@ -44,6 +44,8 @@ export interface HostActions {
   /** Electron shell.openPath: resolves '' on success, an error text otherwise. */
   openPath(absolutePath: string): Promise<string>;
   showItemInFolder(absolutePath: string): void;
+  /** Electron shell.openExternal: hands an http(s) address to the system browser; rejects when that fails. */
+  openExternal(url: string): Promise<void>;
   /** Called after a workspace lifecycle channel when a workspace is open afterwards. Never rejects. */
   workspaceOpened(): Promise<void>;
   /** Called before a workspace lifecycle channel calls the manager. Never rejects. */

@@ -245,6 +245,19 @@ export const ipcContract = {
     request: z.object({ assetId: IdSchema, name: z.string().max(200) }),
     response: AssetDetailSchema,
   },
+  'assets:addSource': {
+    request: z.object({ assetId: IdSchema, url: z.string().max(2000) }),
+    response: AssetDetailSchema,
+  },
+  'assets:removeSource': {
+    request: z.object({ assetId: IdSchema, sourceId: IdSchema }),
+    response: AssetDetailSchema,
+  },
+  // Opens a stored source in the system browser; the renderer never passes the address itself.
+  'assets:openSource': {
+    request: z.object({ assetId: IdSchema, sourceId: IdSchema }),
+    response: z.null(),
+  },
   'files:addTag': {
     request: z.object({ fileId: IdSchema, name: z.string().max(200) }),
     response: FileRecordSchema,

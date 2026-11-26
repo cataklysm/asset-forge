@@ -112,10 +112,19 @@ export const AssetSummarySchema = AssetSchema.extend({
 });
 export type AssetSummary = z.infer<typeof AssetSummarySchema>;
 
+/** A web address the asset's material came from; `url` is the normalised `href` (http or https only). */
+export const AssetSourceSchema = z.object({
+  id,
+  url: z.string(),
+  createdAt: timestamp,
+});
+export type AssetSource = z.infer<typeof AssetSourceSchema>;
+
 export const AssetDetailSchema = AssetSchema.extend({
   coverFileId: id.nullable(), // effective cover, as in AssetSummary
   coverIsChosen: z.boolean(), // false when the cover is the automatic one or there is none
   tags: z.array(TagAssignmentSchema), // asset tags only; file tags are on the file records
+  sources: z.array(AssetSourceSchema), // by createdAt, then id
 });
 export type AssetDetail = z.infer<typeof AssetDetailSchema>;
 

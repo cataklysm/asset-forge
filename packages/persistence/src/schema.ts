@@ -92,6 +92,20 @@ export const asset = sqliteTable(
   ],
 );
 
+/** Source URLs of an asset, stored as normalised `href`; the unique index also serves lookups by asset. */
+export const assetSource = sqliteTable(
+  'asset_source',
+  {
+    id: text('id').primaryKey(),
+    assetId: text('asset_id')
+      .notNull()
+      .references(() => asset.id),
+    url: text('url').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('asset_source_asset_id_url_unique').on(t.assetId, t.url)],
+);
+
 export const project = sqliteTable(
   'project',
   {

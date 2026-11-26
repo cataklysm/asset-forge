@@ -67,6 +67,7 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
     {
       openPath: async () => '',
       showItemInFolder: () => {},
+      openExternal: async () => {},
       workspaceOpened: () => jobHost.workspaceOpened(),
       workspaceClosing: () => jobHost.workspaceClosing(),
     },

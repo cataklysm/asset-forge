@@ -47,6 +47,7 @@ function assetDetail(p: Partial<AssetDetail> = {}): AssetDetail {
     coverFileId: null,
     coverIsChosen: false,
     tags: [],
+    sources: [],
     ...p,
   };
 }
