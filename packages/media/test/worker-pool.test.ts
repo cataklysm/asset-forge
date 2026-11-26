@@ -28,7 +28,7 @@ function pool(options: Parameters<typeof createWorkerPool>[0]): WorkerPool {
 }
 
 function job(sourcePath: string): PreviewJob {
-  return { sourcePath, targetPath: `${sourcePath}.webp`, longestEdge: 256 };
+  return { sourcePath, targetPath: `${sourcePath}.webp`, longestEdge: 256, format: 'webp' };
 }
 
 describe('createWorkerPool', () => {
@@ -55,7 +55,7 @@ describe('createWorkerPool', () => {
       await sharp({ create: { width: 300 + i, height: 200, channels: 3, background: '#38a' } })
         .png()
         .toFile(sourcePath);
-      jobs.push({ sourcePath, targetPath: join(dir, 'out', `${i}.webp`), longestEdge: 256 });
+      jobs.push({ sourcePath, targetPath: join(dir, 'out', `${i}.webp`), longestEdge: 256, format: 'webp' });
     }
     const p = pool({ workerUrl: TEST_WORKER_URL, size: 2, timeoutMs: 30_000 });
     expect(await Promise.all(jobs.map((j) => p.run(j)))).toEqual(['ok', 'ok', 'ok', 'ok']);
@@ -123,6 +123,43 @@ describe('createWorkerPool', () => {
       expect(line).not.toContain('broken-worker');
       expect(line).not.toContain('fixtures');
     }
+  });
+
+  it('measures through the real worker', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'assetforge-pool-'));
+    dirs.push(dir);
+    const sourcePath = join(dir, 'a.png');
+    await sharp({ create: { width: 300, height: 200, channels: 3, background: '#38a' } })
+      .png()
+      .toFile(sourcePath);
+    const p = pool({ workerUrl: TEST_WORKER_URL, size: 1, timeoutMs: 30_000 });
+    expect(await p.measure(sourcePath)).toEqual({ width: 300, height: 200 });
+    expect(await p.measure(join(dir, 'missing.png'))).toBeNull();
+  });
+
+  it('measure resolves null after a crash and keeps serving', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    expect(await p.measure('a-crash')).toBeNull();
+    expect(await p.measure('b')).toEqual({ width: 1, height: 1 });
+  });
+
+  it('measure resolves null on a timeout', async () => {
+    const p = pool({ workerUrl: hangUrl, size: 1, timeoutMs: 200 });
+    expect(await p.measure('a-hang')).toBeNull();
+    expect(await p.measure('b')).toEqual({ width: 1, height: 1 });
+  });
+
+  it('measure on a closed pool resolves null', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    await p.close();
+    expect(await p.measure('a')).toBeNull();
+  });
+
+  it('a run and a measure queued together both settle', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    const [rendered, size] = await Promise.all([p.run(job('a')), p.measure('b')]);
+    expect(rendered).toBe('ok');
+    expect(size).toEqual({ width: 1, height: 1 });
   });
 
   it.each([0, -1, 1.5, Number.NaN])('rejects a pool size of %s at once', (size) => {

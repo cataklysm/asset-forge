@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import type { PreviewJob, PreviewResult, WorkerRequest, WorkerResponse } from './messages.js';
+import type { ImageSize, PreviewJob, PreviewResult, WorkerJob, WorkerRequest, WorkerResponse } from './messages.js';
 
 export interface WorkerPoolOptions {
   workerUrl: URL;
@@ -13,6 +13,8 @@ export interface WorkerPoolOptions {
 export interface WorkerPool {
   /** Never rejects: a crash, a timeout or a closed pool resolve `none`. */
   run(job: PreviewJob): Promise<PreviewResult>;
+  /** Image dimensions after EXIF orientation. Never rejects: a crash, a timeout, a closed pool or an unreadable image resolve `null`. */
+  measure(sourcePath: string): Promise<ImageSize | null>;
   /** Terminates all workers; queued and running jobs resolve `none`. */
   close(): Promise<void>;
 }
@@ -20,9 +22,13 @@ export interface WorkerPool {
 export const POOL_SIZE = 2;
 export const JOB_TIMEOUT_MS = 30_000;
 
+type TaskResult = PreviewResult | ImageSize | null;
+
 interface Task {
-  job: PreviewJob;
-  resolve: (result: PreviewResult) => void;
+  work: WorkerJob;
+  /** What the task resolves when it fails: `none` for a render, `null` for a measurement. */
+  failure: 'none' | null;
+  resolve: (result: TaskResult) => void;
 }
 
 interface Slot {
@@ -40,6 +46,17 @@ function failureKind(error: unknown): string {
 
 function isResponse(message: unknown): message is WorkerResponse {
   return typeof message === 'object' && message !== null && typeof (message as WorkerResponse).id === 'number';
+}
+
+function isSize(value: unknown): value is ImageSize {
+  const size = value as Partial<ImageSize> | null;
+  return typeof size === 'object' && size !== null && Number.isInteger(size.width) && Number.isInteger(size.height);
+}
+
+/** The result a task accepts from a worker; anything else counts as a failure. */
+function validResult(task: Task, result: unknown): TaskResult {
+  if (task.work.kind === 'render') return result === 'ok' ? 'ok' : 'none';
+  return isSize(result) ? { width: result.width, height: result.height } : null;
 }
 
 /**
@@ -65,17 +82,17 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     void done.finally(() => terminations.delete(done));
   }
 
-  function finish(slot: Slot, result: PreviewResult): void {
+  function finish(slot: Slot, result: TaskResult | undefined): void {
     const current = slot.current;
     if (!current) return;
     clearTimeout(current.timer);
     slot.current = undefined;
-    current.task.resolve(result);
+    current.task.resolve(result === undefined ? current.task.failure : result);
   }
 
   function drop(slot: Slot, kill: boolean): void {
     if (!slots.delete(slot)) return;
-    finish(slot, 'none');
+    finish(slot, undefined);
     if (kill) terminate(slot.worker);
     pump();
   }
@@ -91,7 +108,7 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     const slot: Slot = { worker };
     worker.on('message', (message: unknown) => {
       if (!isResponse(message) || !slots.has(slot) || slot.current?.id !== message.id) return;
-      finish(slot, message.result === 'ok' ? 'ok' : 'none');
+      finish(slot, validResult(slot.current.task, message.result));
       pump();
     });
     worker.on('error', (error: unknown) => {
@@ -108,7 +125,7 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     const id = nextId++;
     const timer = setTimeout(() => drop(slot, true), timeoutMs);
     slot.current = { id, task, timer };
-    const request: WorkerRequest = { id, job: task.job };
+    const request: WorkerRequest = { id, work: task.work };
     try {
       slot.worker.postMessage(request);
     } catch {
@@ -123,7 +140,8 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
         if (slots.size >= size) return;
         slot = spawn();
         if (!slot) {
-          queue.pop()?.resolve('none');
+          const failed = queue.pop();
+          failed?.resolve(failed.failure);
           continue;
         }
       }
@@ -131,17 +149,24 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     }
   }
 
+  function submit(work: WorkerJob, failure: 'none' | null): Promise<TaskResult> {
+    if (closed) return Promise.resolve(failure);
+    return new Promise<TaskResult>((resolve) => {
+      queue.push({ work, failure, resolve });
+      pump();
+    });
+  }
+
   return {
     run(job) {
-      if (closed) return Promise.resolve('none');
-      return new Promise<PreviewResult>((resolve) => {
-        queue.push({ job, resolve });
-        pump();
-      });
+      return submit({ kind: 'render', job }, 'none') as Promise<PreviewResult>;
+    },
+    measure(sourcePath) {
+      return submit({ kind: 'measure', sourcePath }, null) as Promise<ImageSize | null>;
     },
     async close() {
       closed = true;
-      for (const task of queue.splice(0)) task.resolve('none');
+      for (const task of queue.splice(0)) task.resolve(task.failure);
       for (const slot of [...slots]) drop(slot, true);
       await Promise.all([...terminations]);
     },

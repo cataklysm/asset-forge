@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import sharp from 'sharp';
-import type { PreviewJob, PreviewResult } from './messages.js';
+import type { ImageSize, PreviewJob, PreviewResult } from './messages.js';
 
 // libvips keeps opened files locked on Windows when it caches them; the pool provides parallelism.
 sharp.cache(false);
@@ -16,7 +16,7 @@ export interface PreviewLimits {
 
 export const DEFAULT_LIMITS: PreviewLimits = { maxPixels: 100_000_000, maxBytes: 256 * 1024 ** 2 };
 
-/** Renders a bounded WebP preview. Never throws; any failure yields `none` and leaves no target. */
+/** Renders a bounded WebP or PNG preview. Never throws; any failure yields `none` and leaves no target. */
 export async function generatePreview(
   job: PreviewJob,
   limits: PreviewLimits = DEFAULT_LIMITS,
@@ -26,20 +26,40 @@ export async function generatePreview(
     const info = await stat(job.sourcePath);
     if (!info.isFile() || info.size > limits.maxBytes) return 'none';
     await mkdir(dirname(job.targetPath), { recursive: true });
-    await sharp(job.sourcePath, { limitInputPixels: limits.maxPixels, animated: false, pages: 1 })
+    const resized = sharp(job.sourcePath, { limitInputPixels: limits.maxPixels, animated: false, pages: 1 })
       .rotate()
       .resize({
         width: job.longestEdge,
         height: job.longestEdge,
         fit: 'inside',
         withoutEnlargement: true,
-      })
-      .webp()
-      .toFile(tmp);
+      });
+    await (job.format === 'png' ? resized.png({ compressionLevel: 3 }) : resized.webp()).toFile(tmp);
     await rename(tmp, job.targetPath);
     return 'ok';
   } catch {
     await rm(tmp, { force: true }).catch(() => undefined);
     return 'none';
+  }
+}
+
+/** Dimensions of the first frame after EXIF orientation. Never throws; any failure yields `null`. */
+export async function measureImage(
+  sourcePath: string,
+  limits: PreviewLimits = DEFAULT_LIMITS,
+): Promise<ImageSize | null> {
+  try {
+    const info = await stat(sourcePath);
+    if (!info.isFile() || info.size > limits.maxBytes) return null;
+    // Without `animated`, `height` is one frame, not the stacked frames.
+    const meta = await sharp(sourcePath, { limitInputPixels: limits.maxPixels }).metadata();
+    const { width, height, orientation } = meta;
+    if (!width || !height) return null;
+    if (width * height > limits.maxPixels) return null;
+    return orientation !== undefined && orientation >= 5 && orientation <= 8
+      ? { width: height, height: width }
+      : { width, height };
+  } catch {
+    return null;
   }
 }
