@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
 
 export const JobStatusSchema = z.enum([
   'queued',
@@ -59,13 +60,28 @@ export const ANALYZE_FILE_JOB = 'vision.analyze_file';
 /** A model name as the provider lists it; stored and sent verbatim. */
 export const ModelNameSchema = z.string().min(1).max(200);
 
+/** The analysis prompt a v3 job runs with, copied at enqueue so later edits do not reach waiting jobs. */
+export const AnalyzeFilePromptSchema = z.object({
+  name: AnalysisPromptNameSchema,
+  text: AnalysisPromptTextSchema,
+  maxTags: AnalysisTagLimitSchema,
+});
+export type AnalyzeFilePrompt = z.infer<typeof AnalyzeFilePromptSchema>;
+
 /**
  * v1 rows were written by phase 4a and run in mode `apply` with the tagging default model;
- * v2 carries the model chosen at enqueue and whether the result is applied or proposed.
+ * v2 carries the model chosen at enqueue and whether the result is applied or proposed;
+ * v3 adds the analysis prompt. v1 and v2 jobs run with the built-in prompt and at most 20 tags.
  */
 export const AnalyzeFilePayloadSchema = z.union([
   z.object({ version: z.literal(1) }),
   z.object({ version: z.literal(2), model: ModelNameSchema, mode: z.enum(['apply', 'propose']) }),
+  z.object({
+    version: z.literal(3),
+    model: ModelNameSchema,
+    mode: z.enum(['apply', 'propose']),
+    prompt: AnalyzeFilePromptSchema,
+  }),
 ]);
 export type AnalyzeFilePayload = z.infer<typeof AnalyzeFilePayloadSchema>;
 

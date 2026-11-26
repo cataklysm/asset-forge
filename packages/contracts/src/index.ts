@@ -6,6 +6,7 @@ export * from './library';
 export * from './workflows';
 export * from './tags';
 export * from './view-source';
+export * from './analysis-prompts';
 export * from './jobs';
 export * from './analysis';
 export * from './settings';

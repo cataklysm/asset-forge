@@ -55,6 +55,7 @@ const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancell
 function proposalOf(p: Partial<ProposalView> = {}): ProposalView {
   return {
     model: 'vision-a',
+    promptName: null,
     createdAt: NOW,
     stale: false,
     tags: [

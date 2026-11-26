@@ -29,6 +29,7 @@ async function proposeFor(c: Setup, fileId: string): Promise<void> {
       { name: 'metal', displayName: 'metal' },
       { name: 'front view', displayName: 'front view' },
     ],
+    promptName: 'Detail',
     createdAt: CREATED,
   });
 }
@@ -52,6 +53,7 @@ describe('getProposal', () => {
     expect(await getProposal(c.session, c.file.id)).toEqual({
       proposal: {
         model: MODEL,
+        promptName: 'Detail',
         createdAt: CREATED,
         stale: false,
         tags: [

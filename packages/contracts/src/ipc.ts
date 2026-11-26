@@ -356,6 +356,7 @@ export const ipcContract = {
   /**
    * Not all or nothing: analysable files are enqueued, the others are counted as skipped. `force`
    * bypasses the fingerprint skip. `propose` only for a `files` target with exactly one id; it implies `force`.
+   * Without `promptId` the tagging analysis prompt used last runs, otherwise the first one.
    */
   'analysis:enqueue': {
     request: z.object({
@@ -363,6 +364,7 @@ export const ipcContract = {
       model: ModelNameSchema,
       mode: AnalysisModeSchema,
       force: z.boolean(),
+      promptId: IdSchema.optional(),
     }),
     response: EnqueueAnalysisResultSchema,
   },
@@ -376,7 +378,7 @@ export const ipcContract = {
    * `invalid_operation` when it is stale or a name is not in it.
    */
   'analysis:acceptProposal': {
-    request: z.object({ fileId: IdSchema, names: z.array(z.string().min(1).max(200)).min(1).max(20) }),
+    request: z.object({ fileId: IdSchema, names: z.array(z.string().min(1).max(200)).min(1).max(50) }),
     response: z.object({}),
   },
   /** Idempotent. */
@@ -384,9 +386,12 @@ export const ipcContract = {
     request: z.object({ fileId: IdSchema }),
     response: z.object({}),
   },
-  /** Image2Prompt: one request at a time (`busy` otherwise); the text is not stored. */
+  /**
+   * Image2Prompt: one request at a time (`busy` otherwise); the text is not stored. Without `promptId`
+   * the Image to prompt analysis prompt used last runs, otherwise the first one.
+   */
   'analysis:describe': {
-    request: z.object({ requestId: IdSchema, fileId: IdSchema, model: ModelNameSchema }),
+    request: z.object({ requestId: IdSchema, fileId: IdSchema, model: ModelNameSchema, promptId: IdSchema.optional() }),
     response: DescribeResultSchema,
   },
   /** An unknown or finished request is left alone. */

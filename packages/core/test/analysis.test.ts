@@ -298,6 +298,7 @@ describe('the analyze file handler with a v2 payload', () => {
         { name: 'front view', displayName: 'front view' },
         { name: 'photorealistic', displayName: 'photorealistic' },
       ],
+      promptName: null,
       createdAt: expect.any(String),
       stale: false,
     });

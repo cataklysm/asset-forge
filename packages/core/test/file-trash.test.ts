@@ -123,7 +123,7 @@ describe('trashFiles', () => {
     const { session, storage, db, asset, importOne, control } = await setup();
     const file = await importOne('pump.png', { assetId: asset.id, role: 'texture' });
     await db.tags.addToFile({ fileId: file.id, name: 'metal', displayName: 'Metal', origin: 'manual', newId: crypto.randomUUID(), now: TS });
-    const fingerprint = { provider: 'ollama', model: 'm', promptVersion: 1 };
+    const fingerprint = { provider: 'ollama', model: 'm', promptVersion: 1, promptName: null };
     await db.analyses.apply({ fileId: file.id, sha256: file.sha256!, tags: [{ name: 'red', displayName: 'red', newId: crypto.randomUUID() }], ...fingerprint, now: TS });
     await db.analyses.propose({ fileId: file.id, sha256: file.sha256!, tags: [{ name: 'blue', displayName: 'blue' }], ...fingerprint, createdAt: TS });
     await db.assets.setCover(asset.id, file.id, TS);

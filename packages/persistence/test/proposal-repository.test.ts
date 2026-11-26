@@ -81,6 +81,7 @@ const proposal = (o: Partial<Proposal> = {}): Proposal => ({
     { name: 'rusty', displayName: 'Rusty' },
     { name: 'metal', displayName: 'metal' },
   ],
+  promptName: null,
   createdAt: T1,
   ...o,
 });
@@ -140,6 +141,7 @@ describe('tag proposals', () => {
       provider: 'ollama',
       model: 'qwen',
       promptVersion: 1,
+      promptName: null,
       analysedAt: T3,
     });
     expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
@@ -211,7 +213,7 @@ describe('tag proposals', () => {
   test('apply deletes a waiting proposal', async () => {
     await db.analyses.propose(proposal());
     expect(
-      await db.analyses.apply({ fileId: FILE_ID, sha256: SHA, tags: [t('blue')], provider: 'ollama', model: 'qwen', promptVersion: 1, now: T2 }),
+      await db.analyses.apply({ fileId: FILE_ID, sha256: SHA, tags: [t('blue')], provider: 'ollama', model: 'qwen', promptVersion: 1, promptName: null, now: T2 }),
     ).toBe(true);
     expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
   });

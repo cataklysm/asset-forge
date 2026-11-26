@@ -19,7 +19,7 @@ function request(target: AnalysisTarget, patch: { mode?: 'apply' | 'propose'; fo
 
 function analysed(c: Setup, fileId: string, model = MODEL): void {
   const rec = c.db.files.records.get(fileId)!;
-  c.db.analyses.rows.set(fileId, { fileId, sha256: rec.sha256!, provider: PROVIDER, model, promptVersion: ANALYSIS_PROMPT_VERSION, analysedAt: T0 });
+  c.db.analyses.rows.set(fileId, { fileId, sha256: rec.sha256!, provider: PROVIDER, model, promptVersion: ANALYSIS_PROMPT_VERSION, promptName: null, analysedAt: T0 });
 }
 
 /** Records every `jobs.enqueue` call. */
@@ -85,6 +85,7 @@ describe('enqueueAnalysis', () => {
       model: MODEL,
       promptVersion: ANALYSIS_PROMPT_VERSION,
       tags: [{ name: 'car', displayName: 'car' }],
+      promptName: null,
       createdAt: T0,
     });
     const result = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }));

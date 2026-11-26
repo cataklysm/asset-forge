@@ -85,11 +85,13 @@ export function createAnalyzeFileHandler(deps: {
       const tags = cleanAnalysisTags(answer);
       if (tags.length === 0) throw new JobError('invalid_response');
       const fingerprint = { provider: deps.provider, model, promptVersion: ANALYSIS_PROMPT_VERSION };
+      // The payload's prompt name is recorded once jobs carry an analysis prompt (payload v3).
+      const promptName = null;
       const now = s.now().toISOString();
       const written =
         mode === 'apply'
-          ? await s.database.analyses.apply({ fileId, sha256, tags: tags.map((t) => ({ ...t, newId: s.newId() })), ...fingerprint, now })
-          : await s.database.analyses.propose({ fileId, sha256, tags, ...fingerprint, createdAt: now });
+          ? await s.database.analyses.apply({ fileId, sha256, tags: tags.map((t) => ({ ...t, newId: s.newId() })), ...fingerprint, promptName, now })
+          : await s.database.analyses.propose({ fileId, sha256, tags, ...fingerprint, promptName, createdAt: now });
       if (!written) throw new JobError('file_unavailable');
     },
   };

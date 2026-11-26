@@ -617,7 +617,7 @@ it('Review tags in the menu opens the proposal; accepting it reloads the list', 
   const api = install([proposed], {
     ...analysisHandlers(),
     'analysis:getProposal': () => ({
-      proposal: { model: 'vision-a', createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
+      proposal: { model: 'vision-a', promptName: null, createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
       job: null,
     }),
     'analysis:acceptProposal': () => ({}),
