@@ -91,6 +91,7 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b and UI redesign reviews t
 - `TagCombobox` ignores IME composition, can keep a stale active option, and `aria-controls` points at a list that is not rendered; `TagFilter` loses focus at 10 tags.
 - The row "Open" link has `tabIndex -1`; focus is not restored to a neighbour after a removal; the Workspaces screen has no `h1`.
 - The dialog label "Type" shows the MIME type; the design says "format".
+- Image viewer, left out on purpose: neighbouring files are not preloaded; 16-bit and wide-gamut TIFF are converted to 8-bit sRGB in the PNG rendition; the viewer cannot be opened from the asset gallery (only from file lists).
 - Small inconsistencies: the asset breadcrumb is "Assets" only while the project one adds the name; `AssetsScreen` does not refresh `lastSelected` from a loaded page as `ProjectsScreen` does; role selects use `INPUT` instead of `SELECT`.
 
 ## Code structure

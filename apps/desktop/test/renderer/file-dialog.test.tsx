@@ -318,7 +318,8 @@ it('a text file in the list is shown with its placeholder', async () => {
   render(<Harness file={text} asset={null} list={listOf(files, 1)} />);
   await openDialog();
   expect(screen.getByText('2 / 2')).toBeTruthy();
-  expect(screen.getByText('TXT')).toBeTruthy();
+  // Once in the placeholder, once in the film strip.
+  expect(screen.getAllByText('TXT')).toHaveLength(2);
   expect(screen.queryByRole('region', { name: 'Image' })).toBeNull();
 });
 
@@ -329,4 +330,108 @@ it('without a list there is no counter and no arrows', async () => {
   expect(screen.queryByText(/^\d+ \/ \d+$/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Previous file (←)' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Next file (→)' })).toBeNull();
+});
+
+it('the viewer keys act on the dialog and do nothing for a file without a stage', async () => {
+  install();
+  const files = fileList(3);
+  const list = listOf(files, 1);
+  const { unmount } = render(<Harness file={files[1]!} asset={null} list={list} />);
+  const user = await openDialog();
+  await user.keyboard('{ArrowRight}');
+  expect(list.show).toHaveBeenCalledWith(2);
+  await user.keyboard('{ArrowLeft}');
+  expect(list.show).toHaveBeenCalledWith(0);
+  unmount();
+
+  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, kind: 'document' });
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={text} asset={null} />);
+    const second = await openDialog();
+    await second.keyboard('f+r');
+    expect(fs.requestFullscreen).not.toHaveBeenCalled();
+  } finally {
+    fs.restore();
+  }
+});
+
+function stubFullscreen() {
+  let current: Element | null = null;
+  const requestFullscreen = vi.fn(function (this: HTMLElement) {
+    current = this;
+    return Promise.resolve();
+  });
+  const exitFullscreen = vi.fn(() => {
+    current = null;
+    return Promise.resolve();
+  });
+  HTMLElement.prototype.requestFullscreen = requestFullscreen;
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => current });
+  document.exitFullscreen = exitFullscreen;
+  return {
+    requestFullscreen,
+    exitFullscreen,
+    changed: () => document.dispatchEvent(new Event('fullscreenchange')),
+    restore: () => {
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
+    },
+  };
+}
+
+it('the fullscreen button requests fullscreen on the wrapper and follows fullscreenchange', async () => {
+  install();
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    const button = await screen.findByRole('button', { name: 'Fullscreen' });
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    await user.click(button);
+    expect(fs.requestFullscreen).toHaveBeenCalledTimes(1);
+    const wrapper = fs.requestFullscreen.mock.contexts[0] as HTMLElement;
+    expect(wrapper.contains(screen.getByRole('toolbar'))).toBe(true);
+    fs.changed();
+    await waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('true'));
+  } finally {
+    fs.restore();
+  }
+});
+
+it('Esc leaves fullscreen first and closes the dialog the second time', async () => {
+  install();
+  const fs = stubFullscreen();
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    await user.click(await screen.findByRole('button', { name: 'Fullscreen' }));
+    fs.changed();
+    await user.keyboard('{Escape}');
+    expect(fs.exitFullscreen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+    fs.changed();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close' })).toBeNull());
+    expect(fs.exitFullscreen).toHaveBeenCalledTimes(1);
+  } finally {
+    fs.restore();
+  }
+});
+
+it('a rejected requestFullscreen leaves the button unpressed', async () => {
+  install();
+  const fs = stubFullscreen();
+  fs.requestFullscreen.mockImplementation(() => Promise.reject(new Error('denied')));
+  try {
+    render(<Harness file={fileRecord()} asset={null} />);
+    const user = await openDialog();
+    const button = await screen.findByRole('button', { name: 'Fullscreen' });
+    await user.click(button);
+    expect(fs.requestFullscreen).toHaveBeenCalled();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+  } finally {
+    fs.restore();
+  }
 });

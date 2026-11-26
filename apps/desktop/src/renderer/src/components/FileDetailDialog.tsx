@@ -7,7 +7,9 @@ import { formatBytes, formatDateTime } from '../format';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED } from '../ui';
+import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
+import { FilmStrip } from './FilmStrip';
 import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
@@ -74,6 +76,47 @@ export function FileDetailDialog({
     );
   }, [file.id, unmeasured]);
 
+  // Fullscreen shows the toolbar and the stage; the state follows the browser's event.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stageBox = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setFullscreen(document.fullscreenElement === stageBox.current && stageBox.current !== null);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      Promise.resolve(document.exitFullscreen?.()).catch(() => {});
+      return;
+    }
+    try {
+      Promise.resolve(stageBox.current?.requestFullscreen?.()).catch(() => {});
+    } catch {
+      // Fullscreen is refused; the button stays unpressed.
+    }
+  };
+  // Esc and Close leave fullscreen first.
+  const close = () => {
+    if (document.fullscreenElement) {
+      Promise.resolve(document.exitFullscreen?.()).catch(() => {});
+      return;
+    }
+    onClose();
+  };
+  useViewerKeys(rootRef, {
+    previous: () => list?.show(list.index - 1),
+    next: () => list?.show(list.index + 1),
+    zoomIn: () => controls?.zoomIn(),
+    zoomOut: () => controls?.zoomOut(),
+    fit: () => controls?.fit(),
+    actual: () => controls?.actual(),
+    rotate: () => controls?.rotate(),
+    fullscreen: () => {
+      if (controls !== null) toggleFullscreen();
+    },
+  });
+
   const title = asset === null ? file.originalName : `${file.originalName} | ${asset.name}`;
   const report = (message: string) => {
     setError(message);
@@ -101,7 +144,8 @@ export function FileDetailDialog({
   }
 
   return (
-    <Dialog open title={title} onClose={onClose} initialFocusRef={closeRef} size="detail">
+    <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
+      <div ref={rootRef} className="h-full">
       <div className="absolute right-4 top-4 flex items-center gap-2">
         {list !== null && (
           <>
@@ -130,7 +174,7 @@ export function FileDetailDialog({
             </button>
           </>
         )}
-        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={onClose}>
+        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={ICON_BUTTON} onClick={close}>
           <X size={18} aria-hidden />
         </button>
       </div>
@@ -194,20 +238,22 @@ export function FileDetailDialog({
             <Menu label="More" items={items} align="start" side="top" />
           </div>
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div ref={stageBox} className={`flex min-w-0 flex-1 flex-col gap-3 ${fullscreen ? 'bg-surface p-4' : ''}`}>
           {viewable ? (
             <>
-              <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={null} />}</div>
+              <div className="h-9 shrink-0">{controls !== null && <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />}</div>
               <div className="min-h-0 flex-1">
                 <ImageStage file={file} onControls={setControls} />
               </div>
             </>
           ) : (
-            <div className={`flex h-full w-full items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
+            <div className={`flex min-h-0 w-full flex-1 items-center justify-center rounded-control bg-raised text-lg ${MUTED}`}>
               {complete ? formatLabel(file.originalName) : label(file.status)}
             </div>
           )}
+          {list !== null && list.total >= 2 && <FilmStrip list={list} />}
         </div>
+      </div>
       </div>
     </Dialog>
   );
