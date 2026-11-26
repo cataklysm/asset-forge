@@ -10,11 +10,17 @@ import {
 } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
-import { MODEL_NOT_LISTED, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
+import { MODEL_NOT_LISTED, PROMPTS_LOAD_FAILED, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord } from './fixtures';
+import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { fileRecord, imagePrompt, nextId, taggingPrompt } from './fixtures';
+
+const TAG_DEFAULT = taggingPrompt({ name: 'Default' });
+const IMAGE_DEFAULT = imagePrompt({ name: 'Describe' });
+const IMAGE_SHORT = imagePrompt({ name: 'Short' });
+const PROMPTS = [TAG_DEFAULT, IMAGE_DEFAULT, IMAGE_SHORT];
 
 const CONFIGURED: VisionSettingsView = {
   baseUrl: 'http://127.0.0.1:11500',
@@ -48,6 +54,7 @@ function install(
   handlers: FakeHandlers = {},
 ) {
   return installFakeApi({
+    ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
     'settings:getVision': () => view,
     'settings:listVisionModels': () => models,
     'analysis:describe': () => ({ ok: true, text: TEXT }),
@@ -69,7 +76,9 @@ interface Harness {
 function ui({ open = true, file = FILE, onClose = () => {}, onOpenSettings = () => {} }: Harness) {
   return (
     <ProviderSettingsProvider>
-      <PromptDialog open={open} file={file} onClose={onClose} onOpenSettings={onOpenSettings} />
+      <AnalysisPromptsProvider>
+        <PromptDialog open={open} file={file} onClose={onClose} onOpenSettings={onOpenSettings} />
+      </AnalysisPromptsProvider>
     </ProviderSettingsProvider>
   );
 }
@@ -79,10 +88,12 @@ const FILE = fileRecord({ originalName: 'fox.png' });
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const modelSelect = () => screen.getByRole('combobox', { name: 'Prompt model' }) as HTMLSelectElement;
 const promptField = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as HTMLSelectElement;
 
 async function ready() {
   await waitFor(() => expect(modelSelect().value).toBe('vision-a'));
   await waitFor(() => expect(within(modelSelect()).getAllByRole('option').map((o) => o.textContent)).toContain('vision-b'));
+  await waitFor(() => expect(promptSelect().value).not.toBe(''));
 }
 
 afterEach(() => {
@@ -109,7 +120,7 @@ it('Generate sends analysis:describe with a fresh request id, the file and the c
   await user.click(button('Generate'));
   await waitFor(() => expect(callsOf(api, 'analysis:describe')).toHaveLength(2));
   const [first, second] = callsOf(api, 'analysis:describe') as DescribeRequest[];
-  expect(first).toEqual({ requestId: expect.stringMatching(UUID), fileId: FILE.id, model: 'vision-b' });
+  expect(first).toEqual({ requestId: expect.stringMatching(UUID), fileId: FILE.id, model: 'vision-b', promptId: IMAGE_DEFAULT.id });
   expect(second!.requestId).toMatch(UUID);
   expect(second!.requestId).not.toBe(first!.requestId);
 });
@@ -203,7 +214,9 @@ it('Settings is disabled with the given reason while the settings screen cannot 
   install(UNCONFIGURED);
   render(
     <ProviderSettingsProvider>
-      <PromptDialog open file={FILE} onClose={onClose} onOpenSettings={onOpenSettings} settingsBlocked="Import in progress" />
+      <AnalysisPromptsProvider>
+        <PromptDialog open file={FILE} onClose={onClose} onOpenSettings={onOpenSettings} settingsBlocked="Import in progress" />
+      </AnalysisPromptsProvider>
     </ProviderSettingsProvider>,
   );
   const settings = await screen.findByRole('button', { name: 'Settings' });
@@ -384,4 +397,105 @@ it('uses only the shared button classes', async () => {
   await ready();
   for (const element of screen.getAllByRole('button'))
     expect([BUTTON, BUTTON_INLINE, ICON_BUTTON]).toContain(element.className);
+});
+
+it('the prompt select lists the Image to prompt prompts only, below the model select, without a tag limit', async () => {
+  install();
+  render(ui({}));
+  await ready();
+  const options = within(promptSelect()).getAllByRole('option') as HTMLOptionElement[];
+  expect(options.map((o) => o.textContent)).toEqual(['Describe', 'Short']);
+  expect(options.map((o) => o.title)).toEqual(['', '']);
+  expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
+  expect(modelSelect().compareDocumentPosition(promptSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('preselects the Image to prompt prompt used last', async () => {
+  install(CONFIGURED, MODELS, fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DEFAULT.id, imagePrompt: IMAGE_SHORT.id } }).handlers);
+  render(ui({}));
+  await ready();
+  expect(promptSelect().value).toBe(IMAGE_SHORT.id);
+});
+
+it('preselects the first Image to prompt prompt when the one used last is gone', async () => {
+  install(CONFIGURED, MODELS, fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: null, imagePrompt: nextId() } }).handlers);
+  render(ui({}));
+  await ready();
+  expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
+  expect(button('Generate').disabled).toBe(false);
+});
+
+it('Generate sends the chosen prompt, and reopening preselects it', async () => {
+  const user = userEvent.setup();
+  const api = install();
+  const { rerender } = render(ui({}));
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  await user.click(button('Generate'));
+  await waitFor(() => expect(promptField().value).toBe(TEXT));
+  expect(callsOf(api, 'analysis:describe')[0]).toMatchObject({ promptId: IMAGE_SHORT.id });
+  rerender(ui({ open: false }));
+  rerender(ui({ open: true }));
+  await ready();
+  expect(promptSelect().value).toBe(IMAGE_SHORT.id);
+});
+
+it('a cancelled answer still counts as used', async () => {
+  const user = userEvent.setup();
+  install(CONFIGURED, MODELS, { 'analysis:describe': () => ({ ok: false, code: 'cancelled' }) });
+  const { rerender } = render(ui({}));
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  await user.click(button('Generate'));
+  await waitFor(() => expect(button('Generate').disabled).toBe(false));
+  rerender(ui({ open: false }));
+  rerender(ui({ open: true }));
+  await ready();
+  expect(promptSelect().value).toBe(IMAGE_SHORT.id);
+});
+
+it('a busy answer does not count as used', async () => {
+  const user = userEvent.setup();
+  install(CONFIGURED, MODELS, { 'analysis:describe': () => ({ ok: false, code: 'busy' }) });
+  const { rerender } = render(ui({}));
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  await user.click(button('Generate'));
+  expect((await screen.findByRole('alert')).textContent).toBe(PROMPT_BUSY_MESSAGE);
+  rerender(ui({ open: false }));
+  rerender(ui({ open: true }));
+  await ready();
+  expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
+});
+
+it('a failed prompt load blocks Generate with its own reason', async () => {
+  install(CONFIGURED, MODELS, {
+    'analysisPrompts:list': () => {
+      throw fakeError('internal_error');
+    },
+  });
+  render(ui({}));
+  await waitFor(() => expect(button('Generate').title).toBe(PROMPTS_LOAD_FAILED));
+  expect(button('Generate').disabled).toBe(true);
+});
+
+it('a Generate refused with not_found shows the error and falls back to an existing prompt', async () => {
+  const user = userEvent.setup();
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  const api = install(CONFIGURED, MODELS, {
+    ...prompts.handlers,
+    'analysis:describe': () => {
+      prompts.state.prompts = prompts.state.prompts.filter((p) => p.id !== IMAGE_SHORT.id);
+      throw fakeError('not_found', 'The analysis prompt does not exist');
+    },
+  });
+  render(ui({}));
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  const lists = callsOf(api, 'analysisPrompts:list').length;
+  await user.click(button('Generate'));
+  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  await waitFor(() => expect(promptSelect().value).toBe(IMAGE_DEFAULT.id));
+  expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
+  expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Describe']);
 });

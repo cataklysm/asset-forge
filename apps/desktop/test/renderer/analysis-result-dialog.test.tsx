@@ -18,14 +18,21 @@ import {
   NO_VISION_MODEL,
   NOT_ANALYSABLE,
   PROPOSAL_CHANGED,
+  proposalKey,
   STALE_TITLE,
 } from '../../src/renderer/src/components/AnalysisResultDialog';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
-import { SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
+import { PROMPTS_LOAD_FAILED, SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AI_CHIP, BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, nextId } from './fixtures';
+import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { fileRecord, imagePrompt, nextId, taggingPrompt } from './fixtures';
+
+const TAG_DEFAULT = taggingPrompt({ name: 'Default' });
+const TAG_DETAIL = taggingPrompt({ name: 'Detail', maxTags: 30 });
+const IMAGE_DEFAULT = imagePrompt({ name: 'Describe' });
+const PROMPTS = [TAG_DEFAULT, IMAGE_DEFAULT, TAG_DETAIL];
 
 const NOW = '2026-01-01T00:00:00.000Z';
 
@@ -101,6 +108,7 @@ function setup(file: FileRecord, options: Options = {}) {
     summary: IDLE,
   };
   const api = installFakeApi({
+    ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
     'settings:getVision': () => options.settings ?? CONFIGURED,
     'settings:listVisionModels': () => options.models ?? MODELS,
     'jobs:summary': () => state.summary,
@@ -120,13 +128,15 @@ function setup(file: FileRecord, options: Options = {}) {
   const ui = (open: boolean, shownFile: FileRecord = file) => (
     <JobsProvider>
       <ProviderSettingsProvider>
-        <AnalysisResultDialog
-          open={open}
-          file={shownFile}
-          onClose={onClose}
-          onChanged={onChanged}
-          onOpenSettings={onOpenSettings}
-        />
+        <AnalysisPromptsProvider>
+          <AnalysisResultDialog
+            open={open}
+            file={shownFile}
+            onClose={onClose}
+            onChanged={onChanged}
+            onOpenSettings={onOpenSettings}
+          />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>
   );
@@ -167,6 +177,7 @@ describe('AnalysisResultDialog', () => {
       model: 'vision-b',
       mode: 'propose',
       force: true,
+      promptId: TAG_DEFAULT.id,
     });
     // The new job state is read again.
     await waitFor(() => expect(callsOf(api, 'analysis:getProposal').length).toBeGreaterThanOrEqual(2));
@@ -576,5 +587,125 @@ describe('AnalysisResultDialog', () => {
     await screen.findByRole('checkbox', { name: 'Wood' });
     await providerReady();
     for (const el of screen.getAllByRole('button')) expect([BUTTON, ICON_BUTTON, BUTTON_INLINE]).toContain(el.className);
+  });
+});
+
+describe('AnalysisResultDialog prompt choice', () => {
+  const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as HTMLSelectElement;
+
+  async function promptsListed() {
+    await waitFor(() => expect(within(promptSelect()).queryAllByRole('option').length).toBeGreaterThan(1));
+  }
+
+  it('lists the tagging prompts only, below the model select', async () => {
+    setup(fileRecord());
+    await providerReady();
+    await promptsListed();
+    const options = within(promptSelect()).getAllByRole('option') as HTMLOptionElement[];
+    expect(options.map((o) => o.textContent)).toEqual(['Default', 'Detail']);
+    expect(options.map((o) => o.title)).toEqual(['Tag limit 15', 'Tag limit 30']);
+    expect(modelSelect().compareDocumentPosition(promptSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('preselects the tagging prompt used last', async () => {
+    setup(fileRecord(), {
+      handlers: fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DETAIL.id, imagePrompt: null } }).handlers,
+    });
+    await waitFor(() => expect(promptSelect().value).toBe(TAG_DETAIL.id));
+  });
+
+  it('preselects the first tagging prompt when the one used last is gone', async () => {
+    setup(fileRecord(), {
+      handlers: fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id } }).handlers,
+    });
+    await providerReady();
+    await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
+    expect(button('Analyse').disabled).toBe(false);
+  });
+
+  it('Analyse sends the chosen prompt, and reopening preselects it', async () => {
+    const file = fileRecord();
+    const { api, rerender } = setup(file);
+    await providerReady();
+    await promptsListed();
+    const user = userEvent.setup();
+    await user.selectOptions(promptSelect(), TAG_DETAIL.id);
+    await user.click(button('Analyse'));
+    await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
+    expect(callsOf(api, 'analysis:enqueue')[0]!.request).toMatchObject({ mode: 'propose', promptId: TAG_DETAIL.id });
+    await waitFor(() => expect(button('Analyse').disabled).toBe(false));
+    rerender(false);
+    rerender(true);
+    await providerReady();
+    await waitFor(() => expect(promptSelect().value).toBe(TAG_DETAIL.id));
+  });
+
+  it('Analyse again sends the chosen prompt', async () => {
+    const { api } = setup(fileRecord(), { stored: { proposal: proposalOf(), job: null } });
+    await providerReady();
+    await promptsListed();
+    const user = userEvent.setup();
+    await user.selectOptions(promptSelect(), TAG_DETAIL.id);
+    await user.click(button('Analyse again'));
+    await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
+    expect(callsOf(api, 'analysis:enqueue')[0]!.request).toMatchObject({ promptId: TAG_DETAIL.id });
+  });
+
+  it('a failed prompt load blocks Analyse with its own reason', async () => {
+    setup(fileRecord(), {
+      handlers: {
+        'analysisPrompts:list': () => {
+          throw fakeError('internal_error');
+        },
+      },
+    });
+    await providerReady();
+    await waitFor(() => expect(button('Analyse').title).toBe(PROMPTS_LOAD_FAILED));
+    expect(button('Analyse').disabled).toBe(true);
+  });
+
+  it('an Analyse refused with not_found shows the error and falls back to an existing prompt', async () => {
+    const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+    const { api } = setup(fileRecord(), {
+      handlers: {
+        ...prompts.handlers,
+        'analysis:enqueue': () => {
+          prompts.state.prompts = prompts.state.prompts.filter((p) => p.id !== TAG_DETAIL.id);
+          throw fakeError('not_found', 'The analysis prompt does not exist');
+        },
+      },
+    });
+    await providerReady();
+    await promptsListed();
+    const user = userEvent.setup();
+    await user.selectOptions(promptSelect(), TAG_DETAIL.id);
+    const lists = callsOf(api, 'analysisPrompts:list').length;
+    await user.click(button('Analyse'));
+    expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+    await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
+    expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
+    expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Default']);
+  });
+
+  it('shows the prompt name of a proposal beside its model', async () => {
+    setup(fileRecord(), { stored: { proposal: proposalOf({ model: 'vision-b', promptName: 'Detail' }), job: null } });
+    await screen.findByRole('checkbox', { name: 'Wood' });
+    const model = screen.getByTitle('Model');
+    const prompt = screen.getByTitle('Prompt');
+    expect(model.textContent).toBe('vision-b');
+    expect(prompt.textContent).toBe('Detail');
+    expect(model.nextElementSibling).toBe(prompt);
+  });
+
+  it('the proposal key tells proposals of different prompts apart', () => {
+    expect(proposalKey(proposalOf({ promptName: 'Detail' }))).not.toBe(proposalKey(proposalOf({ promptName: null })));
+  });
+
+  it('a proposal without a prompt name shows the model only', async () => {
+    setup(fileRecord(), { stored: { proposal: proposalOf({ model: 'vision-b', promptName: null }), job: null } });
+    await screen.findByRole('checkbox', { name: 'Wood' });
+    expect(screen.getByTitle('Model').textContent).toBe('vision-b');
+    expect(screen.queryByTitle('Prompt')).toBeNull();
+    expect(screen.getByTitle('Model').nextElementSibling).toBeNull();
   });
 });

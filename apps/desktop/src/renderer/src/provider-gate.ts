@@ -1,13 +1,30 @@
 import { JOB_ERROR_MESSAGES } from '@assetforge/contracts';
+import type { AnalysisPromptsState } from './analysis-prompts-context';
 import {
   CHOOSE_MODEL,
+  CHOOSE_PROMPT,
   MODEL_NOT_LISTED,
   MODEL_NOT_VISION,
   NO_VISION_MODEL,
+  PROMPTS_LOAD_FAILED,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
 } from './labels';
 import type { ProviderState } from './provider-context';
+
+/**
+ * Why nothing can start with the analysis prompt `promptId`, as the start button's tooltip; null
+ * when it can. A failed prompt load is its own state, like a failed settings load in `providerGate`.
+ */
+export function promptGate(
+  state: Pick<AnalysisPromptsState, 'prompts' | 'loading' | 'failed'>,
+  promptId: string | null,
+): string | null {
+  if (state.failed) return PROMPTS_LOAD_FAILED;
+  if (state.prompts === null) return START_LOADING;
+  if (promptId === null || !state.prompts.some((p) => p.id === promptId)) return CHOOSE_PROMPT;
+  return null;
+}
 
 /** Model list failures the settings screen fixes. */
 const SETTINGS_CODES: ReadonlySet<string> = new Set(['provider_unauthorized', 'provider_not_configured']);

@@ -1,7 +1,8 @@
 import { RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
-import { call, describeError } from '../api';
+import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import {
   START_COUNTING,
@@ -13,10 +14,11 @@ import {
   START_RETRY_PREVIEW_LABEL,
 } from '../labels';
 import { useProvider } from '../provider-context';
-import { providerGate } from '../provider-gate';
+import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
 interface Props {
@@ -44,14 +46,18 @@ export function wouldEnqueue(preview: AnalysisPreview, force: boolean): number {
 
 /**
  * Starts a batch analysis of a target (several files, an asset, a file or asset filter): a tagging
- * model (the stored default preselected, changeable), the preview counts for that model, "Analyse
+ * model (the stored default preselected, changeable), a tagging prompt (the one used last
+ * preselected, changeable), the preview counts for that model, "Analyse
  * again" (`force`) and Start, which enqueues in mode `apply`.
  */
 export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings, settingsBlocked = null }: Props) {
   const provider = useProvider();
+  const prompts = useAnalysisPrompts();
   const jobs = useJobs();
   // Null while the owner has not chosen: the stored tagging default is in force.
   const [choice, setChoice] = useState<{ model: string | null } | null>(null);
+  // Null while the owner has not chosen: the tagging prompt used last (or the first) is in force.
+  const [promptChoice, setPromptChoice] = useState<string | null>(null);
   const [force, setForce] = useState(false);
   const [preview, setPreview] = useState<AnalysisPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -68,6 +74,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     setWasOpen(open);
     if (open) {
       setChoice(null);
+      setPromptChoice(null);
       setForce(false);
       setError(null);
     }
@@ -76,6 +83,8 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   const { settings } = provider;
   const configured = settings !== null && settings.baseUrl !== null;
   const model = choice !== null ? choice.model : (settings?.taggingModel ?? null);
+  // The prompt is not part of the preview: the counts do not depend on it.
+  const promptId = promptChoice ?? defaultPromptId(prompts, 'tagging');
 
   // The target as a value: a caller may pass an equal target as a new object on every render.
   const targetKey = target === null ? null : JSON.stringify(target);
@@ -114,6 +123,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   const { blocked: providerBlocked, offerSettings } = providerGate(provider, model);
   const blocked =
     providerBlocked ??
+    promptGate(prompts, promptId) ??
     (previewError !== null
       ? START_PREVIEW_FAILED
       : previewing || preview === null
@@ -125,17 +135,23 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
 
   async function start(event?: FormEvent) {
     event?.preventDefault();
-    if (startingRef.current || !canStart || target === null || model === null) return;
+    if (startingRef.current || !canStart || target === null || model === null || promptId === null) return;
     startingRef.current = true;
     setStarting(true);
     setError(null);
     try {
-      const result = await call('analysis:enqueue', { target, model, mode: 'apply', force });
+      const result = await call('analysis:enqueue', { target, model, mode: 'apply', force, promptId });
+      prompts.noteUsed('tagging', promptId);
       jobs.refresh();
       onStarted(result);
       onClose();
     } catch (e) {
       setError(describeError(e));
+      // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
+      if (e instanceof ApiError && e.code === 'not_found') {
+        setPromptChoice(null);
+        void prompts.reload().catch(() => {});
+      }
     } finally {
       startingRef.current = false;
       setStarting(false);
@@ -193,6 +209,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
           onChange={(next) => setChoice({ model: next })}
           disabled={starting || !configured}
         />
+        <PromptSelect purpose="tagging" value={promptId} onChange={setPromptChoice} disabled={starting} />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2" aria-busy={previewing || undefined}>
           {START_COUNTS.map(({ key, label, title }) => (
             <div key={key} className="flex flex-col" title={title}>

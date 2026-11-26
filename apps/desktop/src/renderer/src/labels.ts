@@ -96,6 +96,15 @@ export const CHOOSE_MODEL = 'Choose a model';
 export const MODEL_NOT_LISTED = 'The provider does not offer this model';
 export const MODEL_NOT_VISION = 'This model cannot analyse images';
 
+/** The prompt choice of the analysis and prompt dialogs (PromptSelect, `promptGate`). */
+export const PROMPT_SELECT_LABEL = 'Prompt';
+export const NO_PROMPT_LABEL = 'No prompt';
+export const CHOOSE_PROMPT = 'Choose a prompt';
+/** The tooltip of a tagging prompt in the select. */
+export function tagLimitTitle(maxTags: number): string {
+  return `Tag limit ${maxTags}`;
+}
+
 /** The start dialog (AnalysisStartDialog). */
 export const START_PREVIEW_FAILED = 'The files could not be counted';
 export const START_RETRY_PREVIEW_LABEL = 'Count again';

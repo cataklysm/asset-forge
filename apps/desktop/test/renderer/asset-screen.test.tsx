@@ -18,6 +18,7 @@ import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ANALYSE_ASSET_TITLE } from '../../src/renderer/src/labels';
 import type { AssetTab } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
@@ -627,7 +628,9 @@ function renderWithProvider(id: string) {
   return render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <Harness id={id} />
+        <AnalysisPromptsProvider>
+          <Harness id={id} />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>,
   );
