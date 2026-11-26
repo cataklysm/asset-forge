@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import {
+  MOCK_LEGACY_MODEL,
+  MOCK_MODEL,
+  MOCK_TEXT_MODEL,
+  startMockProvider,
+  type MockProvider,
+} from '../../../docker/mock-provider/server.mjs';
+
+const KEY = 'test-key-not-real';
 
 let provider: MockProvider | undefined;
 
@@ -13,7 +21,7 @@ function chat(url: string, image: string | null, model = MOCK_MODEL): Promise<Re
   return fetch(`${url}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model, stream: false, messages: [message] }),
+    body: JSON.stringify({ model, stream: false, format: { type: 'object' }, messages: [message] }),
   });
 }
 
@@ -31,10 +39,76 @@ afterEach(async () => {
 });
 
 describe('mock provider', () => {
-  it('lists the mock model', async () => {
+  it('lists a vision model, a text model and one without capabilities', async () => {
     const { url } = await start();
     const response = await fetch(`${url}/api/tags`);
-    expect(await response.json()).toEqual({ models: [{ name: 'mock-vision', model: 'mock-vision' }] });
+    expect(await response.json()).toEqual({
+      models: [
+        { name: 'mock-vision', model: 'mock-vision' },
+        { name: MOCK_TEXT_MODEL, model: MOCK_TEXT_MODEL },
+        { name: MOCK_LEGACY_MODEL, model: MOCK_LEGACY_MODEL },
+      ],
+    });
+  });
+
+  it('shows the capabilities of each model', async () => {
+    const { url } = await start();
+    const show = async (model: string) => {
+      const response = await fetch(`${url}/api/show`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model }),
+      });
+      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+    };
+    expect(await show(MOCK_MODEL)).toMatchObject({ status: 200, body: { capabilities: ['completion', 'vision'] } });
+    expect(await show(MOCK_TEXT_MODEL)).toMatchObject({ status: 200, body: { capabilities: ['completion'] } });
+    const legacy = await show(MOCK_LEGACY_MODEL);
+    expect(legacy.status).toBe(200);
+    expect(legacy.body).not.toHaveProperty('capabilities');
+    expect((await show('other')).status).toBe(404);
+  });
+
+  it('answers a chat without format in plain text, the same for the same image', async () => {
+    const { url } = await start();
+    const describe = async (image: string) => {
+      const response = await fetch(`${url}/api/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: MOCK_MODEL, stream: false, messages: [{ role: 'user', content: 'x', images: [image] }] }),
+      });
+      return ((await response.json()) as { message: { content: string } }).message.content;
+    };
+    const first = await describe(imageA);
+    expect(first.length).toBeGreaterThan(0);
+    expect(() => JSON.parse(first) as unknown).toThrow();
+    expect(await describe(imageA)).toBe(first);
+    expect(await describe(imageB)).not.toBe(first);
+  });
+
+  it('requires the bearer key when one is set, and never logs it', async () => {
+    const lines: string[] = [];
+    const { url } = await start({ apiKey: KEY, log: (line) => void lines.push(line) });
+    const auth = { authorization: `Bearer ${KEY}` };
+    expect((await fetch(`${url}/api/tags`)).status).toBe(401);
+    expect((await fetch(`${url}/api/tags`, { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
+    expect((await fetch(`${url}/api/tags`, { headers: { authorization: KEY } })).status).toBe(401);
+    expect((await chat(url, imageA)).status).toBe(401);
+    expect((await fetch(`${url}/api/tags`, { headers: auth })).status).toBe(200);
+    const authorized = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...auth },
+      body: JSON.stringify({ model: MOCK_MODEL, format: {}, messages: [{ role: 'user', content: 'x', images: [imageA] }] }),
+    });
+    expect(authorized.status).toBe(200);
+    expect(lines.length).toBeGreaterThanOrEqual(6);
+    expect(lines.join('\n')).not.toContain(KEY);
+    expect(lines.join('\n')).not.toContain('wrong');
+  });
+
+  it('needs no key when none is set', async () => {
+    const { url } = await start({ apiKey: '' });
+    expect((await fetch(`${url}/api/tags`)).status).toBe(200);
   });
 
   it('answers the same image with the same eight tags and another image with different ones', async () => {

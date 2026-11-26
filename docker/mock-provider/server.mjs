@@ -3,6 +3,17 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 
 export const MOCK_MODEL = 'mock-vision';
+/** A model whose capabilities lack vision. */
+export const MOCK_TEXT_MODEL = 'mock-text';
+/** A model whose show answer carries no capabilities, like an older server. */
+export const MOCK_LEGACY_MODEL = 'mock-legacy';
+
+const MODELS = [MOCK_MODEL, MOCK_TEXT_MODEL, MOCK_LEGACY_MODEL];
+const SHOW = {
+  [MOCK_MODEL]: { capabilities: ['completion', 'vision'] },
+  [MOCK_TEXT_MODEL]: { capabilities: ['completion'] },
+  [MOCK_LEGACY_MODEL]: { modelfile: '' },
+};
 
 const VOCABULARY = [
   'chair', 'table', 'lamp', 'sword', 'shield', 'barrel', 'crate', 'tree', 'rock', 'house',
@@ -38,13 +49,24 @@ function sendJson(res, status, body) {
   res.end(text);
 }
 
+/** A plain-text description for a chat request without `format`, derived from the same picks as the tags. */
+function descriptionFor(imageBytes) {
+  const tags = tagsFor(imageBytes);
+  return `A ${tags[7]} ${tags[6]} of a ${tags[0]} with ${tags[1]} and ${tags[2]}.`;
+}
+
 export async function startMockProvider(options = {}) {
-  const { port = 11500, host = '127.0.0.1', delayMs = 0 } = options;
+  const { port = 11500, host = '127.0.0.1', delayMs = 0, log = () => {} } = options;
+  // An empty key means none: the Compose file passes an unset variable through as an empty string.
+  const apiKey = options.apiKey ? String(options.apiKey) : null;
   const failures = [...(options.failures ?? [])];
   const requests = [];
   const timers = new Set();
 
   const server = createServer((req, res) => {
+    // The log line carries method, path and status only; headers (and so the key) never reach it.
+    const logged = (req.url ?? '').split('?')[0];
+    res.on('finish', () => log(`${req.method ?? ''} ${logged} ${res.statusCode}`));
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
@@ -60,8 +82,18 @@ export async function startMockProvider(options = {}) {
       }
       requests.push({ method: req.method ?? '', path, body, headers: { ...req.headers } });
 
+      if (apiKey !== null && req.headers.authorization !== `Bearer ${apiKey}`) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
       if (req.method === 'GET' && path === '/api/tags') {
-        sendJson(res, 200, { models: [{ name: MOCK_MODEL, model: MOCK_MODEL }] });
+        sendJson(res, 200, { models: MODELS.map((name) => ({ name, model: name })) });
+        return;
+      }
+      if (req.method === 'POST' && path === '/api/show') {
+        const model = body && typeof body === 'object' ? body.model : undefined;
+        if (typeof model === 'string' && Object.hasOwn(SHOW, model)) sendJson(res, 200, SHOW[model]);
+        else sendJson(res, 404, { error: 'model not found' });
         return;
       }
       if (req.method !== 'POST' || path !== '/api/chat') {
@@ -90,10 +122,13 @@ export async function startMockProvider(options = {}) {
         return;
       }
 
+      const bytes = Buffer.from(image, 'base64');
       const content =
         failure === 'invalid'
           ? 'not json'
-          : JSON.stringify({ tags: tagsFor(Buffer.from(image, 'base64')) });
+          : request.format === undefined
+            ? descriptionFor(bytes)
+            : JSON.stringify({ tags: tagsFor(bytes) });
       const answer = () =>
         sendJson(res, 200, {
           model: MOCK_MODEL,
@@ -139,6 +174,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     port: Number(process.env.MOCK_PORT ?? 11500),
     host: process.env.MOCK_HOST ?? '127.0.0.1',
     delayMs: Number(process.env.MOCK_DELAY_MS ?? 0),
+    apiKey: process.env.MOCK_API_KEY,
+    log: (line) => console.log(line),
   });
   console.log(`mock vision provider listening on ${provider.url}`);
   for (const signal of ['SIGINT', 'SIGTERM']) {

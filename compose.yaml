@@ -6,6 +6,7 @@ services:
     environment:
       MOCK_HOST: 0.0.0.0
       MOCK_DELAY_MS: ${MOCK_DELAY_MS:-0}
+      MOCK_API_KEY: ${MOCK_API_KEY:-}
     ports:
       - '127.0.0.1:11500:11500'
     volumes:

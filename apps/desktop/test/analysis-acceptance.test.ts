@@ -39,6 +39,7 @@ async function mockTagsOf(bytes: Uint8Array): Promise<string[]> {
     body: JSON.stringify({
       model: MOCK_MODEL,
       stream: false,
+      format: { type: 'object' },
       messages: [{ role: 'user', content: 'tag', images: [Buffer.from(bytes).toString('base64')] }],
     }),
   });
