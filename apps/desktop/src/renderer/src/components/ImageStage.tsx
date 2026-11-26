@@ -51,7 +51,8 @@ interface Anchor extends Point {
   scrollLeft: number;
   scrollTop: number;
   box: Size;
-  content: Size;
+  /** Where the box sits inside the scrolled content. */
+  offset: Point;
 }
 
 function Stage({ file, onControls }: Props) {
@@ -69,10 +70,16 @@ function Stage({ file, onControls }: Props) {
   // The basis of every percentage: the stored size, or the preview's own size when that is all there is.
   const image: Size = large !== null ? { width: file.width ?? 0, height: file.height ?? 0 } : natural;
   const dpr = window.devicePixelRatio || 1;
+  // Sizes and offsets lie on the device-pixel grid: a fractional one would make the browser
+  // resample, and with `pixelated` it doubles or drops a row or column at 100 %.
+  const snap = (value: number) => Math.round(value * dpr) / dpr;
   const exact = effectivePercent(zoom, image, stage, dpr, rotation);
-  const element = cssSize(image, exact, dpr);
+  const unsnapped = cssSize(image, exact, dpr);
+  const element: Size = { width: snap(unsnapped.width), height: snap(unsnapped.height) };
   const box = rotated(element, rotation);
   const content: Size = { width: Math.max(stage.width, box.width), height: Math.max(stage.height, box.height) };
+  // The box is centred in a stage larger than itself.
+  const offset: Point = { x: snap((content.width - box.width) / 2), y: snap((content.height - box.height) / 2) };
   const marker =
     source === 'reduced' ? `Reduced from ${file.width} × ${file.height} px` : large === null ? 'Preview only' : null;
 
@@ -83,16 +90,16 @@ function Stage({ file, onControls }: Props) {
     const el = stageRef.current;
     if (pending === null || el === null) return;
     anchor.current = null;
-    const axis = (scroll: number, pointer: number, before: number, beforeContent: number, after: number, afterContent: number) =>
-      anchoredScroll(scroll - (beforeContent - before) / 2, pointer, before, after) + (afterContent - after) / 2;
-    el.scrollLeft = axis(pending.scrollLeft, pending.x, pending.box.width, pending.content.width, box.width, content.width);
-    el.scrollTop = axis(pending.scrollTop, pending.y, pending.box.height, pending.content.height, box.height, content.height);
+    const axis = (scroll: number, pointer: number, before: number, beforeOffset: number, after: number, afterOffset: number) =>
+      anchoredScroll(scroll - beforeOffset, pointer, before, after) + afterOffset;
+    el.scrollLeft = axis(pending.scrollLeft, pending.x, pending.box.width, pending.offset.x, box.width, offset.x);
+    el.scrollTop = axis(pending.scrollTop, pending.y, pending.box.height, pending.offset.y, box.height, offset.y);
   });
 
   function zoomTo(next: Zoom, at?: Point) {
     const el = stageRef.current;
     const point = at ?? { x: stage.width / 2, y: stage.height / 2 };
-    anchor.current = { ...point, scrollLeft: el?.scrollLeft ?? 0, scrollTop: el?.scrollTop ?? 0, box, content };
+    anchor.current = { ...point, scrollLeft: el?.scrollLeft ?? 0, scrollTop: el?.scrollTop ?? 0, box, offset };
     setZoom(next);
   }
 
@@ -147,7 +154,9 @@ function Stage({ file, onControls }: Props) {
   );
   const onControlsRef = useRef(onControls);
   onControlsRef.current = onControls;
-  useEffect(() => onControlsRef.current(controls), [controls]);
+  useEffect(() => {
+    onControlsRef.current(controls);
+  }, [controls]);
 
   const drag = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -172,13 +181,17 @@ function Stage({ file, onControls }: Props) {
     drag.current = null;
   };
 
+  // Unrotated, the layers fill the box and carry no transform; rotated, they are centred in the box
+  // and turned about their centre.
   const layer = {
     width: `${element.width}px`,
     height: `${element.height}px`,
-    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+    left: `${snap((box.width - element.width) / 2)}px`,
+    top: `${snap((box.height - element.height) / 2)}px`,
+    ...(rotation === 0 ? {} : { transform: `rotate(${rotation}deg)` }),
     imageRendering: exact >= 100 ? 'pixelated' : 'auto',
   } as const;
-  const layerClass = 'absolute left-1/2 top-1/2 max-w-none select-none';
+  const layerClass = 'absolute max-w-none select-none';
 
   return (
     <div className="relative h-full w-full">
@@ -187,7 +200,7 @@ function Stage({ file, onControls }: Props) {
         role="region"
         aria-label="Image"
         tabIndex={0}
-        className={`h-full w-full cursor-grab overflow-auto rounded-control bg-raised active:cursor-grabbing ${FOCUS}`}
+        className={`h-full w-full cursor-grab select-none overflow-auto rounded-control bg-raised active:cursor-grabbing ${FOCUS}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
@@ -196,8 +209,11 @@ function Stage({ file, onControls }: Props) {
           if (canActual) zoomTo(zoom.mode === 'fit' ? { mode: 'percent', percent: 100 } : { mode: 'fit' }, pointerOf(event));
         }}
       >
-        <div className="flex items-center justify-center" style={{ width: `${content.width}px`, height: `${content.height}px` }}>
-          <div className="relative shrink-0" style={{ width: `${box.width}px`, height: `${box.height}px` }}>
+        <div className="relative" style={{ width: `${content.width}px`, height: `${content.height}px` }}>
+          <div
+            className="absolute"
+            style={{ left: `${offset.x}px`, top: `${offset.y}px`, width: `${box.width}px`, height: `${box.height}px` }}
+          >
             {(!loaded || large === null) && (
               <img
                 src={previewUrl(file.id, 'detail')}

@@ -173,11 +173,59 @@ it('a press on the scrollbars starts no pan; a press on the image does', () => {
 });
 
 it('rotate swaps the box and refits', () => {
-  render(<Viewer file={png(4000, 2000)} />);
+  const file = png(4000, 2000);
+  render(<Viewer file={file} />);
   fireEvent.click(button('Rotate'));
   expect(percent()).toBe('20%');
   expect(box().style.width).toBe('400px');
   expect(box().style.height).toBe('800px');
+  expect(large(file)!.style.transform).toBe('rotate(90deg)');
+});
+
+const px = (value: string) => {
+  expect(value).toMatch(/px$/);
+  return Number.parseFloat(value);
+};
+const onDeviceGrid = (value: string, dpr: number) => {
+  const device = px(value) * dpr;
+  expect(Math.abs(device - Math.round(device))).toBeLessThan(1e-6);
+};
+
+it('without rotation the image layers carry no transform', () => {
+  const file = png(4000, 2000);
+  render(<Viewer file={file} />);
+  expect(images()).toHaveLength(2);
+  for (const img of images()) expect(img.style.transform).toBe('');
+  fireEvent.click(button('100%'));
+  for (const img of images()) expect(img.style.transform).toBe('');
+});
+
+it('at 100% with a fractional devicePixelRatio every size and offset lies on the device-pixel grid', () => {
+  setDpr(1.25);
+  // 1001 × 601 image pixels are 800.8 × 480.8 CSS pixels; centred in 1000 × 800 the offsets would be 99.6 / 159.6.
+  const file = png(1001, 601);
+  render(<Viewer file={file} />);
+  fireEvent.click(button('100%'));
+  expect(percent()).toBe('100%');
+  for (const element of [box(), ...images()]) {
+    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top]) onDeviceGrid(value, 1.25);
+  }
+  expect(px(large(file)!.style.width) * 1.25).toBeCloseTo(1001, 6);
+  expect(px(large(file)!.style.height) * 1.25).toBeCloseTo(601, 6);
+
+  fireEvent.click(button('Rotate'));
+  fireEvent.click(button('100%'));
+  expect(px(box().style.width) * 1.25).toBeCloseTo(601, 6);
+  expect(px(box().style.height) * 1.25).toBeCloseTo(1001, 6);
+  for (const element of [box(), ...images()]) {
+    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top]) onDeviceGrid(value, 1.25);
+  }
+  expect(large(file)!.style.transform).toBe('rotate(90deg)');
+});
+
+it('the stage does not select text while panning', () => {
+  render(<Viewer file={png(4000, 2000)} />);
+  expect(stage().className.split(/\s+/)).toContain('select-none');
 });
 
 it('TIFF loads its converted rendition; an oversized image its reduced one with a marker', () => {
