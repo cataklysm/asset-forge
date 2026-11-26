@@ -6,15 +6,23 @@ import {
   type FileRecord,
   type IpcRequest,
   type ListModelsResult,
-  type VisionSettingsView,
+  type ProviderView,
 } from '@assetforge/contracts';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
-import { MODEL_NOT_LISTED, PROMPTS_LOAD_FAILED, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { MODEL_NOT_LISTED, PROMPTS_LOAD_FAILED, PROVIDER_STATE_LABELS, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
+import { ProviderSettingsProvider, useProviders, type ProvidersState } from '../../src/renderer/src/provider-context';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import {
+  deferred,
+  fakeAnalysisPrompts,
+  fakeError,
+  fakeProviders,
+  installFakeApi,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { fileRecord, imagePrompt, nextId, taggingPrompt } from './fixtures';
 
 const TAG_DEFAULT = taggingPrompt({ name: 'Default' });
@@ -22,17 +30,9 @@ const IMAGE_DEFAULT = imagePrompt({ name: 'Describe' });
 const IMAGE_SHORT = imagePrompt({ name: 'Short' });
 const PROMPTS = [TAG_DEFAULT, IMAGE_DEFAULT, IMAGE_SHORT];
 
-const CONFIGURED: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 120,
-  taggingModel: 'vision-b',
-  promptModel: 'vision-a',
-  hasApiKey: false,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
-
-const UNCONFIGURED: VisionSettingsView = { ...CONFIGURED, baseUrl: null, taggingModel: null, promptModel: null };
+/** The one entry most tests use; `null` in its place stands for no entry at all. */
+const CONFIGURED: ProviderView = providerView({ name: 'Local', taggingModel: 'vision-b', promptModel: 'vision-a' });
+const UNCONFIGURED = null;
 
 const MODELS: ListModelsResult = {
   ok: true,
@@ -48,15 +48,17 @@ const TEXT = 'A weathered bronze statue of a fox under soft morning light, three
 
 type DescribeRequest = IpcRequest<'analysis:describe'>;
 
-function install(
-  view: VisionSettingsView = CONFIGURED,
-  models: ListModelsResult = MODELS,
-  handlers: FakeHandlers = {},
-) {
+/** The `providers:*` handlers of one entry answering `models`, or of none. */
+function oneProvider(entry: ProviderView | null, models: ListModelsResult) {
+  return entry === null
+    ? fakeProviders().handlers
+    : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: models }).handlers;
+}
+
+function install(entry: ProviderView | null = CONFIGURED, models: ListModelsResult = MODELS, handlers: FakeHandlers = {}) {
   return installFakeApi({
     ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
-    'settings:getVision': () => view,
-    'settings:listVisionModels': () => models,
+    ...oneProvider(entry, models),
     'analysis:describe': () => ({ ok: true, text: TEXT }),
     'analysis:cancelDescribe': () => ({}),
     ...handlers,
@@ -73,10 +75,17 @@ interface Harness {
   onOpenSettings?: () => void;
 }
 
+let probe: ProvidersState | null = null;
+function Probe() {
+  probe = useProviders();
+  return null;
+}
+
 function ui({ open = true, file = FILE, onClose = () => {}, onOpenSettings = () => {} }: Harness) {
   return (
     <ProviderSettingsProvider>
       <AnalysisPromptsProvider>
+        <Probe />
         <PromptDialog open={open} file={file} onClose={onClose} onOpenSettings={onOpenSettings} />
       </AnalysisPromptsProvider>
     </ProviderSettingsProvider>
@@ -120,7 +129,13 @@ it('Generate sends analysis:describe with a fresh request id, the file and the c
   await user.click(button('Generate'));
   await waitFor(() => expect(callsOf(api, 'analysis:describe')).toHaveLength(2));
   const [first, second] = callsOf(api, 'analysis:describe') as DescribeRequest[];
-  expect(first).toEqual({ requestId: expect.stringMatching(UUID), fileId: FILE.id, model: 'vision-b', promptId: IMAGE_DEFAULT.id });
+  expect(first).toEqual({
+    requestId: expect.stringMatching(UUID),
+    fileId: FILE.id,
+    model: 'vision-b',
+    providerId: CONFIGURED.id,
+    promptId: IMAGE_DEFAULT.id,
+  });
   expect(second!.requestId).toMatch(UUID);
   expect(second!.requestId).not.toBe(first!.requestId);
 });
@@ -188,7 +203,7 @@ it('a failed settings load is not "not configured" and offers Settings, like the
   const user = userEvent.setup();
   const onOpenSettings = vi.fn();
   install(CONFIGURED, MODELS, {
-    'settings:getVision': () => {
+    'providers:list': () => {
       throw fakeError('internal_error');
     },
   });
@@ -360,7 +375,7 @@ it('not configured: Generate is disabled with a title and Settings navigates the
   const onClose = vi.fn();
   const onOpenSettings = vi.fn();
   render(ui({ onClose, onOpenSettings }));
-  await waitFor(() => expect(callsOf(api, 'settings:getVision')).toHaveLength(1));
+  await waitFor(() => expect(callsOf(api, 'providers:list')).toHaveLength(1));
   await waitFor(() => expect(button('Generate').title).not.toBe(''));
   expect(button('Generate').disabled).toBe(true);
   await user.click(button('Settings'));
@@ -498,4 +513,127 @@ it('a Generate refused with not_found shows the error and falls back to an exist
   await waitFor(() => expect(promptSelect().value).toBe(IMAGE_DEFAULT.id));
   expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
   expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Describe']);
+});
+
+describe('provider choice', () => {
+  const RUNPOD = providerView({
+    name: 'RunPod',
+    baseUrl: 'https://pod.example.test',
+    taggingModel: 'big-vision',
+    promptModel: 'pod-describe',
+  });
+  const POD_MODELS: ListModelsResult = {
+    ok: true,
+    models: [
+      { name: 'big-vision', vision: true },
+      { name: 'pod-describe', vision: true },
+    ],
+  };
+  const DOWN: ListModelsResult = { ok: false, code: 'provider_unreachable' };
+
+  const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
+  const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+
+  function installTwo(lastUsedId: string | null, models: Record<string, ListModelsResult> = {}, handlers: FakeHandlers = {}) {
+    const providers = fakeProviders(
+      { providers: [CONFIGURED, RUNPOD], lastUsedId },
+      { [CONFIGURED.id]: MODELS, [RUNPOD.id]: POD_MODELS, ...models },
+    );
+    return install(CONFIGURED, MODELS, { ...providers.handlers, ...handlers });
+  }
+
+  it('shows both entries with their states before the model select and preselects the one used last', async () => {
+    installTwo(RUNPOD.id, { [CONFIGURED.id]: DOWN });
+    render(ui({}));
+    await waitFor(() =>
+      expect(optionTexts(providerSelect())).toEqual([
+        `Local — ${PROVIDER_STATE_LABELS.unreachable}`,
+        `RunPod — ${PROVIDER_STATE_LABELS.ready}`,
+      ]),
+    );
+    expect(providerSelect().value).toBe(RUNPOD.id);
+    expect(modelSelect().value).toBe('pod-describe');
+    expect(providerSelect().compareDocumentPosition(modelSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('opening asks every entry for its state once', async () => {
+    const api = installTwo(null);
+    render(ui({}));
+    await ready();
+    const refreshed = callsOf(api, 'providers:listModels').filter((r) => (r as { refresh?: boolean }).refresh === true);
+    expect(refreshed).toEqual([
+      { providerId: CONFIGURED.id, refresh: true },
+      { providerId: RUNPOD.id, refresh: true },
+    ]);
+  });
+
+  it('switching the provider swaps the model list and preselects its prompt default', async () => {
+    const user = userEvent.setup();
+    installTwo(CONFIGURED.id);
+    render(ui({}));
+    await ready();
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(within(modelSelect()).queryByRole('option', { name: 'big-vision' })).toBeTruthy());
+    expect(modelSelect().value).toBe('pod-describe');
+    expect(within(modelSelect()).queryByRole('option', { name: 'vision-b' })).toBeNull();
+  });
+
+  it('a provider that is down blocks Generate with its reason; switching to the ready one enables it', async () => {
+    const user = userEvent.setup();
+    installTwo(CONFIGURED.id, { [CONFIGURED.id]: DOWN });
+    render(ui({}));
+    await waitFor(() => expect(button('Generate').title).toBe(JOB_ERROR_MESSAGES.provider_unreachable));
+    expect(button('Generate').disabled).toBe(true);
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(button('Generate').disabled).toBe(false));
+  });
+
+  it('Generate sends the selected provider, and the next opening preselects it', async () => {
+    const user = userEvent.setup();
+    const api = installTwo(CONFIGURED.id);
+    const { rerender } = render(ui({}));
+    await ready();
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(button('Generate').disabled).toBe(false));
+    await user.click(button('Generate'));
+    await waitFor(() => expect(promptField().value).toBe(TEXT));
+    expect(callsOf(api, 'analysis:describe')[0]).toMatchObject({ model: 'pod-describe', providerId: RUNPOD.id });
+    expect(probe!.list?.lastUsedId).toBe(RUNPOD.id);
+    rerender(ui({ open: false }));
+    rerender(ui({ open: true }));
+    await waitFor(() => expect(providerSelect().value).toBe(RUNPOD.id));
+  });
+
+  it('a busy answer does not record the provider as used', async () => {
+    const user = userEvent.setup();
+    installTwo(CONFIGURED.id, {}, { 'analysis:describe': () => ({ ok: false, code: 'busy' }) });
+    render(ui({}));
+    await ready();
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(button('Generate').disabled).toBe(false));
+    await user.click(button('Generate'));
+    expect((await screen.findByRole('alert')).textContent).toBe(PROMPT_BUSY_MESSAGE);
+    expect(probe!.list?.lastUsedId).toBe(CONFIGURED.id);
+  });
+
+  it('an entry deleted while the dialog is open moves the selection to the remaining one', async () => {
+    const user = userEvent.setup();
+    installTwo(CONFIGURED.id);
+    render(ui({}));
+    await ready();
+    await user.selectOptions(providerSelect(), RUNPOD.id);
+    await waitFor(() => expect(modelSelect().value).toBe('pod-describe'));
+    await act(async () => probe!.remove(RUNPOD.id));
+    await waitFor(() => expect(providerSelect().value).toBe(CONFIGURED.id));
+    expect(optionTexts(providerSelect())).toHaveLength(1);
+    expect(modelSelect().value).toBe('vision-a');
+  });
+
+  it('without any entry the provider select shows no provider and Settings is offered', async () => {
+    install(UNCONFIGURED);
+    render(ui({}));
+    await screen.findByRole('button', { name: 'Settings' });
+    expect(optionTexts(providerSelect())).toEqual(['No provider']);
+    expect(button('Generate').title).toBe(JOB_ERROR_MESSAGES.provider_not_configured);
+  });
 });

@@ -10,7 +10,7 @@ import {
   type FileRecord,
   type IpcRequest,
   type IpcResponse,
-  type VisionSettingsView,
+  type ProviderView,
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
@@ -21,7 +21,16 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { deferred, fakeAssetSources, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
+import {
+  deferred,
+  fakeAssetSources,
+  fakeError,
+  fakeProviders,
+  importResultOf,
+  installFakeApi,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -666,22 +675,16 @@ it('workflow tab: start, step state without skipped for mandatory steps, and rem
   );
 });
 
-const VISION: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 120,
-  taggingModel: 'vision-a',
-  promptModel: 'vision-a',
-  hasApiKey: false,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
+const VISION: ProviderView = providerView();
 
 /** The provider, job and analysis channels the dialogs use. */
-function analysisHandlers(settings: VisionSettingsView = VISION): FakeHandlers {
+function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
   return {
-    'settings:getVision': () => settings,
-    'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
-    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null }),
+    ...(entry === null
+      ? fakeProviders().handlers
+      : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
+          .handlers),
+    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] }),
     'analysis:getProposal': () => ({ proposal: null, job: null }),
     'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 0 }),
     'analysis:enqueue': () => ({ enqueued: 2, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 } }),
@@ -745,7 +748,7 @@ it('files tab: Analyse in the selection bar opens the start dialog for the selec
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
   expect(callsOf(api, 'analysis:preview')).toEqual([
-    { target: { kind: 'files', fileIds: [c1.id, c2.id, bad.id] }, model: 'vision-a' },
+    { target: { kind: 'files', fileIds: [c1.id, c2.id, bad.id] }, model: 'vision-a', providerId: VISION.id },
   ]);
   await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
@@ -782,6 +785,7 @@ it('files tab: Analyse all sends the asset scope with the current filters', asyn
   expect(callsOf(api, 'analysis:preview')[0]).toEqual({
     target: { kind: 'fileFilter', filter: { scope: { kind: 'asset', assetId: asset.id }, role: 'texture' } },
     model: 'vision-a',
+    providerId: VISION.id,
   });
 });
 
@@ -795,7 +799,7 @@ it('the header Analyse starts the whole asset', async () => {
   await user.click(header);
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
-  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'asset', assetId: asset.id }, model: 'vision-a' });
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'asset', assetId: asset.id }, model: 'vision-a', providerId: VISION.id });
   await user.click(screen.getByRole('button', { name: 'Start' }));
   expect(within(await screen.findByRole('status')).getByText('2 queued, 1 already analysed')).toBeTruthy();
 });
@@ -917,7 +921,7 @@ it('no dialog opens on Delete', async () => {
 
 it('without a configured provider the header Analyse is disabled with the reason', async () => {
   const asset = assetDetail();
-  install(asset, analysisHandlers({ ...VISION, baseUrl: null }));
+  install(asset, analysisHandlers(null));
   renderWithProvider(asset.id);
   const header = (await screen.findByRole('button', { name: 'Analyse' })) as HTMLButtonElement;
   await waitFor(() => expect(header.title).toBe(JOB_ERROR_MESSAGES.provider_not_configured));

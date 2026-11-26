@@ -13,11 +13,13 @@ import {
   START_PREVIEW_FAILED,
   START_RETRY_PREVIEW_LABEL,
 } from '../labels';
-import { useProvider } from '../provider-context';
+import { useProviderChoice } from '../provider-choice';
+import { useProviders } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { ProviderSelect } from './ProviderSelect';
 import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
@@ -45,17 +47,18 @@ export function wouldEnqueue(preview: AnalysisPreview, force: boolean): number {
 }
 
 /**
- * Starts a batch analysis of a target (several files, an asset, a file or asset filter): a tagging
- * model (the stored default preselected, changeable), a tagging prompt (the one used last
+ * Starts a batch analysis of a target (several files, an asset, a file or asset filter): a provider
+ * (the one used last preselected, changeable), a tagging model (that entry's default preselected), a tagging prompt (the one used last
  * preselected, changeable), the preview counts for that model, "Analyse
  * again" (`force`) and Start, which enqueues in mode `apply`.
  */
 export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings, settingsBlocked = null }: Props) {
-  const provider = useProvider();
+  const providers = useProviders();
   const prompts = useAnalysisPrompts();
   const jobs = useJobs();
-  // Null while the owner has not chosen: the stored tagging default is in force.
-  const [choice, setChoice] = useState<{ model: string | null } | null>(null);
+  // Every opening starts from the entry used last and its tagging default.
+  const choice = useProviderChoice('tagging', open ? 'open' : null);
+  const { providerId, model } = choice;
   // Null while the owner has not chosen: the tagging prompt used last (or the first) is in force.
   const [promptChoice, setPromptChoice] = useState<string | null>(null);
   const [force, setForce] = useState(false);
@@ -73,16 +76,13 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
-      setChoice(null);
       setPromptChoice(null);
       setForce(false);
       setError(null);
     }
   }
 
-  const { settings } = provider;
-  const configured = settings !== null && settings.baseUrl !== null;
-  const model = choice !== null ? choice.model : (settings?.taggingModel ?? null);
+
   // The prompt is not part of the preview: the counts do not depend on it.
   const promptId = promptChoice ?? defaultPromptId(prompts, 'tagging');
 
@@ -95,13 +95,13 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     const current = targetRef.current;
     setPreview(null);
     setPreviewError(null);
-    if (!open || current === null || model === null || !configured) {
+    if (!open || current === null || model === null || providerId === null) {
       setPreviewing(false);
       return;
     }
     let superseded = false;
     setPreviewing(true);
-    call('analysis:preview', { target: current, model })
+    call('analysis:preview', { target: current, model, providerId })
       .then(
         (next) => {
           if (!superseded) setPreview(next);
@@ -116,11 +116,11 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     return () => {
       superseded = true;
     };
-  }, [open, targetKey, model, configured, previewRun]);
+  }, [open, targetKey, model, providerId, previewRun]);
 
   const nothingToDo = preview !== null && wouldEnqueue(preview, force) === 0;
   // The way to the settings depends on the provider and the model only, never on the counts.
-  const { blocked: providerBlocked, offerSettings } = providerGate(provider, model);
+  const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
   const blocked =
     providerBlocked ??
     promptGate(prompts, promptId) ??
@@ -135,13 +135,15 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
 
   async function start(event?: FormEvent) {
     event?.preventDefault();
-    if (startingRef.current || !canStart || target === null || model === null || promptId === null) return;
+    if (startingRef.current || !canStart || target === null || providerId === null || model === null || promptId === null)
+      return;
     startingRef.current = true;
     setStarting(true);
     setError(null);
     try {
-      const result = await call('analysis:enqueue', { target, model, mode: 'apply', force, promptId });
+      const result = await call('analysis:enqueue', { target, model, providerId, mode: 'apply', force, promptId });
       prompts.noteUsed('tagging', promptId);
+      providers.noteUsed(providerId);
       jobs.refresh();
       onStarted(result);
       onClose();
@@ -203,11 +205,13 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
             </button>
           </div>
         )}
+        <ProviderSelect value={providerId} onChange={choice.setProvider} disabled={starting} />
         <ModelSelect
+          providerId={providerId}
           purpose="tagging"
           value={model}
-          onChange={(next) => setChoice({ model: next })}
-          disabled={starting || !configured}
+          onChange={choice.setModel}
+          disabled={starting || providerId === null}
         />
         <PromptSelect purpose="tagging" value={promptId} onChange={setPromptChoice} disabled={starting} />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2" aria-busy={previewing || undefined}>

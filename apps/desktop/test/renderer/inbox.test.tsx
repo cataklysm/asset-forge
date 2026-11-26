@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type VisionSettingsView } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type ProviderView } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
@@ -13,7 +13,7 @@ import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/lis
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { deferred, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, importResultOf, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -443,22 +443,16 @@ it('assigning in the detail dialog moves on to the following file; assigning the
   await screen.findByText('Inbox is empty');
 });
 
-const VISION: VisionSettingsView = {
-  baseUrl: 'http://127.0.0.1:11500',
-  timeoutSeconds: 120,
-  taggingModel: 'vision-a',
-  promptModel: 'vision-a',
-  hasApiKey: false,
-  fromEnvironment: false,
-  canStoreKey: true,
-};
-const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null };
+const VISION: ProviderView = providerView();
+const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
 
-/** The provider, job and analysis channels the dialogs use; `settings` decides whether a provider is configured. */
-function analysisHandlers(settings: VisionSettingsView = VISION): FakeHandlers {
+/** The provider, job and analysis channels the dialogs use; `entry` null means no provider is configured. */
+function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
   return {
-    'settings:getVision': () => settings,
-    'settings:listVisionModels': () => ({ ok: true, models: [{ name: 'vision-a', vision: true }] }),
+    ...(entry === null
+      ? fakeProviders().handlers
+      : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
+          .handlers),
     'jobs:summary': () => NO_JOBS,
     'analysis:getProposal': () => ({ proposal: null, job: null }),
     'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
@@ -482,7 +476,7 @@ function renderWithProvider() {
 it('Settings in the result dialog closes it and the detail dialog beneath before the settings open', async () => {
   const user = userEvent.setup();
   const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
-  install([proposed], analysisHandlers({ ...VISION, baseUrl: null, taggingModel: null, promptModel: null }));
+  install([proposed], analysisHandlers(null));
   // The screen stays mounted: only the dialogs' own closing can remove them.
   const onOpenSettings = vi.fn();
   render(
@@ -560,12 +554,12 @@ it('Analyse on several selected files opens the start dialog for all of them; St
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
   const target = { kind: 'files', fileIds: [c1.id, c2.id, doc.id] };
-  expect(callsOf(api, 'analysis:preview')).toEqual([{ target, model: 'vision-a' }]);
+  expect(callsOf(api, 'analysis:preview')).toEqual([{ target, model: 'vision-a', providerId: VISION.id }]);
   await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
   expect(within(strip).getByText('1 queued, 1 already queued')).toBeTruthy();
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target, model: 'vision-a', mode: 'apply', force: false, promptId: expect.any(String) },
+    { target, model: 'vision-a', providerId: VISION.id, mode: 'apply', force: false, promptId: expect.any(String) },
   ]);
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
@@ -581,7 +575,7 @@ it('one image among several selected files opens the start dialog, not the singl
   await screen.findByRole('dialog', { name: 'Analyse' });
   expect(screen.queryByRole('dialog', { name: 'c1.png' })).toBeNull();
   await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
-  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'files', fileIds: [c1.id, doc.id] }, model: 'vision-a' });
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'files', fileIds: [c1.id, doc.id] }, model: 'vision-a', providerId: VISION.id });
   expect(callsOf(api, 'analysis:getProposal')).toEqual([]);
 });
 
@@ -651,6 +645,7 @@ it('Analyse all sends the current filters of the inbox as a file filter target',
   expect(callsOf(api, 'analysis:preview')[0]).toEqual({
     target: { kind: 'fileFilter', filter: { scope: { kind: 'inbox' }, tagNames: ['oak'], kind: 'image' } },
     model: 'vision-a',
+    providerId: VISION.id,
   });
 });
 
@@ -728,7 +723,7 @@ it('Review tags in the menu opens the proposal; accepting it reloads the list', 
 it('without a configured provider the analysis entries are disabled with the reason', async () => {
   const user = userEvent.setup();
   const { c1 } = files();
-  install([c1], analysisHandlers({ ...VISION, baseUrl: null }));
+  install([c1], analysisHandlers(null));
   renderWithProvider();
   await screen.findByText('c1.png');
   const reason = JOB_ERROR_MESSAGES.provider_not_configured;
@@ -743,7 +738,7 @@ it('without a configured provider the analysis entries are disabled with the rea
   expect(item.title).toBe(reason);
 });
 
-const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: null };
+const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [] };
 
 /** The inbox under a job provider; `succeed()` makes the next poll report a finished job. */
 function withJobs(files: FileRecord[]) {
