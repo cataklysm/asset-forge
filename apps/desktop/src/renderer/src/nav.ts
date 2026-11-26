@@ -4,5 +4,6 @@ export type View =
   | { name: 'projects' }
   | { name: 'project'; id: string }
   | { name: 'inbox' }
+  | { name: 'trash' }
   | { name: 'jobs' }
   | { name: 'settings' };

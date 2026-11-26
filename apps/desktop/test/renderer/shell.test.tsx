@@ -8,12 +8,18 @@ import { AppShell } from '../../src/renderer/src/components/AppShell';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import { JOB_POLL_MS, sameSummary } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, pageOf } from './fixtures';
+import { fileRecord, pageOf, trashedRecord } from './fixtures';
 
-type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
+type Section = 'assets' | 'projects' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
 function shell(
-  props: { section?: Section | null; busy?: boolean; onNavigate?(s: Section): void; onClose?(): void },
+  props: {
+    section?: Section | null;
+    busy?: boolean;
+    trashCount?: number | null;
+    onNavigate?(s: Section): void;
+    onClose?(): void;
+  },
   child = <p>content</p>,
 ) {
   return (
@@ -23,6 +29,7 @@ function shell(
       section={props.section === undefined ? 'assets' : props.section}
       busy={props.busy ?? false}
       activeJobs={0}
+      trashCount={props.trashCount}
       onNavigate={props.onNavigate ?? (() => {})}
       onClose={props.onClose ?? (() => {})}
     >
@@ -106,6 +113,7 @@ function workspaceShell(summary: () => JobSummary, onResume: () => void = () => 
       return {};
     },
     'assets:list': () => ({ items: [], total: 0 }),
+    'trash:summary': () => ({ count: 0 }),
     'assetTypes:list': () => [],
     'projects:list': () => ({ items: [], total: 0 }),
     'settings:getVision': () => ({
@@ -275,4 +283,91 @@ it('choosing Settings shows the Settings page, also without a configured provide
   expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
   expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('');
+});
+
+it('Trash follows Inbox in the navigation', () => {
+  render(shell({}));
+  const names = within(screen.getByRole('navigation', { name: 'Main' }))
+    .getAllByRole('link')
+    .map((link) => link.textContent);
+  expect(names).toEqual(['Assets', 'Projects', 'Inbox', 'Trash', 'Jobs', 'Settings']);
+});
+
+it('the trash entry shows its count and names it "Trash, 3 files"', async () => {
+  const user = userEvent.setup();
+  const onNavigate = vi.fn();
+  const { rerender } = render(shell({ trashCount: 3, onNavigate }));
+  const entry = screen.getByRole('link', { name: 'Trash, 3 files' });
+  expect(entry.textContent).toBe('Trash3');
+  await user.click(entry);
+  expect(onNavigate).toHaveBeenCalledWith('trash');
+  rerender(shell({ trashCount: 1, onNavigate }));
+  expect(screen.getByRole('link', { name: 'Trash, 1 file' })).toBeTruthy();
+});
+
+it('no badge for an empty trash', () => {
+  const { rerender } = render(shell({ trashCount: 0 }));
+  expect(screen.getByRole('link', { name: 'Trash' }).textContent).toBe('Trash');
+  rerender(shell({ trashCount: null }));
+  expect(screen.getByRole('link', { name: 'Trash' }).textContent).toBe('Trash');
+});
+
+it('navigating to Trash renders the trash screen', async () => {
+  const user = userEvent.setup();
+  const api = workspaceShell(() => IDLE, () => {}, {
+    'trash:summary': () => ({ count: 1 }),
+    'files:list': () => pageOf([trashedRecord({ originalName: 'gone.png' })]),
+    'tags:suggest': () => [],
+  });
+  await user.click(await screen.findByRole('link', { name: 'Trash, 1 file' }));
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Trash/ }).textContent).toBe('Trash1'));
+  expect(await screen.findByText('gone.png')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Trash, 1 file' }).getAttribute('aria-current')).toBe('page');
+  const scopes = api.calls.filter((c) => c.channel === 'files:list').map((c) => (c.request as { scope: unknown }).scope);
+  expect(scopes.length).toBeGreaterThan(0);
+  expect(scopes.every((scope) => (scope as { kind: string }).kind === 'trash')).toBe(true);
+});
+
+it('the trash filters survive leaving and returning', async () => {
+  const user = userEvent.setup();
+  const api = workspaceShell(() => IDLE, () => {}, {
+    'files:list': () => pageOf([]),
+    'tags:suggest': () => [],
+  });
+  await user.click(screen.getByRole('link', { name: 'Trash' }));
+  await user.type(await screen.findByRole('searchbox', { name: 'Search files' }), 'hero');
+  await waitFor(() =>
+    expect(api.calls.filter((c) => c.channel === 'files:list').at(-1)?.request).toMatchObject({
+      scope: { kind: 'trash' },
+      query: 'hero',
+    }),
+  );
+  await user.click(screen.getByRole('link', { name: /Assets/ }));
+  await screen.findByRole('heading', { level: 2, name: /Assets/ });
+  await user.click(screen.getByRole('link', { name: 'Trash' }));
+  expect(((await screen.findByRole('searchbox', { name: 'Search files' })) as HTMLInputElement).value).toBe('hero');
+});
+
+it('deleting a file in the inbox raises the count in the navigation', async () => {
+  const user = userEvent.setup();
+  const file = fileRecord({ originalName: 'fox.png' });
+  let count = 0;
+  let inbox = [file];
+  workspaceShell(() => IDLE, () => {}, {
+    'trash:summary': () => ({ count }),
+    'files:list': () => pageOf(inbox),
+    'tags:suggest': () => [],
+    'files:trashMany': ({ fileIds }) => {
+      count += fileIds.length;
+      inbox = inbox.filter((f) => !fileIds.includes(f.id));
+      return { items: fileIds.map((fileId) => ({ fileId, file: { ...file, deletedAt: '2026-01-02T00:00:00.000Z' }, error: null })) };
+    },
+  });
+  await user.click(screen.getByRole('link', { name: /Inbox/ }));
+  const listbox = await screen.findByRole('listbox', { name: 'Files' });
+  const tile = within(listbox).getByText('fox.png').closest<HTMLElement>('[data-index]')!;
+  expect(screen.getByRole('link', { name: 'Trash' }).textContent).toBe('Trash');
+  await user.click(within(tile).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  expect(await screen.findByRole('link', { name: 'Trash, 1 file' })).toBeTruthy();
 });

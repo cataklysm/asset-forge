@@ -1,14 +1,14 @@
-import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { JOB_ERROR_MESSAGES, type JobErrorCode } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
-import { RESUME_LABEL, RESUME_TITLE } from '../labels';
+import { RESUME_LABEL, RESUME_TITLE, TRASH_LABEL, trashNavLabel } from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 
 /** Pause reasons the user fixes on the settings screen: the banner offers the way there. */
 const SETTINGS_REASONS: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured']);
 
-export type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
+export type Section = 'assets' | 'projects' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
 interface Props {
   workspaceName: string;
@@ -17,6 +17,8 @@ interface Props {
   busy: boolean;
   /** Queued, running and waiting jobs; shown beside the Jobs entry when above zero. */
   activeJobs: number;
+  /** Files in the trash; shown beside the Trash entry when above zero. */
+  trashCount?: number | null;
   /** Why the provider queue stopped claiming work; shows the pause banner. */
   paused?: JobErrorCode | null;
   /** Resumes the paused queue (`jobs:resume`); a rejection shows in the banner. */
@@ -30,6 +32,7 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'assets', label: 'Assets', icon: Package },
   { section: 'projects', label: 'Projects', icon: FolderOpen },
   { section: 'inbox', label: 'Inbox', icon: Inbox },
+  { section: 'trash', label: TRASH_LABEL, icon: Trash2 },
   { section: 'jobs', label: 'Jobs', icon: ListChecks },
   { section: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -46,6 +49,7 @@ export function AppShell({
   section,
   busy,
   activeJobs,
+  trashCount = null,
   paused = null,
   onResume = async () => {},
   onNavigate,
@@ -118,12 +122,19 @@ export function AppShell({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Main" className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
           {NAV.map(({ section: target, label, icon: Icon }) => {
-            const count = target === 'jobs' && activeJobs > 0 ? activeJobs : null;
+            const count =
+              target === 'jobs' && activeJobs > 0
+                ? activeJobs
+                : target === 'trash' && trashCount !== null && trashCount > 0
+                  ? trashCount
+                  : null;
+            const name =
+              count === null ? undefined : target === 'trash' ? trashNavLabel(count) : `${label}, ${count} active`;
             return (
               <a
                 key={target}
                 href="#"
-                aria-label={count === null ? undefined : `${label}, ${count} active`}
+                aria-label={name}
                 aria-current={section === target ? 'page' : undefined}
                 aria-disabled={busy || undefined}
                 title={busy ? BUSY_TITLE : undefined}
