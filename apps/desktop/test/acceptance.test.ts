@@ -626,3 +626,159 @@ describe('phase 3b acceptance', () => {
     }
   });
 });
+
+describe('file trash acceptance', () => {
+  const page = { limit: 50, offset: 0 };
+
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    }, noopHost, idleJobHost, idleServices);
+    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await dispatch(handlers, channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+  }
+
+  async function sources(...names: string[]): Promise<string[]> {
+    const dir = join(base, 'sources');
+    const paths: string[] = [];
+    for (const name of names) {
+      const path = join(dir, name);
+      await writeFile(path, `content of ${name}`);
+      paths.push(path);
+    }
+    return paths;
+  }
+
+  it('a deleted file leaves every view and comes back intact', async () => {
+    const [keptPath, doomedPath] = await sources('alpha.png', 'zephyr.png');
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let ids: { assetId: string; keptId: string; doomedId: string };
+    try {
+      const call = handlersFor(first);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const typeId = (await call('assetTypes:list', {}))[0]!.id;
+      const asset = await call('assets:create', { name: 'Pump', typeId });
+      const results = await call('files:import', {
+        sourcePaths: [keptPath!, doomedPath!],
+        target: { assetId: asset.id, role: 'reference' },
+      });
+      expect(results.map((r) => r.file?.status)).toEqual(['complete', 'complete']);
+      const [kept, doomed] = results.map((r) => r.file!);
+      ids = { assetId: asset.id, keptId: kept!.id, doomedId: doomed!.id };
+      await call('files:addTag', { fileId: doomed!.id, name: 'brass' });
+      const chosen = await call('assets:setCover', { assetId: asset.id, fileId: doomed!.id });
+      expect(chosen).toMatchObject({ coverFileId: doomed!.id, coverIsChosen: true });
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([{ name: 'brass', displayName: 'brass' }]);
+
+      const trashed = await call('files:trashMany', { fileIds: [doomed!.id] });
+      expect(trashed.items).toMatchObject([{ fileId: doomed!.id, error: null }]);
+      const record = trashed.items[0]!.file!;
+      expect(record).toMatchObject({ assetId: null, role: null, trashedAssetId: asset.id, trashedRole: 'reference' });
+      expect(record.deletedAt).toEqual(expect.any(String));
+      expect(record.relativePath.startsWith('.assetforge/trash/')).toBe(true);
+      expect(existsSync(join(workspaceRoot, doomed!.relativePath))).toBe(false);
+      expect(existsSync(join(workspaceRoot, record.relativePath))).toBe(true);
+
+      const files = await call('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
+      expect(files.items.map((f) => f.id)).toEqual([kept!.id]);
+      expect(await call('assets:get', { id: asset.id })).toMatchObject({ coverFileId: kept!.id, coverIsChosen: false });
+      const gallery = await call('assets:list', { ...page, query: 'zephyr' });
+      expect(gallery.items).toEqual([]);
+      const listed = await call('assets:list', page);
+      expect(listed.items).toMatchObject([{ id: asset.id, fileCount: 1, coverFileId: kept!.id }]);
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([]);
+      expect(await call('trash:summary', {})).toEqual({ count: 1 });
+      expect((await call('files:list', { ...page, scope: { kind: 'inbox' } })).items).toEqual([]);
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(second);
+      await call('workspace:open', { rootPath: workspaceRoot });
+      expect(await call('trash:summary', {})).toEqual({ count: 1 });
+      const trash = await call('files:list', { ...page, scope: { kind: 'trash' } });
+      expect(trash.items).toMatchObject([{ id: ids.doomedId, trashedAssetId: ids.assetId, trashedAssetName: 'Pump' }]);
+      expect(existsSync(join(workspaceRoot, trash.items[0]!.relativePath))).toBe(true);
+
+      const restored = await call('files:restoreMany', { fileIds: [ids.doomedId] });
+      expect(restored.items).toMatchObject([{ fileId: ids.doomedId, error: null }]);
+      const back = restored.items[0]!.file!;
+      expect(back).toMatchObject({
+        assetId: ids.assetId,
+        role: 'reference',
+        deletedAt: null,
+        trashedAssetId: null,
+        trashedRole: null,
+        relativePath: assetFilePath(ids.assetId, 'reference', ids.doomedId, 'zephyr.png'),
+      });
+      expect(back.tags.map((t) => t.name)).toEqual(['brass']);
+      expect(await readFile(join(workspaceRoot, back.relativePath), 'utf8')).toBe('content of zephyr.png');
+      const files = await call('files:list', { ...page, scope: { kind: 'asset', assetId: ids.assetId } });
+      expect(files.items.map((f) => f.id).sort()).toEqual([ids.keptId, ids.doomedId].sort());
+      expect(await call('assets:get', { id: ids.assetId })).toMatchObject({ coverFileId: ids.keptId, coverIsChosen: false });
+      expect((await call('assets:list', { ...page, query: 'zephyr' })).items.map((a) => a.id)).toEqual([ids.assetId]);
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([{ name: 'brass', displayName: 'brass' }]);
+      expect(await call('trash:summary', {})).toEqual({ count: 0 });
+
+      const again = await call('files:trashMany', { fileIds: [ids.doomedId] });
+      const trashPath = again.items[0]!.file!.relativePath;
+      expect(existsSync(join(workspaceRoot, trashPath))).toBe(true);
+      const purged = await call('files:purgeMany', { fileIds: [ids.doomedId] });
+      expect(purged.items).toEqual([{ fileId: ids.doomedId, file: null, error: null }]);
+      expect(existsSync(join(workspaceRoot, trashPath))).toBe(false);
+      expect(await second.read((s) => s.database.files.get(ids.doomedId))).toBeNull();
+      expect((await call('files:list', { ...page, scope: { kind: 'all' } })).items.map((f) => f.id)).toEqual([ids.keptId]);
+      expect(await call('trash:summary', {})).toEqual({ count: 0 });
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([]);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('a purge interrupted before the binary is removed is finished by the next open', async () => {
+    const [firstPath, secondPath] = await sources('one.png', 'two.png');
+    const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    let interrupted: { id: string; path: string };
+    let survivor: { id: string; path: string };
+    try {
+      const call = handlersFor(first);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const imported = await call('files:import', { sourcePaths: [firstPath!, secondPath!] });
+      const fileIds = imported.map((r) => r.file!.id);
+      const trashed = await call('files:trashMany', { fileIds });
+      expect(trashed.items.map((i) => i.error)).toEqual([null, null]);
+      const [a, b] = trashed.items.map((i) => ({ id: i.fileId, path: i.file!.relativePath }));
+      interrupted = a!;
+      survivor = b!;
+
+      // The rows go, the process dies before the binary is removed.
+      expect(await first.exclusive((s) => s.database.files.purge(interrupted.id))).toBe(true);
+      expect(existsSync(join(workspaceRoot, interrupted.path))).toBe(true);
+    } finally {
+      await first.close();
+    }
+
+    const second = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(second);
+      await call('workspace:open', { rootPath: workspaceRoot });
+      expect(existsSync(join(workspaceRoot, interrupted.path))).toBe(false);
+      expect(await readFile(join(workspaceRoot, survivor.path), 'utf8')).toBe('content of two.png');
+      const trashDir = await readdir(join(workspaceRoot, '.assetforge', 'trash'));
+      expect(trashDir).toEqual([survivor.path.split('/').pop()]);
+      expect(await call('trash:summary', {})).toEqual({ count: 1 });
+      const trash = await call('files:list', { ...page, scope: { kind: 'trash' } });
+      expect(trash.items.map((f) => f.id)).toEqual([survivor.id]);
+    } finally {
+      await second.close();
+    }
+  });
+});
