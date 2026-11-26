@@ -238,7 +238,13 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   const view = (entry: ProviderEntry): ProviderView => ({ ...entry, hasApiKey: decryptKey(entry.id) !== null });
 
   const notify = (id: string): void => {
-    for (const listener of listeners) listener(id);
+    for (const listener of listeners) {
+      try {
+        listener(id);
+      } catch {
+        // One failing listener must not keep the others from hearing of the change.
+      }
+    }
   };
 
   return {

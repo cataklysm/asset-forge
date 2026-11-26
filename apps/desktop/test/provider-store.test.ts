@@ -304,6 +304,47 @@ describe('provider store: save', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  it('calls every listener even when an earlier one throws', () => {
+    const s = store();
+    const ids: string[] = [];
+    s.onChange(() => {
+      throw new Error('listener failed');
+    });
+    s.onChange((id) => ids.push(id));
+    const a = s.save(input());
+    s.delete(a.id);
+    expect(ids).toEqual([a.id, a.id]);
+  });
+
+  it('tells listeners when the key write fails after the settings were written', () => {
+    const s = store();
+    const a = s.save(input());
+    // A non-empty directory where the key file belongs makes the final rename fail.
+    mkdirSync(keyFile(a.id), { recursive: true });
+    writeFileSync(join(keyFile(a.id), 'blocker'), 'x');
+    let calls = 0;
+    s.onChange(() => calls++);
+    expect(() => s.save(input({ id: a.id, timeoutSeconds: 200, apiKey: KEY }))).toThrow();
+    expect(calls).toBe(1);
+    expect(s.get(a.id)?.timeoutSeconds).toBe(200);
+    expect(readdirSync(credentials()).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('never touches the registry settings.json', () => {
+    const registry = join(dir, 'settings.json');
+    writeFileSync(registry, 'registry content');
+    const before = statSync(registry).mtimeMs;
+    const s = store();
+    const a = s.save(input({ apiKey: KEY }));
+    s.save(input({ id: a.id, baseUrl: 'http://other:1', apiKey: null }));
+    s.markUsed(a.id);
+    s.list();
+    s.delete(a.id);
+    store().list();
+    expect(readFileSync(registry, 'utf8')).toBe('registry content');
+    expect(statSync(registry).mtimeMs).toBe(before);
+  });
+
   it('tells listeners the id after a save and a delete, not after a refusal', () => {
     const s = store();
     const ids: string[] = [];
@@ -316,6 +357,25 @@ describe('provider store: save', () => {
 });
 
 describe('provider store: keys', () => {
+  it('keeps the key when the default port is spelled out', () => {
+    const s = store();
+    const a = s.save(input({ baseUrl: 'https://ollama.example.test', apiKey: KEY }));
+    expect(s.save(input({ id: a.id, baseUrl: 'https://ollama.example.test:443/' })).hasApiKey).toBe(true);
+    expect(s.apiKeyFor(a.id, 'https://ollama.example.test:443/')).toBe(KEY);
+  });
+
+  it.each([
+    ['host case', 'http://Ollama.Example.test:11434', 'http://ollama.example.TEST:11434/x', true],
+    ['an IPv6 literal', 'http://[::1]:11434', 'http://[0:0:0:0:0:0:0:1]:11434/api', true],
+    ['an explicit default port', 'http://ollama.example.test', 'http://ollama.example.test:80', true],
+    ['a trailing dot', 'http://ollama.example.test:11434', 'http://ollama.example.test.:11434', false],
+  ])('normalises the origin for %s', (_label, first, second, kept) => {
+    const s = store();
+    const a = s.save(input({ baseUrl: first, apiKey: KEY }));
+    expect(s.save(input({ id: a.id, baseUrl: second })).hasApiKey).toBe(kept);
+    expect(s.apiKeyFor(a.id, second)).toBe(kept ? KEY : null);
+    expect(existsSync(keyFile(a.id))).toBe(kept);
+  });
   it('keeps the key when apiKey is absent, deletes it on null, replaces it on a string', () => {
     const s = store();
     const a = s.save(input({ apiKey: KEY }));
