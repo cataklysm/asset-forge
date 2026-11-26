@@ -2,6 +2,8 @@ import type { TagAssignment, TagSuggestion } from '@assetforge/contracts';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/renderer/src/api';
 import { TagChip } from '../../src/renderer/src/components/TagChip';
@@ -9,6 +11,7 @@ import { TagCombobox } from '../../src/renderer/src/components/TagCombobox';
 import { TagFilter } from '../../src/renderer/src/components/TagFilter';
 import { TagList } from '../../src/renderer/src/components/TagList';
 import { TagRow } from '../../src/renderer/src/components/TagRow';
+import { AI_CHIP, CHIP, FILTER_CHIP, MATCHED_CHIP } from '../../src/renderer/src/ui';
 import { deferred, installFakeApi } from './fake-api';
 import { tagOf } from './fixtures';
 
@@ -246,6 +249,50 @@ it('a chip carries its origin and a filter chip uses the filter look', () => {
   expect(screen.getByText('oak').closest('[data-origin]')?.getAttribute('data-origin')).toBe('ai');
   expect(screen.getByText('bark').closest('span[class*="border-accent"]')).not.toBeNull();
   expect(screen.getByRole('button', { name: 'Remove bark' })).not.toBeNull();
+});
+
+const classesOf = (text: string) => (screen.getByText(text).parentElement as HTMLElement).className;
+
+it('an AI chip uses the AI look, a title and a distinct remove label', () => {
+  render(<TagChip tag={tagOf('Car', 'ai')} onRemove={() => {}} />);
+  const chip = screen.getByText('Car').parentElement as HTMLElement;
+  expect(chip.className).toContain(AI_CHIP);
+  expect(chip.getAttribute('title')).toBe('AI tag');
+  expect(screen.getByRole('button', { name: 'Remove AI tag Car' })).not.toBeNull();
+});
+
+it('manual, filter and matched chips keep their look and have no AI title', () => {
+  render(
+    <>
+      <TagChip tag={tagOf('Car')} onRemove={() => {}} />
+      <TagChip tag={tagOf('Filt', 'ai')} filter />
+      <TagChip tag={tagOf('Match', 'ai')} matched />
+    </>,
+  );
+  expect(classesOf('Car')).toContain(CHIP);
+  expect(classesOf('Filt')).toContain(FILTER_CHIP);
+  expect(classesOf('Match')).toContain(MATCHED_CHIP);
+  for (const text of ['Car', 'Filt', 'Match']) expect((screen.getByText(text).parentElement as HTMLElement).hasAttribute('title')).toBe(false);
+  expect(screen.getByRole('button', { name: 'Remove Car' })).not.toBeNull();
+});
+
+it('the AI colour has a contrast of at least 4.5 on the page and surface backgrounds', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/renderer/src/index.css'), 'utf8');
+  const channels = (name: string) => {
+    const m = css.match(new RegExp(`--color-${name}: *#([0-9a-f]{6});`, 'i'));
+    if (!m) throw new Error(`token ${name} missing`);
+    return [0, 2, 4].map((i) => parseInt(m[1]!.slice(i, i + 2), 16) / 255);
+  };
+  const luminance = (name: string) => {
+    const [r, g, b] = channels(name).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  expect(contrast('ai', 'bg')).toBeGreaterThanOrEqual(4.5);
+  expect(contrast('ai', 'surface')).toBeGreaterThanOrEqual(4.5);
 });
 
 function FilterHarness({ onChange }: { onChange(names: string[]): void }) {

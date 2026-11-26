@@ -29,6 +29,9 @@ const CHIP_BASE = 'inline-flex h-[26px] items-center gap-1 rounded-control borde
 
 export const CHIP = `${CHIP_BASE} border-line-strong text-text`;
 
+/** A tag proposed by the AI: its own colour, so it stays distinguishable from manual tags. */
+export const AI_CHIP = `${CHIP_BASE} border-ai text-ai`;
+
 export const FILTER_CHIP = `${CHIP_BASE} border-accent text-accent`;
 
 /** A tag that matched the active tag filter: accent border, normal text. */

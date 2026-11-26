@@ -51,6 +51,7 @@ describe('design tokens and window appearance', () => {
       danger: '#f87171',
       'danger-soft': '#2a1015',
       warning: '#fbbf24',
+      ai: '#b9a3ff',
     }))
       expect(css).toMatch(new RegExp(`--color-${name}: *${value};`, 'i'));
   });

@@ -1,6 +1,6 @@
 import type { TagOrigin } from '@assetforge/contracts';
 import { X } from 'lucide-react';
-import { CHIP, FILTER_CHIP, FOCUS, MATCHED_CHIP } from '../ui';
+import { AI_CHIP, CHIP, FILTER_CHIP, FOCUS, MATCHED_CHIP } from '../ui';
 
 interface Props {
   tag: { name: string; displayName: string; origin?: TagOrigin };
@@ -11,14 +11,20 @@ interface Props {
 
 /** One tag. `origin` is exposed as `data-origin` so that AI tags can be styled apart later. */
 export function TagChip({ tag, onRemove, filter = false, matched = false }: Props) {
-  const look = filter ? FILTER_CHIP : matched ? MATCHED_CHIP : CHIP;
+  const ai = tag.origin === 'ai' && !filter && !matched;
+  const look = filter ? FILTER_CHIP : matched ? MATCHED_CHIP : ai ? AI_CHIP : CHIP;
   return (
-    <span data-origin={tag.origin} data-matched={matched || undefined} className={`${look} max-w-full`}>
+    <span
+      data-origin={tag.origin}
+      data-matched={matched || undefined}
+      title={ai ? 'AI tag' : undefined}
+      className={`${look} max-w-full`}
+    >
       <span className="truncate">{tag.displayName}</span>
       {onRemove && (
         <button
           type="button"
-          aria-label={`Remove ${tag.displayName}`}
+          aria-label={ai ? `Remove AI tag ${tag.displayName}` : `Remove ${tag.displayName}`}
           onClick={onRemove}
           className={`-mr-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-80 hover:opacity-100 ${FOCUS}`}
         >
