@@ -21,6 +21,8 @@ export function readVisionConfig(
 }
 
 function usableBaseUrl(raw: string): string | null {
+  // A bare `?` or `#` leaves search and hash empty but stays in `href`.
+  if (raw.includes('?') || raw.includes('#')) return null;
   let url: URL;
   try {
     url = new URL(raw);

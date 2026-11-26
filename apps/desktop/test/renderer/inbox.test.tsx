@@ -1,16 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { FileRecord, IpcRequest } from '@assetforge/contracts';
+import type { FileRecord, IpcRequest, JobSummary } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
+import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, nonImageRecord, pageOf, tagOf } from './fixtures';
-import { act } from '@testing-library/react';
-import type { JobSummary } from '@assetforge/contracts';
-import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });

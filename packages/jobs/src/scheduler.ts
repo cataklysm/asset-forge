@@ -64,6 +64,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let started = false;
   let stopping = false;
   let startDone: Promise<void> = Promise.resolve();
+  let starting: Promise<void> | null = null;
   let passDone: Promise<void> = Promise.resolve();
   let passing = false;
   let passAgain = false;
@@ -210,8 +211,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
   return {
     async start() {
-      if (started || stopping) return;
-      startDone = (async () => {
+      if (stopping) return;
+      // Set synchronously, so a second call while recovery runs waits for it instead of recovering again.
+      if (starting) return starting;
+      startDone = starting = (async () => {
         try {
           await recover();
         } catch (cause) {
@@ -222,7 +225,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         wake();
         await passDone;
       })();
-      await startDone;
+      await starting;
     },
 
     wake,

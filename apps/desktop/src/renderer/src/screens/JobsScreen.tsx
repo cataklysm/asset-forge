@@ -54,6 +54,8 @@ export function JobsScreen() {
   // Bumped after every action of this screen; with `changeToken` it reloads the list.
   const [reloadToken, setReloadToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   const reloadKey = `${changeToken}|${reloadToken}`;
   const key = JSON.stringify([status, reloadKey]);
 
@@ -111,12 +113,18 @@ export function JobsScreen() {
   }
 
   async function run(action: () => Promise<unknown>) {
+    // One action at a time; the ref also catches a second click before the busy render.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     setError(null);
     try {
       await action();
     } catch (e) {
       setError(describeError(e));
     } finally {
+      busyRef.current = false;
+      setBusy(false);
       refresh();
       setReloadToken((n) => n + 1);
     }
@@ -129,7 +137,7 @@ export function JobsScreen() {
       <button
         type="button"
         className={BUTTON}
-        disabled={summary === null || active === 0}
+        disabled={busy || summary === null || active === 0}
         onClick={() => void run(() => call('jobs:cancelAll', {}))}
       >
         Cancel all
@@ -137,7 +145,7 @@ export function JobsScreen() {
       <button
         type="button"
         className={BUTTON}
-        disabled={retryable === 0}
+        disabled={busy || retryable === 0}
         onClick={() => void run(() => call('jobs:retryFailed', {}))}
       >
         Retry failed
@@ -145,7 +153,7 @@ export function JobsScreen() {
       <button
         type="button"
         className={BUTTON}
-        disabled={finished === 0}
+        disabled={busy || finished === 0}
         onClick={() => void run(() => call('jobs:clearFinished', {}))}
       >
         Clear finished

@@ -125,6 +125,7 @@ describe('phase 4a acceptance', () => {
       expect(await call('jobs:retryFailed', {})).toEqual({ retried: afterCancel.cancelled });
       await until((s) => s.running === 1);
       const [interrupted] = (await call('jobs:list', { limit: 10, offset: 0, status: 'running' })).items;
+      expect(interrupted).toBeDefined();
       await call('workspace:close', {});
 
       // Reopen without starting the scheduler: the interrupted job is back in the queue, its run not counted.

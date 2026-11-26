@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { JobsScreen } from '../../src/renderer/src/screens/JobsScreen';
-import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId, pageOf } from './fixtures';
 
 afterEach(() => {
@@ -271,6 +271,42 @@ it('a rejected retry shows the alert above the table', async () => {
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toBe('invalid_operation');
   expect(alert.compareDocumentPosition(screen.getByRole('grid', { name: 'Jobs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('a second click while an action runs sends nothing and the page actions wait for it', async () => {
+  const user = userEvent.setup();
+  const pending = deferred<Record<string, never>>();
+  let retries = 0;
+  const api = install(
+    {
+      'jobs:list': listOf([job({ status: 'failed', fileName: 'failed.png' })]),
+      'jobs:retry': () => {
+        retries += 1;
+        if (retries === 1) return pending.promise;
+        throw fakeError('invalid_operation');
+      },
+    },
+    { ...IDLE, queued: 1, failed: 1, succeeded: 1 },
+  );
+  renderScreen();
+  await screen.findByText('failed.png');
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false));
+
+  const retry = screen.getByRole('button', { name: 'Retry job' });
+  await user.click(retry);
+  await user.click(retry);
+  for (const name of ['Cancel all', 'Retry failed', 'Clear finished'])
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+
+  const lists = listCalls(api).length;
+  await act(async () => {
+    pending.resolve({});
+    await pending.promise;
+  });
+  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(lists));
+  expect(api.calls.filter((c) => c.channel === 'jobs:retry')).toHaveLength(1);
+  expect(screen.queryByRole('alert')).toBeNull();
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false));
 });
 
 it('a moved changes in the next poll loads the list again, keeping the rows meanwhile', async () => {

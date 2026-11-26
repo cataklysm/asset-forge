@@ -29,7 +29,7 @@ describe('readVisionConfig', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it.each(['', 'nonsense', 'file:///x', 'http://user:secret@host', 'http://:secret@host', 'http://h/?k=secret', 'http://h/#x'])(
+  it.each(['', 'nonsense', 'file:///x', 'http://user:secret@host', 'http://:secret@host', 'http://h/?k=secret', 'http://h/#x', 'http://h/?', 'http://h/#'])(
     'falls back to the default for %j and warns without the value',
     (value) => {
       const warn = vi.fn<(message: string) => void>();

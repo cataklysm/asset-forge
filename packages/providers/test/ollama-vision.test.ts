@@ -144,6 +144,95 @@ describe('ollama vision adapter', () => {
     await expectCode(analyze({ baseUrl: url, model: MOCK_MODEL, timeoutMs: 50 }), 'provider_timeout', url);
   });
 
+  it('maps HTTP 200 with an empty body to invalid_response', async () => {
+    const baseUrl = 'http://127.0.0.1:1';
+    await expectCode(analyze({ baseUrl, model: MOCK_MODEL, fetch: answering(200, '') }), 'invalid_response', baseUrl);
+  });
+
+  it('maps a body over the size cap to invalid_response and cancels the stream', async () => {
+    const baseUrl = 'http://127.0.0.1:1';
+    let cancelled = false;
+    const chunk = new Uint8Array(64 * 1024).fill(0x20);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl: typeof fetch = async () => new Response(stream, { status: 200 });
+    await expectCode(analyze({ baseUrl, model: MOCK_MODEL, fetch: fetchImpl }), 'invalid_response', baseUrl);
+    expect(cancelled).toBe(true);
+  });
+
+  it('maps a content-length over the size cap to invalid_response', async () => {
+    const baseUrl = 'http://127.0.0.1:1';
+    let pulled = false;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulled = true;
+          controller.enqueue(new TextEncoder().encode('{}'));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const fetchImpl: typeof fetch = async () =>
+      new Response(stream, { status: 200, headers: { 'content-length': String(2 * 1024 * 1024) } });
+    await expectCode(analyze({ baseUrl, model: MOCK_MODEL, fetch: fetchImpl }), 'invalid_response', baseUrl);
+    expect(pulled).toBe(false);
+  });
+
+  it('refuses a redirect as provider_rejected without following it', async () => {
+    const { url, requests } = await start();
+    let calls = 0;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      calls += 1;
+      expect(init?.redirect).toBe('manual');
+      return new Response(null, { status: 307, headers: { location: `${url}/api/chat` } });
+    };
+    await expectCode(analyze({ baseUrl: url, model: MOCK_MODEL, fetch: fetchImpl }), 'provider_rejected', url);
+    expect(calls).toBe(1);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('does not follow a real redirect response', async () => {
+    const { createServer: createHttpServer } = await import('node:http');
+    let hits = 0;
+    const server = createHttpServer((request, response) => {
+      hits += 1;
+      response.writeHead(307, { location: '/api/chat' });
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    try {
+      await expectCode(analyze({ baseUrl, model: MOCK_MODEL }), 'provider_rejected', baseUrl);
+      expect(hits).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('rethrows a pre-aborted signal and makes no request', async () => {
+    const baseUrl = 'http://127.0.0.1:1';
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1;
+      return new Response('{}', { status: 200 });
+    };
+    const controller = new AbortController();
+    const reason = new Error('cancelled before start');
+    controller.abort(reason);
+    const error = await failureOf(analyze({ baseUrl, model: MOCK_MODEL, fetch: fetchImpl }, controller.signal));
+    expect(error).toBe(reason);
+    expect(calls).toBe(0);
+  });
+
   it('rethrows the caller abort, not a job error', async () => {
     const { url } = await start(['hang']);
     const controller = new AbortController();

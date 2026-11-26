@@ -119,6 +119,36 @@ describe('file analysis repository', () => {
     expect(await tagsOf()).toEqual(['kept/manual', 'metal/ai', 'rusty/manual']);
   });
 
+  test('a successful apply changes no workflow step and not the asset status', async () => {
+    const versionId = uuid(60);
+    const stepIds = [uuid(61), uuid(62)];
+    await db.workflowTemplates.insertTemplate({ id: uuid(50), key: 'character', name: 'Character', builtIn: true, createdAt: T0 });
+    await db.workflowTemplates.insertVersion({
+      id: versionId,
+      templateId: uuid(50),
+      version: 1,
+      steps: [
+        { id: stepIds[0]!, position: 0, key: 'concept', name: 'Concept', mandatory: true },
+        { id: stepIds[1]!, position: 1, key: 'texturing', name: 'Texturing', mandatory: true },
+      ],
+      createdAt: T0,
+    });
+    await db.assetWorkflows.insert(
+      { id: uuid(70), assetId: ASSET_ID, templateVersionId: versionId, createdAt: T0 },
+      stepIds.map((stepDefinitionId, i) => ({ id: uuid(71 + i), stepDefinitionId, updatedAt: T0 })),
+    );
+    const snapshot = () => ({
+      asset: handle.prepare('select status, updated_at from asset where id = ?').get(ASSET_ID),
+      steps: handle.prepare('select * from asset_workflow_step order by id').all(),
+    });
+    const before = snapshot();
+    expect(before.steps).toHaveLength(2);
+
+    expect(await apply({ now: T2 })).toBe(true);
+    expect(snapshot()).toEqual(before);
+    expect((await db.assets.get(ASSET_ID))?.status).toBe('draft');
+  });
+
   test('duplicate tag names in one answer give one assignment', async () => {
     expect(await apply({ tags: [t('metal'), t('metal')] })).toBe(true);
     expect(await tagsOf()).toEqual(['metal/ai']);

@@ -297,6 +297,38 @@ describe('createScheduler', () => {
     expect(s.row(u)).toMatchObject({ status: 'queued', attempt: 0 });
   });
 
+  it('recovers once when start is called twice without waiting', async () => {
+    const h = controlled('cpu');
+    // A later listing answers later, so a second recovery would see the job the first start already launched.
+    let listings = 0;
+    const s = setup({
+      handlers: { t: h.handler },
+      repo: (fake) =>
+        new Proxy(fake, {
+          get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver) as unknown;
+            if (prop !== 'listByStatus' || typeof value !== 'function') return value;
+            return async (...args: unknown[]) => {
+              const ticks = listings++ * 10;
+              for (let i = 0; i < ticks; i++) await new Promise((resolve) => setImmediate(resolve));
+              return (value as (...a: unknown[]) => unknown).apply(target, args);
+            };
+          },
+        }),
+    });
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso() });
+
+    await Promise.all([s.scheduler.start(), s.scheduler.start()]);
+    await flush();
+    expect(h.runs).toHaveLength(1);
+    expect(s.row(id)).toMatchObject({ status: 'running', attempt: 1 });
+    h.runOf(id).resolve();
+    await flush();
+    expect(s.row(id).status).toBe('succeeded');
+    expect(h.runs).toHaveLength(1);
+  });
+
   it('never claims a job whose type has no handler', async () => {
     const h = controlled('cpu');
     const s = setup({ handlers: { t: h.handler } });

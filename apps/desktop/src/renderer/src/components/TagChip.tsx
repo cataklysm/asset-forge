@@ -9,7 +9,7 @@ interface Props {
   matched?: boolean;
 }
 
-/** One tag. `origin` is exposed as `data-origin` so that AI tags can be styled apart later. */
+/** One tag, an AI tag in its own look; `origin` is also exposed as `data-origin`. */
 export function TagChip({ tag, onRemove, filter = false, matched = false }: Props) {
   const ai = tag.origin === 'ai' && !filter && !matched;
   const look = filter ? FILTER_CHIP : matched ? MATCHED_CHIP : ai ? AI_CHIP : CHIP;

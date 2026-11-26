@@ -148,25 +148,25 @@ Deferred by design:
 Found during the build:
 
 - Tag cleaning (`cleanTagText`, shared by manual and AI tags) does not strip control and format characters (`\p{Cc}`, `\p{Cf}`: NUL, zero-width characters, bidi overrides), so a model answer can produce invisible or visually spoofed tags. Fixing it changes stored names and needs a `DERIVED_DATA_VERSION` bump.
-- Scheduler (`packages/jobs/src/scheduler.ts`): a concurrent second `start()` runs the recovery twice and could release a live run; a cancel during `stop` is dropped instead of marking the run cancelled; a failing pass skips the remaining resource classes and keeps the old timer; non-`JobError` causes during `stop` are not logged; the delay fallback is unreachable.
+- Scheduler (`packages/jobs/src/scheduler.ts`): a cancel during `stop` is dropped instead of marking the run cancelled; a failing pass skips the remaining resource classes and keeps the old timer; non-`JobError` causes during `stop` are not logged; the delay fallback is unreachable.
+- Scheduler: a thrown `claimNext` or `nextRunAfter` in a pass (e.g. a corrupt `payload` JSON) stalls that resource class until the next wake.
+- Scheduler: when `recover()` or `settle` fails, the rows stay `running` until the next workspace open; retry the recovery on the next wake.
+- Scheduler: a job that a pass has claimed but not yet launched misses a cancel (`cancelPending` returns 0 and no active run exists yet); re-check `active` after `cancelPending` returned 0.
 - A handler that ignores its abort signal hangs `stop` and with it the workspace close and quit.
-- Ollama adapter (`packages/providers/src/ollama-vision.ts`): a non-2xx answer whose body cannot be read is classified `provider_unreachable` instead of by its status; `response.text()` is unbounded; `fetch` follows redirects (use `redirect: 'error'`).
-- Job repository: the `exceptId` parameter of `keyHeld` in `job-repository.ts` is unused; a cancelled `retry_wait` job keeps its `run_after` and its old error.
+- `pool.jpeg` is not abortable (up to 30 s), so a workspace close during an analysis can wait that long.
+- Job repository: a cancelled `retry_wait` job keeps its `run_after` and its old error.
 - The "an AI assignment yields to any existing one" rule is coded twice (`FileAnalysisRepository.apply` and `linkFileTags`).
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
 - `job.file_id` and `file_analysis.file_id` reference `file` without a delete rule; once files can be deleted, their jobs and analysis rows must be handled.
-- Base URL check (`apps/desktop/src/main/vision-config.ts`): a bare `?` or `#` (`http://h/?`) still passes, because `search` and `hash` are empty while `href` keeps the delimiter; reject a raw value that contains `?` or `#`.
-- `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
-- `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs; it matters once paid providers run.
-- `retryJob` (`packages/core/src/jobs.ts`): the message "The file of this job already has an active job" also covers a job whose status changed between the check and the update.
+- Before paid providers: `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
+- Before paid providers: `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs.
+- Provider causes are dropped everywhere (the job row holds only the code); consider a main-console debug line with the HTTP status code and the error class only, never a URL or body (4b).
 - Inbox (`apps/desktop/src/renderer/src/screens/InboxScreen.tsx`): the `importResult` state also holds analysis results (rename to `result`); "Analyse" is not blocked while an import runs and not disabled while an analysis call runs; a rejected call leaves an earlier result strip in place.
-- `AssetFilesTab.tsx`: the `useJobs` hook line sits between the JSDoc of `analyse` and the function; move it up to the other hooks.
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
-- `TagChip.tsx`: the doc comment still says AI tags may be styled apart "later"; they already are.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
-- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts`); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx`.
+- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts` with the next job type); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx` (share it); a status filter change can lose its reset to the top when a poll moves the reload key in the same render (skip the capture when the status changed); the remount after a moved `changes` returns the focus to the row rather than the action button, and a newly queued job shifts the restored index; the count tooltip "Jobs in this workspace" shows the filtered total.
 
 Replaced by the phase 4b result dialog:
 
@@ -179,11 +179,12 @@ Tests:
 - The core tag tests lack the asset-tag cases of the manual-wins fake.
 - Missing persistence tests: `FileAnalysisRepository.apply` for an inbox file, rejection of an unknown `job.file_id` by the foreign key.
 - Mock provider: its test does not pin the style tag or that the tags come from the vocabulary; scripted numeric and `'hang'` failures bypass `delayMs` and are consumed before the model and image checks.
-- Ollama adapter: no tests for an HTTP 200 with an empty body and for a signal that is already aborted; the `closedPortUrl` test can flake.
+- Ollama adapter: the `closedPortUrl` test can flake.
 - Tag cleaning: no test pins that control and format characters pass `cleanTagText` (see above).
 - No test pins the content of `ANALYSIS_PROMPT` (`packages/core/src/analysis.ts`); the analysis test only checks that it is sent.
-- Analysis acceptance test (`apps/desktop/test/analysis-acceptance.test.ts`): the `interrupted` job may be undefined (no `toBeDefined`, or a hanging mock answer to make the run certain); the number of mock tags per file is never asserted.
-- Renderer: the theme contrast test in `tags.test.tsx` reads `index.css` through `process.cwd()` (use `import.meta.url` like `theme.test.ts`); `file-browser.test.tsx` waits a real 50 ms for a negative assertion; `inbox.test.tsx` imports `act` and `JobSummary` in second import lines from the same sources.
+- Renderer: the theme contrast test in `tags.test.tsx` reads `index.css` through `process.cwd()` (use `import.meta.url` like `theme.test.ts`).
+- Real 50 ms sleeps in negative assertions (`file-browser.test.tsx`, `inbox.test.tsx`, `jobs-ipc.test.ts`).
+- Jobs screen tests: no test for the poll and reload after a rejected action, for the position kept across a reload, or for the reset to the top on a status change.
 - Renderer analysis tests: the Files-tab skipped test uses a failed PNG rather than a document; the inbox dialog test asserts only the IPC call; there is no dialog test on the Files tab; no test checks `refresh()` after a successful `startAnalysis` (inbox, Files tab) or the `resultToken` reload of the asset Files tab.
 - The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
 

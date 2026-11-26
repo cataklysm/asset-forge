@@ -9,7 +9,7 @@ import {
   type JobView,
 } from '@assetforge/contracts';
 import type { Job, JobRepository } from '@assetforge/core';
-import { and, asc, count, desc, eq, inArray, isNotNull, lte, min, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, lte, min, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import { file, job } from './schema.js';
@@ -42,11 +42,9 @@ const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage:
 
 const isActive = inArray(job.status, [...ACTIVE_JOB_STATUSES]);
 
-/** True when an active job other than `exceptId` holds the key. */
-function keyHeld(tx: Pick<BetterSQLite3Database, 'select'>, dedupeKey: string, exceptId?: string): boolean {
-  const where = [eq(job.dedupeKey, dedupeKey), isActive];
-  if (exceptId !== undefined) where.push(ne(job.id, exceptId));
-  return tx.select({ id: job.id }).from(job).where(and(...where)).limit(1).get() !== undefined;
+/** True when an active job holds the key. */
+function keyHeld(tx: Pick<BetterSQLite3Database, 'select'>, dedupeKey: string): boolean {
+  return tx.select({ id: job.id }).from(job).where(and(eq(job.dedupeKey, dedupeKey), isActive)).limit(1).get() !== undefined;
 }
 
 export function createJobRepository(db: BetterSQLite3Database): JobRepository {

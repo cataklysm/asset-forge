@@ -56,6 +56,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const containerRef = useRef<HTMLDivElement>(null);
   const detailDialog = useFileDialog(containerRef);
   const detail = detailDialog.file;
+  const { refresh: refreshJobs } = useJobs();
   // Synchronous guards: a second activation before the re-render must not send a second request.
   const acting = useRef(false);
   const batching = useRef(false);
@@ -167,7 +168,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     });
 
   /** Enqueues an analysis of `files`; the outcome shows in the result strip, the selection is kept. */
-  const { refresh: refreshJobs } = useJobs();
   const analyse = (files: readonly FileRecord[]) =>
     batch(async () => {
       try {
