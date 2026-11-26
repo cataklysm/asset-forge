@@ -359,6 +359,7 @@ describe('generation repository', () => {
     await db.generations.succeed({ id: uuid(2), output, now: T2 });
     expect(await db.generations.remove(uuid(1))).toBe(false);
     expect(await db.generations.remove(uuid(2))).toBe(false);
+    // A succeeded generation is never cancelled through the repository; raw SQL only sets up the cascade check.
     handle.prepare("update generation set status = 'cancelled' where id = ?").run(uuid(2));
     db.generations.settle({ id: uuid(1), outcome: { status: 'cancelled' }, now: T2 });
     expect(await db.generations.remove(uuid(1))).toBe(true);

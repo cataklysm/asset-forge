@@ -19,7 +19,7 @@ import { file, generation, job } from './schema.js';
 type JobRow = typeof job.$inferSelect;
 
 /** The stored code; a value outside the vocabulary (the column has no CHECK) reads as `internal_error`. */
-const errorCodeOf = (value: string | null): JobErrorCode | null =>
+export const errorCodeOf = (value: string | null): JobErrorCode | null =>
   value === null ? null : JobErrorCodeSchema.catch('internal_error').parse(value);
 
 const toJob = (row: JobRow): Job => ({

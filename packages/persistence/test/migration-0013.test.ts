@@ -125,7 +125,7 @@ describe('migration 0013', () => {
       }
       expect(check.pragma('foreign_key_list(generation)')).toEqual([]);
       expect(indexColumns(check, 'generation_job_id_idx')).toEqual(['job_id']);
-      expect(indexColumns(check, 'generation_created_at_idx')[0]).toBe('created_at');
+      expect(indexColumns(check, 'generation_created_at_idx')).toEqual(['created_at', 'id']);
       expect(check.prepare('SELECT id, status, file_id, provider_id FROM job').all()).toEqual([
         { id: uuid(10), status: 'queued', file_id: uuid(3), provider_id: 'p1' },
       ]);

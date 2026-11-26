@@ -1,24 +1,15 @@
-import {
-  GenerationParametersSchema,
-  JobErrorCodeSchema,
-  type GenerationFile,
-  type JobErrorCode,
-} from '@assetforge/contracts';
+import { FINISHED_JOB_STATUSES, GenerationParametersSchema, type GenerationFile } from '@assetforge/contracts';
 import type { GenerationFileRef, GenerationRepository, GenerationRow, JobOutcome } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { insertJob } from './job-repository.js';
+import { errorCodeOf, insertJob } from './job-repository.js';
 import { file, generation, generationInput, generationOutput, job } from './schema.js';
 
 type Tx = Pick<BetterSQLite3Database, 'select'>;
 type FileTable = typeof generationInput | typeof generationOutput;
 
-/** The stored code; a value outside the vocabulary (the column has no CHECK) reads as `internal_error`. */
-const errorCodeOf = (value: string | null): JobErrorCode | null =>
-  value === null ? null : JobErrorCodeSchema.catch('internal_error').parse(value);
-
-const FINISHED = ['succeeded', 'failed', 'cancelled'] as const;
-const isFinishedJob = (status: string): status is (typeof FINISHED)[number] => (FINISHED as readonly string[]).includes(status);
+const isFinishedJob = (status: string): status is (typeof FINISHED_JOB_STATUSES)[number] =>
+  (FINISHED_JOB_STATUSES as readonly string[]).includes(status);
 
 /** The input or output rows of these generations, by generation id in position order, with the file's trash state. */
 function filesOf(tx: Tx, table: FileTable, ids: readonly string[]): Map<string, GenerationFile[]> {
