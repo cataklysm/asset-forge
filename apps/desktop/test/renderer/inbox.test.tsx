@@ -359,7 +359,7 @@ it('Import as file sends unpackArchives false; an archive-level failure is named
     'dialog:pickFiles': () => ['C:\\in\\a.zip', 'C:\\in\\pack.zip'],
     'files:import': () => [
       importResultOf('C:\\in\\a.zip', { file: fileRecord({ originalName: 'a.zip', kind: 'other' }) }),
-      importResultOf('C:\\in\\pack.zip', { error: 'The archive could not be read' }),
+      importResultOf('C:\\in\\pack.zip', { error: 'This file is not a readable ZIP archive' }),
     ],
   });
   render(<Harness />);

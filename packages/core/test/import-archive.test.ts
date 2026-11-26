@@ -147,7 +147,7 @@ describe('importFiles unpacking archives', () => {
 
   it('entry paths never influence the storage path', async () => {
     const { unpack, archives } = await setup();
-    const names = ['../../evil.png', '/abs/root.png', 'C:\\Windows\\x.png', 'C:x.png', 'a\\..\\b.png', 'dir/..', '..\\..\\up.txt', '\\\\server\\share\\s.png'];
+    const names = ['../../evil.png', '/abs/root.png', 'C:\\Windows\\x.png', 'C:x.png', 'a\\..\\b.png', 'dir/..', '..\\..\\up.txt', '\\\\server\\share\\s.png', 'x.png:stream'];
     archives.set('/src/pack.zip', names.map((name, i) => ({ name, content: `c${i}` })));
 
     const results = await unpack(['/src/pack.zip']);

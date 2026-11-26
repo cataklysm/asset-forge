@@ -188,6 +188,7 @@ export const ZIP_CANCEL_TITLE = 'Imports nothing';
 export function archiveCountLabel(count: number): string {
   return `${count} archives`;
 }
+
 /** The origin of a trashed file that came from the inbox. */
 export const INBOX_LABEL = 'Inbox';
 export const TRASH_EMPTY_TEXT = 'Trash is empty';

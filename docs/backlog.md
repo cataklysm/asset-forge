@@ -383,6 +383,15 @@ Deferred by design:
 - No free-space check before unpacking; only the entry-count and declared-size limits bound what one import writes.
 - No folder structure: entries are imported flat under the last segment of their path.
 
+Found in the final review and not fixed:
+
+- A stored entry with a wrong declared size and an archive with strong encryption fail the whole archive (`This file is not a readable ZIP archive`) instead of one entry.
+- The result strip is neither bounded nor virtualised; one import can show up to 5000 failure lines.
+- Test gaps: Esc in the "ZIP archive" choice dialog is tested only in the inbox; `openEntry` racing `close()` is untested; `apps/desktop/test/import-result.test.ts` imports renderer test helpers (`test/renderer/fake-api.ts`, `fixtures.ts`).
+- `useZipChoice` leaves a pending promise when the screen unmounts or `choose` is called twice.
+- `AssetScreen` has no synchronous re-entry guard like the inbox's `importingRef`.
+- Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-manager.ts`).
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.

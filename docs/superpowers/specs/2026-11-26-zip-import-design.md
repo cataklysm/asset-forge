@@ -101,7 +101,7 @@ To make this possible `importFile` is split: the part after "the source is open"
 - over a limit: `This archive is too large to unpack`;
 - no result at all (empty, or only skipped entries): `This archive contains no files`. An archive holding only refused entries answers one refusal per entry instead.
 
-An archive whose directory was read but that becomes unreadable part-way reports every entry not yet started as a result with `file: null` and `This archive could not be read to the end`; no file rows are created for them. The entry being read at that moment fails like any import (a failed file row).
+An archive whose directory was read but that becomes unreadable part-way reports each entry that cannot be opened as a result with `file: null` and `This archive could not be read to the end`, without a file row; the following entries are still tried. The entry being read at that moment fails like any import (a failed file row).
 
 ### Crash and repeat
 

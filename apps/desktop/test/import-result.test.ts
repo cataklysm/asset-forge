@@ -41,6 +41,11 @@ describe('importTitle', () => {
     expect(importTitle(results, { duplicates: true })).toBe('3 imported, 2 failed, 1 duplicates');
   });
 
+  it('a complete file with an error (placement failed) counts as imported and as failed', () => {
+    const placed = [importResultOf('C:\\in\\a.png', { file: complete, error: 'The asset does not exist' })];
+    expect(importTitle(placed, { duplicates: true })).toBe('1 imported, 1 failed, 0 duplicates');
+  });
+
   it('an empty result', () => {
     expect(importTitle([], { duplicates: true })).toBe('0 imported, 0 failed, 0 duplicates');
   });
@@ -50,7 +55,7 @@ describe('importFailures', () => {
   it('names an entry failure with the archive and any other failure by its file name', () => {
     const failures = importFailures([
       importResultOf('C:\\in\\pack.zip', { entryName: 'a.exe', error: 'This file type cannot be imported' }),
-      importResultOf('C:\\in\\broken.zip', { error: 'The archive could not be read' }),
+      importResultOf('C:\\in\\broken.zip', { error: 'This file is not a readable ZIP archive' }),
       importResultOf('C:\\in\\c.exe', { error: 'This file type cannot be imported' }),
       importResultOf('C:\\in\\ok.png', { file: fileRecord() }),
     ]);

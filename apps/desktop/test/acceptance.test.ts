@@ -971,4 +971,58 @@ describe('ZIP import acceptance', () => {
       await manager.close();
     }
   });
+
+  /** Offsets of the central and local header of every entry of a (non-ZIP64) archive. */
+  function zipHeaders(buf: Buffer): { central: number; local: number }[] {
+    let eocd = -1;
+    for (let i = buf.length - 22; i >= 0; i--) {
+      if (buf.readUInt32LE(i) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('no end of central directory');
+    let cursor = buf.readUInt32LE(eocd + 16);
+    const out: { central: number; local: number }[] = [];
+    for (let n = 0; n < buf.readUInt16LE(eocd + 10); n++) {
+      out.push({ central: cursor, local: buf.readUInt32LE(cursor + 42) });
+      cursor += 46 + buf.readUInt16LE(cursor + 28) + buf.readUInt16LE(cursor + 30) + buf.readUInt16LE(cursor + 32);
+    }
+    return out;
+  }
+
+  it('a deflated entry with a lying declared size fails alone; the next entry is imported', async () => {
+    const archivePath = join(base, 'sources', 'liar.zip');
+    const content = Buffer.from('deflated content '.repeat(200));
+    const zip = new yazl.ZipFile();
+    zip.addBuffer(content, 'liar.png', { compress: true });
+    zip.addBuffer(Buffer.from('honest pixels'), 'honest.png', { compress: true });
+    zip.end();
+    await pipeline(zip.outputStream, createWriteStream(archivePath));
+    const buf = await readFile(archivePath);
+    const [liar] = zipHeaders(buf);
+    buf.writeUInt32LE(content.length + 1, liar!.central + 24);
+    buf.writeUInt32LE(content.length + 1, liar!.local + 22);
+    await writeFile(archivePath, buf);
+
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(manager);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+
+      const results = await call('files:import', { sourcePaths: [archivePath], unpackArchives: true });
+
+      expect(results.map((r) => [r.entryName, r.file?.status ?? null])).toEqual([
+        ['liar.png', 'failed'],
+        ['honest.png', 'complete'],
+      ]);
+      expect(results[0]!.error).toEqual(expect.any(String));
+      expect(results[0]!.error).not.toContain(base);
+      expect(results[1]!.error).toBeNull();
+      expect(await readFile(join(workspaceRoot, results[1]!.file!.relativePath), 'utf8')).toBe('honest pixels');
+      expect(await readdir(join(workspaceRoot, '.assetforge', 'staging'))).toEqual([]);
+    } finally {
+      await manager.close();
+    }
+  });
 });

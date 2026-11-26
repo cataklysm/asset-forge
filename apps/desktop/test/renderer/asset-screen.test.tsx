@@ -284,7 +284,7 @@ it('Import as file in the asset screen sends unpackArchives false', async () => 
   const asset = assetDetail();
   const api = install(asset, {
     'dialog:pickFiles': () => ['C:\\in\\pack.zip'],
-    'files:import': () => [importResultOf('C:\\in\\pack.zip', { error: 'The archive could not be read' })],
+    'files:import': () => [importResultOf('C:\\in\\pack.zip', { error: 'This file is not a readable ZIP archive' })],
   });
   render(<Harness id={asset.id} />);
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
