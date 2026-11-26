@@ -23,7 +23,13 @@ describe('readVisionConfig', () => {
     expect(readVisionConfig({ ASSETFORGE_VISION_MODEL: '   ' }).model).toBe('mock-vision');
   });
 
-  it.each(['', 'nonsense', 'file:///x', 'http://user:secret@host'])(
+  it('keeps a path base URL without its trailing slash', () => {
+    const warn = vi.fn();
+    expect(readVisionConfig({ ASSETFORGE_VISION_BASE_URL: 'http://h/base/' }, warn).baseUrl).toBe('http://h/base');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'nonsense', 'file:///x', 'http://user:secret@host', 'http://:secret@host', 'http://h/?k=secret', 'http://h/#x'])(
     'falls back to the default for %j and warns without the value',
     (value) => {
       const warn = vi.fn<(message: string) => void>();

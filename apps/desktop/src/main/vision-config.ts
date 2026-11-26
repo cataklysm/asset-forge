@@ -29,5 +29,6 @@ function usableBaseUrl(raw: string): string | null {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   if (url.username !== '' || url.password !== '') return null;
+  if (url.search !== '' || url.hash !== '') return null;
   return url.href.replace(/\/+$/, '');
 }
