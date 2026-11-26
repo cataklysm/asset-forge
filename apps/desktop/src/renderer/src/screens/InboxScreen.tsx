@@ -10,7 +10,9 @@ import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
 import { SelectionBar } from '../components/SelectionBar';
+import { useZipChoice } from '../components/ZipChoiceDialog';
 import { fileMenuItems } from '../file-actions';
+import { importTitle } from '../import-result';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
@@ -57,6 +59,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const deleting = useRef(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const trash = useTrash();
+  const zipChoice = useZipChoice();
 
   // A finished job may have changed records (e.g. AI tags): the list and the count reload.
   const { resultToken } = useJobs();
@@ -110,12 +113,10 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     try {
       const sourcePaths = await call('dialog:pickFiles', {});
       if (sourcePaths.length === 0) return;
-      const results = await call('files:import', { sourcePaths });
-      const failures = importFailures(results);
-      // A duplicate is still imported (it only has matching content), so it counts in both figures.
-      const imported = results.filter((r) => r.file !== null).length;
-      const duplicates = results.filter((r) => r.duplicateOf.length > 0).length;
-      setImportResult({ title: `${imported} imported, ${failures.length} failed, ${duplicates} duplicates`, failures });
+      const unpackArchives = await zipChoice.choose(sourcePaths);
+      if (unpackArchives === null) return;
+      const results = await call('files:import', { sourcePaths, unpackArchives });
+      setImportResult({ title: importTitle(results, { duplicates: true }), failures: importFailures(results) });
       reload();
     } catch (e) {
       setError(describeError(e));
@@ -303,6 +304,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           }}
         />
         {analysis.dialogs}
+        {zipChoice.dialog}
       </div>
     </Page>
   );

@@ -175,6 +175,19 @@ export const PURGE_SELECTION_TITLE = 'Removes the files from disk; asks first';
 export const EMPTY_TRASH_LABEL = 'Empty trash';
 export const EMPTY_TRASH_TITLE = 'Removes every file in the trash from disk; asks first';
 export const CANCEL_LABEL = 'Cancel';
+
+/** The choice before importing picked ZIP archives (ZipChoiceDialog). */
+export const ZIP_ARCHIVE_TITLE = 'ZIP archive';
+export const UNPACK_LABEL = 'Unpack';
+export const UNPACK_TITLE = 'Imports each file inside the archive';
+export const IMPORT_AS_FILE_LABEL = 'Import as file';
+export const IMPORT_AS_FILE_TITLE = 'Imports the archive itself as one file';
+export const ZIP_CANCEL_TITLE = 'Imports nothing';
+
+/** '2 archives'; the dialog names a single archive by its file name instead. */
+export function archiveCountLabel(count: number): string {
+  return `${count} archives`;
+}
 /** The origin of a trashed file that came from the inbox. */
 export const INBOX_LABEL = 'Inbox';
 export const TRASH_EMPTY_TEXT = 'Trash is empty';

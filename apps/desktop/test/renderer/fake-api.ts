@@ -2,6 +2,7 @@ import type {
   AnalysisPrompt,
   AnalysisPromptList,
   ErrorCode,
+  ImportResult,
   IpcChannel,
   IpcRequest,
   IpcResponse,
@@ -44,6 +45,14 @@ export function deferred<T>(): {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+/**
+ * One result of `files:import`: no file, no error, no duplicates unless given. For an archive
+ * entry pass `entryName`; `sourcePath` is then the archive's path.
+ */
+export function importResultOf(sourcePath: string, p: Partial<Omit<ImportResult, 'sourcePath'>> = {}): ImportResult {
+  return { sourcePath, entryName: null, file: null, error: null, duplicateOf: [], ...p };
 }
 
 type PromptChannel = 'analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';

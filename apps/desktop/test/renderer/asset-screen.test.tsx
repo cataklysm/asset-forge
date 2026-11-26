@@ -21,7 +21,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -241,13 +241,74 @@ it('import shows the result strip with failed names and errors, and reports busy
   expect(strip.textContent).toContain('This file type cannot be imported');
   expect(strip.textContent).not.toContain('C:\\in');
   expect(callsOf(api, 'files:import')).toEqual([
-    { sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.exe'], target: { assetId: asset.id, role: 'concept' } },
+    { sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.exe'], target: { assetId: asset.id, role: 'concept' }, unpackArchives: false },
   ]);
+  expect(screen.queryByRole('dialog')).toBeNull();
   await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
   expect(screen.queryByText('Importing…')).toBeNull();
 
   await user.click(within(strip).getByRole('button', { name: 'Dismiss' }));
   expect(screen.queryByText('1 imported, 1 failed')).toBeNull();
+});
+
+it('a picked ZIP asks first; Unpack imports the entries with the role and the strip counts them', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const d = fileRecord({ originalName: 'd.png', assetId: asset.id, role: 'reference' });
+  const failedRow = fileRecord({ originalName: 'e.png', status: 'failed', sha256: null, error: 'The checksum did not match' });
+  const api = install(asset, {
+    'dialog:pickFiles': () => ['C:\\in\\pack.zip'],
+    'files:import': () => [
+      importResultOf('C:\\in\\pack.zip', { entryName: 'd.png', file: d }),
+      importResultOf('C:\\in\\pack.zip', { entryName: 'e.png', file: failedRow, error: 'The checksum did not match' }),
+      importResultOf('C:\\in\\pack.zip', { entryName: 'a.exe', error: 'This file type cannot be imported' }),
+    ],
+  });
+  render(<Harness id={asset.id} />);
+  await user.click(await screen.findByRole('button', { name: 'Import files' }));
+  const dialog = await screen.findByRole('dialog', { name: 'ZIP archive' });
+  expect(within(dialog).getByText('pack.zip')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Unpack' }));
+
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('1 imported, 2 failed')).toBeTruthy();
+  expect(strip.textContent).toContain('a.exe (pack.zip)');
+  expect(strip.textContent).toContain('e.png (pack.zip)');
+  expect(callsOf(api, 'files:import')).toEqual([
+    { sourcePaths: ['C:\\in\\pack.zip'], target: { assetId: asset.id, role: 'reference' }, unpackArchives: true },
+  ]);
+});
+
+it('Import as file in the asset screen sends unpackArchives false', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const api = install(asset, {
+    'dialog:pickFiles': () => ['C:\\in\\pack.zip'],
+    'files:import': () => [importResultOf('C:\\in\\pack.zip', { error: 'The archive could not be read' })],
+  });
+  render(<Harness id={asset.id} />);
+  await user.click(await screen.findByRole('button', { name: 'Import files' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Import as file' }));
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('0 imported, 1 failed')).toBeTruthy();
+  expect(within(strip).getByText('pack.zip')).toBeTruthy();
+  expect(callsOf(api, 'files:import')).toEqual([
+    { sourcePaths: ['C:\\in\\pack.zip'], target: { assetId: asset.id, role: 'reference' }, unpackArchives: false },
+  ]);
+});
+
+it('Cancel in the ZIP dialog of the asset screen imports nothing and ends the busy state', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const api = install(asset, { 'dialog:pickFiles': () => ['C:\\in\\pack.zip'], 'files:import': () => [] });
+  const onBusyChange = vi.fn();
+  render(<Harness id={asset.id} onBusyChange={onBusyChange} />);
+  await user.click(await screen.findByRole('button', { name: 'Import files' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Import files' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  expect(callsOf(api, 'files:import')).toEqual([]);
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 async function selectThree(asset: AssetDetail, handlers: FakeHandlers = {}) {
