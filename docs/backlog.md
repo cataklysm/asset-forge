@@ -1,13 +1,12 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import and asset sources reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources and several vision providers reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
-- **Several vision providers.** Today exactly one provider can be configured (one base URL, one API key, one default model per purpose). The owner needs several defined side by side: the local Ollama on their own graphics card is not always available (the card is needed for other work), and at times a container on RunPod or a similar host takes over, also to try much larger models. Decided by the owner: the provider is chosen where an analysis is started (the start dialog, the single-image dialog, Image to prompt), not only in the settings, so that switching needs no detour through the settings and the dialog shows which provider is selected and whether it is reachable; a dialog preselects the provider that was used last. Open for the design: what a provider entry holds (name, base URL, key, timeout, default models), how reachability is shown there, one stored key per provider in `safeStorage`, the read-only environment mode, the pause gate and the pause banner per provider, queued jobs whose provider is switched or removed, and the fingerprint skip (it already contains provider and model, so the same file analysed through another provider counts as not analysed).
 
 ## Correctness and robustness
 
@@ -413,6 +412,39 @@ Found in the final review and not fixed:
 - Writing a source and touching the asset's `updated_at` are two statements, not one transaction (as for tags).
 - An `assets:get` reload already in flight can briefly show the asset without a source that was just added (the same pattern as for tags).
 - How Windows treats `^`, `|`, `&` and a backtick in a query string handed to `shell.openExternal` is unverified.
+
+## Vision providers
+
+Deferred by design:
+
+- No second kind of provider (OpenAI-compatible servers, vLLM, a llama.cpp server, RunPod serverless); every entry speaks the Ollama API and `OLLAMA_PROVIDER` stays the one adapter kind (it is also the provider id in the fingerprint, so the same model through two entries counts as already analysed).
+- No automatic failover: the app never moves jobs or switches a provider by itself.
+- No starting, stopping or loading anything on a provider (pods, Ollama model load control).
+- No setting for parallel analyses per provider; each provider runs one at a time.
+- No moving of a running job or of single jobs picked from the list; a move is all waiting jobs of one provider.
+- No background polling of reachability; a state is checked when a dialog, the select or the settings ask.
+- No record of which entry produced a stored analysis; the stored model name stays the record.
+- No paid providers and no safeguards for them.
+- Jobs in workspaces that are not open are not checked when an entry is deleted; such a job later fails as `provider_not_configured` and can be moved.
+- Jobs without a provider are assigned to the first entry only when a workspace is opened, not when the first entry is created.
+- The origin binding of a key lives in the plaintext settings file (it is the stored base URL), now per entry.
+- The Jobs-screen provider filter offers `All providers` and the existing entries; there is no option for jobs without a provider or for the lanes of a deleted provider.
+- In environment mode an unusable `ASSETFORGE_VISION_BASE_URL` gives an empty provider list rather than one entry that reports the error.
+
+Found in the final review and not fixed:
+
+- Opening a dialog or the provider select discards each entry's last answer before re-checking, so a ready entry shows as being checked and Start is blocked until the answer arrives.
+- A failed reload with a list already held is visible only to the caller.
+- A pending key removal is not shown and cannot be undone before saving.
+- Focus is lost after deleting an entry in Settings.
+- The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
+- Key temporary files are swept only at start.
+- A store read error on workspace open prevents the scheduler from starting.
+- A source lane stays paused with no jobs after a move until Resume or a save of its entry.
+- The waiting count in the move dialog is not refreshed while it is open.
+- Jobs of a deleted provider cannot be filtered on the Jobs screen.
+- The result dialog re-checks all entries and drops a manual provider pick on every file switch.
+- `listTimeoutMs` is not clamped.
 
 ## Not covered by any automated check
 
