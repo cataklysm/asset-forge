@@ -284,8 +284,11 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
             })
             .from(job)
             .leftJoin(file, eq(file.id, job.fileId))
-            // The generation whose current job this is; an earlier run of a requeued generation finds none.
-            .leftJoin(generation, eq(generation.jobId, job.id))
+            // The generation named in the payload, so an earlier run of a requeued generation is named too.
+            .leftJoin(
+              generation,
+              and(eq(job.type, IMAGE_GENERATE_JOB), sql`${generation.id} = json_extract(${job.payload}, '$.generationId')`),
+            )
             .where(where)
             .orderBy(desc(job.createdAt), desc(job.id))
             .limit(limit)
