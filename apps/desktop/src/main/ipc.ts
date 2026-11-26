@@ -20,7 +20,8 @@ import type { DescribeController } from './describe-controller.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
-import type { SettingsHandlers } from './settings-handlers.js';
+import type { ProviderHandlers } from './provider-handlers.js';
+import type { ProviderStore } from './provider-store.js';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
 
@@ -56,7 +57,9 @@ export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
 
 /** App-level services the handlers route to; they do not need an open workspace. */
 export interface AppServices {
-  settings: SettingsHandlers;
+  providers: ProviderHandlers;
+  /** The provider entries the analysis channels resolve and the job rows are named from. */
+  providerStore: ProviderStore;
   analysisPrompts: AnalysisPromptHandlers;
   prompts: AnalysisPromptStore;
   describe: DescribeController;
@@ -105,11 +108,11 @@ export function createWorkspaceHandlers(
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe, services.prompts),
+    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
-    // App-level settings and analysis prompts: not behind the workspace guard.
-    ...services.settings,
+    // App-level provider entries and analysis prompts: not behind the workspace guard.
+    ...services.providers,
     ...services.analysisPrompts,
   };
 }
