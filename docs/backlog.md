@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer and phase 4a reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a and phase 4b reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Correctness and robustness
 
@@ -140,7 +140,6 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewe
 
 Deferred by design:
 
-- No circuit breaker for an unreachable provider: every job of a batch still makes its three tries and fails about 35 s after its first one. A job in `retry_wait` holds no slot, so the files interleave rather than fail strictly one after another, but the whole batch keeps calling a provider that is down until each file has used its tries; "Cancel all" ends it. A possible fix is "stop the queue after N consecutive unreachable failures".
 - No attempt history: a job keeps only its attempt counter and the error of its latest run (ReadMe §10). Needed at the latest for paid jobs in phase 5.
 - The file name on the Jobs screen is plain text, not a link to the file.
 - Job rows are only removed by "Clear finished"; there is no age-based cleanup of finished jobs.
@@ -161,9 +160,7 @@ Found during the build:
 - `job.file_id` and `file_analysis.file_id` reference `file` without a delete rule; once files can be deleted, their jobs and analysis rows must be handled.
 - Before paid providers: `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
 - Before paid providers: `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs.
-- Provider causes are dropped everywhere (the job row holds only the code); consider a main-console debug line with the HTTP status code and the error class only, never a URL or body (4b).
-- `ollama-vision.ts` passes the response body as the cause of `invalid_response`; nothing logs it today, and the debug line above must not start to.
-- `ollama-vision.ts`: the redirect and non-2xx branches throw directly, so an abort that lands while the body is discarded yields a `JobError` instead of the abort reason.
+- `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
 - Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
 - `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
 - Inbox (`apps/desktop/src/renderer/src/screens/InboxScreen.tsx`): the `importResult` state also holds analysis results (rename to `result`); "Analyse" is not blocked while an import runs and not disabled while an analysis call runs; a rejected call leaves an earlier result strip in place.
@@ -171,10 +168,6 @@ Found during the build:
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
 - Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts` with the next job type); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx` (share it); a status filter change can lose its reset to the top when a poll moves the reload key in the same render (skip the capture when the status changed); the remount after a moved `changes` returns the focus to the row rather than the action button, and a newly queued job shifts the restored index; the count tooltip "Jobs in this workspace" shows the filtered total.
-
-Replaced by the phase 4b result dialog:
-
-- An analysis started from the file detail dialog shows its result strip or error behind the dialog (`InboxScreen.tsx`, `AssetFilesTab.tsx`), as the 4a spec asks; the 4b result dialog shows the outcome in place.
 
 Tests:
 
@@ -191,6 +184,57 @@ Tests:
 - Jobs screen tests: no test for the poll and reload after a rejected action, for the position kept across a reload, or for the reset to the top on a status change.
 - Renderer analysis tests: the Files-tab skipped test uses a failed PNG rather than a document; the inbox dialog test asserts only the IPC call; there is no dialog test on the Files tab; no test checks `refresh()` after a successful `startAnalysis` (inbox, Files tab) or the `resultToken` reload of the asset Files tab.
 - The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
+
+## Phase 4b
+
+Deferred by design:
+
+- The asset gallery has no multi-select; several assets are analysed through "Analyse all" over the gallery filter.
+- Image2Prompt runs outside the scheduler, so it can overlap one running analysis on the same GPU (Ollama queues the requests).
+- The pause of the analysis queue is not persisted; a restart starts unpaused.
+- A file has one AI tag set, not one per model, and there is no proposal history.
+- `settings:listVisionModels` has no cancel channel; a slow server holds the request until its timeout.
+- The Settings screen is reachable only inside an open workspace, although the settings are app-level.
+- The two "Before paid providers" entries of phase 4a still apply.
+
+Provider adapter (`packages/providers/src/ollama-vision.ts`):
+
+- Models beyond the first 100 of `/api/tags` are dropped silently.
+- `invalid_response` for a `message.content` that is not JSON is logged with HTTP status 200.
+- A timeout that fires after the answer arrived relabels the outcome as `provider_timeout`.
+- A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
+
+Settings (`apps/desktop/src/main/vision-settings.ts`):
+
+- A change listener that throws in the `finally` of a save masks an error of the key write.
+- A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
+- An unusable `ASSETFORGE_VISION_BASE_URL` in environment mode is treated as "not configured" without a warning.
+
+Scheduler and pause gate (`packages/jobs`):
+
+- With a class limit of 2 or more, a claim already in flight when the pause trips still starts its job.
+- The gate records an outcome before the job's result is stored, so a failing store still counts.
+- The pause threshold of `createPauseGate` is not validated.
+
+Persistence:
+
+- `acceptProposal` in the repository answers `false` both for no proposal and for a stale one; core tells them apart only by reading first.
+- A wrong `sha256` passed to the repository's `acceptProposal` deletes a valid proposal (core always passes the stored one).
+- The proposal reader returns an empty tag list for invalid stored tag names, where the list readers throw.
+- No query-plan test for the reader page statement or the new index `job (file_id, type, created_at, id)`.
+
+Renderer:
+
+- Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract.
+- A stored default model that the server no longer offers is shown but not blocked.
+- The title says "not configured" while the settings are still loading.
+- A busy state can flicker for one frame; no test for a double click on Start or Accept.
+
+Core tests:
+
+- The fingerprint tests do not cover every field separately for a waiting proposal (checksum, prompt version).
+- The fake proposal reader skips tag normalisation.
+- `viewOf` in `analysis-proposals.ts` duplicates the `JobView` mapping of the job use cases.
 
 ## Not covered by any automated check
 
