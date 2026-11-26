@@ -162,6 +162,10 @@ Found during the build:
 - Before paid providers: `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
 - Before paid providers: `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs.
 - Provider causes are dropped everywhere (the job row holds only the code); consider a main-console debug line with the HTTP status code and the error class only, never a URL or body (4b).
+- `ollama-vision.ts` passes the response body as the cause of `invalid_response`; nothing logs it today, and the debug line above must not start to.
+- `ollama-vision.ts`: the redirect and non-2xx branches throw directly, so an abort that lands while the body is discarded yields a `JobError` instead of the abort reason.
+- Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
+- `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
 - Inbox (`apps/desktop/src/renderer/src/screens/InboxScreen.tsx`): the `importResult` state also holds analysis results (rename to `result`); "Analyse" is not blocked while an import runs and not disabled while an analysis call runs; a rejected call leaves an earlier result strip in place.
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
