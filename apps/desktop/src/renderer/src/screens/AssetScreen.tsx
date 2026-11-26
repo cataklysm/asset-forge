@@ -19,7 +19,9 @@ import { importFailures, ResultStrip, type ResultFailure } from '../components/R
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
+import { useZipChoice } from '../components/ZipChoiceDialog';
 import { useLoad } from '../hooks/useLoad';
+import { importTitle } from '../import-result';
 import { useJobs } from '../jobs-context';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel } from '../labels';
 import type { AssetTab } from '../list-state';
@@ -69,6 +71,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
     onChanged: () => setReloadToken((t) => t + 1),
   });
+  const zipChoice = useZipChoice();
 
   const loaded = useLoad(() => call('assets:get', { id }), [id, renameToken]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
@@ -114,9 +117,10 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     try {
       const sourcePaths = await call('dialog:pickFiles', {});
       if (sourcePaths.length === 0) return;
-      const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole } });
-      const failures = importFailures(results);
-      setImportResult({ title: `${results.length - failures.length} imported, ${failures.length} failed`, failures });
+      const unpackArchives = await zipChoice.choose(sourcePaths);
+      if (unpackArchives === null) return;
+      const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole }, unpackArchives });
+      setImportResult({ title: importTitle(results, { duplicates: false }), failures: importFailures(results) });
       filesChanged();
     } catch (e) {
       setError(describeError(e));
@@ -296,6 +300,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         )}
       </Tabs>
       {analysis.dialogs}
+      {zipChoice.dialog}
     </div>
   );
 }

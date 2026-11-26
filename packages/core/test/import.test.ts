@@ -4,6 +4,7 @@ import {
   importFile,
   inboxPath,
   REFUSED_IMPORT_MESSAGE,
+  sanitizeFileName,
   SourceNotReadableError,
   STAGING_DIR,
   StorageFullError,
@@ -49,6 +50,7 @@ describe('importFile', () => {
     expect(result.error).toBeNull();
     expect(result.duplicateOf).toEqual([]);
     expect(result.sourcePath).toBe('/src/ref.png');
+    expect(result.entryName).toBeNull();
     const file = result.file!;
     expect(file.status).toBe('complete');
     expect(file.sizeBytes).toBe(5);
@@ -296,12 +298,10 @@ describe('importFile', () => {
 
       const domain: SourceFiles = {
         open: async () => {
-          throw new SourceNotReadableError('Cannot read source file: /src/a.png');
+          throw new SourceNotReadableError();
         },
       };
-      expect((await importFile({ ...ctx, sources: domain }, '/src/a.png')).error).toBe(
-        'Cannot read source file: /src/a.png',
-      );
+      expect((await importFile({ ...ctx, sources: domain }, '/src/a.png')).error).toBe('This file cannot be read');
     });
   });
 
@@ -349,7 +349,7 @@ describe('refused imports', () => {
       return ctx.files.insertPending(r);
     };
     const result = await importFile({ ...ctx, files }, '/src/tool.exe');
-    expect(result).toEqual({ sourcePath: '/src/tool.exe', file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(result).toEqual({ sourcePath: '/src/tool.exe', entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     expect(sources.opened).toEqual([]);
     expect(inserted).toBe(0);
   });
@@ -359,9 +359,23 @@ describe('refused imports', () => {
     for (const p of ['C:\\x\\a.exe::$DATA', 'C:\\x\\a.exe:stream', 'C:\\x\\evil.txt:payload.exe']) {
       sources.set(p, Buffer.from('x'));
       const result = await importFile(ctx, p);
-      expect(result).toEqual({ sourcePath: p, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+      expect(result).toEqual({ sourcePath: p, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
     }
     expect(sources.opened).toEqual([]);
+  });
+
+  it('refuses a type that only shows after the name is truncated', async () => {
+    const { manager, sources, storage, db } = await setup();
+    const name = `${'a'.repeat(96)}.exe.${'b'.repeat(16)}`;
+    expect(sanitizeFileName(name).endsWith('.exe')).toBe(true);
+    sources.set(`/src/${name}`, Buffer.from('MZ'));
+
+    const [result] = await manager.importFiles([`/src/${name}`]);
+
+    expect(result).toEqual({ sourcePath: `/src/${name}`, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(sources.opened).toEqual([]);
+    expect(db.files.records.size).toBe(0);
+    expect(stagingEntries(storage)).toEqual([]);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { JobStatusSchema, RelationKindSchema } from '@assetforge/contracts';
-import { JOB_STATUS_LABELS, jobStatusLabel, label, relationLabel } from '../src/renderer/src/labels.js';
+import { archiveCountLabel, JOB_STATUS_LABELS, jobStatusLabel, label, relationLabel } from '../src/renderer/src/labels.js';
 
 describe('label', () => {
   it.each([
@@ -56,5 +56,14 @@ describe('jobStatusLabel', () => {
       'failed',
       'cancelled',
     ]);
+  });
+});
+
+describe('archiveCountLabel', () => {
+  it.each([
+    [2, '2 archives'],
+    [5, '5 archives'],
+  ])('%i -> %s', (count, expected) => {
+    expect(archiveCountLabel(count)).toBe(expected);
   });
 });

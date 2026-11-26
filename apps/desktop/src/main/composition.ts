@@ -6,7 +6,7 @@ import { WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contract
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
-import { LocalFileSystemStorage, NodeSourceFiles } from '@assetforge/storage';
+import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
 import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
@@ -54,6 +54,7 @@ export function createWorkspaceHost(opts: CompositionOptions): WorkspaceHost {
   return {
     registry: new JsonWorkspaceRegistry(join(opts.userDataPath, 'settings.json')),
     sources: new NodeSourceFiles(),
+    archives: new ZipArchiveReader(),
     imageProbe: opts.imageProbe ?? { measure: async () => null },
     createStorage: (rootPath) => new LocalFileSystemStorage(rootPath),
     openDatabase: async (workspaceId) =>

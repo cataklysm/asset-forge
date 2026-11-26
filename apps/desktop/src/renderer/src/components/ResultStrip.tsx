@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import type { FileBatchResult, ImportResult } from '@assetforge/contracts';
 import { ApiError, describeError } from '../api';
+import { baseName } from '../import-result';
 import { ALERT, BORDER, ICON_BUTTON_INLINE } from '../ui';
 
 export interface ResultFailure {
@@ -10,16 +11,17 @@ export interface ResultFailure {
   message: string;
 }
 
-/** The file name of a picked source path; the rest of the path never reaches the screen. */
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
-
-/** One failure per import result with an error, named by its source's file name. */
+/**
+ * One failure per import result with an error: an archive entry is named
+ * '<entry name> (<archive file name>)', any other result by its source's file name.
+ */
 export function importFailures(results: readonly ImportResult[]): ResultFailure[] {
-  return results.flatMap((r, index) =>
-    r.error === null ? [] : [{ key: `${index}:${r.sourcePath}`, name: baseName(r.sourcePath), message: r.error }],
-  );
+  return results.flatMap((r, index) => {
+    if (r.error === null) return [];
+    const source = baseName(r.sourcePath);
+    const name = r.entryName === null ? source : `${r.entryName} (${source})`;
+    return [{ key: `${index}:${r.sourcePath}`, name, message: r.error }];
+  });
 }
 
 /** One failure per item of a per-item file batch (`files:assignMany`, `files:trashMany`, …) with an error. */

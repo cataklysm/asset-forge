@@ -11,6 +11,7 @@ import {
   isOpenable,
   isPreviewable,
   isRefusedImport,
+  isZipArchive,
 } from '../src/index.js';
 
 describe('media types', () => {
@@ -67,6 +68,11 @@ describe('media types', () => {
   it('isRefusedImport', () => {
     for (const name of ['Setup.EXE.', 'a.txt.exe', '.bat', 'x.appimage']) expect(isRefusedImport(name)).toBe(true);
     for (const name of ['a.py', 'a.js', 'a.sh', 'a.html', 'a.svg', 'a.exe.txt']) expect(isRefusedImport(name)).toBe(false);
+  });
+
+  it('isZipArchive by import extension', () => {
+    for (const name of ['a.zip', 'A.ZIP', 'a.zip. ']) expect(isZipArchive(name)).toBe(true);
+    for (const name of ['a.zip.png', 'zip', 'a.zipx']) expect(isZipArchive(name)).toBe(false);
   });
 
   it('isRefusedImport sees through alternate data streams', () => {

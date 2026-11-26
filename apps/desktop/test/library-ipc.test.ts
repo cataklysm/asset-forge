@@ -172,6 +172,44 @@ describe('library IPC', () => {
     ]);
   });
 
+  describe('files:import', () => {
+    it('answers no_workspace_open for an unpacking import without a workspace', async () => {
+      const source = join(base, 'pack.zip');
+      await writeFile(source, 'not a zip');
+      expect(await call('files:import', { sourcePaths: [source], unpackArchives: true })).toMatchObject({
+        ok: false,
+        error: { code: 'no_workspace_open' },
+      });
+    });
+
+    it('refuses a non-boolean unpackArchives as an invalid request and answers entryName null for a plain import', async () => {
+      await openWorkspace();
+      const source = join(base, 'a.png');
+      await writeFile(source, 'hello');
+      expect(await call('files:import', { sourcePaths: [source], unpackArchives: 'x' })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' },
+      });
+
+      const results = await ok<any[]>('files:import', { sourcePaths: [source], unpackArchives: true });
+      expect(ipcContract['files:import'].response.safeParse(results).success).toBe(true);
+      expect(results).toMatchObject([{ sourcePath: source, entryName: null, error: null, file: { status: 'complete' } }]);
+    });
+
+    it('passes unpackArchives through to the import', async () => {
+      await openWorkspace();
+      const source = join(base, 'pack.zip');
+      await writeFile(source, 'not a zip');
+      // The source is no ZIP, so unpacking answers the archive-level message.
+      expect(await ok<any[]>('files:import', { sourcePaths: [source], unpackArchives: true })).toEqual([
+        { sourcePath: source, entryName: null, file: null, error: 'This file is not a readable ZIP archive', duplicateOf: [] },
+      ]);
+      expect(await ok<any[]>('files:import', { sourcePaths: [source] })).toMatchObject([
+        { sourcePath: source, entryName: null, error: null, file: { status: 'complete', originalName: 'pack.zip' } },
+      ]);
+    });
+  });
+
   describe('files:measure', () => {
     it('measures an image imported without dimensions and rejects a non-UUID id', async () => {
       await openWorkspace();

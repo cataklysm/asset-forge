@@ -36,6 +36,8 @@ import { fileKind, isOpenable, isPreviewable } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { foldSearchWord, searchWords, textWords } from '../src/search.js';
 import {
+  ArchiveNotReadableError,
+  ArchiveTooLargeError,
   InvalidOperationError,
   NotFoundError,
   SourceNotReadableError,
@@ -46,6 +48,7 @@ import type {
   AnalysisFingerprint,
   AnalysisTargetEntry,
   AnalysisTargetReader,
+  ArchiveReader,
   AssetCover,
   AssetQuery,
   Proposal,
@@ -68,6 +71,7 @@ import type {
   FileRepository,
   ImageProbe,
   ModelImageSource,
+  OpenArchive,
   Page,
   ProjectAssetRepository,
   ProjectQuery,
@@ -1447,9 +1451,72 @@ export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles 
   async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
     this.opened.push(absolutePath);
     const data = this.get(absolutePath);
-    if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError(`Cannot read source: ${absolutePath}`);
+    if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError();
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
     return { name, stream: Readable.from([data]) };
+  }
+}
+
+/** One entry of a fake archive; `declaredSize` defaults to the content's length. */
+export interface FakeArchiveEntry {
+  name: string;
+  content?: Buffer | string;
+  declaredSize?: number;
+  isDirectory?: boolean;
+  isSymlink?: boolean;
+  isUnsupported?: boolean;
+  /** `openEntry` rejects for this entry. */
+  failOpen?: boolean;
+  /** The entry's stream yields a part of the content, then errors. */
+  failStream?: boolean;
+}
+
+/**
+ * Maps absolute archive paths to `'not-zip'` or a list of entries; an unknown path is not
+ * readable. Like the real reader, `open` rejects with `ArchiveTooLargeError` for more entries
+ * than `maxEntries`, unless `ignoreMaxEntries` lets the caller's own count check show.
+ */
+export class FakeArchives extends Map<string, 'not-zip' | FakeArchiveEntry[]> implements ArchiveReader {
+  /** Every `open` call. */
+  readonly opened: { path: string; maxEntries: number }[] = [];
+  /** When set, `open` does not enforce `maxEntries`. */
+  ignoreMaxEntries = false;
+  /** Every index `openEntry` was called with, across archives. */
+  readonly openedEntries: number[] = [];
+  closed = 0;
+
+  async open(absolutePath: string, limits: { maxEntries: number }): Promise<OpenArchive> {
+    this.opened.push({ path: absolutePath, maxEntries: limits.maxEntries });
+    const archive = this.get(absolutePath);
+    if (archive === undefined) throw new SourceNotReadableError();
+    if (archive === 'not-zip') throw new ArchiveNotReadableError();
+    if (!this.ignoreMaxEntries && archive.length > limits.maxEntries) throw new ArchiveTooLargeError();
+    const bytes = (e: FakeArchiveEntry) => Buffer.from(e.content ?? '');
+    return {
+      entries: archive.map((e) => ({
+        name: e.name,
+        uncompressedSize: e.declaredSize ?? bytes(e).length,
+        isDirectory: e.isDirectory ?? false,
+        isSymlink: e.isSymlink ?? false,
+        isUnsupported: e.isUnsupported ?? false,
+      })),
+      openEntry: async (index) => {
+        this.openedEntries.push(index);
+        const entry = archive[index]!;
+        if (entry.failOpen) throw new Error(`EIO: i/o error, read '${absolutePath}'`);
+        const data = bytes(entry);
+        if (!entry.failStream) return Readable.from([data]);
+        return Readable.from(
+          (async function* () {
+            yield data.subarray(0, 1);
+            throw new Error(`invalid stored block lengths in ${entry.name}`);
+          })(),
+        );
+      },
+      close: async () => {
+        this.closed += 1;
+      },
+    };
   }
 }
 
@@ -1523,16 +1590,19 @@ export function createFakeHost(): {
   storages: Map<string, InMemoryStorage>;
   databases: Map<string, InMemoryDatabase>;
   sources: FakeSourceFiles;
+  archives: FakeArchives;
   trash: { paths: string[]; failNext: boolean };
 } {
   const trash = { paths: [] as string[], failNext: false };
   const storages = new Map<string, InMemoryStorage>();
   const databases = new Map<string, InMemoryDatabase>();
   const sources = new FakeSourceFiles();
+  const archives = new FakeArchives();
   const probe = new FakeImageProbe();
   const host: WorkspaceHost = {
     registry: new InMemoryRegistry(),
     sources,
+    archives,
     imageProbe: probe,
     createStorage(rootPath) {
       let storage = storages.get(rootPath);
@@ -1565,5 +1635,5 @@ export function createFakeHost(): {
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
-  return { host, probe, storages, databases, sources, trash };
+  return { host, probe, storages, databases, sources, archives, trash };
 }

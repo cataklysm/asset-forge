@@ -13,6 +13,7 @@ export * from './file-access.js';
 export * from './file-names.js';
 export * from './measure-file.js';
 export * from './media-types.js';
+export * from './import-archive.js';
 export * from './import-file.js';
 export * from './jobs.js';
 export * from './paths.js';

@@ -78,6 +78,11 @@ export function isRefusedImport(fileName: string): boolean {
   return refused(fileName) || (colon >= 0 && refused(fileName.slice(0, colon)));
 }
 
+/** True for a ZIP archive by its name; decides both which sources are unpacked and that entries are not. */
+export function isZipArchive(fileName: string): boolean {
+  return importExtension(fileName) === 'zip';
+}
+
 /** A file can be opened externally when its kind is image, model or document, except SVG. */
 export function isOpenable(relativePath: string): boolean {
   const name = diskName(relativePath);

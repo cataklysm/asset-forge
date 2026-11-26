@@ -13,7 +13,7 @@ import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/lis
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, importResultOf, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -297,9 +297,9 @@ it('import results list imported, failed and duplicates', async () => {
     'files:import': () => {
       api.setFiles([a, b]);
       return [
-        { sourcePath: 'C:\\in\\a.png', file: a, error: null, duplicateOf: [] },
-        { sourcePath: 'C:\\in\\b.png', file: b, error: null, duplicateOf: [a.id] },
-        { sourcePath: 'C:\\in\\c.exe', file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+        { sourcePath: 'C:\\in\\a.png', entryName: null, file: a, error: null, duplicateOf: [] },
+        { sourcePath: 'C:\\in\\b.png', entryName: null, file: b, error: null, duplicateOf: [a.id] },
+        { sourcePath: 'C:\\in\\c.exe', entryName: null, file: null, error: 'This file type cannot be imported', duplicateOf: [] },
       ];
     },
   });
@@ -316,10 +316,91 @@ it('import results list imported, failed and duplicates', async () => {
   expect(strip.textContent).toContain('c.exe');
   expect(strip.textContent).toContain('This file type cannot be imported');
   expect(strip.textContent).not.toContain('C:\\in');
-  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe'] }]);
+  // No ZIP was picked: no dialog, nothing to unpack.
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(callsOf(api, 'files:import')).toEqual([
+    { sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe'], unpackArchives: false },
+  ]);
   expect(await screen.findByText('a.png')).toBeTruthy();
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Inbox/ }).textContent).toBe('Inbox2'));
   await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+});
+
+it('a picked ZIP asks first; Unpack sends unpackArchives true and the strip counts entries', async () => {
+  const user = userEvent.setup();
+  const d = fileRecord({ originalName: 'd.png' });
+  const e = fileRecord({ originalName: 'e.png' });
+  const api = install([], {
+    'dialog:pickFiles': () => ['C:\\in\\pack.zip', 'C:\\in\\f.png'],
+    'files:import': () => [
+      importResultOf('C:\\in\\pack.zip', { entryName: 'd.png', file: d }),
+      importResultOf('C:\\in\\pack.zip', { entryName: 'a.exe', error: 'This file type cannot be imported' }),
+      importResultOf('C:\\in\\f.png', { file: e, duplicateOf: [d.id] }),
+    ],
+  });
+  render(<Harness />);
+  await screen.findByText('Inbox is empty');
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  const dialog = await screen.findByRole('dialog', { name: 'ZIP archive' });
+  expect(within(dialog).getByText('pack.zip')).toBeTruthy();
+  expect(callsOf(api, 'files:import')).toEqual([]);
+  await user.click(within(dialog).getByRole('button', { name: 'Unpack' }));
+
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('2 imported, 1 failed, 1 duplicates')).toBeTruthy();
+  expect(strip.textContent).toContain('a.exe (pack.zip)');
+  expect(strip.textContent).not.toContain('C:\\in');
+  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\pack.zip', 'C:\\in\\f.png'], unpackArchives: true }]);
+});
+
+it('Import as file sends unpackArchives false; an archive-level failure is named by the archive', async () => {
+  const user = userEvent.setup();
+  const api = install([], {
+    'dialog:pickFiles': () => ['C:\\in\\a.zip', 'C:\\in\\pack.zip'],
+    'files:import': () => [
+      importResultOf('C:\\in\\a.zip', { file: fileRecord({ originalName: 'a.zip', kind: 'other' }) }),
+      importResultOf('C:\\in\\pack.zip', { error: 'This file is not a readable ZIP archive' }),
+    ],
+  });
+  render(<Harness />);
+  await screen.findByText('Inbox is empty');
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  const dialog = await screen.findByRole('dialog', { name: 'ZIP archive' });
+  expect(within(dialog).getByText('2 archives')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Import as file' }));
+
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('1 imported, 1 failed, 0 duplicates')).toBeTruthy();
+  expect(within(strip).getByText('pack.zip')).toBeTruthy();
+  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\a.zip', 'C:\\in\\pack.zip'], unpackArchives: false }]);
+});
+
+it.each([
+  ['Cancel', async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) =>
+    user.click(within(dialog).getByRole('button', { name: 'Cancel' }))],
+  ['Esc', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+])('%s in the ZIP dialog imports nothing and enables the import button again', async (_name, dismiss) => {
+  const user = userEvent.setup();
+  const api = install([], { 'dialog:pickFiles': () => ['C:\\in\\pack.zip'], 'files:import': () => [] });
+  const onBusyChange = vi.fn();
+  render(<Harness onBusyChange={onBusyChange} />);
+  await screen.findByText('Inbox is empty');
+  const button = screen.getAllByRole('button', { name: 'Import files' })[0] as HTMLButtonElement;
+  await user.click(button);
+  const dialog = await screen.findByRole('dialog', { name: 'ZIP archive' });
+  expect(button.disabled).toBe(true);
+  await dismiss(user, dialog);
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  await waitFor(() => expect((screen.getAllByRole('button', { name: 'Import files' })[0] as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByText('Importing…')).toBeNull();
+  expect(onBusyChange).toHaveBeenLastCalledWith(false);
+  expect(callsOf(api, 'files:import')).toEqual([]);
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  // A new import starts the choice again.
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  expect(await screen.findByRole('dialog', { name: 'ZIP archive' })).toBeTruthy();
 });
 
 async function assignInDialog(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {

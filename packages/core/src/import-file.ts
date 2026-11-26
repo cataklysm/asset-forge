@@ -1,6 +1,7 @@
+import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
 import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
-import { mimeFromFileName } from './file-names.js';
+import { mimeFromFileName, sanitizeFileName } from './file-names.js';
 import { fileKind, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, ImageProbe, SourceFiles, Storage } from './ports.js';
@@ -29,7 +30,25 @@ export function safeErrorMessage(error: unknown, fallback: string): string {
 /** Message of the result for a file whose type is never imported; contains no path. */
 export const REFUSED_IMPORT_MESSAGE: string = new ValidationFailedError('This file type cannot be imported').message;
 
+/**
+ * True when a source or archive entry of this name is never imported: by its own name, or by the
+ * name it would be stored under, since truncation can drop a long fake extension and expose a
+ * refused one (`<96 × a>.exe.<16 × b>` is stored as `<96 × a>.exe`).
+ */
+export function isRefusedImportName(fileName: string): boolean {
+  return isRefusedImport(fileName) || isRefusedImport(sanitizeFileName(fileName));
+}
+
 const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
+
+/** An opened source: a file on disk (`entryName` null) or an entry of the archive at `sourcePath`. */
+export interface ImportSource {
+  sourcePath: string;
+  entryName: string | null;
+  /** The file name the import stores; already checked against the refused types. */
+  name: string;
+  stream: Readable;
+}
 
 /**
  * Imports one source file. The step order is the crash-safety contract:
@@ -38,18 +57,22 @@ const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');
  */
 export async function importFile(ctx: ImportContext, sourcePath: string): Promise<ImportResult> {
   const sourceName = sourcePath.slice(Math.max(sourcePath.lastIndexOf('/'), sourcePath.lastIndexOf('\\')) + 1);
-  if (isRefusedImport(sourceName)) {
-    return { sourcePath, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
+  if (isRefusedImportName(sourceName)) {
+    return { sourcePath, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
   }
 
   let opened;
   try {
     opened = await ctx.sources.open(sourcePath);
   } catch (error) {
-    return { sourcePath, file: null, error: messageOf(error), duplicateOf: [] };
+    return { sourcePath, entryName: null, file: null, error: messageOf(error), duplicateOf: [] };
   }
-  const { name, stream } = opened;
+  return importStream(ctx, { sourcePath, entryName: null, name: opened.name, stream: opened.stream });
+}
 
+/** The import steps of an opened source; takes ownership of its stream and never rejects. */
+export async function importStream(ctx: ImportContext, source: ImportSource): Promise<ImportResult> {
+  const { sourcePath, entryName, name, stream } = source;
   const id = ctx.newId();
   const staging = stagingPath(id);
   const finalPath = inboxPath(id, name);
@@ -68,7 +91,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
   } catch (error) {
     // The storage adapter does not destroy a source it never started piping; release the handle.
     stream.destroy();
-    return { sourcePath, file: null, error: messageOf(error), duplicateOf: [] };
+    return { sourcePath, entryName, file: null, error: messageOf(error), duplicateOf: [] };
   }
 
   // `move` rejects when the target exists, so the final path is ours to clean up only after it succeeded.
@@ -117,7 +140,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       trashedAssetName: null,
       trashedRole: null,
     };
-    return { sourcePath, file, error: null, duplicateOf };
+    return { sourcePath, entryName, file, error: null, duplicateOf };
   } catch (error) {
     const message = messageOf(error);
     stream.destroy();
@@ -158,6 +181,6 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       trashedAssetName: null,
       trashedRole: null,
     };
-    return { sourcePath, file, error: message, duplicateOf: [] };
+    return { sourcePath, entryName, file, error: message, duplicateOf: [] };
   }
 }

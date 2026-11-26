@@ -28,13 +28,32 @@ export class TrashFailedError extends define('trash_failed') {}
 export class InvalidManifestError extends define('invalid_manifest') {}
 export class NoWorkspaceOpenError extends define('no_workspace_open') {}
 export class PathEscapeError extends define('path_escape') {}
-export class SourceNotReadableError extends define('source_not_readable') {}
+/** A source that is missing, not a regular file or not readable; the message never names the path. */
+export class SourceNotReadableError extends AssetForgeError {
+  constructor(options?: { cause?: unknown }) {
+    super('source_not_readable', 'This file cannot be read', options);
+  }
+}
 export class ChecksumMismatchError extends define('checksum_mismatch') {}
 export class StorageAccessDeniedError extends define('storage_access_denied') {}
 export class StorageFullError extends define('storage_full') {}
 export class NotFoundError extends define('not_found') {}
 export class InvalidOperationError extends define('invalid_operation') {}
 export class ValidationFailedError extends define('validation_failed') {}
+
+/** A readable source that is not a ZIP archive (or whose directory cannot be read). */
+export class ArchiveNotReadableError extends ValidationFailedError {
+  constructor(options?: { cause?: unknown }) {
+    super('This file is not a readable ZIP archive', options);
+  }
+}
+
+/** An archive that would take an import over its entry or size limit. */
+export class ArchiveTooLargeError extends ValidationFailedError {
+  constructor(options?: { cause?: unknown }) {
+    super('This archive is too large to unpack', options);
+  }
+}
 
 export const CREDENTIAL_STORE_UNAVAILABLE_MESSAGE = 'The system credential store is not available, so the API key cannot be saved';
 

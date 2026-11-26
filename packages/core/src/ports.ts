@@ -55,6 +55,31 @@ export interface SourceFiles {
   open(absolutePath: string): Promise<{ name: string; stream: Readable }>; // rejects with SourceNotReadableError
 }
 
+export interface ArchiveEntry {
+  /** The entry's path as stored in the archive. */
+  name: string;
+  uncompressedSize: number;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  /** Encrypted, or a compression method other than stored/deflate. */
+  isUnsupported: boolean;
+}
+
+export interface OpenArchive {
+  entries: readonly ArchiveEntry[];
+  /** A stream of the entry's content that fails when it does not yield exactly `uncompressedSize` bytes. */
+  openEntry(index: number): Promise<Readable>;
+  close(): Promise<void>;
+}
+
+export interface ArchiveReader {
+  /**
+   * Rejects with SourceNotReadableError (missing, not a regular file, not readable),
+   * ArchiveNotReadableError (not a ZIP) or ArchiveTooLargeError (more than `maxEntries` entries, decided before reading the directory).
+   */
+  open(absolutePath: string, limits: { maxEntries: number }): Promise<OpenArchive>;
+}
+
 export interface StorageRef {
   id: string;
   kind: 'workspace_root';
@@ -549,6 +574,7 @@ export interface ModelImageSource {
 export interface WorkspaceHost {
   registry: WorkspaceRegistry;
   sources: SourceFiles;
+  archives: ArchiveReader;
   imageProbe: ImageProbe;
   createStorage(rootPath: string): Storage;
   openDatabase(workspaceId: string): Promise<WorkspaceDatabase>; // creates the file and applies migrations

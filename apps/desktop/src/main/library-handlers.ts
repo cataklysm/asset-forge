@@ -118,7 +118,7 @@ export function createLibraryHandlers(
   };
 
   return {
-    'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null),
+    'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null, { unpackArchives: r.unpackArchives }),
     'files:list': (r) => manager.listFiles(r),
     'files:assign': (r) =>
       manager.exclusive((s) => relocateFile(s, r.fileId, { assetId: r.assetId, role: r.role })),

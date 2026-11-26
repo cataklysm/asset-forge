@@ -1,9 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { pipeline } from 'node:stream/promises';
+import yazl from 'yazl';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse } from '@assetforge/contracts';
 import {
@@ -879,6 +881,146 @@ describe('tag rename and merge acceptance', () => {
         ok: false,
         error: { code: 'not_found', message: 'Tag does not exist' },
       });
+    } finally {
+      await manager.close();
+    }
+  });
+});
+
+describe('ZIP import acceptance', () => {
+  const page = { limit: 50, offset: 0 };
+
+  function handlersFor(manager: WorkspaceManager) {
+    const handlers = createWorkspaceHandlers(manager, {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    }, noopHost, idleJobHost, idleServices);
+    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+      const result = await dispatch(handlers, channel, request);
+      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+      return result.value as IpcResponse<C>;
+    };
+  }
+
+  async function buildArchive(path: string): Promise<void> {
+    const zip = new yazl.ZipFile();
+    zip.addEmptyDirectory('textures/');
+    zip.addBuffer(Buffer.from('wood pixels'), 'textures/wood.png');
+    zip.addBuffer(Buffer.from('stone pixels'), 'stone.png', { compress: false });
+    zip.addBuffer(Buffer.from('MZ'), 'tools/setup.exe');
+    zip.addBuffer(Buffer.from('resource fork'), '__MACOSX/._stone.png');
+    zip.end();
+    await pipeline(zip.outputStream, createWriteStream(path));
+  }
+
+  it('unpacks an archive into an asset, imports it as a file, and reports duplicates on a repeat', async () => {
+    const archivePath = join(base, 'sources', 'pack.zip');
+    await buildArchive(archivePath);
+
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(manager);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+      const typeId = (await call('assetTypes:list', {}))[0]!.id;
+      const asset = await call('assets:create', { name: 'Quarry', typeId });
+
+      const unpacked = await call('files:import', {
+        sourcePaths: [archivePath],
+        target: { assetId: asset.id, role: 'texture' },
+        unpackArchives: true,
+      });
+      expect(unpacked.map((r) => [r.sourcePath, r.entryName, r.error])).toEqual([
+        [archivePath, 'textures/wood.png', null],
+        [archivePath, 'stone.png', null],
+        [archivePath, 'tools/setup.exe', 'This file type cannot be imported'],
+      ]);
+      const [wood, stone] = unpacked.map((r) => r.file);
+      expect(wood).toMatchObject({ status: 'complete', originalName: 'wood.png', assetId: asset.id, role: 'texture', kind: 'image' });
+      expect(stone).toMatchObject({ status: 'complete', originalName: 'stone.png', assetId: asset.id, role: 'texture', kind: 'image' });
+      expect(unpacked[2]!.file).toBeNull();
+      expect(unpacked.map((r) => r.duplicateOf)).toEqual([[], [], []]);
+      expect(wood!.relativePath).toBe(assetFilePath(asset.id, 'texture', wood!.id, 'wood.png'));
+      expect(await readFile(join(workspaceRoot, wood!.relativePath), 'utf8')).toBe('wood pixels');
+      expect(await readFile(join(workspaceRoot, stone!.relativePath), 'utf8')).toBe('stone pixels');
+      expect(createHash('sha256').update('stone pixels').digest('hex')).toBe(stone!.sha256);
+
+      const inAsset = await call('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
+      expect(inAsset.items.map((f) => f.id).sort()).toEqual([wood!.id, stone!.id].sort());
+      expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'wood' })).items.map((f) => f.id)).toEqual([wood!.id]);
+      expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'stone' })).items.map((f) => f.id)).toEqual([stone!.id]);
+      expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'setup' })).items).toEqual([]);
+      expect(await readdir(join(workspaceRoot, '.assetforge', 'staging'))).toEqual([]);
+
+      const [asFile] = await call('files:import', { sourcePaths: [archivePath], unpackArchives: false });
+      expect(asFile).toMatchObject({
+        sourcePath: archivePath,
+        entryName: null,
+        error: null,
+        duplicateOf: [],
+        file: { status: 'complete', originalName: 'pack.zip', kind: 'other', assetId: null },
+      });
+
+      const again = await call('files:import', { sourcePaths: [archivePath], unpackArchives: true });
+      expect(again.map((r) => r.entryName)).toEqual(['textures/wood.png', 'stone.png', 'tools/setup.exe']);
+      expect(again.map((r) => r.duplicateOf)).toEqual([[wood!.id], [stone!.id], []]);
+      expect(again.slice(0, 2).map((r) => r.file?.status)).toEqual(['complete', 'complete']);
+      expect((await call('files:list', { ...page, scope: { kind: 'inbox' } })).total).toBe(3);
+    } finally {
+      await manager.close();
+    }
+  });
+
+  /** Offsets of the central and local header of every entry of a (non-ZIP64) archive. */
+  function zipHeaders(buf: Buffer): { central: number; local: number }[] {
+    let eocd = -1;
+    for (let i = buf.length - 22; i >= 0; i--) {
+      if (buf.readUInt32LE(i) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('no end of central directory');
+    let cursor = buf.readUInt32LE(eocd + 16);
+    const out: { central: number; local: number }[] = [];
+    for (let n = 0; n < buf.readUInt16LE(eocd + 10); n++) {
+      out.push({ central: cursor, local: buf.readUInt32LE(cursor + 42) });
+      cursor += 46 + buf.readUInt16LE(cursor + 28) + buf.readUInt16LE(cursor + 30) + buf.readUInt16LE(cursor + 32);
+    }
+    return out;
+  }
+
+  it('a deflated entry with a lying declared size fails alone; the next entry is imported', async () => {
+    const archivePath = join(base, 'sources', 'liar.zip');
+    const content = Buffer.from('deflated content '.repeat(200));
+    const zip = new yazl.ZipFile();
+    zip.addBuffer(content, 'liar.png', { compress: true });
+    zip.addBuffer(Buffer.from('honest pixels'), 'honest.png', { compress: true });
+    zip.end();
+    await pipeline(zip.outputStream, createWriteStream(archivePath));
+    const buf = await readFile(archivePath);
+    const [liar] = zipHeaders(buf);
+    buf.writeUInt32LE(content.length + 1, liar!.central + 24);
+    buf.writeUInt32LE(content.length + 1, liar!.local + 22);
+    await writeFile(archivePath, buf);
+
+    const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
+    try {
+      const call = handlersFor(manager);
+      await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
+
+      const results = await call('files:import', { sourcePaths: [archivePath], unpackArchives: true });
+
+      expect(results.map((r) => [r.entryName, r.file?.status ?? null])).toEqual([
+        ['liar.png', 'failed'],
+        ['honest.png', 'complete'],
+      ]);
+      expect(results[0]!.error).toEqual(expect.any(String));
+      expect(results[0]!.error).not.toContain(base);
+      expect(results[1]!.error).toBeNull();
+      expect(await readFile(join(workspaceRoot, results[1]!.file!.relativePath), 'utf8')).toBe('honest pixels');
+      expect(await readdir(join(workspaceRoot, '.assetforge', 'staging'))).toEqual([]);
     } finally {
       await manager.close();
     }
