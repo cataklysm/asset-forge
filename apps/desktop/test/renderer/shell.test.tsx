@@ -9,7 +9,7 @@ import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell
 import { JOB_POLL_MS } from '../../src/renderer/src/jobs-context';
 import { fakeError, installFakeApi } from './fake-api';
 
-type Section = 'assets' | 'projects' | 'inbox' | 'jobs';
+type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
 
 function shell(
   props: { section?: Section | null; busy?: boolean; onNavigate?(s: Section): void; onClose?(): void },
@@ -103,6 +103,15 @@ function workspaceShell(summary: () => JobSummary) {
     'assets:list': () => ({ items: [], total: 0 }),
     'assetTypes:list': () => [],
     'projects:list': () => ({ items: [], total: 0 }),
+    'settings:getVision': () => ({
+      baseUrl: null,
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      hasApiKey: false,
+      fromEnvironment: false,
+      canStoreKey: true,
+    }),
   });
   render(
     <WorkspaceShell
@@ -142,4 +151,13 @@ it('choosing Jobs shows the Jobs page', async () => {
   await user.click(screen.getByRole('link', { name: /Jobs/ }));
   expect(await screen.findByRole('heading', { level: 2, name: 'Jobs' })).toBeTruthy();
   expect(screen.getByRole('link', { name: /Jobs/ }).getAttribute('aria-current')).toBe('page');
+});
+
+it('choosing Settings shows the Settings page, also without a configured provider', async () => {
+  const user = userEvent.setup();
+  workspaceShell(() => IDLE);
+  await user.click(screen.getByRole('link', { name: 'Settings' }));
+  expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
+  expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('');
 });

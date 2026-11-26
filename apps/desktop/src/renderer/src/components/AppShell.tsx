@@ -1,9 +1,9 @@
-import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 
-export type Section = 'assets' | 'projects' | 'inbox' | 'jobs';
+export type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
 
 interface Props {
   workspaceName: string;
@@ -22,6 +22,7 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'projects', label: 'Projects', icon: FolderOpen },
   { section: 'inbox', label: 'Inbox', icon: Inbox },
   { section: 'jobs', label: 'Jobs', icon: ListChecks },
+  { section: 'settings', label: 'Settings', icon: Settings },
 ];
 
 const BUSY_TITLE = 'Import in progress';

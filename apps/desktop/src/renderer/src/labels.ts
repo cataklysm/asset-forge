@@ -38,3 +38,12 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
 export function jobStatusLabel(status: JobStatus): string {
   return JOB_STATUS_LABELS[status];
 }
+
+/** The accessible names of the model selects. */
+export const MODEL_PURPOSE_LABELS: Record<'tagging' | 'prompt', string> = {
+  tagging: 'Tagging model',
+  prompt: 'Prompt model',
+};
+
+export const NO_MODEL_LABEL = 'No model';
+export const REFRESH_MODELS_LABEL = 'Refresh models';
