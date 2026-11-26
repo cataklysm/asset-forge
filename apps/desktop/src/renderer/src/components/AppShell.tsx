@@ -34,7 +34,8 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'settings', label: 'Settings', icon: Settings },
 ];
 
-const BUSY_TITLE = 'Import in progress';
+/** Tooltip of the navigation (and of the dialogs' Settings) while an import runs. */
+export const BUSY_TITLE = 'Import in progress';
 
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 

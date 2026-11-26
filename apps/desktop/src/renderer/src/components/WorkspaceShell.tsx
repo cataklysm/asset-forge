@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from 'react';
+import { useCallback, useState, type ComponentProps } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { JobsProvider, useJobs } from '../jobs-context';
@@ -23,7 +23,7 @@ import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ALERT } from '../ui';
 import { OpenSettingsProvider } from './AnalysisDialogs';
-import { AppShell, type Section } from './AppShell';
+import { AppShell, BUSY_TITLE, type Section } from './AppShell';
 
 interface Props {
   workspace: WorkspaceSummary;
@@ -95,6 +95,11 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
     setView({ name: section } as View);
   }
 
+  const openSettings = useCallback(() => {
+    setError(null);
+    setView({ name: 'settings' });
+  }, []);
+
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -107,51 +112,47 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
           onClose={() => void closeWorkspace()}
         >
           {/* The screens bring their own padding. */}
-          <OpenSettingsProvider
-            onOpenSettings={() => {
-              // A running import keeps the screen, as it does for the navigation.
-              if (!busy) navigate('settings');
-            }}
-          >
-          {error !== null && (
-            <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
-              {error}
-            </p>
-          )}
-          {view.name === 'assets' ? (
-            <AssetsScreen
-              state={shell.assetList}
-              onStateChange={setAssetList}
-              onOpen={(id) => setView({ name: 'asset', id })}
-            />
-          ) : view.name === 'asset' ? (
-            <AssetScreen
-              key={view.id}
-              id={view.id}
-              tab={shell.assetTab}
-              onTabChange={setAssetTab}
-              onBack={() => setView({ name: 'assets' })}
-              onOpenAsset={(id) => setView({ name: 'asset', id })}
-              onOpenProject={(id) => setView({ name: 'project', id })}
-              onBusyChange={setBusy}
-            />
-          ) : view.name === 'project' ? (
-            <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
-          ) : view.name === 'inbox' ? (
-            <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
-          ) : view.name === 'jobs' ? (
-            <JobsScreen />
-          ) : view.name === 'settings' ? (
-            <SettingsScreen />
-          ) : (
-            <ProjectsScreen
-              state={shell.projectList}
-              onStateChange={setProjectList}
-              onOpen={(id) => setView({ name: 'project', id })}
-              onOpenAsset={(id) => setView({ name: 'asset', id })}
-              onShowAssets={showAssets}
-            />
-          )}
+          {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
+          <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
+            {error !== null && (
+              <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+                {error}
+              </p>
+            )}
+            {view.name === 'assets' ? (
+              <AssetsScreen
+                state={shell.assetList}
+                onStateChange={setAssetList}
+                onOpen={(id) => setView({ name: 'asset', id })}
+              />
+            ) : view.name === 'asset' ? (
+              <AssetScreen
+                key={view.id}
+                id={view.id}
+                tab={shell.assetTab}
+                onTabChange={setAssetTab}
+                onBack={() => setView({ name: 'assets' })}
+                onOpenAsset={(id) => setView({ name: 'asset', id })}
+                onOpenProject={(id) => setView({ name: 'project', id })}
+                onBusyChange={setBusy}
+              />
+            ) : view.name === 'project' ? (
+              <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+            ) : view.name === 'inbox' ? (
+              <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
+            ) : view.name === 'jobs' ? (
+              <JobsScreen />
+            ) : view.name === 'settings' ? (
+              <SettingsScreen />
+            ) : (
+              <ProjectsScreen
+                state={shell.projectList}
+                onStateChange={setProjectList}
+                onOpen={(id) => setView({ name: 'project', id })}
+                onOpenAsset={(id) => setView({ name: 'asset', id })}
+                onShowAssets={showAssets}
+              />
+            )}
           </OpenSettingsProvider>
         </JobsAppShell>
       </ProviderSettingsProvider>

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from '@assetforge/contracts';
-import { analysableFiles, enqueueTitle, singleAnalysable } from '../analysis';
+import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -184,8 +184,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   });
 
   const noneEligible = eligible.length === 0;
-  const toAnalyse = analysableFiles(selection);
-  const single = singleAnalysable(selection);
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 pt-4">
@@ -208,7 +206,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         >
           Add tags
         </button>
-        <SelectionAnalysisButtons analysis={analysis} files={toAnalyse} single={single} />
+        <SelectionAnalysisButtons analysis={analysis} selection={selection} />
         <button
           type="button"
           className={BUTTON}

@@ -1,15 +1,16 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import {
   JOB_ERROR_MESSAGES,
   type AnalysisTarget,
   type EnqueueAnalysisResult,
   type FileRecord,
 } from '@assetforge/contracts';
-import { NONE_ANALYSABLE } from '../analysis';
+import { analysableFiles, NONE_ANALYSABLE, singleAnalysable } from '../analysis';
 import {
   ANALYSE_ALL_LABEL,
   ANALYSE_ALL_TITLE,
   ANALYSE_LABEL,
+  ANALYSE_SELECTION_TITLE,
   ANALYSE_TITLE,
   IMAGE_TO_PROMPT_LABEL,
   IMAGE_TO_PROMPT_TITLE,
@@ -17,6 +18,7 @@ import {
   REVIEW_TAGS_TITLE,
 } from '../labels';
 import { useProvider } from '../provider-context';
+import type { FileSelection } from '../selection';
 import { BUTTON } from '../ui';
 import { AnalysisResultDialog } from './AnalysisResultDialog';
 import { AnalysisStartDialog } from './AnalysisStartDialog';
@@ -40,27 +42,22 @@ export function AnalyseAllButton({
 }
 
 /**
- * The analysis buttons of a selection bar: Analyse for the analysable `files`, and for exactly one
- * analysable image (`single`) Review tags (with a proposal) and Image to prompt.
+ * The analysis buttons of a selection bar: Analyse (enabled when the selection holds an analysable
+ * image; exactly one selected file opens the single-image dialog, more the start dialog for all of
+ * them), and for exactly one analysable image Review tags (with a proposal) and Image to prompt.
  */
-export function SelectionAnalysisButtons({
-  analysis,
-  files,
-  single,
-}: {
-  analysis: AnalysisDialogs;
-  files: readonly FileRecord[];
-  single: FileRecord | null;
-}) {
-  const none = files.length === 0;
+export function SelectionAnalysisButtons({ analysis, selection }: { analysis: AnalysisDialogs; selection: FileSelection }) {
+  const none = analysableFiles(selection).length === 0;
+  const single = singleAnalysable(selection);
+  const title = selection.selected.size > 1 ? ANALYSE_SELECTION_TITLE : ANALYSE_TITLE;
   return (
     <>
       <button
         type="button"
         className={BUTTON}
         disabled={none || analysis.blocked !== null}
-        title={none ? NONE_ANALYSABLE : (analysis.blocked ?? ANALYSE_TITLE)}
-        onClick={() => analysis.analyseFiles(files)}
+        title={none ? NONE_ANALYSABLE : (analysis.blocked ?? title)}
+        onClick={() => analysis.analyseFiles([...selection.selected.values()])}
       >
         {ANALYSE_LABEL}
       </button>
@@ -84,15 +81,31 @@ export function SelectionAnalysisButtons({
   );
 }
 
-const OpenSettingsContext =createContext<() => void>(() => {});
-
-/** Gives the analysis dialogs below it the way to the settings screen. */
-export function OpenSettingsProvider({ onOpenSettings, children }: { onOpenSettings(): void; children: ReactNode }) {
-  return <OpenSettingsContext.Provider value={onOpenSettings}>{children}</OpenSettingsContext.Provider>;
+export interface OpenSettings {
+  /** Shows the settings screen. */
+  open(): void;
+  /** Why the settings screen cannot be shown now (e.g. an import runs); null when it can. */
+  blocked: string | null;
 }
 
-/** Shows the settings screen; outside an `OpenSettingsProvider` it does nothing. */
-export function useOpenSettings(): () => void {
+const OpenSettingsContext = createContext<OpenSettings>({ open: () => {}, blocked: null });
+
+/** Gives the analysis dialogs below it the way to the settings screen. */
+export function OpenSettingsProvider({
+  onOpenSettings,
+  blocked = null,
+  children,
+}: {
+  onOpenSettings(): void;
+  blocked?: string | null;
+  children: ReactNode;
+}) {
+  const value = useMemo(() => ({ open: onOpenSettings, blocked }), [onOpenSettings, blocked]);
+  return <OpenSettingsContext.Provider value={value}>{children}</OpenSettingsContext.Provider>;
+}
+
+/** The way to the settings screen; outside an `OpenSettingsProvider` it does nothing. */
+export function useOpenSettings(): OpenSettings {
   return useContext(OpenSettingsContext);
 }
 
@@ -116,7 +129,10 @@ export interface AnalysisDialogs {
    * entries; null when it can, or while the settings are still unknown.
    */
   blocked: string | null;
-  /** One file opens the single-image result dialog, several the start dialog with a `files` target. */
+  /**
+   * One file opens the single-image result dialog, several the start dialog with a `files` target
+   * of all of them (the start dialog counts the ones that cannot be analysed).
+   */
   analyseFiles(files: readonly FileRecord[]): void;
   /** Opens the start dialog for `target`. */
   start(target: AnalysisTarget): void;
@@ -134,15 +150,17 @@ export interface AnalysisDialogs {
  */
 export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): AnalysisDialogs {
   const { settings } = useProvider();
-  const openSettings = useOpenSettings();
+  const settingsRoute = useOpenSettings();
   const [open, setOpen] = useState<Open | null>(null);
 
   const blocked = settings !== null && settings.baseUrl === null ? JOB_ERROR_MESSAGES.provider_not_configured : null;
   const close = () => setOpen(null);
+  // While the settings screen cannot be shown, nothing closes (the dialogs disable Settings).
   const toSettings = () => {
+    if (settingsRoute.blocked !== null) return;
     setOpen(null);
     onLeave?.();
-    openSettings();
+    settingsRoute.open();
   };
 
   function analyseFiles(files: readonly FileRecord[]) {
@@ -160,6 +178,7 @@ export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): 
         onClose={close}
         onStarted={onStarted}
         onOpenSettings={toSettings}
+        settingsBlocked={settingsRoute.blocked}
       />
       <AnalysisResultDialog
         open={open?.kind === 'result'}
@@ -167,12 +186,14 @@ export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): 
         onClose={close}
         onChanged={onChanged}
         onOpenSettings={toSettings}
+        settingsBlocked={settingsRoute.blocked}
       />
       <PromptDialog
         open={open?.kind === 'prompt'}
         file={open?.kind === 'prompt' ? open.file : null}
         onClose={close}
         onOpenSettings={toSettings}
+        settingsBlocked={settingsRoute.blocked}
       />
     </>
   );

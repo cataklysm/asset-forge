@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { SETTINGS_LOAD_FAILED, START_LOADING } from '../labels';
 import { useProvider } from '../provider-context';
+import { providerGate } from '../provider-gate';
 import { ALERT, BUTTON, FOCUS } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { SettingsButton } from './SettingsButton';
 
 interface Props {
   open: boolean;
@@ -14,35 +15,40 @@ interface Props {
   onClose(): void;
   /** Shows the settings screen; the dialog asks to be closed first. */
   onOpenSettings(): void;
+  /** Why the settings screen cannot be shown now (Settings is disabled with it); null when it can. */
+  settingsBlocked?: string | null;
 }
 
 export const PROMPT_DIALOG_TITLE = 'Image to prompt';
 /** Shown when the main process is already describing another image. */
 export const PROMPT_BUSY_MESSAGE = 'Another prompt is being generated';
-const NO_PROMPT_MODEL_TITLE = 'Choose a prompt model';
-const NO_VISION_MODEL_TITLE = 'The provider offers no model that can read images';
 const COPY_FAILED_MESSAGE = 'The text could not be copied';
 const GENERATING_TITLE = 'The prompt is being generated';
 const NO_FILE_TITLE = 'No image to describe';
-/** Model list failures the settings screen fixes: the dialog offers the way there. */
-const SETTINGS_CODES: ReadonlySet<string> = new Set(['provider_unauthorized', 'provider_not_configured']);
 
 /**
  * Image2Prompt: describes one image with a chosen model and shows the text to copy. The text lives
  * only in this dialog's state; it is dropped when the dialog closes or another file is shown, and
  * a request still running then is cancelled.
  */
-export function PromptDialog({ open, file, onClose, onOpenSettings }: Props) {
+export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBlocked = null }: Props) {
   return (
     <Dialog open={open} title={PROMPT_DIALOG_TITLE} onClose={onClose}>
       {/* Rendered only while open; a new file starts from scratch. */}
-      <PromptBody key={file?.id ?? ''} file={file} onClose={onClose} onOpenSettings={onOpenSettings} />
+      <PromptBody
+        key={file?.id ?? ''}
+        file={file}
+        onClose={onClose}
+        onOpenSettings={onOpenSettings}
+        settingsBlocked={settingsBlocked}
+      />
     </Dialog>
   );
 }
 
-function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
-  const { settings, models, loading, settingsFailed } = useProvider();
+function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: Omit<Props, 'open'>) {
+  const provider = useProvider();
+  const { settings } = provider;
   // Null until the user picks one: until then the stored prompt default is shown.
   const [chosen, setChosen] = useState<{ model: string | null } | null>(null);
   const [running, setRunning] = useState(false);
@@ -53,33 +59,10 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
 
   const model = chosen !== null ? chosen.model : (settings?.promptModel ?? null);
   const configured = settings !== null && settings.baseUrl !== null;
-  // Only loaded settings without a base URL are "not configured"; a failed load is not.
-  const notConfigured = !loading && settings !== null && settings.baseUrl === null;
-  const noVisionModel = models !== null && models.ok && models.models.every((m) => m.vision === false);
-  const modelRefused =
-    models !== null && models.ok && models.models.some((m) => m.name === model && m.vision === false);
-  // A model list the provider refused for a reason the settings screen fixes.
-  const listRefused = models !== null && !models.ok && SETTINGS_CODES.has(models.code);
+  const gate = providerGate(provider, model);
 
-  const blockedTitle =
-    settings === null && loading
-      ? START_LOADING
-      : settings === null && settingsFailed
-        ? SETTINGS_LOAD_FAILED
-        : notConfigured
-          ? JOB_ERROR_MESSAGES.provider_not_configured
-          : !configured
-            ? START_LOADING
-            : noVisionModel
-              ? NO_VISION_MODEL_TITLE
-              : model === null || modelRefused
-                ? NO_PROMPT_MODEL_TITLE
-                : running
-                  ? GENERATING_TITLE
-                  : file === null
-                    ? NO_FILE_TITLE
-                    : undefined;
-  const canGenerate = configured && !running && file !== null && model !== null && !modelRefused && !noVisionModel;
+  const blockedTitle = gate.blocked ?? (running ? GENERATING_TITLE : file === null ? NO_FILE_TITLE : undefined);
+  const canGenerate = gate.blocked === null && !running && file !== null && model !== null;
 
   function cancel() {
     const requestId = request.current;
@@ -126,6 +109,7 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
   }
 
   function openSettings() {
+    if (settingsBlocked !== null) return;
     onClose();
     onOpenSettings();
   }
@@ -153,11 +137,7 @@ function PromptBody({ file, onClose, onOpenSettings }: Omit<Props, 'open'>) {
             Cancel
           </button>
         )}
-        {(notConfigured || noVisionModel || listRefused) && (
-          <button type="button" className={BUTTON} onClick={openSettings}>
-            Settings
-          </button>
-        )}
+        {gate.offerSettings && <SettingsButton blocked={settingsBlocked} onClick={openSettings} />}
       </div>
       {error !== null && (
         <p role="alert" className={ALERT}>

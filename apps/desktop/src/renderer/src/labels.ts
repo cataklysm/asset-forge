@@ -59,6 +59,7 @@ export const SKIP_LABELS: Record<'alreadyAnalysed' | 'alreadyQueued' | 'notAnaly
 /** The file actions and buttons that start or review an analysis. */
 export const ANALYSE_LABEL = 'Analyse';
 export const ANALYSE_TITLE = 'Tag this image with the vision model';
+export const ANALYSE_SELECTION_TITLE = 'Tag the selected images with the vision model';
 export const ANALYSE_ALL_LABEL = 'Analyse all';
 export const ANALYSE_ALL_TITLE = 'Analyse the images of this list';
 export const ANALYSE_ASSETS_TITLE = 'Analyse the images of the assets in this list';
@@ -82,12 +83,16 @@ export const RESUME_TITLE = 'Continue the queued jobs';
 /** A failed load of the provider settings; not the same as "not configured". */
 export const SETTINGS_LOAD_FAILED = 'The provider settings could not be read';
 
+/** Why the provider or the chosen model lets no analysis or prompt start (see `providerGate`). */
+export const START_LOADING = 'The provider settings are loading';
+export const NO_VISION_MODEL = 'The provider offers no model that can analyse images';
+export const CHOOSE_MODEL = 'Choose a model';
+export const MODEL_NOT_LISTED = 'The provider does not offer this model';
+export const MODEL_NOT_VISION = 'This model cannot analyse images';
+
 /** The start dialog (AnalysisStartDialog). */
 export const START_PREVIEW_FAILED = 'The files could not be counted';
 export const START_RETRY_PREVIEW_LABEL = 'Count again';
-export const START_NOT_CONFIGURED = 'No vision provider is configured';
-export const START_LOADING = 'The provider settings are loading';
-export const START_CHOOSE_MODEL = 'Choose a model';
 export const START_COUNTING = 'The files are being counted';
 export const START_NOTHING_TO_DO = 'Nothing to analyse';
 export const START_FORCE_LABEL = 'Analyse again';

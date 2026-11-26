@@ -659,7 +659,7 @@ it('files tab: the tile menu Analyse opens the result dialog of a complete image
   expect(callsOf(api, 'analysis:enqueue')).toEqual([]);
 });
 
-it('files tab: Analyse in the selection bar opens the start dialog for the analysable images; Start fills the strip', async () => {
+it('files tab: Analyse in the selection bar opens the start dialog for the selected files; Start fills the strip', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const c1 = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
@@ -676,7 +676,9 @@ it('files tab: Analyse in the selection bar opens the start dialog for the analy
   await user.click(selectionAnalyse());
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
-  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a' }]);
+  expect(callsOf(api, 'analysis:preview')).toEqual([
+    { target: { kind: 'files', fileIds: [c1.id, c2.id, bad.id] }, model: 'vision-a' },
+  ]);
   await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
   expect(within(strip).getByText('2 queued, 1 already analysed')).toBeTruthy();

@@ -4,22 +4,20 @@ import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@as
 import { call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import {
-  SETTINGS_LOAD_FAILED,
-  START_CHOOSE_MODEL,
   START_COUNTING,
   START_COUNTS,
   START_FORCE_LABEL,
   START_FORCE_TITLE,
-  START_LOADING,
-  START_NOT_CONFIGURED,
   START_NOTHING_TO_DO,
   START_PREVIEW_FAILED,
   START_RETRY_PREVIEW_LABEL,
 } from '../labels';
 import { useProvider } from '../provider-context';
+import { providerGate } from '../provider-gate';
 import { ALERT, BUTTON, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { SettingsButton } from './SettingsButton';
 
 interface Props {
   open: boolean;
@@ -30,6 +28,8 @@ interface Props {
   onStarted(result: EnqueueAnalysisResult): void;
   /** Shows the settings screen; the dialog closes first. */
   onOpenSettings(): void;
+  /** Why the settings screen cannot be shown now (Settings is disabled with it); null when it can. */
+  settingsBlocked?: string | null;
 }
 
 export const ANALYSIS_START_TITLE = 'Analyse';
@@ -47,7 +47,7 @@ export function wouldEnqueue(preview: AnalysisPreview, force: boolean): number {
  * model (the stored default preselected, changeable), the preview counts for that model, "Analyse
  * again" (`force`) and Start, which enqueues in mode `apply`.
  */
-export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings }: Props) {
+export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings, settingsBlocked = null }: Props) {
   const provider = useProvider();
   const jobs = useJobs();
   // Null while the owner has not chosen: the stored tagging default is in force.
@@ -73,10 +73,9 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     }
   }
 
-  const { settings, models } = provider;
+  const { settings } = provider;
   const configured = settings !== null && settings.baseUrl !== null;
   const model = choice !== null ? choice.model : (settings?.taggingModel ?? null);
-  const selectable = models !== null && models.ok && models.models.some((m) => m.vision !== false);
 
   // The target as a value: a caller may pass an equal target as a new object on every render.
   const targetKey = target === null ? null : JSON.stringify(target);
@@ -111,27 +110,18 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   }, [open, targetKey, model, configured, previewRun]);
 
   const nothingToDo = preview !== null && wouldEnqueue(preview, force) === 0;
+  // The way to the settings depends on the provider and the model only, never on the counts.
+  const { blocked: providerBlocked, offerSettings } = providerGate(provider, model);
   const blocked =
-    settings === null && provider.loading
-      ? START_LOADING
-      : settings === null && provider.settingsFailed
-        ? SETTINGS_LOAD_FAILED
-        : !configured
-          ? START_NOT_CONFIGURED
-          : model === null
-            ? START_CHOOSE_MODEL
-            : previewError !== null
-              ? START_PREVIEW_FAILED
-              : previewing || preview === null
-                ? START_COUNTING
-                : nothingToDo
-                  ? START_NOTHING_TO_DO
-                  : null;
+    providerBlocked ??
+    (previewError !== null
+      ? START_PREVIEW_FAILED
+      : previewing || preview === null
+        ? START_COUNTING
+        : nothingToDo
+          ? START_NOTHING_TO_DO
+          : null);
   const canStart = blocked === null && !starting && target !== null;
-  // The way to the settings when the provider is the problem: not configured, its model list
-  // failed (or the call threw) or it offers no vision model. Never next to a Start that works.
-  const offerSettings =
-    !provider.loading && !canStart && (!configured || models === null || !selectable);
 
   async function start(event?: FormEvent) {
     event?.preventDefault();
@@ -160,7 +150,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
 
   /** Ignored while a start is in flight: the dialog closes by itself and the strip shows the result. */
   function openSettings() {
-    if (startingRef.current) return;
+    if (startingRef.current || settingsBlocked !== null) return;
     onClose();
     onOpenSettings();
   }
@@ -224,9 +214,7 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
         </label>
         <div className="flex justify-end gap-2">
           {offerSettings && (
-            <button type="button" className={BUTTON} onClick={openSettings}>
-              Settings
-            </button>
+            <SettingsButton blocked={settingsBlocked} onClick={openSettings} />
           )}
           <button type="button" className={BUTTON} disabled={starting} onClick={close}>
             Cancel

@@ -543,6 +543,7 @@ describe('AnalysisResultDialog', () => {
     expect(button('Analyse').title).not.toBe(JOB_ERROR_MESSAGES.provider_not_configured);
     await act(async () => settings.reject(fakeError('internal_error')));
     await waitFor(() => expect(button('Analyse').title).toBe(SETTINGS_LOAD_FAILED));
+    expect(button('Settings')).toBeTruthy();
   });
 
   it('uses only the shared button styles', async () => {

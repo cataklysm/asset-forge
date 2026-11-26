@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
-import { analysableFiles, enqueueTitle, singleAnalysable } from '../analysis';
+import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
 import { SelectionAnalysisButtons, useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { FileBrowser } from '../components/FileBrowser';
@@ -131,8 +131,6 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     </button>
   );
   const noneEligible = eligibleFiles(selection).length === 0;
-  const toAnalyse = analysableFiles(selection);
-  const single = singleAnalysable(selection);
   const shown = detail.file;
   const fileActions = (file: FileRecord) => ({
     onAnalyse: () => analysis.analyseFiles([file]),
@@ -185,7 +183,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           >
             Add tags
           </button>
-          <SelectionAnalysisButtons analysis={analysis} files={toAnalyse} single={single} />
+          <SelectionAnalysisButtons analysis={analysis} selection={selection} />
         </SelectionBar>
         <FileBrowser
           scope={INBOX}

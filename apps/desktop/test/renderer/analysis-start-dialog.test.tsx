@@ -12,7 +12,13 @@ import type {
 import { expect, it, vi } from 'vitest';
 import { AnalysisStartDialog } from '../../src/renderer/src/components/AnalysisStartDialog';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
-import { SETTINGS_LOAD_FAILED, START_LOADING } from '../../src/renderer/src/labels';
+import {
+  MODEL_NOT_LISTED,
+  SETTINGS_LOAD_FAILED,
+  START_COUNTING,
+  START_LOADING,
+  START_NOTHING_TO_DO,
+} from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -296,6 +302,62 @@ it('while the settings load Start says so, and a failed load is not "not configu
   await act(async () => settings.reject(fakeError('internal_error')));
   await waitFor(() => expect(startButton().title).toBe(SETTINGS_LOAD_FAILED));
   expect(startButton().disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
+});
+
+it('a stored tagging default the provider no longer lists blocks Start and previews nothing', async () => {
+  const api = install({}, { ...CONFIGURED, taggingModel: 'gone-model' });
+  renderDialog();
+  await waitFor(() => expect(startButton().title).toBe(MODEL_NOT_LISTED));
+  expect(startButton().disabled).toBe(true);
+  // The preview may run while the list loads; the start stays blocked once it is there.
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([]);
+});
+
+it('the settings offer does not change while the files are counted or when nothing is to do', async () => {
+  const preview = deferred<AnalysisPreview>();
+  install(
+    {
+      'settings:listVisionModels': () => {
+        throw fakeError('internal_error');
+      },
+      'analysis:preview': () => preview.promise,
+    },
+    CONFIGURED,
+  );
+  renderDialog();
+  await waitFor(() => expect(startButton().title).toBe(START_COUNTING));
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+  await act(async () => preview.resolve(NOTHING_NEW));
+  await waitFor(() => expect(startButton().title).toBe(START_NOTHING_TO_DO));
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+});
+
+it('Settings is disabled with the given reason while the settings screen cannot be shown', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const onOpenSettings = vi.fn();
+  install({}, UNCONFIGURED);
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <AnalysisStartDialog
+          open
+          target={assetTarget()}
+          onClose={onClose}
+          onStarted={() => {}}
+          onOpenSettings={onOpenSettings}
+          settingsBlocked="Import in progress"
+        />
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  const settings = (await screen.findByRole('button', { name: 'Settings' })) as HTMLButtonElement;
+  expect(settings.disabled).toBe(true);
+  expect(settings.title).toBe('Import in progress');
+  await user.click(settings);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(onOpenSettings).not.toHaveBeenCalled();
 });
 
 it('a failed start keeps the retry of a preview that failed afterwards', async () => {

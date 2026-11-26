@@ -10,7 +10,7 @@ import {
 } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
-import { SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
+import { MODEL_NOT_LISTED, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
@@ -173,16 +173,45 @@ it('a model list refused as unauthorized offers Settings', async () => {
   expect(await screen.findByRole('button', { name: 'Settings' })).toBeTruthy();
 });
 
-it('a failed settings load is not "not configured" and offers no Settings', async () => {
+it('a failed settings load is not "not configured" and offers Settings, like the analysis dialogs', async () => {
+  const user = userEvent.setup();
+  const onOpenSettings = vi.fn();
   install(CONFIGURED, MODELS, {
     'settings:getVision': () => {
       throw fakeError('internal_error');
     },
   });
-  render(ui({}));
+  render(ui({ onOpenSettings }));
   await waitFor(() => expect(button('Generate').title).toBe(SETTINGS_LOAD_FAILED));
   expect(button('Generate').disabled).toBe(true);
-  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+  expect(button('Generate').title).not.toBe(JOB_ERROR_MESSAGES.provider_not_configured);
+  await user.click(button('Settings'));
+  expect(onOpenSettings).toHaveBeenCalledTimes(1);
+});
+
+it('a stored prompt model the provider no longer lists blocks Generate', async () => {
+  install({ ...CONFIGURED, promptModel: 'gone-model' });
+  render(ui({}));
+  await waitFor(() => expect(button('Generate').title).toBe(MODEL_NOT_LISTED));
+  expect(button('Generate').disabled).toBe(true);
+});
+
+it('Settings is disabled with the given reason while the settings screen cannot be shown', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const onOpenSettings = vi.fn();
+  install(UNCONFIGURED);
+  render(
+    <ProviderSettingsProvider>
+      <PromptDialog open file={FILE} onClose={onClose} onOpenSettings={onOpenSettings} settingsBlocked="Import in progress" />
+    </ProviderSettingsProvider>,
+  );
+  const settings = await screen.findByRole('button', { name: 'Settings' });
+  expect((settings as HTMLButtonElement).disabled).toBe(true);
+  expect(settings.title).toBe('Import in progress');
+  await user.click(settings);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(onOpenSettings).not.toHaveBeenCalled();
 });
 
 it('shows the text in a read-only field and Copy writes exactly the text', async () => {

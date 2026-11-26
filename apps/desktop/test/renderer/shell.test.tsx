@@ -7,7 +7,8 @@ import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import { JOB_POLL_MS, sameSummary } from '../../src/renderer/src/jobs-context';
-import { fakeError, installFakeApi } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { fileRecord, pageOf } from './fixtures';
 
 type Section = 'assets' | 'projects' | 'inbox' | 'jobs' | 'settings';
 
@@ -97,7 +98,7 @@ it('Ctrl+F focuses the page search field', async () => {
 
 const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: null };
 
-function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}) {
+function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}, handlers: FakeHandlers = {}) {
   const api = installFakeApi({
     'jobs:summary': summary,
     'jobs:resume': () => {
@@ -116,6 +117,7 @@ function workspaceShell(summary: () => JobSummary, onResume: () => void = () => 
       fromEnvironment: false,
       canStoreKey: true,
     }),
+    ...handlers,
   });
   render(
     <WorkspaceShell
@@ -208,6 +210,54 @@ it('sameSummary tells a changed pause reason apart', () => {
   expect(sameSummary({ ...IDLE, paused: { reason: 'provider_unreachable' } }, { ...IDLE, paused: { reason: 'provider_unauthorized' } })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, paused: { reason: 'provider_unreachable' } })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, failed: 1 })).toBe(false);
+});
+
+/** The inbox of the workspace shell with one image that has a tag proposal; the provider is not configured. */
+async function inboxWithProposal(handlers: FakeHandlers = {}) {
+  const user = userEvent.setup();
+  const file = fileRecord({ originalName: 'fox.png', hasProposal: true });
+  const api = workspaceShell(() => IDLE, () => {}, {
+    'files:list': () => pageOf([file]),
+    'tags:suggest': () => [],
+    'analysis:getProposal': () => ({ proposal: null, job: null }),
+    ...handlers,
+  });
+  await user.click(screen.getByRole('link', { name: /Inbox/ }));
+  const listbox = await screen.findByRole('listbox', { name: 'Files' });
+  const tile = within(listbox).getByText('fox.png').closest<HTMLElement>('[data-index]')!;
+  return { user, api, tile };
+}
+
+it('Settings in a dialog closes it and the detail dialog beneath, then shows the settings screen', async () => {
+  const { user, tile } = await inboxWithProposal();
+  await user.click(tile);
+  await user.keyboard('{Enter}');
+  const detail = await screen.findByRole('dialog', { name: 'fox.png' });
+  await user.click(within(detail).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Review tags' }));
+  await waitFor(() => expect(screen.getAllByRole('dialog', { name: 'fox.png' })).toHaveLength(2));
+  const [, result] = screen.getAllByRole('dialog', { name: 'fox.png' });
+  await user.click(await within(result!).findByRole('button', { name: 'Settings' }));
+  expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
+});
+
+it('while an import runs Settings in a dialog is disabled like the navigation and nothing closes', async () => {
+  const pick = deferred<string[]>();
+  const { user, tile } = await inboxWithProposal({ 'dialog:pickFiles': () => pick.promise });
+  await user.click(screen.getByRole('button', { name: 'Import files' }));
+  await waitFor(() => expect(screen.getByRole('link', { name: /Assets/ }).getAttribute('aria-disabled')).toBe('true'));
+  await user.click(within(tile).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Review tags' }));
+  const result = await screen.findByRole('dialog', { name: 'fox.png' });
+  const settings = (await within(result).findByRole('button', { name: 'Settings' })) as HTMLButtonElement;
+  expect(settings.disabled).toBe(true);
+  expect(settings.title).toBe(screen.getByRole('link', { name: /Assets/ }).getAttribute('title'));
+  await user.click(settings);
+  expect(screen.getByRole('dialog', { name: 'fox.png' })).toBe(result);
+  expect(screen.queryByRole('heading', { level: 2, name: 'Settings' })).toBeNull();
+  await act(async () => pick.resolve([]));
 });
 
 it('choosing Jobs shows the Jobs page', async () => {

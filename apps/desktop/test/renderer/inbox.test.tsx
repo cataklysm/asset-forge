@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type JobSummary, type VisionSettingsView } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
+import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
+import { OpenSettingsProvider } from '../../src/renderer/src/components/AnalysisDialogs';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
@@ -390,6 +392,34 @@ function renderWithProvider() {
   );
 }
 
+it('Settings in the result dialog closes it and the detail dialog beneath before the settings open', async () => {
+  const user = userEvent.setup();
+  const proposed = fileRecord({ originalName: 'proposed.png', hasProposal: true });
+  install([proposed], analysisHandlers({ ...VISION, baseUrl: null, taggingModel: null, promptModel: null }));
+  // The screen stays mounted: only the dialogs' own closing can remove them.
+  const onOpenSettings = vi.fn();
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <OpenSettingsProvider onOpenSettings={onOpenSettings}>
+          <Harness />
+        </OpenSettingsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  await screen.findByText('proposed.png');
+  await user.click(tile('proposed.png'));
+  await user.keyboard('{Enter}');
+  const detail = await screen.findByRole('dialog', { name: 'proposed.png' });
+  await user.click(within(detail).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Review tags' }));
+  await waitFor(() => expect(screen.getAllByRole('dialog', { name: 'proposed.png' })).toHaveLength(2));
+  const [, result] = screen.getAllByRole('dialog', { name: 'proposed.png' });
+  await user.click(await within(result!).findByRole('button', { name: 'Settings' }));
+  expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
 async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(within(tile(name)).getByRole('button', { name: 'File actions' }));
 }
@@ -427,7 +457,7 @@ it('the detail dialog Analyse opens the result dialog above it', async () => {
   expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: c1.id }]);
 });
 
-it('Analyse on several selected files opens the start dialog for the images; Start shows the counts in the strip', async () => {
+it('Analyse on several selected files opens the start dialog for all of them; Start shows the counts in the strip', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();
   const doc = nonImageRecord('notes.pdf');
@@ -435,17 +465,47 @@ it('Analyse on several selected files opens the start dialog for the images; Sta
   renderWithProvider();
   await selectRange(user, 'c1.png', 'notes.pdf');
   expect(screen.queryByRole('button', { name: 'Image to prompt' })).toBeNull();
-  await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  const analyse = screen.getByRole('button', { name: 'Analyse' });
+  expect(analyse.title).toBe(ANALYSE_SELECTION_TITLE);
+  await user.click(analyse);
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
-  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a' }]);
+  const target = { kind: 'files', fileIds: [c1.id, c2.id, doc.id] };
+  expect(callsOf(api, 'analysis:preview')).toEqual([{ target, model: 'vision-a' }]);
   await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
   expect(within(strip).getByText('1 queued, 1 already queued')).toBeTruthy();
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: { kind: 'files', fileIds: [c1.id, c2.id] }, model: 'vision-a', mode: 'apply', force: false },
-  ]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ target, model: 'vision-a', mode: 'apply', force: false }]);
   expect(screen.getByText('3 selected')).toBeTruthy();
+});
+
+it('one image among several selected files opens the start dialog, not the single-image dialog', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const doc = nonImageRecord('notes.pdf');
+  const api = install([c1, doc], analysisHandlers());
+  renderWithProvider();
+  await selectRange(user, 'c1.png', 'notes.pdf');
+  await user.click(screen.getByRole('button', { name: 'Analyse' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  expect(screen.queryByRole('dialog', { name: 'c1.png' })).toBeNull();
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'files', fileIds: [c1.id, doc.id] }, model: 'vision-a' });
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([]);
+});
+
+it('a single selected image keeps the single-image title and opens the result dialog', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const api = install([c1], analysisHandlers());
+  renderWithProvider();
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  const analyse = screen.getByRole('button', { name: 'Analyse' });
+  expect(analyse.title).toBe(ANALYSE_TITLE);
+  await user.click(analyse);
+  await screen.findByRole('dialog', { name: 'c1.png' });
+  expect(callsOf(api, 'analysis:getProposal')).toEqual([{ fileId: c1.id }]);
 });
 
 it('Analyse is disabled for a selection without images; one image adds Image to prompt, a proposal Review tags', async () => {
