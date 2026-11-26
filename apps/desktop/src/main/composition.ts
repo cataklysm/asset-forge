@@ -134,8 +134,14 @@ export function createAnalysisServices(o: {
     jobHost: host,
     settings: createSettingsHandlers(store, gateway),
     describe,
-    workspaceOpened: () => host.workspaceOpened(),
+    workspaceOpened: async () => {
+      describe.unblock();
+      await host.workspaceOpened();
+    },
     async workspaceClosing() {
+      // No new describe request starts until the lifecycle step is over: `workspaceOpened` follows
+      // when a workspace is open afterwards, and without one the request answers no_workspace_open.
+      describe.block();
       await describe.cancelAll();
       await host.workspaceClosing();
     },

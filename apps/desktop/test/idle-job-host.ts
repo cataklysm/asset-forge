@@ -34,6 +34,8 @@ export const idleServices: AppServices = {
     describe: async () => ({ ok: false, code: 'provider_not_configured' }),
     cancel: () => {},
     cancelAll: async () => {},
+    block: () => {},
+    unblock: () => {},
   },
 };
 

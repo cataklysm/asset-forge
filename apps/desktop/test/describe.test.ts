@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createHarness, TEST_KEY, type Harness } from './analysis-harness.js';
 
@@ -40,6 +41,40 @@ async function chats(n: number): Promise<void> {
   }
 }
 
+async function until(check: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('Timed out');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * Replaces the harness with one whose model JPEG can be held: after `hold()`, the next JPEG waits
+ * until `release()`. `entered` resolves once that JPEG was asked for.
+ */
+async function holdFirstJpeg(): Promise<{ hold(): void; release(): void; entered: Promise<void> }> {
+  let armed = false;
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await h.close();
+  h = await createHarness({
+    images: {
+      jpeg: async (path) => {
+        if (armed) {
+          armed = false;
+          enter();
+          await held;
+        }
+        return readFile(path);
+      },
+    },
+  });
+  return { hold: () => (armed = true), release, entered };
+}
+
 describe('analysis:describe', () => {
   it('runs one request at a time, cancels on request and on close, and writes nothing', async () => {
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY, failures: ['hang', 'hang'] });
@@ -73,6 +108,61 @@ describe('analysis:describe', () => {
 
     expect(await rowCounts()).toEqual(before);
     for (const response of h.responses) expect(response).not.toContain(TEST_KEY);
+  });
+
+  it('frees the slot on cancel; the cancelled run never answers the next request', async () => {
+    const jpeg = await holdFirstJpeg();
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+
+    jpeg.hold();
+    const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
+    await jpeg.entered;
+    expect(await h.ok('analysis:cancelDescribe', { requestId: ids.a })).toEqual({});
+    // A is still waiting for its JPEG, yet B runs at once and gets the provider's answer.
+    const second = await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL });
+    expect(second.ok).toBe(true);
+    expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(1);
+
+    jpeg.release();
+    expect(await first).toEqual({ ok: false, code: 'cancelled' });
+    // The cancelled run stops before the provider; nothing else reaches it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(1);
+    expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
+  });
+
+  it('refuses new requests while the workspace closes', async () => {
+    const jpeg = await holdFirstJpeg();
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
+    await h.ok('settings:setVision', { baseUrl: mock.url, timeoutSeconds: 30, taggingModel: null, promptModel: null, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+    const block = vi.spyOn(h.services.describe, 'block');
+
+    // A holds the close step open while it waits for its JPEG.
+    jpeg.hold();
+    const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
+    await jpeg.entered;
+    const closing = h.ok('workspace:close', {});
+    await until(() => block.mock.calls.length > 0);
+    expect(h.manager.current()).not.toBeNull();
+    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL })).toEqual({
+      ok: false,
+      code: 'cancelled',
+    });
+
+    jpeg.release();
+    expect(await first).toEqual({ ok: false, code: 'cancelled' });
+    await closing;
+    const none = await h.call('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL });
+    expect(none).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
+    expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(0);
+
+    await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
+    expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
   });
 
   it('maps a provider failure to its code without logging it', async () => {

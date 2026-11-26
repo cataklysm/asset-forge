@@ -27,6 +27,7 @@ const ENV_MODEL = 'ASSETFORGE_VISION_MODEL';
 
 const INVALID_SETTINGS = 'The provider settings are not valid';
 const INVALID_BASE_URL = 'The base URL must be an http or https URL without user info, query or fragment';
+export const UNUSABLE_ENV_BASE_URL = `${ENV_BASE_URL} is not a usable http(s) URL; the vision provider is not configured`;
 const FROM_ENVIRONMENT = 'The provider settings are set by the environment and cannot be changed';
 
 interface StoredVision {
@@ -83,6 +84,8 @@ export function createVisionSettingsStore(o: {
   const keyPath = join(o.userData, KEY_FILE);
   const listeners: (() => void)[] = [];
   const fromEnvironment = o.env[ENV_BASE_URL] !== undefined;
+  // Once per store, i.e. per app start; the value itself is never logged.
+  if (fromEnvironment && usableBaseUrl(o.env[ENV_BASE_URL] ?? '') === null) console.warn(UNUSABLE_ENV_BASE_URL);
   let stored: StoredVision | null = null;
 
   /** The environment replaces the stored settings entirely; an unusable URL means "not configured". */

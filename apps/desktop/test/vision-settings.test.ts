@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SetVisionSettings } from '@assetforge/contracts';
 import { AssetForgeError } from '@assetforge/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createVisionSettingsStore } from '../src/main/vision-settings.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createVisionSettingsStore, UNUSABLE_ENV_BASE_URL } from '../src/main/vision-settings.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';
@@ -344,5 +344,31 @@ describe('vision settings store: environment', () => {
     const s = store({ ASSETFORGE_VISION_BASE_URL: 'http://u:p@127.0.0.1:11500', ASSETFORGE_VISION_MODEL: 'env-model' });
     expect(s.baseUrl()).toBeNull();
     expect(s.view()).toMatchObject({ baseUrl: null, fromEnvironment: true });
+  });
+
+  it('warns once, without the value, about an unusable environment URL', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const s = store({ ASSETFORGE_VISION_BASE_URL: 'http://u:secret-part@127.0.0.1:11500' });
+      s.view();
+      s.baseUrl();
+      s.defaults();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]).toEqual([UNUSABLE_ENV_BASE_URL]);
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/secret-part|127\.0\.0\.1|u:/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('does not warn about a usable environment URL or without one', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      store(env).view();
+      store().view();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

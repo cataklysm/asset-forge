@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from '@assetforge/contracts';
-import type { WorkspaceManager } from '@assetforge/core';
+import type { ModelImageSource, WorkspaceManager } from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createAnalysisServices, createWorkspaceManager, type AnalysisServices } from '../src/main/composition.js';
@@ -36,7 +36,9 @@ export interface Harness {
  * The analysis services and the IPC handlers as the app wires them, with a fake credential store,
  * the given environment and the raw source bytes standing in for the model JPEG.
  */
-export async function createHarness(o: { env?: NodeJS.ProcessEnv; codec?: FakeCodec } = {}): Promise<Harness> {
+export async function createHarness(
+  o: { env?: NodeJS.ProcessEnv; codec?: FakeCodec; images?: ModelImageSource } = {},
+): Promise<Harness> {
   const base = await mkdtemp(join(tmpdir(), 'af-analysis-'));
   const userData = join(base, 'userData');
   const sources = join(base, 'sources');
@@ -55,7 +57,7 @@ export async function createHarness(o: { env?: NodeJS.ProcessEnv; codec?: FakeCo
     userDataPath: userData,
     secrets: o.codec ?? new FakeCodec(),
     env: o.env ?? {},
-    images: { jpeg: (path) => readFile(path) },
+    images: o.images ?? { jpeg: (path) => readFile(path) },
     log: (line) => logs.push(line),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
