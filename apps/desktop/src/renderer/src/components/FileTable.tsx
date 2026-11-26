@@ -2,11 +2,11 @@ import { useRef, type RefObject } from 'react';
 import { formatBytes, formatDateTime } from '../format';
 import { rowCount } from '../gallery';
 import { useElementSize, useVirtualRows } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import { DELETED_LABEL, label, ORIGIN_LABEL } from '../labels';
 import { formatLabel } from '../media-url';
 import { retryIndex, slotAt } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
-import { fileItemHandlers, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
+import { fileItemHandlers, fileOrigin, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { Menu } from './Menu';
 import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
@@ -18,8 +18,10 @@ const COLUMNS_WITH_ROLE =
   'grid grid-cols-[2rem_minmax(10rem,1.6fr)_8rem_5rem_6rem_10rem_minmax(6rem,1fr)_2.5rem] items-center gap-3 px-2';
 const COLUMNS_WITHOUT_ROLE =
   'grid grid-cols-[2rem_minmax(10rem,1.6fr)_5rem_6rem_10rem_minmax(6rem,1fr)_2.5rem] items-center gap-3 px-2';
+const COLUMNS_WITH_ORIGIN =
+  'grid grid-cols-[2rem_minmax(10rem,1.6fr)_5rem_6rem_10rem_10rem_minmax(6rem,1fr)_minmax(6rem,1fr)_2.5rem] items-center gap-3 px-2';
 
-/** The files as a table: Name, Role (asset files), Type, Size, Imported and Tags. */
+/** The files as a table: Name, Role (asset files), Type, Size, Imported, Deleted and Origin (the trash) and Tags. */
 export function FileTable(props: FileViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(scrollRef);
@@ -38,8 +40,21 @@ export function FileTable(props: FileViewProps) {
 }
 
 function TableRows(props: FileViewProps & { scrollRef: RefObject<HTMLDivElement | null>; height: number }) {
-  const { viewKey, paged, total, restore, showRole, coverFileId, selected, onRows, onRetry, positionRef, scrollRef, height } =
-    props;
+  const {
+    viewKey,
+    paged,
+    total,
+    restore,
+    showRole,
+    showOrigin,
+    coverFileId,
+    selected,
+    onRows,
+    onRetry,
+    positionRef,
+    scrollRef,
+    height,
+  } = props;
   const rows = useVirtualRows({
     scrollRef,
     total,
@@ -54,10 +69,16 @@ function TableRows(props: FileViewProps & { scrollRef: RefObject<HTMLDivElement 
   });
   const { virtualizer } = rows;
   const items = virtualizer.getVirtualItems();
-  const columns = showRole ? COLUMNS_WITH_ROLE : COLUMNS_WITHOUT_ROLE;
-  const headers = showRole
-    ? ['Name', 'Role', 'Type', 'Size', 'Imported', 'Tags']
-    : ['Name', 'Type', 'Size', 'Imported', 'Tags'];
+  const columns = showOrigin ? COLUMNS_WITH_ORIGIN : showRole ? COLUMNS_WITH_ROLE : COLUMNS_WITHOUT_ROLE;
+  const headers = [
+    'Name',
+    ...(showRole ? ['Role'] : []),
+    'Type',
+    'Size',
+    'Imported',
+    ...(showOrigin ? [DELETED_LABEL, ORIGIN_LABEL] : []),
+    'Tags',
+  ];
 
   return (
     <div role="presentation" className="relative w-full text-sm" style={{ height: virtualizer.getTotalSize() }}>
@@ -159,6 +180,16 @@ function TableRows(props: FileViewProps & { scrollRef: RefObject<HTMLDivElement 
                 <span role="gridcell" className="truncate">
                   {formatDateTime(file.importedAt)}
                 </span>
+                {showOrigin && (
+                  <>
+                    <span role="gridcell" className="truncate">
+                      {file.deletedAt === null ? '–' : formatDateTime(file.deletedAt)}
+                    </span>
+                    <span role="gridcell" className="truncate">
+                      {fileOrigin(file)}
+                    </span>
+                  </>
+                )}
                 <span role="gridcell" className="min-w-0">
                   <TagList tags={file.tags} kind="file" max={2} />
                 </span>

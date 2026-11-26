@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
+import { ConfirmDialog } from '../../src/renderer/src/components/ConfirmDialog';
 import { Dialog } from '../../src/renderer/src/components/Dialog';
 import { Menu, type MenuItem } from '../../src/renderer/src/components/Menu';
 import { Tabs } from '../../src/renderer/src/components/Tabs';
@@ -291,4 +292,39 @@ it('the detail dialog is named by its title and leaves header and body to its co
   const body = screen.getByText('Body').parentElement!;
   expect(body.className.split(/\s+/)).toContain('h-full');
   expect(body.className.split(/\s+/).some((c) => /^p[xy]?-/.test(c))).toBe(false);
+});
+
+it('ConfirmDialog focuses Cancel, confirms, cancels on Esc and disables both buttons while busy', async () => {
+  const user = userEvent.setup();
+  const onConfirm = vi.fn();
+  const onCancel = vi.fn();
+  const view = (busy: boolean) => (
+    <ConfirmDialog
+      open
+      title="Delete 2 files permanently?"
+      confirmLabel="Delete permanently"
+      busy={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+  const { rerender } = render(view(false));
+  const dialog = screen.getByRole('dialog', { name: 'Delete 2 files permanently?' });
+  // The title is the only text besides the two buttons.
+  const buttons = screen.getAllByRole('button').map((b) => b.textContent);
+  expect(buttons).toEqual(['Delete permanently', 'Cancel']);
+  expect(dialog.textContent).toBe('Delete 2 files permanently?Delete permanentlyCancel');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+
+  await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  screen.getByRole('button', { name: 'Cancel' }).focus();
+  await user.keyboard('{Escape}');
+  expect(onCancel).toHaveBeenCalledTimes(2);
+
+  rerender(view(true));
+  expect((screen.getByRole('button', { name: 'Delete permanently' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
 });

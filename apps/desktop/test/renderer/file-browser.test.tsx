@@ -5,6 +5,7 @@ import type { FileList, FileRecord, FileScope, IpcRequest } from '@assetforge/co
 import { afterEach, expect, it, vi } from 'vitest';
 import { FileBrowser, type ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
+import { formatDateTime } from '../../src/renderer/src/format';
 import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/renderer/src/list-state';
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
 import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
@@ -625,4 +626,55 @@ it('the Delete key inside the search field does not', async () => {
   await user.keyboard('{ArrowLeft}{Delete}');
   expect((search as HTMLInputElement).value).toBe('oa');
   expect(onDeleteKey).not.toHaveBeenCalled();
+});
+
+const TRASH_SCOPE: FileScope = { kind: 'trash' };
+
+function trashFiles(): [FileRecord, FileRecord] {
+  return [
+    trashedRecord({
+      originalName: 'hero.png',
+      deletedAt: '2026-03-04T05:06:00.000Z',
+      trashedAssetId: nextId(),
+      trashedAssetName: 'Hero',
+      trashedRole: 'texture',
+    }),
+    trashedRecord({ originalName: 'loose.png', deletedAt: '2026-03-05T05:06:00.000Z' }),
+  ];
+}
+
+it('the trash table shows the deletion date and the origin', async () => {
+  const user = userEvent.setup();
+  const [hero, loose] = trashFiles();
+  install({ 'files:list': listOf([hero, loose]) });
+  render(<Harness scope={TRASH_SCOPE} showRoleFilter={false} />);
+  // The tile's meta line names the origin.
+  const heroTile = (await screen.findByText('hero.png')).closest<HTMLElement>('[data-index]')!;
+  expect(within(heroTile).getByText(/^Hero · PNG/)).toBeTruthy();
+  expect(within(itemOf('loose.png')).getByText(/^Inbox · PNG/)).toBeTruthy();
+
+  await user.click(screen.getByRole('button', { name: 'Show as table' }));
+  const table = screen.getByRole('grid', { name: 'Files' });
+  const headers = within(table)
+    .getAllByRole('columnheader')
+    .map((h) => h.textContent);
+  expect(headers).toEqual(['', 'Name', 'Type', 'Size', 'Imported', 'Deleted', 'Origin', 'Tags', '']);
+  const cells = (name: string) =>
+    within(itemOf(name))
+      .getAllByRole('gridcell')
+      .map((c) => c.textContent);
+  expect(cells('hero.png')[5]).toBe(formatDateTime(hero.deletedAt!));
+  expect(cells('hero.png')[6]).toBe('Hero');
+  expect(cells('loose.png')[6]).toBe('Inbox');
+});
+
+it('the trash scope has no role filter, no Proposals toggle and no Analyse all', async () => {
+  const api = install({ 'files:list': listOf(trashFiles()) });
+  // Even a host that asks for the role filter does not get it in the trash.
+  render(<Harness scope={TRASH_SCOPE} showRoleFilter />);
+  await screen.findByText('hero.png');
+  expect(screen.queryByRole('combobox', { name: 'Role' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Proposals/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Analyse all/ })).toBeNull();
+  expect(listRequests(api)[0]).toMatchObject({ scope: TRASH_SCOPE });
 });

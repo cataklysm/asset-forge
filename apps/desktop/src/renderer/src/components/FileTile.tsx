@@ -3,7 +3,7 @@ import type { FileRecord } from '@assetforge/contracts';
 import { formatBytes } from '../format';
 import type { ViewHandle, ViewRestore, VirtualRows, VisibleRows } from '../hooks/useVirtualRows';
 import { formatLabel } from '../media-url';
-import { label } from '../labels';
+import { INBOX_LABEL, label } from '../labels';
 import type { PagedState } from '../paged-list';
 import { FOCUS, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
@@ -25,10 +25,19 @@ export function FileFrame({ file, className }: { file: FileRecord; className: st
   return <span className={`${plain} ${MUTED}`}>{formatLabel(file.originalName)}</span>;
 }
 
-/** "Role · FORMAT · size" for asset files, "FORMAT | size" where files have no role (the inbox). */
-export function fileMeta(file: FileRecord, showRole: boolean): string {
+/** Where a trashed file came from: the name of its former asset, or the inbox. */
+export function fileOrigin(file: FileRecord): string {
+  return file.trashedAssetId === null ? INBOX_LABEL : (file.trashedAssetName ?? INBOX_LABEL);
+}
+
+/**
+ * "Role · FORMAT · size" for asset files, "Origin · FORMAT · size" in the trash, "FORMAT | size"
+ * where files have neither (the inbox).
+ */
+export function fileMeta(file: FileRecord, showRole: boolean, showOrigin = false): string {
   const format = formatLabel(file.originalName);
   const size = formatBytes(file.sizeBytes);
+  if (showOrigin) return [fileOrigin(file), format, size].join(' · ');
   if (!showRole) return `${format} | ${size}`;
   return [file.role === null ? null : label(file.role), format, size].filter((part) => part !== null).join(' · ');
 }
@@ -41,6 +50,8 @@ export interface FileViewProps {
   restore: ViewRestore;
   /** Files belong to an asset: the role is shown. */
   showRole: boolean;
+  /** Files in the trash: the deletion date and the origin are shown. */
+  showOrigin: boolean;
   coverFileId: string | null;
   selected: ReadonlyMap<string, FileRecord>;
   onClickItem(index: number, mods: { ctrl: boolean; shift: boolean }): void;

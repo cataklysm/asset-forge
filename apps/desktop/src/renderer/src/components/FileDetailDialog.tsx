@@ -4,12 +4,13 @@ import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
 import { formatBytes, formatDateTime } from '../format';
-import { label } from '../labels';
+import { DELETED_LABEL, label, ORIGIN_LABEL } from '../labels';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED, PANEL_TITLE, SECTION_TITLE } from '../ui';
 import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
 import { FilmStrip } from './FilmStrip';
+import { fileOrigin } from './FileTile';
 import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
 import { Link } from './Link';
@@ -25,7 +26,7 @@ interface Props {
   asset: { id: string; name: string; tags: readonly TagAssignment[] } | null;
   /** Drives the "More" menu; its "Details" entry is not offered here. */
   actions: FileActionContext;
-  /** Asset files: the role select. Inbox files: the assign control. */
+  /** Asset files: the role select. Inbox files: the assign control. Not shown for a trashed file. */
   roleControl: ReactNode;
   /** Receives the updated file after `files:addTag` / `files:removeTag`. */
   onFileChange(file: FileRecord): void;
@@ -74,6 +75,8 @@ export function FileDetailDialog({
   const setControls = (next: ViewerControls) => setStage({ fileId, controls: next });
 
   const complete = file.status === 'complete';
+  // A file in the trash: read-only, without a role or assign control.
+  const trashed = file.deletedAt !== null;
   const viewable = complete && file.previewable;
 
   const onMeasuredRef = useRef(onMeasured);
@@ -168,6 +171,7 @@ export function FileDetailDialog({
   }
 
   const image = file.kind === 'image';
+  const tagsLabel = image ? 'Image tags' : 'File tags';
   const browsing = list !== null && list.total >= 2 ? list : null;
   // The header pair and the on-stage pair: same behaviour and tooltips, distinct accessible names.
   const step = (direction: -1 | 1, look: { className: string; name?: string }) =>
@@ -228,6 +232,14 @@ export function FileDetailDialog({
                 <dd>{formatBytes(file.sizeBytes)}</dd>
                 <dt className={LABEL}>Imported</dt>
                 <dd>{formatDateTime(file.importedAt)}</dd>
+                {file.deletedAt !== null && (
+                  <>
+                    <dt className={LABEL}>{DELETED_LABEL}</dt>
+                    <dd>{formatDateTime(file.deletedAt)}</dd>
+                    <dt className={LABEL}>{ORIGIN_LABEL}</dt>
+                    <dd className="break-words">{fileOrigin(file)}</dd>
+                  </>
+                )}
                 {!complete && (
                   <>
                     <dt className={LABEL}>Status</dt>
@@ -242,17 +254,24 @@ export function FileDetailDialog({
               )}
             </section>
             {/* The inbox's assign control shows only for complete files. */}
-            {(asset !== null || complete) && (
+            {!trashed && (asset !== null || complete) && (
               <section className="space-y-2">
                 <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
                 {/* Keyed by file: stepping on starts the controls afresh. */}
                 <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
               </section>
             )}
-            {complete && (
+            {/* In the trash the tags are kept but cannot be changed. */}
+            {trashed && file.tags.length > 0 && (
+              <section aria-label={tagsLabel} className="space-y-2">
+                <h3 className={PANEL_TITLE}>{tagsLabel}</h3>
+                <TagList tags={file.tags} kind="file" max={Number.MAX_SAFE_INTEGER} wrap />
+              </section>
+            )}
+            {!trashed && complete && (
               <TagRow
                 key={`tags-${file.id}`}
-                label={image ? 'Image tags' : 'File tags'}
+                label={tagsLabel}
                 kind="file"
                 layout="stacked"
                 tags={file.tags}

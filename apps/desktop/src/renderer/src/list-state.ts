@@ -42,6 +42,9 @@ export interface InboxListState {
   scrollOffset: number;
 }
 
+/** The trash list: the same as the inbox's, kept by the shell so that it survives navigation. */
+export type TrashListState = InboxListState;
+
 export interface ProjectFilters {
   query: string;
   status: Choice<ProjectStatus>;

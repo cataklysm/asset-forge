@@ -124,11 +124,15 @@ const pageOf = (index: number) => Math.floor(index / PAGE_SIZE);
 
 /**
  * A paginated, virtualised list of files as tiles or a table, with its filters, endless
- * scrolling and multi-select (see `selection.ts`). Mounted by the asset Files tab and the inbox.
+ * scrolling and multi-select (see `selection.ts`). Mounted by the asset Files tab, the inbox and
+ * the trash, which shows the deletion date and the origin and never the role filter.
  */
 export function FileBrowser(props: FileBrowserProps) {
-  const { scope, filters, onFiltersChange, showRoleFilter, view, onViewChange, selection, reloadToken, emptyText } = props;
+  const { scope, filters, onFiltersChange, view, onViewChange, selection, reloadToken, emptyText } = props;
   const showRole = scope.kind === 'asset';
+  const showOrigin = scope.kind === 'trash';
+  // The trash has no roles.
+  const showRoleFilter = props.showRoleFilter && !showOrigin;
 
   // Only the text is debounced, trimmed before it enters the key; the role is ignored while hidden.
   const query = useDebouncedValue(filters.query.trim(), SEARCH_DEBOUNCE_MS);
@@ -427,6 +431,7 @@ export function FileBrowser(props: FileBrowserProps) {
           total,
           restore: restore.current,
           showRole,
+          showOrigin,
           coverFileId: props.coverFileId ?? null,
           selected: selection.selected,
           onClickItem: (index, mods) => props.onSelectionChange(clickSelect(selection, index, itemAt, mods)),
@@ -670,7 +675,7 @@ function GridRows(
 function GridItem(
   props: FileViewProps & { rows: ReturnType<typeof useVirtualRows>; index: number; paged: PagedState<FileRecord> },
 ) {
-  const { rows, index, paged, total, showRole, coverFileId, selected, onRetry } = props;
+  const { rows, index, paged, total, showRole, showOrigin, coverFileId, selected, onRetry } = props;
   const slot = slotAt(paged, index);
   const tabbable = index === rows.tabbableIndex;
   if (slot.kind === 'failed' && index === retryIndex(slot.page, rows.firstVisibleIndex)) {
@@ -753,7 +758,7 @@ function GridItem(
               <p className={`min-w-0 flex-1 leading-6 ${TILE_TITLE}`}>{file.originalName}</p>
               {file.hasProposal && <ProposalMarker />}
             </div>
-            <p className={`truncate text-sm leading-5 ${MUTED}`}>{fileMeta(file, showRole)}</p>
+            <p className={`truncate text-sm leading-5 ${MUTED}`}>{fileMeta(file, showRole, showOrigin)}</p>
             <div className="mt-2">
               <TagList tags={file.tags} kind="file" max={3} />
             </div>

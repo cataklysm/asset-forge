@@ -122,6 +122,11 @@ export const PURGE_SELECTION_TITLE = 'Removes the files from disk; asks first';
 export const EMPTY_TRASH_LABEL = 'Empty trash';
 export const EMPTY_TRASH_TITLE = 'Removes every file in the trash from disk; asks first';
 export const CANCEL_LABEL = 'Cancel';
+/** The origin of a trashed file that came from the inbox. */
+export const INBOX_LABEL = 'Inbox';
+export const TRASH_EMPTY_TEXT = 'Trash is empty';
+export const DELETED_LABEL = 'Deleted';
+export const ORIGIN_LABEL = 'Origin';
 
 const fileCount = (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`;
 

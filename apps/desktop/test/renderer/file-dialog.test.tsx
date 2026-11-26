@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
@@ -10,7 +10,8 @@ import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, nextId, tagOf } from './fixtures';
+import { formatDateTime } from '../../src/renderer/src/format';
+import { fileRecord, nextId, tagOf, trashedRecord } from './fixtures';
 
 const ASSET = { id: nextId(), name: 'Oak tree', tags: [tagOf('Nature')] };
 const ACTIONS: FileActionContext = { cover: null, onDetails: () => {} };
@@ -22,6 +23,7 @@ function Harness(props: {
   onMeasured?(fileId: string, size: { width: number; height: number }): void;
   actions?: FileActionContext;
   list?: ViewerList | null;
+  roleControl?: ReactNode;
 }) {
   const [file, setFile] = useState(props.file);
   const [open, setOpen] = useState(false);
@@ -35,7 +37,7 @@ function Harness(props: {
           file={file}
           asset={props.asset === undefined ? ASSET : props.asset}
           actions={props.actions ?? ACTIONS}
-          roleControl={<span>role control</span>}
+          roleControl={props.roleControl === undefined ? <span>role control</span> : props.roleControl}
           onFileChange={setFile}
           onMeasured={(id, size) => {
             props.onMeasured?.(id, size);
@@ -703,4 +705,50 @@ it('a failing delete shows the message in the dialog', async () => {
   await deleteInDialog(user, dialog);
   expect(await within(dialog).findByText('The file is still being imported')).toBeTruthy();
   expect(screen.getByRole('dialog', { name: 'a.png' })).toBe(dialog);
+});
+
+it('a trashed file shows its origin, read-only tags and only Restore and Delete permanently', async () => {
+  install();
+  const file = trashedRecord({
+    originalName: 'hero.png',
+    deletedAt: '2026-03-04T05:06:00.000Z',
+    trashedAssetId: ASSET.id,
+    trashedAssetName: 'Hero',
+    trashedRole: 'texture',
+    tags: [tagOf('Bark'), tagOf('Moss', 'ai')],
+  });
+  const actions: FileActionContext = {
+    cover: { isEffective: false, isChosen: false },
+    onDetails: () => {},
+    onSetCover: () => {},
+    onDetach: () => {},
+    onAnalyse: () => {},
+    onReviewTags: () => {},
+    onImageToPrompt: () => {},
+    onDelete: () => {},
+    onRestore: () => {},
+    onPurge: () => {},
+  };
+  render(<Harness file={{ ...file, hasProposal: true }} asset={null} actions={actions} roleControl={null} />);
+  const user = await openDialog();
+  expect(detailValue('Deleted')).toBe(formatDateTime(file.deletedAt!));
+  expect(detailValue('Origin')).toBe('Hero');
+  // Tags are shown, but cannot be changed.
+  const tags = screen.getByRole('region', { name: 'Image tags' });
+  expect(within(tags).getByText('Bark')).toBeTruthy();
+  expect(within(tags).getByText('Moss')).toBeTruthy();
+  expect(within(tags).queryByRole('button')).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Add image tag' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Assign' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Role' })).toBeNull();
+
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Restore', 'Delete permanently']);
+});
+
+it('a trashed file from the inbox names the inbox as its origin', async () => {
+  install();
+  render(<Harness file={trashedRecord({ originalName: 'loose.png' })} asset={null} roleControl={null} />);
+  await openDialog();
+  expect(detailValue('Origin')).toBe('Inbox');
 });
