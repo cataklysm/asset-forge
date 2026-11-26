@@ -22,6 +22,7 @@ import {
   DELETE_LABEL,
   DELETE_PROVIDER_TITLE,
   EDIT_MODEL_LABEL,
+  EDIT_MODEL_TITLE,
   ENTER_BASE_URL,
   ENTER_NAME,
   FROM_ENVIRONMENT,
@@ -31,10 +32,10 @@ import {
   NEW_PROVIDER_LABEL,
   NEW_PROVIDER_TITLE,
   NO_KEY_STORE_TITLE,
-  NO_MODEL_LABEL,
   PROMPT_MODEL_TITLE,
   PROVIDER_KIND_LABEL,
   PROVIDER_KIND_LABELS,
+  PROVIDER_KIND_TITLE,
   PROVIDER_LIMIT_TITLE,
   PROVIDER_NAME_LABEL,
   PROVIDER_NAME_TITLE,
@@ -42,7 +43,6 @@ import {
   PROVIDER_STATE_LABELS,
   PROVIDERS_LIST_LABEL,
   PROVIDERS_TITLE,
-  REFRESH_MODELS_LABEL,
   REMOVE_KEY_LABEL,
   REMOVE_KEY_TITLE,
   RETRY_LABEL,
@@ -57,7 +57,7 @@ import {
 import { providerStatus, useProviders } from '../provider-context';
 import { ALERT, BUTTON, BUTTON_INLINE, ICON_BUTTON, INPUT, LABEL, MUTED, SECTION_TITLE, SELECT } from '../ui';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ModelSelect } from './ModelSelect';
+import { EditModelSelect, ModelSelect } from './ModelSelect';
 
 /** The selection of the editor for an entry that is not saved yet; never a provider id. */
 const NEW = 'new';
@@ -323,7 +323,7 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
   return (
     <form className="flex min-w-0 flex-1 flex-col gap-4" onSubmit={onSubmit} aria-busy={busy || undefined}>
       {entry === null ? (
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1" title={PROVIDER_KIND_TITLE}>
           <span className={LABEL}>{PROVIDER_KIND_LABEL}</span>
           <select
             className={`w-48 ${SELECT}`}
@@ -418,7 +418,7 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
       </label>
 
       {draft.kind === 'venice' ? (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1" title={EDIT_MODEL_TITLE}>
           <span className={LABEL}>{EDIT_MODEL_LABEL}</span>
           <EditModelSelect
             providerId={entry?.id ?? null}
@@ -477,56 +477,5 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
         </button>
       </div>
     </form>
-  );
-}
-
-interface EditModelSelectProps {
-  /** The `venice` entry whose edit models are listed; null lists nothing. */
-  providerId: string | null;
-  value: string | null;
-  onChange(model: string | null): void;
-  disabled: boolean;
-}
-
-/**
- * The edit models of entry `providerId` as a select, each with its price as tooltip when known;
- * `value` stays shown and selected even when it is not (or not yet) in the list.
- */
-function EditModelSelect({ providerId, value, onChange, disabled }: EditModelSelectProps) {
-  const { imageModels, loadModels } = useProviders();
-  const answer = providerId === null ? undefined : imageModels[providerId];
-  const loading = providerId !== null && (answer === undefined || answer === 'checking');
-  const list = answer !== undefined && answer !== 'checking' && answer.ok ? answer.models : [];
-  const listed = value !== null && list.some((m) => m.name === value);
-
-  return (
-    <div className="flex items-center gap-2">
-      <select
-        className={`min-w-0 flex-1 ${SELECT}`}
-        aria-label={EDIT_MODEL_LABEL}
-        value={value ?? ''}
-        disabled={disabled}
-        aria-busy={loading || undefined}
-        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
-      >
-        <option value="">{NO_MODEL_LABEL}</option>
-        {value !== null && !listed && <option value={value}>{value}</option>}
-        {list.map((model) => (
-          <option key={model.name} value={model.name} title={model.price ?? undefined}>
-            {model.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className={ICON_BUTTON}
-        title={REFRESH_MODELS_LABEL}
-        aria-label={REFRESH_MODELS_LABEL}
-        disabled={disabled || loading || providerId === null}
-        onClick={() => providerId !== null && void loadModels(providerId, true)}
-      >
-        <RefreshCw size={16} aria-hidden />
-      </button>
-    </div>
   );
 }

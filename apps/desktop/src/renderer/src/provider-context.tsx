@@ -233,12 +233,12 @@ const UNREACHABLE: ReadonlySet<string> = new Set(['provider_unreachable', 'provi
  * the vision model list otherwise (also for an entry that is not listed).
  */
 export function providerStatus(
-  state: Pick<ProvidersState, 'models'> & Partial<Pick<ProvidersState, 'list' | 'imageModels'>>,
+  state: Pick<ProvidersState, 'list' | 'models' | 'imageModels'>,
   id: string,
 ): ProviderStatus {
   let failure: Extract<ListModelsResult, { ok: false }>;
   if (kindOf(state.list, id) === 'venice') {
-    const answer = state.imageModels?.[id];
+    const answer = state.imageModels[id];
     if (answer === undefined || answer === 'checking') return 'checking';
     if (answer.ok) return answer.models.length > 0 ? 'ready' : 'no_edit_model';
     failure = answer;

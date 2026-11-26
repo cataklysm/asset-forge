@@ -232,7 +232,7 @@ it('a rejected model call ends checking with its state', async () => {
 });
 
 it('maps every answer to its state', () => {
-  const of = (answer: ListModelsResult | undefined) => providerStatus({ models: { x: answer } }, 'x');
+  const of = (answer: ListModelsResult | undefined) => providerStatus({ list: null, models: { x: answer }, imageModels: {} }, 'x');
   expect(of(undefined)).toBe('checking');
   expect(of(READY)).toBe('ready');
   expect(of({ ok: true, models: [{ name: 'unknown', vision: null }] })).toBe('ready');
