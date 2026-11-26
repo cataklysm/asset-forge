@@ -7,8 +7,11 @@ export interface TagsState {
   renameToken: number;
   /** The last rename of this session; null before the first. */
   lastRename: TagRename | null;
-  /** Opens the shared dialog; null outside a provider. */
-  openRename: ((tag: { name: string; displayName: string }) => void) | null;
+  /**
+   * Opens the shared dialog; null outside a provider. `onRenamed` is called before the signal
+   * when this opening ends in a rename, and never when it is cancelled.
+   */
+  openRename: ((tag: { name: string; displayName: string }, onRenamed?: (change: TagRename) => void) => void) | null;
 }
 
 const INERT: TagsState = { renameToken: 0, lastRename: null, openRename: null };
@@ -22,12 +25,24 @@ export function TagsProvider({ children, onRenamed }: { children: ReactNode; onR
   const onRenamedRef = useRef(onRenamed);
   onRenamedRef.current = onRenamed;
 
-  const openRename = useCallback((next: { name: string; displayName: string }) => setTag(next), []);
+  /** The callback of the current opening of the dialog. */
+  const openerRef = useRef<((change: TagRename) => void) | null>(null);
+
+  const openRename = useCallback((next: { name: string; displayName: string }, onOpenerRenamed?: (change: TagRename) => void) => {
+    openerRef.current = onOpenerRenamed ?? null;
+    setTag(next);
+  }, []);
   const handleRenamed = useCallback((change: TagRename) => {
+    const opener = openerRef.current;
+    openerRef.current = null;
+    opener?.(change);
     setRenamed((current) => ({ token: current.token + 1, last: change }));
     onRenamedRef.current?.(change);
   }, []);
-  const close = useCallback(() => setTag(null), []);
+  const close = useCallback(() => {
+    openerRef.current = null;
+    setTag(null);
+  }, []);
 
   const value = useMemo<TagsState>(
     () => ({ renameToken: renamed.token, lastRename: renamed.last, openRename }),

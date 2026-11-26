@@ -1,5 +1,5 @@
 import type { TagAssignment, TagSuggestion } from '@assetforge/contracts';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { readFileSync } from 'node:fs';
@@ -11,10 +11,12 @@ import { TagCombobox } from '../../src/renderer/src/components/TagCombobox';
 import { TagFilter } from '../../src/renderer/src/components/TagFilter';
 import { TagList } from '../../src/renderer/src/components/TagList';
 import { TagRow } from '../../src/renderer/src/components/TagRow';
-import { TagsProvider } from '../../src/renderer/src/tags-context';
+import { renameInTags, type TagRename } from '../../src/renderer/src/tag-rename';
+import { TagsProvider, useRenamed } from '../../src/renderer/src/tags-context';
 import { AI_CHIP, CHIP, FILTER_CHIP, MATCHED_CHIP } from '../../src/renderer/src/ui';
 import { deferred, installFakeApi } from './fake-api';
 import { tagOf } from './fixtures';
+import { RenameTrigger, renameHandlers, renameThroughDialog } from './rename-flow';
 
 const INVALID = 'Tags need a letter or digit and at most 64 characters.';
 
@@ -433,4 +435,103 @@ it('with pencils, Backspace in the empty input and a removal still focus remove 
   screen.getByRole('button', { name: 'Remove oak' }).focus();
   await user.keyboard('{Delete}');
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove bark' }));
+});
+
+/** A row whose tags follow every rename, at once or only when `release` is called (like a list reload). */
+function RenamingRowHarness({ initial, later = false, drop = false }: { initial: TagAssignment[]; later?: boolean; drop?: boolean }) {
+  const [tags, setTags] = useState(initial);
+  const [held, setHeld] = useState<TagRename | null>(null);
+  useRenamed((change) => {
+    if (later) setHeld(change);
+    else setTags((current) => (drop ? current.filter((t) => t.name !== change.from) : [...renameInTags(current, change)]));
+  });
+  return (
+    <>
+      <TagRow label="Asset tags" kind="asset" tags={tags} onAdd={async () => {}} onRemove={async () => {}} />
+      <button
+        type="button"
+        onClick={() => {
+          if (held !== null) setTags((current) => [...renameInTags(current, held)]);
+          setHeld(null);
+        }}
+      >
+        release
+      </button>
+    </>
+  );
+}
+
+it('after a rename from a pencil the pencil of the renamed chip has focus', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...renameHandlers({ oak: 'oak', bark: 'bark' }) });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RenamingRowHarness initial={[tagOf('oak'), tagOf('bark')]} />
+    </TagsProvider>,
+  );
+  await renameThroughDialog(user, 'oak', 'Side');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rename Side' })));
+});
+
+it('after a merge from a pencil the pencil of the kept chip has focus', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...renameHandlers({ oak: 'oak', bark: 'bark' }) });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RenamingRowHarness initial={[tagOf('oak'), tagOf('bark')]} />
+    </TagsProvider>,
+  );
+  await renameThroughDialog(user, 'oak', 'bark');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rename bark' })));
+  expect(screen.queryByRole('button', { name: 'Rename oak' })).toBeNull();
+});
+
+it('a rename that reaches the row only later still focuses the renamed chip', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...renameHandlers({ oak: 'oak' }) });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RenamingRowHarness initial={[tagOf('oak'), tagOf('bark')]} later />
+    </TagsProvider>,
+  );
+  await renameThroughDialog(user, 'oak', 'Side');
+  // Focus is back on the old pencil until the row's tags change.
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rename oak' }));
+  act(() => screen.getByRole('button', { name: 'release' }).click());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Rename Side' })));
+});
+
+it('when the renamed chip is not in the row afterwards the input has focus', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...renameHandlers({ oak: 'oak' }) });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RenamingRowHarness initial={[tagOf('oak'), tagOf('bark')]} drop />
+    </TagsProvider>,
+  );
+  await renameThroughDialog(user, 'oak', 'Side');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Add asset tag' })));
+});
+
+it('a rename started elsewhere after a cancelled one moves no focus into the row', async () => {
+  installFakeApi({ 'tags:suggest': () => [], ...renameHandlers({ oak: 'oak' }) });
+  const user = userEvent.setup();
+  render(
+    <TagsProvider>
+      <RenamingRowHarness initial={[tagOf('oak'), tagOf('bark')]} />
+      <RenameTrigger tag={{ name: 'oak', displayName: 'oak' }} />
+    </TagsProvider>,
+  );
+  await user.click(screen.getAllByRole('button', { name: 'Rename oak' })[0]!);
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  const trigger = screen.getAllByRole('button', { name: 'Rename oak' })[1]!;
+  await user.click(trigger);
+  const field = screen.getByRole('textbox', { name: 'Name' });
+  await user.clear(field);
+  await user.type(field, 'Side');
+  const confirm = screen.getByRole<HTMLButtonElement>('button', { name: 'Rename' });
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  await user.click(confirm);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Rename Side' })).not.toBeNull());
+  expect(document.activeElement).toBe(trigger);
 });
