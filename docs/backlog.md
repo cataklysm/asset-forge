@@ -365,6 +365,13 @@ Deferred by design:
 - An open proposal review dialog keeps the names it loaded: after a rename of one of them, Accept is refused and the dialog must be reopened.
 - A merge target without any assignment (an unused tag row) is offered as a merge with zero counts.
 
+Left from the reviews:
+
+- Renderer: the restore-capture block on a rename reload is repeated in `AssetsScreen`, `ProjectsScreen` and `FileBrowser`, and the `useRenamed` bodies of the inbox, the trash and the asset Files tab are near-identical; both want one shared helper.
+- Renderer: `onRenamedRef` in `tags-context.tsx` is assigned during render (the same pattern as elsewhere in the renderer).
+- Renderer: the gallery's last selected asset is rewritten in a ref and shows only with the reload's re-render; its `matchedTags` are not rewritten.
+- Tests: the position test of the asset Files tab after a rename does not reproduce a jump to the top under jsdom; the large merge test (3000 files) uses inbox files only; the in-memory tag fake does not model `createdAt`.
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
