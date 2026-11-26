@@ -10,7 +10,7 @@ const ACTIVE_JOBS = 'This provider still has active jobs; move or cancel them fi
 
 export type ProviderHandlers = Pick<
   IpcHandlers,
-  'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels'
+  'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels' | 'providers:listImageModels'
 >;
 
 export interface ProviderDeleteGuard {
@@ -35,7 +35,9 @@ export function createProviderHandlers(
       store.delete(r.id);
       return {};
     },
-    // There is no cancel channel; the adapter's own bound limits the request.
+    // There is no cancel channel; the adapter's own bound (`LIST_MODELS_TIMEOUT_MS`) limits the request.
+    // An unknown id answers `not_found`, an entry of the other kind `invalid_operation` (from the gateway).
     'providers:listModels': (r) => gateway.models(r.providerId, r.refresh === true, new AbortController().signal),
+    'providers:listImageModels': (r) => gateway.imageModels(r.providerId, r.refresh === true, new AbortController().signal),
   };
 }

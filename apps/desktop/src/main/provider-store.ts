@@ -6,11 +6,13 @@ import {
   ENVIRONMENT_PROVIDER_ID,
   MAX_PROVIDERS,
   ModelNameSchema,
+  ProviderKindSchema,
   ProviderNameSchema,
   SaveProviderSchema,
   VISION_TIMEOUT_DEFAULT_SECONDS,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
+  type ProviderKind,
   type ProviderList,
   type ProviderView,
   type SaveProvider,
@@ -25,8 +27,9 @@ import { writeAtomic } from './atomic-file.js';
 import type { SecretCodec } from './secret-codec.js';
 import { usableBaseUrl } from './vision-config.js';
 
-// App-level vision provider entries in `userData/provider-settings.json` (version 2) and one API key
-// per entry, encrypted by the OS credential store, in `userData/credentials/vision-api-key-<id>`.
+// App-level provider entries (`ollama` for vision, `venice` for images) in `userData/provider-settings.json`
+// (version 3) and one API key per entry, encrypted by the OS credential store, in
+// `userData/credentials/vision-api-key-<id>` (the name predates the kinds and is kept for every kind).
 // Kept free of Electron imports. A key is decrypted only when asked for and is never cached.
 
 export const PROVIDER_SETTINGS_FILE = 'provider-settings.json';
@@ -48,23 +51,40 @@ const INVALID_NAME = 'The provider name must have 1 to 60 characters';
 const DUPLICATE_NAME = 'A provider with this name already exists';
 const TOO_MANY = `No more than ${MAX_PROVIDERS} providers`;
 export const PROVIDER_NOT_FOUND = 'This provider does not exist';
+export const KIND_CHANGED = 'The kind of a provider cannot be changed';
+export const CANNOT_GENERATE = 'This provider cannot generate images';
+export const CANNOT_ANALYSE = 'This provider cannot analyse images';
+const IMAGE_URL_NOT_SECURE = 'An image provider needs an https URL, or http on a loopback address';
+
+/** The refusal for an entry used as the other kind. */
+export const wrongKind = (wanted: ProviderKind): string => (wanted === 'venice' ? CANNOT_GENERATE : CANNOT_ANALYSE);
 
 export interface ProviderEntry {
   id: string;
+  kind: ProviderKind;
   name: string;
   baseUrl: string;
   timeoutSeconds: number;
+  /** Always null for `venice`. */
   taggingModel: string | null;
+  /** Always null for `venice`. */
   promptModel: string | null;
+  /** Always null for `ollama`. */
+  editModel: string | null;
 }
 
 export interface ProviderStore {
   list(): ProviderList;
+  /** The entry of any kind. */
   get(id: string): ProviderEntry | null;
-  first(): ProviderEntry | null;
-  /** A given id: that entry, else NotFoundError. Absent: the entry used last, else the first, else null. */
-  resolve(id: string | undefined): ProviderEntry | null;
-  /** Best effort; a failed write is swallowed. */
+  /** The first entry of the kind. */
+  first(kind?: ProviderKind): ProviderEntry | null;
+  /**
+   * A given id: that entry, else NotFoundError, or InvalidOperationError when it is of another kind.
+   * Absent: the entry of the kind used last, else the first of the kind, else null.
+   */
+  resolve(id: string | undefined, kind?: ProviderKind): ProviderEntry | null;
+  /** Records the entry as used last for its kind. Best effort; a failed write is swallowed. */
   markUsed(id: string): void;
   save(input: SaveProvider): ProviderView;
   delete(id: string): void;
@@ -74,12 +94,21 @@ export interface ProviderStore {
   onChange(listener: (id: string) => void): void;
 }
 
+interface LastUsed {
+  vision: string | null;
+  image: string | null;
+}
+
 interface Stored {
   providers: ProviderEntry[];
-  lastUsedId: string | null;
+  /** One slot per purpose: `vision` names an `ollama` entry, `image` a `venice` entry. */
+  lastUsed: LastUsed;
   /** Set by the upgrade until the legacy key file has been renamed to the entry's key file. */
   adoptLegacyKey: { id: string; origin: string } | null;
 }
+
+const EMPTY: Stored = { providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null };
+const slotOf = (kind: ProviderKind): keyof LastUsed => (kind === 'venice' ? 'image' : 'vision');
 
 const TimeoutSchema = z.number().int().min(VISION_TIMEOUT_MIN_SECONDS).max(VISION_TIMEOUT_MAX_SECONDS);
 const StoredBaseUrlSchema = z.string().refine((url) => usableBaseUrl(url) === url);
@@ -113,7 +142,34 @@ const V2FileSchema = z.object({
   adoptLegacyKey: z.object({ id: z.uuid(), origin: z.string() }).nullable(),
 });
 
-type ReadResult = { kind: 'v1'; vision: z.infer<typeof V1FileSchema>['vision'] } | { kind: 'v2'; stored: Stored } | { kind: 'none' };
+const V3FileSchema = z.object({
+  version: z.literal(3),
+  providers: z
+    .array(
+      z
+        .object({
+          id: z.uuid(),
+          kind: ProviderKindSchema,
+          name: ProviderNameSchema,
+          baseUrl: StoredBaseUrlSchema,
+          timeoutSeconds: TimeoutSchema,
+          taggingModel: ModelNameSchema.nullable(),
+          promptModel: ModelNameSchema.nullable(),
+          editModel: ModelNameSchema.nullable(),
+        })
+        .refine((e) =>
+          e.kind === 'venice' ? e.taggingModel === null && e.promptModel === null : e.editModel === null,
+        )
+        // The save rule holds on read too: a hand-edited file must not send a stored key over plain http.
+        .refine((e) => e.kind !== 'venice' || secureForImages(e.baseUrl)),
+    )
+    .max(MAX_PROVIDERS)
+    .refine((entries) => new Set(entries.map((e) => e.id)).size === entries.length),
+  lastUsed: z.object({ vision: z.uuid().nullable(), image: z.uuid().nullable() }),
+  adoptLegacyKey: z.object({ id: z.uuid(), origin: z.string() }).nullable(),
+});
+
+type ReadResult = { kind: 'v1'; vision: z.infer<typeof V1FileSchema>['vision'] } | { kind: 'stored'; stored: Stored } | { kind: 'none' };
 
 export function createProviderStore(o: { userData: string; secrets: SecretCodec; env: NodeJS.ProcessEnv }): ProviderStore {
   const settingsPath = join(o.userData, PROVIDER_SETTINGS_FILE);
@@ -132,7 +188,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   let state: Stored | null = null;
 
   const write = (next: Stored): void => {
-    writeAtomic(settingsPath, `${JSON.stringify({ version: 2, ...next }, null, 2)}\n`);
+    writeAtomic(settingsPath, `${JSON.stringify({ version: 3, ...next }, null, 2)}\n`);
   };
   /** Writes `next` and only then makes it the state, so a failed write changes nothing. */
   const commit = (next: Stored): void => {
@@ -154,24 +210,25 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     return next;
   };
 
-  /** Version 1 → 2. Every step is written before the next one, so a crash in between resumes on the next start. */
+  /** Version 1 → 3. Every step is written before the next one, so a crash in between resumes on the next start. */
   const upgrade = (vision: z.infer<typeof V1FileSchema>['vision']): Stored => {
     if (vision.baseUrl === null) {
-      const empty: Stored = { providers: [], lastUsedId: null, adoptLegacyKey: null };
-      write(empty);
+      write(EMPTY);
       rmSync(legacyKeyPath, { force: true });
-      return empty;
+      return EMPTY;
     }
     const id = randomUUID();
     const entry: ProviderEntry = {
       id,
+      kind: 'ollama',
       name: UPGRADED_NAME,
       baseUrl: vision.baseUrl,
       timeoutSeconds: vision.timeoutSeconds,
       taggingModel: vision.taggingModel,
       promptModel: vision.promptModel,
+      editModel: null,
     };
-    const marked: Stored = { providers: [entry], lastUsedId: null, adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
+    const marked: Stored = { ...EMPTY, providers: [entry], adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
     write(marked);
     return adoptLegacyKey(marked);
   };
@@ -199,8 +256,8 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     const read = readStored(settingsPath);
     let stored: Stored;
     if (read.kind === 'v1') stored = upgrade(read.vision);
-    else if (read.kind === 'v2') stored = adoptLegacyKey(read.stored);
-    else stored = { providers: [], lastUsedId: null, adoptLegacyKey: null };
+    else if (read.kind === 'stored') stored = adoptLegacyKey(read.stored);
+    else stored = EMPTY;
     sweepKeyFiles(stored);
     state = stored;
     return stored;
@@ -212,10 +269,14 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   };
 
   const get = (id: string): ProviderEntry | null => entries().find((p) => p.id === id) ?? null;
+  const first = (kind: ProviderKind): ProviderEntry | null => entries().find((p) => p.kind === kind) ?? null;
 
-  const lastUsedId = (): string | null => {
-    const id = fromEnvironment ? environmentLastUsed : load().lastUsedId;
-    return id !== null && get(id) !== null ? id : null;
+  /** The entry of the kind used last, while it still exists and is of that kind. */
+  const lastUsed = (kind: ProviderKind): ProviderEntry | null => {
+    // Environment mode has only the `ollama` environment entry, so its image slot stays empty.
+    const id = fromEnvironment ? (kind === 'ollama' ? environmentLastUsed : null) : load().lastUsed[slotOf(kind)];
+    const entry = id === null ? null : get(id);
+    return entry !== null && entry.kind === kind ? entry : null;
   };
 
   /** The stored key of an entry, decrypted; any failure to read or decrypt counts as no key. */
@@ -250,30 +311,33 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   return {
     list: () => ({
       providers: entries().map(view),
-      lastUsedId: lastUsedId(),
+      lastUsedId: lastUsed('ollama')?.id ?? null,
+      lastUsedImageId: lastUsed('venice')?.id ?? null,
       fromEnvironment,
       canStoreKey: o.secrets.available(),
     }),
     get,
-    first: () => entries()[0] ?? null,
-    resolve(id) {
+    first: (kind = 'ollama') => first(kind),
+    resolve(id, kind = 'ollama') {
       if (id !== undefined) {
         const entry = get(id);
         if (entry === null) throw new NotFoundError(PROVIDER_NOT_FOUND);
+        if (entry.kind !== kind) throw new InvalidOperationError(wrongKind(kind));
         return entry;
       }
-      const last = lastUsedId();
-      return (last === null ? null : get(last)) ?? entries()[0] ?? null;
+      return lastUsed(kind) ?? first(kind);
     },
     markUsed(id) {
       try {
-        if (get(id) === null) return;
+        const entry = get(id);
+        if (entry === null) return;
         if (fromEnvironment) {
           environmentLastUsed = id;
           return;
         }
         const current = load();
-        if (current.lastUsedId !== id) commit({ ...current, lastUsedId: id });
+        const slot = slotOf(entry.kind);
+        if (current.lastUsed[slot] !== id) commit({ ...current, lastUsed: { ...current.lastUsed, [slot]: id } });
       } catch {
         // Best effort: the entry used last is a convenience.
       }
@@ -282,14 +346,19 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       if (fromEnvironment) throw new InvalidOperationError(FROM_ENVIRONMENT);
       const parsed = SaveProviderSchema.safeParse(input);
       if (!parsed.success) throw new InvalidOperationError(INVALID_SETTINGS);
-      const { id, apiKey, name: rawName, baseUrl: rawBaseUrl, ...rest } = parsed.data;
+      const { id, apiKey, name: rawName, baseUrl: rawBaseUrl, timeoutSeconds } = parsed.data;
       const current = load();
       const previous = id === undefined ? null : (current.providers.find((p) => p.id === id) ?? null);
       if (id !== undefined && previous === null) throw new NotFoundError(PROVIDER_NOT_FOUND);
+      if (previous !== null && parsed.data.kind !== undefined && parsed.data.kind !== previous.kind) {
+        throw new InvalidOperationError(KIND_CHANGED);
+      }
+      const kind = previous?.kind ?? parsed.data.kind ?? 'ollama';
       const name = ProviderNameSchema.safeParse(rawName);
       if (!name.success) throw new ValidationFailedError(INVALID_NAME);
       const baseUrl = usableBaseUrl(rawBaseUrl.trim());
       if (baseUrl === null) throw new InvalidOperationError(INVALID_BASE_URL);
+      if (kind === 'venice' && !secureForImages(baseUrl)) throw new ValidationFailedError(IMAGE_URL_NOT_SECURE);
       const others = current.providers.filter((p) => p.id !== id);
       const key = name.data.toLowerCase();
       if (others.some((p) => p.name.toLowerCase() === key)) throw new InvalidOperationError(DUPLICATE_NAME);
@@ -301,7 +370,18 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
         encrypted = o.secrets.encrypt(apiKey);
       }
 
-      const entry: ProviderEntry = { id: previous?.id ?? randomUUID(), name: name.data, baseUrl, ...rest };
+      // A `venice` entry keeps no vision models, an `ollama` entry no edit model. An absent edit model keeps the stored one.
+      const editModel = parsed.data.editModel === undefined ? (previous?.editModel ?? null) : parsed.data.editModel;
+      const entry: ProviderEntry = {
+        id: previous?.id ?? randomUUID(),
+        kind,
+        name: name.data,
+        baseUrl,
+        timeoutSeconds,
+        taggingModel: kind === 'venice' ? null : parsed.data.taggingModel,
+        promptModel: kind === 'venice' ? null : parsed.data.promptModel,
+        editModel: kind === 'ollama' ? null : editModel,
+      };
       const providers = previous === null ? [...current.providers, entry] : current.providers.map((p) => (p.id === entry.id ? entry : p));
       // The key is bound to the origin it was entered for. The old key goes first, so a failure
       // half-way leaves no key rather than a key bound to the wrong origin.
@@ -325,7 +405,10 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       commit({
         ...current,
         providers: current.providers.filter((p) => p.id !== id),
-        lastUsedId: current.lastUsedId === id ? null : current.lastUsedId,
+        lastUsed: {
+          vision: current.lastUsed.vision === id ? null : current.lastUsed.vision,
+          image: current.lastUsed.image === id ? null : current.lastUsed.image,
+        },
       });
       try {
         rmSync(keyPath(id), { force: true });
@@ -355,12 +438,28 @@ function environment(env: NodeJS.ProcessEnv): ProviderEntry | null {
   const usableModel = model !== undefined && ModelNameSchema.safeParse(model).success ? model : null;
   return {
     id: ENVIRONMENT_PROVIDER_ID,
+    kind: 'ollama',
     name: ENVIRONMENT_NAME,
     baseUrl,
     timeoutSeconds: VISION_TIMEOUT_DEFAULT_SECONDS,
     taggingModel: usableModel,
     promptModel: usableModel,
+    editModel: null,
   };
+}
+
+/** An image provider carries a key for a paid service: https, or plain http only to this machine. */
+function secureForImages(baseUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol === 'https:') return true;
+  // The WHATWG parser has already normalised IPv4 forms (e.g. `127.1`) and IPv6 literals (e.g. `[0::1]`).
+  const host = url.hostname;
+  return host === 'localhost' || host === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
 function originOf(baseUrl: string): string | null {
@@ -385,10 +484,23 @@ function readStored(path: string): ReadResult {
   } catch {
     json = undefined;
   }
+  const v3 = V3FileSchema.safeParse(json);
+  if (v3.success) {
+    const { providers, lastUsed, adoptLegacyKey } = v3.data;
+    return { kind: 'stored', stored: { providers, lastUsed, adoptLegacyKey } };
+  }
   const v2 = V2FileSchema.safeParse(json);
   if (v2.success) {
+    // Version 2 → 3 in memory only; the first write stores version 3. Until then a crash reads the same again.
     const { providers, lastUsedId, adoptLegacyKey } = v2.data;
-    return { kind: 'v2', stored: { providers, lastUsedId, adoptLegacyKey } };
+    return {
+      kind: 'stored',
+      stored: {
+        providers: providers.map((p) => ({ ...p, kind: 'ollama' as const, editModel: null })),
+        lastUsed: { vision: lastUsedId, image: null },
+        adoptLegacyKey,
+      },
+    };
   }
   const v1 = V1FileSchema.safeParse(json);
   if (v1.success) return { kind: 'v1', vision: v1.data.vision };
