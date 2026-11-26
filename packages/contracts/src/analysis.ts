@@ -74,7 +74,7 @@ export const ProposalViewSchema = z.object({
   model: ModelNameSchema,
   createdAt: z.iso.datetime(),
   stale: z.boolean(),
-  tags: z.array(ProposalTagSchema),
+  tags: z.array(ProposalTagSchema).max(20),
 });
 export type ProposalView = z.infer<typeof ProposalViewSchema>;
 

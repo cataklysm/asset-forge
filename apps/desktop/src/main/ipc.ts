@@ -9,15 +9,16 @@ import {
 import { join } from 'node:path';
 import {
   AssetForgeError,
-  InvalidOperationError,
   SerialQueue,
   workspaceFolderName,
   type WorkspaceManager,
 } from '@assetforge/core';
 import type { z } from 'zod';
+import type { DescribeController } from './describe-controller.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
+import type { SettingsHandlers } from './settings-handlers.js';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
 
@@ -49,13 +50,18 @@ export interface HostActions {
 
 export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
 
-const NOT_AVAILABLE = 'This action is not available yet';
+/** App-level services the handlers route to; they do not need an open workspace. */
+export interface AppServices {
+  settings: SettingsHandlers;
+  describe: DescribeController;
+}
 
 export function createWorkspaceHandlers(
   manager: WorkspaceManager,
   dialogs: Dialogs,
   host: HostActions,
   jobs: JobHost,
+  services: AppServices,
 ): IpcHandlers {
   // The open workspace's jobs stop before the manager may close it, outside `exclusive` (a job may
   // wait for that queue), and start again for whatever workspace is open afterwards, also after a failure.
@@ -93,19 +99,11 @@ export function createWorkspaceHandlers(
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host),
-    ...createJobHandlers(manager, jobs),
+    ...createJobHandlers(manager, jobs, services.describe),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
-    // phase 4b stub: Task 8 (settings handlers, not behind the workspace guard)
-    'settings:getVision': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
-    'settings:setVision': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
-    'settings:listVisionModels': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
+    // App-level settings: not behind the workspace guard.
+    ...services.settings,
   };
 }
 

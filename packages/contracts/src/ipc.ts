@@ -345,9 +345,12 @@ export const ipcContract = {
     request: z.object({ fileId: IdSchema }),
     response: z.object({ proposal: ProposalViewSchema.nullable(), job: JobViewSchema.nullable() }),
   },
-  /** Applies a non-empty subset of the proposal's tag names; `invalid_operation` when it is gone or stale. */
+  /**
+   * Applies a non-empty subset of the proposal's tag names; `not_found` when the file has no proposal,
+   * `invalid_operation` when it is stale or a name is not in it.
+   */
   'analysis:acceptProposal': {
-    request: z.object({ fileId: IdSchema, names: z.array(z.string().max(200)).min(1).max(20) }),
+    request: z.object({ fileId: IdSchema, names: z.array(z.string().min(1).max(200)).min(1).max(20) }),
     response: z.object({}),
   },
   /** Idempotent. */

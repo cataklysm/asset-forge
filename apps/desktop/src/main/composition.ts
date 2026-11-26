@@ -1,11 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { WorkspaceManager, type ImageProbe, type WorkspaceHost } from '@assetforge/core';
-import { WorkspaceSummarySchema } from '@assetforge/contracts';
+import { WorkspaceManager, type ImageProbe, type ModelImageSource, type WorkspaceHost } from '@assetforge/core';
+import { WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
+import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
+import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { LocalFileSystemStorage, NodeSourceFiles } from '@assetforge/storage';
+import { createDescribeController } from './describe-controller.js';
+import type { AppServices } from './ipc.js';
+import { createJobHost, type JobHost } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
+import type { SecretCodec } from './secret-codec.js';
+import { createSettingsHandlers } from './settings-handlers.js';
+import { createVisionGateway, type VisionGateway } from './vision-gateway.js';
+import { createVisionSettingsStore, type VisionSettingsStore } from './vision-settings.js';
 
 export interface CompositionOptions {
   userDataPath: string;
@@ -62,4 +71,73 @@ export function createWorkspaceHost(opts: CompositionOptions): WorkspaceHost {
 
 export function createWorkspaceManager(opts: CompositionOptions): WorkspaceManager {
   return new WorkspaceManager(createWorkspaceHost(opts));
+}
+
+export interface AnalysisServices extends AppServices {
+  store: VisionSettingsStore;
+  gateway: VisionGateway;
+  /** One per app session: a pause outlives closing and reopening a workspace. */
+  pause: PauseGate;
+  jobHost: JobHost;
+  /** Starts the jobs of the open workspace. Never rejects. */
+  workspaceOpened(): Promise<void>;
+  /** Cancels a running describe request and stops the jobs. Never rejects. */
+  workspaceClosing(): Promise<void>;
+}
+
+/**
+ * The vision provider settings, the adapter built from them, the job host with the app session's pause
+ * gate and the describe controller. The settings store is the only source of base URL, key and models.
+ */
+export function createAnalysisServices(o: {
+  manager: WorkspaceManager;
+  userDataPath: string;
+  secrets: SecretCodec;
+  env: NodeJS.ProcessEnv;
+  images: ModelImageSource;
+  /** One main-console line per provider failure: code and HTTP status only. */
+  log: (line: string) => void;
+  limits?: Record<ResourceClass, number>;
+}): AnalysisServices {
+  const store = createVisionSettingsStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
+  // Registers its change listener first, so the adapter is rebuilt before the queue resumes.
+  const gateway = createVisionGateway({ settings: store, create: createOllamaVision, log: o.log });
+  let jobHost: JobHost | null = null;
+  const pause = createPauseGate({
+    // A pause or resume changes the summary; the listener must not throw.
+    onChange: () => {
+      try {
+        jobHost?.changed();
+      } catch {
+        // The counter only drives polling; nothing to do.
+      }
+    },
+  });
+  const host = createJobHost({
+    manager: o.manager,
+    gateway,
+    images: o.images,
+    provider: OLLAMA_PROVIDER,
+    defaultModel: () => store.defaults().taggingModel,
+    pause,
+    ...(o.limits === undefined ? {} : { limits: o.limits }),
+  });
+  jobHost = host;
+  // New settings may fix what paused the queue.
+  store.onChange(() => host.resume());
+  const describe = createDescribeController({ manager: o.manager, vision: () => gateway.current(), images: o.images });
+
+  return {
+    store,
+    gateway,
+    pause,
+    jobHost: host,
+    settings: createSettingsHandlers(store, gateway),
+    describe,
+    workspaceOpened: () => host.workspaceOpened(),
+    async workspaceClosing() {
+      await describe.cancelAll();
+      await host.workspaceClosing();
+    },
+  };
 }

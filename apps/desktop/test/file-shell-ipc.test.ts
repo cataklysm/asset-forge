@@ -7,7 +7,7 @@ import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
-import { idleJobHost } from './idle-job-host.js';
+import { idleJobHost, idleServices } from './idle-job-host.js';
 
 let base: string;
 let root: string;
@@ -37,6 +37,7 @@ beforeEach(async () => {
     },
     host,
     idleJobHost,
+    idleServices,
   );
 });
 afterEach(async () => {

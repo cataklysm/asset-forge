@@ -13,7 +13,7 @@ import {
   type IpcHandlers,
   type RemoveChoice,
 } from '../src/main/ipc.js';
-import { idleJobHost, noopHost } from './idle-job-host.js';
+import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;
 let manager: WorkspaceManager;
@@ -40,7 +40,7 @@ beforeEach(async () => {
       await rename(path, join(base, 'trash', basename(path)));
     },
   });
-  handlers = createWorkspaceHandlers(manager, dialogs, noopHost, idleJobHost);
+  handlers = createWorkspaceHandlers(manager, dialogs, noopHost, idleJobHost, idleServices);
 });
 afterEach(async () => {
   await manager.close();
@@ -86,7 +86,7 @@ describe('dispatch', () => {
       pickFiles: async () => ['D:\\a.png'],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost);
+    }, noopHost, idleJobHost, idleServices);
     expect(await dispatch(picked, 'dialog:pickDirectory', {})).toEqual({ ok: true, value: 'D:\\picked' });
     expect(await dispatch(picked, 'dialog:pickFiles', {})).toEqual({ ok: true, value: ['D:\\a.png'] });
   });

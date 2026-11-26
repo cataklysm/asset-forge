@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from '@assetforge/contracts';
 import type { WorkspaceManager } from '@assetforge/core';
-import { DEFAULT_LIMITS } from '@assetforge/jobs';
+import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
+import { idleServices } from './idle-job-host.js';
 
 let base: string;
 let sources: string;
@@ -44,10 +45,11 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
   const adapter = createOllamaVision({ baseUrl: mock.url });
   jobHost = createJobHost({
     manager,
-    vision: () => adapter,
+    gateway: { current: () => adapter },
     images: { jpeg: (path) => readFile(path) },
     provider: OLLAMA_PROVIDER,
     defaultModel: () => MOCK_MODEL,
+    pause: createPauseGate({}),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(
@@ -65,6 +67,7 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
       workspaceClosing: () => jobHost.workspaceClosing(),
     },
     jobHost,
+    idleServices,
   );
 }
 
@@ -119,28 +122,37 @@ describe('job IPC', () => {
     }
   });
 
-  it('answers invalid_operation on the phase 4b channels that are not built yet', async () => {
+  it('answers no_workspace_open on every analysis channel without a workspace', async () => {
     await setup();
     const requests: [IpcChannel, unknown][] = [
-      ['settings:getVision', {}],
-      ['settings:setVision', { baseUrl: null, timeoutSeconds: 120, taggingModel: null, promptModel: null }],
-      ['settings:listVisionModels', {}],
       ['analysis:preview', { target: { kind: 'files', fileIds: [uuid] }, model: MOCK_MODEL }],
       ['analysis:getProposal', { fileId: uuid }],
       ['analysis:acceptProposal', { fileId: uuid, names: ['red car'] }],
       ['analysis:discardProposal', { fileId: uuid }],
       ['analysis:describe', { requestId: uuid, fileId: uuid, model: MOCK_MODEL }],
       ['analysis:cancelDescribe', { requestId: uuid }],
-      ['jobs:resume', {}],
     ];
-    const check = async () => {
-      for (const [channel, request] of requests) {
-        expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
-      }
-    };
-    await check();
+    for (const [channel, request] of requests) {
+      expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
+    }
+  });
+
+  it('resumes without a workspace, since the pause belongs to the app session', async () => {
+    await setup();
+    expect(await ok('jobs:resume', {})).toEqual({});
+  });
+
+  it('refuses an accept with an empty tag name', async () => {
+    await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    await check();
+    expect(await call('analysis:acceptProposal', { fileId: uuid, names: [''] })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+    expect(await call('analysis:acceptProposal', { fileId: uuid, names: ['red car'] })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
   });
 
   it('refuses a proposal for more than one file', async () => {

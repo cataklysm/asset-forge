@@ -50,6 +50,9 @@ describe('vision settings', () => {
     expect(ListModelsResultSchema.safeParse({ ok: true, models: [{ name: 'qwen', vision: true }] }).success).toBe(true);
     expect(ListModelsResultSchema.safeParse({ ok: false, code: 'provider_unauthorized' }).success).toBe(true);
     expect(ListModelsResultSchema.safeParse({ ok: false, code: 'busy' }).success).toBe(false);
+    const models = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `m${i}`, vision: null }));
+    expect(ListModelsResultSchema.safeParse({ ok: true, models: models(100) }).success).toBe(true);
+    expect(ListModelsResultSchema.safeParse({ ok: true, models: models(101) }).success).toBe(false);
   });
 
   test('settings channels and the credential store error exist', () => {

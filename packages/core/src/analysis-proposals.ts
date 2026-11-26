@@ -1,5 +1,5 @@
 import { ANALYZE_FILE_JOB, normalizeTagName, type JobView, type ProposalView } from '@assetforge/contracts';
-import { InvalidOperationError } from './errors.js';
+import { InvalidOperationError, NotFoundError } from './errors.js';
 import type { Job } from './jobs.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -40,12 +40,12 @@ export async function getProposal(
 /**
  * Applies the chosen tags of the file's proposal like an analysis in mode `apply` and records the
  * analysis. `names` must be a non-empty subset of the proposal's tags, compared normalised.
- * `invalid_operation` without a proposal, for a foreign or empty choice, and for a stale proposal,
- * which is deleted.
+ * `not_found` without a proposal; `invalid_operation` for a foreign or empty choice and for a stale
+ * proposal, which is deleted.
  */
 export async function acceptProposal(s: WorkspaceSession, r: { fileId: string; names: string[] }): Promise<void> {
   const proposal = await s.database.analyses.getProposal(r.fileId);
-  if (proposal === null) throw new InvalidOperationError('The file has no tag proposal');
+  if (proposal === null) throw new NotFoundError('The file has no tag proposal');
   if (proposal.stale) {
     await s.database.analyses.discardProposal(r.fileId);
     throw new InvalidOperationError('The tag proposal is out of date');

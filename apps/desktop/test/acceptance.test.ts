@@ -20,7 +20,7 @@ import {
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
-import { idleJobHost, noopHost } from './idle-job-host.js';
+import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;
 let userDataPath: string;
@@ -206,7 +206,7 @@ describe('phase 2a acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost);
+    }, noopHost, idleJobHost, idleServices);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -416,7 +416,7 @@ describe('phase 2b acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost);
+    }, noopHost, idleJobHost, idleServices);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -555,7 +555,7 @@ describe('phase 3b acceptance', () => {
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
       confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost);
+    }, noopHost, idleJobHost, idleServices);
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);

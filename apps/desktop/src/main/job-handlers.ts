@@ -1,21 +1,26 @@
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import {
+  acceptProposal,
   cancelAllJobs,
   cancelJob,
   clearFinishedJobs,
   countJobs,
+  discardProposal,
   enqueueAnalysis,
-  InvalidOperationError,
+  getProposal,
   listJobs,
+  previewAnalysis,
   retryFailedJobs,
   retryJob,
   type WorkspaceManager,
 } from '@assetforge/core';
+import type { DescribeController } from './describe-controller.js';
 import type { IpcHandlers } from './ipc.js';
 import type { JobHost } from './job-host.js';
 
 // Kept free of Electron imports. Every repository call is one atomic transaction, so these run
-// through `read` rather than the serial queue. No core use case wakes the scheduler; the handlers do.
+// through `read` rather than the serial queue; accepting and discarding a proposal change tags and
+// go through `exclusive` like every other tag change. No core use case wakes the scheduler; the handlers do.
 
 export type JobHandlers = Pick<
   IpcHandlers,
@@ -36,9 +41,7 @@ export type JobHandlers = Pick<
   | 'jobs:clearFinished'
 >;
 
-const NOT_AVAILABLE = 'This action is not available yet';
-
-export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost): JobHandlers {
+export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost, describe: DescribeController): JobHandlers {
   /** A job row changed outside the scheduler: raise the counter and let the scheduler look for work. */
   const touched = () => {
     jobs.changed();
@@ -46,39 +49,34 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost): Job
   };
 
   return {
-    // phase 4b stub: Task 8
-    'analysis:preview': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
+    'analysis:preview': (r) =>
+      manager.read((s) => previewAnalysis(s, { target: r.target, model: r.model, provider: OLLAMA_PROVIDER })),
     'analysis:enqueue': async (r) => {
       const { target, model, mode, force } = r;
       const result = await manager.read((s) => enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER }));
       if (result.enqueued > 0) touched();
       return result;
     },
-    // phase 4b stub: Task 8
-    'analysis:getProposal': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
+    'analysis:getProposal': (r) => manager.read((s) => getProposal(s, r.fileId)),
+    'analysis:acceptProposal': async (r) => {
+      await manager.exclusive((s) => acceptProposal(s, { fileId: r.fileId, names: r.names }));
+      return {};
     },
-    // phase 4b stub: Task 8
-    'analysis:acceptProposal': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
+    'analysis:discardProposal': async (r) => {
+      await manager.exclusive((s) => discardProposal(s, r.fileId));
+      return {};
     },
-    // phase 4b stub: Task 8
-    'analysis:discardProposal': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
-    // phase 4b stub: Task 8
-    'analysis:describe': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
-    },
-    // phase 4b stub: Task 8
-    'analysis:cancelDescribe': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
+    'analysis:describe': (r) => manager.read(() => describe.describe(r)),
+    'analysis:cancelDescribe': async (r) => {
+      await manager.read(async () => describe.cancel(r.requestId));
+      return {};
     },
     'jobs:list': (r) => manager.read((s) => listJobs(s, r)),
-    // phase 4b stub: Task 8 (paused comes from the pause gate)
-    'jobs:summary': async () => ({ ...(await manager.read((s) => countJobs(s))), changes: jobs.changes(), paused: null }),
+    'jobs:summary': async () => {
+      const counts = await manager.read((s) => countJobs(s));
+      const reason = jobs.paused();
+      return { ...counts, changes: jobs.changes(), paused: reason === null ? null : { reason } };
+    },
     'jobs:cancel': async (r) => {
       await manager.read((s) => cancelJob(s, jobs, r.jobId));
       touched();
@@ -99,9 +97,10 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost): Job
       if (retried > 0) touched();
       return { retried };
     },
-    // phase 4b stub: Task 8
+    // The pause belongs to the app session, so this works without an open workspace.
     'jobs:resume': async () => {
-      throw new InvalidOperationError(NOT_AVAILABLE);
+      jobs.resume();
+      return {};
     },
     'jobs:clearFinished': async () => {
       const removed = await manager.read((s) => clearFinishedJobs(s));

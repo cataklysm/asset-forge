@@ -8,6 +8,7 @@ import {
   enqueueAnalysis,
   getProposal,
   InvalidOperationError,
+  NotFoundError,
 } from '../src/index.js';
 import { PROVIDER, setup, type Setup } from './analysis-setup.js';
 
@@ -122,9 +123,13 @@ describe('acceptProposal', () => {
     expect((await c.db.files.get(c.file.id))!.hasProposal).toBe(false);
   });
 
-  it('refuses without a proposal, with no names or with a name not in the proposal', async () => {
+  it('answers not_found without a proposal', async () => {
     const c = await setup();
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }));
+    await expect(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('refuses with no names or with a name not in the proposal', async () => {
+    const c = await setup();
     await proposeFor(c, c.file.id);
     await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: [] }));
     await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal', 'wood'] }));

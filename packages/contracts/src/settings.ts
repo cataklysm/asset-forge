@@ -38,7 +38,7 @@ export const VisionModelSchema = z.object({ name: ModelNameSchema, vision: z.boo
 export type VisionModel = z.infer<typeof VisionModelSchema>;
 
 export const ListModelsResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), models: z.array(VisionModelSchema) }),
+  z.object({ ok: z.literal(true), models: z.array(VisionModelSchema).max(100) }),
   z.object({ ok: z.literal(false), code: JobErrorCodeSchema }),
 ]);
 export type ListModelsResult = z.infer<typeof ListModelsResultSchema>;
