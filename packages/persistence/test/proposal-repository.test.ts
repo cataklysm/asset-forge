@@ -185,6 +185,23 @@ describe('tag proposals', () => {
     expect(rowCount('file_tag')).toBe(0);
   });
 
+  test('accept with a tag outside the stored proposal writes nothing and keeps the proposal', async () => {
+    await db.analyses.propose(proposal());
+    expect(await accept([t('metal'), t('wood')])).toBe(false);
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
+    expect(rowCount('file_tag')).toBe(0);
+    expect(rowCount('tag')).toBe(0);
+    expect(await db.analyses.get(FILE_ID)).toBeNull();
+  });
+
+  test('accept with no tags writes nothing and keeps the proposal', async () => {
+    await db.analyses.propose(proposal());
+    expect(await accept([])).toBe(false);
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
+    expect(rowCount('file_tag')).toBe(0);
+    expect(await db.analyses.get(FILE_ID)).toBeNull();
+  });
+
   test('accept without a proposal returns false', async () => {
     expect(await accept([t('metal')])).toBe(false);
     expect(rowCount('file_tag')).toBe(0);

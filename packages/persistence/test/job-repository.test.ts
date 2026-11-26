@@ -345,4 +345,24 @@ describe('job repository', () => {
     expect(await db.jobs.latestForFile(FILE_ID, 'other.type')).toMatchObject({ id: uuid(13) });
     expect(await db.jobs.latestForFile(uuid(99), TYPE)).toBeNull();
   });
+
+  test('latestForFile prefers a retried older job over a newer finished one', async () => {
+    const forFile = (n: number) => newJob(n, { fileId: FILE_ID, resourceClass: 'remote_api' });
+    await enqueue(T0, forFile(20));
+    expect((await claim(T0, 'remote_api'))?.id).toBe(uuid(20));
+    await db.jobs.finish(uuid(20), { status: 'failed', errorCode: 'provider_rejected', now: T0 });
+    await enqueue(T2, forFile(21));
+    expect((await claim(T2, 'remote_api'))?.id).toBe(uuid(21));
+    await db.jobs.finish(uuid(21), { status: 'succeeded', errorCode: null, now: T2 });
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(21), status: 'succeeded' });
+
+    expect(await db.jobs.retry({ id: uuid(20), now: T3 })).toBe(1);
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(20), status: 'queued' });
+
+    // Among several active jobs the newest wins.
+    await enqueue(T1, forFile(22));
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(22), status: 'queued' });
+    await enqueue(T9, newJob(23, { fileId: FILE_ID, type: 'other.type' }));
+    expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(22) });
+  });
 });

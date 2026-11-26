@@ -66,10 +66,9 @@ export class InMemoryJobRepository implements JobRepository {
   }
 
   async latestForFile(fileId: string, type: string): Promise<Job | null> {
-    const newest = this.rows
-      .filter((r) => r.fileId === fileId && r.type === type)
-      .sort((a, b) => oldestFirst(b, a))[0];
-    return newest ? structuredClone(newest) : null;
+    const newestFirst = this.rows.filter((r) => r.fileId === fileId && r.type === type).sort((a, b) => oldestFirst(b, a));
+    const chosen = newestFirst.find((r) => isActive(r.status)) ?? newestFirst[0];
+    return chosen ? structuredClone(chosen) : null;
   }
 
   async listByStatus(status: JobStatus): Promise<Job[]> {

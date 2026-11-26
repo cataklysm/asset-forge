@@ -130,6 +130,10 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
       return db.transaction((tx) => {
         const row = tx.select().from(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, r.fileId)).get();
         if (!row) return false;
+        // A choice outside the stored proposal is refused without touching it.
+        if (r.tags.length === 0) return false;
+        const proposed = new Set(parseTags(row.tags).map((t) => t.name));
+        if (r.tags.some((t) => !proposed.has(t.name))) return false;
         const target = row.sha256 === r.sha256 ? matchingFile(tx, r.fileId, row.sha256) : undefined;
         if (!target) {
           tx.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, r.fileId)).run();

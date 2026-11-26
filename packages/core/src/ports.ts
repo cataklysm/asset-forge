@@ -334,7 +334,10 @@ export interface JobRepository {
   counts(): Promise<Record<JobStatus, number>>;
   /** Newest created_at first, then id descending. `fileName` is the file's original name. */
   list(q: { limit: number; offset: number; status?: JobStatus }): Promise<{ items: JobView[]; total: number }>;
-  /** The newest job (created_at, then id) of this type for the file, whatever its status; null when there is none. */
+  /**
+   * The active or latest job of this type for the file: the newest active job (created_at, then id)
+   * when there is one, otherwise the newest job whatever its status; null when there is none.
+   */
   latestForFile(fileId: string, type: string): Promise<Job | null>;
 }
 

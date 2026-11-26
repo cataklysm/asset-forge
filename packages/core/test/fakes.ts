@@ -523,6 +523,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   }): Promise<boolean> {
     const proposal = this.proposals.get(r.fileId);
     if (!proposal) return false;
+    if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return false;
     if (proposal.sha256 !== r.sha256 || !this.hasContent(r.fileId, r.sha256)) {
       this.proposals.delete(r.fileId);
       return false;

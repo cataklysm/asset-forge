@@ -60,13 +60,16 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
 
   return {
     async latestForFile(fileId, type): Promise<Job | null> {
-      const row = db
-        .select()
-        .from(job)
-        .where(and(eq(job.fileId, fileId), eq(job.type, type)))
-        .orderBy(desc(job.createdAt), desc(job.id))
-        .limit(1)
-        .get();
+      // Both statements walk job_file_id_type_created_at_idx backwards; the active one first.
+      const newest = (...extra: SQL[]) =>
+        db
+          .select()
+          .from(job)
+          .where(and(eq(job.fileId, fileId), eq(job.type, type), ...extra))
+          .orderBy(desc(job.createdAt), desc(job.id))
+          .limit(1)
+          .get();
+      const row = newest(isActive) ?? newest();
       return row ? toJob(row) : null;
     },
     async enqueue({ jobs, now }): Promise<string[]> {

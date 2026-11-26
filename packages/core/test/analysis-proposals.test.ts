@@ -75,6 +75,28 @@ describe('getProposal', () => {
     });
   });
 
+  it('prefers an active older job over a newer finished one', async () => {
+    const c = await setup();
+    const newJob = (id: string) => ({
+      id,
+      type: ANALYZE_FILE_JOB,
+      resourceClass: 'remote_api' as const,
+      payload: {},
+      fileId: c.file.id,
+      dedupeKey: null,
+    });
+    await c.db.jobs.enqueue({ jobs: [newJob('job-a')], now: '2026-03-01T00:00:00.000Z' });
+    await c.db.jobs.claimNext({ resourceClass: 'remote_api', types: [ANALYZE_FILE_JOB], now: '2026-03-01T00:00:01.000Z' });
+    await c.db.jobs.finish('job-a', { status: 'failed', errorCode: 'provider_unavailable', now: '2026-03-01T00:00:02.000Z' });
+    await c.db.jobs.enqueue({ jobs: [newJob('job-b')], now: '2026-03-02T00:00:00.000Z' });
+    await c.db.jobs.claimNext({ resourceClass: 'remote_api', types: [ANALYZE_FILE_JOB], now: '2026-03-02T00:00:01.000Z' });
+    await c.db.jobs.finish('job-b', { status: 'succeeded', errorCode: null, now: '2026-03-02T00:00:02.000Z' });
+    expect((await getProposal(c.session, c.file.id)).job?.id).toBe('job-b');
+
+    await c.db.jobs.retry({ id: 'job-a', now: '2026-03-03T00:00:00.000Z' });
+    expect((await getProposal(c.session, c.file.id)).job).toMatchObject({ id: 'job-a', status: 'queued' });
+  });
+
   it('marks a proposal of changed content stale', async () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
@@ -116,6 +138,15 @@ describe('acceptProposal', () => {
     await proposeFor(c, c.file.id);
     c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
     await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }));
+    expect(c.db.tags.forFile(c.file.id)).toEqual([]);
+    expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
+  });
+
+  it('drops a stale proposal before checking the names', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['wood'] }));
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
     expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
   });

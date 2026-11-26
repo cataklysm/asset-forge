@@ -20,7 +20,10 @@ function viewOf(job: Job, fileName: string | null): JobView {
   };
 }
 
-/** The file's waiting proposal and its newest `vision.analyze_file` job; null for what does not exist. */
+/**
+ * The file's waiting proposal and its active, otherwise latest, `vision.analyze_file` job; null for
+ * what does not exist.
+ */
 export async function getProposal(
   s: WorkspaceSession,
   fileId: string,
@@ -43,6 +46,10 @@ export async function getProposal(
 export async function acceptProposal(s: WorkspaceSession, r: { fileId: string; names: string[] }): Promise<void> {
   const proposal = await s.database.analyses.getProposal(r.fileId);
   if (proposal === null) throw new InvalidOperationError('The file has no tag proposal');
+  if (proposal.stale) {
+    await s.database.analyses.discardProposal(r.fileId);
+    throw new InvalidOperationError('The tag proposal is out of date');
+  }
   const chosen = new Set<string>();
   for (const raw of r.names) {
     const name = normalizeTagName(raw);
