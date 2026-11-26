@@ -1,13 +1,12 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b and file trash reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash and editable prompts reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **ZIP import.** A ZIP file can be imported into the inbox and directly into an asset; it is unpacked and its contents are imported as individual files. Open for the design: nested folders and nested archives, entries of a refused kind (programs, installers, shortcuts), size and entry-count limits, zip-slip and symlink entries (ReadMe security constraints on archives), and whether the archive itself is kept.
-- **Editable analysis prompts.** The prompts sent to the vision provider for tagging and for Image to prompt can be edited to fit the owner's needs. Open for the design: where they are stored (per workspace or app-wide), and reset to the built-in text. Decided by the owner: an edited prompt does not invalidate earlier results — files already analysed stay skipped, and a re-analysis remains an explicit choice (`force`). The edit must therefore not change the fingerprint.
 - **Editable tags.** A tag can be renamed, and two tags can be merged, across the whole workspace (example: analysis returns `front view` while the existing images carry `front`; the owner wants one uniform tag). Open for the design: the origin of a merged tag (manual wins), and the search index. Decided by the owner: a rename or merge does not map future AI results onto the kept tag, and no tag list is appended to the prompt; after a new analysis the owner edits the tags again.
 - **Sources on an asset.** An asset can carry sources (where it or its material comes from). Open for the design: what a source is (URL, free text, author, licence, retrieval date), one or several per asset, whether a source can also sit on a single file, whether sources are searchable, and whether a URL is only stored or can be opened (ReadMe constraints on URL downloads apply if anything is fetched).
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
@@ -317,6 +316,45 @@ Tests:
 - Core and jobs: the open test cannot detect a swapped order of move recovery and sweep; the fake `onPurge` does not clear a chosen cover; the scheduler test does not pin the purge order (cancel, then row removal); the proposal-accept refusal for a trashed file is pinned only at core level; `wake()` after a trash action is not pinned.
 - Renderer: no tests for Delete from the asset-tab detail dialog, the trash count refresh after an asset-tab or single delete and after restore, purge and Empty trash, a partial failure and a double Delete in the inbox, focus after a delete, the double-submit guard, Esc while busy and purge from the detail dialog in the trash; the search-field Delete test is weak; the selection-bar tests do not pin the absence of other actions.
 - The acceptance test's "images" are text files named `.png`; its comment does not say so.
+
+## Editable prompts
+
+Deferred by design:
+
+- No prompt per asset type, project or workspace, no version history of a prompt, no import or export, no placeholders, and no tag vocabulary appended to a prompt.
+- A file keeps one set of AI tags and one waiting proposal whatever prompt produced them; the prompt is not part of the fingerprint, so another prompt redoes a file only through "Analyse again".
+- A file already queued with another prompt counts as `alreadyQueued` and keeps the prompt it was queued with.
+- The Jobs screen shows neither model nor prompt.
+
+Found during the build — main process:
+
+- `markUsed` in `apps/desktop/src/main/analysis-prompts.ts` catches around `load()` as well, so a prompt file that cannot be read while the prompt used last is stored is logged as the write warning instead of failing.
+- After a failed write of the prompt used last, the store keeps the previous value in memory too, so the dialogs preselect the earlier prompt until the next successful write.
+- The `TOO_MANY` message is built from `ANALYSIS_PROMPTS_PER_PURPOSE` instead of being a literal fixed string (same text today).
+
+Found during the build — renderer:
+
+- A save or reset answer in `PromptSettings` can be overwritten by an older list answer still in flight; save, delete and reset should supersede a pending reload (bump `reloadRequest` in `analysis-prompts-context.tsx`).
+- Reset drops text typed into the editor while the call runs.
+- An error of a prompt action outlives a change of the selected prompt.
+- A tag limit typed as `015` counts as an unsaved change of `15`.
+- The unsaved-changes marker in the prompt list is `aria-hidden`, so a screen reader does not learn of unsaved changes.
+- The Image to prompt dialog names both the prompt select and the result text "Prompt".
+- While the analysis prompts load, the start button's tooltip of the three dialogs is `START_LOADING`, "The provider settings are loading", instead of a text about the prompts.
+- A failed prompt reload leaves the three analysis dialogs on "The analysis prompts could not be read" with no Retry or Settings action in the dialog; the only retry is in Settings > Prompts.
+- Reset in the Prompts settings overwrites a saved text without confirmation, while Delete confirms (owner's call).
+- A hand-edited `analysis-prompts.json` with more than 50 prompts per purpose or duplicate names is accepted on load; only ids are checked for uniqueness.
+- A choice whose prompt vanished from the list through a reload shows "choose a prompt" instead of falling back to the default.
+- The `not_found` handling (reload and drop the choice) is copied in the three dialogs.
+- A `not_found` start shows the generic "This item no longer exists." text.
+- `promptGate` does not check the purpose of the chosen id (the main process does).
+
+Tests:
+
+- `analysis:describe` without `promptId` (fallback to the prompt used last, then the first) is not tested at the channel level.
+- The read-error test of the prompt store asserts only that it throws, not the error.
+- `chatContents()` is duplicated in `describe.test.ts` and `jobs-ipc.test.ts`; the marking of the prompt used last after a cancelled describe is not asserted in `describe.test.ts`.
+- Renderer: no test for a superseding reload of the prompt list or for the busy guard of the prompt actions; `installFakeApi` consumes two ids per call for the seeded default prompts.
 
 ## Not covered by any automated check
 

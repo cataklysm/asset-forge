@@ -5,6 +5,7 @@ import { JOB_ERROR_MESSAGES, type AssetAssignment, type AssetSummary, type Asset
 import { afterEach, expect, it, vi } from 'vitest';
 import { NO_FILTERS, type AssetListState } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AssetsScreen } from '../../src/renderer/src/screens/AssetsScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { assetSummary, nextId, pageOf, projectSummary, tagOf } from './fixtures';
@@ -229,7 +230,9 @@ const ANALYSIS: FakeHandlers = {
 function renderWithProvider(initial: AssetListState = INITIAL) {
   return render(
     <ProviderSettingsProvider>
-      <Harness initial={initial} />
+      <AnalysisPromptsProvider>
+        <Harness initial={initial} />
+      </AnalysisPromptsProvider>
     </ProviderSettingsProvider>,
   );
 }

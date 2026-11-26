@@ -33,7 +33,10 @@ export async function getProposal(
   const job = await s.database.jobs.latestForFile(fileId, ANALYZE_FILE_JOB);
   const file = job === null ? null : await s.database.files.get(fileId);
   return {
-    proposal: stored === null ? null : { model: stored.model, createdAt: stored.createdAt, stale: stored.stale, tags: stored.tags },
+    proposal:
+      stored === null
+        ? null
+        : { model: stored.model, promptName: stored.promptName, createdAt: stored.createdAt, stale: stored.stale, tags: stored.tags },
     job: job === null ? null : viewOf(job, file?.originalName ?? null),
   };
 }

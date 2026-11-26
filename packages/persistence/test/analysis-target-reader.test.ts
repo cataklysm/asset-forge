@@ -110,9 +110,9 @@ const analysedOf = async (fileId: string, fingerprint: AnalysisFingerprint = FP)
   (await page({ kind: 'files', fileIds: [fileId] }, { fingerprint }))[0]?.analysed;
 
 const applyAnalysis = (fileId: string) =>
-  db.analyses.apply({ fileId, sha256: SHA, tags: [], provider: FP.provider, model: FP.model, promptVersion: FP.promptVersion, now: T1 });
+  db.analyses.apply({ fileId, sha256: SHA, tags: [], provider: FP.provider, model: FP.model, promptVersion: FP.promptVersion, promptName: null, now: T1 });
 const proposeFor = (fileId: string) =>
-  db.analyses.propose({ fileId, sha256: SHA, ...FP, tags: [{ name: 'blue', displayName: 'blue' }], createdAt: T1 });
+  db.analyses.propose({ fileId, sha256: SHA, ...FP, tags: [{ name: 'blue', displayName: 'blue' }], promptName: null, createdAt: T1 });
 
 describe('analysis target reader', () => {
   test('a files target lists the known files by id and marks the analysable ones', async () => {

@@ -101,21 +101,21 @@ describe('analysis results', () => {
   });
 
   test('a proposal view carries its model, age, staleness and tags', () => {
-    const view = { model: 'qwen', createdAt: '2026-11-26T10:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] };
+    const view = { model: 'qwen', promptName: 'General', createdAt: '2026-11-26T10:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] };
     expect(ProposalViewSchema.safeParse(view).success).toBe(true);
     expect(ProposalViewSchema.safeParse({ ...view, stale: undefined }).success).toBe(false);
     const tags = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `tag ${i}`, displayName: `tag ${i}` }));
-    expect(ProposalViewSchema.safeParse({ ...view, tags: tags(20) }).success).toBe(true);
-    expect(ProposalViewSchema.safeParse({ ...view, tags: tags(21) }).success).toBe(false);
+    expect(ProposalViewSchema.safeParse({ ...view, tags: tags(50) }).success).toBe(true);
+    expect(ProposalViewSchema.safeParse({ ...view, tags: tags(51) }).success).toBe(false);
   });
 
-  test('accepting a proposal takes one to twenty non-empty names', () => {
+  test('accepting a proposal takes one to fifty non-empty names', () => {
     const request = ipcContract['analysis:acceptProposal'].request;
     const fileId = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
     expect(request.safeParse({ fileId, names: ['oak'] }).success).toBe(true);
     expect(request.safeParse({ fileId, names: [] }).success).toBe(false);
     expect(request.safeParse({ fileId, names: [''] }).success).toBe(false);
-    expect(request.safeParse({ fileId, names: Array.from({ length: 21 }, (_, i) => `t${i}`) }).success).toBe(false);
+    expect(request.safeParse({ fileId, names: Array.from({ length: 51 }, (_, i) => `t${i}`) }).success).toBe(false);
   });
 
   test('a describe result is a text or a code', () => {

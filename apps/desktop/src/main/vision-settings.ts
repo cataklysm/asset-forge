@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -12,6 +11,7 @@ import {
   type VisionSettingsView,
 } from '@assetforge/contracts';
 import { CredentialStoreUnavailableError, InvalidOperationError } from '@assetforge/core';
+import { writeAtomic } from './atomic-file.js';
 import type { SecretCodec } from './secret-codec.js';
 import { usableBaseUrl } from './vision-config.js';
 
@@ -228,16 +228,4 @@ function readStored(path: string): StoredVision {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   renameSync(path, `${path}.corrupt-${stamp}`);
   return { ...EMPTY };
-}
-
-function writeAtomic(path: string, data: string | Buffer): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(tmp, data, { mode: 0o600 });
-    renameSync(tmp, path);
-  } catch (error) {
-    rmSync(tmp, { force: true });
-    throw error;
-  }
 }

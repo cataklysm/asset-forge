@@ -4,8 +4,9 @@ import {
   ANALYSIS_PROMPT_VERSION,
   ANALYSIS_SCHEMA,
   cleanAnalysisTags,
-  IMAGE_PROMPT,
+  composeTaggingRequest,
   isAnalysable,
+  LEGACY_TAG_LIMIT,
   MAX_PROMPT_TEXT,
 } from './analysis.js';
 import { JobError, type JobHandler } from './jobs.js';
@@ -72,24 +73,30 @@ export function createAnalyzeFileHandler(deps: {
       const parsed = AnalyzeFilePayloadSchema.safeParse(job.payload);
       if (job.fileId === null || !parsed.success) throw new JobError('internal_error');
       const fileId = job.fileId;
+      const payload = parsed.data;
       // v1 rows of phase 4a apply with the default model in force when they run.
-      const { model, mode } =
-        parsed.data.version === 1 ? { model: deps.defaultModel(), mode: 'apply' as const } : parsed.data;
+      const { model, mode } = payload.version === 1 ? { model: deps.defaultModel(), mode: 'apply' as const } : payload;
+      // v3 runs with the analysis prompt copied at enqueue; v1 and v2 with the unchanged legacy prompt.
+      const request =
+        payload.version === 3
+          ? { prompt: composeTaggingRequest(payload.prompt), limit: payload.prompt.maxTags, promptName: payload.prompt.name }
+          : { prompt: ANALYSIS_PROMPT, limit: LEGACY_TAG_LIMIT, promptName: null };
       const vision = deps.vision();
       if (vision === null || model === null) throw new JobError('provider_not_configured');
       const { image, sha256 } = await readModelImage(s, images, fileId);
       signal.throwIfAborted();
-      const answer = await vision.analyzeImage({ image, prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA, model, signal });
+      const answer = await vision.analyzeImage({ image, prompt: request.prompt, schema: ANALYSIS_SCHEMA, model, signal });
       // Nothing is awaited between this check and the write, so a cancelled run never writes.
       signal.throwIfAborted();
-      const tags = cleanAnalysisTags(answer);
+      const tags = cleanAnalysisTags(answer, request.limit);
       if (tags.length === 0) throw new JobError('invalid_response');
       const fingerprint = { provider: deps.provider, model, promptVersion: ANALYSIS_PROMPT_VERSION };
+      const { promptName } = request;
       const now = s.now().toISOString();
       const written =
         mode === 'apply'
-          ? await s.database.analyses.apply({ fileId, sha256, tags: tags.map((t) => ({ ...t, newId: s.newId() })), ...fingerprint, now })
-          : await s.database.analyses.propose({ fileId, sha256, tags, ...fingerprint, createdAt: now });
+          ? await s.database.analyses.apply({ fileId, sha256, tags: tags.map((t) => ({ ...t, newId: s.newId() })), ...fingerprint, promptName, now })
+          : await s.database.analyses.propose({ fileId, sha256, tags, ...fingerprint, promptName, createdAt: now });
       if (!written) throw new JobError('file_unavailable');
     },
   };
@@ -97,12 +104,12 @@ export function createAnalyzeFileHandler(deps: {
 
 /**
  * Image2Prompt: a paragraph describing the file's image, trimmed and cut at `MAX_PROMPT_TEXT`.
- * Writes nothing. Rejects with a `JobError` (`provider_not_configured`, `file_unavailable`,
+ * `prompt` is sent as it is. Writes nothing. Rejects with a `JobError` (`provider_not_configured`, `file_unavailable`,
  * `invalid_response` for an empty text, or the provider's), or with the signal's reason when aborted.
  */
 export async function describeImage(
   deps: { session: WorkspaceSession; vision: () => VisionProvider | null; images: ModelImageSource },
-  r: { fileId: string; model: string; signal: AbortSignal },
+  r: { fileId: string; model: string; prompt: string; signal: AbortSignal },
 ): Promise<string> {
   const { signal } = r;
   signal.throwIfAborted();
@@ -110,7 +117,7 @@ export async function describeImage(
   if (vision === null) throw new JobError('provider_not_configured');
   const { image } = await readModelImage(deps.session, deps.images, r.fileId);
   signal.throwIfAborted();
-  const answer: unknown = await vision.describeImage({ image, prompt: IMAGE_PROMPT, model: r.model, signal });
+  const answer: unknown = await vision.describeImage({ image, prompt: r.prompt, model: r.model, signal });
   signal.throwIfAborted();
   const text = typeof answer === 'string' ? answer.trim().slice(0, MAX_PROMPT_TEXT) : '';
   if (text === '') throw new JobError('invalid_response');

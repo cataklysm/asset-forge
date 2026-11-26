@@ -8,6 +8,7 @@ import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/l
 import { OpenSettingsProvider } from '../../src/renderer/src/components/AnalysisDialogs';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
@@ -387,7 +388,9 @@ function renderWithProvider() {
   return render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <Harness />
+        <AnalysisPromptsProvider>
+          <Harness />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>,
   );
@@ -402,9 +405,11 @@ it('Settings in the result dialog closes it and the detail dialog beneath before
   render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <OpenSettingsProvider onOpenSettings={onOpenSettings}>
-          <Harness />
-        </OpenSettingsProvider>
+        <AnalysisPromptsProvider>
+          <OpenSettingsProvider onOpenSettings={onOpenSettings}>
+            <Harness />
+          </OpenSettingsProvider>
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>,
   );
@@ -476,7 +481,9 @@ it('Analyse on several selected files opens the start dialog for all of them; St
   await user.click(screen.getByRole('button', { name: 'Start' }));
   const strip = await screen.findByRole('status');
   expect(within(strip).getByText('1 queued, 1 already queued')).toBeTruthy();
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ target, model: 'vision-a', mode: 'apply', force: false }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([
+    { target, model: 'vision-a', mode: 'apply', force: false, promptId: expect.any(String) },
+  ]);
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
 
@@ -548,7 +555,9 @@ it('Analyse all sends the current filters of the inbox as a file filter target',
   render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <Harness initial={{ filters: { ...NO_FILE_FILTERS, tagNames: ['oak'], kind: 'image' }, scrollOffset: 0 }} />
+        <AnalysisPromptsProvider>
+          <Harness initial={{ filters: { ...NO_FILE_FILTERS, tagNames: ['oak'], kind: 'image' }, scrollOffset: 0 }} />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>,
   );
@@ -617,7 +626,7 @@ it('Review tags in the menu opens the proposal; accepting it reloads the list', 
   const api = install([proposed], {
     ...analysisHandlers(),
     'analysis:getProposal': () => ({
-      proposal: { model: 'vision-a', createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
+      proposal: { model: 'vision-a', promptName: null, createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
       job: null,
     }),
     'analysis:acceptProposal': () => ({}),

@@ -4,6 +4,7 @@ import {
   type AnalysisPreview,
   type AnalysisTarget,
   type AnalyzeFilePayload,
+  type AnalyzeFilePrompt,
   type EnqueueAnalysisResult,
 } from '@assetforge/contracts';
 import { ANALYSIS_PROMPT_VERSION } from './analysis.js';
@@ -33,17 +34,21 @@ export async function previewAnalysis(
  * of at most `ENQUEUE_CHUNK`. Not all or nothing: files that are unknown (listed ids only), not
  * analysable, already queued or — in mode `apply` without `force` — already analysed with this
  * fingerprint are counted as skipped. Mode `propose` takes exactly one listed file and implies `force`.
+ * Every job carries payload v3 with a copy of `prompt`.
  */
 export async function enqueueAnalysis(
   s: WorkspaceSession,
-  r: { target: AnalysisTarget; model: string; mode: AnalysisMode; force: boolean; provider: string },
+  r: { target: AnalysisTarget; model: string; mode: AnalysisMode; force: boolean; provider: string; prompt: AnalyzeFilePrompt },
 ): Promise<EnqueueAnalysisResult> {
   const { target } = r;
   if (r.mode === 'propose' && !(target.kind === 'files' && target.fileIds.length === 1)) {
     throw new InvalidOperationError('A tag proposal can only be requested for a single file');
   }
   const skipAnalysed = r.mode === 'apply' && !r.force;
-  const payload: AnalyzeFilePayload = { version: 2, model: r.model, mode: r.mode };
+  // The prompt is copied into every job, so later edits or a deletion do not reach waiting jobs.
+  // It is not part of the fingerprint: a file analysed with another prompt still counts as analysed.
+  const prompt: AnalyzeFilePrompt = { name: r.prompt.name, text: r.prompt.text, maxTags: r.prompt.maxTags };
+  const payload: AnalyzeFilePayload = { version: 3, model: r.model, mode: r.mode, prompt };
   const fingerprint = fingerprintOf(r);
   const result: EnqueueAnalysisResult = {
     enqueued: 0,

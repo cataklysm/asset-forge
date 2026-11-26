@@ -7,14 +7,16 @@ import {
   type JobView,
   type ProposalView,
 } from '@assetforge/contracts';
+import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
-import { jobStatusLabel } from '../labels';
+import { jobStatusLabel, PROMPT_SELECT_LABEL } from '../labels';
 import { useProvider } from '../provider-context';
-import { providerGate } from '../provider-gate';
+import { promptGate, providerGate } from '../provider-gate';
 import { AI_CHIP, ALERT, BUTTON, FOCUS, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
 interface Props {
@@ -51,7 +53,7 @@ interface Shown {
 /** Identifies one stored proposal: a replaced proposal never shares the key of the one before. */
 export function proposalKey(proposal: ProposalView | null): string | null {
   if (proposal === null) return null;
-  return JSON.stringify([proposal.model, proposal.createdAt, proposal.tags.map((t) => t.name)]);
+  return JSON.stringify([proposal.model, proposal.promptName, proposal.createdAt, proposal.tags.map((t) => t.name)]);
 }
 
 const isActive = (job: JobView | null) =>
@@ -70,6 +72,7 @@ const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
 export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSettings, settingsBlocked = null }: Props) {
   const { changeToken, refresh } = useJobs();
   const provider = useProvider();
+  const prompts = useAnalysisPrompts();
   const { settings } = provider;
   const fileId = open && file !== null ? file.id : null;
 
@@ -84,6 +87,8 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   const busy = busyOpening !== null && busyOpening === opening;
   // The owner's pick for this file; until then the tagging default.
   const [chosen, setChosen] = useState<{ fileId: string; model: string | null } | null>(null);
+  // The owner's prompt pick for this file; until then the tagging prompt used last (or the first).
+  const [chosenPrompt, setChosenPrompt] = useState<{ fileId: string; id: string } | null>(null);
   const fileIdRef = useRef(fileId);
   fileIdRef.current = fileId;
   // Only the newest read may set what is shown.
@@ -129,6 +134,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
       setShown(null);
       setError(null);
       setChosen(null);
+      setChosenPrompt(null);
     }
     void read(fileId);
     // `read` only uses refs and stable setters.
@@ -136,6 +142,8 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   }, [fileId, changeToken]);
 
   const model = chosen !== null && chosen.fileId === fileId ? chosen.model : (settings?.taggingModel ?? null);
+  const promptId =
+    chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : defaultPromptId(prompts, 'tagging');
 
   /**
    * Runs one action of the current opening; `live()` is false once the dialog closed or switched
@@ -160,7 +168,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   const analyse = () =>
     run(async (live) => {
-      if (file === null || model === null) return;
+      if (file === null || model === null || promptId === null) return;
       const id = file.id;
       try {
         const result = await call('analysis:enqueue', {
@@ -168,12 +176,20 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
           model,
           mode: 'propose',
           force: true,
+          promptId,
         });
+        // An accepted start records the prompt, also when the dialog moved on meanwhile.
+        prompts.noteUsed('tagging', promptId);
         refresh();
         if (!live()) return;
         await read(id);
         if (live() && result.enqueued === 0 && result.skipped.alreadyQueued === 0) setError(NOT_ANALYSABLE);
       } catch (e) {
+        // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
+        if (e instanceof ApiError && e.code === 'not_found') {
+          void prompts.reload().catch(() => {});
+          if (live()) setChosenPrompt(null);
+        }
         if (live()) setError(describeError(e));
       }
     });
@@ -255,7 +271,8 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   }
 
   // Why Analyse cannot start, as its tooltip; null when it can.
-  const { blocked, offerSettings } = providerGate(provider, model);
+  const { blocked: providerBlocked, offerSettings } = providerGate(provider, model);
+  const blocked = providerBlocked ?? promptGate(prompts, promptId);
 
   const current = shown !== null && shown.fileId === fileId ? shown : null;
   const proposal = current?.proposal ?? null;
@@ -280,6 +297,14 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
           value={model}
           onChange={(next) => {
             if (fileId !== null) setChosen({ fileId, model: next });
+          }}
+          disabled={busy}
+        />
+        <PromptSelect
+          purpose="tagging"
+          value={promptId}
+          onChange={(id) => {
+            if (fileId !== null) setChosenPrompt({ fileId, id });
           }}
           disabled={busy}
         />
@@ -346,6 +371,11 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
               <span className={`${MUTED} truncate`} title="Model">
                 {proposal.model}
               </span>
+              {proposal.promptName !== null && (
+                <span className={`${MUTED} truncate`} title={PROMPT_SELECT_LABEL}>
+                  {proposal.promptName}
+                </span>
+              )}
               {proposal.stale && (
                 <span className="text-warning" title={STALE_TITLE}>
                   Out of date

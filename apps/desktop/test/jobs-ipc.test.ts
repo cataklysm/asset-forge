@@ -1,17 +1,19 @@
+import { mkdirSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from '@assetforge/contracts';
-import type { WorkspaceManager } from '@assetforge/core';
+import { composeTaggingRequest, type WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analysis-prompts.js';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
-import { idleServices } from './idle-job-host.js';
+import { servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
 let sources: string;
@@ -19,6 +21,7 @@ let manager: WorkspaceManager;
 let mock: MockProvider | undefined;
 let jobHost: JobHost;
 let handlers: IpcHandlers;
+let logs: string[];
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
@@ -30,6 +33,7 @@ beforeEach(async () => {
   sources = join(base, 'sources');
   await mkdir(sources, { recursive: true });
   manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
+  logs = [];
 });
 afterEach(async () => {
   await jobHost?.workspaceClosing();
@@ -67,7 +71,7 @@ async function setup(failures: MockFailure[] = []): Promise<void> {
       workspaceClosing: () => jobHost.workspaceClosing(),
     },
     jobHost,
-    idleServices,
+    servicesWithPrompts(join(base, 'userData'), (line) => logs.push(line)),
   );
 }
 
@@ -291,4 +295,106 @@ describe('job IPC', () => {
       process.off('unhandledRejection', onRejection);
     }
   });
+});
+
+describe('analysis:enqueue with an analysis prompt', () => {
+  const armour = { purpose: 'tagging' as const, name: 'Armour', text: 'Only armour.', maxTags: 3 };
+
+  async function payloads(): Promise<unknown[]> {
+    return manager.read(async (s) => {
+      const { items } = await s.database.jobs.list({ limit: 100, offset: 0 });
+      return Promise.all(items.map(async (j) => (await s.database.jobs.get(j.id))!.payload));
+    });
+  }
+
+  function chatContents(): string[] {
+    return mock!.requests
+      .filter((r) => r.path === '/api/chat')
+      .map((r) => (r.body as { messages: { content: string }[] }).messages[0]!.content);
+  }
+
+  it('copies the chosen prompt into the payload and remembers it as used last', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [first, second] = await importImages(2);
+    const prompt = await ok('analysisPrompts:save', armour);
+
+    expect(await ok('analysis:enqueue', { ...filesRequest([first!]), promptId: prompt.id })).toEqual({
+      enqueued: 1,
+      skipped: NONE_SKIPPED,
+    });
+    expect((await ok('analysisPrompts:list', {})).lastUsed.tagging).toBe(prompt.id);
+
+    // Without an id the prompt used last runs.
+    await ok('analysis:enqueue', filesRequest([second!]));
+    const expected = { version: 3, model: MOCK_MODEL, mode: 'apply', prompt: { name: 'Armour', text: 'Only armour.', maxTags: 3 } };
+    expect(await payloads()).toEqual([expected, expected]);
+  });
+
+  it('answers not_found for an unknown id and an image prompt id and queues nothing', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    const image = (await ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'image_prompt')!;
+
+    for (const promptId of [uuid, image.id]) {
+      expect(await call('analysis:enqueue', { ...filesRequest([fileId!]), promptId })).toEqual({
+        ok: false,
+        error: { code: 'not_found', message: 'The analysis prompt does not exist' },
+      });
+    }
+    expect(await payloads()).toEqual([]);
+    expect((await ok('analysisPrompts:list', {})).lastUsed).toEqual({ tagging: null, imagePrompt: null });
+  });
+
+  it('remembers the prompt when nothing was queued', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', filesRequest([fileId!]));
+    await until((s) => s.succeeded === 1);
+    const prompt = await ok('analysisPrompts:save', armour);
+
+    expect(await ok('analysis:enqueue', { ...filesRequest([fileId!]), force: false, promptId: prompt.id })).toEqual({
+      enqueued: 0,
+      skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 },
+    });
+    expect((await ok('analysisPrompts:list', {})).lastUsed.tagging).toBe(prompt.id);
+  });
+
+  it('still returns its counts when the prompt used last cannot be stored', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysisPrompts:list', {});
+    // The file path becomes a directory: the rename onto it fails.
+    const path = join(base, 'userData', ANALYSIS_PROMPTS_FILE);
+    rmSync(path);
+    mkdirSync(join(path, 'blocker'), { recursive: true });
+
+    expect(await ok('analysis:enqueue', filesRequest([fileId!]))).toEqual({ enqueued: 1, skipped: NONE_SKIPPED });
+    expect(logs).toEqual([LAST_USED_WRITE_FAILED]);
+  });
+
+  for (const change of ['edited', 'deleted'] as const) {
+    it(`runs a waiting job with the text it was queued with after its prompt was ${change}`, async () => {
+      await setup(['hang']);
+      await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+      const [blocker, fileId] = await importImages(2);
+      await ok('analysis:enqueue', filesRequest([blocker!]));
+      // The blocker hangs at the provider, so the second job waits in the queue.
+      await until((s) => s.running === 1 && chatContents().length === 1);
+      const prompt = await ok('analysisPrompts:save', armour);
+      await ok('analysis:enqueue', { ...filesRequest([fileId!]), promptId: prompt.id });
+
+      if (change === 'edited') await ok('analysisPrompts:save', { ...armour, id: prompt.id, text: 'Only helmets.', maxTags: 7 });
+      else await ok('analysisPrompts:delete', { id: prompt.id });
+      const [running] = (await ok('jobs:list', { ...page, status: 'running' })).items;
+      await ok('jobs:cancel', { jobId: running!.id });
+      await until((s) => s.succeeded === 1);
+
+      expect(chatContents()).toHaveLength(2);
+      expect(chatContents()[1]).toBe(composeTaggingRequest({ text: 'Only armour.', maxTags: 3 }));
+    });
+  }
 });

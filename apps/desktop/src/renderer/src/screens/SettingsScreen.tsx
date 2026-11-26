@@ -8,7 +8,8 @@ import {
 import { describeError } from '../api';
 import { ModelSelect } from '../components/ModelSelect';
 import { Page } from '../components/Page';
-import { MODEL_PURPOSE_LABELS } from '../labels';
+import { PromptSettings } from '../components/PromptSettings';
+import { MODEL_PURPOSE_LABELS, RETRY_LABEL } from '../labels';
 import { useProvider } from '../provider-context';
 import { ALERT, BUTTON, BUTTON_INLINE, INPUT, LABEL, MUTED, SECTION_TITLE } from '../ui';
 
@@ -47,8 +48,20 @@ const TITLES = {
   test: 'Saves, then asks the server for its models',
 };
 
-/** App-level settings of the vision provider. */
+/** App-level settings: the vision provider and the analysis prompts, the latter in every provider state. */
 export function SettingsScreen() {
+  return (
+    <Page title="Settings">
+      <div className="flex min-h-0 flex-1 flex-col gap-10 overflow-auto">
+        <ProviderSettings />
+        <PromptSettings />
+      </div>
+    </Page>
+  );
+}
+
+/** The vision provider form, with its loading and failed states. */
+function ProviderSettings() {
   const { settings, models, loading, reload, refreshModels, save } = useProvider();
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +76,7 @@ export function SettingsScreen() {
 
   if (settings === null || form === null) {
     return (
-      <Page title="Settings">
+      <>
         {loading || settings !== null ? (
           <div className="flex max-w-xl flex-col gap-3" aria-busy="true">
             {Array.from({ length: 4 }, (_, i) => (
@@ -85,11 +98,11 @@ export function SettingsScreen() {
                 reload().catch((e: unknown) => setError(describeError(e)));
               }}
             >
-              Retry
+              {RETRY_LABEL}
             </button>
           </div>
         )}
-      </Page>
+      </>
     );
   }
 
@@ -155,7 +168,7 @@ export function SettingsScreen() {
   const modelCount = tested && models !== null && models.ok ? models.models.length : null;
 
   return (
-    <Page title="Settings">
+    <>
       <form className="flex max-w-xl flex-col gap-4" onSubmit={onSubmit} aria-busy={busy || undefined}>
         <div className="flex items-center gap-3">
           <h3 className={SECTION_TITLE}>Vision provider</h3>
@@ -266,6 +279,6 @@ export function SettingsScreen() {
           )}
         </div>
       </form>
-    </Page>
+    </>
   );
 }

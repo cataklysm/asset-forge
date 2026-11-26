@@ -20,6 +20,9 @@ export const ICON_BUTTON_INLINE = `${BUTTON_LOOK} h-8 w-8`;
 
 export const INPUT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text placeholder:text-muted ${FOCUS}`;
 
+/** A multi-line text field in the look of `INPUT`. */
+export const TEXTAREA = `min-h-40 resize-y rounded-control border border-line bg-surface p-2.5 text-text placeholder:text-muted ${FOCUS}`;
+
 /** An input that reads as an action in a row of chips ("+ Add tag"); its box shows while focused. */
 export const INLINE_INPUT = `h-[26px] w-28 rounded-control border border-transparent bg-transparent px-1 text-sm text-text placeholder:text-accent focus:border-line ${FOCUS}`;
 

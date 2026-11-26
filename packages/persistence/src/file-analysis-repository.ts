@@ -81,6 +81,7 @@ const toProposal = (row: typeof fileAnalysisProposal.$inferSelect): Proposal => 
   model: row.model,
   promptVersion: row.promptVersion,
   tags: parseTags(row.tags),
+  promptName: row.promptName,
   createdAt: row.createdAt,
 });
 
@@ -97,7 +98,14 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
           fileId: r.fileId,
           assetId: target.assetId,
           tags: r.tags,
-          analysis: { sha256: r.sha256, provider: r.provider, model: r.model, promptVersion: r.promptVersion, analysedAt: r.now },
+          analysis: {
+            sha256: r.sha256,
+            provider: r.provider,
+            model: r.model,
+            promptVersion: r.promptVersion,
+            promptName: r.promptName,
+            analysedAt: r.now,
+          },
         });
         return true;
       });
@@ -111,6 +119,7 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
           model: r.model,
           promptVersion: r.promptVersion,
           tags: JSON.stringify(r.tags.map((t) => ({ name: t.name, displayName: t.displayName }))),
+          promptName: r.promptName,
           createdAt: r.createdAt,
         };
         tx.insert(fileAnalysisProposal)
@@ -150,7 +159,14 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
           fileId: r.fileId,
           assetId: target.assetId,
           tags: r.tags,
-          analysis: { sha256: row.sha256, provider: row.provider, model: row.model, promptVersion: row.promptVersion, analysedAt: r.now },
+          analysis: {
+            sha256: row.sha256,
+            provider: row.provider,
+            model: row.model,
+            promptVersion: row.promptVersion,
+            promptName: row.promptName,
+            analysedAt: r.now,
+          },
         });
         return true;
       });

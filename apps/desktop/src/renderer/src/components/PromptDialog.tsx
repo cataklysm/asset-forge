@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
-import { call, describeError } from '../api';
+import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { ApiError, call, describeError } from '../api';
 import { useProvider } from '../provider-context';
-import { providerGate } from '../provider-gate';
+import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, FOCUS } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
 interface Props {
@@ -48,9 +50,12 @@ export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBloc
 
 function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: Omit<Props, 'open'>) {
   const provider = useProvider();
+  const prompts = useAnalysisPrompts();
   const { settings } = provider;
   // Null until the user picks one: until then the stored prompt default is shown.
   const [chosen, setChosen] = useState<{ model: string | null } | null>(null);
+  // Null until the user picks one: until then the Image to prompt prompt used last (or the first).
+  const [chosenPrompt, setChosenPrompt] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,10 +64,12 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
 
   const model = chosen !== null ? chosen.model : (settings?.promptModel ?? null);
   const configured = settings !== null && settings.baseUrl !== null;
+  const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
   const gate = providerGate(provider, model);
+  const blocked = gate.blocked ?? promptGate(prompts, promptId);
 
-  const blockedTitle = gate.blocked ?? (running ? GENERATING_TITLE : file === null ? NO_FILE_TITLE : undefined);
-  const canGenerate = gate.blocked === null && !running && file !== null && model !== null;
+  const blockedTitle = blocked ?? (running ? GENERATING_TITLE : file === null ? NO_FILE_TITLE : undefined);
+  const canGenerate = blocked === null && !running && file !== null && model !== null && promptId !== null;
 
   function cancel() {
     const requestId = request.current;
@@ -75,19 +82,26 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   useEffect(() => () => cancel(), []);
 
   async function generate() {
-    if (!canGenerate || file === null || model === null) return;
+    if (!canGenerate || file === null || model === null || promptId === null) return;
     const requestId = crypto.randomUUID();
     request.current = requestId;
     setRunning(true);
     setText(null);
     setError(null);
     try {
-      const result = await call('analysis:describe', { requestId, fileId: file.id, model });
+      const result = await call('analysis:describe', { requestId, fileId: file.id, model, promptId });
+      // Every answer but `busy` means the describe started; a cancelled one too, also after closing.
+      if (result.ok || result.code !== 'busy') prompts.noteUsed('image_prompt', promptId);
       if (request.current !== requestId) return;
       if (result.ok) setText(result.text);
       else if (result.code === 'busy') setError(PROMPT_BUSY_MESSAGE);
       else if (result.code !== 'cancelled') setError(JOB_ERROR_MESSAGES[result.code]);
     } catch (e) {
+      // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
+      if (e instanceof ApiError && e.code === 'not_found') {
+        void prompts.reload().catch(() => {});
+        if (request.current === requestId) setChosenPrompt(null);
+      }
       if (request.current === requestId) setError(describeError(e));
     } finally {
       if (request.current === requestId) {
@@ -122,6 +136,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
         onChange={(next) => setChosen({ model: next })}
         disabled={running || !configured}
       />
+      <PromptSelect purpose="image_prompt" value={promptId} onChange={setChosenPrompt} disabled={running} />
       <div className="flex gap-2">
         <button
           type="button"

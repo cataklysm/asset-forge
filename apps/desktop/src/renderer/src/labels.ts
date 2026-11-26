@@ -1,4 +1,10 @@
-import type { JobStatus, RelationKind } from '@assetforge/contracts';
+import {
+  ANALYSIS_TAG_LIMIT_MAX,
+  ANALYSIS_TAG_LIMIT_MIN,
+  type AnalysisPromptPurpose,
+  type JobStatus,
+  type RelationKind,
+} from '@assetforge/contracts';
 
 /** 'in_progress' -> 'In progress'. */
 export function label(value: string): string {
@@ -90,6 +96,15 @@ export const CHOOSE_MODEL = 'Choose a model';
 export const MODEL_NOT_LISTED = 'The provider does not offer this model';
 export const MODEL_NOT_VISION = 'This model cannot analyse images';
 
+/** The prompt choice of the analysis and prompt dialogs (PromptSelect, `promptGate`). */
+export const PROMPT_SELECT_LABEL = 'Prompt';
+export const NO_PROMPT_LABEL = 'No prompt';
+export const CHOOSE_PROMPT = 'Choose a prompt';
+/** The tooltip of a tagging prompt in the select. */
+export function tagLimitTitle(maxTags: number): string {
+  return `Tag limit ${maxTags}`;
+}
+
 /** The start dialog (AnalysisStartDialog). */
 export const START_PREVIEW_FAILED = 'The files could not be counted';
 export const START_RETRY_PREVIEW_LABEL = 'Count again';
@@ -107,6 +122,44 @@ export const START_COUNTS: readonly {
   { key: 'alreadyQueued', label: 'Already queued', title: 'Files with an analysis that is queued or running' },
   { key: 'notAnalysable', label: 'Not analysable', title: 'Files that are not complete images of a supported type' },
 ];
+
+/** The Prompts section of the settings (PromptSettings). */
+export const PROMPTS_TITLE = 'Prompts';
+export const PROMPT_PURPOSE_LABELS: Record<AnalysisPromptPurpose, string> = {
+  tagging: 'Tagging',
+  image_prompt: 'Image to prompt',
+};
+export const PROMPT_PURPOSE_TITLES: Record<AnalysisPromptPurpose, string> = {
+  tagging: 'Prompts the tag analysis can send with an image',
+  image_prompt: 'Prompts Image to prompt can send with an image',
+};
+export const PROMPTS_LOAD_FAILED = 'The analysis prompts could not be read';
+export const RETRY_LABEL = 'Retry';
+export const NEW_PROMPT_LABEL = 'New';
+export const NEW_PROMPT_TITLE = 'Adds a prompt with the built-in text';
+/** The name of a new prompt: 'New prompt', then 'New prompt 2', … */
+export const NEW_PROMPT_NAME = 'New prompt';
+export const PROMPT_NAME_LABEL = 'Name';
+export const PROMPT_NAME_TITLE = 'Shown in the analysis dialogs; unique within its list';
+export const PROMPT_TAG_LIMIT_LABEL = 'Tag limit';
+export const PROMPT_TAG_LIMIT_TITLE = `At most this many tags are kept from one answer (${ANALYSIS_TAG_LIMIT_MIN}–${ANALYSIS_TAG_LIMIT_MAX})`;
+export const PROMPT_TEXT_LABEL = 'Text';
+export const PROMPT_TEXT_TITLE = 'Sent to the vision model together with the image';
+export const SAVE_LABEL = 'Save';
+export const RESET_LABEL = 'Reset';
+export const RESET_PROMPT_TITLE = 'Replaces the text with the built-in one; the name stays';
+export const DELETE_PROMPT_TITLE = 'Deletes the prompt; asks first';
+export const LAST_PROMPT_TITLE = 'The last prompt cannot be deleted';
+export const UNSAVED_CHANGES = 'Unsaved changes';
+export const NO_CHANGES = 'No unsaved changes';
+export const ENTER_NAME = 'Enter a name';
+export const ENTER_TEXT = 'Enter a text';
+export const TAG_LIMIT_INVALID = `The tag limit must be a whole number from ${ANALYSIS_TAG_LIMIT_MIN} to ${ANALYSIS_TAG_LIMIT_MAX}`;
+
+/** 'Delete the prompt Detailed?'. */
+export function deletePromptTitle(name: string): string {
+  return `Delete the prompt ${name}?`;
+}
 
 /** The trash: its navigation entry, the Delete, Restore and permanent delete actions and their confirmation. */
 export const TRASH_LABEL = 'Trash';

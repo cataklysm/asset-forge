@@ -579,6 +579,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     provider: string;
     model: string;
     promptVersion: number;
+    promptName: string | null;
     now: string;
   }): Promise<boolean> {
     if (!this.hasContent(r.fileId, r.sha256)) return false;
@@ -589,6 +590,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       provider: r.provider,
       model: r.model,
       promptVersion: r.promptVersion,
+      promptName: r.promptName,
       analysedAt: r.now,
     });
     this.proposals.delete(r.fileId);
@@ -641,6 +643,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       provider: proposal.provider,
       model: proposal.model,
       promptVersion: proposal.promptVersion,
+      promptName: proposal.promptName,
       analysedAt: r.now,
     });
     this.proposals.delete(r.fileId);

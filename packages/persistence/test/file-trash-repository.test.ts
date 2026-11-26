@@ -229,6 +229,7 @@ describe('file trash repository', () => {
       model: 'qwen',
       promptVersion: 1,
       tags: [{ name: 'x', displayName: 'x' }],
+      promptName: null,
       createdAt: TS,
     });
     for (const f of [tex, mesh, other]) await trash(f);
@@ -262,6 +263,7 @@ describe('file trash repository', () => {
         provider: 'ollama',
         model: 'qwen',
         promptVersion: 1,
+        promptName: null,
         now: TS,
       });
       await db.analyses.propose({
@@ -271,6 +273,7 @@ describe('file trash repository', () => {
         model: 'qwen',
         promptVersion: 1,
         tags: [{ name: 'x', displayName: 'x' }],
+        promptName: null,
         createdAt: TS,
       });
       await db.jobs.enqueue({

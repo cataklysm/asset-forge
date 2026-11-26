@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type {
   AnalysisPreview,
@@ -10,10 +10,12 @@ import type {
   VisionSettingsView,
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
+import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { AnalysisStartDialog } from '../../src/renderer/src/components/AnalysisStartDialog';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import {
   MODEL_NOT_LISTED,
+  PROMPTS_LOAD_FAILED,
   SETTINGS_LOAD_FAILED,
   START_COUNTING,
   START_LOADING,
@@ -21,8 +23,13 @@ import {
 } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { BUTTON, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { NONE_SKIPPED, nextId } from './fixtures';
+import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { NONE_SKIPPED, imagePrompt, nextId, taggingPrompt } from './fixtures';
+
+const TAG_DEFAULT = taggingPrompt({ name: 'Default' });
+const TAG_DETAIL = taggingPrompt({ name: 'Detail', maxTags: 30 });
+const IMAGE_DEFAULT = imagePrompt({ name: 'Describe' });
+const PROMPTS = [TAG_DEFAULT, IMAGE_DEFAULT, TAG_DETAIL];
 
 const CONFIGURED: VisionSettingsView = {
   baseUrl: 'http://127.0.0.1:11500',
@@ -58,6 +65,7 @@ type PreviewRequest = IpcRequest<'analysis:preview'>;
 
 function install(handlers: FakeHandlers = {}, settings: VisionSettingsView = CONFIGURED, models: ListModelsResult = MODELS) {
   return installFakeApi({
+    ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
     'settings:getVision': () => settings,
     'settings:listVisionModels': () => models,
     'jobs:summary': () => IDLE,
@@ -83,13 +91,15 @@ function renderDialog(overrides: Overrides = {}) {
   const ui = (o: Overrides) => (
     <JobsProvider>
       <ProviderSettingsProvider>
-        <AnalysisStartDialog
-          open={o.open ?? true}
-          target={'target' in o ? (o.target ?? null) : target}
-          onClose={onClose}
-          onStarted={onStarted}
-          onOpenSettings={onOpenSettings}
-        />
+        <AnalysisPromptsProvider>
+          <AnalysisStartDialog
+            open={o.open ?? true}
+            target={'target' in o ? (o.target ?? null) : target}
+            onClose={onClose}
+            onStarted={onStarted}
+            onOpenSettings={onOpenSettings}
+          />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>
   );
@@ -190,7 +200,7 @@ it('keeps Start disabled when nothing would be enqueued until Analyse again is c
   await userEvent.click(startButton());
   await waitFor(() => expect(onStarted).toHaveBeenCalled());
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: assetTarget(), model: 'vision-b', mode: 'apply', force: true },
+    { target: assetTarget(), model: 'vision-b', mode: 'apply', force: true, promptId: TAG_DEFAULT.id },
   ]);
 });
 
@@ -211,7 +221,7 @@ it('Start enqueues in mode apply, then reports, closes and refreshes the jobs', 
   await userEvent.click(startButton());
   await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: assetTarget(), model: 'vision-b', mode: 'apply', force: false },
+    { target: assetTarget(), model: 'vision-b', mode: 'apply', force: false, promptId: TAG_DEFAULT.id },
   ]);
   expect(onStarted).toHaveBeenCalledWith(ENQUEUED);
   expect(onStarted.mock.invocationCallOrder[0]!).toBeLessThan(onClose.mock.invocationCallOrder[0]!);
@@ -341,14 +351,16 @@ it('Settings is disabled with the given reason while the settings screen cannot 
   render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <AnalysisStartDialog
-          open
-          target={assetTarget()}
-          onClose={onClose}
-          onStarted={() => {}}
-          onOpenSettings={onOpenSettings}
-          settingsBlocked="Import in progress"
-        />
+        <AnalysisPromptsProvider>
+          <AnalysisStartDialog
+            open
+            target={assetTarget()}
+            onClose={onClose}
+            onStarted={() => {}}
+            onOpenSettings={onOpenSettings}
+            settingsBlocked="Import in progress"
+          />
+        </AnalysisPromptsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>,
   );
@@ -493,4 +505,96 @@ it('every button uses the shared button look', async () => {
   renderDialog();
   await screen.findByRole('button', { name: 'Settings' });
   for (const button of screen.getAllByRole('button')) expect([BUTTON, ICON_BUTTON]).toContain(button.className);
+});
+
+const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as HTMLSelectElement;
+
+async function promptsListed() {
+  await waitFor(() => expect(within(promptSelect()).queryAllByRole('option').length).toBeGreaterThan(1));
+}
+
+it('the prompt select lists the tagging prompts only, below the model select, with the tag limit as tooltip', async () => {
+  install();
+  renderDialog();
+  await previewShown();
+  await promptsListed();
+  const options = within(promptSelect()).getAllByRole('option') as HTMLOptionElement[];
+  expect(options.map((o) => o.textContent)).toEqual(['Default', 'Detail']);
+  expect(options.map((o) => o.title)).toEqual(['Tag limit 15', 'Tag limit 30']);
+  expect(modelSelect().compareDocumentPosition(promptSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('preselects the tagging prompt used last', async () => {
+  install(fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DETAIL.id, imagePrompt: null } }).handlers);
+  renderDialog();
+  await previewShown();
+  await waitFor(() => expect(promptSelect().value).toBe(TAG_DETAIL.id));
+});
+
+it('preselects the first tagging prompt when the one used last is gone', async () => {
+  install(fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id } }).handlers);
+  renderDialog();
+  await previewShown();
+  await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
+  expect(startButton().disabled).toBe(false);
+});
+
+it('Start sends the chosen prompt, and reopening preselects it', async () => {
+  const api = install();
+  const { rerender } = renderDialog();
+  await previewShown();
+  await promptsListed();
+  await userEvent.selectOptions(promptSelect(), TAG_DETAIL.id);
+  await userEvent.click(startButton());
+  await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:enqueue')[0]).toMatchObject({ promptId: TAG_DETAIL.id });
+  rerender({ open: false });
+  rerender({ open: true });
+  await previewShown();
+  expect(promptSelect().value).toBe(TAG_DETAIL.id);
+});
+
+it('changing the prompt does not preview again', async () => {
+  const api = install();
+  renderDialog();
+  await previewShown();
+  await promptsListed();
+  await userEvent.selectOptions(promptSelect(), TAG_DETAIL.id);
+  expect(promptSelect().value).toBe(TAG_DETAIL.id);
+  expect(callsOf(api, 'analysis:preview')).toHaveLength(1);
+});
+
+it('a failed prompt load blocks Start with its own reason', async () => {
+  install({
+    'analysisPrompts:list': () => {
+      throw fakeError('internal_error');
+    },
+  });
+  renderDialog();
+  await previewShown();
+  await waitFor(() => expect(startButton().title).toBe(PROMPTS_LOAD_FAILED));
+  expect(startButton().disabled).toBe(true);
+});
+
+it('a start refused with not_found shows the error and falls back to an existing prompt', async () => {
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  const api = install({
+    ...prompts.handlers,
+    'analysis:enqueue': () => {
+      prompts.state.prompts = prompts.state.prompts.filter((p) => p.id !== TAG_DETAIL.id);
+      throw fakeError('not_found', 'The analysis prompt does not exist');
+    },
+  });
+  const { onStarted, onClose } = renderDialog();
+  await previewShown();
+  await promptsListed();
+  await userEvent.selectOptions(promptSelect(), TAG_DETAIL.id);
+  const lists = callsOf(api, 'analysisPrompts:list').length;
+  await userEvent.click(startButton());
+  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
+  expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
+  expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Default']);
+  expect(onStarted).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
 });

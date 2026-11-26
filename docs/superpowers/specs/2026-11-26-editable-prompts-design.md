@@ -1,6 +1,16 @@
 # Editable analysis prompts — named prompts chosen at the analysis start — design
 
-Status: approved by the owner, 2026-11-26.
+Status: approved by the owner, 2026-11-26; implemented 2026-11-26.
+
+## Changed during the build
+
+- `promptId` is optional on `analysis:enqueue` and `analysis:describe`: without one the prompt used last for the purpose runs, otherwise the first of the purpose.
+- `analysisPrompts:save` is discriminated on `purpose`: `maxTags` is required for `tagging` and not part of an `image_prompt` request, rather than optional. A request outside the limits is refused by the IPC validation as `invalid_request`; the store's own check (`invalid_operation`, "The analysis prompt is not valid") sits behind it.
+- Without an open workspace `analysis:enqueue` and `analysis:describe` answer `no_workspace_open` before the `promptId` is resolved.
+- A describe that answers `cancelled` marks its prompt as used, also when it was refused during a workspace open or close without starting a request; only `busy` and a rejected call do not.
+- Version 1 and 2 jobs record `prompt_name` as `null`.
+- New in the Prompts section saves a prompt and then resets it, because the renderer does not know the built-in text.
+- A failed prompt load reads "The analysis prompts could not be read". While the prompts load, the dialogs' start tooltip is the provider wording "The provider settings are loading" (backlog).
 
 ## Intent
 

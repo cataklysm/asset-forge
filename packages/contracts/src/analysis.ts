@@ -72,9 +72,11 @@ export type ProposalTag = z.infer<typeof ProposalTagSchema>;
 /** A waiting proposal of a file; `stale` when the file's content changed since the analysis. */
 export const ProposalViewSchema = z.object({
   model: ModelNameSchema,
+  /** Name of the analysis prompt used, as it was then; null for proposals from before analysis prompts. */
+  promptName: z.string().nullable(),
   createdAt: z.iso.datetime(),
   stale: z.boolean(),
-  tags: z.array(ProposalTagSchema).max(20),
+  tags: z.array(ProposalTagSchema).max(50),
 });
 export type ProposalView = z.infer<typeof ProposalViewSchema>;
 

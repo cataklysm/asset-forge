@@ -369,6 +369,8 @@ export interface FileAnalysis {
   provider: string;
   model: string;
   promptVersion: number;
+  /** Name of the analysis prompt used, as it was then; null for analyses from before analysis prompts. */
+  promptName: string | null;
   analysedAt: string;
 }
 
@@ -384,8 +386,10 @@ export interface Proposal extends AnalysisFingerprint {
   fileId: string;
   /** Hash of the content that was analysed. */
   sha256: string;
-  /** Already cleaned, at most 20. */
+  /** Already cleaned, at most 50. */
   tags: { name: string; displayName: string }[];
+  /** Name of the analysis prompt used, as it was then; null for proposals from before analysis prompts. */
+  promptName: string | null;
   createdAt: string;
 }
 
@@ -404,6 +408,8 @@ export interface FileAnalysisRepository {
     provider: string;
     model: string;
     promptVersion: number;
+    /** Recorded on the analysis row; not part of the fingerprint. */
+    promptName: string | null;
     now: string;
   }): Promise<boolean>;
   /**
@@ -416,7 +422,7 @@ export interface FileAnalysisRepository {
   /**
    * One transaction. False when there is no proposal or it is stale (the file is gone, not complete
    * or its sha256 differs from `sha256` / the proposal's; a stale proposal is deleted). Otherwise applies
-   * exactly `tags` as `apply` does, writes the analysis row from the proposal's fingerprint with
+   * exactly `tags` as `apply` does, writes the analysis row from the proposal's fingerprint and prompt name with
    * `analysedAt = now`, deletes the proposal and returns true.
    */
   acceptProposal(r: {

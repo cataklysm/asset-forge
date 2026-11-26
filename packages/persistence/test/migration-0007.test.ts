@@ -92,6 +92,7 @@ describe('migration 0007', () => {
           model: 'qwen',
           promptVersion: 1,
           tags: [{ name: 'blue', displayName: 'Blue' }],
+          promptName: null,
           createdAt: TS,
         }),
       ).toBe(true);

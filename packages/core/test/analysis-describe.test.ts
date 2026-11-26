@@ -4,8 +4,8 @@ import { rejectsWith, setup, UNKNOWN_ID, type Setup } from './analysis-setup.js'
 
 const MODEL = 'llava:13b';
 
-function describeWith(c: Setup, fileId: string, signal = new AbortController().signal) {
-  return describeImage({ session: c.session, vision: () => c.vision, images: c.images }, { fileId, model: MODEL, signal });
+function describeWith(c: Setup, fileId: string, signal = new AbortController().signal, prompt = IMAGE_PROMPT) {
+  return describeImage({ session: c.session, vision: () => c.vision, images: c.images }, { fileId, model: MODEL, prompt, signal });
 }
 
 /** Nothing was written: no job, analysis, proposal or tag. */
@@ -23,6 +23,13 @@ describe('describeImage', () => {
     expect(c.images.calls).toEqual([`/memory/${c.file.relativePath}`]);
     expect(c.vision.describeCalls).toEqual([{ image: new Uint8Array([0xff, 0xd8, 0xff]), prompt: IMAGE_PROMPT, model: MODEL }]);
     expectNoWrites(c);
+  });
+
+  it('sends exactly the prompt it is given', async () => {
+    const c = await setup();
+    const prompt = '  Describe only the armour.\n\nNothing else.  ';
+    await describeWith(c, c.file.id, new AbortController().signal, prompt);
+    expect(c.vision.describeCalls.map((call) => call.prompt)).toEqual([prompt]);
   });
 
   it('cuts the text at 4000 characters', async () => {
@@ -52,7 +59,7 @@ describe('describeImage', () => {
 
   it('fails provider_not_configured without a provider', async () => {
     const c = await setup();
-    const result = describeImage({ session: c.session, vision: () => null, images: c.images }, { fileId: c.file.id, model: MODEL, signal: new AbortController().signal });
+    const result = describeImage({ session: c.session, vision: () => null, images: c.images }, { fileId: c.file.id, model: MODEL, prompt: IMAGE_PROMPT, signal: new AbortController().signal });
     await rejectsWith(result, 'provider_not_configured');
     expect(c.images.calls).toEqual([]);
   });

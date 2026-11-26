@@ -29,6 +29,7 @@ async function proposeFor(c: Setup, fileId: string): Promise<void> {
       { name: 'metal', displayName: 'metal' },
       { name: 'front view', displayName: 'front view' },
     ],
+    promptName: 'Detail',
     createdAt: CREATED,
   });
 }
@@ -46,12 +47,20 @@ describe('getProposal', () => {
   it('returns the proposal view and the latest analysis job', async () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
-    await enqueueAnalysis(c.session, { target: { kind: 'files', fileIds: [c.file.id] }, model: MODEL, mode: 'propose', force: true, provider: PROVIDER });
+    await enqueueAnalysis(c.session, {
+      target: { kind: 'files', fileIds: [c.file.id] },
+      model: MODEL,
+      mode: 'propose',
+      force: true,
+      provider: PROVIDER,
+      prompt: { name: 'Detail', text: 'T', maxTags: 15 },
+    });
     const jobId = c.db.jobs.rows[0]!.id;
 
     expect(await getProposal(c.session, c.file.id)).toEqual({
       proposal: {
         model: MODEL,
+        promptName: 'Detail',
         createdAt: CREATED,
         stale: false,
         tags: [

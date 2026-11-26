@@ -59,7 +59,9 @@ async function addFile(id: string, complete = true): Promise<void> {
 
 const t = (name: string, displayName = name) => ({ name, displayName, newId: uuid(nextTagId++) });
 
-const apply = (o: { fileId?: string; sha256?: string; tags?: ReturnType<typeof t>[]; model?: string; now?: string } = {}) =>
+const apply = (
+  o: { fileId?: string; sha256?: string; tags?: ReturnType<typeof t>[]; model?: string; promptName?: string | null; now?: string } = {},
+) =>
   db.analyses.apply({
     fileId: o.fileId ?? FILE_ID,
     sha256: o.sha256 ?? SHA,
@@ -67,6 +69,7 @@ const apply = (o: { fileId?: string; sha256?: string; tags?: ReturnType<typeof t
     provider: 'ollama',
     model: o.model ?? 'qwen',
     promptVersion: 1,
+    promptName: o.promptName === undefined ? null : o.promptName,
     now: o.now ?? T1,
   });
 
@@ -89,6 +92,7 @@ describe('file analysis repository', () => {
       provider: 'ollama',
       model: 'qwen',
       promptVersion: 1,
+      promptName: null,
       analysedAt: T1,
     });
   });
@@ -204,11 +208,48 @@ describe('analysis of a trashed file', () => {
       model: 'qwen',
       promptVersion: 1,
       tags: [{ name: 'rusty', displayName: 'rusty' }],
+      promptName: null,
       createdAt: T2,
     });
     expect(await db.analyses.propose(proposal(FILE_ID))).toBe(false);
     expect(fileRows('file_analysis_proposal', FILE_ID)).toBe(0);
     expect(await db.analyses.propose(proposal(LIVE_ID))).toBe(true);
     expect(fileRows('file_analysis_proposal', LIVE_ID)).toBe(1);
+  });
+});
+
+describe('the recorded analysis prompt name', () => {
+  const proposal = (promptName: string | null) => ({
+    fileId: FILE_ID,
+    sha256: SHA,
+    provider: 'ollama',
+    model: 'qwen',
+    promptVersion: 1,
+    tags: [{ name: 'rusty', displayName: 'rusty' }],
+    promptName,
+    createdAt: T1,
+  });
+
+  test('apply stores the prompt name and get returns it', async () => {
+    expect(await apply({ promptName: 'General' })).toBe(true);
+    expect(await db.analyses.get(FILE_ID)).toMatchObject({ promptName: 'General' });
+  });
+
+  test('an apply without a prompt name after a named one stores null', async () => {
+    await apply({ promptName: 'General' });
+    expect(await apply({ promptName: null, now: T2 })).toBe(true);
+    expect(await db.analyses.get(FILE_ID)).toMatchObject({ promptName: null, analysedAt: T2 });
+  });
+
+  test('propose stores the prompt name and getProposal returns it', async () => {
+    expect(await db.analyses.propose(proposal('Detail'))).toBe(true);
+    expect(await db.analyses.getProposal(FILE_ID)).toMatchObject({ promptName: 'Detail', stale: false });
+  });
+
+  test('accepting a proposal writes its prompt name to the analysis row', async () => {
+    await apply({ promptName: 'General' });
+    await db.analyses.propose(proposal('Detail'));
+    expect(await db.analyses.acceptProposal({ fileId: FILE_ID, sha256: SHA, tags: [t('rusty')], now: T2 })).toBe(true);
+    expect(await db.analyses.get(FILE_ID)).toMatchObject({ promptName: 'Detail', analysedAt: T2 });
   });
 });

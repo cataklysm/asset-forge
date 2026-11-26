@@ -380,6 +380,8 @@ export const fileAnalysis = sqliteTable('file_analysis', {
   provider: text('provider').notNull(),
   model: text('model').notNull(),
   promptVersion: integer('prompt_version').notNull(),
+  /** Name of the analysis prompt used, as it was then; null for rows from before analysis prompts. */
+  promptName: text('prompt_name'),
   analysedAt: text('analysed_at').notNull(),
 });
 
@@ -393,6 +395,8 @@ export const fileAnalysisProposal = sqliteTable('file_analysis_proposal', {
   model: text('model').notNull(),
   promptVersion: integer('prompt_version').notNull(),
   tags: text('tags').notNull(),
+  /** Name of the analysis prompt used, as it was then; null for rows from before analysis prompts. */
+  promptName: text('prompt_name'),
   createdAt: text('created_at').notNull(),
 });
 
