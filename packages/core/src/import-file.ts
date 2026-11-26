@@ -111,6 +111,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       width: size?.width ?? null,
       height: size?.height ?? null,
       tags: [],
+      hasProposal: false,
     };
     return { sourcePath, file, error: null, duplicateOf };
   } catch (error) {
@@ -147,6 +148,7 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
       width: null,
       height: null,
       tags: [],
+      hasProposal: false,
     };
     return { sourcePath, file, error: message, duplicateOf: [] };
   }

@@ -14,7 +14,7 @@ import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import type { AssetTab } from '../../src/renderer/src/list-state';
 import { AssetScreen } from '../../src/renderer/src/screens/AssetScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { fileRecord, nextId, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { applyFiles, enqueueAll, fileRecord, nextId, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const NOW = '2026-01-01T00:00:00.000Z';
 const TYPE: AssetType = {
@@ -602,7 +602,7 @@ it('files tab: the tile menu analyses a complete image and shows the outcome', a
   const blend = nonImageRecord('tree.blend', { assetId: asset.id, role: 'working' });
   const api = install(asset, {
     'files:list': listOf([leaf, blend]),
-    'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }),
+    'analysis:enqueue': enqueueAll,
   });
   render(<Harness id={asset.id} />);
   await screen.findByText('tree.blend');
@@ -612,19 +612,18 @@ it('files tab: the tile menu analyses a complete image and shows the outcome', a
   await user.click(within(tile('leaf.png')).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
   expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [leaf.id] }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([leaf.id])]);
 });
 
-it('files tab: Analyse in the selection bar sends only the analysable images and lists the skipped ones', async () => {
+it('files tab: Analyse in the selection bar sends only the analysable images and counts the skipped ones', async () => {
   const asset = assetDetail();
   const { user, api, c1, c2 } = await selectThree(asset, {
-    'analysis:enqueue': (r) => ({ enqueued: 1, skipped: [{ fileId: r.fileIds[1]!, reason: 'already_queued' }] }),
+    'analysis:enqueue': () => ({ enqueued: 1, skipped: { ...NONE_SKIPPED, alreadyQueued: 1 } }),
   });
   await user.click(screen.getByRole('button', { name: 'Analyse' }));
-  const strip = await screen.findByRole('alert');
+  const strip = await screen.findByRole('status');
   expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
-  expect(strip.textContent).toContain('c2.png: Already queued');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id, c2.id] }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id, c2.id])]);
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
 

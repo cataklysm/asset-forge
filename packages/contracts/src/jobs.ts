@@ -22,6 +22,8 @@ export const JobErrorCodeSchema = z.enum([
   'invalid_response',
   'file_unavailable',
   'internal_error',
+  'provider_unauthorized',
+  'provider_not_configured',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -37,6 +39,8 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   invalid_response: 'The analysis provider returned an unusable answer',
   file_unavailable: 'The file is not available for analysis',
   internal_error: 'The job failed unexpectedly',
+  provider_unauthorized: 'The analysis provider refused the API key',
+  provider_not_configured: 'No analysis provider is configured',
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
@@ -52,7 +56,17 @@ export function isRetryableJobError(code: JobErrorCode): boolean {
 
 export const ANALYZE_FILE_JOB = 'vision.analyze_file';
 
-export const AnalyzeFilePayloadSchema = z.object({ version: z.literal(1) });
+/** A model name as the provider lists it; stored and sent verbatim. */
+export const ModelNameSchema = z.string().min(1).max(200);
+
+/**
+ * v1 rows were written by phase 4a and run in mode `apply` with the tagging default model;
+ * v2 carries the model chosen at enqueue and whether the result is applied or proposed.
+ */
+export const AnalyzeFilePayloadSchema = z.union([
+  z.object({ version: z.literal(1) }),
+  z.object({ version: z.literal(2), model: ModelNameSchema, mode: z.enum(['apply', 'propose']) }),
+]);
 export type AnalyzeFilePayload = z.infer<typeof AnalyzeFilePayloadSchema>;
 
 export const JobViewSchema = z.object({
@@ -83,14 +97,11 @@ export const JobSummarySchema = z.object({
   cancelled: count,
   succeeded: count,
   changes: count,
+  /** Set while the `local_gpu` queue is paused because the provider is down or refused the request; null otherwise. */
+  paused: z.object({ reason: JobErrorCodeSchema }).nullable(),
 });
 export type JobSummary = z.infer<typeof JobSummarySchema>;
 
-export const AnalysisSkipReasonSchema = z.enum(['not_found', 'not_analysable', 'already_queued']);
+/** Why a file was not queued by an enqueue; the IPC result carries counts per reason (`EnqueueAnalysisResultSchema`). */
+export const AnalysisSkipReasonSchema = z.enum(['not_found', 'not_analysable', 'already_queued', 'already_analysed']);
 export type AnalysisSkipReason = z.infer<typeof AnalysisSkipReasonSchema>;
-
-export const EnqueueAnalysisResultSchema = z.object({
-  enqueued: count,
-  skipped: z.array(z.object({ fileId: z.string(), reason: AnalysisSkipReasonSchema })),
-});
-export type EnqueueAnalysisResult = z.infer<typeof EnqueueAnalysisResultSchema>;

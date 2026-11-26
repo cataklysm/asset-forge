@@ -95,7 +95,7 @@ it('Ctrl+F focuses the page search field', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9 };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: null };
 
 function workspaceShell(summary: () => JobSummary) {
   const api = installFakeApi({

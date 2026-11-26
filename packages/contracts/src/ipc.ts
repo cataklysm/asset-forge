@@ -4,11 +4,9 @@ import { TagSuggestionSchema } from './tags';
 import {
   AssignManyResultSchema,
   FileIdsSchema,
-  FileKindSchema,
   FileListSchema,
   FileRecordSchema,
   FileRecordsSchema,
-  FileScopeSchema,
   FileTargetSchema,
   ImportResultSchema,
 } from './files';
@@ -45,7 +43,18 @@ import {
   WorkflowTemplateSchema,
 } from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
-import { EnqueueAnalysisResultSchema, JobStatusSchema, JobSummarySchema, JobViewSchema } from './jobs';
+import { JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema } from './jobs';
+import {
+  AnalysisModeSchema,
+  AnalysisPreviewSchema,
+  AnalysisTargetSchema,
+  AssetListFilterSchema,
+  DescribeResultSchema,
+  EnqueueAnalysisResultSchema,
+  FileListFilterSchema,
+  ProposalViewSchema,
+} from './analysis';
+import { ListModelsResultSchema, SetVisionSettingsSchema, VisionSettingsViewSchema } from './settings';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -101,13 +110,8 @@ export const ipcContract = {
     response: z.array(ImportResultSchema),
   },
   'files:list': {
-    request: PageRequestSchema.extend({
-      scope: FileScopeSchema,
-      query: z.string().max(200).optional(),
-      tagNames: z.array(z.string().max(200)).max(10).optional(),
-      role: FileRoleSchema.optional(),
-      kind: FileKindSchema.optional(),
-    }),
+    /** `hasProposal` is a list filter only; it is not part of `FileListFilter` in an analysis target. */
+    request: PageRequestSchema.extend(FileListFilterSchema.shape).extend({ hasProposal: z.boolean().optional() }),
     response: FileListSchema,
   },
   'files:assign': {
@@ -157,15 +161,7 @@ export const ipcContract = {
     response: ProjectSchema,
   },
   'assets:list': {
-    request: PageRequestSchema.extend({
-      typeId: IdSchema.optional(),
-      status: AssetStatusSchema.optional(),
-      projectId: IdSchema.optional(),
-      query: z.string().max(200).optional(),
-      tagNames: z.array(z.string().max(200)).max(10).optional(),
-      fileRole: FileRoleSchema.optional(),
-      fileKind: FileKindSchema.optional(),
-    }),
+    request: PageRequestSchema.extend(AssetListFilterSchema.shape),
     response: AssetListSchema,
   },
   'assets:get': {
@@ -311,10 +307,63 @@ export const ipcContract = {
     request: z.object({ assetId: IdSchema }),
     response: z.object({ removed: z.boolean() }),
   },
-  /** Not all or nothing: analysable files are enqueued, the others are reported as skipped. */
+  /** Settings channels need no open workspace. The view never carries the API key. */
+  'settings:getVision': {
+    request: EmptyRequestSchema,
+    response: VisionSettingsViewSchema,
+  },
+  /** `apiKey` absent keeps the stored key, `null` deletes it; a changed origin without a new key deletes it. */
+  'settings:setVision': {
+    request: SetVisionSettingsSchema,
+    response: VisionSettingsViewSchema,
+  },
+  /** Uses the stored settings; the list is cached until the settings change or `refresh` is true. */
+  'settings:listVisionModels': {
+    request: z.object({ refresh: z.boolean().optional() }),
+    response: ListModelsResultSchema,
+  },
+  /** What `analysis:enqueue` of this target with this model would do, as counts. */
+  'analysis:preview': {
+    request: z.object({ target: AnalysisTargetSchema, model: ModelNameSchema }),
+    response: AnalysisPreviewSchema,
+  },
+  /**
+   * Not all or nothing: analysable files are enqueued, the others are counted as skipped. `force`
+   * bypasses the fingerprint skip. `propose` only for a `files` target with exactly one id; it implies `force`.
+   */
   'analysis:enqueue': {
-    request: z.object({ fileIds: FileIdsSchema }),
+    request: z.object({
+      target: AnalysisTargetSchema,
+      model: ModelNameSchema,
+      mode: AnalysisModeSchema,
+      force: z.boolean(),
+    }),
     response: EnqueueAnalysisResultSchema,
+  },
+  /** The waiting proposal of a file and its active or latest analysis job. */
+  'analysis:getProposal': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.object({ proposal: ProposalViewSchema.nullable(), job: JobViewSchema.nullable() }),
+  },
+  /** Applies a non-empty subset of the proposal's tag names; `invalid_operation` when it is gone or stale. */
+  'analysis:acceptProposal': {
+    request: z.object({ fileId: IdSchema, names: z.array(z.string().max(200)).min(1).max(20) }),
+    response: z.object({}),
+  },
+  /** Idempotent. */
+  'analysis:discardProposal': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.object({}),
+  },
+  /** Image2Prompt: one request at a time (`busy` otherwise); the text is not stored. */
+  'analysis:describe': {
+    request: z.object({ requestId: IdSchema, fileId: IdSchema, model: ModelNameSchema }),
+    response: DescribeResultSchema,
+  },
+  /** An unknown or finished request is left alone. */
+  'analysis:cancelDescribe': {
+    request: z.object({ requestId: IdSchema }),
+    response: z.object({}),
   },
   /** Newest first. */
   'jobs:list': {
@@ -344,6 +393,11 @@ export const ipcContract = {
   'jobs:retryFailed': {
     request: EmptyRequestSchema,
     response: z.object({ retried: z.number().int().nonnegative() }),
+  },
+  /** Ends a pause of the analysis queue. */
+  'jobs:resume': {
+    request: EmptyRequestSchema,
+    response: z.object({}),
   },
   /** Deletes every succeeded, failed and cancelled job. */
   'jobs:clearFinished': {

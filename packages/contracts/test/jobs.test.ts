@@ -49,16 +49,22 @@ describe('job contracts', () => {
   test('the payload version is pinned', () => {
     expect(AnalyzeFilePayloadSchema.safeParse({ version: 1 }).success).toBe(true);
     expect(AnalyzeFilePayloadSchema.safeParse({ version: 2 }).success).toBe(false);
+    expect(AnalyzeFilePayloadSchema.safeParse({ version: 3, model: 'm', mode: 'apply' }).success).toBe(false);
   });
 
-  test('summary counts are non-negative integers', () => {
-    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4 };
+  test('summary counts are non-negative integers and a pause names its reason', () => {
+    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: null };
     expect(JobSummarySchema.safeParse(ok).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, failed: -1 }).success).toBe(false);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'provider_unauthorized' } }).success).toBe(true);
+    expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'nope' } }).success).toBe(false);
+    const { paused: _paused, ...withoutPause } = ok;
+    expect(JobSummarySchema.safeParse(withoutPause).success).toBe(false);
   });
 
-  test('an enqueue result lists skipped files with a reason', () => {
-    expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped: [{ fileId: 'f', reason: 'not_found' }] }).success).toBe(true);
-    expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped: [{ fileId: 'f', reason: 'x' }] }).success).toBe(false);
+  test('an enqueue result counts the skipped files per reason', () => {
+    const skipped = { notFound: 1, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
+    expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped }).success).toBe(true);
+    expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 1, skipped: [{ fileId: 'f', reason: 'not_found' }] }).success).toBe(false);
   });
 });

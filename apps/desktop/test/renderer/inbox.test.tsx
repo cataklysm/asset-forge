@@ -8,7 +8,7 @@ import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
-import { assetSummary, fileRecord, nonImageRecord, pageOf, tagOf } from './fixtures';
+import { applyFiles, assetSummary, enqueueAll, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 
 const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
@@ -359,7 +359,7 @@ it('the tile menu analyses a complete image and shows the outcome', async () => 
   const user = userEvent.setup();
   const { c1 } = files();
   const blend = nonImageRecord('tree.blend');
-  const api = install([c1, blend], { 'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }) });
+  const api = install([c1, blend], { 'analysis:enqueue': enqueueAll });
   render(<Harness />);
   await screen.findByText('tree.blend');
   await user.click(within(tile('tree.blend')).getByRole('button', { name: 'File actions' }));
@@ -368,13 +368,13 @@ it('the tile menu analyses a complete image and shows the outcome', async () => 
   await user.click(within(tile('c1.png')).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
   expect((await screen.findByRole('status')).textContent).toContain('1 queued, 0 skipped');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id] }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id])]);
 });
 
 it('the detail dialog analyses the shown image', async () => {
   const user = userEvent.setup();
   const { c1 } = files();
-  const api = install([c1], { 'analysis:enqueue': (r) => ({ enqueued: r.fileIds.length, skipped: [] }) });
+  const api = install([c1], { 'analysis:enqueue': enqueueAll });
   render(<Harness />);
   await screen.findByText('c1.png');
   await user.click(tile('c1.png'));
@@ -382,23 +382,22 @@ it('the detail dialog analyses the shown image', async () => {
   const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
   await user.click(within(dialog).getByRole('button', { name: 'More' }));
   await user.click(screen.getByRole('menuitem', { name: 'Analyse' }));
-  await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id] }]));
+  await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id])]));
 });
 
-it('Analyse in the selection bar sends only the images and lists the skipped ones; the selection is kept', async () => {
+it('Analyse in the selection bar sends only the images and counts the skipped ones; the selection is kept', async () => {
   const user = userEvent.setup();
   const { c1, c2 } = files();
   const doc = nonImageRecord('notes.pdf');
   const api = install([c1, c2, doc], {
-    'analysis:enqueue': () => ({ enqueued: 1, skipped: [{ fileId: c2.id, reason: 'already_queued' }] }),
+    'analysis:enqueue': () => ({ enqueued: 1, skipped: { ...NONE_SKIPPED, alreadyQueued: 1 } }),
   });
   render(<Harness />);
   await selectRange(user, 'c1.png', 'notes.pdf');
   await user.click(screen.getByRole('button', { name: 'Analyse' }));
-  const strip = await screen.findByRole('alert');
+  const strip = await screen.findByRole('status');
   expect(within(strip).getByText('1 queued, 1 skipped')).toBeTruthy();
-  expect(strip.textContent).toContain('c2.png: Already queued');
-  expect(callsOf(api, 'analysis:enqueue')).toEqual([{ fileIds: [c1.id, c2.id] }]);
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([applyFiles([c1.id, c2.id])]);
   expect(screen.getByText('3 selected')).toBeTruthy();
 });
 
@@ -425,7 +424,7 @@ it('Analyse is disabled for a selection without images, and a rejected call show
   expect(screen.getByText('1 selected')).toBeTruthy();
 });
 
-const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1 };
+const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: null };
 
 /** The inbox under a job provider; `succeed()` makes the next poll report a finished job. */
 function withJobs(files: FileRecord[]) {

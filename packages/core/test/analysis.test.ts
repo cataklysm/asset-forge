@@ -33,8 +33,12 @@ async function setup() {
   const file = await importOne('car.png');
   const vision = new FakeVisionProvider();
   const images = new FakeModelImageSource();
-  const handler = createAnalyzeFileHandler({ session, vision, images, provider: 'ollama', model: 'mock-vision' });
-  return { db, storage, session, importOne, file, vision, images, handler };
+  let configured: { vision: FakeVisionProvider | null; model: string | null } = { vision, model: 'mock-vision' };
+  const handler = createAnalyzeFileHandler({ session, vision: () => configured.vision, images, provider: 'ollama', defaultModel: () => configured.model });
+  const configure = (c: { vision: FakeVisionProvider | null; model: string | null }) => {
+    configured = c;
+  };
+  return { db, storage, session, importOne, file, vision, images, handler, configure };
 }
 
 function jobFor(fileId: string | null, payload: unknown = { version: 1 }): Job {
@@ -124,12 +128,23 @@ describe('the analyze file handler', () => {
     expect(handler).toMatchObject({ resourceClass: 'local_gpu', onInterrupted: 'requeue' });
   });
 
+  it('fails provider_not_configured without a provider or a model, before reading the image', async () => {
+    const { db, file, vision, images, handler, configure } = await setup();
+    configure({ vision: null, model: 'mock-vision' });
+    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'provider_not_configured');
+    configure({ vision, model: null });
+    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'provider_not_configured');
+    expect(images.calls).toEqual([]);
+    expect(vision.calls).toEqual([]);
+    expect(await db.analyses.get(file.id)).toBeNull();
+  });
+
   it('writes the AI tags and the analysis record', async () => {
     const { db, file, vision, images, handler } = await setup();
     await handler.run(jobFor(file.id), new AbortController().signal);
 
     expect(images.calls).toEqual([`/memory/${file.relativePath}`]);
-    expect(vision.calls).toEqual([{ image: new Uint8Array([0xff, 0xd8, 0xff]), prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA }]);
+    expect(vision.calls).toEqual([{ image: new Uint8Array([0xff, 0xd8, 0xff]), prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA, model: 'mock-vision' }]);
     expect(db.tags.forFile(file.id)).toEqual([
       { name: 'front view', displayName: 'front view', origin: 'ai' },
       { name: 'metal', displayName: 'metal', origin: 'ai' },

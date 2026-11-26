@@ -23,11 +23,13 @@ export interface JobHost extends JobControl {
 
 export interface JobHostDeps {
   manager: WorkspaceManager;
-  vision: VisionProvider;
+  /** The provider in force when a job runs; null when none is configured. */
+  vision: () => VisionProvider | null;
   images: ModelImageSource;
-  /** Provider and model recorded with every analysis. */
+  /** Provider id recorded with every analysis. */
   provider: string;
-  model: string;
+  /** The tagging default model at run time; null when none is set. */
+  defaultModel: () => string | null;
   limits?: Record<ResourceClass, number>;
 }
 
@@ -60,7 +62,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
               vision: deps.vision,
               images: deps.images,
               provider: deps.provider,
-              model: deps.model,
+              defaultModel: deps.defaultModel,
             }),
           },
           limits: deps.limits ?? DEFAULT_LIMITS,

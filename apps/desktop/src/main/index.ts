@@ -119,13 +119,15 @@ function start(): void {
 
   const appUrl = getAppUrl(windowOptions);
 
+  // phase 4b stub: Task 8 (the provider and the models come from the vision settings)
   const vision = readVisionConfig(process.env, (message) => console.warn(message));
+  const visionAdapter = createOllamaVision({ baseUrl: vision.baseUrl });
   const jobHost = createJobHost({
     manager,
-    vision: createOllamaVision(vision),
+    vision: () => visionAdapter,
     images: { jpeg: (path) => pool.jpeg(path) },
     provider: OLLAMA_PROVIDER,
-    model: vision.model,
+    defaultModel: () => vision.model,
   });
 
   const handlers = createWorkspaceHandlers(

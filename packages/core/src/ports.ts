@@ -1,5 +1,7 @@
 import type { Readable } from 'node:stream';
 import type {
+  AnalysisPreview,
+  AnalysisTarget,
   Asset,
   AssetList,
   AssetAssignment,
@@ -100,6 +102,8 @@ export interface FileQuery extends Page {
   tagNames?: string[];
   role?: FileRole;
   kind?: FileKind;
+  /** Only files with (true) or without (false) a waiting tag proposal. */
+  hasProposal?: boolean;
 }
 
 /** Where a file row points: its path and, unless it is in the inbox, its asset and role. */
@@ -330,6 +334,8 @@ export interface JobRepository {
   counts(): Promise<Record<JobStatus, number>>;
   /** Newest created_at first, then id descending. `fileName` is the file's original name. */
   list(q: { limit: number; offset: number; status?: JobStatus }): Promise<{ items: JobView[]; total: number }>;
+  /** The newest job (created_at, then id) of this type for the file, whatever its status; null when there is none. */
+  latestForFile(fileId: string, type: string): Promise<Job | null>;
 }
 
 /** Provenance of the latest analysis of a file: the content that was analysed, by what and when. */
@@ -342,13 +348,30 @@ export interface FileAnalysis {
   analysedAt: string;
 }
 
+/** What an analysis result depends on besides the file content: equal fingerprints and hash mean "already analysed". */
+export interface AnalysisFingerprint {
+  provider: string;
+  model: string;
+  promptVersion: number;
+}
+
+/** A tag proposal of an analysis in mode `propose`, waiting for the owner; one per file. */
+export interface Proposal extends AnalysisFingerprint {
+  fileId: string;
+  /** Hash of the content that was analysed. */
+  sha256: string;
+  /** Already cleaned, at most 20. */
+  tags: { name: string; displayName: string }[];
+  createdAt: string;
+}
+
 export interface FileAnalysisRepository {
   get(fileId: string): Promise<FileAnalysis | null>;
   /**
    * One transaction. Returns false and writes nothing unless the file exists, is complete and has
    * this sha256. Otherwise: deletes every `ai` assignment of the file, inserts an `ai` assignment
    * for each tag the file does not carry manually (creating missing tags), upserts the analysis
-   * row and reindexes the file's asset.
+   * row, deletes a waiting proposal of the file and reindexes the file's asset.
    */
   apply(r: {
     fileId: string;
@@ -359,6 +382,59 @@ export interface FileAnalysisRepository {
     promptVersion: number;
     now: string;
   }): Promise<boolean>;
+  /**
+   * One transaction. Returns false and writes nothing unless the file exists, is complete and has
+   * this sha256; otherwise stores the proposal, replacing an older one. Tags and the analysis row stay untouched.
+   */
+  propose(r: Proposal): Promise<boolean>;
+  /** The waiting proposal; `stale` when the file's current sha256 differs from the proposal's. */
+  getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null>;
+  /**
+   * One transaction. False when there is no proposal or it is stale (the file is gone, not complete
+   * or its sha256 differs from `sha256` / the proposal's; a stale proposal is deleted). Otherwise applies
+   * exactly `tags` as `apply` does, writes the analysis row from the proposal's fingerprint with
+   * `analysedAt = now`, deletes the proposal and returns true.
+   */
+  acceptProposal(r: {
+    fileId: string;
+    sha256: string;
+    tags: readonly { name: string; displayName: string; newId: string }[];
+    now: string;
+  }): Promise<boolean>;
+  /** Deletes the proposal; no-op without one. */
+  discardProposal(fileId: string): Promise<void>;
+}
+
+/** One file of an analysis target. */
+export interface AnalysisTargetEntry {
+  fileId: string;
+  /** Complete, of one of the given MIME types, with a checksum (core's `isAnalysable`). */
+  analysable: boolean;
+  /** The fingerprint and the file's current sha256 equal its analysis row or its waiting proposal. */
+  analysed: boolean;
+}
+
+/**
+ * Enumerates the files of an analysis target in the main process, so the id set never crosses IPC.
+ * `asset`: every file of the asset. `assetFilter`: the files of the matching assets, only those with
+ * the filter's `fileRole` / `fileKind` when set; `query` and `tagNames` select assets only.
+ */
+export interface AnalysisTargetReader {
+  /** Keyset page by file id, ascending, after `afterId`; unknown ids of a `files` target are absent. */
+  page(r: {
+    target: AnalysisTarget;
+    fingerprint: AnalysisFingerprint;
+    mimeTypes: readonly string[];
+    afterId: string | null;
+    limit: number;
+  }): Promise<AnalysisTargetEntry[]>;
+  /**
+   * Disjoint counts over the whole target, for `analysis:preview`: `notAnalysable` the files that are
+   * not analysable; of the analysable ones `alreadyAnalysed` those analysed with the fingerprint,
+   * `alreadyQueued` the rest with an active `vision.analyze_file` job, `analysable` the remainder
+   * (what an enqueue without `force` would queue). Unknown ids of a `files` target are not counted.
+   */
+  count(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisPreview>;
 }
 
 export interface WorkspaceMeta {
@@ -388,6 +464,7 @@ export interface WorkspaceDatabase {
   tags: TagRepository;
   jobs: JobRepository;
   analyses: FileAnalysisRepository;
+  analysisTargets: AnalysisTargetReader;
   /**
    * Recomputes derived data (file kinds, the search index) unless the stored stamp is current;
    * the stamp is written last, so an interrupted run is redone on the next open.
@@ -409,11 +486,17 @@ export interface ImageProbe {
 }
 
 /**
- * Asks a vision model about one image. Resolves with the model's parsed JSON answer; rejects with a
- * `JobError` on provider failure, or with the signal's reason when `signal` aborts. Implemented outside core.
+ * A vision provider; the model is an argument of every call, never bound to the instance. Each
+ * method rejects with a `JobError` on provider failure, or with the signal's reason when `signal`
+ * aborts. Implemented outside core.
  */
 export interface VisionProvider {
-  analyzeImage(r: { image: Uint8Array; prompt: string; schema: unknown; signal: AbortSignal }): Promise<unknown>;
+  /** Resolves with the model's parsed JSON answer, requested in the format `schema`. */
+  analyzeImage(r: { image: Uint8Array; prompt: string; schema: unknown; model: string; signal: AbortSignal }): Promise<unknown>;
+  /** Resolves with the model's plain-text answer. */
+  describeImage(r: { image: Uint8Array; prompt: string; model: string; signal: AbortSignal }): Promise<string>;
+  /** The server's models; `vision` is null when the server does not report capabilities. */
+  listModels(signal: AbortSignal): Promise<{ name: string; vision: boolean | null }[]>;
 }
 
 /** Renders an image for a vision model. Implemented outside core. */

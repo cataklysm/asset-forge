@@ -21,8 +21,12 @@ afterEach(async () => {
   provider = undefined;
 });
 
-function analyze(options: Parameters<typeof createOllamaVision>[0], signal = new AbortController().signal) {
-  return createOllamaVision(options).analyzeImage({ image, prompt, schema, signal });
+/** The model is an argument of every call, not an option of the adapter. */
+function analyze(
+  { model, ...options }: Parameters<typeof createOllamaVision>[0] & { model: string },
+  signal = new AbortController().signal,
+) {
+  return createOllamaVision(options).analyzeImage({ image, prompt, schema, model, signal });
 }
 
 async function failureOf(promise: Promise<unknown>): Promise<unknown> {

@@ -35,6 +35,7 @@ const toRecord = (row: typeof file.$inferSelect, tags: TagAssignment[]): FileRec
   width: row.width,
   height: row.height,
   tags,
+  hasProposal: false, // phase 4b stub: Task 2
 });
 
 /** Turns rows into records; the file tags of all rows come from one query. */

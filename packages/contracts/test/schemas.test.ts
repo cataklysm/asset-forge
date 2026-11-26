@@ -59,6 +59,7 @@ describe('FileRecordSchema', () => {
       width: null,
       height: null,
       tags: [],
+      hasProposal: false,
     };
     expect(FileRecordSchema.parse(record)).toEqual(record);
     const { kind: _k, ...withoutKind } = record;

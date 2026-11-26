@@ -65,6 +65,11 @@ export class InMemoryJobRepository implements JobRepository {
     return row ? structuredClone(row) : null;
   }
 
+  // phase 4b stub: Task 3
+  async latestForFile(_fileId: string, _type: string): Promise<Job | null> {
+    throw new Error('not implemented');
+  }
+
   async listByStatus(status: JobStatus): Promise<Job[]> {
     return this.rows.filter((r) => r.status === status).sort(oldestFirst).map((r) => structuredClone(r));
   }

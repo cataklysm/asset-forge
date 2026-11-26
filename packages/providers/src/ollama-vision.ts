@@ -1,3 +1,4 @@
+import type { JobErrorCode } from '@assetforge/contracts';
 import { JobError, type VisionProvider } from '@assetforge/core';
 
 export const OLLAMA_PROVIDER = 'ollama';
@@ -43,9 +44,14 @@ async function readCapped(response: Response): Promise<string> {
 
 export interface OllamaVisionOptions {
   baseUrl: string;
-  model: string;
+  /** The API key in force at call time; null for none. */
+  // phase 4b stub: Task 4 (accepted and not used yet)
+  apiKey?: () => string | null;
   timeoutMs?: number;
   fetch?: typeof fetch;
+  /** Told the code and HTTP status of every failed call. */
+  // phase 4b stub: Task 4 (accepted and not used yet)
+  onFailure?: (code: JobErrorCode, status: number | null) => void;
 }
 
 /** A `VisionProvider` over Ollama's `POST /api/chat`. No authentication in phase 4a. */
@@ -55,7 +61,7 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
   const fetchImpl = options.fetch ?? fetch;
 
   return {
-    async analyzeImage({ image, prompt, schema, signal }) {
+    async analyzeImage({ image, prompt, schema, model, signal }) {
       signal.throwIfAborted();
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(), timeoutMs);
@@ -75,7 +81,7 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
-              model: options.model,
+              model,
               stream: false,
               format: schema,
               options: { temperature: 0 },
@@ -131,6 +137,14 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionProvider
       } finally {
         clearTimeout(timer);
       }
+    },
+    // phase 4b stub: Task 4
+    async describeImage(): Promise<string> {
+      throw new Error('not implemented');
+    },
+    // phase 4b stub: Task 4
+    async listModels(): Promise<{ name: string; vision: boolean | null }[]> {
+      throw new Error('not implemented');
     },
   };
 }

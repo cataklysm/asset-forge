@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analysable, analysableFiles, NONE_ANALYSABLE, startAnalysis } from '../../src/renderer/src/analysis';
+import { analysable, analysableFiles, NONE_ANALYSABLE, startAnalysis, TEMP_MODEL } from '../../src/renderer/src/analysis';
 import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
 import { selectAll } from '../../src/renderer/src/selection';
 import { installFakeApi } from './fake-api';
@@ -32,29 +32,23 @@ describe('analysis', () => {
     expect(labels({ cover: null, onDetails: () => {} })).not.toContain('Analyse');
   });
 
-  it('startAnalysis sends the ids and names every skipped file with its reason', async () => {
+  it('startAnalysis sends the ids as an applied file target and counts the skipped files', async () => {
     const a = fileRecord({ originalName: 'a.png' });
     const b = fileRecord({ originalName: 'b.png' });
     const c = fileRecord({ originalName: 'c.png' });
     const api = installFakeApi({
       'analysis:enqueue': () => ({
-        enqueued: 0,
-        skipped: [
-          { fileId: a.id, reason: 'not_found' },
-          { fileId: b.id, reason: 'not_analysable' },
-          { fileId: c.id, reason: 'already_queued' },
-        ],
+        enqueued: 1,
+        skipped: { notFound: 1, notAnalysable: 0, alreadyQueued: 1, alreadyAnalysed: 0 },
       }),
     });
     const result = await startAnalysis([a, b, c]);
-    expect(api.calls).toEqual([{ channel: 'analysis:enqueue', request: { fileIds: [a.id, b.id, c.id] } }]);
-    expect(result).toEqual({
-      title: '0 queued, 3 skipped',
-      failures: [
-        { key: a.id, name: 'a.png', message: 'File not found' },
-        { key: b.id, name: 'b.png', message: 'Not an image that can be analysed' },
-        { key: c.id, name: 'c.png', message: 'Already queued' },
-      ],
-    });
+    expect(api.calls).toEqual([
+      {
+        channel: 'analysis:enqueue',
+        request: { target: { kind: 'files', fileIds: [a.id, b.id, c.id] }, model: TEMP_MODEL, mode: 'apply', force: true },
+      },
+    ]);
+    expect(result).toEqual({ title: '1 queued, 2 skipped', failures: [] });
   });
 });

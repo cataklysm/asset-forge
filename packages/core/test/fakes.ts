@@ -38,8 +38,10 @@ import {
   ValidationFailedError,
 } from '../src/errors.js';
 import type {
+  AnalysisTargetReader,
   AssetCover,
   AssetQuery,
+  Proposal,
   AssetRelationRepository,
   AssetRepository,
   AssignmentKey,
@@ -368,6 +370,7 @@ class InMemoryFiles implements FileRepository {
       width: null,
       height: null,
       tags: [],
+      hasProposal: false, // phase 4b stub: Task 3
     });
   }
 
@@ -477,6 +480,31 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       analysedAt: r.now,
     });
     return true;
+  }
+
+  // phase 4b stub: Task 3
+  async propose(_r: Proposal): Promise<boolean> {
+    throw new Error('not implemented');
+  }
+
+  // phase 4b stub: Task 3
+  async getProposal(_fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
+    throw new Error('not implemented');
+  }
+
+  // phase 4b stub: Task 3
+  async acceptProposal(_r: {
+    fileId: string;
+    sha256: string;
+    tags: readonly { name: string; displayName: string; newId: string }[];
+    now: string;
+  }): Promise<boolean> {
+    throw new Error('not implemented');
+  }
+
+  // phase 4b stub: Task 3
+  async discardProposal(_fileId: string): Promise<void> {
+    throw new Error('not implemented');
   }
 }
 
@@ -1045,6 +1073,15 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly relations = new InMemoryRelations(this.assets);
   readonly jobs = new InMemoryJobRepository((fileId) => this.files.records.get(fileId)?.originalName ?? null);
   readonly analyses = new InMemoryAnalyses(this.files, this.tags);
+  // phase 4b stub: Task 3
+  readonly analysisTargets: AnalysisTargetReader = {
+    page: async () => {
+      throw new Error('not implemented');
+    },
+    count: async () => {
+      throw new Error('not implemented');
+    },
+  };
   closed = false;
 
   constructor() {
@@ -1131,7 +1168,7 @@ export class FakeModelImageSource implements ModelImageSource {
   }
 }
 
-type VisionRequest = { image: Uint8Array; prompt: string; schema: unknown; signal: AbortSignal };
+type VisionRequest = { image: Uint8Array; prompt: string; schema: unknown; model: string; signal: AbortSignal };
 
 /** Resolves with `answer`, or with what `respond` returns when set; records every request. */
 export class FakeVisionProvider implements VisionProvider {
@@ -1140,8 +1177,18 @@ export class FakeVisionProvider implements VisionProvider {
   respond: ((r: VisionRequest) => Promise<unknown>) | null = null;
 
   async analyzeImage(r: VisionRequest): Promise<unknown> {
-    this.calls.push({ image: r.image, prompt: r.prompt, schema: r.schema });
+    this.calls.push({ image: r.image, prompt: r.prompt, schema: r.schema, model: r.model });
     return this.respond === null ? this.answer : this.respond(r);
+  }
+
+  // phase 4b stub: Task 3
+  async describeImage(_r: { image: Uint8Array; prompt: string; model: string; signal: AbortSignal }): Promise<string> {
+    throw new Error('not implemented');
+  }
+
+  // phase 4b stub: Task 3
+  async listModels(_signal: AbortSignal): Promise<{ name: string; vision: boolean | null }[]> {
+    throw new Error('not implemented');
   }
 }
 

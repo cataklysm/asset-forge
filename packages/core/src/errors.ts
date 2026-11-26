@@ -35,3 +35,12 @@ export class StorageFullError extends define('storage_full') {}
 export class NotFoundError extends define('not_found') {}
 export class InvalidOperationError extends define('invalid_operation') {}
 export class ValidationFailedError extends define('validation_failed') {}
+
+export const CREDENTIAL_STORE_UNAVAILABLE_MESSAGE = 'The system credential store is not available, so the API key cannot be saved';
+
+/** The OS credential store cannot encrypt, so a secret is not saved; there is no plaintext fallback. */
+export class CredentialStoreUnavailableError extends AssetForgeError {
+  constructor(options?: { cause?: unknown }) {
+    super('credential_store_unavailable', CREDENTIAL_STORE_UNAVAILABLE_MESSAGE, options);
+  }
+}

@@ -16,6 +16,9 @@ import { createJobHost } from '../src/main/job-host.js';
 let base: string;
 let manager: WorkspaceManager;
 let mock: MockProvider;
+/** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
+const filesRequest = (fileIds: string[]) => ({ target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: true });
+const NONE_SKIPPED = { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-analysis-accept-'));
@@ -47,12 +50,13 @@ const active = (s: JobSummary) => s.queued + s.running + s.waiting;
 
 describe('phase 4a acceptance', () => {
   it('analyses a batch through cancel, retry and a close mid-batch without touching manual tags', async () => {
+    const adapter = createOllamaVision({ baseUrl: mock.url });
     const jobHost = createJobHost({
       manager,
-      vision: createOllamaVision({ baseUrl: mock.url, model: MOCK_MODEL }),
+      vision: () => adapter,
       images: { jpeg: (path) => readFile(path) },
       provider: OLLAMA_PROVIDER,
-      model: MOCK_MODEL,
+      defaultModel: () => MOCK_MODEL,
       limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
     });
     // While held, opening a workspace does not start its scheduler.
@@ -113,7 +117,7 @@ describe('phase 4a acceptance', () => {
         [fileIds[1]!, 'hand picked'],
       ]);
 
-      expect(await call('analysis:enqueue', { fileIds })).toEqual({ enqueued: 6, skipped: [] });
+      expect(await call('analysis:enqueue', filesRequest(fileIds))).toEqual({ enqueued: 6, skipped: NONE_SKIPPED });
 
       // Cancel all while the batch runs.
       await until((s) => s.succeeded >= 1);

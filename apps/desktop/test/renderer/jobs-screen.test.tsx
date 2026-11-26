@@ -15,7 +15,7 @@ afterEach(() => {
 const CREATED = '2026-01-01T10:00:00.000Z';
 const RUN_AFTER = '2026-01-01T10:05:00.000Z';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0 };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: null };
 
 function job(p: Partial<JobView> = {}): JobView {
   return {

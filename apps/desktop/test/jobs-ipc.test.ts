@@ -20,6 +20,9 @@ let jobHost: JobHost;
 let handlers: IpcHandlers;
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
+/** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
+const filesRequest = (fileIds: string[]) => ({ target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: true });
+const NONE_SKIPPED = { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-jobs-ipc-'));
@@ -38,12 +41,13 @@ afterEach(async () => {
 /** Starts the mock and wires the handlers to a job host that talks to it. */
 async function setup(failures: MockFailure[] = []): Promise<void> {
   mock = await startMockProvider({ port: 0, failures });
+  const adapter = createOllamaVision({ baseUrl: mock.url });
   jobHost = createJobHost({
     manager,
-    vision: createOllamaVision({ baseUrl: mock.url, model: MOCK_MODEL }),
+    vision: () => adapter,
     images: { jpeg: (path) => readFile(path) },
     provider: OLLAMA_PROVIDER,
-    model: MOCK_MODEL,
+    defaultModel: () => MOCK_MODEL,
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(
@@ -101,7 +105,7 @@ describe('job IPC', () => {
   it('answers no_workspace_open on every job channel without a workspace', async () => {
     await setup();
     const requests: [IpcChannel, unknown][] = [
-      ['analysis:enqueue', { fileIds: [uuid] }],
+      ['analysis:enqueue', filesRequest([uuid])],
       ['jobs:list', page],
       ['jobs:summary', {}],
       ['jobs:cancel', { jobId: uuid }],
@@ -115,10 +119,57 @@ describe('job IPC', () => {
     }
   });
 
+  it('answers invalid_operation on the phase 4b channels that are not built yet', async () => {
+    await setup();
+    const requests: [IpcChannel, unknown][] = [
+      ['settings:getVision', {}],
+      ['settings:setVision', { baseUrl: null, timeoutSeconds: 120, taggingModel: null, promptModel: null }],
+      ['settings:listVisionModels', {}],
+      ['analysis:preview', { target: { kind: 'files', fileIds: [uuid] }, model: MOCK_MODEL }],
+      ['analysis:getProposal', { fileId: uuid }],
+      ['analysis:acceptProposal', { fileId: uuid, names: ['red car'] }],
+      ['analysis:discardProposal', { fileId: uuid }],
+      ['analysis:describe', { requestId: uuid, fileId: uuid, model: MOCK_MODEL }],
+      ['analysis:cancelDescribe', { requestId: uuid }],
+      ['jobs:resume', {}],
+    ];
+    const check = async () => {
+      for (const [channel, request] of requests) {
+        expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+      }
+    };
+    await check();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    await check();
+    for (const request of [
+      { ...filesRequest([uuid]), mode: 'propose' },
+      { ...filesRequest([uuid]), target: { kind: 'asset', assetId: uuid } },
+    ]) {
+      expect(await call('analysis:enqueue', request)).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+    }
+  });
+
+  it('reports no pause in the summary', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    expect(await ok('jobs:summary', {})).toMatchObject({ queued: 0, paused: null });
+  });
+
+  it('counts the skipped files of an enqueue per reason', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    await ok('analysis:enqueue', filesRequest([fileId!]));
+    expect(await ok('analysis:enqueue', filesRequest([fileId!, uuid]))).toEqual({
+      enqueued: 0,
+      skipped: { ...NONE_SKIPPED, notFound: 1, alreadyQueued: 1 },
+    });
+  });
+
   it('refuses an enqueue with a duplicate id', async () => {
     await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    expect(await call('analysis:enqueue', { fileIds: [uuid, uuid] })).toMatchObject({
+    expect(await call('analysis:enqueue', filesRequest([uuid, uuid]))).toMatchObject({
       ok: false,
       error: { code: 'invalid_request' },
     });
@@ -130,7 +181,7 @@ describe('job IPC', () => {
     const [fileId] = await importImages(1);
     const before = (await ok('jobs:summary', {})).changes;
 
-    expect(await ok('analysis:enqueue', { fileIds: [fileId!] })).toEqual({ enqueued: 1, skipped: [] });
+    expect(await ok('analysis:enqueue', filesRequest([fileId!]))).toEqual({ enqueued: 1, skipped: NONE_SKIPPED });
     const afterEnqueue = (await ok('jobs:summary', {})).changes;
     expect(afterEnqueue).toBeGreaterThan(before);
     const list = await ok('jobs:list', page);
@@ -144,7 +195,7 @@ describe('job IPC', () => {
   it('refuses to retry a queued job and to cancel an unknown one', async () => {
     await setup(['hang']);
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    await ok('analysis:enqueue', { fileIds: await importImages(2) });
+    await ok('analysis:enqueue', filesRequest(await importImages(2)));
     await until((s) => s.running === 1 && s.queued === 1);
     const [queued] = (await ok('jobs:list', { ...page, status: 'queued' })).items;
 
@@ -158,7 +209,7 @@ describe('job IPC', () => {
   it('clears finished jobs and returns how many it removed', async () => {
     await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    await ok('analysis:enqueue', { fileIds: await importImages(2) });
+    await ok('analysis:enqueue', filesRequest(await importImages(2)));
     await until((s) => s.succeeded === 2);
 
     expect(await ok('jobs:clearFinished', {})).toEqual({ removed: 2 });
@@ -173,7 +224,7 @@ describe('job IPC', () => {
       await setup(['hang']);
       const first = join(base, 'first');
       await ok('workspace:create', { name: 'First', rootPath: first });
-      await ok('analysis:enqueue', { fileIds: await importImages(1) });
+      await ok('analysis:enqueue', filesRequest(await importImages(1)));
       await until((s) => s.running === 1);
 
       await ok('workspace:create', { name: 'Second', rootPath: join(base, 'second') });

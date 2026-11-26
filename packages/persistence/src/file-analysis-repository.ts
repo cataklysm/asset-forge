@@ -43,5 +43,21 @@ export function createFileAnalysisRepository(db: BetterSQLite3Database): FileAna
         return true;
       });
     },
+    // phase 4b stub: Task 2
+    async propose(): Promise<boolean> {
+      throw new Error('not implemented');
+    },
+    // phase 4b stub: Task 2
+    async getProposal(): Promise<null> {
+      throw new Error('not implemented');
+    },
+    // phase 4b stub: Task 2
+    async acceptProposal(): Promise<boolean> {
+      throw new Error('not implemented');
+    },
+    // phase 4b stub: Task 2
+    async discardProposal(): Promise<void> {
+      throw new Error('not implemented');
+    },
   };
 }

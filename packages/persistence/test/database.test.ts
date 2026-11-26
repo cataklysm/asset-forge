@@ -85,6 +85,7 @@ describe('workspace database', () => {
       previewable: true,
       openable: true,
       tags: [],
+      hasProposal: false,
     });
     expect(() => FileRecordSchema.parse(list.items[0])).not.toThrow();
   });

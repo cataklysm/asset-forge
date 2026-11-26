@@ -31,6 +31,8 @@ export const FileRecordSchema = z.object({
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
   tags: z.array(TagAssignmentSchema), // file tags only
+  /** A tag proposal of an analysis waits for the owner's decision. */
+  hasProposal: z.boolean(),
 });
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 

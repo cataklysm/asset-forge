@@ -4,7 +4,6 @@ import {
   cleanTagText,
   normalizeTagName,
   type AnalysisSkipReason,
-  type EnqueueAnalysisResult,
   type FileRecord,
 } from '@assetforge/contracts';
 import { JobError, type JobHandler, type NewJob } from './jobs.js';
@@ -59,14 +58,22 @@ export function isAnalysable(file: FileRecord): boolean {
   return file.status === 'complete' && isPreviewable(file.mimeType) && file.sha256 !== null;
 }
 
+/** The phase 4a enqueue result: one entry per skipped file. */
+// phase 4b stub: Task 3 (replaced by the counts of `EnqueueAnalysisResult` from contracts)
+export interface FileEnqueueResult {
+  enqueued: number;
+  skipped: { fileId: string; reason: AnalysisSkipReason }[];
+}
+
 /**
  * One analysis job per analysable file, in request order. Not all or nothing: unknown and
  * unanalysable files and files that already have an active analysis job are reported as skipped.
  */
+// phase 4b stub: Task 3 (becomes `enqueueAnalysis(s, { target, model, mode, force })`)
 export async function enqueueAnalysis(
   s: WorkspaceSession,
   r: { fileIds: readonly string[] },
-): Promise<EnqueueAnalysisResult> {
+): Promise<FileEnqueueResult> {
   const entries: { fileId: string; reason: AnalysisSkipReason | null; job: NewJob | null }[] = [];
   for (const fileId of r.fileIds) {
     const file = await s.database.files.get(fileId);
@@ -88,7 +95,7 @@ export async function enqueueAnalysis(
   }
   const jobs = entries.flatMap((e) => (e.job === null ? [] : [e.job]));
   const inserted = new Set(jobs.length === 0 ? [] : await s.database.jobs.enqueue({ jobs, now: s.now().toISOString() }));
-  const skipped: EnqueueAnalysisResult['skipped'] = [];
+  const skipped: FileEnqueueResult['skipped'] = [];
   for (const e of entries) {
     if (e.reason !== null) skipped.push({ fileId: e.fileId, reason: e.reason });
     else if (!inserted.has(e.job!.id)) skipped.push({ fileId: e.fileId, reason: 'already_queued' });
@@ -102,12 +109,15 @@ export async function enqueueAnalysis(
  */
 export function createAnalyzeFileHandler(deps: {
   session: WorkspaceSession;
-  vision: VisionProvider;
+  /** The provider in force when a job runs; null when none is configured. */
+  vision: () => VisionProvider | null;
   images: ModelImageSource;
+  /** Provider id recorded with every analysis. */
   provider: string;
-  model: string;
+  /** The tagging default model at run time, for v1 payloads; null when none is set. */
+  defaultModel: () => string | null;
 }): JobHandler {
-  const { session: s, vision, images } = deps;
+  const { session: s, images } = deps;
 
   async function load(fileId: string): Promise<FileRecord> {
     const file = await s.database.files.get(fileId);
@@ -145,9 +155,13 @@ export function createAnalyzeFileHandler(deps: {
       if (job.fileId === null || !AnalyzeFilePayloadSchema.safeParse(job.payload).success) {
         throw new JobError('internal_error');
       }
+      // phase 4b stub: Task 3 (payload v2 model and mode; v1 and a missing provider or model fail provider_not_configured)
+      const vision = deps.vision();
+      const model = deps.defaultModel();
+      if (vision === null || model === null) throw new JobError('provider_not_configured');
       const { image, sha256 } = await read(job.fileId);
       signal.throwIfAborted();
-      const answer = await vision.analyzeImage({ image, prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA, signal });
+      const answer = await vision.analyzeImage({ image, prompt: ANALYSIS_PROMPT, schema: ANALYSIS_SCHEMA, model, signal });
       // Nothing is awaited between this check and the write, so a cancelled run never writes.
       signal.throwIfAborted();
       const tags = cleanAnalysisTags(answer);
@@ -157,7 +171,7 @@ export function createAnalyzeFileHandler(deps: {
         sha256,
         tags: tags.map((t) => ({ ...t, newId: s.newId() })),
         provider: deps.provider,
-        model: deps.model,
+        model,
         promptVersion: ANALYSIS_PROMPT_VERSION,
         now: s.now().toISOString(),
       });

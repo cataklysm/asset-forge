@@ -7,7 +7,13 @@ import {
   type WorkspaceSummary,
 } from '@assetforge/contracts';
 import { join } from 'node:path';
-import { AssetForgeError, SerialQueue, workspaceFolderName, type WorkspaceManager } from '@assetforge/core';
+import {
+  AssetForgeError,
+  InvalidOperationError,
+  SerialQueue,
+  workspaceFolderName,
+  type WorkspaceManager,
+} from '@assetforge/core';
 import type { z } from 'zod';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
@@ -42,6 +48,8 @@ export interface HostActions {
 }
 
 export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
+
+const NOT_AVAILABLE = 'This action is not available yet';
 
 export function createWorkspaceHandlers(
   manager: WorkspaceManager,
@@ -88,6 +96,16 @@ export function createWorkspaceHandlers(
     ...createJobHandlers(manager, jobs),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
+    // phase 4b stub: Task 8 (settings handlers, not behind the workspace guard)
+    'settings:getVision': async () => {
+      throw new InvalidOperationError(NOT_AVAILABLE);
+    },
+    'settings:setVision': async () => {
+      throw new InvalidOperationError(NOT_AVAILABLE);
+    },
+    'settings:listVisionModels': async () => {
+      throw new InvalidOperationError(NOT_AVAILABLE);
+    },
   };
 }
 
