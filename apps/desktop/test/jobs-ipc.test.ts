@@ -141,12 +141,13 @@ describe('job IPC', () => {
     await check();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
     await check();
-    for (const request of [
-      { ...filesRequest([uuid]), mode: 'propose' },
-      { ...filesRequest([uuid]), target: { kind: 'asset', assetId: uuid } },
-    ]) {
-      expect(await call('analysis:enqueue', request)).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
-    }
+  });
+
+  it('refuses a proposal for more than one file', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const request = { ...filesRequest([uuid, '4f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f']), mode: 'propose' };
+    expect(await call('analysis:enqueue', request)).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
   });
 
   it('reports no pause in the summary', async () => {

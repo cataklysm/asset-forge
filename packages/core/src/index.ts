@@ -1,4 +1,7 @@
 export * from './analysis.js';
+export * from './analysis-enqueue.js';
+export * from './analysis-handler.js';
+export * from './analysis-proposals.js';
 export * from './asset-cover.js';
 export * from './asset-files.js';
 export * from './asset-types.js';

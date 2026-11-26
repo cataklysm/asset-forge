@@ -1,74 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { ANALYZE_FILE_JOB } from '@assetforge/contracts';
 import {
   ANALYSIS_PROMPT,
+  ANALYSIS_PROMPT_VERSION,
   ANALYSIS_SCHEMA,
   addFileTag,
   cleanAnalysisTags,
-  createAnalyzeFileHandler,
-  enqueueAnalysis,
   JobError,
   MAX_ANALYSIS_TAGS,
-  WorkspaceManager,
-  type Job,
-  type WorkspaceSession,
 } from '../src/index.js';
-import { createFakeHost, FakeModelImageSource, FakeVisionProvider } from './fakes.js';
+import { jobFor, PROVIDER, rejectsWith, setup, UNKNOWN_ID } from './analysis-setup.js';
 
-const ROOT = '/ws/a';
-const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
-const T0 = '2026-01-01T00:00:00.000Z';
-
-async function setup() {
-  const fake = createFakeHost();
-  const manager = new WorkspaceManager(fake.host);
-  const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
-  const db = fake.databases.get(summary.id)!;
-  const storage = fake.storages.get(ROOT)!;
-  const session: WorkspaceSession = await manager.read(async (s) => s);
-  const importOne = async (name: string) => {
-    fake.sources.set(`/src/${name}`, Buffer.from(name));
-    return (await manager.importFiles([`/src/${name}`]))[0]!.file!;
-  };
-  const file = await importOne('car.png');
-  const vision = new FakeVisionProvider();
-  const images = new FakeModelImageSource();
-  let configured: { vision: FakeVisionProvider | null; model: string | null } = { vision, model: 'mock-vision' };
-  const handler = createAnalyzeFileHandler({ session, vision: () => configured.vision, images, provider: 'ollama', defaultModel: () => configured.model });
-  const configure = (c: { vision: FakeVisionProvider | null; model: string | null }) => {
-    configured = c;
-  };
-  return { db, storage, session, importOne, file, vision, images, handler, configure };
-}
-
-function jobFor(fileId: string | null, payload: unknown = { version: 1 }): Job {
-  return {
-    id: 'job-1',
-    type: ANALYZE_FILE_JOB,
-    resourceClass: 'local_gpu',
-    status: 'running',
-    fileId,
-    payload,
-    dedupeKey: fileId === null ? null : `${ANALYZE_FILE_JOB}:${fileId}`,
-    attempt: 1,
-    runAfter: null,
-    errorCode: null,
-    errorMessage: null,
-    createdAt: T0,
-    startedAt: T0,
-    finishedAt: null,
-    updatedAt: T0,
-  };
-}
-
-async function rejectsWith(p: Promise<unknown>, code: JobError['code']): Promise<void> {
-  const error = await p.then(
-    () => null,
-    (e: unknown) => e,
-  );
-  expect(error).toBeInstanceOf(JobError);
-  expect((error as JobError).code).toBe(code);
-}
 
 describe('cleanAnalysisTags', () => {
   it('drops non-strings, invalid and duplicate tags', () => {
@@ -88,37 +29,6 @@ describe('cleanAnalysisTags', () => {
     for (const answer of [{}, 'text', { tags: 'a' }, null, undefined, 42, ['a', 'b'], { tags: { 0: 'a' } }, { tags: [[], {}, 1] }]) {
       expect(cleanAnalysisTags(answer)).toEqual([]);
     }
-  });
-});
-
-describe('enqueueAnalysis', () => {
-  it('enqueues analysable files and reports the rest in request order', async () => {
-    const { db, session, importOne, file } = await setup();
-    const queued = await importOne('queued.png');
-    const pending = await importOne('pending.png');
-    db.files.records.set(pending.id, { ...db.files.records.get(pending.id)!, status: 'pending', sha256: null });
-    const blend = await importOne('scene.blend');
-    await enqueueAnalysis(session, { fileIds: [queued.id] });
-
-    const result = await enqueueAnalysis(session, { fileIds: [file.id, UNKNOWN_ID, pending.id, blend.id, queued.id] });
-
-    expect(result).toEqual({
-      enqueued: 1,
-      skipped: [
-        { fileId: UNKNOWN_ID, reason: 'not_found' },
-        { fileId: pending.id, reason: 'not_analysable' },
-        { fileId: blend.id, reason: 'not_analysable' },
-        { fileId: queued.id, reason: 'already_queued' },
-      ],
-    });
-    const job = db.jobs.rows.find((j) => j.fileId === file.id)!;
-    expect(job).toMatchObject({
-      type: ANALYZE_FILE_JOB,
-      resourceClass: 'local_gpu',
-      status: 'queued',
-      payload: { version: 1 },
-      dedupeKey: `vision.analyze_file:${file.id}`,
-    });
   });
 });
 
@@ -305,5 +215,83 @@ describe('the analyze file handler', () => {
     vision.answer = { tags: ['blue boat', 'wood'] };
     await handler.run(jobFor(file.id), new AbortController().signal);
     expect(db.tags.forFile(file.id).map((t) => t.name)).toEqual(['blue boat', 'wood']);
+  });
+});
+
+describe('the analyze file handler with a v2 payload', () => {
+  const apply = { version: 2, model: 'llava:13b', mode: 'apply' };
+  const propose = { version: 2, model: 'llava:13b', mode: 'propose' };
+
+  it('applies with the payload model, sent to the provider and written to the analysis record', async () => {
+    const { db, file, vision, handler } = await setup();
+    await handler.run(jobFor(file.id, apply), new AbortController().signal);
+    expect(vision.calls.map((c) => c.model)).toEqual(['llava:13b']);
+    expect(await db.analyses.get(file.id)).toMatchObject({ sha256: file.sha256, provider: PROVIDER, model: 'llava:13b', promptVersion: ANALYSIS_PROMPT_VERSION });
+    expect(db.tags.forFile(file.id).map((t) => t.name)).toEqual(['front view', 'metal', 'photorealistic', 'red car']);
+  });
+
+  it('applies without a default model', async () => {
+    const { db, file, vision, handler, configure } = await setup();
+    configure({ vision, model: null });
+    await handler.run(jobFor(file.id, apply), new AbortController().signal);
+    expect(await db.analyses.get(file.id)).toMatchObject({ model: 'llava:13b' });
+  });
+
+  it('removes a waiting proposal when it applies', async () => {
+    const { db, file, handler } = await setup();
+    await handler.run(jobFor(file.id, propose), new AbortController().signal);
+    await handler.run(jobFor(file.id, apply), new AbortController().signal);
+    expect(await db.analyses.getProposal(file.id)).toBeNull();
+  });
+
+  it('stores a proposal and leaves the tags and the analysis record alone', async () => {
+    const { db, session, file, vision, handler } = await setup();
+    await addFileTag(session, { fileId: file.id, name: 'mine' });
+    await handler.run(jobFor(file.id, propose), new AbortController().signal);
+    expect(vision.calls.map((c) => c.model)).toEqual(['llava:13b']);
+    expect(await db.analyses.getProposal(file.id)).toEqual({
+      fileId: file.id,
+      sha256: file.sha256,
+      provider: PROVIDER,
+      model: 'llava:13b',
+      promptVersion: ANALYSIS_PROMPT_VERSION,
+      tags: [
+        { name: 'red car', displayName: 'Red Car' },
+        { name: 'metal', displayName: 'metal' },
+        { name: 'front view', displayName: 'front view' },
+        { name: 'photorealistic', displayName: 'photorealistic' },
+      ],
+      createdAt: expect.any(String),
+      stale: false,
+    });
+    expect(db.tags.forFile(file.id)).toEqual([{ name: 'mine', displayName: 'mine', origin: 'manual' }]);
+    expect(await db.analyses.get(file.id)).toBeNull();
+  });
+
+  it('fails file_unavailable when the proposal cannot be stored', async () => {
+    const { db, file, vision, handler } = await setup();
+    vision.respond = async () => {
+      db.files.records.set(file.id, { ...db.files.records.get(file.id)!, sha256: 'f'.repeat(64) });
+      return { tags: ['car'] };
+    };
+    await rejectsWith(handler.run(jobFor(file.id, propose), new AbortController().signal), 'file_unavailable');
+    expect(await db.analyses.getProposal(file.id)).toBeNull();
+  });
+
+  it('fails invalid_response for zero clean tags in either mode', async () => {
+    for (const payload of [apply, propose]) {
+      const { db, file, vision, handler } = await setup();
+      vision.answer = { tags: ['', 7] };
+      await rejectsWith(handler.run(jobFor(file.id, payload), new AbortController().signal), 'invalid_response');
+      expect(await db.analyses.getProposal(file.id)).toBeNull();
+      expect(await db.analyses.get(file.id)).toBeNull();
+    }
+  });
+
+  it('fails provider_not_configured without a provider, before reading the image', async () => {
+    const { file, images, handler, configure } = await setup();
+    configure({ vision: null, model: 'mock-vision' });
+    await rejectsWith(handler.run(jobFor(file.id, apply), new AbortController().signal), 'provider_not_configured');
+    expect(images.calls).toEqual([]);
   });
 });

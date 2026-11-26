@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB } from '@assetforge/contracts';
 import type {
+  AnalysisPreview,
+  AnalysisTarget,
   Asset,
   AssetAssignment,
   AssetList,
@@ -38,6 +41,8 @@ import {
   ValidationFailedError,
 } from '../src/errors.js';
 import type {
+  AnalysisFingerprint,
+  AnalysisTargetEntry,
   AnalysisTargetReader,
   AssetCover,
   AssetQuery,
@@ -329,17 +334,21 @@ class InMemoryTags implements TagRepository {
   }
 }
 
+/** Waiting tag proposals by file id; shared so a file record can report `hasProposal` like the database does. */
+class ProposalRows extends Map<string, Proposal> {}
+
 class InMemoryFiles implements FileRepository {
-  /** Stored without tags; every method that returns a record attaches the current file tags. */
+  /** Stored without tags; every method that returns a record attaches the current file tags and `hasProposal`. */
   readonly records = new Map<string, FileRecord>();
 
   constructor(
     private readonly covers: CoverChoices,
     private readonly tags: InMemoryTags,
+    private readonly proposals: ProposalRows,
   ) {}
 
   private withTags(rec: FileRecord): FileRecord {
-    return { ...rec, tags: this.tags.forFile(rec.id) };
+    return { ...rec, tags: this.tags.forFile(rec.id), hasProposal: this.proposals.has(rec.id) };
   }
 
   async insertPending(r: {
@@ -370,7 +379,7 @@ class InMemoryFiles implements FileRepository {
       width: null,
       height: null,
       tags: [],
-      hasProposal: false, // phase 4b stub: Task 3
+      hasProposal: false,
     });
   }
 
@@ -426,6 +435,7 @@ class InMemoryFiles implements FileRepository {
       .filter((r) => q.role === undefined || r.role === q.role)
       .filter((r) => q.kind === undefined || r.kind === q.kind)
       .filter((r) => (q.tagNames ?? []).every((name) => tagsOf(r.id).includes(name)))
+      .filter((r) => q.hasProposal === undefined || this.proposals.has(r.id) === q.hasProposal)
       .filter((r) => words.every((w) => matchesWord(r, w)))
       .sort((a, b) => (a.importedAt < b.importedAt ? 1 : a.importedAt > b.importedAt ? -1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
@@ -445,11 +455,17 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   constructor(
     private readonly files: InMemoryFiles,
     private readonly tags: InMemoryTags,
+    readonly proposals: ProposalRows,
   ) {}
 
   async get(fileId: string): Promise<FileAnalysis | null> {
     const row = this.rows.get(fileId);
     return row ? { ...row } : null;
+  }
+
+  private hasContent(fileId: string, sha256: string): boolean {
+    const rec = this.files.records.get(fileId);
+    return rec !== undefined && rec.status === 'complete' && rec.sha256 === sha256;
   }
 
   async apply(r: {
@@ -461,16 +477,8 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     promptVersion: number;
     now: string;
   }): Promise<boolean> {
-    const rec = this.files.records.get(r.fileId);
-    if (!rec || rec.status !== 'complete' || rec.sha256 !== r.sha256) return false;
-    const assignments = this.tags.fileAssignments;
-    const kept = assignments.filter((a) => !(a.fileId === r.fileId && a.origin === 'ai'));
-    assignments.splice(0, assignments.length, ...kept);
-    for (const t of r.tags) {
-      this.tags.ensureTag(t);
-      const carried = assignments.some((a) => a.fileId === r.fileId && a.name === t.name);
-      if (!carried) assignments.push({ fileId: r.fileId, name: t.name, origin: 'ai' });
-    }
+    if (!this.hasContent(r.fileId, r.sha256)) return false;
+    this.writeTags(r.fileId, r.tags);
     this.rows.set(r.fileId, {
       fileId: r.fileId,
       sha256: r.sha256,
@@ -479,32 +487,144 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       promptVersion: r.promptVersion,
       analysedAt: r.now,
     });
+    this.proposals.delete(r.fileId);
     return true;
   }
 
-  // phase 4b stub: Task 3
-  async propose(_r: Proposal): Promise<boolean> {
-    throw new Error('not implemented');
+  /** Replaces the file's AI tags with `tags`, leaving tags it carries manually alone. */
+  private writeTags(fileId: string, tags: readonly { name: string; displayName: string; newId: string }[]): void {
+    const assignments = this.tags.fileAssignments;
+    const kept = assignments.filter((a) => !(a.fileId === fileId && a.origin === 'ai'));
+    assignments.splice(0, assignments.length, ...kept);
+    for (const t of tags) {
+      this.tags.ensureTag(t);
+      const carried = assignments.some((a) => a.fileId === fileId && a.name === t.name);
+      if (!carried) assignments.push({ fileId, name: t.name, origin: 'ai' });
+    }
   }
 
-  // phase 4b stub: Task 3
-  async getProposal(_fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
-    throw new Error('not implemented');
+  async propose(r: Proposal): Promise<boolean> {
+    if (!this.hasContent(r.fileId, r.sha256)) return false;
+    this.proposals.set(r.fileId, structuredClone(r));
+    return true;
   }
 
-  // phase 4b stub: Task 3
-  async acceptProposal(_r: {
+  async getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
+    const proposal = this.proposals.get(fileId);
+    if (!proposal) return null;
+    return { ...structuredClone(proposal), stale: this.files.records.get(fileId)?.sha256 !== proposal.sha256 };
+  }
+
+  async acceptProposal(r: {
     fileId: string;
     sha256: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
   }): Promise<boolean> {
-    throw new Error('not implemented');
+    const proposal = this.proposals.get(r.fileId);
+    if (!proposal) return false;
+    if (proposal.sha256 !== r.sha256 || !this.hasContent(r.fileId, r.sha256)) {
+      this.proposals.delete(r.fileId);
+      return false;
+    }
+    this.writeTags(r.fileId, r.tags);
+    this.rows.set(r.fileId, {
+      fileId: r.fileId,
+      sha256: proposal.sha256,
+      provider: proposal.provider,
+      model: proposal.model,
+      promptVersion: proposal.promptVersion,
+      analysedAt: r.now,
+    });
+    this.proposals.delete(r.fileId);
+    return true;
   }
 
-  // phase 4b stub: Task 3
-  async discardProposal(_fileId: string): Promise<void> {
-    throw new Error('not implemented');
+  async discardProposal(fileId: string): Promise<void> {
+    this.proposals.delete(fileId);
+  }
+
+  /** The fingerprint and the file's current sha256 equal its analysis row or its waiting proposal. */
+  analysedWith(fileId: string, fingerprint: AnalysisFingerprint): boolean {
+    const sha256 = this.files.records.get(fileId)?.sha256;
+    const same = (row: AnalysisFingerprint & { sha256: string }) =>
+      row.sha256 === sha256 &&
+      row.provider === fingerprint.provider &&
+      row.model === fingerprint.model &&
+      row.promptVersion === fingerprint.promptVersion;
+    const row = this.rows.get(fileId);
+    const proposal = this.proposals.get(fileId);
+    return (row !== undefined && same(row)) || (proposal !== undefined && same(proposal));
+  }
+}
+
+/** Resolves analysis targets over the fake's rows, following the contract of the SQLite reader. */
+class InMemoryAnalysisTargets implements AnalysisTargetReader {
+  constructor(
+    private readonly files: InMemoryFiles,
+    private readonly assets: InMemoryAssets,
+    private readonly analyses: InMemoryAnalyses,
+    private readonly jobs: InMemoryJobRepository,
+  ) {}
+
+  /** How often `page` was called. */
+  pageCalls = 0;
+
+  private async fileIdsOf(target: AnalysisTarget): Promise<string[]> {
+    const all = { offset: 0, limit: Number.MAX_SAFE_INTEGER };
+    switch (target.kind) {
+      case 'files':
+        return target.fileIds.filter((id) => this.files.records.has(id));
+      case 'fileFilter':
+        return (await this.files.list({ ...target.filter, ...all })).items.map((f) => f.id);
+      case 'asset':
+        return [...this.files.records.values()].filter((f) => f.assetId === target.assetId).map((f) => f.id);
+      case 'assetFilter': {
+        const { fileRole, fileKind } = target.filter;
+        const assetIds = new Set((await this.assets.list({ ...target.filter, ...all })).items.map((a) => a.id));
+        return [...this.files.records.values()]
+          .filter((f) => f.assetId !== null && assetIds.has(f.assetId))
+          .filter((f) => (fileRole === undefined || f.role === fileRole) && (fileKind === undefined || f.kind === fileKind))
+          .map((f) => f.id);
+      }
+    }
+  }
+
+  private async entries(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisTargetEntry[]> {
+    const ids = [...new Set(await this.fileIdsOf(r.target))].sort();
+    return ids.map((fileId) => {
+      const f = this.files.records.get(fileId)!;
+      const analysable = f.status === 'complete' && r.mimeTypes.includes(f.mimeType) && f.sha256 !== null;
+      return { fileId, analysable, analysed: analysable && this.analyses.analysedWith(fileId, r.fingerprint) };
+    });
+  }
+
+  async page(r: {
+    target: AnalysisTarget;
+    fingerprint: AnalysisFingerprint;
+    mimeTypes: readonly string[];
+    afterId: string | null;
+    limit: number;
+  }): Promise<AnalysisTargetEntry[]> {
+    this.pageCalls++;
+    const entries = await this.entries(r);
+    return entries.filter((e) => r.afterId === null || e.fileId > r.afterId).slice(0, r.limit);
+  }
+
+  async count(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisPreview> {
+    const result: AnalysisPreview = { analysable: 0, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 };
+    const queued = new Set(
+      this.jobs.rows
+        .filter((j) => j.type === ANALYZE_FILE_JOB && j.fileId !== null && (ACTIVE_JOB_STATUSES as readonly string[]).includes(j.status))
+        .map((j) => j.fileId),
+    );
+    for (const e of await this.entries(r)) {
+      if (!e.analysable) result.notAnalysable++;
+      else if (e.analysed) result.alreadyAnalysed++;
+      else if (queued.has(e.fileId)) result.alreadyQueued++;
+      else result.analysable++;
+    }
+    return result;
   }
 }
 
@@ -1061,7 +1181,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly storages = new InMemoryStorages();
   private readonly covers = new CoverChoices();
   readonly tags = new InMemoryTags();
-  readonly files = new InMemoryFiles(this.covers, this.tags);
+  private readonly proposals = new ProposalRows();
+  readonly files = new InMemoryFiles(this.covers, this.tags, this.proposals);
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
@@ -1072,16 +1193,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   readonly jobs = new InMemoryJobRepository((fileId) => this.files.records.get(fileId)?.originalName ?? null);
-  readonly analyses = new InMemoryAnalyses(this.files, this.tags);
-  // phase 4b stub: Task 3
-  readonly analysisTargets: AnalysisTargetReader = {
-    page: async () => {
-      throw new Error('not implemented');
-    },
-    count: async () => {
-      throw new Error('not implemented');
-    },
-  };
+  readonly analyses = new InMemoryAnalyses(this.files, this.tags, this.proposals);
+  readonly analysisTargets = new InMemoryAnalysisTargets(this.files, this.assets, this.analyses, this.jobs);
   closed = false;
 
   constructor() {
@@ -1168,6 +1281,7 @@ export class FakeModelImageSource implements ModelImageSource {
   }
 }
 
+type DescribeRequest = { image: Uint8Array; prompt: string; model: string; signal: AbortSignal };
 type VisionRequest = { image: Uint8Array; prompt: string; schema: unknown; model: string; signal: AbortSignal };
 
 /** Resolves with `answer`, or with what `respond` returns when set; records every request. */
@@ -1181,14 +1295,20 @@ export class FakeVisionProvider implements VisionProvider {
     return this.respond === null ? this.answer : this.respond(r);
   }
 
-  // phase 4b stub: Task 3
-  async describeImage(_r: { image: Uint8Array; prompt: string; model: string; signal: AbortSignal }): Promise<string> {
-    throw new Error('not implemented');
+  /** Every `describeImage` request. */
+  readonly describeCalls: Omit<DescribeRequest, 'signal'>[] = [];
+  description = '  A red sports car seen from the front.  ';
+  describe: ((r: DescribeRequest) => Promise<string>) | null = null;
+
+  async describeImage(r: DescribeRequest): Promise<string> {
+    this.describeCalls.push({ image: r.image, prompt: r.prompt, model: r.model });
+    return this.describe === null ? this.description : this.describe(r);
   }
 
-  // phase 4b stub: Task 3
+  models: { name: string; vision: boolean | null }[] = [{ name: 'mock-vision', vision: true }];
+
   async listModels(_signal: AbortSignal): Promise<{ name: string; vision: boolean | null }[]> {
-    throw new Error('not implemented');
+    return this.models.map((m) => ({ ...m }));
   }
 }
 

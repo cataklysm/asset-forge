@@ -1,4 +1,4 @@
-import type { EnqueueAnalysisResult } from '@assetforge/contracts';
+import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import {
   cancelAllJobs,
   cancelJob,
@@ -9,7 +9,6 @@ import {
   listJobs,
   retryFailedJobs,
   retryJob,
-  type FileEnqueueResult,
   type WorkspaceManager,
 } from '@assetforge/core';
 import type { IpcHandlers } from './ipc.js';
@@ -39,18 +38,6 @@ export type JobHandlers = Pick<
 
 const NOT_AVAILABLE = 'This action is not available yet';
 
-// phase 4b stub: Task 8 (the core use case returns the counts itself)
-function counted(result: FileEnqueueResult): EnqueueAnalysisResult {
-  const skipped = { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
-  for (const s of result.skipped) {
-    if (s.reason === 'not_found') skipped.notFound++;
-    else if (s.reason === 'not_analysable') skipped.notAnalysable++;
-    else if (s.reason === 'already_queued') skipped.alreadyQueued++;
-    else skipped.alreadyAnalysed++;
-  }
-  return { enqueued: result.enqueued, skipped };
-}
-
 export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost): JobHandlers {
   /** A job row changed outside the scheduler: raise the counter and let the scheduler look for work. */
   const touched = () => {
@@ -64,12 +51,10 @@ export function createJobHandlers(manager: WorkspaceManager, jobs: JobHost): Job
       throw new InvalidOperationError(NOT_AVAILABLE);
     },
     'analysis:enqueue': async (r) => {
-      // phase 4b stub: Task 8 (only an explicit file list in apply mode, through the phase 4a use case)
-      const { target } = r;
-      if (target.kind !== 'files' || r.mode !== 'apply') throw new InvalidOperationError(NOT_AVAILABLE);
-      const result = await manager.read((s) => enqueueAnalysis(s, { fileIds: target.fileIds }));
+      const { target, model, mode, force } = r;
+      const result = await manager.read((s) => enqueueAnalysis(s, { target, model, mode, force, provider: OLLAMA_PROVIDER }));
       if (result.enqueued > 0) touched();
-      return counted(result);
+      return result;
     },
     // phase 4b stub: Task 8
     'analysis:getProposal': async () => {
