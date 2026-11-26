@@ -16,7 +16,8 @@ const TITLE_PADDING = { form: '', detail: 'pr-56' } as const;
 
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
-  detail: 'w-[min(96vw,1600px)] h-[min(92vh,1000px)]',
+  // The window size minus an even margin; the UA's max-width/max-height would cap it otherwise.
+  detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none',
 } as const;
 
 /** A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening. */
