@@ -1,17 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { builtInAnalysisPrompt, countActiveAnalysisJobs, WorkspaceManager, type ImageProbe, type ModelImageSource, type WorkspaceHost } from '@assetforge/core';
-import { WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
+import {
+  builtInAnalysisPrompt,
+  countActiveAnalysisJobs,
+  WorkspaceManager,
+  type GenerationImageSource,
+  type ImageProbe,
+  type ModelImageSource,
+  type WorkspaceHost,
+} from '@assetforge/core';
+import { IMAGE_GENERATE_JOB, WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
-import { createOllamaVision, OLLAMA_PROVIDER } from '@assetforge/providers';
+import { createOllamaVision, createVeniceImage, OLLAMA_PROVIDER } from '@assetforge/providers';
 import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
 import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
+import { createImageProviderDirectory } from './generation-handlers.js';
 import type { AppServices } from './ipc.js';
-import { createJobHost, type JobHost } from './job-host.js';
+import { createJobHost, type JobHost, type SchedulerClock } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
 import { createProviderGateway, type ProviderGateway } from './provider-gateway.js';
 import { createProviderHandlers } from './provider-handlers.js';
@@ -97,13 +106,18 @@ export function createAnalysisServices(o: {
   secrets: SecretCodec;
   env: NodeJS.ProcessEnv;
   images: ModelImageSource;
+  /** Reads the image a generation sends. */
+  generationImages: GenerationImageSource;
   /** One main-console line per provider failure: code and HTTP status only. */
   log: (line: string) => void;
   limits?: Record<ResourceClass, number>;
+  /** The scheduler's clock; real time without it. */
+  clock?: SchedulerClock;
 }): AnalysisServices {
   const store = createProviderStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
   // Registers its change listener first, so the entry's adapter is dropped before its lane resumes.
-  const gateway = createProviderGateway({ store, create: createOllamaVision, log: o.log });
+  const gateway = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: o.log });
+  const imageProviders = createImageProviderDirectory(store, gateway);
   let jobHost: JobHost | null = null;
   const pause = createPauseGate({
     // A pause or resume changes the summary; the listener must not throw.
@@ -122,7 +136,10 @@ export function createAnalysisServices(o: {
     provider: OLLAMA_PROVIDER,
     pause,
     firstEntry: () => store.first(),
+    imageProviders,
+    generationImages: o.generationImages,
     ...(o.limits === undefined ? {} : { limits: o.limits }),
+    ...(o.clock === undefined ? {} : { clock: o.clock }),
   });
   jobHost = host;
   // A saved or deleted entry may fix what paused its lane; the other lanes stay as they are.
@@ -138,11 +155,15 @@ export function createAnalysisServices(o: {
   const providers = createProviderHandlers(store, gateway, {
     // Without an open workspace no job can be active here; jobs of another workspace fail later as not configured.
     hasActiveJobs: async (id) =>
-      o.manager.current() !== null && (await o.manager.read((s) => countActiveAnalysisJobs(s, id))) > 0,
+      o.manager.current() !== null &&
+      (await o.manager.read(
+        async (s) => (await countActiveAnalysisJobs(s, id)) + (await s.database.jobs.countActiveInLane(IMAGE_GENERATE_JOB, id)),
+      )) > 0,
   });
 
   return {
     providerStore: store,
+    imageProviders,
     gateway,
     pause,
     jobHost: host,

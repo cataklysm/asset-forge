@@ -11,12 +11,14 @@ import {
   AssetForgeError,
   SerialQueue,
   workspaceFolderName,
+  type ImageProviderDirectory,
   type WorkspaceManager,
 } from '@assetforge/core';
 import type { z } from 'zod';
 import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
+import { createGenerationHandlers } from './generation-handlers.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
@@ -60,6 +62,8 @@ export interface AppServices {
   providers: ProviderHandlers;
   /** The provider entries the analysis channels resolve and the job rows are named from. */
   providerStore: ProviderStore;
+  /** The `venice` entries the generation channels and generation jobs run on. */
+  imageProviders: ImageProviderDirectory;
   analysisPrompts: AnalysisPromptHandlers;
   prompts: AnalysisPromptStore;
   describe: DescribeController;
@@ -108,7 +112,8 @@ export function createWorkspaceHandlers(
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore),
+    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders),
+    ...createGenerationHandlers(manager, jobs, services.imageProviders),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
     // App-level provider entries and analysis prompts: not behind the workspace guard.

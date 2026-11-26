@@ -410,4 +410,15 @@ describe('generation repository', () => {
       [uuid(101), 'oak.png', PROVIDER, 'Venice', 'qwen-image'],
     ]);
   });
+
+  test('jobs.list names provider and model for every run of a requeued generation', async () => {
+    await create(edit(1));
+    db.generations.settle({ id: uuid(1), outcome: { status: 'failed', errorCode: 'provider_rejected' }, now: T2 });
+    expect(await db.generations.requeue({ id: uuid(1), job: jobFor(1, 1), now: T3 })).toBe(true);
+    const { items } = await db.jobs.list({ limit: 10, offset: 0 });
+    expect(items.map((i) => [i.id, i.providerName, i.model])).toEqual([
+      [uuid(1101), 'Venice', 'qwen-image'],
+      [uuid(101), 'Venice', 'qwen-image'],
+    ]);
+  });
 });

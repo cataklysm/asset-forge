@@ -1,4 +1,4 @@
-import { ANALYZE_FILE_JOB, JOB_ERROR_MESSAGES } from '@assetforge/contracts';
+import { IMAGE_GENERATE_JOB, ImageGeneratePayloadSchema, JOB_ERROR_MESSAGES, type ProviderKind } from '@assetforge/contracts';
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import {
   acceptProposal,
@@ -9,6 +9,7 @@ import {
   discardProposal,
   enqueueAnalysis,
   getProposal,
+  InvalidOperationError,
   laneName,
   listJobs,
   listWaitingLanes,
@@ -17,14 +18,26 @@ import {
   ProviderNotConfiguredError,
   rerouteJobs,
   retryFailedJobs,
+  retryGeneration,
   retryJob,
+  type ImageProviderDirectory,
   type WorkspaceManager,
+  type WorkspaceSession,
 } from '@assetforge/core';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
 import type { IpcHandlers } from './ipc.js';
 import type { JobHost } from './job-host.js';
-import { PROVIDER_NOT_FOUND, type ProviderStore } from './provider-store.js';
+import { CANNOT_ANALYSE, type ProviderStore } from './provider-store.js';
+
+const GENERATION_NOT_FOUND = 'This generation does not exist';
+
+/** The provider name stored with the generation of the lane's newest generation job; null when there is none. */
+async function generationLaneName(s: WorkspaceSession, lane: string | null): Promise<string | null> {
+  const parsed = ImageGeneratePayloadSchema.safeParse(await s.database.jobs.latestPayloadOfLane(IMAGE_GENERATE_JOB, lane));
+  if (!parsed.success) return null;
+  return (await s.database.generations.get(parsed.data.generationId))?.providerName ?? null;
+}
 
 // Kept free of Electron imports. Every repository call is one atomic transaction, so these run
 // through `read` rather than the serial queue; accepting and discarding a proposal change tags and
@@ -59,6 +72,7 @@ export function createJobHandlers(
   describe: DescribeController,
   prompts: AnalysisPromptStore,
   providers: ProviderStore,
+  imageProviders: ImageProviderDirectory,
 ): JobHandlers {
   /** A job row changed outside the scheduler: raise the counter and let the scheduler look for work. */
   const touched = () => {
@@ -74,6 +88,8 @@ export function createJobHandlers(
   /** The current name of an existing entry; otherwise the name copied into a payload, if any. */
   const nameOf = (lane: string | null, copied: string | null): string | null =>
     (lane === null ? null : providers.get(lane)?.name) ?? copied;
+  /** True when the lane belongs to an existing `venice` entry: its jobs are generations, never analyses. */
+  const isImageLane = (lane: string | null): boolean => lane !== null && providers.get(lane)?.kind === 'venice';
 
   return {
     'analysis:preview': (r) =>
@@ -152,18 +168,18 @@ export function createJobHandlers(
       );
       return {
         ...page,
-        items: page.items.map((job) =>
-          job.type === ANALYZE_FILE_JOB ? { ...job, providerName: nameOf(job.providerId, job.providerName) } : job,
-        ),
+        items: page.items.map((job) => ({ ...job, providerName: nameOf(job.providerId, job.providerName) })),
       };
     },
     'jobs:summary': async () =>
       manager.read(async (s) => {
         const counts = await countJobs(s);
         const paused = [];
-        for (const { lane, reason } of jobs.paused()) {
-          const providerName = nameOf(lane, null) ?? (await laneName(s, lane));
-          paused.push({ providerId: lane, providerName, reason });
+        for (const { lane, reason, resourceClass } of jobs.paused()) {
+          // A generation lane pauses only for a venice entry; an analysis lane only for an ollama one.
+          const kind: ProviderKind = resourceClass === 'remote_api' ? 'venice' : 'ollama';
+          const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : await generationLaneName(s, lane));
+          paused.push({ providerId: lane, providerName, kind, reason });
         }
         return { ...counts, changes: jobs.changes(), paused };
       }),
@@ -178,7 +194,15 @@ export function createJobHandlers(
       return { cancelled };
     },
     'jobs:retry': async (r) => {
-      await manager.read((s) => retryJob(s, r.jobId));
+      await manager.read(async (s) => {
+        const job = await s.database.jobs.get(r.jobId);
+        if (job?.type !== IMAGE_GENERATE_JOB) return retryJob(s, r.jobId);
+        // A generation runs again as itself, with a new job and its stored settings, never as the old job row.
+        const parsed = ImageGeneratePayloadSchema.safeParse(job.payload);
+        const id = (await s.database.generations.byJob(job.id))?.id ?? (parsed.success ? parsed.data.generationId : null);
+        if (id === null || (await s.database.generations.get(id)) === null) throw new NotFoundError(GENERATION_NOT_FOUND);
+        await retryGeneration(s, { providers: imageProviders, control: jobs }, id);
+      });
       touched();
       return {};
     },
@@ -189,11 +213,14 @@ export function createJobHandlers(
     },
     'jobs:waitingByProvider': () =>
       manager.read(async (s) =>
-        (await listWaitingLanes(s)).map(({ lane, payloadName, waiting }) => ({
-          providerId: lane,
-          providerName: nameOf(lane, payloadName),
-          waiting,
-        })),
+        (await listWaitingLanes(s))
+          // Jobs in a venice lane can be moved to no analysis provider, so that lane is never offered.
+          .filter(({ lane }) => !isImageLane(lane))
+          .map(({ lane, payloadName, waiting }) => ({
+            providerId: lane,
+            providerName: nameOf(lane, payloadName),
+            waiting,
+          })),
       ),
     // The pause belongs to the app session, so this works without an open workspace.
     'jobs:resume': async (r) => {
@@ -204,8 +231,9 @@ export function createJobHandlers(
     // has no waiting jobs left, so its pause ends; resume already raises the counter and wakes the scheduler.
     'jobs:reroute': async (r) => {
       const result = await manager.read((s) => {
-        const to = providers.get(r.toProviderId);
-        if (to === null) throw new NotFoundError(PROVIDER_NOT_FOUND);
+        // Only analysis jobs move, and only between analysis entries; generation jobs never move.
+        if (isImageLane(r.fromProviderId)) throw new InvalidOperationError(CANNOT_ANALYSE);
+        const to = providers.resolve(r.toProviderId, 'ollama')!;
         return rerouteJobs(s, { fromLane: r.fromProviderId, to: { id: to.id, name: to.name }, model: r.model });
       });
       if (result.moved > 0) jobs.resume(r.fromProviderId);

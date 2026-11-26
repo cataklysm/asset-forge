@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ProviderView } from '@assetforge/contracts';
-import { builtInAnalysisPrompt, type VisionProvider } from '@assetforge/core';
-import { createOllamaVision } from '@assetforge/providers';
+import { builtInAnalysisPrompt, type GenerationImageSource, type ImageProviderDirectory, type VisionProvider } from '@assetforge/core';
+import { createOllamaVision, createVeniceImage } from '@assetforge/providers';
 import { createAnalysisPromptHandlers } from '../src/main/analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from '../src/main/analysis-prompts.js';
 import type { AppServices, HostActions } from '../src/main/ipc.js';
@@ -18,6 +18,7 @@ export const idleJobHost: JobHost = {
   changed: () => {},
   wake: () => {},
   cancel: async () => {},
+  cancelAll: async () => 0,
   paused: () => [],
   resume: () => {},
 };
@@ -29,13 +30,15 @@ function notUsed(): never {
 /** App services without a provider, for tests that do not exercise settings, analysis prompts or describe. */
 export const idleServices: AppServices = {
   providers: {
-    'providers:list': async () => ({ providers: [], lastUsedId: null, fromEnvironment: false, canStoreKey: false }),
+    'providers:list': async () => ({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: false }),
     'providers:save': notUsed,
     'providers:delete': notUsed,
     'providers:listModels': notUsed,
+    'providers:listImageModels': notUsed,
   },
+  imageProviders: noImageProviders(),
   providerStore: {
-    list: () => ({ providers: [], lastUsedId: null, fromEnvironment: false, canStoreKey: false }),
+    list: () => ({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: false }),
     get: () => null,
     first: () => null,
     resolve: () => null,
@@ -87,7 +90,7 @@ export function mockProviderEntry(
   url: string,
 ): { store: ProviderStore; entry: ProviderView; vision: (lane: string | null) => VisionProvider | null } {
   const store = createProviderStore({ userData, secrets: new FakeCodec(), env: {} });
-  const gateway = createProviderGateway({ store, create: createOllamaVision, log: () => {} });
+  const gateway = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: () => {} });
   const entry = store.save({ name: 'Mock', baseUrl: url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
   return { store, entry, vision: (lane) => gateway.vision(lane) };
 }
@@ -99,4 +102,21 @@ export const noopHost: HostActions = {
   openExternal: async () => {},
   workspaceOpened: async () => {},
   workspaceClosing: async () => {},
+};
+
+/** An image provider directory without any `venice` entry. */
+export function noImageProviders(): ImageProviderDirectory {
+  return {
+    resolve: () => null,
+    exists: () => false,
+    adapter: () => null,
+    models: async () => ({ ok: false, code: 'provider_not_configured' }),
+    markUsed: () => {},
+  };
+}
+
+/** What `createJobHost` needs for generation jobs in tests that never start one. */
+export const noGenerations: { imageProviders: ImageProviderDirectory; generationImages: GenerationImageSource } = {
+  imageProviders: noImageProviders(),
+  generationImages: { read: async () => null },
 };

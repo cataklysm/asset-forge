@@ -81,7 +81,7 @@ describe('several vision providers', () => {
 
     const paused = await h.until((s) => s.paused.length > 0 && s.succeeded === 2);
     expect(paused).toMatchObject({ waiting: 3, queued: 1, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', reason: 'provider_unreachable' }]);
+    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unreachable' }]);
     expect(await h.ok('jobs:waitingByProvider', {})).toEqual([{ providerId: a.id, providerName: 'A', waiting: 4 }]);
 
     expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 4 });
@@ -104,7 +104,7 @@ describe('several vision providers', () => {
     await h.ok('workspace:open', { rootPath: workspaceRoot() });
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ failed: 1, queued: 2 });
-    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', reason: 'provider_not_configured' }]);
+    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_not_configured' }]);
     const [failed] = (await h.ok('jobs:list', { ...page, status: 'failed' })).items;
     expect(failed).toMatchObject({ errorCode: 'provider_not_configured', providerId: a.id, providerName: 'A' });
 
@@ -191,7 +191,7 @@ describe('several vision providers', () => {
 
       const paused = await h.until((s) => s.paused.length > 0);
       expect(paused).toMatchObject({ failed: 1, queued: 2 });
-      expect(paused.paused).toEqual([{ providerId: null, providerName: null, reason: 'provider_not_configured' }]);
+      expect(paused.paused).toEqual([{ providerId: null, providerName: null, kind: 'ollama', reason: 'provider_not_configured' }]);
       const [failed] = (await h.ok('jobs:list', { ...page, status: 'failed' })).items;
       expect(failed).toMatchObject({ errorCode: 'provider_not_configured', providerId: null });
       for (const payload of (await payloadsByFile()).values()) expect((payload as { version: number }).version).toBeLessThan(4);
@@ -267,7 +267,7 @@ describe('several vision providers', () => {
     await h.until((s) => s.paused.length === 1 && s.failed === 1);
     expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 0 });
     expect((await h.ok('jobs:summary', {})).paused).toEqual([
-      { providerId: a.id, providerName: 'A', reason: 'provider_unauthorized' },
+      { providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unauthorized' },
     ]);
   });
 
@@ -283,8 +283,8 @@ describe('several vision providers', () => {
     await h.ok('analysis:enqueue', request(forB, b.id));
     const paused = await h.until((s) => s.paused.length === 2);
     expect([...paused.paused].sort((x, y) => x.providerName!.localeCompare(y.providerName!))).toEqual([
-      { providerId: a.id, providerName: 'A', reason: 'provider_unauthorized' },
-      { providerId: b.id, providerName: 'B', reason: 'provider_unauthorized' },
+      { providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unauthorized' },
+      { providerId: b.id, providerName: 'B', kind: 'ollama', reason: 'provider_unauthorized' },
     ]);
 
     expect((await laneOf(a.id)).map((j) => j.fileId).sort()).toEqual([...forA].sort());
@@ -312,7 +312,7 @@ describe('several vision providers', () => {
 
     await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY });
     const summary = await h.until((s) => s.succeeded === 1 && active(s) === 0);
-    expect(summary.paused).toEqual([{ providerId: b.id, providerName: 'Renamed', reason: 'provider_unauthorized' }]);
+    expect(summary.paused).toEqual([{ providerId: b.id, providerName: 'Renamed', kind: 'ollama', reason: 'provider_unauthorized' }]);
     expect(chats(mocks.a).filter((r) => r.headers['authorization'] === `Bearer ${TEST_KEY}`)).toHaveLength(1);
   });
 });
