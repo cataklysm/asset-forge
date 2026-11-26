@@ -185,6 +185,7 @@ describe('analysis target reader', () => {
       type: 'vision.analyze_file',
       resourceClass: 'local_gpu' as const,
       fileId: B_REF,
+      lane: null,
       payload: { version: 2 },
       dedupeKey: `vision.analyze_file:${B_REF}`,
     };
