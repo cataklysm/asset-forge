@@ -49,11 +49,17 @@ export class ZipArchiveReader implements ArchiveReader {
       await closeFd(fd).catch(() => undefined);
       throw new ArchiveNotReadableError({ cause });
     }
-    // Errors after the directory was read (for example closing the descriptor) must not crash the process.
-    zipfile.on('error', () => undefined);
     // The descriptor reader reports the end of `fs.close` as 'close' or 'error'. The ZipFile forwards
     // only its first error, so listen on the reader itself: `close()` must settle either way.
-    const descriptor = (zipfile as unknown as { reader: EventEmitter }).reader;
+    // `reader` is a yauzl internal; without it the ZipFile cannot be trusted to release the
+    // descriptor, so it is closed here directly and the ZipFile is dropped.
+    const descriptor: unknown = (zipfile as unknown as { reader?: unknown }).reader;
+    if (!isEmitter(descriptor)) {
+      await closeFd(fd).catch(() => undefined);
+      throw new ArchiveNotReadableError();
+    }
+    // Errors after the directory was read (for example closing the descriptor) must not crash the process.
+    zipfile.on('error', () => undefined);
     const closed = new Promise<void>((resolve) => {
       descriptor.once('close', () => resolve());
       descriptor.once('error', () => resolve());
@@ -70,19 +76,19 @@ export class ZipArchiveReader implements ArchiveReader {
       return closing;
     };
 
-    let raw: yauzl.Entry[];
+    let directory: DirectoryEntry[];
     try {
       if (zipfile.entryCount > limits.maxEntries) throw new ArchiveTooLargeError();
-      raw = await readDirectory(zipfile);
+      directory = await readDirectory(zipfile);
     } catch (error) {
       await close();
       throw error;
     }
 
     return {
-      entries: raw.map(toArchiveEntry),
+      entries: directory.map((d) => d.entry),
       openEntry: async (index) => {
-        const entry = raw[index];
+        const entry = directory[index]?.location;
         if (closing !== undefined || entry === undefined) throw new ArchiveNotReadableError();
         let stream: Readable;
         try {
@@ -104,6 +110,10 @@ export class ZipArchiveReader implements ArchiveReader {
   }
 }
 
+function isEmitter(value: unknown): value is EventEmitter {
+  return typeof (value as { once?: unknown } | null | undefined)?.once === 'function';
+}
+
 /** The same check and the same failure as a plain import source (`NodeSourceFiles`). */
 async function openRegularFile(absolutePath: string): Promise<number> {
   let fd: number | undefined;
@@ -120,11 +130,37 @@ async function openRegularFile(absolutePath: string): Promise<number> {
   }
 }
 
-function readDirectory(zipfile: yauzl.ZipFile): Promise<yauzl.Entry[]> {
+interface DirectoryEntry {
+  entry: ArchiveEntry;
+  /** What `openReadStream` needs of the entry, without its name, extra field and comment buffers. */
+  location: yauzl.Entry;
+}
+
+/**
+ * A public `yauzl.Entry` carrying only the fields `ZipFile.openReadStream` (yauzl 3.4.0) reads:
+ * sizes, compression method, the flags behind `isEncrypted()` and the local header offset.
+ * A full entry keeps up to ~196 KB of name, extra field and comment buffers alive.
+ */
+function slimEntry(entry: yauzl.Entry): yauzl.Entry {
+  return Object.assign(new yauzl.Entry(), {
+    generalPurposeBitFlag: entry.generalPurposeBitFlag,
+    compressionMethod: entry.compressionMethod,
+    compressedSize: entry.compressedSize,
+    uncompressedSize: entry.uncompressedSize,
+    relativeOffsetOfLocalHeader: entry.relativeOffsetOfLocalHeader,
+  });
+}
+
+function readDirectory(zipfile: yauzl.ZipFile): Promise<DirectoryEntry[]> {
   return new Promise((resolve, reject) => {
-    const entries: yauzl.Entry[] = [];
+    const entries: DirectoryEntry[] = [];
     const onEntry = (entry: yauzl.Entry) => {
-      entries.push(entry);
+      try {
+        entries.push({ entry: toArchiveEntry(entry), location: slimEntry(entry) });
+      } catch (cause) {
+        onError(cause);
+        return;
+      }
       zipfile.readEntry();
     };
     const onEnd = () => {

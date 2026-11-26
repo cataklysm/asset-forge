@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, fstatSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
@@ -14,12 +15,49 @@ import {
 } from '@assetforge/core';
 import { ZipArchiveReader } from '../src/index.js';
 
+// Windows opens files with FILE_SHARE_DELETE, so deleting a file proves nothing about its handle.
+// Instead every descriptor the adapter opens is recorded and checked to be closed.
+const probe = vi.hoisted(() => ({ opened: [] as number[], dropReader: false }));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const open = (...args: unknown[]) => {
+    const callback = args.pop() as (err: NodeJS.ErrnoException | null, fd?: number) => void;
+    (actual.open as (...a: unknown[]) => void)(...args, (err: NodeJS.ErrnoException | null, fd?: number) => {
+      if (!err && fd !== undefined) probe.opened.push(fd);
+      callback(err, fd);
+    });
+  };
+  return { ...actual, open, default: { ...actual, open } };
+});
+
+vi.mock('yauzl', async (importOriginal) => {
+  const actual = (await importOriginal<{ default: typeof import('yauzl') }>()).default;
+  const fromFd = (fd: number, options: import('yauzl').Options, callback: (err: Error | null, zip?: unknown) => void) =>
+    actual.fromFd(fd, options, (err, zipfile) => {
+      if (zipfile && probe.dropReader) delete (zipfile as unknown as { reader?: unknown }).reader;
+      callback(err, zipfile);
+    });
+  const mocked = { ...actual, fromFd };
+  return { ...mocked, default: mocked };
+});
+
+/** Asserts that every descriptor the adapter opened since the last call is closed again. */
+function expectAllClosed({ requireOpened = true } = {}): void {
+  if (requireOpened) expect(probe.opened.length).toBeGreaterThan(0);
+  for (const fd of probe.opened.splice(0)) {
+    expect(() => fstatSync(fd), `descriptor ${fd} is still open`).toThrow(expect.objectContaining({ code: 'EBADF' }));
+  }
+}
+
 let tmp: string;
 const reader = new ZipArchiveReader();
 const LIMITS = { maxEntries: 100 };
 
 beforeEach(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'af-zip-'));
+  probe.opened.length = 0;
+  probe.dropReader = false;
 });
 
 afterEach(async () => {
@@ -234,7 +272,6 @@ describe('ZipArchiveReader', () => {
       { kind: 'file', name: 'c.txt', data: stored },
     ]);
     await expect(reader.open(file, { maxEntries: 2 })).rejects.toBeInstanceOf(ArchiveTooLargeError);
-    await fs.rm(file);
   });
 
   it.each([
@@ -260,28 +297,90 @@ describe('ZipArchiveReader', () => {
       buf.writeUInt32LE(stored.length + 1, entry!.central + 24);
     });
     await expect(reader.open(file, LIMITS)).rejects.toBeInstanceOf(ArchiveNotReadableError);
-    await fs.rm(file);
+    expectAllClosed();
   });
 
-  it('releases the file after close, also with an entry left unread', async () => {
+  it('rejects openEntry when the entry has a corrupt local file header', async () => {
     const file = path.join(tmp, 'a.zip');
-    await buildZip(file, [{ kind: 'file', name: 'x.txt', data: deflated }]);
-    const archive = await reader.open(file, LIMITS);
-    await read(await archive.openEntry(0));
-    await archive.openEntry(0);
-    await archive.close();
-    await archive.close();
-    await expect(archive.openEntry(0)).rejects.toBeInstanceOf(ArchiveNotReadableError);
-    await fs.rm(file);
-    await expect(fs.stat(file)).rejects.toThrow();
+    await buildZip(file, [
+      { kind: 'file', name: 'x.txt', data: deflated },
+      { kind: 'file', name: 'y.txt', data: stored },
+    ]);
+    await patch(file, (buf, [entry]) => {
+      buf.writeUInt32LE(0xdeadbeef, entry!.local);
+    });
+    await withArchive(file, async (archive) => {
+      await expect(archive.openEntry(0)).rejects.toBeInstanceOf(ArchiveNotReadableError);
+      expect(await read(await archive.openEntry(1))).toEqual(stored);
+    });
+    expectAllClosed();
   });
 
-  it('releases the file after a failed open', async () => {
-    const file = path.join(tmp, 'text.zip');
-    await fs.writeFile(file, 'not an archive');
-    await expect(reader.open(file, LIMITS)).rejects.toBeInstanceOf(ArchiveNotReadableError);
-    await fs.rm(file);
-    await expect(fs.stat(file)).rejects.toThrow();
+  describe('releases every descriptor it opens', () => {
+    it('after open and close', async () => {
+      const file = path.join(tmp, 'a.zip');
+      await buildZip(file, [{ kind: 'file', name: 'x.txt', data: deflated }]);
+      const archive = await reader.open(file, LIMITS);
+      await read(await archive.openEntry(0));
+      await archive.close();
+      expectAllClosed();
+    });
+
+    it('after close with an entry stream left unread', async () => {
+      const file = path.join(tmp, 'a.zip');
+      // Large enough that the unread stream cannot buffer the whole entry and drop its reference by itself.
+      await buildZip(file, [{ kind: 'file', name: 'x.bin', data: randomBytes(4 * 1024 * 1024) }]);
+      const archive = await reader.open(file, LIMITS);
+      await archive.openEntry(0);
+      await archive.close();
+      await archive.close();
+      await expect(archive.openEntry(0)).rejects.toBeInstanceOf(ArchiveNotReadableError);
+      expectAllClosed();
+    });
+
+    it('when the file is not a ZIP', async () => {
+      const file = path.join(tmp, 'text.zip');
+      await fs.writeFile(file, 'not an archive');
+      await expect(reader.open(file, LIMITS)).rejects.toBeInstanceOf(ArchiveNotReadableError);
+      expectAllClosed();
+    });
+
+    it('when the archive has too many entries', async () => {
+      const file = path.join(tmp, 'a.zip');
+      await buildZip(file, [
+        { kind: 'file', name: 'a.txt', data: stored },
+        { kind: 'file', name: 'b.txt', data: stored },
+        { kind: 'file', name: 'c.txt', data: stored },
+      ]);
+      await expect(reader.open(file, { maxEntries: 2 })).rejects.toBeInstanceOf(ArchiveTooLargeError);
+      expectAllClosed();
+    });
+
+    it('when reading the directory fails', async () => {
+      const file = path.join(tmp, 'a.zip');
+      await buildZip(file, [
+        { kind: 'file', name: 'a.txt', data: stored },
+        { kind: 'file', name: 'b.txt', data: stored },
+      ]);
+      await patch(file, (buf, entries) => {
+        buf.writeUInt32LE(0xdeadbeef, entries[1]!.central);
+      });
+      await expect(reader.open(file, LIMITS)).rejects.toBeInstanceOf(ArchiveNotReadableError);
+      expectAllClosed();
+    });
+
+    it('when the source is a directory', async () => {
+      await expect(reader.open(tmp, LIMITS)).rejects.toBeInstanceOf(SourceNotReadableError);
+      expectAllClosed({ requireOpened: false });
+    });
+
+    it('when the yauzl internal it relies on is missing', async () => {
+      const file = path.join(tmp, 'a.zip');
+      await buildZip(file, [{ kind: 'file', name: 'x.txt', data: stored }]);
+      probe.dropReader = true;
+      await expect(reader.open(file, LIMITS)).rejects.toBeInstanceOf(ArchiveNotReadableError);
+      expectAllClosed();
+    });
   });
 
   it('never puts reader error text into the message', async () => {
