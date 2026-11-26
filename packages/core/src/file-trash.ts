@@ -108,6 +108,8 @@ export function trashFiles(s: WorkspaceSession, control: JobControl, fileIds: re
     let exists: boolean;
     try {
       exists = await s.storage.exists(file.relativePath);
+      // A share that dropped after the first check also answers "missing": never trash as missing then.
+      if (!exists) await requireReachable(s);
     } catch (error) {
       await s.database.fileMoves.abort(file.id).catch(() => undefined);
       throw error;
@@ -123,6 +125,8 @@ export function restoreFiles(s: WorkspaceSession, fileIds: readonly string[]): P
     if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
     await requireReachable(s);
     if (!(await s.storage.exists(file.relativePath))) {
+      // A storage that dropped after the first check answers the storage error, not "missing".
+      await requireReachable(s);
       throw new InvalidOperationError('The file is missing on disk and cannot be restored');
     }
 

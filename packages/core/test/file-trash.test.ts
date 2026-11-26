@@ -294,6 +294,40 @@ describe('trashFiles', () => {
     expect([...storage.files.keys()].sort()).toEqual(filesBefore);
   });
 
+  it('a storage that drops inside exists refuses the trash, commits nothing and leaves no journal row', async () => {
+    const { session, storage, db, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    vi.spyOn(storage, 'exists').mockImplementationOnce(async () => {
+      storage.reachable = false;
+      return false;
+    });
+
+    const [item] = await trashFiles(session, control, [file.id]);
+
+    expect(item!.error).toBeInstanceOf(StorageUnreachableError);
+    expect(item!.file).toBeNull();
+    expect(await db.files.get(file.id)).toEqual(file);
+    expect(storage.files.has(file.relativePath)).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
+  it('a storage that drops inside exists refuses the restore with the storage error, not the missing message', async () => {
+    const { session, storage, db, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    const [trashed] = ok(await trashFiles(session, control, [file.id]));
+    vi.spyOn(storage, 'exists').mockImplementationOnce(async () => {
+      storage.reachable = false;
+      return false;
+    });
+
+    const [item] = await restoreFiles(session, [file.id]);
+
+    expect(item!.error).toBeInstanceOf(StorageUnreachableError);
+    expect(item!.error!.message).toBe('The storage of this workspace is not reachable');
+    expect(await db.files.get(file.id)).toEqual(trashed);
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+
   it('a failing move aborts the journal and leaves the file where it was', async () => {
     const { session, storage, db, importOne, control } = await setup();
     const file = await importOne('a.png');
