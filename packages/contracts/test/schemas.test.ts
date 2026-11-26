@@ -19,6 +19,17 @@ import {
   SetCoverRequestSchema,
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
+  GENERATION_PROMPT_MAX,
+  GenerationSchema,
+  IMAGE_ANSWER_MAX_BYTES,
+  IMAGE_INPUT_MAX_BYTES,
+  IMAGE_INPUT_MAX_PIXELS,
+  IMAGE_INPUT_MIN_PIXELS,
+  MAX_FILE_GENERATIONS,
+  MAX_RECENT_PROMPTS,
+  StartGenerationResultSchema,
+  StartGenerationSchema,
+  UPSCALE_MAX_PIXELS,
   ipcContract,
 } from '../src/index';
 
@@ -552,5 +563,89 @@ describe('trash channels', () => {
     expect(ipcContract['trash:summary'].request.safeParse({}).success).toBe(true);
     expect(ipcContract['trash:summary'].response.safeParse({ count: 0 }).success).toBe(true);
     expect(ipcContract['trash:summary'].response.safeParse({ count: -1 }).success).toBe(false);
+  });
+});
+
+describe('generation studio', () => {
+  const generation = {
+    id: uuid,
+    kind: 'edit',
+    status: 'pending',
+    errorCode: null,
+    providerId: uuid,
+    providerName: 'Venice',
+    providerKind: 'venice',
+    model: 'qwen-image',
+    prompt: 'Make it night',
+    parameters: { v: 1, aspectRatio: null, resolution: null, safeMode: true },
+    jobId: uuid,
+    jobStatus: 'queued',
+    createdAt: now,
+    finishedAt: null,
+    inputs: [{ fileId: uuid, name: 'oak.png', sha256: 'a'.repeat(64), trashed: false }],
+    outputs: [],
+  };
+
+  it('the constants', () => {
+    expect(GENERATION_PROMPT_MAX).toBe(8000);
+    expect(IMAGE_INPUT_MIN_PIXELS).toBe(65_536);
+    expect(IMAGE_INPUT_MAX_PIXELS).toBe(33_177_600);
+    expect(IMAGE_INPUT_MAX_BYTES).toBe(25_000_000);
+    expect(IMAGE_ANSWER_MAX_BYTES).toBe(100 * 1024 ** 2);
+    expect(UPSCALE_MAX_PIXELS).toBe(100_000_000);
+    expect(MAX_RECENT_PROMPTS).toBe(20);
+    expect(MAX_FILE_GENERATIONS).toBe(200);
+  });
+
+  it('StartGenerationSchema accepts an edit without provider, aspect ratio and resolution', () => {
+    const edit = { kind: 'edit', fileId: uuid, model: 'qwen-image', prompt: 'Make it night', safeMode: true };
+    expect(StartGenerationSchema.safeParse(edit).success).toBe(true);
+    expect(StartGenerationSchema.safeParse({ ...edit, providerId: uuid, aspectRatio: '1:1', resolution: '1K' }).success).toBe(true);
+    expect(ipcContract['generations:start'].request.safeParse(edit).success).toBe(true);
+  });
+
+  it('StartGenerationSchema refuses an edit without safe mode', () => {
+    expect(StartGenerationSchema.safeParse({ kind: 'edit', fileId: uuid, model: 'm', prompt: 'p' }).success).toBe(false);
+  });
+
+  it('StartGenerationSchema takes an upscale of 2 or 4 only', () => {
+    expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 2 }).success).toBe(true);
+    expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 4, providerId: uuid }).success).toBe(true);
+    expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 3 }).success).toBe(false);
+    expect(StartGenerationSchema.safeParse({ kind: 'other', fileId: uuid, scale: 2 }).success).toBe(false);
+  });
+
+  it('GenerationSchema parses an output without file and a generation without job status', () => {
+    expect(GenerationSchema.safeParse(generation).success).toBe(true);
+    const finished = {
+      ...generation,
+      status: 'succeeded',
+      jobStatus: null,
+      finishedAt: now,
+      outputs: [{ fileId: null, name: 'oak edit 1.png', sha256: 'b'.repeat(64), trashed: false }],
+    };
+    expect(GenerationSchema.safeParse(finished).success).toBe(true);
+    const upscale = { ...generation, kind: 'upscale', model: null, prompt: null, parameters: { v: 1, scale: 4 } };
+    expect(GenerationSchema.safeParse(upscale).success).toBe(true);
+    expect(GenerationSchema.safeParse({ ...generation, status: 'running' }).success).toBe(false);
+  });
+
+  it('StartGenerationResultSchema is the generation or a job error code', () => {
+    expect(StartGenerationResultSchema.safeParse({ ok: true, generation }).success).toBe(true);
+    expect(StartGenerationResultSchema.safeParse({ ok: false, code: 'provider_unauthorized' }).success).toBe(true);
+    expect(StartGenerationResultSchema.safeParse({ ok: false, code: 'busy' }).success).toBe(false);
+  });
+
+  it('the generation channels', () => {
+    expect(ipcContract['generations:forFile'].request.safeParse({ fileId: uuid }).success).toBe(true);
+    expect(ipcContract['generations:forFile'].response.safeParse({ madeBy: null, results: [generation] }).success).toBe(true);
+    expect(ipcContract['generations:retry'].request.safeParse({ generationId: uuid }).success).toBe(true);
+    expect(ipcContract['generations:retry'].response.safeParse(generation).success).toBe(true);
+    expect(ipcContract['generations:remove'].request.safeParse({ generationId: 'x' }).success).toBe(false);
+    expect(ipcContract['generations:recentPrompts'].request.safeParse({}).success).toBe(true);
+    expect(ipcContract['generations:recentPrompts'].response.safeParse({ prompts: ['a'] }).success).toBe(true);
+    expect(
+      ipcContract['generations:recentPrompts'].response.safeParse({ prompts: Array.from({ length: 21 }, () => 'a') }).success,
+    ).toBe(false);
   });
 });

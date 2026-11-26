@@ -351,7 +351,7 @@ describe('phase 4b acceptance', () => {
     for (const channel of ['analysis:enqueue', 'analysis:preview'] as const) {
       expect(await h.call(channel, request)).toEqual({
         ok: false,
-        error: { code: 'provider_not_configured', message: 'No analysis provider is configured' },
+        error: { code: 'provider_not_configured', message: 'No provider is configured' },
       });
     }
     expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 0, failed: 0, paused: [] });

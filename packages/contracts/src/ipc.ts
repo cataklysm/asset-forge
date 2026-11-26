@@ -58,7 +58,20 @@ import {
   FileListFilterSchema,
   ProposalViewSchema,
 } from './analysis';
-import { ListModelsResultSchema, ProviderListSchema, ProviderViewSchema, SaveProviderSchema } from './settings';
+import {
+  ListImageModelsResultSchema,
+  ListModelsResultSchema,
+  ProviderListSchema,
+  ProviderViewSchema,
+  SaveProviderSchema,
+} from './settings';
+import {
+  GenerationSchema,
+  MAX_FILE_GENERATIONS,
+  MAX_RECENT_PROMPTS,
+  StartGenerationResultSchema,
+  StartGenerationSchema,
+} from './generations';
 import { AnalysisPromptListSchema, AnalysisPromptSchema, SaveAnalysisPromptSchema } from './analysis-prompts';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
@@ -382,6 +395,39 @@ export const ipcContract = {
   'providers:listModels': {
     request: z.object({ providerId: ProviderIdSchema, refresh: z.boolean().optional() }),
     response: ListModelsResultSchema,
+  },
+  /** The image edit models of a `venice` entry; cached until the entry changes or `refresh` is true. */
+  'providers:listImageModels': {
+    request: z.object({ providerId: ProviderIdSchema, refresh: z.boolean().optional() }),
+    response: ListImageModelsResultSchema,
+  },
+  /** Starts an edit or upscale of one complete image outside the trash as a job. */
+  'generations:start': {
+    request: StartGenerationSchema,
+    response: StartGenerationResultSchema,
+  },
+  /** The generation that made this file, and the generations made from it, newest first. */
+  'generations:forFile': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.object({
+      madeBy: GenerationSchema.nullable(),
+      results: z.array(GenerationSchema).max(MAX_FILE_GENERATIONS),
+    }),
+  },
+  /** Only a failed or cancelled generation; it runs again with the same settings. */
+  'generations:retry': {
+    request: z.object({ generationId: IdSchema }),
+    response: GenerationSchema,
+  },
+  /** Only a failed or cancelled generation. */
+  'generations:remove': {
+    request: z.object({ generationId: IdSchema }),
+    response: z.object({}),
+  },
+  /** Distinct edit prompts, newest use first. */
+  'generations:recentPrompts': {
+    request: EmptyRequestSchema,
+    response: z.object({ prompts: z.array(z.string()).max(MAX_RECENT_PROMPTS) }),
   },
   /** App-level analysis prompts need no open workspace. The file order is kept; a purpose never has none. */
   'analysisPrompts:list': {

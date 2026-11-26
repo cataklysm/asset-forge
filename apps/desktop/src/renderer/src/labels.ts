@@ -2,7 +2,9 @@ import {
   ANALYSIS_TAG_LIMIT_MAX,
   ANALYSIS_TAG_LIMIT_MIN,
   type AnalysisPromptPurpose,
+  type GenerationStatus,
   type JobStatus,
+  type ProviderKind,
   type RelationKind,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
@@ -95,8 +97,17 @@ export const PROVIDER_STATE_LABELS = {
   unreachable: 'not reachable',
   unauthorized: 'key refused',
   no_vision_model: 'no vision model',
+  no_edit_model: 'no edit model',
   error: 'error',
 } as const;
+
+/** The kind of a provider entry (ProviderSettings). */
+export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
+  ollama: 'Ollama',
+  venice: 'Venice',
+};
+export const PROVIDER_KIND_LABEL = 'Kind';
+export const EDIT_MODEL_LABEL = 'Edit model';
 
 /** The provider select (ProviderSelect). */
 export const PROVIDER_LABEL = 'Provider';
@@ -309,3 +320,46 @@ export function purgeConfirmTitle(count: number): string {
 export function trashNavLabel(count: number): string {
   return `${TRASH_LABEL}, ${fileCount(count)}`;
 }
+
+/** The entry points of the generation studio and the dialog's own title. */
+export const GENERATE_LABEL = 'Generate from image';
+export const GENERATE_TITLE = 'Edit this image with an image model';
+export const UPSCALE_LABEL = 'Upscale';
+export const UPSCALE_SCALE_LABELS: Record<2 | 4, string> = { 2: '2×', 4: '4×' };
+export const NO_IMAGE_PROVIDER_TITLE = 'Add an image provider in Settings first';
+export const STUDIO_TITLE = 'Studio';
+
+/** The form of the studio (GenerationStudio). */
+export const PROMPT_LABEL = PROMPT_SELECT_LABEL;
+export const RECENT_PROMPTS_LABEL = 'Recent';
+export const ASPECT_LABEL = 'Aspect';
+export const RESOLUTION_LABEL = 'Resolution';
+export const SAFE_MODE_LABEL = 'Safe mode';
+export const GENERATE_BUTTON = 'Generate';
+
+/** The results of the studio; `RETRY_LABEL` above is shared. */
+export const RESULTS_LABEL = 'Results';
+export const USE_SETTINGS_LABEL = 'Use settings';
+export const OPEN_LABEL = 'Open';
+export const REMOVE_LABEL = 'Remove';
+export const TRASHED_MARK = 'In the trash';
+export const DELETED_MARK = DELETED_LABEL;
+/** A pending generation shows its live job state as queued or running. */
+export const GENERATION_STATUS_LABELS: Record<GenerationStatus | 'running', string> = {
+  pending: JOB_STATUS_LABELS.queued,
+  running: JOB_STATUS_LABELS.running,
+  succeeded: JOB_STATUS_LABELS.succeeded,
+  failed: JOB_STATUS_LABELS.failed,
+  cancelled: JOB_STATUS_LABELS.cancelled,
+};
+
+/** The generation block of the file details column. */
+export const GENERATED_FROM_LABEL = 'Generated from';
+export const COPY_PROMPT_TITLE = 'Copy prompt';
+export const PARAMETERS_LABEL = 'Parameters';
+
+/** The type column of the Jobs screen. */
+export const JOB_TYPE_LABELS: Record<string, string> = {
+  'vision.analyze_file': 'Analysis',
+  'image.generate': 'Generation',
+};

@@ -120,17 +120,19 @@ export function fakeAnalysisPrompts(seed?: Partial<AnalysisPromptList>): {
   return { state, handlers };
 }
 
-type ProviderChannel = 'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels';
+type ProviderChannel = 'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels' | 'providers:listImageModels';
 
 /** A stored provider entry: `Local` on the mock address, with a tagging and a prompt model and no key. */
 export function providerView(p: Partial<ProviderView> = {}): ProviderView {
   return {
     id: nextId(),
+    kind: 'ollama',
     name: 'Local',
     baseUrl: 'http://127.0.0.1:11500',
     timeoutSeconds: 120,
     taggingModel: 'vision-a',
     promptModel: 'vision-a',
+    editModel: null,
     hasApiKey: false,
     ...p,
   };
@@ -154,6 +156,7 @@ export function fakeProviders(
   const state: ProviderList = {
     providers: seed?.providers ?? [],
     lastUsedId: seed?.lastUsedId ?? null,
+    lastUsedImageId: seed?.lastUsedImageId ?? null,
     fromEnvironment: seed?.fromEnvironment ?? false,
     canStoreKey: seed?.canStoreKey ?? true,
   };
@@ -175,11 +178,13 @@ export function fakeProviders(
       if (before === undefined && state.providers.length >= 10) throw fakeError('invalid_operation', 'No more than 10 providers');
       const next: ProviderView = {
         id: before?.id ?? nextId(),
+        kind: request.kind ?? before?.kind ?? 'ollama',
         name,
         baseUrl: request.baseUrl,
         timeoutSeconds: request.timeoutSeconds,
         taggingModel: request.taggingModel,
         promptModel: request.promptModel,
+        editModel: request.editModel === undefined ? (before?.editModel ?? null) : request.editModel,
         hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
       };
       state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
@@ -189,12 +194,17 @@ export function fakeProviders(
       find(id);
       state.providers = state.providers.filter((p) => p.id !== id);
       if (state.lastUsedId === id) state.lastUsedId = null;
+      if (state.lastUsedImageId === id) state.lastUsedImageId = null;
       return {};
     },
     'providers:listModels': ({ providerId }) => {
       if (!state.providers.some((p) => p.id === providerId)) return { ok: false, code: 'provider_not_configured' };
       const answer = models[providerId] ?? FAKE_MODELS;
       return typeof answer === 'function' ? answer() : structuredClone(answer);
+    },
+    'providers:listImageModels': ({ providerId }) => {
+      if (!state.providers.some((p) => p.id === providerId)) return { ok: false, code: 'provider_not_configured' };
+      return { ok: true, models: [] };
     },
   };
   return { state, handlers };
@@ -249,7 +259,38 @@ export function fakeAssetSources(asset: AssetDetail): {
   return { state, handlers };
 }
 
-/** Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see `fakeAnalysisPrompts`) and the `providers:*` ones with no entry (see `fakeProviders`). */
+type GenerationChannel =
+  | 'generations:start'
+  | 'generations:forFile'
+  | 'generations:retry'
+  | 'generations:remove'
+  | 'generations:recentPrompts';
+
+/**
+ * The `generations:*` answers of a workspace without generations: no image provider to start with,
+ * no generation to retry or remove, empty lists.
+ */
+export function fakeGenerationDefaults(): { [C in GenerationChannel]: NonNullable<FakeHandlers[C]> } {
+  return {
+    'generations:start': () => {
+      throw fakeError('provider_not_configured', 'No provider is configured');
+    },
+    'generations:forFile': () => ({ madeBy: null, results: [] }),
+    'generations:retry': () => {
+      throw fakeError('not_found', 'The generation does not exist');
+    },
+    'generations:remove': () => {
+      throw fakeError('not_found', 'The generation does not exist');
+    },
+    'generations:recentPrompts': () => ({ prompts: [] }),
+  };
+}
+
+/**
+ * Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see
+ * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`) and the
+ * `generations:*` ones (see `fakeGenerationDefaults`).
+ */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
   set<C extends IpcChannel>(channel: C, handler: FakeHandlers[C]): void;
@@ -257,6 +298,7 @@ export function installFakeApi(handlers: FakeHandlers): {
   const table: Record<string, ((request: never) => unknown) | undefined> = {
     ...fakeAnalysisPrompts().handlers,
     ...fakeProviders().handlers,
+    ...fakeGenerationDefaults(),
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

@@ -91,6 +91,7 @@ import type {
   WorkspaceMetaRepository,
   WorkspaceRegistry,
 } from '../src/ports.js';
+import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 
 /** In-memory storage. Files live in `files`, directories in `dirs` (relative, `/`-separated). */
@@ -1420,6 +1421,10 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   );
   readonly analyses = new InMemoryAnalyses(this.files, this.tags, this.proposals);
   readonly analysisTargets = new InMemoryAnalysisTargets(this.files, this.assets, this.analyses, this.jobs);
+  readonly generations = new InMemoryGenerationRepository(this.jobs, (fileId) => {
+    const rec = this.files.records.get(fileId);
+    return rec === undefined ? 'unknown' : rec.deletedAt === null ? 'live' : 'trashed';
+  });
   closed = false;
 
   constructor() {
@@ -1614,7 +1619,7 @@ export class FakeVisionProvider implements VisionProvider {
 
 /** Trashes files through `trashFiles` with a control that cancels nothing; throws the first item error. */
 export async function trashForTest(s: WorkspaceSession, fileIds: readonly string[]): Promise<void> {
-  const items = await trashFiles(s, { wake() {}, async cancel() {} }, fileIds);
+  const items = await trashFiles(s, { wake() {}, async cancel() {}, async cancelAll() { return 0; } }, fileIds);
   for (const item of items) if (item.error) throw item.error;
 }
 

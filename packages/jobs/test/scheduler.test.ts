@@ -139,7 +139,7 @@ describe('JobError', () => {
   it('carries the code and its fixed message', () => {
     const error = new JobError('provider_rejected', { cause: new Error('secret body') });
     expect(error.code).toBe('provider_rejected');
-    expect(error.message).toBe('The analysis provider rejected the request');
+    expect(error.message).toBe('The provider rejected the request');
     expect(error).toBeInstanceOf(Error);
   });
 });
@@ -216,7 +216,7 @@ describe('createScheduler', () => {
     expect(r.status).toBe('failed');
     expect(r.attempt).toBe(3);
     expect(r.errorCode).toBe('provider_timeout');
-    expect(r.errorMessage).toBe('The analysis provider did not answer in time');
+    expect(r.errorMessage).toBe('The provider did not answer in time');
     expect(s.timers).toHaveLength(0);
   });
 
@@ -227,7 +227,7 @@ describe('createScheduler', () => {
     await s.scheduler.start();
     h.runOf(id).reject(new JobError('provider_rejected'));
     await flush();
-    expect(s.row(id)).toMatchObject({ status: 'failed', attempt: 1, errorCode: 'provider_rejected', errorMessage: 'The analysis provider rejected the request' });
+    expect(s.row(id)).toMatchObject({ status: 'failed', attempt: 1, errorCode: 'provider_rejected', errorMessage: 'The provider rejected the request' });
     expect(s.timers).toHaveLength(0);
   });
 

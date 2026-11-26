@@ -10,12 +10,24 @@ import {
   ProviderViewSchema,
   SaveProviderSchema,
   VisionModelSchema,
+  ImageModelSchema,
+  ListImageModelsResultSchema,
+  ProviderKindSchema,
+  VENICE_DEFAULT_BASE_URL,
   ipcContract,
 } from '../src/index';
 
 const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
 const save = { name: 'RunPod', baseUrl: 'http://127.0.0.1:11500', timeoutSeconds: 120, taggingModel: 'qwen', promptModel: null };
-const view = { ...save, id: uuid, hasApiKey: false };
+const view = { ...save, id: uuid, kind: 'ollama', editModel: null, hasApiKey: false };
+const veniceView = {
+  ...view,
+  kind: 'venice',
+  baseUrl: VENICE_DEFAULT_BASE_URL,
+  taggingModel: null,
+  promptModel: null,
+  editModel: 'qwen-image',
+};
 
 describe('provider entries', () => {
   test('the constants', () => {
@@ -75,10 +87,55 @@ describe('provider entries', () => {
     expect(ProviderViewSchema.safeParse({ ...view, name: '' }).success).toBe(false);
   });
 
+  test('a view names its kind; a venice view has an edit model', () => {
+    expect(ProviderKindSchema.options).toEqual(['ollama', 'venice']);
+    expect(VENICE_DEFAULT_BASE_URL).toBe('https://api.venice.ai/api/v1');
+    const { kind: _kind, ...withoutKind } = view;
+    expect(ProviderViewSchema.safeParse(withoutKind).success).toBe(false);
+    expect(ProviderViewSchema.safeParse({ ...view, kind: 'other' }).success).toBe(false);
+    expect(ProviderViewSchema.safeParse(veniceView).success).toBe(true);
+    const { editModel: _editModel, ...withoutEditModel } = view;
+    expect(ProviderViewSchema.safeParse(withoutEditModel).success).toBe(false);
+  });
+
+  test('a save request may name a kind and an edit model', () => {
+    expect(SaveProviderSchema.safeParse({ ...save, kind: 'venice', editModel: 'qwen-image' }).success).toBe(true);
+    expect(SaveProviderSchema.safeParse({ ...save, editModel: null }).success).toBe(true);
+    expect(SaveProviderSchema.safeParse({ ...save, kind: 'other' }).success).toBe(false);
+    expect(SaveProviderSchema.safeParse({ ...save, editModel: '' }).success).toBe(false);
+  });
+
+  test('an image model list is the models or a job error code', () => {
+    const model = {
+      name: 'qwen-image',
+      aspectRatios: null,
+      resolutions: null,
+      defaultResolution: null,
+      promptCharacterLimit: null,
+      price: null,
+    };
+    expect(ImageModelSchema.safeParse(model).success).toBe(true);
+    expect(ListImageModelsResultSchema.safeParse({ ok: true, models: [model] }).success).toBe(true);
+    expect(
+      ListImageModelsResultSchema.safeParse({
+        ok: true,
+        models: [{ ...model, aspectRatios: ['1:1'], resolutions: ['1K'], defaultResolution: '1K', promptCharacterLimit: 1500, price: '0.01 USD' }],
+      }).success,
+    ).toBe(true);
+    expect(ImageModelSchema.safeParse({ ...model, promptCharacterLimit: 0 }).success).toBe(false);
+    expect(ListImageModelsResultSchema.safeParse({ ok: false, code: 'provider_insufficient_balance' }).success).toBe(true);
+    expect(ListImageModelsResultSchema.safeParse({ ok: true, models: Array.from({ length: 201 }, () => model) }).success).toBe(false);
+    const request = ipcContract['providers:listImageModels'].request;
+    expect(request.safeParse({ providerId: uuid }).success).toBe(true);
+    expect(request.safeParse({ providerId: uuid, refresh: true }).success).toBe(true);
+    expect(request.safeParse({}).success).toBe(false);
+  });
+
   test('the list holds at most 10 entries', () => {
     const list = (n: number) => ({
       providers: Array.from({ length: n }, () => view),
       lastUsedId: null,
+      lastUsedImageId: null,
       fromEnvironment: false,
       canStoreKey: true,
     });
@@ -86,6 +143,9 @@ describe('provider entries', () => {
     expect(ProviderListSchema.safeParse(list(10)).success).toBe(true);
     expect(ProviderListSchema.safeParse(list(11)).success).toBe(false);
     expect(ProviderListSchema.safeParse({ ...list(1), lastUsedId: 'environment' }).success).toBe(true);
+    expect(ProviderListSchema.safeParse({ ...list(1), lastUsedImageId: uuid }).success).toBe(true);
+    const { lastUsedImageId: _lastUsedImageId, ...withoutImage } = list(1);
+    expect(ProviderListSchema.safeParse(withoutImage).success).toBe(false);
     expect(ipcContract['providers:list'].response.safeParse(list(1)).success).toBe(true);
   });
 

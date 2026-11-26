@@ -54,13 +54,23 @@ export class JobError extends Error {
   }
 }
 
+/** How a job ended. */
+export type JobOutcome = { status: 'succeeded' } | { status: 'failed'; errorCode: JobErrorCode } | { status: 'cancelled' };
+
 /** Runs the jobs of one type. */
 export interface JobHandler {
   resourceClass: ResourceClass;
   /** What happens to a job found `running` when a workspace opens. `fail` is for paid work with an unclear outcome. */
   onInterrupted: 'requeue' | 'fail';
+  /** The error code an interrupted job fails with under `onInterrupted: 'fail'`; `internal_error` when absent. */
+  interruptedCode?: JobErrorCode;
   /** Resolves on success; throws `JobError(code)` otherwise. Must stop soon after `signal` aborts. */
   run(job: Job, signal: AbortSignal): Promise<void>;
+  /**
+   * Runs inside the transaction that ends the job, with the outcome it ends with. Synchronous; a throw
+   * rolls the end back.
+   */
+  settled?(job: Job, outcome: JobOutcome): void;
 }
 
 /** What use cases need of a running scheduler. */
@@ -69,6 +79,8 @@ export interface JobControl {
   wake(): void;
   /** Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the handler. */
   cancel(jobId: string): Promise<void>;
+  /** Cancels every pending job and aborts every running one. Answers how many. */
+  cancelAll(): Promise<number>;
 }
 
 const FINISHED: readonly JobStatus[] = FINISHED_JOB_STATUSES;

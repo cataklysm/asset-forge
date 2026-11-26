@@ -33,8 +33,14 @@ import type {
   WorkflowTemplate,
   WorkspaceSummary,
   ResourceClass,
+  Generation,
+  GenerationKind,
+  GenerationParameters,
+  ImageModel,
+  ListImageModelsResult,
+  ProviderKind,
 } from '@assetforge/contracts';
-import type { Job, NewJob } from './jobs.js';
+import type { Job, JobOutcome, NewJob } from './jobs.js';
 
 export interface Storage {
   isReachable(): Promise<boolean>; // root's parent volume/dir is accessible
@@ -395,16 +401,29 @@ export interface JobRepository {
   }): Promise<Job | null>;
   /** Earliest run_after of `retry_wait` jobs of these types whose lane is not in `excludeLanes`; null when there is none. */
   nextRunAfter(types: readonly string[], excludeLanes?: readonly (string | null)[]): Promise<string | null>;
-  /** running → succeeded | failed | cancelled, finished_at = now, message from JOB_ERROR_MESSAGES. False when the row is not `running`. */
-  finish(id: string, r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string }): Promise<boolean>;
+  /**
+   * running → succeeded | failed | cancelled, finished_at = now, message from JOB_ERROR_MESSAGES. False when the row is not `running`.
+   * `settled` runs inside the transaction, once and only when the row changed; a throw rolls the end back.
+   */
+  finish(
+    id: string,
+    r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string; settled?: () => void },
+  ): Promise<boolean>;
   /** running → retry_wait with run_after and the error. False when the row is not `running`. */
   scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean>;
   /** running → queued, attempt − 1 (not below 0), started_at cleared. False when the row is not `running`. */
   release(id: string, now: string): Promise<boolean>;
-  /** queued | retry_wait | waiting_remote → cancelled, for one job or for all. Returns how many. */
-  cancelPending(r: { id?: string; now: string }): Promise<number>;
-  /** failed | cancelled → queued with attempt 0, error, run_after, started_at and finished_at cleared; for one job or for all, newest created_at first, skipping a job whose dedupe key is held by an active job. Returns how many. */
-  retry(r: { id?: string; now: string }): Promise<number>;
+  /**
+   * queued | retry_wait | waiting_remote → cancelled, for one job or for all. Returns how many. `settled` runs
+   * inside the transaction with each cancelled job; a throw rolls every cancel back.
+   */
+  cancelPending(r: { id?: string; now: string; settled?: (job: Job) => void }): Promise<number>;
+  /**
+   * failed | cancelled → queued with attempt 0, error, run_after, started_at and finished_at cleared; for one job or for all,
+   * newest created_at first, skipping a job whose dedupe key is held by an active job and a job of one of `excludeTypes`.
+   * Returns how many.
+   */
+  retry(r: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number>;
   /** Deletes every succeeded, failed or cancelled job. Returns how many. */
   clearFinished(): Promise<number>;
   counts(): Promise<Record<JobStatus, number>>;
@@ -543,6 +562,70 @@ export interface AnalysisTargetReader {
   count(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisPreview>;
 }
 
+/** A file a generation read or wrote, as it was then. */
+export interface GenerationFileRef {
+  fileId: string;
+  sha256: string;
+  originalName: string;
+}
+
+export interface NewGeneration {
+  id: string;
+  kind: GenerationKind;
+  providerId: string;
+  /** A copy of the provider name at start. */
+  providerName: string;
+  providerKind: ProviderKind;
+  /** Null for an upscale. */
+  model: string | null;
+  /** The fully resolved prompt; null for an upscale. */
+  prompt: string | null;
+  parameters: GenerationParameters;
+  createdAt: string;
+}
+
+/** A generation with its input and output files; `jobStatus` is the status of its current job row, null when it is gone. */
+export type GenerationRow = Generation;
+
+/**
+ * The generations of a workspace. Every transition is guarded by the status it starts from; a purged file
+ * reads as `fileId: null` in `inputs` and `outputs`.
+ */
+export interface GenerationRepository {
+  /** One transaction: the generation as `pending`, its input row and the job; `job_id` is the job's id. */
+  create(r: { generation: NewGeneration; input: GenerationFileRef; job: NewJob }): Promise<void>;
+  get(id: string): Promise<GenerationRow | null>;
+  /** The generation whose current job is this one. */
+  byJob(jobId: string): Promise<GenerationRow | null>;
+  /** The generation that wrote this file. */
+  madeBy(fileId: string): Promise<GenerationRow | null>;
+  /** The generations that read this file, newest (created_at, then id) first. */
+  resultsOf(fileId: string, limit: number): Promise<GenerationRow[]>;
+  /** The 1-based rank of this edit among the edits of its input file by (created_at, id); 0 when it is unknown or no edit. */
+  editRank(id: string): Promise<number>;
+  /** One transaction guarded on `pending`: the output row and `succeeded` with finished_at = now. False otherwise. */
+  succeed(r: { id: string; output: GenerationFileRef; now: string }): Promise<boolean>;
+  /**
+   * Synchronous, for `JobHandler.settled`; changes only a `pending` row and answers whether it did. `failed` sets the
+   * code, `cancelled` clears it; a `succeeded` outcome on a still pending row becomes failed `internal_error`.
+   */
+  settle(r: { id: string; outcome: JobOutcome; now: string }): boolean;
+  /**
+   * One transaction guarded on `failed` | `cancelled`: inserts the job, sets `pending`, clears the error and finished_at
+   * and replaces job_id. False and nothing written otherwise.
+   */
+  requeue(r: { id: string; job: NewJob; now: string }): Promise<boolean>;
+  /** Deletes a `failed` or `cancelled` generation; false otherwise. */
+  remove(id: string): Promise<boolean>;
+  /** Distinct prompts of edit generations, newest use first. */
+  recentPrompts(limit: number): Promise<string[]>;
+  /**
+   * Every `pending` generation whose job row is gone or finished takes that job's outcome as `settle` does,
+   * or failed `provider_outcome_unknown` when the row is gone. Returns how many changed.
+   */
+  reconcile(now: string): Promise<number>;
+}
+
 export interface WorkspaceMeta {
   id: string;
   formatVersion: number;
@@ -572,6 +655,7 @@ export interface WorkspaceDatabase {
   jobs: JobRepository;
   analyses: FileAnalysisRepository;
   analysisTargets: AnalysisTargetReader;
+  generations: GenerationRepository;
   /**
    * Recomputes derived data (file kinds, the search index) unless the stored stamp is current;
    * the stamp is written last, so an interrupted run is redone on the next open.
@@ -610,6 +694,57 @@ export interface VisionProvider {
 export interface ModelImageSource {
   /** A JPEG of the image, longest edge at most 1024 px, EXIF-oriented; null when it cannot be produced. */
   jpeg(absolutePath: string): Promise<Uint8Array | null>;
+}
+
+/** An image as it is sent to an image provider; held in main-process memory, never sent over IPC. */
+export interface ImageInput {
+  data: Uint8Array;
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+}
+
+/**
+ * An image provider (edit and upscale). Each method rejects with a `JobError` on provider failure, or with
+ * the signal's reason when `signal` aborts. Implemented outside core.
+ */
+export interface ImageProvider {
+  listEditModels(signal: AbortSignal): Promise<ImageModel[]>;
+  editImage(r: {
+    image: ImageInput;
+    model: string;
+    prompt: string;
+    aspectRatio: string | null;
+    resolution: string | null;
+    safeMode: boolean;
+    signal: AbortSignal;
+  }): Promise<{ stream: Readable; mimeType: string }>;
+  upscaleImage(r: { image: ImageInput; scale: 2 | 4; signal: AbortSignal }): Promise<{ stream: Readable; mimeType: string }>;
+}
+
+/** The `venice` provider entries as use cases see them. Implemented outside core. */
+export interface ImageProviderDirectory {
+  /**
+   * A given id: that entry, else NotFoundError, or InvalidOperationError when it is not a `venice` entry.
+   * Absent: the image entry used last, else the first, else null.
+   */
+  resolve(id: string | undefined): { id: string; name: string } | null;
+  exists(id: string): boolean;
+  adapter(id: string): ImageProvider | null;
+  /** The entry's edit models: cached, else loaded within `LIST_MODELS_TIMEOUT_MS`. */
+  models(id: string, signal: AbortSignal): Promise<ListImageModelsResult>;
+  /** Best effort. */
+  markUsed(id: string): void;
+}
+
+/** Reads the image a generation sends. Implemented outside core. */
+export interface GenerationImageSource {
+  /**
+   * The original when it is JPEG, PNG or WebP and at most `IMAGE_INPUT_MAX_BYTES`, else the lossless rendition
+   * when it is at most that size, else null.
+   */
+  read(
+    file: { absolutePath: string; mimeType: string; sha256: string; sizeBytes: number },
+    signal: AbortSignal,
+  ): Promise<ImageInput | null>;
 }
 
 export interface WorkspaceHost {

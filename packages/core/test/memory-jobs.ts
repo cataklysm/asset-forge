@@ -126,8 +126,27 @@ export class InMemoryJobRepository implements JobRepository {
     return times[0] ?? null;
   }
 
-  async finish(id: string, r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string }): Promise<boolean> {
-    return this.fromRunning(id, { status: r.status, ...errorOf(r.errorCode), finishedAt: r.now, updatedAt: r.now });
+  async finish(
+    id: string,
+    r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string; settled?: () => void },
+  ): Promise<boolean> {
+    return this.inTransaction(() => {
+      const changed = this.fromRunning(id, { status: r.status, ...errorOf(r.errorCode), finishedAt: r.now, updatedAt: r.now });
+      if (changed) r.settled?.();
+      return changed;
+    });
+  }
+
+  /** Runs `work` like a transaction: when it throws, every row is put back as it was. */
+  private inTransaction<T>(work: () => T): T {
+    const before = this.rows.map((row) => [row, structuredClone(row)] as const);
+    try {
+      return work();
+    } catch (error) {
+      // Restores in place, so references callers hold to a row stay valid.
+      this.rows.splice(0, this.rows.length, ...before.map(([row, copy]) => Object.assign(row, copy)));
+      throw error;
+    }
   }
 
   async scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean> {
@@ -139,20 +158,24 @@ export class InMemoryJobRepository implements JobRepository {
     return this.fromRunning(id, { status: 'queued', attempt: Math.max((row?.attempt ?? 0) - 1, 0), startedAt: null, updatedAt: now });
   }
 
-  async cancelPending({ id, now }: { id?: string; now: string }): Promise<number> {
-    let n = 0;
-    for (const row of this.rows) {
-      if (id !== undefined && row.id !== id) continue;
-      if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
-      Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
-      n++;
-    }
-    return n;
+  async cancelPending({ id, now, settled }: { id?: string; now: string; settled?: (job: Job) => void }): Promise<number> {
+    return this.inTransaction(() => {
+      let n = 0;
+      for (const row of this.rows) {
+        if (id !== undefined && row.id !== id) continue;
+        if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
+        Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
+        settled?.(structuredClone(row));
+        n++;
+      }
+      return n;
+    });
   }
 
-  async retry({ id, now }: { id?: string; now: string }): Promise<number> {
+  async retry({ id, now, excludeTypes }: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number> {
     const candidates = this.rows
       .filter((r) => (id === undefined || r.id === id) && (r.status === 'failed' || r.status === 'cancelled'))
+      .filter((r) => !(excludeTypes ?? []).includes(r.type))
       .filter((r) => r.fileId === null || this.fileState(r.fileId) !== 'trashed')
       .sort((a, b) => oldestFirst(b, a));
     let n = 0;

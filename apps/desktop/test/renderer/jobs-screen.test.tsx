@@ -87,7 +87,7 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
     fileName: null,
     type: 'other.kind',
     errorCode: 'provider_unreachable',
-    errorMessage: 'The analysis provider could not be reached',
+    errorMessage: 'The provider could not be reached',
   });
   install({ 'jobs:list': listOf([running, retrying, failed]) });
   renderScreen();
@@ -119,7 +119,7 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
     'Failed',
     '3 / 3',
     formatDateTime(CREATED),
-    'The analysis provider could not be reached',
+    'The provider could not be reached',
     '',
   ]);
 });
