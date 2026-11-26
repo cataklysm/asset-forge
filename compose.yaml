@@ -1,0 +1,15 @@
+services:
+  mock-provider:
+    profiles: ['mock']
+    image: node:22-alpine
+    command: ['node', '/app/server.mjs']
+    environment:
+      MOCK_HOST: 0.0.0.0
+      MOCK_DELAY_MS: ${MOCK_DELAY_MS:-0}
+    ports:
+      - '127.0.0.1:11500:11500'
+    volumes:
+      - type: bind
+        source: ./docker/mock-provider/server.mjs
+        target: /app/server.mjs
+        read_only: true
