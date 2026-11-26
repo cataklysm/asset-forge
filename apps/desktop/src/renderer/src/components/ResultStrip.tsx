@@ -1,4 +1,6 @@
 import { X } from 'lucide-react';
+import type { AssignManyResult, ImportResult } from '@assetforge/contracts';
+import { ApiError, describeError } from '../api';
 import { ALERT, BORDER, ICON_BUTTON_INLINE } from '../ui';
 
 export interface ResultFailure {
@@ -6,6 +8,27 @@ export interface ResultFailure {
   key: string;
   name: string;
   message: string;
+}
+
+/** The file name of a picked source path; the rest of the path never reaches the screen. */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** One failure per import result with an error, named by its source's file name. */
+export function importFailures(results: readonly ImportResult[]): ResultFailure[] {
+  return results.flatMap((r, index) =>
+    r.error === null ? [] : [{ key: `${index}:${r.sourcePath}`, name: baseName(r.sourcePath), message: r.error }],
+  );
+}
+
+/** One failure per item of a `files:assignMany` result with an error. */
+export function assignFailures(items: AssignManyResult['items'], nameOf: (fileId: string) => string): ResultFailure[] {
+  return items.flatMap((item) =>
+    item.error === null
+      ? []
+      : [{ key: item.fileId, name: nameOf(item.fileId), message: describeError(new ApiError(item.error.code, item.error.message)) }],
+  );
 }
 
 interface Props {

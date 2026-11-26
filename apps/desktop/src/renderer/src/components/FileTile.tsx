@@ -5,7 +5,7 @@ import type { ViewPosition, ViewRestore, VirtualRows, VisibleRows } from '../hoo
 import { formatLabel } from '../media-url';
 import { label } from '../labels';
 import type { PagedState } from '../paged-list';
-import { BORDER, FOCUS, ITEM_HOVER, MUTED } from '../ui';
+import { FOCUS, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
 import type { MenuItem } from './Menu';
 
@@ -14,7 +14,9 @@ export function FileFrame({ file, className }: { file: FileRecord; className: st
   const plain = `flex items-center justify-center rounded bg-raised text-xs ${className}`;
   if (file.status !== 'complete') {
     return (
-      <span className={`${plain} ${file.status === 'failed' ? 'text-danger' : MUTED}`}>{label(file.status)}</span>
+      <span className={`${plain} ${file.status === 'failed' ? 'text-danger' : MUTED}`} title={file.error ?? undefined}>
+        {label(file.status)}
+      </span>
     );
   }
   if (file.previewable) {
@@ -140,30 +142,5 @@ export function SelectBox({
       }}
       className={`h-4 w-4 accent-accent ${FOCUS}`}
     />
-  );
-}
-
-interface Props {
-  file: FileRecord;
-  isCover: boolean;
-  onSelect(file: FileRecord, trigger: HTMLElement): void;
-}
-
-/** One file as a tile: thumbnail, format label or import status, and the original name. */
-export function FileTile({ file, isCover, onSelect }: Props) {
-  return (
-    <button
-      type="button"
-      data-file-tile=""
-      data-file-id={file.id}
-      aria-haspopup="dialog"
-      title={file.originalName}
-      className={`flex min-w-0 flex-col gap-1 rounded border p-2 text-left text-sm ${BORDER} ${ITEM_HOVER} ${FOCUS}`}
-      onClick={(e) => onSelect(file, e.currentTarget)}
-    >
-      <FileFrame file={file} className="h-28 w-full" />
-      <span className="truncate">{file.originalName}</span>
-      {isCover && <span className={`text-xs font-medium ${MUTED}`}>Cover</span>}
-    </button>
   );
 }

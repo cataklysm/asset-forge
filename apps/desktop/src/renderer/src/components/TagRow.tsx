@@ -7,7 +7,7 @@ import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
 
 interface Props {
-  label: 'Asset tags' | 'Image tags';
+  label: 'Asset tags' | 'Image tags' | 'Shared image tags';
   kind: 'asset' | 'file';
   tags: readonly TagAssignment[];
   onAdd(displayName: string): Promise<void>;

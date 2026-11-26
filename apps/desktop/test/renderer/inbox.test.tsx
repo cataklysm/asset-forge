@@ -1,0 +1,319 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import type { FileRecord, IpcRequest } from '@assetforge/contracts';
+import { expect, it, vi } from 'vitest';
+import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
+import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
+import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
+import { assetSummary, fileRecord, pageOf, tagOf } from './fixtures';
+
+const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
+const OAK = assetSummary({ name: 'Oak' });
+
+type ListRequest = IpcRequest<'files:list'>;
+
+/** Serves the files that `current()` returns, page by page. */
+function listOf(current: () => FileRecord[]) {
+  return (request: ListRequest) => {
+    const items = current();
+    return pageOf(items.slice(request.offset, request.offset + request.limit), items.length);
+  };
+}
+
+function install(files: FileRecord[], handlers: FakeHandlers = {}) {
+  let items = files;
+  const api = installFakeApi({
+    'files:list': listOf(() => items),
+    'tags:suggest': () => [],
+    'assets:list': () => pageOf([OAK]),
+    ...handlers,
+  });
+  return {
+    ...api,
+    setFiles(next: FileRecord[]) {
+      items = next;
+    },
+  };
+}
+
+function callsOf(api: ReturnType<typeof install>, channel: string) {
+  return api.calls.filter((c) => c.channel === channel).map((c) => c.request);
+}
+
+interface HarnessProps {
+  initial?: InboxListState;
+  onState?(s: InboxListState): void;
+  onBusyChange?(busy: boolean): void;
+}
+
+function Harness(props: HarnessProps) {
+  const [state, setState] = useState(props.initial ?? INITIAL);
+  return (
+    <div className="flex h-[800px] flex-col">
+      <InboxScreen
+        state={state}
+        onStateChange={(next) => {
+          props.onState?.(next);
+          setState(next);
+        }}
+        onBusyChange={props.onBusyChange ?? (() => {})}
+      />
+    </div>
+  );
+}
+
+function tile(name: string): HTMLElement {
+  const element = within(screen.getByRole('listbox', { name: 'Files' })).getByText(name).closest<HTMLElement>('[data-index]');
+  if (element === null) throw new Error(`no tile for ${name}`);
+  return element;
+}
+
+function column(): HTMLElement {
+  return screen.getByRole('complementary');
+}
+
+async function pickAsset(user: ReturnType<typeof userEvent.setup>) {
+  const picker = within(column()).getByRole('combobox', { name: 'Search assets' });
+  await user.click(picker);
+  await within(column()).findByRole('option', { name: 'Oak' });
+  await user.keyboard('{ArrowDown}{Enter}');
+  expect((await within(column()).findByTitle('Target asset')).textContent).toBe('Oak');
+}
+
+function files() {
+  const c1 = fileRecord({ originalName: 'c1.png' });
+  const c2 = fileRecord({ originalName: 'c2.png' });
+  const f1 = fileRecord({ originalName: 'f1.png', status: 'failed', sha256: null, error: 'The checksum did not match' });
+  return { c1, c2, f1 };
+}
+
+async function selectRange(user: ReturnType<typeof userEvent.setup>, first: string, last: string) {
+  await screen.findByText(first);
+  await user.click(tile(first));
+  await user.keyboard('{Shift>}');
+  await user.click(tile(last));
+  await user.keyboard('{/Shift}');
+}
+
+it('failed files are excluded from the assign request and the count', async () => {
+  const user = userEvent.setup();
+  const { c1, c2, f1 } = files();
+  const api = install([c1, c2, f1], {
+    'files:assignMany': (r) => ({
+      items: r.fileIds.map((fileId) => ({ fileId, file: { ...(fileId === c1.id ? c1 : c2), assetId: OAK.id, role: r.role }, error: null })),
+    }),
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'f1.png');
+  expect(await screen.findByText('3 selected')).toBeTruthy();
+
+  const assign = within(column()).getByRole('button', { name: 'Assign 2 files' });
+  expect((assign as HTMLButtonElement).disabled).toBe(true);
+  // The failed import is marked in the list of names, with its error as tooltip.
+  const names = within(column()).getByRole('list', { name: 'Selected files' });
+  const failed = within(names).getByText('Failed');
+  expect(failed.getAttribute('title')).toBe('The checksum did not match');
+
+  await pickAsset(user);
+  expect((assign as HTMLButtonElement).disabled).toBe(false);
+  await user.click(assign);
+  await waitFor(() =>
+    expect(callsOf(api, 'files:assignMany')).toEqual([{ fileIds: [c1.id, c2.id], assetId: OAK.id, role: 'reference' }]),
+  );
+});
+
+it('a partially failed assign lists the failure and drops the moved files', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const api = install([c1, c2], {
+    'files:assignMany': () => {
+      api.setFiles([c2]);
+      return {
+        items: [
+          { fileId: c1.id, file: { ...c1, assetId: OAK.id, role: 'reference' }, error: null },
+          { fileId: c2.id, file: null, error: { code: 'not_found', message: 'not_found' } },
+        ],
+      };
+    },
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  await pickAsset(user);
+  await user.selectOptions(within(column()).getByRole('combobox', { name: 'Role' }), 'concept');
+  const before = callsOf(api, 'files:list').length;
+  await user.click(within(column()).getByRole('button', { name: 'Assign 2 files' }));
+
+  const strip = await within(column()).findByRole('alert');
+  expect(strip.textContent).toContain('c2.png');
+  expect(strip.textContent).toContain('This item no longer exists.');
+  expect(callsOf(api, 'files:assignMany')).toEqual([{ fileIds: [c1.id, c2.id], assetId: OAK.id, role: 'concept' }]);
+  await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(before));
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c1.png')).toBeNull());
+  expect(screen.getByText('1 selected')).toBeTruthy();
+  const names = within(column()).getByRole('list', { name: 'Selected files' });
+  expect(within(names).getByText('c2.png')).toBeTruthy();
+  expect(within(names).queryByText('c1.png')).toBeNull();
+  expect(within(names).getByText('Failed').getAttribute('title')).toBe('This item no longer exists.');
+});
+
+it('shared image tags show only tags every eligible file carries; removing one removes it from all', async () => {
+  const user = userEvent.setup();
+  const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('oak'), tagOf('bark')] });
+  const c2 = fileRecord({ originalName: 'c2.png', tags: [tagOf('bark')] });
+  const f1 = fileRecord({ originalName: 'f1.png', status: 'failed', sha256: null, error: 'Broken' });
+  const api = install([c1, c2, f1], {
+    'files:removeTagMany': (r) => {
+      const items = [c1, c2].map((f) => ({ ...f, tags: f.tags.filter((t) => t.name !== r.name) }));
+      api.setFiles([...items, f1]);
+      return { items };
+    },
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'f1.png');
+  const row = within(column()).getByRole('group', { name: 'Shared image tags' });
+  expect(within(row).getByRole('button', { name: 'Remove bark' })).toBeTruthy();
+  expect(within(row).queryByRole('button', { name: 'Remove oak' })).toBeNull();
+
+  await user.click(within(row).getByRole('button', { name: 'Remove bark' }));
+  await waitFor(() => expect(within(row).queryByRole('button', { name: 'Remove bark' })).toBeNull());
+  expect(callsOf(api, 'files:removeTagMany')).toEqual([{ fileIds: [c1.id, c2.id], name: 'bark' }]);
+});
+
+it('Add tags in the selection bar focuses the shared tag input', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  install([c1, c2]);
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  await user.click(screen.getByRole('button', { name: 'Add tags' }));
+  expect(document.activeElement).toBe(within(column()).getByRole('combobox', { name: 'Add image tag' }));
+});
+
+it('"n images" when every selected file is an image, else "n files"', async () => {
+  const user = userEvent.setup();
+  const a = fileRecord({ originalName: 'a.png' });
+  const b = fileRecord({ originalName: 'b.png' });
+  const m = fileRecord({ originalName: 'm.glb', kind: 'model', mimeType: 'model/gltf-binary', previewable: false });
+  install([a, b, m]);
+  render(<Harness />);
+  expect(screen.queryByRole('complementary')).toBeNull();
+  await selectRange(user, 'a.png', 'b.png');
+  expect(within(column()).getByText('2 images')).toBeTruthy();
+  await user.keyboard('{Control>}');
+  await user.click(tile('m.glb'));
+  await user.keyboard('{/Control}');
+  expect(within(column()).getByText('3 files')).toBeTruthy();
+  expect(within(column()).getByRole('heading', { name: 'Selection' })).toBeTruthy();
+
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(screen.queryByRole('complementary')).toBeNull();
+});
+
+it('filters and scroll offset survive navigation; the selection does not', async () => {
+  const user = userEvent.setup();
+  const items = Array.from({ length: 200 }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+  const onState = vi.fn();
+  const api = install(items);
+  const { unmount } = render(<Harness onState={onState} />);
+  await screen.findByText('File 0.png');
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Inbox/ }).textContent).toBe('Inbox200'));
+  expect(callsOf(api, 'files:list')).toContainEqual({ limit: 1, offset: 0, scope: { kind: 'inbox' } });
+
+  await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'file');
+  await user.selectOptions(screen.getByRole('combobox', { name: 'File type' }), 'image');
+  const expected = { limit: 60, offset: 0, scope: { kind: 'inbox' }, query: 'file', kind: 'image' };
+  await waitFor(() => expect(callsOf(api, 'files:list').at(-1)).toEqual(expected));
+  await user.click(await screen.findByText('File 1.png'));
+  expect(screen.getByText('1 selected')).toBeTruthy();
+
+  const grid = screen.getByRole('listbox', { name: 'Files' });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ ...expected, offset: 60 }));
+  unmount();
+  const saved = onState.mock.lastCall![0] as InboxListState;
+  expect(saved).toEqual({ filters: { query: 'file', role: '', kind: 'image', tagNames: [] }, scrollOffset: 4800 });
+
+  api.calls.length = 0;
+  render(<Harness initial={saved} />);
+  await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ ...expected, offset: 60 }));
+  expect((screen.getByRole('searchbox', { name: 'Search files' }) as HTMLInputElement).value).toBe('file');
+  expect(screen.queryByText('1 selected')).toBeNull();
+  expect(screen.queryByRole('complementary')).toBeNull();
+});
+
+it('empty inbox and no-result states', async () => {
+  const user = userEvent.setup();
+  const api = install([], { 'dialog:pickFiles': () => [] });
+  render(<Harness />);
+  expect(await screen.findByText('Inbox is empty')).toBeTruthy();
+  const buttons = screen.getAllByRole('button', { name: 'Import files' });
+  expect(buttons).toHaveLength(2);
+  await user.click(buttons[1]!);
+  await waitFor(() => expect(callsOf(api, 'dialog:pickFiles')).toHaveLength(1));
+
+  await user.selectOptions(screen.getByRole('combobox', { name: 'File type' }), 'model');
+  expect(await screen.findByText('No matching files')).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Import files' })).toHaveLength(1);
+});
+
+it('import results list imported, failed and duplicates', async () => {
+  const user = userEvent.setup();
+  const picked = deferred<string[]>();
+  const a = fileRecord({ originalName: 'a.png' });
+  const b = fileRecord({ originalName: 'b.png' });
+  const api = install([], {
+    'dialog:pickFiles': () => picked.promise,
+    'files:import': () => {
+      api.setFiles([a, b]);
+      return [
+        { sourcePath: 'C:\\in\\a.png', file: a, error: null, duplicateOf: [] },
+        { sourcePath: 'C:\\in\\b.png', file: b, error: null, duplicateOf: [a.id] },
+        { sourcePath: 'C:\\in\\c.exe', file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+      ];
+    },
+  });
+  const onBusyChange = vi.fn();
+  render(<Harness onBusyChange={onBusyChange} />);
+  await screen.findByText('Inbox is empty');
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  expect(screen.getByText('Importing…')).toBeTruthy();
+  expect(onBusyChange).toHaveBeenLastCalledWith(true);
+  picked.resolve(['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe']);
+
+  const strip = await screen.findByRole('alert');
+  expect(within(strip).getByText('2 imported, 1 failed, 1 duplicates')).toBeTruthy();
+  expect(strip.textContent).toContain('c.exe');
+  expect(strip.textContent).toContain('This file type cannot be imported');
+  expect(strip.textContent).not.toContain('C:\\in');
+  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe'] }]);
+  expect(await screen.findByText('a.png')).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Inbox/ }).textContent).toBe('Inbox2'));
+  await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+});
+
+it('the detail dialog assigns one file and closes', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const api = install([c1, c2], {
+    'files:assign': (r) => {
+      api.setFiles([c2]);
+      return { ...c1, assetId: r.assetId, role: r.role };
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Enter}');
+  const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
+  await user.click(within(dialog).getByRole('button', { name: 'Assign' }));
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Role' }), 'texture');
+  await user.click(within(dialog).getByRole('combobox', { name: 'Search assets' }));
+  await within(dialog).findByRole('option', { name: 'Oak' });
+  await user.keyboard('{ArrowDown}{Enter}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(callsOf(api, 'files:assign')).toEqual([{ fileId: c1.id, assetId: OAK.id, role: 'texture' }]);
+  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c1.png')).toBeNull());
+  expect(screen.queryByText('1 selected')).toBeNull();
+});

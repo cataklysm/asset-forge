@@ -13,7 +13,7 @@ import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
 import { Link } from '../components/Link';
-import { ResultStrip, type ResultFailure } from '../components/ResultStrip';
+import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
@@ -35,11 +35,6 @@ interface Props {
   onOpenAsset(id: string): void;
   onOpenProject(id: string): void;
   onBusyChange(busy: boolean): void;
-}
-
-/** The file name of a picked source path; the rest of the path never reaches the screen. */
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
 }
 
 /** Runs a mutation and reports its error through `setError`; resolves to whether it succeeded. */
@@ -108,9 +103,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       const sourcePaths = await call('dialog:pickFiles', {});
       if (sourcePaths.length === 0) return;
       const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole } });
-      const failures = results.flatMap((r, index) =>
-        r.error === null ? [] : [{ key: `${index}:${r.sourcePath}`, name: baseName(r.sourcePath), message: r.error }],
-      );
+      const failures = importFailures(results);
       setImportResult({ title: `${results.length - failures.length} imported, ${failures.length} failed`, failures });
       filesChanged();
     } catch (e) {

@@ -1,22 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from '@assetforge/contracts';
-import { ApiError, call, describeError } from '../api';
+import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useFileDialog } from '../hooks/useFileDialog';
 import { label } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, type AssetView, type FileFilters } from '../list-state';
-import { dropSelected, eligibleFiles, NO_SELECTION, refreshSelected, sharedTags, type FileSelection } from '../selection';
+import {
+  dropSelected,
+  eligibleFiles,
+  NO_SELECTION,
+  NONE_ELIGIBLE,
+  refreshSelected,
+  sharedTags,
+  type FileSelection,
+} from '../selection';
 import { ALERT, BUTTON, SELECT } from '../ui';
 import { Dialog } from './Dialog';
 import { FileBrowser } from './FileBrowser';
 import { FileDetailDialog } from './FileDetailDialog';
 import { FileRoleSelect } from './FileRoleControls';
-import { ResultStrip, type ResultFailure } from './ResultStrip';
+import { assignFailures, ResultStrip, type ResultFailure } from './ResultStrip';
 import { SelectionBar } from './SelectionBar';
 import { TagRow } from './TagRow';
 
 const ROLES = FileRoleSchema.options;
-const NONE_ELIGIBLE = 'None of the selected files is completely imported';
 
 interface Props {
   asset: AssetDetail;
@@ -29,11 +37,6 @@ interface Props {
   onCountChange(total: number): void;
 }
 
-interface Opened {
-  id: string;
-  trigger: HTMLElement | null;
-}
-
 /**
  * The asset's files: the file browser with its own filters, view and selection (none of them
  * persisted), the selection bar (Add tags, Set role, Detach) and the file detail dialog.
@@ -42,7 +45,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const [filters, setFilters] = useState<FileFilters>(NO_FILE_FILTERS);
   const [view, setView] = useState<AssetView>('grid');
   const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
-  const [detail, setDetail] = useState<FileRecord | null>(null);
   const [dialog, setDialog] = useState<'tags' | 'role' | null>(null);
   const [batchRole, setBatchRole] = useState<FileRole>('reference');
   const [batchBusy, setBatchBusy] = useState(false);
@@ -50,8 +52,8 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const [result, setResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const opened = useRef<Opened | null>(null);
-  const pendingFocus = useRef<Opened | null>(null);
+  const detailDialog = useFileDialog(containerRef);
+  const detail = detailDialog.file;
   // Synchronous guards: a second activation before the re-render must not send a second request.
   const acting = useRef(false);
   const batching = useRef(false);
@@ -63,38 +65,12 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const eligible = eligibleFiles(selection);
   const eligibleIds = eligible.map((f) => f.id);
 
-  function openDetail(file: FileRecord) {
-    const active = document.activeElement;
-    opened.current = { id: file.id, trigger: active instanceof HTMLElement ? active : null };
-    setDetail(file);
-  }
-
-  function closeDetail() {
-    pendingFocus.current = opened.current;
-    opened.current = null;
-    setDetail(null);
-  }
-
-  // After the dialog has gone: the opener, else the same file's element (the list may have been
-  // reloaded while the dialog was open), else the first tile.
-  useEffect(() => {
-    const target = pendingFocus.current;
-    if (detail !== null || target === null) return;
-    pendingFocus.current = null;
-    if (target.trigger?.isConnected) {
-      target.trigger.focus();
-      return;
-    }
-    const root = containerRef.current;
-    const element =
-      root?.querySelector<HTMLElement>(`[data-file-id="${CSS.escape(target.id)}"]`) ??
-      root?.querySelector<HTMLElement>('[data-file-tile]');
-    element?.focus();
-  }, [detail]);
+  const openDetail = detailDialog.open;
+  const closeDetail = detailDialog.close;
 
   /** A changed record: the dialog and the selection show it, and the list reloads. */
   function fileChanged(file: FileRecord) {
-    setDetail((current) => (current?.id === file.id ? file : current));
+    detailDialog.update(file);
     setSelection((current) => refreshSelected(current, [file]));
     onFilesChanged();
   }
@@ -120,7 +96,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     exclusive(async () => {
       await call('files:unassign', { fileId: file.id });
       setSelection((current) => dropSelected(current, [file.id]));
-      if (opened.current?.id === file.id) closeDetail();
+      if (detailDialog.openId() === file.id) closeDetail();
       onFilesChanged();
     });
 
@@ -161,11 +137,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         setDialogError(describeError(e));
         return;
       }
-      const failures = items.flatMap((item) =>
-        item.error === null
-          ? []
-          : [{ key: item.fileId, name: nameOf(item.fileId), message: describeError(new ApiError(item.error.code, item.error.message)) }],
-      );
+      const failures = assignFailures(items, nameOf);
       const changed = items.flatMap((item) => (item.file === null ? [] : [item.file]));
       setSelection((current) => refreshSelected(current, changed));
       setResult(failures.length === 0 ? null : { title: `${changed.length} updated, ${failures.length} failed`, failures });

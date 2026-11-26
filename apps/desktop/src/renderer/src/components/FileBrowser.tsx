@@ -1,5 +1,13 @@
 import { LayoutGrid, List, Search, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { FileRoleSchema, type FileKind, type FileRecord, type FileScope } from '@assetforge/contracts';
 import { call } from '../api';
 import { columnsForWidth, pagesForRows, rowItems } from '../gallery';
@@ -74,6 +82,8 @@ export interface FileBrowserProps {
   menuItems(file: FileRecord): MenuItem[];
   /** Shown when the unfiltered list is empty ("No files" / "Inbox is empty"). */
   emptyText: string;
+  /** Shown below `emptyText` (e.g. the inbox's "Import files"). */
+  emptyAction?: ReactNode;
   onTotal?(total: number | null): void;
 }
 
@@ -331,7 +341,14 @@ export function FileBrowser(props: FileBrowserProps) {
             ))}
           </div>
         ) : viewProps === null ? (
-          <p className={MUTED}>{hasFilters(effective) ? 'No matching files' : emptyText}</p>
+          hasFilters(effective) || props.emptyAction === undefined ? (
+            <p className={MUTED}>{hasFilters(effective) ? 'No matching files' : emptyText}</p>
+          ) : (
+            <div className="flex flex-col items-start gap-3">
+              <p className={MUTED}>{emptyText}</p>
+              {props.emptyAction}
+            </div>
+          )
         ) : view === 'grid' ? (
           <FileGridView key={viewKey} {...viewProps} />
         ) : (

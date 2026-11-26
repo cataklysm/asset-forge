@@ -14,7 +14,7 @@ import {
 import type { View } from '../nav';
 import { AssetsScreen } from '../screens/AssetsScreen';
 import { AssetScreen } from '../screens/AssetScreen';
-import { FilesScreen } from '../screens/FilesScreen';
+import { InboxScreen } from '../screens/InboxScreen';
 import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { ALERT } from '../ui';
@@ -50,9 +50,9 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
   const [busy, setBusy] = useState(false);
   // List state lives here so it survives navigation; it is dropped with the workspace.
   const [shell, setShell] = useState<ShellState>(INITIAL_SHELL);
-  const [inboxOffset, setInboxOffset] = useState(0);
   const setAssetList = (assetList: AssetListState) => setShell((current) => ({ ...current, assetList }));
   const setProjectList = (projectList: ProjectListState) => setShell((current) => ({ ...current, projectList }));
+  const setInboxList = (inboxList: InboxListState) => setShell((current) => ({ ...current, inboxList }));
   const setAssetTab = (assetTab: AssetTab) => setShell((current) => ({ ...current, assetTab }));
 
   function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>) {
@@ -83,53 +83,41 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
       onNavigate={navigate}
       onClose={() => void closeWorkspace()}
     >
-      {view.name !== 'inbox' ? (
-        // Redesigned screens bring their own padding.
-        <>
-          {error !== null && (
-            <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
-              {error}
-            </p>
-          )}
-          {view.name === 'assets' ? (
-            <AssetsScreen
-              state={shell.assetList}
-              onStateChange={setAssetList}
-              onOpen={(id) => setView({ name: 'asset', id })}
-            />
-          ) : view.name === 'asset' ? (
-            <AssetScreen
-              key={view.id}
-              id={view.id}
-              tab={shell.assetTab}
-              onTabChange={setAssetTab}
-              onBack={() => setView({ name: 'assets' })}
-              onOpenAsset={(id) => setView({ name: 'asset', id })}
-              onOpenProject={(id) => setView({ name: 'project', id })}
-              onBusyChange={setBusy}
-            />
-          ) : view.name === 'project' ? (
-            <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
-          ) : (
-            <ProjectsScreen
-              state={shell.projectList}
-              onStateChange={setProjectList}
-              onOpen={(id) => setView({ name: 'project', id })}
-              onOpenAsset={(id) => setView({ name: 'asset', id })}
-              onShowAssets={showAssets}
-            />
-          )}
-        </>
+      {/* The screens bring their own padding. */}
+      {error !== null && (
+        <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+          {error}
+        </p>
+      )}
+      {view.name === 'assets' ? (
+        <AssetsScreen
+          state={shell.assetList}
+          onStateChange={setAssetList}
+          onOpen={(id) => setView({ name: 'asset', id })}
+        />
+      ) : view.name === 'asset' ? (
+        <AssetScreen
+          key={view.id}
+          id={view.id}
+          tab={shell.assetTab}
+          onTabChange={setAssetTab}
+          onBack={() => setView({ name: 'assets' })}
+          onOpenAsset={(id) => setView({ name: 'asset', id })}
+          onOpenProject={(id) => setView({ name: 'project', id })}
+          onBusyChange={setBusy}
+        />
+      ) : view.name === 'project' ? (
+        <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />
+      ) : view.name === 'inbox' ? (
+        <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
       ) : (
-        /* The inbox still brings its own layout until it is redesigned. */
-        <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
-          {error !== null && (
-            <p role="alert" className={ALERT}>
-              {error}
-            </p>
-          )}
-          <FilesScreen offset={inboxOffset} onOffsetChange={setInboxOffset} onBusyChange={setBusy} />
-        </div>
+        <ProjectsScreen
+          state={shell.projectList}
+          onStateChange={setProjectList}
+          onOpen={(id) => setView({ name: 'project', id })}
+          onOpenAsset={(id) => setView({ name: 'asset', id })}
+          onShowAssets={showAssets}
+        />
       )}
     </AppShell>
   );

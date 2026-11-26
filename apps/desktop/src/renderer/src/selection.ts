@@ -81,6 +81,9 @@ export function dropSelected(sel: FileSelection, ids: Iterable<string>): FileSel
   return selected === null ? sel : { ...sel, selected };
 }
 
+/** Tooltip of a batch action that has no eligible file to act on. */
+export const NONE_ELIGIBLE = 'None of the selected files is completely imported';
+
 /** The selected files a batch can act on: completely imported ones, in selection order. */
 export function eligibleFiles(sel: FileSelection): FileRecord[] {
   return [...sel.selected.values()].filter((f) => f.status === 'complete');
