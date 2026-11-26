@@ -353,11 +353,6 @@ export const SOURCE_IMAGE_LABEL = 'Source image';
 export const CLOSE_LABEL = 'Close';
 export const UPSCALES_LABEL = 'Upscales';
 
-/** 'Upscale 2×'. */
-export function upscaleLabel(scale: 2 | 4): string {
-  return `${UPSCALE_LABEL} ${UPSCALE_SCALE_LABELS[scale]}`;
-}
-
 /** The results of the studio; `RETRY_LABEL` above is shared. */
 export const RESULTS_LABEL = 'Results';
 export const USE_SETTINGS_LABEL = 'Use settings';
