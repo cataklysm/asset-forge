@@ -173,6 +173,15 @@ describe('library IPC', () => {
   });
 
   describe('files:import', () => {
+    it('answers no_workspace_open for an unpacking import without a workspace', async () => {
+      const source = join(base, 'pack.zip');
+      await writeFile(source, 'not a zip');
+      expect(await call('files:import', { sourcePaths: [source], unpackArchives: true })).toMatchObject({
+        ok: false,
+        error: { code: 'no_workspace_open' },
+      });
+    });
+
     it('refuses a non-boolean unpackArchives as an invalid request and answers entryName null for a plain import', async () => {
       await openWorkspace();
       const source = join(base, 'a.png');
@@ -191,7 +200,7 @@ describe('library IPC', () => {
       await openWorkspace();
       const source = join(base, 'pack.zip');
       await writeFile(source, 'not a zip');
-      // The placeholder reader refuses every archive, so an unpacked .zip answers the archive-level message.
+      // The source is no ZIP, so unpacking answers the archive-level message.
       expect(await ok<any[]>('files:import', { sourcePaths: [source], unpackArchives: true })).toEqual([
         { sourcePath: source, entryName: null, file: null, error: 'This file is not a readable ZIP archive', duplicateOf: [] },
       ]);

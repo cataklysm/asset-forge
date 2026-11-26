@@ -1,12 +1,11 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts and tag rename and merge reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge and ZIP import reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
-- **ZIP import.** A ZIP file can be imported into the inbox and directly into an asset; it is unpacked and its contents are imported as individual files. Open for the design: nested folders and nested archives, entries of a refused kind (programs, installers, shortcuts), size and entry-count limits, zip-slip and symlink entries (ReadMe security constraints on archives), and whether the archive itself is kept.
 - **Sources on an asset.** An asset can carry sources (where it or its material comes from). Open for the design: what a source is (URL, free text, author, licence, retrieval date), one or several per asset, whether a source can also sit on a single file, whether sources are searchable, and whether a URL is only stored or can be opened (ReadMe constraints on URL downloads apply if anything is fetched).
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
 - **Several vision providers.** Today exactly one provider can be configured (one base URL, one API key, one default model per purpose). The owner needs several defined side by side: the local Ollama on their own graphics card is not always available (the card is needed for other work), and at times a container on RunPod or a similar host takes over, also to try much larger models. Decided by the owner: the provider is chosen where an analysis is started (the start dialog, the single-image dialog, Image to prompt), not only in the settings, so that switching needs no detour through the settings and the dialog shows which provider is selected and whether it is reachable; a dialog preselects the provider that was used last. Open for the design: what a provider entry holds (name, base URL, key, timeout, default models), how reachability is shown there, one stored key per provider in `safeStorage`, the read-only environment mode, the pause gate and the pause banner per provider, queued jobs whose provider is switched or removed, and the fingerprint skip (it already contains provider and model, so the same file analysed through another provider counts as not analysed).
@@ -371,6 +370,18 @@ Left from the reviews:
 - Renderer: `onRenamedRef` in `tags-context.tsx` is assigned during render (the same pattern as elsewhere in the renderer).
 - Renderer: the gallery's last selected asset is rewritten in a ref and shows only with the reload's re-render; its `matchedTags` are not rewritten.
 - Tests: the position test of the asset Files tab after a rename does not reproduce a jump to the top under jsdom; the large merge test (3000 files) uses inbox files only; the in-memory tag fake does not model `createdAt`.
+
+## ZIP import
+
+Deferred by design:
+
+- No progress display and no cancel for a running import, also not while an archive is unpacked.
+- No archive format other than ZIP (7z, RAR, tar, gz).
+- No password-protected archives; an encrypted entry is refused.
+- No nested archives: a `.zip` entry is refused, not unpacked.
+- No unpacking of a ZIP that already sits in the workspace as a file.
+- No free-space check before unpacking; only the entry-count and declared-size limits bound what one import writes.
+- No folder structure: entries are imported flat under the last segment of their path.
 
 ## Not covered by any automated check
 
