@@ -11,11 +11,13 @@ import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context
 import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import { jobStatusLabel, PROMPT_SELECT_LABEL } from '../labels';
-import { useProvider } from '../provider-context';
+import { useProviderChoice } from '../provider-choice';
+import { useProviders } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
 import { AI_CHIP, ALERT, BUTTON, FOCUS, MUTED } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
+import { ProviderSelect } from './ProviderSelect';
 import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
@@ -71,10 +73,12 @@ const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
  */
 export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSettings, settingsBlocked = null }: Props) {
   const { changeToken, refresh } = useJobs();
-  const provider = useProvider();
+  const providers = useProviders();
   const prompts = useAnalysisPrompts();
-  const { settings } = provider;
   const fileId = open && file !== null ? file.id : null;
+  // Every file shown starts from the entry used last and its tagging default.
+  const choice = useProviderChoice('tagging', fileId);
+  const { providerId, model } = choice;
 
   const [shown, setShown] = useState<Shown | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +89,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   const busyRef = useRef<number | null>(null);
   const [busyOpening, setBusyOpening] = useState<number | null>(null);
   const busy = busyOpening !== null && busyOpening === opening;
-  // The owner's pick for this file; until then the tagging default.
-  const [chosen, setChosen] = useState<{ fileId: string; model: string | null } | null>(null);
+
   // The owner's prompt pick for this file; until then the tagging prompt used last (or the first).
   const [chosenPrompt, setChosenPrompt] = useState<{ fileId: string; id: string } | null>(null);
   const fileIdRef = useRef(fileId);
@@ -133,7 +136,6 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
       setOpening(openingRef.current);
       setShown(null);
       setError(null);
-      setChosen(null);
       setChosenPrompt(null);
     }
     void read(fileId);
@@ -141,7 +143,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, changeToken]);
 
-  const model = chosen !== null && chosen.fileId === fileId ? chosen.model : (settings?.taggingModel ?? null);
+
   const promptId =
     chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : defaultPromptId(prompts, 'tagging');
 
@@ -168,18 +170,20 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
 
   const analyse = () =>
     run(async (live) => {
-      if (file === null || model === null || promptId === null) return;
+      if (file === null || providerId === null || model === null || promptId === null) return;
       const id = file.id;
       try {
         const result = await call('analysis:enqueue', {
           target: { kind: 'files', fileIds: [id] },
           model,
+          providerId,
           mode: 'propose',
           force: true,
           promptId,
         });
-        // An accepted start records the prompt, also when the dialog moved on meanwhile.
+        // An accepted start records the prompt and the provider, also when the dialog moved on meanwhile.
         prompts.noteUsed('tagging', promptId);
+        providers.noteUsed(providerId);
         refresh();
         if (!live()) return;
         await read(id);
@@ -271,7 +275,7 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   }
 
   // Why Analyse cannot start, as its tooltip; null when it can.
-  const { blocked: providerBlocked, offerSettings } = providerGate(provider, model);
+  const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
   const blocked = providerBlocked ?? promptGate(prompts, promptId);
 
   const current = shown !== null && shown.fileId === fileId ? shown : null;
@@ -292,13 +296,13 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
   function analyseRow(label: string) {
     return (
       <div className="flex flex-col gap-2">
+        <ProviderSelect value={providerId} onChange={choice.setProvider} disabled={busy} />
         <ModelSelect
+          providerId={providerId}
           purpose="tagging"
           value={model}
-          onChange={(next) => {
-            if (fileId !== null) setChosen({ fileId, model: next });
-          }}
-          disabled={busy}
+          onChange={choice.setModel}
+          disabled={busy || providerId === null}
         />
         <PromptSelect
           purpose="tagging"

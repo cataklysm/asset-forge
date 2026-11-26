@@ -17,7 +17,7 @@ import {
   REVIEW_TAGS_LABEL,
   REVIEW_TAGS_TITLE,
 } from '../labels';
-import { useProvider } from '../provider-context';
+import { useProviders } from '../provider-context';
 import type { FileSelection } from '../selection';
 import { BUTTON } from '../ui';
 import { AnalysisResultDialog } from './AnalysisResultDialog';
@@ -125,8 +125,8 @@ interface Options {
 
 export interface AnalysisDialogs {
   /**
-   * Why no analysis can start (the provider is not configured), as tooltip of the disabled
-   * entries; null when it can, or while the settings are still unknown.
+   * Why no analysis can start (no provider entry exists), as tooltip of the disabled entries; null
+   * when it can, or while the provider list is still unknown.
    */
   blocked: string | null;
   /**
@@ -149,11 +149,11 @@ export interface AnalysisDialogs {
  * image, propose) and Image2Prompt. At most one is open; each chooses its model itself.
  */
 export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): AnalysisDialogs {
-  const { settings } = useProvider();
+  const { list } = useProviders();
   const settingsRoute = useOpenSettings();
   const [open, setOpen] = useState<Open | null>(null);
 
-  const blocked = settings !== null && settings.baseUrl === null ? JOB_ERROR_MESSAGES.provider_not_configured : null;
+  const blocked = list !== null && list.providers.length === 0 ? JOB_ERROR_MESSAGES.provider_not_configured : null;
   const close = () => setOpen(null);
   // While the settings screen cannot be shown, nothing closes (the dialogs disable Settings).
   const toSettings = () => {
