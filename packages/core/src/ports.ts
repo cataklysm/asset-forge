@@ -13,6 +13,9 @@ import type {
   FileKind,
   FileScope,
   ImportStatus,
+  JobErrorCode,
+  JobStatus,
+  JobView,
   Project,
   ProjectAssignment,
   ProjectList,
@@ -26,7 +29,9 @@ import type {
   WorkflowStepState,
   WorkflowTemplate,
   WorkspaceSummary,
+  ResourceClass,
 } from '@assetforge/contracts';
+import type { Job, NewJob } from './jobs.js';
 
 export interface Storage {
   isReachable(): Promise<boolean>; // root's parent volume/dir is accessible
@@ -299,6 +304,62 @@ export interface TagRepository {
   listForAsset(assetId: string): Promise<TagAssignment[]>; // by name, then origin
 }
 
+/** The persistent job queue of a workspace. Every transition is guarded by the status it starts from. */
+export interface JobRepository {
+  /** One transaction. Inserts each job as `queued`, attempt 0; a job whose dedupe key is held by an active job (or by an earlier job of the same call) is skipped. Returns the inserted ids. */
+  enqueue(r: { jobs: readonly NewJob[]; now: string }): Promise<string[]>;
+  get(id: string): Promise<Job | null>;
+  listByStatus(status: JobStatus): Promise<Job[]>; // oldest created_at first, then id
+  /** Oldest job (created_at, id) of the class and one of `types` that is `queued`, or `retry_wait` with run_after <= now. Atomically sets `running`, attempt + 1, started_at = now, clears run_after and the error. */
+  claimNext(r: { resourceClass: ResourceClass; types: readonly string[]; now: string }): Promise<Job | null>;
+  /** Earliest run_after of `retry_wait` jobs of these types; null when there is none. */
+  nextRunAfter(types: readonly string[]): Promise<string | null>;
+  /** running → succeeded | failed | cancelled, finished_at = now, message from JOB_ERROR_MESSAGES. False when the row is not `running`. */
+  finish(id: string, r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string }): Promise<boolean>;
+  /** running → retry_wait with run_after and the error. False when the row is not `running`. */
+  scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean>;
+  /** running → queued, attempt − 1 (not below 0), started_at cleared. False when the row is not `running`. */
+  release(id: string, now: string): Promise<boolean>;
+  /** queued | retry_wait | waiting_remote → cancelled, for one job or for all. Returns how many. */
+  cancelPending(r: { id?: string; now: string }): Promise<number>;
+  /** failed | cancelled → queued with attempt 0, error, run_after, started_at and finished_at cleared; for one job or for all, newest created_at first, skipping a job whose dedupe key is held by an active job. Returns how many. */
+  retry(r: { id?: string; now: string }): Promise<number>;
+  /** Deletes every succeeded, failed or cancelled job. Returns how many. */
+  clearFinished(): Promise<number>;
+  counts(): Promise<Record<JobStatus, number>>;
+  /** Newest created_at first, then id descending. `fileName` is the file's original name. */
+  list(q: { limit: number; offset: number; status?: JobStatus }): Promise<{ items: JobView[]; total: number }>;
+}
+
+/** Provenance of the latest analysis of a file: the content that was analysed, by what and when. */
+export interface FileAnalysis {
+  fileId: string;
+  sha256: string;
+  provider: string;
+  model: string;
+  promptVersion: number;
+  analysedAt: string;
+}
+
+export interface FileAnalysisRepository {
+  get(fileId: string): Promise<FileAnalysis | null>;
+  /**
+   * One transaction. Returns false and writes nothing unless the file exists, is complete and has
+   * this sha256. Otherwise: deletes every `ai` assignment of the file, inserts an `ai` assignment
+   * for each tag the file does not carry manually (creating missing tags), upserts the analysis
+   * row and reindexes the file's asset.
+   */
+  apply(r: {
+    fileId: string;
+    sha256: string;
+    tags: readonly { name: string; displayName: string; newId: string }[];
+    provider: string;
+    model: string;
+    promptVersion: number;
+    now: string;
+  }): Promise<boolean>;
+}
+
 export interface WorkspaceMeta {
   id: string;
   formatVersion: number;
@@ -324,6 +385,8 @@ export interface WorkspaceDatabase {
   workflowTemplates: WorkflowTemplateRepository;
   assetWorkflows: AssetWorkflowRepository;
   tags: TagRepository;
+  jobs: JobRepository;
+  analyses: FileAnalysisRepository;
   /**
    * Recomputes derived data (file kinds, the search index) unless the stored stamp is current;
    * the stamp is written last, so an interrupted run is redone on the next open.

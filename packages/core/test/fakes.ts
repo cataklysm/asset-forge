@@ -45,6 +45,8 @@ import type {
   AssignmentKey,
   AssetTypeRepository,
   AssetWorkflowRepository,
+  FileAnalysis,
+  FileAnalysisRepository,
   NewWorkflowStep,
   StepContext,
   StepDefinitionInput,
@@ -72,6 +74,7 @@ import type {
   WorkspaceMetaRepository,
   WorkspaceRegistry,
 } from '../src/ports.js';
+import { InMemoryJobRepository } from './memory-jobs.js';
 
 /** In-memory storage. Files live in `files`, directories in `dirs` (relative, `/`-separated). */
 export class InMemoryStorage implements Storage {
@@ -245,7 +248,7 @@ class InMemoryTags implements TagRepository {
       .map(([name]) => ({ name, displayName: this.tags.get(name)!.displayName }));
   }
 
-  private ensureTag(r: { name: string; displayName: string; newId: string }): void {
+  ensureTag(r: { name: string; displayName: string; newId: string }): void {
     if (!this.tags.has(r.name)) this.tags.set(r.name, { id: r.newId, displayName: r.displayName });
   }
 
@@ -419,6 +422,51 @@ class InMemoryFiles implements FileRepository {
     const rec = this.records.get(id);
     if (!rec) throw new NotFoundError(`Unknown file id: ${id}`);
     return rec;
+  }
+}
+
+/** Analysis rows by file id; `apply` writes the fake's tag data like the database transaction. */
+class InMemoryAnalyses implements FileAnalysisRepository {
+  readonly rows = new Map<string, FileAnalysis>();
+
+  constructor(
+    private readonly files: InMemoryFiles,
+    private readonly tags: InMemoryTags,
+  ) {}
+
+  async get(fileId: string): Promise<FileAnalysis | null> {
+    const row = this.rows.get(fileId);
+    return row ? { ...row } : null;
+  }
+
+  async apply(r: {
+    fileId: string;
+    sha256: string;
+    tags: readonly { name: string; displayName: string; newId: string }[];
+    provider: string;
+    model: string;
+    promptVersion: number;
+    now: string;
+  }): Promise<boolean> {
+    const rec = this.files.records.get(r.fileId);
+    if (!rec || rec.status !== 'complete' || rec.sha256 !== r.sha256) return false;
+    const assignments = this.tags.fileAssignments;
+    const kept = assignments.filter((a) => !(a.fileId === r.fileId && a.origin === 'ai'));
+    assignments.splice(0, assignments.length, ...kept);
+    for (const t of r.tags) {
+      this.tags.ensureTag(t);
+      const carried = assignments.some((a) => a.fileId === r.fileId && a.name === t.name);
+      if (!carried) assignments.push({ fileId: r.fileId, name: t.name, origin: 'ai' });
+    }
+    this.rows.set(r.fileId, {
+      fileId: r.fileId,
+      sha256: r.sha256,
+      provider: r.provider,
+      model: r.model,
+      promptVersion: r.promptVersion,
+      analysedAt: r.now,
+    });
+    return true;
   }
 }
 
@@ -985,6 +1033,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
+  readonly jobs = new InMemoryJobRepository((fileId) => this.files.records.get(fileId)?.originalName ?? null);
+  readonly analyses = new InMemoryAnalyses(this.files, this.tags);
   closed = false;
 
   constructor() {

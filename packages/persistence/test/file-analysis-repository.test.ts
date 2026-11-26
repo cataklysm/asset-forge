@@ -1,0 +1,138 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { BUILT_IN_ASSET_TYPES, type WorkspaceDatabase } from '@assetforge/core';
+import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
+
+const T0 = '2026-01-01T00:00:00.000Z';
+const T1 = '2026-01-01T00:00:01.000Z';
+const T2 = '2026-01-01T00:00:02.000Z';
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const STORAGE_ID = uuid(1);
+const TYPE_ID = uuid(2);
+const ASSET_ID = uuid(3);
+const FILE_ID = uuid(4);
+const SHA = 'a'.repeat(64);
+
+let dir: string;
+let db: WorkspaceDatabase;
+let handle: Database.Database;
+let nextTagId = 5000;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'af-analysis-'));
+  const pragma = vi.spyOn(Database.prototype, 'pragma');
+  try {
+    db = await openWorkspaceDatabase(join(dir, 'ws.db'), MIGRATIONS_FOLDER);
+    handle = pragma.mock.contexts[0] as Database.Database;
+  } finally {
+    pragma.mockRestore();
+  }
+  await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T0 });
+  await db.assetTypes.insertMissing([
+    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+  ]);
+  await db.assets.insert({ id: ASSET_ID, name: 'Pump', typeId: TYPE_ID, description: '', status: 'draft', createdAt: T0, updatedAt: T0 });
+  await addFile(FILE_ID);
+  await db.files.setPlacement(FILE_ID, { relativePath: `assets/${ASSET_ID}/f.png`, assetId: ASSET_ID, role: 'reference' });
+});
+
+afterEach(async () => {
+  await db.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+async function addFile(id: string, complete = true): Promise<void> {
+  await db.files.insertPending({
+    id,
+    storageId: STORAGE_ID,
+    originalName: 'f.png',
+    relativePath: `inbox/${id}/f.png`,
+    mimeType: 'image/png',
+    importedAt: T0,
+    kind: 'image',
+  });
+  if (complete) await db.files.markComplete(id, { sizeBytes: 1, sha256: SHA, width: null, height: null });
+}
+
+const t = (name: string, displayName = name) => ({ name, displayName, newId: uuid(nextTagId++) });
+
+const apply = (o: { fileId?: string; sha256?: string; tags?: ReturnType<typeof t>[]; model?: string; now?: string } = {}) =>
+  db.analyses.apply({
+    fileId: o.fileId ?? FILE_ID,
+    sha256: o.sha256 ?? SHA,
+    tags: o.tags ?? [t('rusty'), t('metal')],
+    provider: 'ollama',
+    model: o.model ?? 'qwen',
+    promptVersion: 1,
+    now: o.now ?? T1,
+  });
+
+const tagsOf = async (fileId = FILE_ID) => (await db.files.get(fileId))!.tags.map((a) => `${a.name}/${a.origin}`);
+const rowCount = (table: string) => (handle.prepare(`select count(*) as n from ${table}`).get() as { n: number }).n;
+
+describe('file analysis repository', () => {
+  test('apply writes the ai tags and the analysis row', async () => {
+    expect(await db.analyses.get(FILE_ID)).toBeNull();
+    expect(await apply({ tags: [t('rusty', 'Rusty'), t('metal')] })).toBe(true);
+    expect(await db.files.get(FILE_ID)).toMatchObject({
+      tags: [
+        { name: 'metal', displayName: 'metal', origin: 'ai' },
+        { name: 'rusty', displayName: 'Rusty', origin: 'ai' },
+      ],
+    });
+    expect(await db.analyses.get(FILE_ID)).toEqual({
+      fileId: FILE_ID,
+      sha256: SHA,
+      provider: 'ollama',
+      model: 'qwen',
+      promptVersion: 1,
+      analysedAt: T1,
+    });
+  });
+
+  test('apply writes nothing for an unknown file, a pending file or a different sha256', async () => {
+    const pending = uuid(40);
+    await addFile(pending, false);
+    expect(await apply({ fileId: uuid(99) })).toBe(false);
+    expect(await apply({ fileId: pending })).toBe(false);
+    expect(await apply({ sha256: 'b'.repeat(64) })).toBe(false);
+    expect(rowCount('file_tag')).toBe(0);
+    expect(rowCount('tag')).toBe(0);
+    expect(rowCount('file_analysis')).toBe(0);
+  });
+
+  test('a second apply replaces the earlier ai assignments and the analysis row', async () => {
+    await apply({ tags: [t('rusty'), t('metal')] });
+    expect(await apply({ tags: [t('metal'), t('blue')], model: 'llava', now: T2 })).toBe(true);
+    expect(await tagsOf()).toEqual(['blue/ai', 'metal/ai']);
+    expect(await db.analyses.get(FILE_ID)).toMatchObject({ model: 'llava', analysedAt: T2 });
+    expect(rowCount('file_analysis')).toBe(1);
+  });
+
+  test('manual assignments stay, and a tag carried manually gets no ai assignment', async () => {
+    await db.tags.addToFile({ fileId: FILE_ID, name: 'rusty', displayName: 'rusty', origin: 'manual', newId: uuid(4000), now: T0 });
+    await db.tags.addToFile({ fileId: FILE_ID, name: 'kept', displayName: 'kept', origin: 'manual', newId: uuid(4001), now: T0 });
+    expect(await apply({ tags: [t('rusty'), t('metal')] })).toBe(true);
+    expect(await tagsOf()).toEqual(['kept/manual', 'metal/ai', 'rusty/manual']);
+  });
+
+  test('duplicate tag names in one answer give one assignment', async () => {
+    expect(await apply({ tags: [t('metal'), t('metal')] })).toBe(true);
+    expect(await tagsOf()).toEqual(['metal/ai']);
+  });
+
+  test('the asset search and the tag filters find an ai tag afterwards', async () => {
+    await apply({ tags: [t('corroded')] });
+    expect((await db.assets.list({ limit: 10, offset: 0, query: 'corro' })).items.map((a) => a.id)).toEqual([ASSET_ID]);
+    expect((await db.assets.list({ limit: 10, offset: 0, tagNames: ['corroded'] })).items.map((a) => a.id)).toEqual([ASSET_ID]);
+    expect((await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, tagNames: ['corroded'] })).items.map((f) => f.id)).toEqual([
+      FILE_ID,
+    ]);
+
+    await apply({ tags: [t('shiny')], now: T2 });
+    expect((await db.assets.list({ limit: 10, offset: 0, query: 'corro' })).total).toBe(0);
+  });
+});

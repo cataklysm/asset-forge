@@ -43,6 +43,13 @@
       "when": 1795680742148,
       "tag": "0005_lush_mother_askani",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795688562889,
+      "tag": "0006_cuddly_micromacro",
+      "breakpoints": true
     }
   ]
 }

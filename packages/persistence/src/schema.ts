@@ -1,10 +1,13 @@
 import {
+  ACTIVE_JOB_STATUSES,
   ApprovalStatusSchema,
   AssetStatusSchema,
   AssignmentPrioritySchema,
   FileRoleSchema,
   ImportStatusSchema,
+  JobStatusSchema,
   ProjectStatusSchema,
+  ResourceClassSchema,
   RelationKindSchema,
   WorkflowStepStateSchema,
 } from '@assetforge/contracts';
@@ -37,6 +40,8 @@ const FILE_ROLES = vocabulary(FileRoleSchema);
 const IMPORT_STATUSES = vocabulary(ImportStatusSchema);
 const STEP_STATES = vocabulary(WorkflowStepStateSchema);
 const TAG_ORIGINS = ['manual', 'ai'] as const;
+const JOB_STATUSES = vocabulary(JobStatusSchema);
+const RESOURCE_CLASSES = vocabulary(ResourceClassSchema);
 
 export const workspace = sqliteTable('workspace', {
   id: text('id').primaryKey(),
@@ -315,6 +320,49 @@ export const fileTag = sqliteTable(
     check('file_tag_origin_check', oneOf(t.origin, TAG_ORIGINS)),
   ],
 );
+
+/** The persistent job queue. `payload` is JSON; `error_message` is the fixed message of `error_code`. */
+export const job = sqliteTable(
+  'job',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    resourceClass: text('resource_class', { enum: RESOURCE_CLASSES }).notNull(),
+    status: text('status', { enum: JOB_STATUSES }).notNull(),
+    fileId: text('file_id').references(() => file.id),
+    payload: text('payload').notNull(),
+    dedupeKey: text('dedupe_key'),
+    attempt: integer('attempt').notNull().default(0),
+    runAfter: text('run_after'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at').notNull(),
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [
+    index('job_claim_idx').on(t.status, t.resourceClass, t.createdAt, t.id),
+    // At most one active job per dedupe key; finished jobs keep theirs.
+    uniqueIndex('job_active_dedupe_idx')
+      .on(t.dedupeKey)
+      .where(oneOf(t.status, ACTIVE_JOB_STATUSES)),
+    check('job_resource_class_check', oneOf(t.resourceClass, RESOURCE_CLASSES)),
+    check('job_status_check', oneOf(t.status, JOB_STATUSES)),
+  ],
+);
+
+/** Provenance of the latest analysis of a file; replaced by the next one. */
+export const fileAnalysis = sqliteTable('file_analysis', {
+  fileId: text('file_id')
+    .primaryKey()
+    .references(() => file.id),
+  sha256: text('sha256').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  promptVersion: integer('prompt_version').notNull(),
+  analysedAt: text('analysed_at').notNull(),
+});
 
 /** Maps an asset to the integer rowid of its row in the hand-written FTS5 table `asset_search`. */
 export const assetSearchMap = sqliteTable('asset_search_map', {

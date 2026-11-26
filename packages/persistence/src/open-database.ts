@@ -8,8 +8,10 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
 import { ensureDerivedData, type DerivedDataOptions } from './derived-data.js';
+import { createFileAnalysisRepository } from './file-analysis-repository.js';
 import { createFileMoveRepository } from './file-move-repository.js';
 import { createFileRepository } from './file-repository.js';
+import { createJobRepository } from './job-repository.js';
 import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
 import { createProjectAssetRepository } from './project-asset-repository.js';
@@ -48,6 +50,8 @@ export async function openWorkspaceDatabase(
       workflowTemplates: createWorkflowTemplateRepository(db),
       assetWorkflows: createAssetWorkflowRepository(db),
       tags: createTagRepository(db),
+      jobs: createJobRepository(db),
+      analyses: createFileAnalysisRepository(db),
       async ensureDerivedData() {
         await ensureDerivedData(db, options.derivedData);
       },

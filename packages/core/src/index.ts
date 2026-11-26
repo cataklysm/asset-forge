@@ -9,6 +9,7 @@ export * from './file-names.js';
 export * from './measure-file.js';
 export * from './media-types.js';
 export * from './import-file.js';
+export type * from './jobs.js';
 export * from './paths.js';
 export * from './projects.js';
 export * from './recover-imports.js';

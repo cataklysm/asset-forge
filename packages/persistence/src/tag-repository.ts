@@ -41,19 +41,19 @@ function finishBatch(tx: Tx, rows: (typeof file.$inferSelect)[]): FileRecord[] {
 /** Highest code point; sorts after every character that can follow a prefix in a name. */
 const PREFIX_END = String.fromCodePoint(0x10ffff);
 
-export function createTagRepository(db: BetterSQLite3Database): TagRepository {
-  /** Inserts the tag unless its name exists and returns the id of the tag with that name. */
-  const ensureTag = (
-    tx: Pick<BetterSQLite3Database, 'insert' | 'select'>,
-    r: { name: string; displayName: string; newId: string; now: string },
-  ): string => {
-    tx.insert(tag)
-      .values({ id: r.newId, name: r.name, displayName: r.displayName, createdAt: r.now })
-      .onConflictDoNothing({ target: tag.name })
-      .run();
-    return tx.select({ id: tag.id }).from(tag).where(eq(tag.name, r.name)).get()!.id;
-  };
+/** Inserts the tag unless its name exists and returns the id of the tag with that name. */
+export function ensureTag(
+  tx: Pick<BetterSQLite3Database, 'insert' | 'select'>,
+  r: { name: string; displayName: string; newId: string; now: string },
+): string {
+  tx.insert(tag)
+    .values({ id: r.newId, name: r.name, displayName: r.displayName, createdAt: r.now })
+    .onConflictDoNothing({ target: tag.name })
+    .run();
+  return tx.select({ id: tag.id }).from(tag).where(eq(tag.name, r.name)).get()!.id;
+}
 
+export function createTagRepository(db: BetterSQLite3Database): TagRepository {
   return {
     async suggest({ prefix, limit }): Promise<TagSuggestion[]> {
       // A range over the unique name index; LIKE would treat % and _ in the prefix as wildcards.
