@@ -2,6 +2,15 @@
 
 Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a and phase 4b reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
+## Requested features
+
+Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
+
+- **ZIP import.** A ZIP file can be imported into the inbox and directly into an asset; it is unpacked and its contents are imported as individual files. Open for the design: nested folders and nested archives, entries of a refused kind (programs, installers, shortcuts), size and entry-count limits, zip-slip and symlink entries (ReadMe security constraints on archives), and whether the archive itself is kept.
+- **Delete files, not only detach.** A file (an image in particular) can be deleted from the asset screen and the inbox, single and as a batch. Follows the persistence rule "logical / trash first; physical deletion checks all references"; open for the design: trash and restore, the asset cover, relations and lineage that point at the file, and cached previews.
+- **Editable analysis prompts.** The prompts sent to the vision provider for tagging and for Image to prompt can be edited to fit the owner's needs. Open for the design: where they are stored (per workspace or app-wide), reset to the built-in text, and versioning — the analysis fingerprint includes the template version, so an edited prompt must count as a new version.
+- **Editable tags.** A tag can be renamed, and two tags can be merged, across the whole workspace (example: analysis returns `front view` while the existing images carry `front`; the owner wants one uniform tag). Open for the design: the origin of a merged tag (manual wins), the search index, and whether a rename also maps future AI results onto the kept tag.
+
 ## Correctness and robustness
 
 - `JsonWorkspaceRegistry` read-modify-write is unserialized and quarantine on read is racy; it drops unknown keys in `settings.json`.
