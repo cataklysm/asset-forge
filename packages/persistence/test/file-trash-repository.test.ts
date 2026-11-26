@@ -278,7 +278,7 @@ describe('file trash repository', () => {
       });
       await db.jobs.enqueue({
         jobs: [
-          { id: newId(), type: 'vision.analyze_file', resourceClass: 'local_gpu', fileId: f, payload: { version: 1 }, dedupeKey: null },
+          { id: newId(), type: 'vision.analyze_file', resourceClass: 'local_gpu', fileId: f, lane: null, payload: { version: 1 }, dedupeKey: null },
         ],
         now: TS,
       });

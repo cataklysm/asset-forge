@@ -361,6 +361,8 @@ export const job = sqliteTable(
     resourceClass: text('resource_class', { enum: RESOURCE_CLASSES }).notNull(),
     status: text('status', { enum: JOB_STATUSES }).notNull(),
     fileId: text('file_id').references(() => file.id),
+    /** The queue lane within the resource class; for analysis jobs the provider id. Null for jobs without one. */
+    providerId: text('provider_id'),
     payload: text('payload').notNull(),
     dedupeKey: text('dedupe_key'),
     attempt: integer('attempt').notNull().default(0),
@@ -380,6 +382,8 @@ export const job = sqliteTable(
       .where(oneOf(t.status, ACTIVE_JOB_STATUSES)),
     // The newest job of a type for one file (`latestForFile`).
     index('job_file_id_type_created_at_idx').on(t.fileId, t.type, t.createdAt, t.id),
+    // Waiting and active jobs per lane (`waitingByLane`, `countActiveInLane`, `rerouteWaiting`).
+    index('job_provider_id_status_idx').on(t.providerId, t.status),
     check('job_resource_class_check', oneOf(t.resourceClass, RESOURCE_CLASSES)),
     check('job_status_check', oneOf(t.status, JOB_STATUSES)),
   ],
