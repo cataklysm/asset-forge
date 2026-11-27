@@ -90,8 +90,10 @@ export interface JobControl {
   wake(): void;
   /**
    * Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the
-   * handler. With `pendingOnly` a running job is left alone: only a job still pending when the cancel reaches the
-   * database ends, so a job claimed meanwhile keeps running.
+   * handler. A run whose handler is already done keeps its outcome; the cancel waits until it is stored and then
+   * cancels a retry it scheduled. With `pendingOnly` a running job is left alone: only a job still pending when the
+   * cancel reaches the database ends, so a job claimed meanwhile keeps running. Rejects when the cancel cannot be
+   * written.
    */
   cancel(jobId: string, options?: CancelOptions): Promise<void>;
   /** Cancels every pending job and aborts every running one. Answers how many. */

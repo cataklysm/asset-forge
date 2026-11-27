@@ -114,26 +114,20 @@ export function createJobHost(deps: JobHostDeps): JobHost {
   /**
    * Without a scheduler (none started, or one stopping: the host lets go of it before the stop) nothing runs, so
    * the waiting jobs, or the one named, are ended in the database and their generations settled cancelled. Answers
-   * how many; 0 without a workspace or when the write failed. `read` does not queue, so a caller already inside
-   * a workspace read never waits on itself.
+   * how many; 0 without a workspace. A failed write rejects, so the caller is told the jobs were not cancelled.
+   * `read` does not queue, so a caller already inside a workspace read never waits on itself.
    */
   const cancelWithoutScheduler = async (jobId?: string): Promise<number> => {
     if (manager.current() === null) return 0;
-    let cancelled = 0;
-    try {
-      cancelled = await manager.read((s) =>
-        s.database.jobs.cancelPending({
-          ...(jobId === undefined ? {} : { id: jobId }),
-          now: s.now().toISOString(),
-          settled: (job) => {
-            settleGenerationOfJob(s, job, { status: 'cancelled' });
-          },
-        }),
-      );
-    } catch (cause) {
-      console.error('The waiting jobs could not be cancelled', cause);
-      return 0;
-    }
+    const cancelled = await manager.read((s) =>
+      s.database.jobs.cancelPending({
+        ...(jobId === undefined ? {} : { id: jobId }),
+        now: s.now().toISOString(),
+        settled: (job) => {
+          settleGenerationOfJob(s, job, { status: 'cancelled' });
+        },
+      }),
+    );
     if (cancelled > 0) changed();
     return cancelled;
   };

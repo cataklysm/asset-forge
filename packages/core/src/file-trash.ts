@@ -12,8 +12,9 @@ export type FileBatchItem = { fileId: string; file: FileRecord | null; error: Er
 
 const EMPTY_CHUNK = 200;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RUNNING_GENERATION = 'This file still has a running generation';
-const MOVE_FAILED ='The file could not be moved; it may be in use, missing, or the target already exists';
+/** The refusal of a purge while a generation of the file runs. */
+export const RUNNING_GENERATION_MESSAGE = 'This file still has a running generation';
+const MOVE_FAILED = 'The file could not be moved; it may be in use, missing, or the target already exists';
 
 /** Runs `op` for each id in request order; a failure is reported for its file and never stops the next. */
 async function eachFile(
@@ -81,7 +82,7 @@ async function cancelJobsOnPurge(s: WorkspaceSession, control: JobControl, fileI
     now: s.now().toISOString(),
     settled: (job) => settleGenerationOfJob(s, job, { status: 'cancelled' }),
   });
-  if (refused) throw new InvalidOperationError(RUNNING_GENERATION);
+  if (refused) throw new InvalidOperationError(RUNNING_GENERATION_MESSAGE);
   for (const job of await s.database.jobs.activeForFile(fileId)) await cancelJob(s, control, job.id);
 }
 
@@ -89,7 +90,7 @@ async function cancelJobsOnPurge(s: WorkspaceSession, control: JobControl, fileI
 async function refuseRunningGeneration(s: WorkspaceSession, fileId: string): Promise<void> {
   const jobs = await s.database.jobs.activeForFile(fileId);
   if (jobs.some((job) => job.type === IMAGE_GENERATE_JOB && job.status === 'running')) {
-    throw new InvalidOperationError(RUNNING_GENERATION);
+    throw new InvalidOperationError(RUNNING_GENERATION_MESSAGE);
   }
 }
 

@@ -1,8 +1,9 @@
-import { FileKindSchema } from '@assetforge/contracts';
+import { FileKindSchema, IMAGE_GENERATE_JOB } from '@assetforge/contracts';
 import type { FileList, FileRecord, FileScope, ImportStatus, TagAssignment } from '@assetforge/contracts';
 import {
   InvalidOperationError,
   NotFoundError,
+  RUNNING_GENERATION_MESSAGE,
   foldSearchWord,
   hasThumbnail,
   isOpenable,
@@ -363,6 +364,13 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
         if (tx.select({ fileId: fileMove.fileId }).from(fileMove).where(eq(fileMove.fileId, id)).get()) {
           throw new InvalidOperationError('The file is being moved');
         }
+        // A running generation still links its result to this file; its job row must outlive the run.
+        const generating = tx
+          .select({ id: job.id })
+          .from(job)
+          .where(and(eq(job.fileId, id), eq(job.type, IMAGE_GENERATE_JOB), eq(job.status, 'running')))
+          .get();
+        if (generating) throw new InvalidOperationError(RUNNING_GENERATION_MESSAGE);
         // Dependents first, so the foreign keys hold at every statement. A chosen cover is cleared by
         // its `set null` rule (only a failed inbox file could still be one; a trashed file is none), the
         // origins by their cascade.

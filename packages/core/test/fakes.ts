@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, MAX_FILE_ORIGINS } from '@assetforge/contracts';
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, MAX_FILE_ORIGINS } from '@assetforge/contracts';
 import type {
   AnalysisPreview,
   AnalysisTarget,
@@ -32,7 +32,7 @@ import type {
   WorkspaceSummary,
 } from '@assetforge/contracts';
 import { automaticCover } from '../src/asset-cover.js';
-import { trashFiles } from '../src/file-trash.js';
+import { RUNNING_GENERATION_MESSAGE, trashFiles } from '../src/file-trash.js';
 import type { WorkspaceSession } from '../src/session.js';
 import { fileKind, hasThumbnail, isOpenable, isPreviewable, type VideoFormat } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
@@ -472,6 +472,8 @@ class InMemoryFiles implements FileRepository {
   onPurge: (fileId: string) => void = () => {};
   /** Set by the database: whether the file has an open move row. */
   hasMove: (fileId: string) => boolean = () => false;
+  /** Set by the database: whether a generation job of the file is running. */
+  hasRunningGeneration: (fileId: string) => boolean = () => false;
 
   private withTags(rec: FileRecord): FileRecord {
     // Mirrors the database: a trashed file is never openable.
@@ -652,6 +654,7 @@ class InMemoryFiles implements FileRepository {
     const rec = this.records.get(id);
     if (!rec || (rec.deletedAt === null && rec.status !== 'failed')) return false;
     if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
+    if (this.hasRunningGeneration(id)) throw new InvalidOperationError(RUNNING_GENERATION_MESSAGE);
     this.onPurge(id);
     this.records.delete(id);
     this.origins.removeOfFile(id);
@@ -1555,6 +1558,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
+    this.files.hasRunningGeneration = (fileId) =>
+      this.jobs.rows.some((j) => j.fileId === fileId && j.type === IMAGE_GENERATE_JOB && j.status === 'running');
     // The purge transaction: tags, analysis, proposal and jobs of the file go with it.
     this.files.onPurge = (fileId) => {
       const tags = this.tags.fileAssignments;

@@ -301,6 +301,33 @@ describe('file trash repository', () => {
     await expect(db.files.get(kept)).resolves.toMatchObject({ id: kept });
   });
 
+  test('purge is refused while a generation of the file runs and deletes nothing', async () => {
+    const f = await addFile('source.png', { assetId: PUMP, role: 'reference' });
+    const running = newId();
+    const queued = newId();
+    await db.jobs.enqueue({
+      jobs: [
+        { id: running, type: 'image.generate', resourceClass: 'remote_api', fileId: f, lane: null, payload: { v: 1 }, dedupeKey: null },
+        { id: queued, type: 'image.generate', resourceClass: 'remote_api', fileId: f, lane: null, payload: { v: 1 }, dedupeKey: null },
+      ],
+      now: TS,
+    });
+    handle.prepare("update job set status = 'running' where id = ?").run(running);
+    await trash(f);
+
+    await expect(db.files.purge(f)).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'This file still has a running generation',
+    });
+    await expect(db.files.get(f)).resolves.toMatchObject({ id: f });
+    expect(countOf('job', f)).toBe(2);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([]);
+
+    // A generation that is only queued does not hold the purge.
+    handle.prepare("update job set status = 'failed' where id = ?").run(running);
+    await expect(db.files.purge(f)).resolves.toBe(true);
+  });
+
   test('purge of a trashed file writes a tombstone that forgetPurge deletes', async () => {
     const a = await addFile('a.png', { assetId: PUMP, role: 'reference' });
     const b = await addFile('b.png');

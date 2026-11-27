@@ -363,9 +363,18 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       const run = active.get(jobId);
       // A pending-only cancel goes to the database, which ends the job only while it is still pending.
       if (run && options?.pendingOnly !== true) {
-        if (run.settled) return;
-        run.cancelled = true;
-        run.controller.abort();
+        if (!run.settled) {
+          run.cancelled = true;
+          run.controller.abort();
+          return;
+        }
+        // The handler is done and keeps its outcome, but a retry it is still storing is cancelled once stored.
+        await tracked(
+          (async () => {
+            await run.done;
+            if ((await jobs.cancelPending({ id: jobId, now: iso(), ...cancelHook })) > 0) changed(jobId);
+          })(),
+        );
         return;
       }
       await tracked(

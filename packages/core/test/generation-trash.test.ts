@@ -102,6 +102,27 @@ describe('purging the source of a generation', () => {
     expect(await generationStatus(t, g.generationId)).toBe('pending');
   });
 
+  it('is refused by the purge itself when a generation of the file runs by then, keeping its job', async () => {
+    const t = await setup();
+    const g = await started(t);
+    await trashForTest(t.session, [t.file.id]);
+    // A generation of the file runs by the time the row goes: the purge transaction itself refuses.
+    const purge = t.db.files.purge.bind(t.db.files);
+    t.db.files.purge = async (id) => {
+      const ended = t.db.jobs.rows.find((r) => r.id === g.jobId)!;
+      t.db.jobs.rows.push({ ...ended, id: 'late-generation', status: 'running', finishedAt: null });
+      return purge(id);
+    };
+
+    const [item] = await purgeFiles(t.session, t.control, [t.file.id]);
+
+    expect(item!.error).toBeInstanceOf(InvalidOperationError);
+    expect(item!.error!.message).toBe(RUNNING_GENERATION);
+    expect(status(t, 'late-generation')).toBe('running');
+    expect(t.db.files.records.get(t.file.id)?.deletedAt).not.toBeNull();
+    expect(await generationStatus(t, g.generationId)).toBe('cancelled');
+  });
+
   it('cancels a queued generation and settles it cancelled, then purges', async () => {
     const t = await setup();
     const g = await started(t);
