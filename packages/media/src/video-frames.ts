@@ -1,6 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** Container of a video; picks the demuxer, which is never guessed from the content. */
@@ -33,6 +33,10 @@ export interface VideoFramesOptions {
   timeoutMs?: number;
   /** Test hook: receives every started process. */
   onProcess?: (child: ChildProcess) => void;
+  /** Test hook: starts the process instead of `child_process.spawn`. */
+  spawnProcess?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+  /** Test hook: replaces KILL_GRACE_MS. */
+  killGraceMs?: number;
 }
 
 export const VIDEO_FRAME_CONCURRENCY = 2;
@@ -53,15 +57,26 @@ const DECODERS: Record<VideoFormat, string> = {
 /** Diagnostic lines are read one by one; a longer line is cut to this many characters. */
 const MAX_LINE = 4096;
 
+/** Scale factor to the displayed size (square pixels), never above 1. */
+const FACTOR = `min(1,${FRAME_EDGE}/max(iw*sar,ih))`;
+/**
+ * Scales to the displayed size with square pixels, longer edge at most FRAME_EDGE, never enlarged.
+ * `sar` is 1 when the video does not say.
+ */
 const SCALE =
-  `scale=w='if(gte(iw,ih),min(${FRAME_EDGE},iw),-1)'` + `:h='if(gte(iw,ih),-1,min(${FRAME_EDGE},ih))'`;
+  `scale=w='max(1,trunc(iw*sar*${FACTOR}+0.5))'` + `:h='max(1,trunc(ih*${FACTOR}+0.5))',setsar=1`;
+
+/** A grace period after kill(): the attempt is given up when the process has not exited by then. */
+export const KILL_GRACE_MS = 2000;
+/** A written frame larger than this is not read back. */
+const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 
 /**
  * The argument list of one attempt. `showinfo` stands after the automatic rotation and before the
- * scale, so it prints the displayed size of the video. Both paths carry the `file:` prefix, so
- * nothing in a name can select another protocol.
+ * scale, so it prints the stored size and sample aspect ratio of the rotated frame. Both paths
+ * carry the `file:` prefix, so nothing in a name can select another protocol.
  */
-export function ffmpegArguments(sourcePath: string, format: VideoFormat, atSeconds: number, tmpPath: string): string[] {
+export function frameArguments(sourcePath: string, format: VideoFormat, atSeconds: number, tmpPath: string): string[] {
   return [
     '-nostdin',
     '-hide_banner',
@@ -102,14 +117,101 @@ export function durationFromLine(line: string): number | null | undefined {
   return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
 }
 
-/** The size of the first frame `showinfo` reports, or undefined for any other line. */
-function sizeFromLine(line: string): { width: number; height: number } | undefined {
-  const match = /^\[Parsed_showinfo_0 @ [0-9a-fA-Fx]+\] n: +0 .* s:(\d+)x(\d+) /.exec(line);
+interface Size {
+  width: number;
+  height: number;
+}
+
+/**
+ * The displayed size of the first frame `showinfo` reports (the stored width times the sample
+ * aspect ratio), or undefined for any other line.
+ */
+function sizeFromLine(line: string): Size | undefined {
+  const match = /^\[Parsed_showinfo_0 @ [0-9a-fA-Fx]+\] n: +0 .* sar:(\d+)\/(\d+) s:(\d+)x(\d+) /.exec(line);
   if (!match) return undefined;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
+  const num = Number(match[1]);
+  const den = Number(match[2]);
+  const stored = Number(match[3]);
+  const height = Number(match[4]);
+  const width = num > 0 && den > 0 ? Math.round((stored * num) / den) : stored;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) return undefined;
   return { width, height };
+}
+
+/** Reads the diagnostics line by line; keeps only what the result needs. */
+function createDiagnosticsReader(): { line(text: string): void; result(): VideoInfo | null } {
+  let lastDuration: number | null = null;
+  let mapped = false;
+  let durationMs: number | null = null;
+  let size: Size | undefined;
+  return {
+    line(text) {
+      // The file can make ffmpeg print lines of its choosing (a CodecID with newlines, for one),
+      // but only while the input is opened. Everything is read as of the last stream mapping,
+      // which ffmpeg prints itself after the input header and before the first frame.
+      if (text === 'Stream mapping:') {
+        mapped = true;
+        durationMs = lastDuration;
+        size = undefined;
+        return;
+      }
+      const duration = durationFromLine(text);
+      if (duration !== undefined) {
+        lastDuration = duration;
+        return;
+      }
+      if (mapped) size ??= sizeFromLine(text);
+    },
+    result() {
+      return mapped && size ? { width: size.width, height: size.height, durationMs } : null;
+    },
+  };
+}
+
+/** The video info a complete diagnostic transcript gives; null without a mapped frame. */
+export function readDiagnostics(lines: Iterable<string>): VideoInfo | null {
+  const reader = createDiagnosticsReader();
+  for (const line of lines) reader.line(line);
+  return reader.result();
+}
+
+/** True when `frame` is the size the scale filter gives for a video of displayed size `video`. */
+export function frameMatches(video: Size, frame: Size): boolean {
+  const factor = Math.min(1, FRAME_EDGE / Math.max(video.width, video.height));
+  return (
+    Math.abs(Math.max(1, Math.round(video.width * factor)) - frame.width) <= 1 &&
+    Math.abs(Math.max(1, Math.round(video.height * factor)) - frame.height) <= 1
+  );
+}
+
+/** Width and height from the first start-of-frame marker of a JPEG; null for anything else. */
+export function jpegDimensions(bytes: Uint8Array): Size | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1] as number;
+    if (marker === 0xff) {
+      offset++;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
+    if (marker === 0xd9 || marker === 0xda) return null;
+    const length = ((bytes[offset + 2] as number) << 8) | (bytes[offset + 3] as number);
+    if (length < 2) return null;
+    const isFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      if (offset + 9 > bytes.length) return null;
+      const height = ((bytes[offset + 5] as number) << 8) | (bytes[offset + 6] as number);
+      const width = ((bytes[offset + 7] as number) << 8) | (bytes[offset + 8] as number);
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    offset += 2 + length;
+  }
+  return null;
 }
 
 interface Attempt {
@@ -129,6 +231,8 @@ type Waiter = (granted: boolean) => void;
 export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
   const concurrency = options.concurrency ?? VIDEO_FRAME_CONCURRENCY;
   const timeoutMs = options.timeoutMs ?? VIDEO_FRAME_TIMEOUT_MS;
+  const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
+  const startProcess = options.spawnProcess ?? spawn;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new RangeError('The video frame concurrency must be a positive integer');
   }
@@ -175,7 +279,7 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
       }
       let child: ChildProcess;
       try {
-        child = spawn(binary, ffmpegArguments(sourcePath, format, atSeconds, tmpPath), {
+        child = startProcess(binary, frameArguments(sourcePath, format, atSeconds, tmpPath), {
           shell: false,
           windowsHide: true,
           stdio: ['ignore', 'ignore', 'pipe'],
@@ -185,24 +289,37 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
         return;
       }
       let killed = false;
-      let size: { width: number; height: number } | undefined;
-      let durationMs: number | null = null;
+      let settled = false;
+      let grace: NodeJS.Timeout | undefined;
+      const reader = createDiagnosticsReader();
       let pending = '';
       let cut = false;
 
+      /** Ends the attempt once, from whichever comes first: close, error or the grace period. */
+      const settle = (result: Attempt) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(grace);
+        running.delete(child);
+        resolve(result);
+      };
       const kill = () => {
+        if (killed) return;
         killed = true;
-        child.kill();
+        try {
+          child.kill();
+        } catch {
+          // Settled below all the same.
+        }
+        // A process that does not exit is given up: the slot is freed and the caller cleans up.
+        grace = setTimeout(() => settle({ info: null, killed: true }), killGraceMs);
       };
       const timer = setTimeout(kill, remaining);
       running.set(child, kill);
       options.onProcess?.(child);
 
-      function readLine(line: string): void {
-        const duration = durationFromLine(line);
-        if (duration !== undefined) durationMs = duration;
-        size ??= sizeFromLine(line);
-      }
+      const readLine = (line: string) => reader.line(line);
 
       child.stderr?.setEncoding('latin1');
       child.stderr?.on('data', (chunk: string) => {
@@ -225,24 +342,25 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
         }
       });
       child.stderr?.on('error', () => undefined);
-      child.once('error', () => undefined);
+      // A failed start (EMFILE, for one) may never be followed by a close.
+      child.once('error', () => settle({ info: null, killed }));
       child.once('close', (code) => {
-        clearTimeout(timer);
-        running.delete(child);
         if (!cut && pending) readLine(pending);
-        if (killed || code !== 0 || !size) {
-          resolve({ info: null, killed });
-          return;
-        }
-        resolve({ info: { width: size.width, height: size.height, durationMs }, killed: false });
+        settle({ info: killed || code !== 0 ? null : reader.result(), killed });
       });
     });
   }
 
-  async function frameWritten(path: string): Promise<boolean> {
+  /**
+   * True when a frame was written and has the size the reported video size scales to; a log line
+   * alone is never trusted.
+   */
+  async function frameWritten(path: string, info: VideoInfo): Promise<boolean> {
     try {
-      const info = await stat(path);
-      return info.isFile() && info.size > 0;
+      const file = await stat(path);
+      if (!file.isFile() || file.size === 0 || file.size > MAX_FRAME_BYTES) return false;
+      const size = jpegDimensions(await readFile(path));
+      return size !== null && frameMatches(info, size);
     } catch {
       return false;
     }
@@ -259,7 +377,7 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
       for (const atSeconds of [FRAME_AT_SECONDS, 0]) {
         const result = await attempt(binary, sourcePath, format, atSeconds, tmpPath, deadline);
         if (result.killed) return null;
-        if (result.info && (await frameWritten(tmpPath))) {
+        if (result.info && (await frameWritten(tmpPath, result.info))) {
           if (closed) return null;
           await rename(tmpPath, targetPath);
           return result.info;
