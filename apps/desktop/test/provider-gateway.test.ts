@@ -14,7 +14,7 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createProviderGateway } from '../src/main/provider-gateway.js';
-import { createProviderStore, type ProviderStore } from '../src/main/provider-store.js';
+import { createProviderStore, encodeKeyPayload, type ProviderStore } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';
@@ -407,9 +407,21 @@ describe('provider gateway: image adapters', () => {
     expect(lines).toEqual([`Image provider ${v.id} failed: provider_unauthorized (HTTP 401)`]);
     // The key is read per request: a key stored without a save (so no change event) is used at once.
     mkdirSync(join(dir, 'credentials'), { recursive: true });
-    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(KEY));
+    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(encodeKeyPayload(new URL(veniceUrl(m)).origin, KEY)));
     const again = await g.imageModels(v.id, false, signal());
     expect(again.ok && again.models.map((x) => x.name)).toEqual([MOCK_EDIT_MODEL, MOCK_EDIT_BASIC_MODEL]);
+  });
+
+  it('sends no key when the key file was stored for another origin', async () => {
+    const m = await mock(KEY);
+    const v = store.save(veniceInput({ baseUrl: veniceUrl(m) }));
+    mkdirSync(join(dir, 'credentials'), { recursive: true });
+    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(encodeKeyPayload('https://other.example.test', KEY)));
+    const g = gateway();
+    expect(await g.imageModels(v.id, false, signal())).toEqual({ ok: false, code: 'provider_unauthorized' });
+    expect(m.requests.length).toBeGreaterThan(0);
+    for (const request of m.requests) expect(request.headers.authorization).toBeUndefined();
+    expect(store.list().providers).toMatchObject([{ id: v.id, hasApiKey: false }]);
   });
 
   it('drops the adapter and the key when a venice entry moves to another origin', async () => {

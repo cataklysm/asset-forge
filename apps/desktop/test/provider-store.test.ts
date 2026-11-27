@@ -6,7 +6,7 @@ import type { SaveProvider } from '@assetforge/contracts';
 import { DEFAULT_PROVIDER_OPTIONS } from '@assetforge/contracts';
 import { AssetForgeError } from '@assetforge/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProviderStore, UNUSABLE_ENV_BASE_URL } from '../src/main/provider-store.js';
+import { createProviderStore, encodeKeyPayload, UNUSABLE_ENV_BASE_URL } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';
@@ -117,6 +117,7 @@ describe('provider store: upgrade and start', () => {
     const id = providers[0]!.id;
     expect(existsSync(legacyKeyFile())).toBe(false);
     expect(readdirSync(credentials())).toEqual([`vision-api-key-${id}`]);
+    expect(codec.decrypt(readFileSync(keyFile(id)))).toBe(encodeKeyPayload('http://192.168.1.20:11434', KEY));
     expect(s.apiKeyFor(id, 'http://192.168.1.20:11434')).toBe(KEY);
     expect(readSettings()).toEqual({
       version: 4,
@@ -160,6 +161,7 @@ describe('provider store: upgrade and start', () => {
     expect(s.list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
     expect(s.apiKeyFor(PREPARED, 'http://192.168.1.20:11434')).toBe(KEY);
     expect(readdirSync(credentials())).toEqual([`vision-api-key-${PREPARED}`]);
+    expect(codec.decrypt(readFileSync(keyFile(PREPARED)))).toBe(encodeKeyPayload('http://192.168.1.20:11434', KEY));
     expect(readSettings().adoptLegacyKey).toBeNull();
   });
 
@@ -213,30 +215,29 @@ describe('provider store: upgrade and start', () => {
 
   it.each([
     ['not JSON', 'not json'],
+    ['a JSON array', '[1]'],
+    ['no version', JSON.stringify({ providers: [] })],
     ['an unknown version', JSON.stringify({ version: 5, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null })],
-    ['a version 3 without slots', JSON.stringify({ version: 3, providers: [], adoptLegacyKey: null })],
-    [
-      'a venice entry with a tagging model',
-      JSON.stringify({
-        version: 3,
-        providers: [
-          { id: PREPARED, kind: 'venice', name: 'V', baseUrl: 'https://v.example.test', timeoutSeconds: 120, taggingModel: 'x', promptModel: null, editModel: null },
-        ],
-        lastUsed: { vision: null, image: null },
-        adoptLegacyKey: null,
-      }),
-    ],
-    ['a wrong shape', JSON.stringify({ version: 2, providers: [{ id: 5 }], lastUsedId: null, adoptLegacyKey: null })],
+    ['a provider list that is not a list', JSON.stringify({ version: 4, providers: {}, lastUsed: { vision: null, image: null }, adoptLegacyKey: null })],
     ['a bad version 1', JSON.stringify({ version: 1, vision: { baseUrl: 'http://u:p@h', timeoutSeconds: 120, taggingModel: null, promptModel: null } })],
-  ])('sets a file with %s aside and reads an empty list', (_label, content) => {
+  ])('sets a file with %s aside, reads an empty list and keeps every key file', (_label, content) => {
     writeFileSync(settingsFile(), content);
     writeLegacyKey();
-    expect(store().list().providers).toEqual([]);
+    writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
+    writeFileSync(join(credentials(), `vision-api-key-${PREPARED}.22222222-2222-4222-8222-222222222222.tmp`), 'partial');
+    const before = allFiles(credentials());
+    const s = store();
+    expect(s.list().providers).toEqual([]);
     const names = readdirSync(dir);
-    expect(names.filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
+    const copies = names.filter((n) => n.startsWith('provider-settings.json.corrupt-'));
+    expect(copies).toHaveLength(1);
+    expect(readFileSync(join(dir, copies[0]!), 'utf8')).toBe(content);
     expect(names.some((n) => n.includes(':'))).toBe(false);
     expect(existsSync(settingsFile())).toBe(false);
-    expect(readdirSync(credentials())).toEqual([]);
+    // Not swept for the rest of the session, not even after a save.
+    s.save(input());
+    const after = allFiles(credentials());
+    for (const [path, bytes] of before) expect(after.get(path)?.equals(bytes), path).toBe(true);
   });
 });
 
@@ -797,14 +798,14 @@ describe('provider store: kinds', () => {
     mkdirSync(credentials(), { recursive: true });
     writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
     const s = store();
+    expect(existsSync(settingsFile())).toBe(true);
     if (loads) {
       expect(s.list().providers).toMatchObject([{ id: PREPARED, kind: 'venice', baseUrl, hasApiKey: true }]);
-      expect(existsSync(settingsFile())).toBe(true);
     } else {
       expect(s.list().providers).toEqual([]);
       expect(s.apiKeyFor(PREPARED, baseUrl)).toBeNull();
       expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
-      expect(existsSync(settingsFile())).toBe(false);
+      expect(existsSync(keyFile(PREPARED))).toBe(true);
     }
   });
 
@@ -1006,10 +1007,11 @@ describe('provider store: version 4 and options', () => {
     ['a vision entry without the options key', [v3Entries[0]]],
     ['a venice entry with options', [{ ...v3Entries[1], options: DEFAULT_PROVIDER_OPTIONS }]],
     ['options out of bounds', [{ ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, temperature: 3 } }]],
-  ])('sets a version 4 file with %s aside', (_label, providers) => {
+  ])('leaves out a version 4 entry with %s and copies the file', (_label, providers) => {
     writeFile(4, providers);
     expect(store().list().providers).toEqual([]);
     expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
+    expect(existsSync(settingsFile())).toBe(true);
   });
 
   it('reads a version 4 entry without parallel requests as 1 and writes the field on the first write', () => {
@@ -1081,5 +1083,307 @@ describe('provider store: version 4 and options', () => {
     expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
     expect(readdirSync(credentials()).sort()).toEqual([`vision-api-key-${PREPARED}`, `vision-api-key-${SECOND}`].sort());
     expect(errorOf(() => s.save(openai({ id: PREPARED, options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))?.code).toBe('validation_failed');
+  });
+});
+
+describe('provider store: damaged entries', () => {
+  const SECOND = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  const THIRD = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
+  const good = {
+    id: PREPARED,
+    kind: 'ollama',
+    name: 'O',
+    baseUrl: 'http://192.168.1.20:11434',
+    timeoutSeconds: 120,
+    taggingModel: 'tagger',
+    promptModel: null,
+    editModel: null,
+    options: DEFAULT_PROVIDER_OPTIONS,
+  };
+  const image = {
+    id: SECOND,
+    kind: 'venice',
+    name: 'V',
+    baseUrl: 'https://v.example.test/api/v1',
+    timeoutSeconds: 120,
+    taggingModel: null,
+    promptModel: null,
+    editModel: 'edit-a',
+    options: null,
+  };
+  const brokenVision = { ...good, id: THIRD, name: 'B' };
+  const brokenImage = { ...image, id: THIRD, name: 'B' };
+  const noSlots = { vision: null, image: null };
+  const writeFile = (content: unknown) => {
+    const text = JSON.stringify(content);
+    writeFileSync(settingsFile(), text);
+    return text;
+  };
+  const writeV4 = (providers: unknown[], lastUsed: unknown = noSlots, adoptLegacyKey: unknown = null) =>
+    writeFile({ version: 4, providers, lastUsed, adoptLegacyKey });
+  const writeKeys = (...ids: string[]) => {
+    mkdirSync(credentials(), { recursive: true });
+    for (const id of ids) writeFileSync(keyFile(id), codec.encrypt(encodeKeyPayload(id === SECOND ? 'https://v.example.test' : 'http://192.168.1.20:11434', KEY)));
+  };
+  const copies = () => readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'));
+  const expectCopyOf = (text: string) => {
+    expect(copies()).toHaveLength(1);
+    expect(readFileSync(join(dir, copies()[0]!), 'utf8')).toBe(text);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(text);
+  };
+
+  it.each([
+    ['a vision entry with an edit model', { ...brokenVision, editModel: 'x' }],
+    ['a venice entry with a tagging model', { ...brokenImage, taggingModel: 'x' }],
+    ['a venice entry with a prompt model', { ...brokenImage, promptModel: 'x' }],
+    ['a venice entry on plain http elsewhere', { ...brokenImage, baseUrl: 'http://example.com' }],
+    ['a vision entry without options', { ...brokenVision, options: null }],
+    ['a venice entry with options', { ...brokenImage, options: DEFAULT_PROVIDER_OPTIONS }],
+    ['a timeout out of bounds', { ...brokenVision, timeoutSeconds: 5 }],
+    ['an unknown kind', { ...brokenVision, kind: 'other' }],
+    ['a base URL with user info', { ...brokenVision, baseUrl: 'http://u:p@host' }],
+    ['a value that is not an object', 7],
+  ])('leaves out %s, keeps the others and every key file, and copies the file', (_label, broken) => {
+    const text = writeV4([good, broken, image]);
+    writeKeys(PREPARED, SECOND, THIRD);
+    const s = store();
+    expect(s.list().providers.map((p) => [p.id, p.hasApiKey])).toEqual([
+      [PREPARED, true],
+      [SECOND, true],
+    ]);
+    expectCopyOf(text);
+    expect(readdirSync(credentials()).sort()).toEqual([PREPARED, SECOND, THIRD].map((id) => `vision-api-key-${id}`).sort());
+  });
+
+  it('keeps every key file for the rest of the session after a degraded load, also after saves', () => {
+    writeV4([good, { ...brokenVision, editModel: 'x' }]);
+    writeKeys(PREPARED, THIRD, UNKNOWN);
+    writeLegacyKey();
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    s.save(input({ id: PREPARED, name: 'Renamed' }));
+    s.save(input({ name: 'New', apiKey: OTHER_KEY }));
+    s.markUsed(PREPARED);
+    s.list();
+    for (const id of [PREPARED, THIRD, UNKNOWN]) expect(existsSync(keyFile(id)), id).toBe(true);
+    expect(existsSync(legacyKeyFile())).toBe(true);
+    // The save rewrote the file without the broken entry; the copy keeps it.
+    expect(readSettings().providers.map((p: { id: string }) => p.id)).toHaveLength(2);
+    expect(JSON.parse(readFileSync(join(dir, copies()[0]!), 'utf8')).providers).toHaveLength(2);
+  });
+
+  it('reads an empty list when every entry is broken, copies the file and keeps every key file', () => {
+    const text = writeV4([{ ...brokenVision, editModel: 'x' }, { ...brokenImage, id: PREPARED, taggingModel: 'x' }]);
+    writeKeys(PREPARED, THIRD);
+    expect(store().list().providers).toEqual([]);
+    expectCopyOf(text);
+    expect(readdirSync(credentials()).sort()).toEqual([PREPARED, THIRD].map((id) => `vision-api-key-${id}`).sort());
+  });
+
+  it('reads the entry used last of a dropped entry as null', () => {
+    writeV4([good, { ...brokenVision, editModel: 'x' }, image, { ...brokenImage, id: UNKNOWN, name: 'C', taggingModel: 'x' }], {
+      vision: THIRD,
+      image: UNKNOWN,
+    });
+    const s = store();
+    expect(s.list()).toMatchObject({ lastUsedId: null, lastUsedImageId: null });
+    expect(s.resolve(undefined)?.id).toBe(PREPARED);
+    expect(s.resolve(undefined, 'image')?.id).toBe(SECOND);
+    s.markUsed(SECOND);
+    expect(readSettings().lastUsed).toEqual({ vision: null, image: SECOND });
+  });
+
+  it('keeps the first ten entries of a longer list', () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    const text = writeV4(ids.map((id, i) => ({ ...good, id, name: `P${i}` })));
+    writeKeys(...ids);
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual(ids.slice(0, 10));
+    expectCopyOf(text);
+    expect(readdirSync(credentials())).toHaveLength(12);
+  });
+
+  it('keeps the first entry of a duplicate id', () => {
+    const text = writeV4([good, image, { ...good, name: 'Second O' }]);
+    writeKeys(PREPARED, SECOND);
+    expect(store().list().providers.map((p) => [p.id, p.name])).toEqual([
+      [PREPARED, 'O'],
+      [SECOND, 'V'],
+    ]);
+    expectCopyOf(text);
+  });
+
+  it('reads broken slots and a broken marker as null and copies the file', () => {
+    const text = writeFile({ version: 3, providers: [{ ...good, options: undefined }], adoptLegacyKey: 'x' });
+    writeKeys(PREPARED);
+    writeLegacyKey();
+    const s = store();
+    expect(s.list()).toMatchObject({ providers: [{ id: PREPARED, hasApiKey: true }], lastUsedId: null, lastUsedImageId: null });
+    expectCopyOf(text);
+    expect(existsSync(legacyKeyFile())).toBe(true);
+  });
+
+  it('leaves out a broken entry of version 2 and version 3', () => {
+    const v2 = writeFile({
+      version: 2,
+      providers: [
+        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+        { id: THIRD, name: 'B', baseUrl: 'ftp://x', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+      ],
+      lastUsedId: THIRD,
+      adoptLegacyKey: null,
+    });
+    writeKeys(PREPARED, THIRD);
+    expect(store().list()).toMatchObject({ providers: [{ id: PREPARED, hasApiKey: true }], lastUsedId: null });
+    expectCopyOf(v2);
+    rmSync(join(dir, copies()[0]!));
+    const { options: _a, ...v3Good } = good;
+    const { options: _b, ...v3Broken } = brokenVision;
+    const v3 = writeFile({ version: 3, providers: [v3Good, { ...v3Broken, editModel: 'x' }], lastUsed: noSlots, adoptLegacyKey: null });
+    expect(store().list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    expectCopyOf(v3);
+    expect(existsSync(keyFile(THIRD))).toBe(true);
+  });
+
+  it('keeps the legacy key and the marker while the marked entry was left out', () => {
+    writeFile({
+      version: 2,
+      providers: [
+        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+        { id: THIRD, name: 'B', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 5, taggingModel: null, promptModel: null },
+      ],
+      lastUsedId: null,
+      adoptLegacyKey: { id: THIRD, origin: 'http://192.168.1.30:11434' },
+    });
+    writeLegacyKey();
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    expect(existsSync(legacyKeyFile())).toBe(true);
+    s.markUsed(PREPARED);
+    expect(readSettings().adoptLegacyKey).toEqual({ id: THIRD, origin: 'http://192.168.1.30:11434' });
+    expect(existsSync(legacyKeyFile())).toBe(true);
+  });
+
+  it('adopts the legacy key of a kept entry on a degraded load without rewriting the file', () => {
+    const text = writeFile({
+      version: 2,
+      providers: [
+        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+        { id: THIRD, name: 'B', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 5, taggingModel: null, promptModel: null },
+      ],
+      lastUsedId: null,
+      adoptLegacyKey: { id: PREPARED, origin: 'http://192.168.1.20:11434' },
+    });
+    writeLegacyKey();
+    const s = store();
+    expect(s.list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
+    expect(existsSync(legacyKeyFile())).toBe(false);
+    expect(codec.decrypt(readFileSync(keyFile(PREPARED)))).toBe(encodeKeyPayload('http://192.168.1.20:11434', KEY));
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(text);
+    // The next start finds the key already moved and clears the marker as today.
+    expect(store().list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
+  });
+
+  it('sweeps an orphan key file after a clean load and makes no copy', () => {
+    writeV4([good]);
+    writeKeys(PREPARED, UNKNOWN);
+    expect(store().list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
+    expect(readdirSync(credentials())).toEqual([`vision-api-key-${PREPARED}`]);
+    expect(copies()).toEqual([]);
+  });
+});
+
+describe('provider store: key bound to its origin', () => {
+  const ORIGIN = 'http://192.168.1.20:11434';
+  const writeStored = () =>
+    writeFileSync(
+      settingsFile(),
+      JSON.stringify({
+        version: 4,
+        providers: [
+          { id: PREPARED, kind: 'ollama', name: 'O', baseUrl: `${ORIGIN}/api`, timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: null, options: DEFAULT_PROVIDER_OPTIONS },
+        ],
+        lastUsed: { vision: null, image: null },
+        adoptLegacyKey: null,
+      }),
+    );
+  const writeKey = (data: Buffer) => {
+    mkdirSync(credentials(), { recursive: true });
+    writeFileSync(keyFile(PREPARED), data);
+  };
+  const stored = () => codec.decrypt(readFileSync(keyFile(PREPARED)));
+
+  it('stores a saved key together with the origin', () => {
+    const s = store();
+    const a = s.save(input({ baseUrl: `${ORIGIN}/x/`, apiKey: KEY }));
+    expect(codec.decrypt(readFileSync(keyFile(a.id)))).toBe(encodeKeyPayload(ORIGIN, KEY));
+  });
+
+  it('gives no key when the stored origin differs from the entry, and leaves the file alone', () => {
+    writeStored();
+    const data = codec.encrypt(encodeKeyPayload('http://192.168.1.99:11434', KEY));
+    writeKey(data);
+    const s = store();
+    expect(s.list().providers).toMatchObject([{ id: PREPARED, hasApiKey: false }]);
+    expect(s.apiKeyFor(PREPARED, ORIGIN)).toBeNull();
+    expect(s.apiKeyFor(PREPARED, 'http://192.168.1.99:11434')).toBeNull();
+    expect(readFileSync(keyFile(PREPARED)).equals(data)).toBe(true);
+    // Saving a key replaces it.
+    expect(s.save(input({ id: PREPARED, name: 'O', baseUrl: ORIGIN, apiKey: OTHER_KEY })).hasApiKey).toBe(true);
+    expect(s.apiKeyFor(PREPARED, ORIGIN)).toBe(OTHER_KEY);
+  });
+
+  it('gives no key for a payload in the new form that cannot be read, and leaves the file alone', () => {
+    writeStored();
+    const data = codec.encrypt(`${encodeKeyPayload(ORIGIN, KEY).slice(0, -2)}`);
+    writeKey(data);
+    const s = store();
+    expect(s.list().providers).toMatchObject([{ hasApiKey: false }]);
+    expect(s.apiKeyFor(PREPARED, ORIGIN)).toBeNull();
+    expect(readFileSync(keyFile(PREPARED)).equals(data)).toBe(true);
+  });
+
+  it('binds a bare key file to the entry origin at load, before any request', () => {
+    writeStored();
+    writeKey(codec.encrypt(KEY));
+    const s = store();
+    expect(s.apiKeyFor(PREPARED, ORIGIN)).toBe(KEY);
+    expect(stored()).toBe(encodeKeyPayload(ORIGIN, KEY));
+    expect(s.list().providers).toMatchObject([{ hasApiKey: true }]);
+    expect(store().apiKeyFor(PREPARED, `${ORIGIN}/other`)).toBe(KEY);
+    expect(readdirSync(credentials())).toEqual([`vision-api-key-${PREPARED}`]);
+  });
+
+  it('keeps a bare key file usable for the session when the rewrite fails', () => {
+    writeStored();
+    const data = codec.encrypt(KEY);
+    writeKey(data);
+    const encrypt = codec.encrypt.bind(codec);
+    codec.encrypt = () => {
+      throw new Error('encrypt failed');
+    };
+    const s = store();
+    expect(s.list().providers).toMatchObject([{ hasApiKey: true }]);
+    expect(s.apiKeyFor(PREPARED, ORIGIN)).toBe(KEY);
+    expect(readFileSync(keyFile(PREPARED)).equals(data)).toBe(true);
+    expect(readdirSync(credentials())).toEqual([`vision-api-key-${PREPARED}`]);
+    // The next start rewrites it.
+    codec.encrypt = encrypt;
+    expect(store().apiKeyFor(PREPARED, ORIGIN)).toBe(KEY);
+    expect(stored()).toBe(encodeKeyPayload(ORIGIN, KEY));
+  });
+
+  it('still removes the key on an origin change through save, whatever its form', () => {
+    writeStored();
+    writeKey(codec.encrypt(KEY));
+    const encrypt = codec.encrypt.bind(codec);
+    codec.encrypt = () => {
+      throw new Error('encrypt failed');
+    };
+    const s = store();
+    codec.encrypt = encrypt;
+    expect(s.save(input({ id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.21:11434' })).hasApiKey).toBe(false);
+    expect(existsSync(keyFile(PREPARED))).toBe(false);
+    expect(s.apiKeyFor(PREPARED, 'http://192.168.1.21:11434')).toBeNull();
   });
 });

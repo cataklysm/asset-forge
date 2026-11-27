@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -41,6 +41,13 @@ import { usableBaseUrl } from './vision-config.js';
 // (version 4) and one API key per entry, encrypted by the OS credential store, in
 // `userData/credentials/vision-api-key-<id>` (the name predates the kinds and is kept for every kind).
 // Kept free of Electron imports. A key is decrypted only when asked for and is never cached.
+//
+// A key file holds the encrypted key payload (see `encodeKeyPayload`): the key together with the origin it was
+// entered for, so a hand-edited settings file cannot redirect a stored key to another origin. A file written before
+// the payload existed holds the bare key; it is bound to the entry's origin when the settings are loaded.
+//
+// A settings file is read entry by entry: a broken entry is left out and the others load. Whenever anything was left
+// out or the file could not be read at all, no key file is deleted by the sweep for the rest of the app session.
 
 export const PROVIDER_SETTINGS_FILE = 'provider-settings.json';
 const CREDENTIALS_DIR = 'credentials';
@@ -65,6 +72,34 @@ export const KIND_CHANGED = 'The kind of a provider cannot be changed';
 export const CANNOT_GENERATE = 'This provider cannot generate images';
 export const CANNOT_ANALYSE = 'This provider cannot analyse images';
 const IMAGE_URL_NOT_SECURE = 'An image provider needs an https URL, or http on a loopback address';
+
+/**
+ * Starts every key payload. A bare key is any text a user typed into a text field; the NUL characters make the marker
+ * one that a typed key does not start with, and the test is a plain prefix test: with the marker the text is a
+ * payload, without it a bare key.
+ */
+const KEY_PAYLOAD_MARKER = '\u0000assetforge-key\u0000';
+const KeyPayloadSchema = z.object({ v: z.literal(1), origin: z.string().min(1), key: z.string().min(1) });
+
+/** The text that is encrypted into a key file: the marker, then `{ v: 1, origin, key }` as JSON. */
+export function encodeKeyPayload(origin: string, key: string): string {
+  return `${KEY_PAYLOAD_MARKER}${JSON.stringify({ v: 1, origin, key })}`;
+}
+
+type DecodedKey = { form: 'bound'; origin: string; key: string } | { form: 'bare'; key: string } | null;
+
+/** A payload that carries the marker but cannot be read is no key; it is never taken for a bare key. */
+function decodeKeyPayload(text: string): DecodedKey {
+  if (!text.startsWith(KEY_PAYLOAD_MARKER)) return text === '' ? null : { form: 'bare', key: text };
+  let json: unknown;
+  try {
+    json = JSON.parse(text.slice(KEY_PAYLOAD_MARKER.length));
+  } catch {
+    return null;
+  }
+  const parsed = KeyPayloadSchema.safeParse(json);
+  return parsed.success ? { form: 'bound', origin: parsed.data.origin, key: parsed.data.key } : null;
+}
 
 /** The refusal for an entry used for the other purpose. */
 export const wrongKind = (wanted: ProviderPurpose): string => (wanted === 'image' ? CANNOT_GENERATE : CANNOT_ANALYSE);
@@ -134,23 +169,13 @@ const V1FileSchema = z.object({
   }),
 });
 
-const V2FileSchema = z.object({
-  version: z.literal(2),
-  providers: z
-    .array(
-      z.object({
-        id: z.uuid(),
-        name: ProviderNameSchema,
-        baseUrl: StoredBaseUrlSchema,
-        timeoutSeconds: TimeoutSchema,
-        taggingModel: ModelNameSchema.nullable(),
-        promptModel: ModelNameSchema.nullable(),
-      }),
-    )
-    .max(MAX_PROVIDERS)
-    .refine((entries) => new Set(entries.map((e) => e.id)).size === entries.length),
-  lastUsedId: z.uuid().nullable(),
-  adoptLegacyKey: z.object({ id: z.uuid(), origin: z.string() }).nullable(),
+const V2EntrySchema = z.object({
+  id: z.uuid(),
+  name: ProviderNameSchema,
+  baseUrl: StoredBaseUrlSchema,
+  timeoutSeconds: TimeoutSchema,
+  taggingModel: ModelNameSchema.nullable(),
+  promptModel: ModelNameSchema.nullable(),
 });
 
 const V3EntryShape = {
@@ -170,21 +195,10 @@ const entryRules = (e: { kind: ProviderKind; baseUrl: string; taggingModel: stri
   // The save rule holds on read too: a hand-edited file must not send a stored key over plain http.
   (isVisionKind(e.kind) || secureForImages(e.baseUrl));
 
-const entriesOf = <T extends { id: string }>(entry: z.ZodType<T>) =>
-  z
-    .array(entry)
-    .max(MAX_PROVIDERS)
-    .refine((entries) => new Set(entries.map((e) => e.id)).size === entries.length);
-
-const LastUsedSchema = z.object({ vision: z.uuid().nullable(), image: z.uuid().nullable() });
+const SlotSchema = z.uuid().nullable();
 const MarkerSchema = z.object({ id: z.uuid(), origin: z.string() }).nullable();
 
-const V3FileSchema = z.object({
-  version: z.literal(3),
-  providers: entriesOf(z.object(V3EntryShape).refine(entryRules)),
-  lastUsed: LastUsedSchema,
-  adoptLegacyKey: MarkerSchema,
-});
+const V3EntrySchema = z.object(V3EntryShape).refine(entryRules);
 
 /**
  * Stored options: a missing or broken `parallelRequests` (written before the field existed, or edited by hand) reads
@@ -194,21 +208,25 @@ const StoredOptionsSchema = ProviderOptionsSchema.extend({
   parallelRequests: ParallelRequestsSchema.catch(PARALLEL_REQUESTS_DEFAULT),
 });
 
-const V4FileSchema = z.object({
-  version: z.literal(4),
-  providers: entriesOf(
-    z
-      .object({ ...V3EntryShape, options: StoredOptionsSchema.nullable() })
-      .refine(entryRules)
-      // Options exactly on a vision entry. Stored extra parameters the save rule refuses do not make the file
-      // unreadable: the gateway sends none for that entry, and the next save refuses the text.
-      .refine((e) => (e.options === null) === !isVisionKind(e.kind)),
-  ),
-  lastUsed: LastUsedSchema,
-  adoptLegacyKey: MarkerSchema,
-});
+const V4EntrySchema = z
+  .object({ ...V3EntryShape, options: StoredOptionsSchema.nullable() })
+  .refine(entryRules)
+  // Options exactly on a vision entry. Stored extra parameters the save rule refuses do not make the entry
+  // unreadable: the gateway sends none for that entry, and the next save refuses the text.
+  .refine((e) => (e.options === null) === !isVisionKind(e.kind));
 
-type ReadResult = { kind: 'v1'; vision: z.infer<typeof V1FileSchema>['vision'] } | { kind: 'stored'; stored: Stored } | { kind: 'none' };
+/** Version 2 to 4: an object with an integer version; everything else is checked field by field and entry by entry. */
+const VersionSchema = z.object({ version: z.int() });
+const EnvelopeSchema = z.object({ providers: z.array(z.unknown()) });
+
+/**
+ * `degraded`: something was left out (a broken entry or field, an entry over the limit, a repeated id) or the file was
+ * unreadable. A degraded load deletes no key file for the rest of the app session.
+ */
+type ReadResult =
+  | { kind: 'v1'; vision: z.infer<typeof V1FileSchema>['vision'] }
+  | { kind: 'stored'; stored: Stored; degraded: boolean }
+  | { kind: 'none'; degraded: boolean };
 
 export function createProviderStore(o: { userData: string; secrets: SecretCodec; env: NodeJS.ProcessEnv }): ProviderStore {
   const settingsPath = join(o.userData, PROVIDER_SETTINGS_FILE);
@@ -225,6 +243,13 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   let environmentLastUsed: string | null = null;
 
   let state: Stored | null = null;
+  /** Set by a degraded load: no key file is swept for the rest of this app session. */
+  let keepKeyFiles = false;
+  /**
+   * Entries whose key file still holds a bare key because binding it at load failed, with the origin the entry had
+   * then. Such a key is used for this app session while the entry keeps that origin.
+   */
+  const unboundOrigins = new Map<string, string>();
 
   const write = (next: Stored): void => {
     writeAtomic(settingsPath, `${JSON.stringify({ version: 4, ...next }, null, 2)}\n`);
@@ -235,17 +260,40 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     state = next;
   };
 
-  /** Moves the legacy key to the entry's key file, but only while the entry still has the origin it was entered for. */
-  const adoptLegacyKey = (stored: Stored): Stored => {
+  /**
+   * Writes the legacy key, bound to `origin`, as the entry's key file and removes the legacy file. When the key cannot
+   * be read or written in the new form, the file is renamed as it is; the load then binds it like any bare key file.
+   */
+  const moveLegacyKey = (id: string, origin: string): void => {
+    try {
+      if (!o.secrets.available()) throw new Error('no credential store');
+      const decoded = decodeKeyPayload(o.secrets.decrypt(readFileSync(legacyKeyPath)));
+      if (decoded?.form !== 'bare') throw new Error('not a bare key');
+      writeAtomic(keyPath(id), o.secrets.encrypt(encodeKeyPayload(origin, decoded.key)));
+    } catch {
+      renameSync(legacyKeyPath, keyPath(id));
+      return;
+    }
+    rmSync(legacyKeyPath, { force: true });
+  };
+
+  /**
+   * Moves the legacy key to the entry's key file, but only while the entry still has the origin it was entered for.
+   * On a degraded load nothing is deleted and the settings file is not rewritten: a legacy key whose entry was left
+   * out stays with its marker.
+   */
+  const adoptLegacyKey = (stored: Stored, degraded: boolean): Stored => {
     const marker = stored.adoptLegacyKey;
     if (marker === null) return stored;
     const entry = stored.providers.find((p) => p.id === marker.id);
     if (existsSync(legacyKeyPath)) {
-      if (entry !== undefined && originOf(entry.baseUrl) === marker.origin) renameSync(legacyKeyPath, keyPath(entry.id));
+      if (entry !== undefined && originOf(entry.baseUrl) === marker.origin) moveLegacyKey(entry.id, marker.origin);
+      else if (degraded) return stored;
       else rmSync(legacyKeyPath, { force: true });
     }
     const next = { ...stored, adoptLegacyKey: null };
-    write(next);
+    // A degraded file stays as it is until the next save; the next start finds the key moved and clears the marker.
+    if (!degraded) write(next);
     return next;
   };
 
@@ -270,7 +318,30 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     };
     const marked: Stored = { ...EMPTY, providers: [entry], adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
     write(marked);
-    return adoptLegacyKey(marked);
+    return adoptLegacyKey(marked, false);
+  };
+
+  /**
+   * Rewrites every bare key file of a listed entry as a payload bound to the entry's current origin, before any
+   * request can read it. A failed rewrite keeps the old file; its key stays usable for this session.
+   */
+  const bindBareKeys = (stored: Stored): void => {
+    if (!o.secrets.available()) return;
+    for (const entry of stored.providers) {
+      let decoded: DecodedKey;
+      try {
+        decoded = decodeKeyPayload(o.secrets.decrypt(readFileSync(keyPath(entry.id))));
+      } catch {
+        continue;
+      }
+      const origin = originOf(entry.baseUrl);
+      if (decoded?.form !== 'bare' || origin === null) continue;
+      try {
+        writeAtomic(keyPath(entry.id), o.secrets.encrypt(encodeKeyPayload(origin, decoded.key)));
+      } catch {
+        unboundOrigins.set(entry.id, origin);
+      }
+    }
   };
 
   /** Leaves only the key files of listed entries: no temporary file, no legacy file, no orphan. */
@@ -294,11 +365,13 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   const load = (): Stored => {
     if (state !== null) return state;
     const read = readStored(settingsPath);
+    if (read.kind !== 'v1' && read.degraded) keepKeyFiles = true;
     let stored: Stored;
     if (read.kind === 'v1') stored = upgrade(read.vision);
-    else if (read.kind === 'stored') stored = adoptLegacyKey(read.stored);
+    else if (read.kind === 'stored') stored = adoptLegacyKey(read.stored, read.degraded);
     else stored = EMPTY;
-    sweepKeyFiles(stored);
+    bindBareKeys(stored);
+    if (!keepKeyFiles) sweepKeyFiles(stored);
     state = stored;
     return stored;
   };
@@ -320,24 +393,33 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     return entry !== null && purposeOf(entry.kind) === purpose ? entry : null;
   };
 
-  /** The stored key of an entry, decrypted; any failure to read or decrypt counts as no key. */
-  const decryptKey = (id: string): string | null => {
-    if (fromEnvironment || id === ENVIRONMENT_PROVIDER_ID || !o.secrets.available()) return null;
+  /**
+   * The stored key of an entry, decrypted, and only when it was stored for the entry's origin; any failure to read or
+   * decrypt counts as no key. A key stored for another origin is left alone: saving a key replaces it.
+   */
+  const decryptKey = (entry: ProviderEntry): string | null => {
+    if (fromEnvironment || entry.id === ENVIRONMENT_PROVIDER_ID || !o.secrets.available()) return null;
     let data: Buffer;
     try {
-      data = readFileSync(keyPath(id));
+      data = readFileSync(keyPath(entry.id));
     } catch {
       return null;
     }
+    let decoded: DecodedKey;
     try {
-      const key = o.secrets.decrypt(data);
-      return key === '' ? null : key;
+      decoded = decodeKeyPayload(o.secrets.decrypt(data));
     } catch {
       return null;
     }
+    if (decoded === null) return null;
+    const origin = originOf(entry.baseUrl);
+    if (origin === null) return null;
+    if (decoded.form === 'bound') return decoded.origin === origin ? decoded.key : null;
+    // A bare key is used only when its binding at load failed, and only while the entry keeps the origin of then.
+    return unboundOrigins.get(entry.id) === origin ? decoded.key : null;
   };
 
-  const view = (entry: ProviderEntry): ProviderView => ({ ...entry, hasApiKey: decryptKey(entry.id) !== null });
+  const view = (entry: ProviderEntry): ProviderView => ({ ...entry, hasApiKey: decryptKey(entry) !== null });
 
   const notify = (id: string): void => {
     for (const listener of listeners) {
@@ -412,11 +494,12 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       const key = name.data.toLowerCase();
       if (others.some((p) => p.name.toLowerCase() === key)) throw new InvalidOperationError(DUPLICATE_NAME);
       if (previous === null && current.providers.length >= MAX_PROVIDERS) throw new InvalidOperationError(TOO_MANY);
-      // Encrypt before anything is written, so a refused key leaves the entry unchanged too.
+      // Encrypt before anything is written, so a refused key leaves the entry unchanged too. The key is stored
+      // together with the origin it is entered for.
       let encrypted: Buffer | null = null;
       if (typeof apiKey === 'string') {
         if (!o.secrets.available()) throw new CredentialStoreUnavailableError();
-        encrypted = o.secrets.encrypt(apiKey);
+        encrypted = o.secrets.encrypt(encodeKeyPayload(originOf(baseUrl)!, apiKey));
       }
 
       // An image entry keeps no vision models, a vision entry no edit model. An absent edit model keeps the stored one.
@@ -436,6 +519,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       // The key is bound to the origin it was entered for. The old key goes first, so a failure
       // half-way leaves no key rather than a key bound to the wrong origin.
       if (previous === null || apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl)) {
+        unboundOrigins.delete(entry.id);
         rmSync(keyPath(entry.id), { force: true });
       }
       commit({ ...current, providers });
@@ -460,6 +544,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
           image: current.lastUsed.image === id ? null : current.lastUsed.image,
         },
       });
+      unboundOrigins.delete(id);
       try {
         rmSync(keyPath(id), { force: true });
       } finally {
@@ -472,7 +557,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       if (entry === null) return null;
       const origin = originOf(baseUrl);
       if (origin === null || originOf(entry.baseUrl) !== origin) return null;
-      return decryptKey(id);
+      return decryptKey(entry);
     },
     onChange(listener) {
       listeners.push(listener);
@@ -526,7 +611,7 @@ function readStored(path: string): ReadResult {
   try {
     text = readFileSync(path, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'none' };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'none', degraded: false };
     throw error;
   }
   let json: unknown;
@@ -535,34 +620,75 @@ function readStored(path: string): ReadResult {
   } catch {
     json = undefined;
   }
-  const v4 = V4FileSchema.safeParse(json);
-  if (v4.success) return { kind: 'stored', stored: v4.data };
-  const v3 = V3FileSchema.safeParse(json);
-  if (v3.success) {
-    // Version 3 → 4 in memory only; the first write stores version 4. Until then a crash reads the same again.
-    const { providers, lastUsed, adoptLegacyKey } = v3.data;
-    return {
-      kind: 'stored',
-      stored: { providers: providers.map((p) => ({ ...p, options: optionsFor(p.kind) })), lastUsed, adoptLegacyKey },
-    };
+  const corruptPath = () => `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  /** Same pattern as the workspace registry: keep the unreadable file aside, start empty. */
+  const setAside = (): ReadResult => {
+    renameSync(path, corruptPath());
+    return { kind: 'none', degraded: true };
+  };
+
+  const version = VersionSchema.safeParse(json);
+  // Not JSON, no version, or a version this app does not know (also a newer one): unreadable as a whole.
+  if (!version.success) return setAside();
+  if (version.data.version === 1) {
+    const v1 = V1FileSchema.safeParse(json);
+    return v1.success ? { kind: 'v1', vision: v1.data.vision } : setAside();
   }
-  const v2 = V2FileSchema.safeParse(json);
-  if (v2.success) {
-    // Version 2 → 4 in memory only; the first write stores version 4. Until then a crash reads the same again.
-    const { providers, lastUsedId, adoptLegacyKey } = v2.data;
-    return {
-      kind: 'stored',
-      stored: {
-        providers: providers.map((p) => ({ ...p, kind: 'ollama' as const, editModel: null, options: optionsFor('ollama') })),
-        lastUsed: { vision: lastUsedId, image: null },
-        adoptLegacyKey,
-      },
-    };
+  if (version.data.version < 2 || version.data.version > 4) return setAside();
+  const envelope = EnvelopeSchema.safeParse(json);
+  if (!envelope.success) return setAside();
+
+  const raw = json as Record<string, unknown>;
+  const read = readEntries(version.data.version, envelope.data.providers);
+  let degraded = read.degraded;
+  const slot = (value: unknown): string | null => {
+    const parsed = SlotSchema.safeParse(value);
+    if (!parsed.success) degraded = true;
+    // A slot naming an entry that was left out (or was never there) reads as nothing used last.
+    return parsed.success && parsed.data !== null && read.providers.some((p) => p.id === parsed.data) ? parsed.data : null;
+  };
+  let lastUsed: LastUsed;
+  if (version.data.version === 2) {
+    lastUsed = { vision: slot(raw.lastUsedId), image: null };
+  } else {
+    const slots = (typeof raw.lastUsed === 'object' && raw.lastUsed !== null ? raw.lastUsed : {}) as Record<string, unknown>;
+    lastUsed = { vision: slot(slots.vision), image: slot(slots.image) };
   }
-  const v1 = V1FileSchema.safeParse(json);
-  if (v1.success) return { kind: 'v1', vision: v1.data.vision };
-  // Same pattern as the workspace registry: keep the unreadable file aside, start empty.
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  renameSync(path, `${path}.corrupt-${stamp}`);
-  return { kind: 'none' };
+  const marker = MarkerSchema.safeParse(raw.adoptLegacyKey);
+  if (!marker.success) degraded = true;
+  const stored: Stored = { providers: read.providers, lastUsed, adoptLegacyKey: marker.success ? marker.data : null };
+  // The original stays in place and is only rewritten by the next save; the copy keeps what was left out.
+  if (degraded) copyFileSync(path, corruptPath());
+  return { kind: 'stored', stored, degraded };
+}
+
+/**
+ * Each entry on its own, upgraded to version 4 in memory (the first write stores version 4; until then a crash reads
+ * the same again). Of a repeated id the first entry is kept, and only the first `MAX_PROVIDERS` entries.
+ */
+function readEntries(version: number, values: unknown[]): { providers: ProviderEntry[]; degraded: boolean } {
+  const providers: ProviderEntry[] = [];
+  let degraded = false;
+  for (const value of values) {
+    const entry = readEntry(version, value);
+    if (entry === null || providers.some((p) => p.id === entry.id) || providers.length >= MAX_PROVIDERS) {
+      degraded = true;
+      continue;
+    }
+    providers.push(entry);
+  }
+  return { providers, degraded };
+}
+
+function readEntry(version: number, value: unknown): ProviderEntry | null {
+  if (version === 2) {
+    const v2 = V2EntrySchema.safeParse(value);
+    return v2.success ? { ...v2.data, kind: 'ollama', editModel: null, options: optionsFor('ollama') } : null;
+  }
+  if (version === 3) {
+    const v3 = V3EntrySchema.safeParse(value);
+    return v3.success ? { ...v3.data, options: optionsFor(v3.data.kind) } : null;
+  }
+  const v4 = V4EntrySchema.safeParse(value);
+  return v4.success ? v4.data : null;
 }
