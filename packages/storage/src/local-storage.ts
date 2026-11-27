@@ -243,9 +243,22 @@ export class LocalFileSystemStorage implements Storage {
     return this.guarded(relPath, () => this.resolve(relPath, false));
   }
 
-  /** Not measured yet: a storage that cannot tell never blocks a download. */
+  /**
+   * Free bytes for this user on the volume of the root, measured on the root or its nearest existing parent.
+   * Null when nothing can be measured: a storage that cannot tell never blocks a download.
+   */
   async freeBytes(): Promise<number | null> {
-    return null;
+    let candidate = this.root;
+    for (;;) {
+      try {
+        const stats = await fs.statfs(candidate);
+        return Number(stats.bavail) * Number(stats.bsize);
+      } catch (err) {
+        const parent = path.dirname(candidate);
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || parent === candidate) return null;
+        candidate = parent;
+      }
+    }
   }
 
   /** The single place where file-system failures are translated (see `translateFsError`). */

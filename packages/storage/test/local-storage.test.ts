@@ -366,3 +366,35 @@ describe('absolutePath', () => {
     expect((error as Error).message).not.toContain(tmp);
   });
 });
+
+describe('freeBytes', () => {
+  it('reports the free space of the volume holding an existing root', async () => {
+    await storage.ensureLayout();
+    const free = await storage.freeBytes();
+    expect(typeof free).toBe('number');
+    expect(free).toBeGreaterThan(0);
+  });
+
+  it('measures through the nearest existing parent of a missing root', async () => {
+    const s = new LocalFileSystemStorage(path.join(tmp, 'missing', 'deeper', 'ws'));
+    const free = await s.freeBytes();
+    expect(free).toBeGreaterThan(0);
+  });
+
+  it('never throws for a root that cannot be measured', async () => {
+    const s = new LocalFileSystemStorage(
+      process.platform === 'win32' ? 'Q:\no\such\drive\ws' : '/no/such/parent/ws',
+    );
+    const free = await s.freeBytes();
+    expect(free === null || typeof free === 'number').toBe(true);
+  });
+
+  it('answers null when the measurement fails', async () => {
+    const spy = vi.spyOn(fs, 'statfs').mockRejectedValue(Object.assign(new Error('EIO'), { code: 'EIO' }));
+    try {
+      expect(await storage.freeBytes()).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
