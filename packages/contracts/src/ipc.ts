@@ -83,6 +83,13 @@ import {
   UpdatePromptSchema,
 } from './prompts';
 import { FileOriginSchema, IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, UrlImportResultSchema } from './url-import';
+import {
+  MAX_SITE_PROFILES,
+  SaveSiteProfileSchema,
+  SiteCrawlProgressSchema,
+  SiteCrawlResultSchema,
+  SiteProfileSchema,
+} from './site-import';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -170,6 +177,46 @@ export const ipcContract = {
       target: FileTargetSchema.optional(),
       skipDuplicates: z.boolean().optional(),
     }),
+    response: UrlImportResultSchema,
+  },
+  /** App-level site profiles; the site channels need no open workspace except `sites:import`. No channel carries a cookie. */
+  'sites:list': {
+    request: EmptyRequestSchema,
+    response: z.object({ profiles: z.array(SiteProfileSchema).max(MAX_SITE_PROFILES) }),
+  },
+  /** Without `id` the profile is created with the site of `url`; with `id` it is replaced and keeps its site. */
+  'sites:save': {
+    request: SaveSiteProfileSchema,
+    response: SiteProfileSchema,
+  },
+  /** Refused while the profile has active downloads, its login window is open or a crawl of it runs. */
+  'sites:delete': {
+    request: IdRequestSchema,
+    response: z.object({}),
+  },
+  /** Opens the login window of the profile on `url`, or on `https://<site>/` without one. */
+  'sites:openLogin': {
+    request: z.object({ profileId: IdSchema, url: z.string().max(2000).optional() }),
+    response: z.object({}),
+  },
+  /** Reads the gallery at `url`, which must belong to the profile's site; one crawl at a time. Downloads nothing. */
+  'sites:crawl': {
+    request: z.object({ profileId: IdSchema, url: z.string().max(2000) }),
+    response: SiteCrawlResultSchema,
+  },
+  /** The progress of the running crawl; null when none runs. */
+  'sites:crawlProgress': {
+    request: EmptyRequestSchema,
+    response: SiteCrawlProgressSchema.nullable(),
+  },
+  /** Marks the running crawl to stop; `cancelling` is false when none runs. */
+  'sites:cancelCrawl': {
+    request: EmptyRequestSchema,
+    response: z.object({ cancelling: z.boolean() }),
+  },
+  /** Queues the file URLs the crawl `crawlId` found; an unknown or replaced crawl is `invalid_operation`. */
+  'sites:import': {
+    request: z.object({ crawlId: IdSchema, target: FileTargetSchema.nullable() }),
     response: UrlImportResultSchema,
   },
   /** The addresses a file was downloaded from, oldest first. */

@@ -9,6 +9,7 @@ import {
 import { join } from 'node:path';
 import {
   AssetForgeError,
+  InvalidOperationError,
   SerialQueue,
   workspaceFolderName,
   type ImageProviderDirectory,
@@ -123,8 +124,34 @@ export function createWorkspaceHandlers(
     // App-level provider entries and analysis prompts: not behind the workspace guard.
     ...services.providers,
     ...services.analysisPrompts,
+    ...siteHandlersPending,
   };
 }
+
+/** Placeholder until the site import handlers are wired; every site channel answers `invalid_operation`. */
+const siteNotAvailable = async (): Promise<never> => {
+  throw new InvalidOperationError('The site import is not available yet');
+};
+const siteHandlersPending: Pick<
+  IpcHandlers,
+  | 'sites:list'
+  | 'sites:save'
+  | 'sites:delete'
+  | 'sites:openLogin'
+  | 'sites:crawl'
+  | 'sites:crawlProgress'
+  | 'sites:cancelCrawl'
+  | 'sites:import'
+> = {
+  'sites:list': siteNotAvailable,
+  'sites:save': siteNotAvailable,
+  'sites:delete': siteNotAvailable,
+  'sites:openLogin': siteNotAvailable,
+  'sites:crawl': siteNotAvailable,
+  'sites:crawlProgress': siteNotAvailable,
+  'sites:cancelCrawl': siteNotAvailable,
+  'sites:import': siteNotAvailable,
+};
 
 /** The hooks never reject by contract; a broken one must not fail the channel either. */
 async function notify(host: HostActions, hook: 'workspaceOpened' | 'workspaceClosing'): Promise<void> {

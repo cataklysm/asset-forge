@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
 import { FileTargetSchema } from './files';
 import { ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
+import { SiteFilterSchema } from './site-import';
 
 export const JobStatusSchema = z.enum([
   'queued',
@@ -42,6 +43,7 @@ export const JobErrorCodeSchema = z.enum([
   'download_not_a_file',
   'download_type_refused',
   'download_no_space',
+  'download_profile_missing',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -74,6 +76,7 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   download_not_a_file: 'This address is a web page, not a file',
   download_type_refused: 'This file type cannot be imported',
   download_no_space: 'There is not enough free disk space',
+  download_profile_missing: 'The site profile of this download no longer exists',
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
@@ -94,17 +97,29 @@ export const ANALYZE_FILE_JOB = 'vision.analyze_file';
 export const IMAGE_GENERATE_JOB = 'image.generate';
 export const FILE_DOWNLOAD_JOB = 'file.download';
 
-/** What a succeeded job produced besides its file; null on an ordinary result. */
-export const JobResultSchema = z.enum(['already_present']);
+/**
+ * What a succeeded job produced besides its file; null on an ordinary result. `filtered`: a site download the
+ * profile's kind or size filter left out; the job keeps no file.
+ */
+export const JobResultSchema = z.enum(['already_present', 'filtered']);
 export type JobResult = z.infer<typeof JobResultSchema>;
 
-/** A download job of the URL import; `target` null leaves the file in the inbox. */
-export const FileDownloadPayloadSchema = z.object({
-  v: z.literal(1),
+const downloadFields = {
   url: z.string().min(1).max(2000),
   target: FileTargetSchema.nullable(),
   skipDuplicates: z.boolean(),
+};
+
+/** A download job of the URL import; `target` null leaves the file in the inbox. */
+export const FileDownloadPayloadV1Schema = z.object({ v: z.literal(1), ...downloadFields });
+/** A download of the site import: sent with the profile's login, kept only when it passes `filter`. */
+export const FileDownloadPayloadV2Schema = z.object({
+  v: z.literal(2),
+  ...downloadFields,
+  siteProfileId: z.uuid(),
+  filter: SiteFilterSchema,
 });
+export const FileDownloadPayloadSchema = z.discriminatedUnion('v', [FileDownloadPayloadV1Schema, FileDownloadPayloadV2Schema]);
 export type FileDownloadPayload = z.infer<typeof FileDownloadPayloadSchema>;
 
 /** { url, host } of a download payload; nulls for anything else. `host` is lower case with a non-default port. */

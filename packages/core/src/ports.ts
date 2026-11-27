@@ -109,10 +109,40 @@ export interface RemoteFile {
   dispositionName: string | null;
 }
 
+/** Headers a site profile's login adds to one request; never logged, stored or sent over IPC. */
+export interface RemoteRequestHeaders {
+  cookie?: string;
+  userAgent?: string;
+}
+
+export interface RemoteOpenOptions {
+  /** Asked once per hop with that hop's URL; null sends the request as without options. */
+  headersFor?: (url: string) => Promise<RemoteRequestHeaders | null>;
+}
+
 /** The network behind the URL import. */
 export interface RemoteFileSource {
   /** Rejects with RemoteFileError, or with the abort reason once `signal` aborts. */
-  open(url: string, signal: AbortSignal): Promise<RemoteFile>;
+  open(url: string, signal: AbortSignal, options?: RemoteOpenOptions): Promise<RemoteFile>;
+}
+
+/** The logins of the site profiles, as the download path sees them. */
+export interface SiteAccess {
+  has(profileId: string): Promise<boolean>;
+  /** Null unless the URL belongs to the profile's site. */
+  headersFor(profileId: string, url: string): Promise<RemoteRequestHeaders | null>;
+}
+
+export type PageLoadResult =
+  /** Absolute or relative strings as found, per query name. */
+  | { ok: true; results: Record<string, string[]> }
+  | { ok: false; reason: 'timeout' | 'left_site' | 'failed' }
+  | { ok: false; reason: 'invalid_xpath'; query: string };
+
+/** Reads pages of a site in a browser session of its profile. */
+export interface PageLoader {
+  /** Loads `url`, waits until the query named `waitFor` matches, then answers every query. */
+  load(url: string, r: { queries: Record<string, string>; waitFor: string; signal: AbortSignal }): Promise<PageLoadResult>;
 }
 
 export interface SourceFiles {

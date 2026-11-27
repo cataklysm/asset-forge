@@ -31,6 +31,7 @@ const DOWNLOAD_MESSAGES = {
   download_not_a_file: 'This address is a web page, not a file',
   download_type_refused: 'This file type cannot be imported',
   download_no_space: 'There is not enough free disk space',
+  download_profile_missing: 'The site profile of this download no longer exists',
 } as const;
 
 const view = {
@@ -71,11 +72,18 @@ describe('download job contracts', () => {
     expect(retryable).toEqual(['download_unreachable', 'download_unavailable', 'download_throttled']);
   });
 
-  test('the download payload is pinned to v1', () => {
+  test('the download payload is v1 or v2', () => {
     const payload = { v: 1, url: 'https://example.com/a.png', target: null, skipDuplicates: true };
     expect(FileDownloadPayloadSchema.safeParse(payload).success).toBe(true);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, target: { assetId: uuid, role: 'reference' } }).success).toBe(true);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, v: 2 }).success).toBe(false);
+    expect(FileDownloadPayloadSchema.safeParse({ ...payload, v: 3 }).success).toBe(false);
+    const v2 = { ...payload, v: 2, siteProfileId: uuid, filter: { kinds: ['image', 'video'], minBytes: 1024 } };
+    expect(FileDownloadPayloadSchema.safeParse(v2).success).toBe(true);
+    expect(FileDownloadPayloadSchema.safeParse({ ...v2, siteProfileId: 'x' }).success).toBe(false);
+    expect(FileDownloadPayloadSchema.safeParse({ ...v2, filter: { kinds: [], minBytes: 0 } }).success).toBe(false);
+    const { filter: _f, ...withoutFilter } = v2;
+    expect(FileDownloadPayloadSchema.safeParse(withoutFilter).success).toBe(false);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, url: '' }).success).toBe(false);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, url: 'x'.repeat(2001) }).success).toBe(false);
     const { skipDuplicates: _s, ...withoutSkip } = payload;
@@ -97,13 +105,20 @@ describe('download job contracts', () => {
     expect(downloadJobFields(null)).toEqual({ url: null, host: null });
   });
 
+  test('downloadJobFields reads a v2 payload', () => {
+    const url = 'https://Cdn.Example.com:8443/a.png';
+    const payload = { v: 2, url, target: null, skipDuplicates: true, siteProfileId: uuid, filter: { kinds: ['image'], minBytes: 0 } };
+    expect(downloadJobFields(payload)).toEqual({ url, host: 'cdn.example.com:8443' });
+  });
+
   test('a job view carries url, host and result', () => {
     expect(JobViewSchema.safeParse(view).success).toBe(true);
     expect(JobViewSchema.safeParse({ ...view, result: 'already_present' }).success).toBe(true);
     expect(JobViewSchema.safeParse({ ...view, result: 'other' }).success).toBe(false);
     const { result: _r, ...withoutResult } = view;
     expect(JobViewSchema.safeParse(withoutResult).success).toBe(false);
-    expect(JobResultSchema.options).toEqual(['already_present']);
+    expect(JobViewSchema.safeParse({ ...view, status: 'succeeded', result: 'filtered' }).success).toBe(true);
+    expect(JobResultSchema.options).toEqual(['already_present', 'filtered']);
   });
 
   test('the summary lists paused hosts', () => {
