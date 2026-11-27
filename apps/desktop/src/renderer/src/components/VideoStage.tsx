@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
-import { OPEN_EXTERNALLY_LABEL, VIDEO_UNPLAYABLE_TEXT } from '../labels';
+import { OPEN_EXTERNALLY_LABEL, VIDEO_LABEL, VIDEO_UNPLAYABLE_TEXT } from '../labels';
 import { previewUrl, videoUrl } from '../media-url';
 import { BUTTON, MUTED } from '../ui';
 
 /** Volume and mute of the app session: every video starts with the values the last one ended with. */
 const session = { volume: 1, muted: false };
+
+/** Back to full volume, unmuted; for tests. */
+export function resetVideoSession(): void {
+  session.volume = 1;
+  session.muted = false;
+}
 
 /** Seeks and toggles the video the stage shows; the dialog's keys call it. */
 export interface VideoControls {
@@ -53,9 +59,11 @@ export function VideoStage({ file, videoRef, canOpenExternally, onOpenExternally
     video.volume = session.volume;
     video.muted = session.muted;
     return () => {
-      // Leaving the file or closing the dialog ends playback.
+      // Leaving the file or closing the dialog ends playback and releases the request and the decoder.
       try {
         video.pause();
+        video.removeAttribute('src');
+        video.load();
       } catch {
         // Nothing to stop.
       }
@@ -63,10 +71,10 @@ export function VideoStage({ file, videoRef, canOpenExternally, onOpenExternally
   }, []);
 
   return (
-    <div role="region" aria-label="Video" className="flex h-full w-full items-center justify-center bg-raised">
+    <div role="region" aria-label={VIDEO_LABEL} className="flex h-full w-full items-center justify-center bg-raised">
       {failed ? (
         <div className="flex flex-col items-center gap-4">
-          <p className={MUTED}>{VIDEO_UNPLAYABLE_TEXT}</p>
+          <p role="status" className={MUTED}>{VIDEO_UNPLAYABLE_TEXT}</p>
           <button type="button" className={BUTTON} disabled={!canOpenExternally} onClick={onOpenExternally}>
             {OPEN_EXTERNALLY_LABEL}
           </button>

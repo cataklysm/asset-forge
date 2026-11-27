@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
@@ -139,6 +139,18 @@ export function FileDetailDialog({
     }
     onClose();
   };
+  // The stage's video or image region is replaced when the file changes. When it held the focus,
+  // the focus goes to the stage box, so the viewer keys keep working; focus elsewhere is left alone.
+  const stageArea = useRef<HTMLDivElement>(null);
+  const stageFocus = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const last = stageFocus.current;
+    const area = stageArea.current;
+    if (last === null || area === null || last.isConnected) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    area.focus({ preventScroll: true });
+  });
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const video = playable ? videoControls(videoRef) : null;
   useViewerKeys(rootRef, {
@@ -345,7 +357,18 @@ export function FileDetailDialog({
                 </div>
               </div>
             )}
-            <div className={`relative min-h-0 flex-1 ${staged ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}>
+            <div
+              ref={stageArea}
+              tabIndex={-1}
+              onFocus={(event) => {
+                stageFocus.current = event.target;
+              }}
+              onBlur={(event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Node && !event.currentTarget.contains(next)) stageFocus.current = null;
+              }}
+              className={`relative min-h-0 flex-1 outline-none ${staged ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}
+            >
               {playable ? (
                 <VideoStage
                   key={file.id}
