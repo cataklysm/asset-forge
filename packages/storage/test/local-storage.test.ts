@@ -383,7 +383,7 @@ describe('freeBytes', () => {
 
   it('never throws for a root that cannot be measured', async () => {
     const s = new LocalFileSystemStorage(
-      process.platform === 'win32' ? 'Q:\no\such\drive\ws' : '/no/such/parent/ws',
+      process.platform === 'win32' ? 'Q:\\no\\such\\drive\\ws' : '/no/such/parent/ws',
     );
     const free = await s.freeBytes();
     expect(free === null || typeof free === 'number').toBe(true);
