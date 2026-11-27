@@ -5,7 +5,10 @@ import {
   ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
-  type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
+  type JobStatus,
+  type JobView,
+  type ProviderList,
+} from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { laneName, MoveJobsDialog } from '../components/MoveJobsDialog';

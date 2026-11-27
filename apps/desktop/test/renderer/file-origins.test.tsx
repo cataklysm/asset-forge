@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { FileOrigin } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
@@ -29,9 +29,9 @@ it('shows each origin under Source; following one asks files:openOrigin and no a
   const links = within(section).getAllByRole('link');
   expect(links.map((l) => l.textContent)).toEqual(['https://example.org/a.png', 'https://cdn.example.com/b.png']);
   expect(links.map((l) => l.getAttribute('title'))).toEqual(['https://example.org/a.png', 'https://cdn.example.com/b.png']);
-  for (const anchor of section.querySelectorAll('a')) {
-    expect(anchor.getAttribute('href')).not.toContain('example');
-  }
+  const anchors = [...section.querySelectorAll('a')];
+  expect(anchors).toHaveLength(2);
+  for (const anchor of anchors) expect(anchor.getAttribute('href')).toBe('#');
   expect(api.calls.filter((c) => c.channel === 'files:origins').map((c) => c.request)).toEqual([{ fileId }]);
 
   await user.click(links[1]!);
@@ -70,23 +70,39 @@ it('a refused open shows the message', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('This source could not be opened');
 });
 
-it('renders nothing without origins and nothing for a failed load', async () => {
-  const api = installFakeApi({});
-  const { container, unmount } = render(<FileOrigins fileId={nextId()} />);
-  await waitFor(() => expect(api.calls.some((c) => c.channel === 'files:origins')).toBe(true));
-  await Promise.resolve();
-  expect(container.innerHTML).toBe('');
-  unmount();
+/** Lets every pending answer pass through the fake API, `call` and the component, and React commit. */
+async function settle() {
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
 
-  const failing = installFakeApi({
-    'files:origins': () => {
-      throw fakeError('internal_error');
+it('renders nothing for a file without origins and nothing for a failed load', async () => {
+  const shown = nextId();
+  const empty = nextId();
+  const broken = nextId();
+  const api = installFakeApi({
+    'files:origins': ({ fileId }) => {
+      if (fileId === broken) throw fakeError('internal_error');
+      return fileId === shown ? [origin('https://example.org/shown.png')] : [];
     },
   });
-  const second = render(<FileOrigins fileId={nextId()} />);
-  await waitFor(() => expect(failing.calls.some((c) => c.channel === 'files:origins')).toBe(true));
-  await Promise.resolve();
-  expect(second.container.innerHTML).toBe('');
+  // The same harness renders a resolved answer, so the empty cases below are answered, not still loading.
+  const { container, rerender } = render(<FileOrigins fileId={shown} />);
+  await settle();
+  expect(screen.getByRole('region', { name: 'Source' })).toBeTruthy();
+
+  rerender(<FileOrigins fileId={empty} />);
+  await settle();
+  expect(api.calls.at(-1)?.request).toEqual({ fileId: empty });
+  expect(container.innerHTML).toBe('');
+
+  rerender(<FileOrigins fileId={shown} />);
+  await settle();
+  expect(screen.getByText('https://example.org/shown.png')).toBeTruthy();
+
+  rerender(<FileOrigins fileId={broken} />);
+  await settle();
+  expect(api.calls.at(-1)?.request).toEqual({ fileId: broken });
+  expect(container.innerHTML).toBe('');
 });
 
 it('more than five origins scroll in a bounded list', async () => {
@@ -112,8 +128,7 @@ it('reloads for a new file id and ignores a late answer for the previous one', a
   rerender(<FileOrigins fileId={second} />);
   await screen.findByText('https://example.org/second.png');
   late.resolve([origin('https://example.org/first.png')]);
-  await late.promise;
-  await Promise.resolve();
+  await settle();
   expect(screen.queryByText('https://example.org/first.png')).toBeNull();
   expect(screen.getByText('https://example.org/second.png')).toBeTruthy();
   expect(api.calls.filter((c) => c.channel === 'files:origins').map((c) => c.request)).toEqual([

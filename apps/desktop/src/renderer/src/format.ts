@@ -17,25 +17,32 @@ export function formatDateTime(iso: string): string {
 }
 
 const SHORT_URL_MAX = 60;
+/** Control and format characters (bidi overrides, zero-width marks) that would disguise the shown text. */
+const HIDDEN_CHARACTERS = /[\p{Cc}\p{Cf}]/u;
+
+/** The segment decoded for reading; kept encoded when it does not decode or would hide characters. */
+function readableSegment(segment: string): string {
+  try {
+    const decoded = decodeURIComponent(segment);
+    return HIDDEN_CHARACTERS.test(decoded) ? segment : decoded;
+  } catch {
+    return segment;
+  }
+}
 
 /**
  * A web address for display only: the host and the last path segment ('example.com/rock.png'),
- * at most 60 characters; an address that does not parse is cut to 60 characters as it is.
+ * at most 60 characters (code points, so a surrogate pair is never split); an address that does
+ * not parse is cut to 60 characters as it is.
  */
 export function shortUrl(text: string): string {
   let short = text;
   try {
     const url = new URL(text);
-    const last = url.pathname.split('/').filter((part) => part !== '').pop();
-    let segment = last ?? '';
-    try {
-      segment = decodeURIComponent(segment);
-    } catch {
-      // A malformed escape stays as it is.
-    }
+    const segment = readableSegment(url.pathname.split('/').filter((part) => part !== '').pop() ?? '');
     short = segment === '' ? url.host : `${url.host}/${segment}`;
   } catch {
     // Not an address: shown cut as it is.
   }
-  return short.slice(0, SHORT_URL_MAX);
+  return Array.from(short).slice(0, SHORT_URL_MAX).join('');
 }
