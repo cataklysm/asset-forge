@@ -64,7 +64,8 @@ function get(url: string): Promise<{ status: number; location: string | null; bo
 /** A page view on jsdom; a redirect off the site is refused as the window's navigation guard refuses it. */
 function jsdomView(site: string): PageView {
   let page: { window: { eval(code: string): unknown; close(): void } } | null = null;
-  const left: (() => void)[] = [];
+  const left: ((url: string) => void)[] = [];
+  const responses: ((status: number) => void)[] = [];
   return {
     async navigate(url) {
       let target = url;
@@ -73,11 +74,12 @@ function jsdomView(site: string): PageView {
         if (answer.status >= 300 && answer.status < 400 && answer.location !== null) {
           target = new URL(answer.location, target).href;
           if (new URL(target).hostname !== site) {
-            for (const listener of left) listener();
+            for (const listener of left) listener(target);
             return 'aborted';
           }
           continue;
         }
+        for (const listener of responses) listener(answer.status);
         if (answer.status !== 200) return 'failed';
         page?.window.close();
         page = new JSDOM(answer.body, { url: target, runScripts: 'outside-only' });
@@ -88,6 +90,7 @@ function jsdomView(site: string): PageView {
     evaluate: async (code) => page?.window.eval(code),
     stop() {},
     onLeftSite: (listener) => left.push(listener),
+    onResponse: (listener) => responses.push(listener),
   };
 }
 
@@ -174,8 +177,14 @@ describe('site import', () => {
       files: [`${site.origin}/files/1.png`, `${site.origin}/files/2.png`, `${cdn.origin}/files/3.png`],
       pages: 2,
       disallowed: 1,
+      pageFailures: 1,
       cancelled: false,
       truncated: null,
+      problems: [
+        { url: `${site.origin}/private/4`, stage: 'detail', reason: 'robots_disallowed', detail: null },
+        { url: `${site.origin}/away`, stage: 'detail', reason: 'left_site', detail: '[::1]' },
+      ],
+      problemsDropped: 0,
     });
     expect(pagesOpened).toEqual([profile.id]);
     expect(pagesClosed).toBe(1);

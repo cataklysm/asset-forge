@@ -37,6 +37,8 @@ function crawlOf(p: Partial<SiteCrawlResult> = {}): SiteCrawlResult {
     pageFailures: 0,
     truncated: null,
     cancelled: false,
+    problems: [],
+    problemsDropped: 0,
     ...p,
   };
 }

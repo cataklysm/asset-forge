@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SiteProfile } from '@assetforge/contracts';
+import { SITE_MAX_PROBLEMS, type SiteCrawlProblem, type SiteProfile } from '@assetforge/contracts';
 import {
   crawlSite,
   InvalidOperationError,
@@ -75,6 +75,33 @@ function deps(
   };
 }
 
+/** Every failed page outcome but invalid_xpath. */
+const PAGE_FAILURES: readonly PageLoadResult[] = [
+  { ok: false, reason: 'timeout' },
+  { ok: false, reason: 'no_match' },
+  { ok: false, reason: 'left_site', host: 'login.other.test' },
+  { ok: false, reason: 'left_site', host: '' },
+  { ok: false, reason: 'http_error', status: 403 },
+  { ok: false, reason: 'failed' },
+];
+
+/** The problem a failed page of `stage` records. */
+function problemOf(url: string, stage: 'gallery' | 'detail', page: PageLoadResult): SiteCrawlProblem {
+  if (page.ok || page.reason === 'invalid_xpath') throw new Error('not a failure');
+  switch (page.reason) {
+    case 'no_match':
+      return { url, stage, reason: stage === 'gallery' ? 'no_thumbnails' : 'no_file', detail: null };
+    case 'timeout':
+      return { url, stage, reason: 'timeout', detail: null };
+    case 'left_site':
+      return { url, stage, reason: 'left_site', detail: page.host };
+    case 'http_error':
+      return { url, stage, reason: 'http_error', detail: String(page.status) };
+    case 'failed':
+      return { url, stage, reason: 'load_failed', detail: null };
+  }
+}
+
 const run = (d: SiteCrawlDeps, p: SiteProfile, url = `${G}/g`, signal = new AbortController().signal) =>
   crawlSite(d, { profile: p, url, signal });
 
@@ -92,6 +119,8 @@ describe('crawlSite', () => {
       pageFailures: 0,
       truncated: null,
       cancelled: false,
+      problems: [],
+      problemsDropped: 0,
     });
     expect(d.loads).toEqual([{ url: `${G}/g`, queries: { thumbnails: '//a[@class="thumb"]' }, waitFor: 'thumbnails' }]);
   });
@@ -284,10 +313,10 @@ describe('crawlSite', () => {
   });
 
   it('counts a failed page and goes on', async () => {
-    for (const reason of ['timeout', 'left_site', 'failed'] as const) {
+    for (const failure of PAGE_FAILURES) {
       const d = deps({
         [`${G}/g`]: ok({ thumbnails: ['/1.jpg'], pagination: ['/g?p=2', '/g?p=3'] }),
-        [`${G}/g?p=2`]: { ok: false, reason },
+        [`${G}/g?p=2`]: failure,
         [`${G}/g?p=3`]: ok({ thumbnails: ['/3.jpg'] }),
       });
       const result = await run(d, profile({ pagination: '//p' }));
@@ -469,5 +498,152 @@ describe('crawlSite', () => {
       },
     };
     await expect(run(d, profile())).rejects.toThrow('window crashed');
+  });
+});
+
+describe('crawl problems', () => {
+  it('answers normally with the problem when the first gallery page fails', async () => {
+    for (const failure of PAGE_FAILURES) {
+      const d = deps({ [`${G}/g`]: failure });
+      const result = await run(d, profile());
+      expect(result).toEqual({
+        files: [],
+        pages: 0,
+        duplicates: 0,
+        filtered: 0,
+        disallowed: 0,
+        invalid: 0,
+        pageFailures: 1,
+        truncated: null,
+        cancelled: false,
+        problems: [problemOf(`${G}/g`, 'gallery', failure)],
+        problemsDropped: 0,
+      });
+    }
+  });
+
+  it('names no_thumbnails for a gallery page and no_file for a detail page that matched nothing', async () => {
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['/d/1'], pagination: ['/g?p=2'] }),
+      [`${G}/d/1`]: { ok: false, reason: 'no_match' },
+      [`${G}/g?p=2`]: { ok: false, reason: 'no_match' },
+    });
+    const result = await run(d, profile({ pagination: '//p', file: '//img' }));
+    expect(result.problems).toEqual([
+      { url: `${G}/d/1`, stage: 'detail', reason: 'no_file', detail: null },
+      { url: `${G}/g?p=2`, stage: 'gallery', reason: 'no_thumbnails', detail: null },
+    ]);
+    expect(result.pageFailures).toBe(2);
+  });
+
+  it('records every failed detail page outcome', async () => {
+    for (const failure of PAGE_FAILURES) {
+      const d = deps({ [`${G}/g`]: ok({ thumbnails: ['/d/1'] }), [`${G}/d/1`]: failure });
+      const result = await run(d, profile({ file: '//img' }));
+      expect(result).toMatchObject({ pages: 1, pageFailures: 1, problems: [problemOf(`${G}/d/1`, 'detail', failure)] });
+    }
+  });
+
+  it('records robots_disallowed for the gallery, a detail page, a pagination target, a file and a page base', async () => {
+    const robots = { [G]: 'User-agent: *\nDisallow: /private' };
+    const gallery = await run(deps({}, robots), profile(), `${G}/private/g`);
+    expect(gallery.problems).toEqual([{ url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null }]);
+    expect(gallery.disallowed).toBe(1);
+
+    const d = deps(
+      {
+        [`${G}/g`]: ok({ thumbnails: ['/private/d/1', '/d/2'], pagination: ['/private/g2'] }),
+        [`${G}/d/2`]: ok({ file: ['/private/2.jpg', '/3.jpg'] }),
+      },
+      robots,
+    );
+    const result = await run(d, profile({ pagination: '//p', file: '//img' }));
+    expect(result.files).toEqual([`${G}/3.jpg`]);
+    expect(result.problems).toEqual([
+      { url: `${G}/private/d/1`, stage: 'detail', reason: 'robots_disallowed', detail: null },
+      { url: `${G}/private/2.jpg`, stage: 'file', reason: 'robots_disallowed', detail: null },
+      { url: `${G}/private/g2`, stage: 'gallery', reason: 'robots_disallowed', detail: null },
+    ]);
+    expect(result.disallowed).toBe(3);
+
+    const based = await run(deps({ [`${G}/g`]: ok({ thumbnails: ['/1.jpg'] }, `${G}/private/g`) }, robots), profile());
+    expect(based.problems).toEqual([{ url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null }]);
+    expect(based.disallowed).toBe(1);
+  });
+
+  it('records robots_unavailable with the host for each URL of an origin whose robots.txt cannot be read', async () => {
+    const d = deps(
+      { [`${G}/g`]: ok({ thumbnails: ['/1.jpg', 'https://cdn.other.test:8443/2.jpg', 'https://cdn.other.test:8443/3.jpg'] }) },
+      { 'https://cdn.other.test:8443': { kind: 'unavailable' } },
+    );
+    const result = await run(d, profile());
+    expect(result.problems).toEqual([
+      { url: 'https://cdn.other.test:8443/2.jpg', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.test:8443' },
+      { url: 'https://cdn.other.test:8443/3.jpg', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.test:8443' },
+    ]);
+    expect(result.disallowed).toBe(2);
+  });
+
+  it('records invalid_link with the page and the value cut to 200 characters', async () => {
+    const long = `javascript:${'x'.repeat(300)}`;
+    const d = deps({ [`${G}/g`]: ok({ thumbnails: ['ftp://x.test/a.jpg', '  ', long, '/ok.jpg'] }) });
+    const result = await run(d, profile());
+    expect(result.invalid).toBe(3);
+    expect(result.problems).toEqual([
+      { url: `${G}/g`, stage: 'link', reason: 'invalid_link', detail: 'ftp://x.test/a.jpg' },
+      { url: `${G}/g`, stage: 'link', reason: 'invalid_link', detail: '' },
+      { url: `${G}/g`, stage: 'link', reason: 'invalid_link', detail: long.slice(0, 200) },
+    ]);
+  });
+
+  it('records off_site for pagination and detail links off the site, each once', async () => {
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['https://other.test/d/1', '/d/2'], pagination: ['https://other.test/g2', '/g?p=2'] }),
+      [`${G}/d/2`]: ok({ file: ['/2.jpg'] }),
+      [`${G}/g?p=2`]: ok({ thumbnails: ['https://other.test/d/1'], pagination: ['https://other.test/g2'] }),
+    });
+    const result = await run(d, profile({ pagination: '//p', file: '//img' }));
+    expect(result.files).toEqual([`${G}/2.jpg`]);
+    expect(result.problems).toEqual([
+      { url: 'https://other.test/d/1', stage: 'detail', reason: 'off_site', detail: null },
+      { url: 'https://other.test/g2', stage: 'gallery', reason: 'off_site', detail: null },
+    ]);
+  });
+
+  it('records filtered_text and filtered_kind for the files the filters leave out, and no duplicate or limit', async () => {
+    const d = deps({ [`${G}/g`]: ok({ thumbnails: ['/full/1.jpg', '/small/2.jpg', '/full/3.pdf', '/full/1.jpg', '/full/4.jpg'] }) });
+    const result = await run(d, profile({ urlContains: 'full', maxFiles: 1 }));
+    expect(result).toMatchObject({ files: [`${G}/full/1.jpg`], filtered: 2, duplicates: 1, truncated: 'files' });
+    expect(result.problems).toEqual([
+      { url: `${G}/small/2.jpg`, stage: 'file', reason: 'filtered_text', detail: null },
+      { url: `${G}/full/3.pdf`, stage: 'file', reason: 'filtered_kind', detail: null },
+    ]);
+  });
+
+  it(`keeps at most ${SITE_MAX_PROBLEMS} problems and counts the rest`, async () => {
+    const values = Array.from({ length: 250 }, (_, i) => `ftp://x.test/${i}.jpg`);
+    const d = deps({ [`${G}/g`]: ok({ thumbnails: values }) });
+    const result = await run(d, profile());
+    expect(result.invalid).toBe(250);
+    expect(result.problems).toHaveLength(SITE_MAX_PROBLEMS);
+    expect(result.problemsDropped).toBe(50);
+    expect(result.problems[0]!.detail).toBe('ftp://x.test/0.jpg');
+  });
+
+  it('keeps the counters in step with the problems', async () => {
+    const d = deps(
+      {
+        [`${G}/g`]: ok({ thumbnails: ['/1.jpg', '/1.jpg', '/a.pdf', '/private/2.jpg', 'ftp://x.test/3.jpg'], pagination: ['/g?p=2'] }),
+        [`${G}/g?p=2`]: { ok: false, reason: 'http_error', status: 500 },
+      },
+      { [G]: 'User-agent: *\nDisallow: /private' },
+    );
+    const result = await run(d, profile({ pagination: '//p' }));
+    const counted = (reasons: string[]) => result.problems.filter((p) => reasons.includes(p.reason)).length;
+    expect(result).toMatchObject({ pages: 1, duplicates: 1, filtered: 1, disallowed: 1, invalid: 1, pageFailures: 1 });
+    expect(counted(['filtered_kind', 'filtered_text'])).toBe(result.filtered);
+    expect(counted(['robots_disallowed', 'robots_unavailable'])).toBe(result.disallowed);
+    expect(counted(['invalid_link'])).toBe(result.invalid);
+    expect(counted(['no_thumbnails', 'no_file', 'timeout', 'left_site', 'http_error', 'load_failed'])).toBe(result.pageFailures);
   });
 });

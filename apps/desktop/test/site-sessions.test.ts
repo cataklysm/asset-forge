@@ -10,6 +10,7 @@ import {
   createSiteAccess,
   EXTRACT_LIMITS,
   extractionCode,
+  leftSiteHost,
   loginNavigationAllowed,
   loginTitle,
   pageNavigationAllowed,
@@ -140,9 +141,10 @@ function fakeView(o: {
   navigate?: (url: string) => Promise<'loaded' | 'aborted' | 'failed'>;
   evaluate?: (call: number) => unknown;
 }) {
-  let left: (() => void) | null = null;
+  let left: ((url: string) => void) | null = null;
+  let response: ((status: number) => void) | null = null;
   let calls = 0;
-  const view: PageView & { stops: number; leave(): void; calls(): number } = {
+  const view: PageView & { stops: number; leave(url?: string): void; answer(status: number): void; calls(): number } = {
     stops: 0,
     navigate: o.navigate ?? (async () => 'loaded'),
     evaluate: async () => o.evaluate?.(++calls),
@@ -152,7 +154,11 @@ function fakeView(o: {
     onLeftSite(listener) {
       left = listener;
     },
-    leave: () => left?.(),
+    onResponse(listener) {
+      response = listener;
+    },
+    leave: (url = 'https://login.other.org/sign-in') => left?.(url),
+    answer: (status) => response?.(status),
     calls: () => calls,
   };
   return view;
@@ -183,7 +189,7 @@ describe('page loader', () => {
     expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'invalid_xpath', query: 'pagination' });
   });
 
-  it('answers timeout when nothing matches in time, and keeps asking after a failed evaluation', async () => {
+  it('answers no_match when the page loaded but nothing matches in time, and keeps asking after a failed evaluation', async () => {
     let calls = 0;
     const view = fakeView({});
     view.evaluate = async () => {
@@ -192,13 +198,66 @@ describe('page loader', () => {
       return { results: { thumbnails: ['x'] }, counts: { thumbnails: 0 } };
     };
     const loader = createPageLoader(view, 'example.com', fast);
-    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'timeout' });
+    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'no_match' });
     expect(calls).toBeGreaterThan(2);
+  });
+
+  it('answers no_match when the overall limit ends the poll of a loaded page', async () => {
+    const view = fakeView({ evaluate: () => ({ results: {}, counts: { thumbnails: 0 } }) });
+    const loader = createPageLoader(view, 'example.com', { ...fast, settleMs: 10_000, totalMs: 40 });
+    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'no_match' });
   });
 
   it('answers timeout when the page never finishes loading', async () => {
     const loader = createPageLoader(fakeView({ navigate: () => new Promise(() => {}) }), 'example.com', { ...fast, totalMs: 30 });
     expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'timeout' });
+  });
+
+  it('answers http_error with the main-frame status when an error page matches nothing', async () => {
+    const view = fakeView({ evaluate: () => ({ results: {}, counts: { thumbnails: 0 } }) });
+    view.navigate = async () => {
+      view.answer(403);
+      return 'loaded';
+    };
+    const loader = createPageLoader(view, 'example.com', fast);
+    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 403 });
+
+    // An error answer Chromium shows its own page for fails the navigation.
+    view.navigate = async () => {
+      view.answer(500);
+      return 'failed';
+    };
+    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 500 });
+
+    // Still loading when the limit ends it.
+    view.navigate = () => {
+      view.answer(503);
+      return new Promise(() => {});
+    };
+    const slow = createPageLoader(view, 'example.com', { ...fast, totalMs: 30 });
+    expect(await slow.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 503 });
+  });
+
+  it('takes an error page that matches as a page, and ignores a status below 400, -1 and one between loads', async () => {
+    const view = fakeView({ evaluate: () => ({ results: { thumbnails: ['/a'] }, counts: { thumbnails: 1 } }) });
+    view.navigate = async () => {
+      view.answer(404);
+      return 'loaded';
+    };
+    const loader = createPageLoader(view, 'example.com', fast);
+    expect((await loader.load('https://example.com/g', request())).ok).toBe(true);
+
+    const empty = fakeView({ evaluate: () => ({ results: {}, counts: { thumbnails: 0 } }) });
+    const emptyLoader = createPageLoader(empty, 'example.com', fast);
+    empty.answer(500); // between loads: reaches no load
+    empty.navigate = async () => {
+      empty.answer(200);
+      empty.answer(-1);
+      return 'loaded';
+    };
+    expect(await emptyLoader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'no_match' });
+    empty.navigate = async () => 'failed';
+    expect(await emptyLoader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'failed' });
   });
 
   it('answers failed for a failed load and polls on after a load replaced within the site', async () => {
@@ -216,14 +275,25 @@ describe('page loader', () => {
     });
   });
 
-  it('answers left_site for a URL off the site and for a refused navigation', async () => {
+  it('answers left_site with the host for a URL off the site and for a refused navigation', async () => {
     const view = fakeView({ navigate: () => new Promise(() => {}) });
     const loader = createPageLoader(view, 'example.com', fast);
-    expect(await loader.load('https://other.org/g', request())).toEqual({ ok: false, reason: 'left_site' });
+    expect(await loader.load('https://Other.org:8443/g', request())).toEqual({ ok: false, reason: 'left_site', host: 'other.org' });
     const pending = loader.load('https://example.com/g', request());
     await new Promise((r) => setTimeout(r, 5));
-    view.leave();
-    expect(await pending).toEqual({ ok: false, reason: 'left_site' });
+    view.leave('https://LOGIN.other.org/sign-in?next=/g');
+    expect(await pending).toEqual({ ok: false, reason: 'left_site', host: 'login.other.org' });
+    const odd = loader.load('https://example.com/g', request());
+    await new Promise((r) => setTimeout(r, 5));
+    view.leave('not a url');
+    expect(await odd).toEqual({ ok: false, reason: 'left_site', host: '' });
+  });
+
+  it('reads the host of a refused target for the answer', () => {
+    expect(leftSiteHost('https://Login.Example.org/x')).toBe('login.example.org');
+    expect(leftSiteHost('http://[::1]:8080/x')).toBe('[::1]');
+    expect(leftSiteHost('data:text/html,x')).toBe('');
+    expect(leftSiteHost('')).toBe('');
   });
 
   it('stops the page and answers at once on abort', async () => {
@@ -258,7 +328,7 @@ describe('page loader', () => {
     const leaving = loader.load('https://example.com/2', request());
     await new Promise((r) => setTimeout(r, 5));
     view.leave();
-    expect(await leaving).toEqual({ ok: false, reason: 'left_site' });
+    expect(await leaving).toEqual({ ok: false, reason: 'left_site', host: 'login.other.org' });
     expect(view.stops).toBe(2);
     hang = false;
     // A signal of an earlier load that arrives between two loads ends nothing.
@@ -526,7 +596,15 @@ describe('electron site sessions', () => {
     const pending = page.loader.load('https://example.com/h', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
     await new Promise((r) => setTimeout(r, 5));
     expect(w.webContents.navigate('will-redirect', 'https://other.org/')).toBe(true);
-    expect(await pending).toEqual({ ok: false, reason: 'left_site' });
+    expect(await pending).toEqual({ ok: false, reason: 'left_site', host: 'other.org' });
+
+    // The main-frame status of did-navigate reaches the running load.
+    w.webContents.executeJavaScriptInIsolatedWorld.mockResolvedValue({ results: { thumbnails: [] }, counts: { thumbnails: 0 }, baseUrl: '' });
+    w.webContents.loadResult = async () => {
+      w.webContents.emit('did-navigate', {}, 'https://example.com/i', 401, 'Unauthorized');
+    };
+    const refused = await page.loader.load('https://example.com/i', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    expect(refused).toEqual({ ok: false, reason: 'http_error', status: 401 });
 
     page.close();
     page.close();

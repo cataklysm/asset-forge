@@ -251,25 +251,47 @@ export interface PageView {
   /** Runs `code` in the isolated world and answers its value. */
   evaluate(code: string): Promise<unknown>;
   stop(): void;
-  /** Called whenever a main-frame navigation or redirect off the site was refused. */
-  onLeftSite(listener: () => void): void;
+  /** Called with the target whenever a main-frame navigation or redirect off the site was refused. */
+  onLeftSite(listener: (url: string) => void): void;
+  /** Called with the HTTP status of every finished main-frame navigation (not called for a non-HTTP answer). */
+  onResponse(listener: (status: number) => void): void;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** A host the crawl answer may carry. */
+const SAFE_HOST = /^[a-z0-9.\-_[\]:]{1,253}$/;
+
+/** The lower-case host of a refused target for the crawl answer; `''` when it cannot be read or looks odd. */
+export function leftSiteHost(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SAFE_HOST.test(host) ? host : '';
+  } catch {
+    return '';
+  }
+}
+
+/** A status the page loader takes from a navigation; anything else reads as no status. */
+const isStatus = (status: number): boolean => Number.isInteger(status) && status >= 100 && status <= 999;
+
 /**
- * The PageLoader of one page window (spec "The crawl", step 2). A load that ends without a page stops the view at
- * once, so a navigation of it that is still under way cannot redirect, or report leaving the site, during the next
- * load; a left-the-site signal only ever ends the load that is running when it arrives.
+ * The PageLoader of one page window (spec "The crawl", step 2, and "Diagnostics"). A load that ends without a page
+ * stops the view at once, so a navigation of it that is still under way cannot redirect, or report leaving the
+ * site, during the next load; a left-the-site signal or a status only ever reaches the load that is running when it
+ * arrives. A main-frame status of 400 or more makes a load that found nothing an `http_error`; a page that matches
+ * `waitFor` is a page whatever its status.
  */
 export function createPageLoader(view: PageView, site: string, timing: PageTiming = PAGE_TIMING): PageLoader {
-  let leftListener: (() => void) | null = null;
-  view.onLeftSite(() => leftListener?.());
+  let leftListener: ((url: string) => void) | null = null;
+  let responseListener: ((status: number) => void) | null = null;
+  view.onLeftSite((target) => leftListener?.(target));
+  view.onResponse((status) => responseListener?.(status));
 
   return {
     async load(url, r): Promise<PageLoadResult> {
       if (r.signal.aborted) return { ok: false, reason: 'failed' };
-      if (!pageNavigationAllowed(url, site)) return { ok: false, reason: 'left_site' };
+      if (!pageNavigationAllowed(url, site)) return { ok: false, reason: 'left_site', host: leftSiteHost(url) };
       const names = Object.keys(r.queries);
       const code = extractionCode(r.queries);
 
@@ -278,11 +300,21 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
         settle = resolve;
       });
       let done = false;
-      const onLeft = () => finish({ ok: false, reason: 'left_site' });
+      /** The document arrived (the navigation resolved); a later miss is `no_match`, not `timeout`. */
+      let loaded = false;
+      let status: number | null = null;
+      /** What a load that found nothing answers: the status when it was an error, else `fallback`. */
+      const missed = (fallback: 'no_match' | 'timeout' | 'failed'): PageLoadResult =>
+        status !== null && status >= 400 ? { ok: false, reason: 'http_error', status } : { ok: false, reason: fallback };
+      const onLeft = (target: string) => finish({ ok: false, reason: 'left_site', host: leftSiteHost(target) });
+      const onResponse = (answered: number) => {
+        if (!done && isStatus(answered)) status = answered;
+      };
       const finish = (result: PageLoadResult) => {
         if (done) return;
         done = true;
         if (leftListener === onLeft) leftListener = null;
+        if (responseListener === onResponse) responseListener = null;
         if (!result.ok) {
           try {
             view.stop();
@@ -295,15 +327,17 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
       const onAbort = () => finish({ ok: false, reason: 'failed' });
       r.signal.addEventListener('abort', onAbort, { once: true });
       leftListener = onLeft;
-      const overall = setTimeout(() => finish({ ok: false, reason: 'timeout' }), timing.totalMs);
+      responseListener = onResponse;
+      const overall = setTimeout(() => finish(missed(loaded ? 'no_match' : 'timeout')), timing.totalMs);
 
       const run = async () => {
-        const loaded = await view.navigate(url);
+        const navigation = await view.navigate(url);
         if (done) return;
-        if (loaded === 'failed') {
-          finish({ ok: false, reason: 'failed' });
+        if (navigation === 'failed') {
+          finish(missed('failed'));
           return;
         }
+        loaded = true;
         // `aborted`: a navigation within the site replaced the first one; its page is polled the same way.
         const until = Date.now() + timing.settleMs;
         for (;;) {
@@ -324,7 +358,7 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
             return;
           }
           if (Date.now() >= until) {
-            finish({ ok: false, reason: 'timeout' });
+            finish(missed('no_match'));
             return;
           }
           await sleep(timing.pollMs);
@@ -512,14 +546,19 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
         onGone?.();
       });
       const contents = window.webContents;
-      const leftListeners: (() => void)[] = [];
+      const leftListeners: ((url: string) => void)[] = [];
+      const responseListeners: ((status: number) => void)[] = [];
       const guard = (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
         if (event.isMainFrame === false || pageNavigationAllowed(event.url, profile.site)) return;
         event.preventDefault();
-        for (const listener of leftListeners) listener();
+        for (const listener of leftListeners) listener(event.url);
       };
       contents.on('will-navigate', guard);
       contents.on('will-redirect', guard);
+      // Fired for the main frame only; the code is -1 for an answer that was not HTTP.
+      contents.on('did-navigate', (_event, _url, httpResponseCode) => {
+        for (const listener of responseListeners) listener(httpResponseCode);
+      });
       // A popup is refused and, unlike in the login window, not loaded: the crawl decides where this window goes.
       contents.setWindowOpenHandler(() => ({ action: 'deny' }));
       const view: PageView = {
@@ -533,6 +572,7 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
           if (!contents.isDestroyed()) contents.stop();
         },
         onLeftSite: (listener) => leftListeners.push(listener),
+        onResponse: (listener) => responseListeners.push(listener),
       };
       return {
         loader: createPageLoader(view, profile.site, timing),

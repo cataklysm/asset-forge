@@ -1,4 +1,12 @@
-import { belongsToSite, type SiteCrawlResult, type SiteProfile } from '@assetforge/contracts';
+import {
+  belongsToSite,
+  SITE_MAX_PROBLEMS,
+  SITE_PROBLEM_VALUE_MAX,
+  type SiteCrawlProblemReason,
+  type SiteCrawlResult,
+  type SiteCrawlStage,
+  type SiteProfile,
+} from '@assetforge/contracts';
 import { InvalidOperationError, ValidationFailedError } from './errors.js';
 import { fileKind } from './media-types.js';
 import type { PageLoader, PageLoadResult } from './ports.js';
@@ -96,6 +104,17 @@ export async function crawlSite(
     pageFailures: 0,
     truncated: null,
     cancelled: false,
+    problems: [],
+    problemsDropped: 0,
+  };
+  const problemKeys = new Set<string>();
+  /** Records a problem once; beyond SITE_MAX_PROBLEMS it is only counted. */
+  const problem = (url: string, stage: SiteCrawlStage, reason: SiteCrawlProblemReason, detail: string | null = null) => {
+    const key = `${stage}\n${reason}\n${url}\n${detail ?? ''}`;
+    if (problemKeys.has(key)) return;
+    problemKeys.add(key);
+    if (answer.problems.length < SITE_MAX_PROBLEMS) answer.problems.push({ url, stage, reason, detail });
+    else answer.problemsDropped++;
   };
   const contains = profile.urlContains.toLowerCase();
   const robotsByOrigin = new Map<string, Promise<RobotsAnswer>>();
@@ -123,12 +142,20 @@ export async function crawlSite(
     return pending;
   };
 
-  const allowed = async (url: string): Promise<boolean> => {
+  /** True when robots lets the crawl use `url`; otherwise counts it as disallowed and records why. */
+  const allowed = async (url: string, stage: SiteCrawlStage): Promise<boolean> => {
     const robots = await robotsOf(new URL(url).origin);
     checkCancel();
     if (robots.kind === 'none') return true;
-    if (robots.kind === 'unavailable') return false;
-    return robotsAllows(robots.rules, url);
+    if (robots.kind === 'unavailable') {
+      answer.disallowed++;
+      problem(url, stage, 'robots_unavailable', new URL(url).host);
+      return false;
+    }
+    if (robotsAllows(robots.rules, url)) return true;
+    answer.disallowed++;
+    problem(url, stage, 'robots_disallowed');
+    return false;
   };
 
   /** Resolves each raw string against the page URL; what fails the URL rule counts as invalid. */
@@ -141,9 +168,31 @@ export async function crawlSite(
         urls.push(normalizeDownloadUrl(new URL(text, pageUrl).href));
       } catch {
         answer.invalid++;
+        problem(pageUrl, 'link', 'invalid_link', text.slice(0, SITE_PROBLEM_VALUE_MAX));
       }
     }
     return urls;
+  };
+
+  /** Counts a failed page and records why it gave nothing. */
+  const pageFailed = (url: string, stage: 'gallery' | 'detail', result: Exclude<PageLoadResult, { ok: true }>) => {
+    answer.pageFailures++;
+    switch (result.reason) {
+      case 'no_match':
+        problem(url, stage, stage === 'gallery' ? 'no_thumbnails' : 'no_file');
+        break;
+      case 'timeout':
+        problem(url, stage, 'timeout');
+        break;
+      case 'left_site':
+        problem(url, stage, 'left_site', result.host);
+        break;
+      case 'http_error':
+        problem(url, stage, 'http_error', String(result.status));
+        break;
+      default:
+        problem(url, stage, 'load_failed');
+    }
   };
 
   const load = async (url: string, queries: Record<string, string>, waitFor: string): Promise<PageLoadResult> => {
@@ -164,7 +213,7 @@ export async function crawlSite(
    * (an in-site redirect or base element), otherwise the requested URL. Answers null when the base differs from
    * the requested URL in origin or path and robots refuses it; the page then counts as disallowed.
    */
-  const baseOf = async (page: { baseUrl: string }, requested: string): Promise<string | null> => {
+  const baseOf = async (page: { baseUrl: string }, requested: string, stage: SiteCrawlStage): Promise<string | null> => {
     let base: string;
     try {
       base = new URL(page.baseUrl).href;
@@ -172,10 +221,7 @@ export async function crawlSite(
       return requested;
     }
     if (!belongsToSite(base, profile.site)) return requested;
-    if (originAndPath(base) !== originAndPath(requested) && !(await allowed(base))) {
-      answer.disallowed++;
-      return null;
-    }
+    if (originAndPath(base) !== originAndPath(requested) && !(await allowed(base, stage))) return null;
     return base;
   };
 
@@ -191,17 +237,16 @@ export async function crawlSite(
       seenFiles.add(url);
       if (contains !== '' && !url.toLowerCase().includes(contains)) {
         answer.filtered++;
+        problem(url, 'file', 'filtered_text');
         continue;
       }
       const kind = kindOfUrl(url);
       if (DECIDED_KINDS.has(kind) && !(profile.kinds as readonly string[]).includes(kind)) {
         answer.filtered++;
+        problem(url, 'file', 'filtered_kind');
         continue;
       }
-      if (!(await allowed(url))) {
-        answer.disallowed++;
-        continue;
-      }
+      if (!(await allowed(url, 'file'))) continue;
       if (answer.files.length >= profile.maxFiles) {
         answer.truncated = 'files';
         throw new Stop();
@@ -219,20 +264,17 @@ export async function crawlSite(
     const galleryRobots = await robotsOf(new URL(galleryUrl).origin);
     checkCancel();
     if (galleryRobots.kind === 'unavailable') throw new InvalidOperationError(ROBOTS_UNREADABLE);
-    if (!(await allowed(galleryUrl))) {
-      answer.disallowed++;
-      return answer;
-    }
+    if (!(await allowed(galleryUrl, 'gallery'))) return answer;
 
     while (queue.length > 0) {
       const pageUrl = queue.shift()!;
       const page = await load(pageUrl, galleryQueries, SITE_QUERY.thumbnails);
       if (!page.ok) {
-        answer.pageFailures++;
+        pageFailed(pageUrl, 'gallery', page);
         progress();
         continue;
       }
-      const pageBase = await baseOf(page, pageUrl);
+      const pageBase = await baseOf(page, pageUrl, 'gallery');
       if (pageBase === null) {
         progress();
         continue;
@@ -244,19 +286,20 @@ export async function crawlSite(
         await addFiles(thumbnails);
       } else {
         for (const detailUrl of thumbnails) {
-          if (seenDetails.has(detailUrl) || !belongsToSite(detailUrl, profile.site)) continue;
-          seenDetails.add(detailUrl);
-          if (!(await allowed(detailUrl))) {
-            answer.disallowed++;
+          if (seenDetails.has(detailUrl)) continue;
+          if (!belongsToSite(detailUrl, profile.site)) {
+            problem(detailUrl, 'detail', 'off_site');
             continue;
           }
+          seenDetails.add(detailUrl);
+          if (!(await allowed(detailUrl, 'detail'))) continue;
           const detail = await load(detailUrl, detailQueries, SITE_QUERY.file);
           if (!detail.ok) {
-            answer.pageFailures++;
+            pageFailed(detailUrl, 'detail', detail);
             progress();
             continue;
           }
-          const detailBase = await baseOf(detail, detailUrl);
+          const detailBase = await baseOf(detail, detailUrl, 'detail');
           if (detailBase !== null) await addFiles(resolveAll(detail.results[SITE_QUERY.file], detailBase));
           progress();
         }
@@ -264,10 +307,13 @@ export async function crawlSite(
 
       if (profile.pagination !== '') {
         for (const next of resolveAll(page.results[SITE_QUERY.pagination], pageBase)) {
-          if (seenPages.has(next) || refusedPages.has(next) || !belongsToSite(next, profile.site)) continue;
-          if (!(await allowed(next))) {
+          if (seenPages.has(next) || refusedPages.has(next)) continue;
+          if (!belongsToSite(next, profile.site)) {
+            problem(next, 'gallery', 'off_site');
+            continue;
+          }
+          if (!(await allowed(next, 'gallery'))) {
             refusedPages.add(next);
-            answer.disallowed++;
             continue;
           }
           if (seenPages.size >= profile.maxPages) {

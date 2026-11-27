@@ -8,6 +8,7 @@ import {
   SITE_MAX_PAGES,
   SITE_URL_CONTAINS_MAX,
   SITE_XPATH_MAX,
+  SiteCrawlProblemReasonSchema,
   SiteCrawlProgressSchema,
   SiteCrawlResultSchema,
   SiteFilterSchema,
@@ -165,8 +166,18 @@ describe('site profile schemas', () => {
       pageFailures: 0,
       truncated: null,
       cancelled: false,
+      problems: [{ url: 'https://example.com/g', stage: 'gallery', reason: 'http_error', detail: '403' }],
+      problemsDropped: 0,
     };
     expect(SiteCrawlResultSchema.safeParse(result).success).toBe(true);
+    expect(SiteCrawlResultSchema.safeParse({ ...result, problems: undefined }).success).toBe(false);
+    expect(
+      SiteCrawlResultSchema.safeParse({ ...result, problems: [{ url: 'x', stage: 'page', reason: 'timeout', detail: null }] }).success,
+    ).toBe(false);
+    expect(
+      SiteCrawlResultSchema.safeParse({ ...result, problems: [{ url: 'x', stage: 'file', reason: 'beyond_limit', detail: null }] }).success,
+    ).toBe(false);
+    expect(SiteCrawlProblemReasonSchema.options).toHaveLength(12);
     expect(SiteCrawlResultSchema.safeParse({ ...result, truncated: 'pages' }).success).toBe(true);
     expect(SiteCrawlResultSchema.safeParse({ ...result, truncated: 'files' }).success).toBe(true);
     expect(SiteCrawlResultSchema.safeParse({ ...result, truncated: 'other' }).success).toBe(false);

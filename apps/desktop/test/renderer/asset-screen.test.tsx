@@ -1294,6 +1294,8 @@ it('Import from site follows Import from URLs, targets the asset with the select
       pageFailures: 0,
       truncated: null,
       cancelled: false,
+      problems: [],
+      problemsDropped: 0,
     }),
     'sites:crawlProgress': () => null,
     'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),

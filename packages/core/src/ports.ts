@@ -140,7 +140,15 @@ export type PageLoadResult =
    * profile's site, so any string may come here.
    */
   | { ok: true; results: Record<string, string[]>; baseUrl: string }
-  | { ok: false; reason: 'timeout' | 'left_site' | 'failed' }
+  /**
+   * `no_match`: the document finished loading but the waited-for query matched nothing in time; `timeout`: it did
+   * not finish loading in time; `failed`: a network or other failure, also a cancel.
+   */
+  | { ok: false; reason: 'no_match' | 'timeout' | 'failed' }
+  /** A navigation off the site was refused; `host` is its lower-case host, empty when unknown. */
+  | { ok: false; reason: 'left_site'; host: string }
+  /** The main frame answered `status` (400 or more) and the waited-for query did not match. */
+  | { ok: false; reason: 'http_error'; status: number }
   | { ok: false; reason: 'invalid_xpath'; query: string };
 
 /** Reads pages of a site in a browser session of its profile. */
