@@ -62,6 +62,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 ## Renderer
 
+- Reported by the owner on 2026-11-27: when a job finishes, the whole table on the Jobs screen appears to be reloaded, which interrupts scrolling; the asset screen does the same. Open question: is this full refresh needed at all, or can the lists update in place (keep scroll position and loaded pages, patch only the changed rows)? Find the cause first (the 2 s jobs poll and the reload it triggers are the obvious suspects).
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
 - The project member table still uses a pager of 50 that resets on navigation.
 - `CommitInput`: Enter followed by blur can save twice before the reload; the draft reset can overwrite typing while a reload is in flight.
