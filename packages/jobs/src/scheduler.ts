@@ -386,10 +386,12 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           if (stopping) return pending;
           let running = 0;
           const ending: Promise<void>[] = [];
-          for (const run of active.values()) {
+          const endingIds: string[] = [];
+          for (const [id, run] of active) {
             // A run whose handler is done keeps its outcome, but a retry it is still storing is cancelled below.
             if (run.settled) {
               ending.push(run.done);
+              endingIds.push(id);
               continue;
             }
             // Cancelled by an earlier call; not counted again.
@@ -400,7 +402,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           }
           if (ending.length === 0) return pending + running;
           await Promise.all(ending);
-          const retried = await jobs.cancelPending({ now: iso(), ...cancelHook });
+          // Only the retries of those runs: a job enqueued while this call waited is not part of it.
+          let retried = 0;
+          for (const id of endingIds) retried += await jobs.cancelPending({ id, now: iso(), ...cancelHook });
           if (retried > 0) changed(null);
           return pending + running + retried;
         })(),

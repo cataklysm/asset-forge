@@ -1251,6 +1251,37 @@ describe('createScheduler with a settled hook', () => {
     expect(h.settled).toEqual([{ id, outcome: { status: 'cancelled' }, rowStatus: 'cancelled' }]);
   });
 
+  it('cancelAll leaves a job enqueued while it waited for a settled run', async () => {
+    const h = hooked('cpu');
+    const u = controlled('io');
+    const gate: { release: (() => void) | null } = { release: null };
+    const s = setup({
+      handlers: { t: h.handler, u: u.handler },
+      limits: { ...DEFAULT_LIMITS, io: 0 },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async scheduleRetry(id: string, r: Parameters<JobRepository['scheduleRetry']>[1]) {
+            await new Promise<void>((resolve) => (gate.release = resolve));
+            return fake.scheduleRetry(id, r);
+          },
+        }),
+    });
+    h.bind(s.fake);
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.scheduler.start();
+    h.runOf(id).reject(new JobError('provider_timeout'));
+    await flush();
+    expect(gate.release).not.toBeNull();
+
+    const cancelling = s.scheduler.cancelAll();
+    await flush();
+    const [later] = (await s.enqueue('u', 'io')) as [string];
+    gate.release!();
+    expect(await cancelling).toBe(1);
+    expect(s.row(id).status).toBe('cancelled');
+    expect(s.row(later).status).toBe('queued');
+  });
+
   it('a pendingOnly cancel leaves a running job alone and cancels a pending one', async () => {
     const h = hooked('cpu');
     const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 1 } });

@@ -27,7 +27,10 @@ describe('generation studio end to end', () => {
   });
 
   /** A harness, the mock with `TEST_KEY`, a `venice` entry for it and a workspace with one asset. */
-  async function setup(o: { fastRetries?: boolean } = {}): Promise<{ entry: ProviderView; assetId: string }> {
+  async function setup(o: { fastRetries?: boolean; host?: { workspaceOpened: () => Promise<void> } } = {}): Promise<{
+    entry: ProviderView;
+    assetId: string;
+  }> {
     h = await createHarness(o);
     mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
     const entry = await h.venice({ url: mock.url, apiKey: TEST_KEY });
@@ -196,6 +199,37 @@ describe('generation studio end to end', () => {
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({ status: 'failed', attempt: 3, errorCode: 'provider_unavailable' });
     expect(await generation(sourceId, busy.id)).toMatchObject({ status: 'failed', errorCode: 'provider_unavailable' });
+  });
+
+  describe('without a scheduler', () => {
+    // The workspace opens but no scheduler starts, so every job stays queued.
+    const noScheduler = { host: { workspaceOpened: async () => {} } };
+
+    it('jobs:cancel ends a queued generation job and settles its generation cancelled', async () => {
+      const { assetId } = await setup(noScheduler);
+      const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+      const g = await started(edit(sourceId, 'Make it night'));
+      const before = (await h.ok('jobs:summary', {})).changes;
+
+      expect(await h.ok('jobs:cancel', { jobId: g.jobId! })).toEqual({});
+      const summary = await h.ok('jobs:summary', {});
+      expect(summary).toMatchObject({ queued: 0, cancelled: 1 });
+      expect(summary.changes).toBeGreaterThan(before);
+      expect(await generation(sourceId, g.id)).toMatchObject({ status: 'cancelled', errorCode: null });
+      expect(mock!.imageRequests).toHaveLength(0);
+    });
+
+    it('jobs:cancelAll ends every waiting job, answers the count and settles the generations cancelled', async () => {
+      const { assetId } = await setup(noScheduler);
+      const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+      const gs = [await started(edit(sourceId, 'Make it night')), await started(edit(sourceId, 'Make it day'))];
+
+      expect(await h.ok('jobs:cancelAll', {})).toEqual({ cancelled: 2 });
+      expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 0, cancelled: 2 });
+      for (const g of gs) expect(await generation(sourceId, g.id)).toMatchObject({ status: 'cancelled' });
+      expect(await h.ok('jobs:cancelAll', {})).toEqual({ cancelled: 0 });
+      expect(mock!.imageRequests).toHaveLength(0);
+    });
   });
 
   it('lets running generations finish into the former asset when their source goes to the trash, cancels the queued one and never repeats a request', async () => {

@@ -12,6 +12,7 @@ import {
   createFileDownloadHandler,
   createImageGenerateHandler,
   reconcileGenerations,
+  settleGenerationOfJob,
   type GenerationImageSource,
   type ImageProviderDirectory,
   type JobControl,
@@ -110,6 +111,32 @@ export function createJobHost(deps: JobHostDeps): JobHost {
   const { manager, pause, clock, feed } = deps;
   let scheduler: Scheduler | null = null;
   const changed = () => feed.jobs();
+  /**
+   * Without a scheduler (none started, or one stopping: the host lets go of it before the stop) nothing runs, so
+   * the waiting jobs, or the one named, are ended in the database and their generations settled cancelled. Answers
+   * how many; 0 without a workspace or when the write failed. `read` does not queue, so a caller already inside
+   * a workspace read never waits on itself.
+   */
+  const cancelWithoutScheduler = async (jobId?: string): Promise<number> => {
+    if (manager.current() === null) return 0;
+    let cancelled = 0;
+    try {
+      cancelled = await manager.read((s) =>
+        s.database.jobs.cancelPending({
+          ...(jobId === undefined ? {} : { id: jobId }),
+          now: s.now().toISOString(),
+          settled: (job) => {
+            settleGenerationOfJob(s, job, { status: 'cancelled' });
+          },
+        }),
+      );
+    } catch (cause) {
+      console.error('The waiting jobs could not be cancelled', cause);
+      return 0;
+    }
+    if (cancelled > 0) changed();
+    return cancelled;
+  };
   // Opening and closing run one after the other, so a stop never overlaps the start of the next scheduler.
   let lifecycle: Promise<void> = Promise.resolve();
   const serial = (fn: () => Promise<void>): Promise<void> => {
@@ -189,11 +216,11 @@ export function createJobHost(deps: JobHostDeps): JobHost {
     },
 
     async cancel(jobId, options) {
-      await scheduler?.cancel(jobId, options);
+      if (scheduler !== null) return scheduler.cancel(jobId, options);
+      await cancelWithoutScheduler(jobId);
     },
 
-    // Without a scheduler nothing runs; a generation left pending is closed by the reconcile on the next open.
-    cancelAll: async () => (scheduler === null ? 0 : scheduler.cancelAll()),
+    cancelAll: async () => (scheduler === null ? cancelWithoutScheduler() : scheduler.cancelAll()),
 
     changes: () => feed.total(),
     changed,
