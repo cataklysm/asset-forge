@@ -1,6 +1,6 @@
 # Video playback — design
 
-Date: 2026-11-27. Status: proposed. Size: a project across contracts, core, persistence, media, main and
+Date: 2026-11-27. Status: approved. Size: a project across contracts, core, persistence, media, main and
 renderer, with one new binary dependency.
 
 ## Intent
