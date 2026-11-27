@@ -61,8 +61,11 @@ Sources:
 - A job handler reports what it did through an `effects` dependency with `fileChanged(fileId)` and
   `fileAdded(assetId | null)`: the analysis handler calls `fileChanged` when it stored tags or a
   proposal, the download handler and the generation handler call `fileAdded` with the place the file
-  ended up in (a download that was `already_present` reports nothing). The port lives in core, the
-  feed implements it.
+  ended up in (a download that was `already_present` reports nothing); when that is an asset they
+  also report the inbox (`null`), which the file passed through, so an inbox page read meanwhile is
+  refreshed. The port lives in core, the feed implements it.
+- A lane hold (`Retry-After`) moves every waiting job of the lane; the scheduler reports it as a
+  change of several rows (`onChange(null)`, a `jobs` entry) when it moved at least one.
 - `JobHost.changed()` (the IPC handlers) writes a `jobs` entry.
 
 `jobs:summary.changes` stays as it is and still rises with every entry, so the existing tokens keep
@@ -93,12 +96,16 @@ apply as before. So a file that fell out of the filter is simply not answered.
   - `refresh()`: keeps key, total and displayed pages; refetches the wanted pages and swaps each when
     its answer arrives; every other loaded page is dropped and loads again when it is wanted. The
     total follows the newest answer. A refresh gets its own number, so the answer of an earlier
-    refresh or of a page request from before it is ignored. A refresh asked while one runs is run once
-    after it.
+    refresh or of a page request from before it is ignored. Page 0 is refetched when no page is
+    wanted, also for an empty list. A refresh asked while one runs, while the loader is inactive,
+    while a key change is loading or before page 0 of the key has settled is run once afterwards; a
+    further key change clears it, since the new key loads fresh.
 - `FileBrowser` no longer takes the job token in its key. On a change answer it:
   - patches: the loaded records whose id is in `fileIds` are read through `files:list` with `ids` and
     the list's own request; answered records are patched, records not answered stay as they are until
-    the next reload. More than 100 loaded matches: `refresh()` instead.
+    the next reload. More than 100 loaded matches: `refresh()` instead. A read that fails, or whose
+    answer is dropped because the list's key changed meanwhile, is followed by `refresh()`, so the
+    change is not lost.
   - refreshes in place when `added` holds its scope (the asset of the Files tab, `null` for the
     inbox) or on `reset`. The trash never reacts.
 - The Files tab count of the asset screen and the inbox count are read again only on a matching

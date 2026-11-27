@@ -35,7 +35,8 @@ interface Through {
  * which other pages exist.
  *
  * `refresh` reloads the current key in place. Every refresh starts a new round, and the answer
- * of a request started in an earlier round is dropped (it still frees its slot).
+ * of a request started in an earlier round is dropped (it still frees its slot). A refresh that
+ * cannot run yet is queued and runs once as soon as it can.
  */
 export class PagedLoader<T> {
   state: PagedState<T>;
@@ -55,7 +56,10 @@ export class PagedLoader<T> {
   private roundOutstanding = 0;
   /** Pages of the current round that keep their old entry until they are requested again. */
   private readonly refetch = new Set<number>();
-  /** A refresh asked while a round was still running; runs once when that round has settled. */
+  /**
+   * A refresh that could not run yet (inactive, a round running, page 0 of the current key not
+   * settled); runs once as soon as it can. A key change clears it: the new key loads fresh.
+   */
   private refreshQueued = false;
 
   constructor(
@@ -89,6 +93,7 @@ export class PagedLoader<T> {
     this.state = emptyPaged<T>(this.epochKey());
     this.wanted = [];
     this.endRound();
+    this.refreshQueued = false;
     this.rejectThroughs();
     this.pump(false);
     return true;
@@ -98,6 +103,7 @@ export class PagedLoader<T> {
   setActive(active: boolean): void {
     this.active = active;
     if (!active) this.rejectThroughs();
+    else this.runQueuedRefresh();
   }
 
   setWanted(pages: readonly number[]): void {
@@ -118,16 +124,17 @@ export class PagedLoader<T> {
   /**
    * Reloads the current key in place: key, total and `displayed` stay, the wanted pages are
    * requested again and each keeps its old entry until its answer arrives, every other page is
-   * dropped at once (page 0 is refetched when no page is wanted). Does nothing while inactive,
-   * while a key change is loading or before page 0 has settled, since that load is fresh
-   * already. Asked while a round runs, it runs once after that round.
+   * dropped at once (page 0 is refetched when no page is wanted, also when the list is empty).
+   * Asked while inactive, while a round runs, while a key change is loading or before page 0 has
+   * settled, it is queued and runs once afterwards: the answer outstanding then may have been
+   * read before the change that asked for the refresh.
    */
   refresh(): void {
-    if (!this.active || this.pending || !firstPageSettled(this.state)) return;
-    if (this.inRound) {
+    if (!this.canRefresh()) {
       this.refreshQueued = true;
       return;
     }
+    this.refreshQueued = false;
     this.round += 1;
     this.inRound = true;
     this.roundOutstanding = 0;
@@ -197,7 +204,8 @@ export class PagedLoader<T> {
   private pump(notify = true): void {
     if (!this.active) return;
     const { total } = this.state;
-    if (total !== null) for (const p of this.refetch) if (p * PAGE_SIZE >= total) this.refetch.delete(p);
+    // Page 0 is fetched even for an empty list: it is how an empty list learns of new rows.
+    if (total !== null) for (const p of this.refetch) if (p > 0 && p * PAGE_SIZE >= total) this.refetch.delete(p);
     // A refetch is requested even when its page stopped being wanted, so its round can end.
     const candidates = this.pending ? [0] : [...this.candidates(), ...this.refetch];
     const pages = pagesToRequest(this.state, candidates, this.maxInFlight, this.outstanding, this.refetch);
@@ -232,23 +240,33 @@ export class PagedLoader<T> {
     const current = round === this.round;
     if (current && counted && this.inRound) this.roundOutstanding -= 1;
     if (current) this.commit(next());
-    this.pump();
+    // A queued refresh goes first: its own pump requests the pages, so none is requested twice.
+    if (!this.runQueuedRefresh()) this.pump();
     this.checkThroughs();
     this.endRoundIfSettled();
   }
 
+  private canRefresh(): boolean {
+    return this.active && !this.inRound && !this.pending && firstPageSettled(this.state);
+  }
+
+  /** Runs a queued refresh when it can run now; returns whether it did. */
+  private runQueuedRefresh(): boolean {
+    if (!this.refreshQueued || !this.canRefresh()) return false;
+    this.refresh();
+    return true;
+  }
+
   private endRoundIfSettled(): void {
     if (!this.inRound || this.roundOutstanding > 0 || this.refetch.size > 0) return;
-    const queued = this.refreshQueued;
     this.endRound();
-    if (queued) this.refresh();
+    this.runQueuedRefresh();
   }
 
   private endRound(): void {
     this.inRound = false;
     this.roundOutstanding = 0;
     this.refetch.clear();
-    this.refreshQueued = false;
   }
 
   private checkThroughs(): void {

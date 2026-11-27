@@ -848,7 +848,7 @@ it('feed (g): the trash ignores every answer', async () => {
   expect(listRequests(feed.api)).toEqual([]);
 });
 
-it('feed (h): an id read that answers after a filter change patches nothing', async () => {
+it('feed (h): an id read that answers after a filter change patches nothing and refetches the new list', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const feed = await startFeed();
   const target = feed.items[0]!;
@@ -863,6 +863,48 @@ it('feed (h): an id read that answers after a filter change patches nothing', as
   });
   await waitFor(() => expect(listRequests(feed.api).at(-1)?.query).toBe('file'));
   await screen.findByText('File 0.png');
+  const requests = listRequests(feed.api).length;
   await act(async () => read.resolve(pageOf([{ ...target, tags: [tagOf('Moss')] }])));
   expect(itemOf('File 0.png').textContent).not.toContain('Moss');
+  // The change it stood for is not lost: the new list is read again.
+  await waitFor(() => expect(listRequests(feed.api)).toHaveLength(requests + 1));
+  expect(listRequests(feed.api).at(-1)).toEqual({ limit: 60, offset: 0, scope: ASSET_SCOPE, query: 'file' });
+});
+
+it('feed (i): an empty inbox shows a file added to the inbox', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let items: FileRecord[] = [];
+  const feed = withFeed({ 'files:list': feedList(() => items) });
+  render(
+    <JobsProvider>
+      <Harness scope={{ kind: 'inbox' }} showRoleFilter={false} emptyText="Inbox is empty" />
+    </JobsProvider>,
+  );
+  expect(await screen.findByText('Inbox is empty')).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  feed.api.calls.length = 0;
+  items = [fileRecord({ originalName: 'New.png' })];
+  await feed.change({ added: [{ assetId: null }] });
+  expect(await screen.findByText('New.png')).toBeTruthy();
+  expect(listRequests(feed.api)).toEqual([{ limit: 60, offset: 0, scope: { kind: 'inbox' } }]);
+});
+
+it('feed (j): an id read that fails refetches the visible page instead', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  const target = feed.items[0]!;
+  const changed = { ...target, tags: [tagOf('Moss')] };
+  feed.api.set('files:list', (request) => {
+    if (request.ids !== undefined) return Promise.reject(new Error('boom'));
+    return feedList(() => [changed, ...feed.items.slice(1)])(request);
+  });
+  await feed.change({ fileIds: [target.id] });
+  await waitFor(() => expect(itemOf('File 0.png').textContent).toContain('Moss'));
+  expect(listRequests(feed.api)).toEqual([
+    { limit: 1, offset: 0, scope: ASSET_SCOPE, ids: [target.id] },
+    { limit: 60, offset: 0, scope: ASSET_SCOPE },
+  ]);
+  expect(screen.getByRole('listbox', { name: 'Files' })).toBe(feed.container);
 });

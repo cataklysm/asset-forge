@@ -1435,6 +1435,29 @@ describe('lane hold', () => {
     expect([a1, a2, a3].map((id) => s.row(id).status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
   });
 
+  it('reports a hold that moved waiting jobs as a change of several rows', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1] = (await s.enqueue('dl', 'io', 2, 'a')) as [string, string];
+    await s.scheduler.start();
+    s.changes.ids.length = 0;
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
+    await flush();
+    // The hold runs before the run's own change is reported.
+    expect(s.changes.ids).toEqual([null, a1]);
+  });
+
+  it('reports nothing more for a hold that moved no job', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1] = (await s.enqueue('dl', 'io', 1, 'a')) as [string];
+    await s.scheduler.start();
+    s.changes.ids.length = 0;
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
+    await flush();
+    expect(s.changes.ids).toEqual([a1]);
+  });
+
   it('keeps the usual delay when the wait is shorter', async () => {
     const h = controlled('io');
     const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });

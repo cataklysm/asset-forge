@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   ANALYZE_FILE_JOB,
@@ -481,6 +481,58 @@ it('jobs changed in bulk (and a reset) refetch the visible page in place, keepin
   expect(screen.getByRole('grid', { name: 'Jobs' })).toBe(grid);
 });
 
+
+it('an empty table shows the jobs added in bulk', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = withFeed([]);
+  renderScreen();
+  expect(await screen.findByText('No jobs')).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  feed.setJobs([job({ fileName: 'new.png' })]);
+  feed.api.calls.length = 0;
+  await feed.change({ jobs: true });
+  expect(await screen.findByText('new.png')).toBeTruthy();
+  expect(listCalls(feed.api).map((c) => c.request)).toEqual([{ offset: 0, limit: 60 }]);
+});
+
+it('a failed id read refetches the visible page instead', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const first = job({ fileName: 'first.png' });
+  const feed = withFeed([first]);
+  renderScreen();
+  await screen.findByText('first.png');
+  feed.api.set('jobs:list', (request) =>
+    request.ids !== undefined ? Promise.reject(new Error('boom')) : listOf([{ ...first, status: 'running', attempt: 1 }])(request),
+  );
+  feed.api.calls.length = 0;
+  await feed.change({ jobIds: [first.id] });
+  await waitFor(() => expect(within(rowOf('first.png')).getByText('Running')).toBeTruthy());
+  expect(listCalls(feed.api).map((c) => c.request)).toEqual([
+    { ids: [first.id], offset: 0, limit: 1 },
+    { offset: 0, limit: 60 },
+  ]);
+});
+
+it('an id read that answers after a filter change patches nothing and refetches the new list', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const first = job({ fileName: 'first.png' });
+  const feed = withFeed([first]);
+  renderScreen();
+  await screen.findByText('first.png');
+  const read = deferred<{ items: JobView[]; total: number }>();
+  feed.api.set('jobs:list', (request) => (request.ids !== undefined ? read.promise : listOf([first])(request)));
+  await feed.change({ jobIds: [first.id] });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'queued' } });
+  await waitFor(() => expect(listCalls(feed.api).at(-1)?.request).toEqual({ offset: 0, limit: 60, status: 'queued' }));
+  await screen.findByText('first.png');
+  const requests = listCalls(feed.api).length;
+  await act(async () => read.resolve(pageOf([{ ...first, status: 'running', attempt: 1 }], 1)));
+  expect(within(rowOf('first.png')).getByText('Queued')).toBeTruthy();
+  await waitFor(() => expect(listCalls(feed.api)).toHaveLength(requests + 1));
+  expect(listCalls(feed.api).at(-1)?.request).toEqual({ offset: 0, limit: 60, status: 'queued' });
+});
 it('an empty list shows No jobs', async () => {
   install({});
   renderScreen();

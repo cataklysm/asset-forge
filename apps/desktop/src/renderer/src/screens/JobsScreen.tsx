@@ -123,14 +123,20 @@ export function JobsScreen() {
       current.refresh();
       return;
     }
+    // No check beyond the key: a workspace read runs synchronously when the main process receives it, and IPC
+    // answers arrive in the order asked, so a page requested after this read never answers before it.
     call('jobs:list', { ...request, ids, offset: 0, limit: ids.length }).then(
       (page) => {
-        // Started for another list: its rows must not reach this one.
-        if (latest.current.key !== startedKey) return;
+        // Started for another list: its rows must not reach this one. The current list may have been read
+        // before the change, so it is read again (queued while its first page is still loading).
+        if (latest.current.key !== startedKey) {
+          latest.current.paged.refresh();
+          return;
+        }
         if (page.items.length > 0) latest.current.paged.patch(page.items);
       },
-      // The rows stay as they are until the next reload.
-      () => {},
+      // The change must not be lost: the loaded pages are read again instead.
+      () => latest.current.paged.refresh(),
     );
   });
 

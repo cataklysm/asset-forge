@@ -501,13 +501,54 @@ describe('PagedLoader.refresh', () => {
     expect(callAt(h, 0)).toBe(requests + 1);
   });
 
-  it('makes no request while a key change is pending or before page 0 settled', async () => {
+  it('refetches page 0 of an empty list and shows the new rows', async () => {
+    const h = rowHarness();
+    await loadPages(h, [0], 0);
+    expect(h.loader.state.total).toBe(0);
+    const requests = h.calls.length;
+    h.loader.refresh();
+    expect(h.calls).toHaveLength(requests + 1);
+    expect(h.calls.at(-1)!.offset).toBe(0);
+    h.open[0]!.resolve(2);
+    await flush();
+    expect(h.loader.displayed.total).toBe(2);
+    expect(callAt(h, 1)).toBe(requests);
+    // The round is over: the next refresh runs at once.
+    h.loader.refresh();
+    expect(h.calls).toHaveLength(requests + 2);
+  });
+
+  it('ends the round of an empty list that stays empty', async () => {
+    const h = rowHarness();
+    await loadPages(h, [0], 0);
+    h.loader.refresh();
+    h.open[0]!.resolve(0);
+    await flush();
+    expect(h.loader.state.total).toBe(0);
+    const requests = h.calls.length;
+    h.loader.refresh();
+    expect(h.calls).toHaveLength(requests + 1);
+  });
+
+  it('runs a refresh asked before page 0 settled once after it', async () => {
     const h = rowHarness('A');
     h.loader.setWanted([0]);
+    h.loader.refresh();
     h.loader.refresh();
     expect(h.calls).toHaveLength(1);
     h.calls[0]!.resolve(200);
     await flush();
+    expect(h.calls).toHaveLength(2);
+    expect(h.calls[1]!.offset).toBe(0);
+    h.calls[1]!.resolve(200);
+    await flush();
+    expect(h.calls).toHaveLength(2);
+    expect(callAt(h, 0)).toBe(1);
+  });
+
+  it('runs a refresh asked while a key change is pending once after its page 0', async () => {
+    const h = rowHarness('A');
+    await loadPages(h, [0], 200);
     h.loader.setKey('B');
     expect(h.loader.pending).toBe(true);
     const requests = h.calls.length;
@@ -516,7 +557,39 @@ describe('PagedLoader.refresh', () => {
     h.open[0]!.resolve(5);
     await flush();
     expect(h.loader.pending).toBe(false);
+    expect(h.calls).toHaveLength(requests + 1);
+    expect(h.calls.at(-1)!.offset).toBe(0);
+    h.open[0]!.resolve(5);
+    await flush();
+    expect(h.calls).toHaveLength(requests + 1);
+    expect(callAt(h, 0)).toBe(requests);
+  });
+
+  it('drops a queued refresh when the key changes again, since the new key loads fresh', async () => {
+    const h = rowHarness('A');
+    await loadPages(h, [0], 200);
+    h.loader.setKey('B');
+    h.loader.refresh();
+    h.loader.setKey('C');
+    const requests = h.calls.length;
+    for (let open = h.open; open.length > 0; open = h.open) {
+      open[0]!.resolve(5);
+      await flush();
+    }
+    expect(h.loader.displayed.key).toContain('C');
     expect(h.calls).toHaveLength(requests);
+  });
+
+  it('runs a refresh asked while inactive when it turns active again', async () => {
+    const h = rowHarness();
+    await loadPages(h, [0], 200);
+    h.loader.setActive(false);
+    const requests = h.calls.length;
+    h.loader.refresh();
+    expect(h.calls).toHaveLength(requests);
+    h.loader.setActive(true);
+    expect(h.calls).toHaveLength(requests + 1);
+    expect(h.calls.at(-1)!.offset).toBe(0);
   });
 
   it('drops the answers of a round when the key changes', async () => {

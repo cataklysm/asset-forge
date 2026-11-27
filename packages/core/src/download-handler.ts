@@ -154,6 +154,8 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
       }
     }
     reportEffect(deps.effects, (e) => e.fileAdded(placedIn));
+    // The file passed through the inbox, so an inbox page read meanwhile may still hold it.
+    if (placedIn !== null) reportEffect(deps.effects, (e) => e.fileAdded(null));
   }
 
   return {

@@ -205,3 +205,16 @@ describe('several providers', () => {
     ).toBe(true);
   });
 });
+
+describe('chosen ids', () => {
+  const other = '8a1c2e3f-5b6d-4e7f-9a0b-1c2d3e4f5a6b';
+
+  test('files:list and jobs:list take distinct chosen ids only', () => {
+    for (const channel of ['files:list', 'jobs:list'] as const) {
+      const request = ipcContract[channel].request;
+      expect(request.safeParse({ limit: 2, offset: 0, scope: { kind: 'all' }, ids: [uuid, other] }).success).toBe(true);
+      expect(request.safeParse({ limit: 2, offset: 0, scope: { kind: 'all' }, ids: [uuid, uuid] }).success).toBe(false);
+      expect(request.safeParse({ limit: 2, offset: 0, scope: { kind: 'all' }, ids: [] }).success).toBe(false);
+    }
+  });
+});

@@ -5,6 +5,7 @@ import {
   emptyPaged,
   markLoading,
   pagesToRequest,
+  loadedIds,
   patchItems,
   rejectPage,
   retryIndex,
@@ -194,5 +195,13 @@ describe('pagesToRequest with pages to fetch again', () => {
     const loaded = stateWithLoaded([0, 1]);
     expect(pagesToRequest(loaded, [0, 1, 2], 2, 0, new Set([1]))).toEqual([1, 2]);
     expect(pagesToRequest(loaded, [0, 1], 2, 1, new Set([0, 1]))).toEqual([0]);
+  });
+});
+
+describe('loadedIds', () => {
+  it('answers each loaded id once, in the order asked, so a read of chosen ids never repeats one', () => {
+    const state = acceptPage(emptyPaged<{ id: string }>('k'), 'k', 0, [{ id: 'a' }, { id: 'b' }], 200);
+    expect(loadedIds(state, ['b', 'x', 'a', 'b', 'a'])).toEqual(['b', 'a']);
+    expect(loadedIds(state, [])).toEqual([]);
   });
 });

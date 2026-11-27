@@ -31,7 +31,7 @@ export interface SchedulerOptions {
   clearTimer?(handle: unknown): void;
   /**
    * Called after every status change the scheduler made, with the id of the job whose row changed; null when a
-   * cancel changed several rows at once. Must not throw.
+   * cancel or a lane hold changed several rows at once. Must not throw.
    */
   onChange?(jobId: string | null): void;
   log?(message: string, cause: unknown): void;
@@ -313,13 +313,17 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   /**
    * Makes the waiting jobs of the job's class and lane wait until `until`; their run counts stay. Not a pause.
    * Runs after the outcome was stored, so a failure here is logged as what it is and never as a lost outcome.
+   * Moved jobs are reported as a change of several rows.
    */
   async function holdLane(job: Job, until: string): Promise<void> {
+    let moved: number;
     try {
-      await jobs.holdLane({ types: typesOf.get(job.resourceClass) ?? [job.type], lane: job.lane, until, now: iso() });
+      moved = await jobs.holdLane({ types: typesOf.get(job.resourceClass) ?? [job.type], lane: job.lane, until, now: iso() });
     } catch (cause) {
       log('The lane hold could not be written', cause);
+      return;
     }
+    if (moved > 0) changed(null);
   }
 
   async function recover(): Promise<void> {

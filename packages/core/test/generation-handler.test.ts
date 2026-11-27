@@ -294,13 +294,13 @@ describe('the image.generate handler', () => {
 });
 
 describe('the effects of the generation handler', () => {
-  it("reports the source's asset for a result placed in it", async () => {
+  it("reports the source's asset and the inbox it passed for a result placed in it", async () => {
     const t = await setup();
     const assetId = await newAsset(t, 'Hero');
     await relocateFile(t.session, t.file.id, { assetId, role: 'reference' });
     await started(t, edit(t.file.id));
     await runNext(t);
-    expect(t.effects.added).toEqual([assetId]);
+    expect(t.effects.added).toEqual([assetId, null]);
     expect(t.effects.changed).toEqual([]);
   });
 

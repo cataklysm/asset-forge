@@ -89,13 +89,17 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError
 const EmptyRequestSchema = z.object({});
 const IdSchema = z.uuid();
 const IdRequestSchema = z.object({ id: IdSchema });
-/**
- * Narrows a list to these rows, within its scope and every other filter: how a list fetches the rows the change feed
- * named. A list filter only, never part of an analysis target.
- */
 /** The most ids one `files:list` or `jobs:list` request may choose. */
 export const MAX_CHOSEN_IDS = 100;
-const ChosenIdsSchema = z.array(IdSchema).min(1).max(MAX_CHOSEN_IDS);
+/**
+ * Narrows a list to these rows, within its scope and every other filter: how a list fetches the rows the change feed
+ * named. Distinct ids. A list filter only, never part of an analysis target.
+ */
+const ChosenIdsSchema = z
+  .array(IdSchema)
+  .min(1)
+  .max(MAX_CHOSEN_IDS)
+  .refine((ids) => new Set(ids).size === ids.length, { message: 'The chosen ids must be distinct' });
 const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });
 const RelationKeySchema = z.object({
   fromAssetId: IdSchema,

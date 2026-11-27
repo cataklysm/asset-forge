@@ -253,16 +253,27 @@ export function FileBrowser(props: FileBrowserProps) {
       current.refresh();
       return;
     }
+    // No check beyond the key: a workspace read runs synchronously when the main process receives it, and IPC
+    // answers arrive in the order asked, so a page requested after this read never answers before it.
     call('files:list', { ...request, ids, offset: 0, limit: ids.length }).then(
       (page) => {
-        // Started for another list: its records must not reach this one.
-        if (latest.current.key !== startedKey) return;
+        // Started for another list: its records must not reach this one. The current list may have been read
+        // before the change, so it is read again (queued while its first page is still loading).
+        if (latest.current.key !== startedKey) {
+          refreshLatest();
+          return;
+        }
         if (page.items.length > 0) latest.current.paged.patch(page.items);
       },
-      // The records stay as they are until the next reload.
-      () => {},
+      // The change must not be lost: the loaded pages are read again instead.
+      () => refreshLatest(),
     );
   });
+
+  /** Reads the loaded pages of the current list again; the trash never follows the feed. */
+  function refreshLatest() {
+    if (latest.current.props.scope.kind !== 'trash') latest.current.paged.refresh();
+  }
 
   function ask(file: FileRecord | null) {
     const current = latest.current.props.viewer;

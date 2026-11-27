@@ -464,14 +464,14 @@ describe('createFileDownloadHandler', () => {
 });
 
 describe('the effects of the download handler', () => {
-  it('reports the inbox for a file without a target and the asset for one placed in it', async () => {
+  it('reports the inbox for a file without a target, and the asset and the inbox it passed for one placed in it', async () => {
     const t = await setup();
     const assetId = await t.newAsset('A');
     t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('one') });
     t.remote.answers.set('https://a.example/2.png', { body: Buffer.from('two') });
     await t.download('https://a.example/1.png');
     await t.download('https://a.example/2.png', { target: { assetId, role: 'concept' } });
-    expect(t.effects.added).toEqual([null, assetId]);
+    expect(t.effects.added).toEqual([null, assetId, null]);
     expect(t.effects.changed).toEqual([]);
   });
 

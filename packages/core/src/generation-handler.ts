@@ -139,6 +139,8 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
         // Best effort: the linked result stays in the inbox.
       }
       reportEffect(deps.effects, (e) => e.fileAdded(placedIn));
+      // The result passed through the inbox, so an inbox page read meanwhile may still hold it.
+      if (placedIn !== null) reportEffect(deps.effects, (e) => e.fileAdded(null));
     },
 
     settled(job: Job, outcome): void {
