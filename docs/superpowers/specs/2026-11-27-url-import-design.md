@@ -179,7 +179,9 @@ New job error codes with fixed messages (never a cause, a path or the URL):
 | `download_unreachable` | DNS failure, refused or lost connection, TLS failure, a timeout | yes | yes |
 | `download_unavailable` | 5xx, 408 | yes | yes |
 | `download_throttled` | 429, 503 | yes, see below | yes |
-| `download_blocked` | 401, 403, 407, 451 | no | yes |
+| `download_blocked` | 407, 451 | no | yes |
+| `download_unauthorized` | 401 | no | yes |
+| `download_forbidden` | 403 | no | yes |
 | `download_not_found` | 404, 410 | no | no |
 | `download_rejected` | other 4xx, a refused redirect, a content encoding | no | no |
 | `download_address_refused` | the address check failed (URL or redirect target) | no | no |

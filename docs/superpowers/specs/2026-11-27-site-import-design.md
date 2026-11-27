@@ -192,6 +192,16 @@ gallery URL, `Test`, progress with `Cancel`, then the counts and the list of fou
 `Import` (disabled until a test of the unchanged profile and URL has answered at least one file).
 After the import the usual URL import result line. Explanations only as tooltips; buttons from `ui.ts`.
 
+### The status of a refusal
+
+A refused download names its HTTP status where that tells the user what to do: 401 ends the job as
+`download_unauthorized` (`The server asked for a login (HTTP 401)`: the login of the profile is
+missing or expired), 403 as `download_forbidden` (`The server refused access (HTTP 403)`: the
+server will not hand the file to this request, for example because it expects a `Referer` or a
+browser, which the app deliberately does not imitate). 407 and 451 stay `download_blocked`. The
+status travels as `RemoteFileError.status`; all three codes are not retried and count for the host
+pause. A refusal on a hop outside the profile's site is still `download_login_not_sent`.
+
 ### One download at a time
 
 The downloads of a site import do not use the lane of the file's host: every job of a profile waits

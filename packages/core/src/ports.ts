@@ -89,11 +89,15 @@ export class RemoteFileError extends Error {
     readonly failure: RemoteFileFailure,
     /** For `throttled`: how long the server asked to wait; null when it did not say. */
     readonly retryAfterMs: number | null = null,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; status?: number },
   ) {
-    super(`Remote file failure: ${failure}`, options);
+    super(`Remote file failure: ${failure}`, options?.cause === undefined ? undefined : { cause: options.cause });
+    this.status = options?.status ?? null;
     this.name = new.target.name;
   }
+
+  /** The HTTP status behind the failure; null when no answer caused it or the source did not say. */
+  readonly status: number | null;
 }
 
 /** An opened remote file: the response headers are in, the body is `stream`. */

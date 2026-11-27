@@ -24,6 +24,8 @@ const DOWNLOAD_MESSAGES = {
   download_unavailable: 'The server is temporarily unavailable',
   download_throttled: 'The server asked to slow down',
   download_blocked: 'The server refused access',
+  download_unauthorized: 'The server asked for a login (HTTP 401)',
+  download_forbidden: 'The server refused access (HTTP 403)',
   download_not_found: 'The file was not found at this address',
   download_rejected: 'The server rejected the request',
   download_address_refused: 'This address is not allowed',

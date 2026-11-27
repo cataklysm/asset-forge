@@ -286,9 +286,9 @@ describe('URL import', () => {
 
     await harness.ok('files:importUrls', { urls: [1, 2, 3].map((n) => a.url(`/r${n}.png`)) });
     const paused = await harness.until((s) => s.failed === 3 && active(s) === 0 && s.pausedHosts.length === 1);
-    expect(paused.pausedHosts).toEqual([{ host: a.host, reason: 'download_blocked' }]);
+    expect(paused.pausedHosts).toEqual([{ host: a.host, reason: 'download_forbidden' }]);
     expect(paused.paused).toEqual([]);
-    for (const job of await jobs()) expect(job).toMatchObject({ status: 'failed', errorCode: 'download_blocked' });
+    for (const job of await jobs()) expect(job).toMatchObject({ status: 'failed', errorCode: 'download_forbidden' });
 
     a.route = serveA;
     await harness.ok('files:importUrls', { urls: [4, 5].map((n) => a.url(`/r${n}.png`)) });

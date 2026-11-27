@@ -395,7 +395,7 @@ function bodyStream(
 
 function statusFailure(status: number, retryAfter: string | undefined): RemoteFileError {
   if (status === 429 || status === 503) return failure('throttled', retryAfterMs(retryAfter));
-  if (BLOCKED_STATUSES.has(status)) return failure('blocked');
+  if (BLOCKED_STATUSES.has(status)) return new RemoteFileError('blocked', null, { status });
   if (NOT_FOUND_STATUSES.has(status)) return failure('not_found');
   if (status === 408 || (status >= 500 && status <= 599)) return failure('unavailable');
   return failure('rejected');

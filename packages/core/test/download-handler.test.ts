@@ -676,6 +676,20 @@ describe('site downloads (payload v2)', () => {
     expect(t.files()).toEqual([]);
   });
 
+  it('a refusal names its status for 401 and 403 and stays download_blocked otherwise', async () => {
+    const t = await setup();
+    const cases = [
+      [401, 'download_unauthorized'],
+      [403, 'download_forbidden'],
+      [451, 'download_blocked'],
+    ] as const;
+    for (const [status, code] of cases) {
+      const url = `https://a.example/${status}.png`;
+      t.remote.answers.set(url, new RemoteFileError('blocked', null, { status }));
+      expect(codeOf(await t.run(await t.claim(url)))).toBe(code);
+    }
+  });
+
   it('a refusal on the site itself stays download_blocked', async () => {
     const t = await setup({ sites: fakeSites().sites });
     const url = 'https://a.example/x.png';

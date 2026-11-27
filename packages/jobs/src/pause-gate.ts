@@ -12,6 +12,8 @@ const DOWN: ReadonlySet<JobErrorCode> = new Set([
   'download_unavailable',
   'download_throttled',
   'download_blocked',
+  'download_unauthorized',
+  'download_forbidden',
 ]);
 /** Codes that pause a lane at once: no later run can succeed until the settings or the account change. */
 const FATAL: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured', 'provider_insufficient_balance']);

@@ -203,6 +203,8 @@ describe('createUrlSource: status mapping', () => {
     };
     const error = await failureOf(open(`${base}/s`));
     expect(error.failure).toBe(failure);
+    // Only a refusal names its status: the job error tells a missing login (401) from a refused request (403).
+    expect(error.status).toBe(failure === 'blocked' ? status : null);
     expect(error.retryAfterMs).toBe(failure === 'throttled' ? 60_000 : null);
     expect(error.message).not.toContain('127.0.0.1');
   });

@@ -36,10 +36,23 @@ const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
   too_large: 'download_too_large',
 };
 
+/**
+ * The job error code of a source failure. A refusal names its HTTP status where that tells the user what to do:
+ * 401 means the login is missing or expired, 403 that the server will not hand the file to this request.
+ *
+ * @param error the failure of the remote source
+ * @returns the code stored on the job
+ */
+function codeOf(error: RemoteFileError): JobErrorCode {
+  if (error.failure === 'blocked' && error.status === 401) return 'download_unauthorized';
+  if (error.failure === 'blocked' && error.status === 403) return 'download_forbidden';
+  return FAILURE_CODES[error.failure];
+}
+
 /** The job error of a source failure; only a throttled one carries a wait, and always one. No cause: it could hold the URL. */
 function jobErrorOf(error: RemoteFileError): JobError {
   const retryAfterMs = error.failure === 'throttled' ? clampRetryAfterMs(error.retryAfterMs) : null;
-  return new JobError(FAILURE_CODES[error.failure], { retryAfterMs });
+  return new JobError(codeOf(error), { retryAfterMs });
 }
 
 /** The job error of whatever ended the source stream: a source failure keeps its code, anything else is internal. */
