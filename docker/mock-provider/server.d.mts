@@ -27,11 +27,25 @@ export function startMockProvider(options?: {
   apiKey?: string;
   /** Receives one line per answered request: method, path and status, never a header. */
   log?: (line: string) => void;
+  /**
+   * When true, a `/v1/chat/completions` request carrying `response_format` gets 400, and one without it
+   * gets the tag JSON (standing for a caller's retry without `response_format`).
+   */
+  refuseResponseFormat?: boolean;
 }): Promise<MockProvider>;
 
 export const MOCK_MODEL = 'mock-vision';
 export const MOCK_TEXT_MODEL = 'mock-text';
 export const MOCK_LEGACY_MODEL = 'mock-legacy';
+
+/** OpenAI endpoints: answers with a `<think>` block before the content. */
+export const MOCK_THINKING_MODEL = 'mock-thinking';
+/** OpenAI endpoints: wraps a JSON answer in a code fence. */
+export const MOCK_FENCED_MODEL = 'mock-fenced';
+/** OpenAI endpoints: answers `content: null` with `reasoning_content`. */
+export const MOCK_REASONING_ONLY_MODEL = 'mock-reasoning-only';
+/** OpenAI endpoints: a name with `/` and `:` that behaves like `mock-vision`. */
+export const MOCK_SLASH_MODEL = 'Qwen/Mock-VL:7B';
 
 export const MOCK_EDIT_MODEL = 'mock-edit';
 export const MOCK_EDIT_BASIC_MODEL = 'mock-edit-basic';

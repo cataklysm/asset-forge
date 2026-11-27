@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   MOCK_EDIT_BASIC_MODEL,
   MOCK_EDIT_MODEL,
+  MOCK_FENCED_MODEL,
   MOCK_LEGACY_MODEL,
   MOCK_MODEL,
   MOCK_PROMPT_BUSY,
@@ -11,7 +12,10 @@ import {
   MOCK_PROMPT_SLOW,
   MOCK_PROMPT_VIOLATION,
   MOCK_PROMPT_VIOLATION_OK,
+  MOCK_REASONING_ONLY_MODEL,
+  MOCK_SLASH_MODEL,
   MOCK_TEXT_MODEL,
+  MOCK_THINKING_MODEL,
   startMockProvider,
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
@@ -190,6 +194,160 @@ describe('mock provider', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ method: 'POST', path: '/api/chat' });
     expect((requests[0]?.body as { model: string }).model).toBe('mock-vision');
+  });
+});
+
+describe('mock provider, OpenAI endpoints', () => {
+  const tagSchema = { type: 'json_schema', json_schema: { name: 'tags', schema: { type: 'object' } } };
+
+  function completions(
+    url: string,
+    options: { model?: string; image?: string | null; responseFormat?: unknown; headers?: Record<string, string> } = {},
+  ): Promise<Response> {
+    const { model = MOCK_MODEL, image = imageA, responseFormat, headers = {} } = options;
+    const content: unknown[] = [{ type: 'text', text: 'Answer as JSON.' }];
+    if (image !== null) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } });
+    return fetch(`${url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        ...(responseFormat === undefined ? {} : { response_format: responseFormat }),
+      }),
+    });
+  }
+
+  async function contentOf(response: Response): Promise<string | null> {
+    const json = (await response.json()) as { choices: { message: { content: string | null } }[] };
+    return json.choices[0]?.message.content ?? null;
+  }
+
+  async function ollamaContent(url: string, format: boolean): Promise<string> {
+    const response = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        ...(format ? { format: { type: 'object' } } : {}),
+        messages: [{ role: 'user', content: 'x', images: [imageA] }],
+      }),
+    });
+    return ((await response.json()) as { message: { content: string } }).message.content;
+  }
+
+  it('lists the models in a fixed order, without changing the Ollama list', async () => {
+    const { url } = await start();
+    const response = await fetch(`${url}/v1/models`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      object: 'list',
+      data: [
+        MOCK_MODEL,
+        MOCK_TEXT_MODEL,
+        MOCK_LEGACY_MODEL,
+        MOCK_THINKING_MODEL,
+        MOCK_FENCED_MODEL,
+        MOCK_REASONING_ONLY_MODEL,
+        MOCK_SLASH_MODEL,
+      ].map((id) => ({ id, object: 'model' })),
+    });
+    expect(MOCK_SLASH_MODEL).toBe('Qwen/Mock-VL:7B');
+    const tags = (await (await fetch(`${url}/api/tags`)).json()) as { models: unknown[] };
+    expect(tags.models).toHaveLength(3);
+  });
+
+  it('answers in the shape of a chat completion', async () => {
+    const { url } = await start();
+    const json = (await (await completions(url, { responseFormat: tagSchema })).json()) as Record<string, unknown>;
+    expect(json).toMatchObject({
+      object: 'chat.completion',
+      choices: [{ index: 0, message: { role: 'assistant' }, finish_reason: 'stop' }],
+    });
+    expect(typeof json.id).toBe('string');
+  });
+
+  it('answers the same tag JSON and the same text as the Ollama chat for the same image', async () => {
+    const { url } = await start();
+    const json = await contentOf(await completions(url, { responseFormat: tagSchema }));
+    expect(json).toBe(await ollamaContent(url, true));
+    const text = await contentOf(await completions(url));
+    expect(text).toBe(await ollamaContent(url, false));
+    expect(() => JSON.parse(text ?? '') as unknown).toThrow();
+    expect(await contentOf(await completions(url, { model: MOCK_SLASH_MODEL, responseFormat: tagSchema }))).toBe(json);
+  });
+
+  it('prefixes a think block, fences JSON and answers reasoning only', async () => {
+    const { url } = await start();
+    const json = await ollamaContent(url, true);
+    const text = await ollamaContent(url, false);
+    const think = '<think>\nmock reasoning\n</think>\n\n';
+    expect(await contentOf(await completions(url, { model: MOCK_THINKING_MODEL, responseFormat: tagSchema }))).toBe(think + json);
+    expect(await contentOf(await completions(url, { model: MOCK_THINKING_MODEL }))).toBe(think + text);
+    expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL, responseFormat: tagSchema }))).toBe(
+      '```json\n' + json + '\n```',
+    );
+    expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL }))).toBe(text);
+    const reasoning = (await (await completions(url, { model: MOCK_REASONING_ONLY_MODEL, responseFormat: tagSchema })).json()) as {
+      choices: { message: Record<string, unknown> }[];
+    };
+    expect(reasoning.choices[0]?.message).toEqual({ role: 'assistant', content: null, reasoning_content: 'mock reasoning' });
+  });
+
+  it('refuses an unknown model and a request without an image', async () => {
+    const { url } = await start();
+    expect((await completions(url, { model: 'other' })).status).toBe(404);
+    const noImage = await completions(url, { image: null });
+    expect(noImage.status).toBe(400);
+    expect(await noImage.json()).toHaveProperty('error');
+  });
+
+  it('requires the bearer key when one is set, and never logs it', async () => {
+    const lines: string[] = [];
+    const { url } = await start({ apiKey: KEY, log: (line) => void lines.push(line) });
+    const auth = { authorization: `Bearer ${KEY}` };
+    expect((await fetch(`${url}/v1/models`)).status).toBe(401);
+    expect((await completions(url, { headers: { authorization: 'Bearer test-key-not-real-2' } })).status).toBe(401);
+    expect((await fetch(`${url}/v1/models`, { headers: auth })).status).toBe(200);
+    expect((await completions(url, { headers: auth })).status).toBe(200);
+    expect(lines).toEqual(['GET /v1/models 401', 'POST /v1/chat/completions 401', 'GET /v1/models 200', 'POST /v1/chat/completions 200']);
+    expect(lines.join('\n')).not.toContain(KEY);
+  });
+
+  it('refuses response_format when asked to, and then answers the tag JSON without it', async () => {
+    const { url } = await start({ refuseResponseFormat: true });
+    const refused = await completions(url, { responseFormat: tagSchema });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toHaveProperty('error');
+    expect(await contentOf(await completions(url))).toBe(await ollamaContent(url, true));
+    expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL }))).toBe('```json\n' + (await ollamaContent(url, true)) + '\n```');
+  });
+
+  it('shares the failure queue with the Ollama chat', async () => {
+    const { url } = await start({ failures: [500, 503, 'invalid'] });
+    const failed = await completions(url, { responseFormat: tagSchema });
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: 'mock failure' });
+    expect((await chat(url, imageA)).status).toBe(503);
+    const invalid = await completions(url, { responseFormat: tagSchema });
+    expect(invalid.status).toBe(200);
+    expect(await contentOf(invalid)).toBe('not json');
+    expect(await contentOf(await completions(url, { responseFormat: tagSchema }))).toBe(await ollamaContent(url, true));
+  });
+
+  it('delays the answer', async () => {
+    const { url } = await start({ delayMs: 50 });
+    const started = performance.now();
+    await completions(url);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(45);
+  });
+
+  it('records requests with their parsed body', async () => {
+    const { url, requests } = await start();
+    await completions(url, { responseFormat: tagSchema });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ method: 'POST', path: '/v1/chat/completions' });
+    expect(requests[0]?.body).toMatchObject({ model: MOCK_MODEL, response_format: tagSchema });
   });
 });
 

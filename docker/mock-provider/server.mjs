@@ -56,6 +56,45 @@ function descriptionFor(imageBytes) {
   return `A ${tags[7]} ${tags[6]} of a ${tags[0]} with ${tags[1]} and ${tags[2]}.`;
 }
 
+// --- OpenAI-shaped chat and model endpoints under /v1 --------------------------------------------
+
+/** Answers with a `<think>` block before the content. */
+export const MOCK_THINKING_MODEL = 'mock-thinking';
+/** Wraps a JSON answer in a code fence. */
+export const MOCK_FENCED_MODEL = 'mock-fenced';
+/** Answers `content: null` with the text in `reasoning_content`. */
+export const MOCK_REASONING_ONLY_MODEL = 'mock-reasoning-only';
+/** A name with `/` and `:` that behaves like `mock-vision`. */
+export const MOCK_SLASH_MODEL = 'Qwen/Mock-VL:7B';
+
+const OPENAI_MODELS = [...MODELS, MOCK_THINKING_MODEL, MOCK_FENCED_MODEL, MOCK_REASONING_ONLY_MODEL, MOCK_SLASH_MODEL];
+/** The models that answer a chat on `/v1/chat/completions`. */
+const OPENAI_CHAT_MODELS = [MOCK_MODEL, MOCK_THINKING_MODEL, MOCK_FENCED_MODEL, MOCK_REASONING_ONLY_MODEL, MOCK_SLASH_MODEL];
+const MOCK_REASONING = 'mock reasoning';
+
+/** The base64 data of the first `image_url` data URL in the messages; undefined when there is none. */
+function openAiImageOf(messages) {
+  for (const message of messages) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const part of message.content) {
+      const url = part?.type === 'image_url' ? part.image_url?.url : undefined;
+      if (typeof url !== 'string') continue;
+      const comma = url.indexOf(',');
+      const data = url.startsWith('data:') && comma >= 0 ? url.slice(comma + 1) : '';
+      if (data.length > 0) return data;
+    }
+  }
+  return undefined;
+}
+
+/** The assistant message of a completion for `model`, given the plain content and whether it is JSON. */
+function openAiMessage(model, content, isJson) {
+  if (model === MOCK_REASONING_ONLY_MODEL) return { role: 'assistant', content: null, reasoning_content: MOCK_REASONING };
+  if (model === MOCK_THINKING_MODEL) return { role: 'assistant', content: `<think>\n${MOCK_REASONING}\n</think>\n\n${content}` };
+  if (model === MOCK_FENCED_MODEL && isJson) return { role: 'assistant', content: '```json\n' + content + '\n```' };
+  return { role: 'assistant', content };
+}
+
 // --- Venice-shaped image endpoints under /api/v1 -------------------------------------------------
 
 export const MOCK_EDIT_MODEL = 'mock-edit';
@@ -194,7 +233,7 @@ function editAnswer(fields) {
 // --------------------------------------------------------------------------------------------------
 
 export async function startMockProvider(options = {}) {
-  const { port = 11500, host = '127.0.0.1', delayMs = 0, log = () => {} } = options;
+  const { port = 11500, host = '127.0.0.1', delayMs = 0, log = () => {}, refuseResponseFormat = false } = options;
   // An empty key means none: the Compose file passes an unset variable through as an empty string.
   const apiKey = options.apiKey ? String(options.apiKey) : null;
   const failures = [...(options.failures ?? [])];
@@ -205,6 +244,54 @@ export async function startMockProvider(options = {}) {
   const slow = new Set();
 
   const authorized = (req) => apiKey === null || req.headers.authorization === `Bearer ${apiKey}`;
+  let completionCount = 0;
+
+  /** Sends a chat answer after `delayMs`; `close` drops the ones still waiting. */
+  function answerLater(answer) {
+    if (delayMs <= 0) return answer();
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      answer();
+    }, delayMs);
+    timers.add(timer);
+  }
+
+  /** `POST /v1/chat/completions`, after the key check; consumes the shared failure queue. */
+  function openAiChat(res, body) {
+    const failure = failures.shift();
+    if (failure === 'hang') return;
+    if (typeof failure === 'number') return sendJson(res, failure, { error: 'mock failure' });
+
+    const request = body && typeof body === 'object' ? body : {};
+    if (!OPENAI_CHAT_MODELS.includes(request.model)) {
+      return sendJson(res, 404, { error: { message: `model '${String(request.model)}' not found`, type: 'invalid_request_error' } });
+    }
+    const hasFormat = request.response_format !== undefined;
+    if (hasFormat && refuseResponseFormat) {
+      return sendJson(res, 400, { error: { message: 'response_format is not supported', type: 'invalid_request_error' } });
+    }
+    const image = openAiImageOf(Array.isArray(request.messages) ? request.messages : []);
+    if (image === undefined) return sendJson(res, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
+
+    const bytes = Buffer.from(image, 'base64');
+    // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets the JSON.
+    const isJson = request.response_format?.type === 'json_schema' || (!hasFormat && refuseResponseFormat);
+    const message =
+      failure === 'invalid'
+        ? { role: 'assistant', content: 'not json' }
+        : openAiMessage(request.model, isJson ? JSON.stringify({ tags: tagsFor(bytes) }) : descriptionFor(bytes), isJson);
+    completionCount += 1;
+    const id = `chatcmpl-mock-${completionCount}`;
+    answerLater(() =>
+      sendJson(res, 200, {
+        id,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: request.model,
+        choices: [{ index: 0, message, finish_reason: 'stop' }],
+      }),
+    );
+  }
 
   async function venice(req, res, path, raw) {
     // The multipart body is not kept on `requests`; `imageRequests` records its fields and the image size.
@@ -292,6 +379,14 @@ export async function startMockProvider(options = {}) {
         sendJson(res, 200, { models: MODELS.map((name) => ({ name, model: name })) });
         return;
       }
+      if (req.method === 'GET' && path === '/v1/models') {
+        sendJson(res, 200, { object: 'list', data: OPENAI_MODELS.map((id) => ({ id, object: 'model' })) });
+        return;
+      }
+      if (req.method === 'POST' && path === '/v1/chat/completions') {
+        openAiChat(res, body);
+        return;
+      }
       if (req.method === 'POST' && path === '/api/show') {
         const model = body && typeof body === 'object' ? body.model : undefined;
         if (typeof model === 'string' && Object.hasOwn(SHOW, model)) sendJson(res, 200, SHOW[model]);
@@ -331,22 +426,14 @@ export async function startMockProvider(options = {}) {
           : request.format === undefined
             ? descriptionFor(bytes)
             : JSON.stringify({ tags: tagsFor(bytes) });
-      const answer = () =>
+      answerLater(() =>
         sendJson(res, 200, {
           model: MOCK_MODEL,
           created_at: new Date().toISOString(),
           message: { role: 'assistant', content },
           done: true,
-        });
-      if (delayMs > 0) {
-        const timer = setTimeout(() => {
-          timers.delete(timer);
-          answer();
-        }, delayMs);
-        timers.add(timer);
-      } else {
-        answer();
-      }
+        }),
+      );
     });
   });
 
