@@ -55,9 +55,11 @@ export async function setup() {
   const file = await importOne('car.png');
   const vision = new FakeVisionProvider();
   const images = new FakeModelImageSource();
-  let configured: { vision: FakeVisionProvider | null } = { vision };
+  let configured: { vision: FakeVisionProvider | null; provider?: string | null } = { vision };
   /** The lane of every provider lookup of the handler. */
   const lanes: (string | null)[] = [];
+  /** The lane of every fingerprint provider lookup of the handler. */
+  const providerLanes: (string | null)[] = [];
   const handler = createAnalyzeFileHandler({
     session,
     vision: (lane) => {
@@ -65,12 +67,16 @@ export async function setup() {
       return configured.vision;
     },
     images,
-    provider: PROVIDER,
+    provider: (lane) => {
+      providerLanes.push(lane);
+      return configured.provider === undefined ? PROVIDER : configured.provider;
+    },
   });
-  const configure = (c: { vision: FakeVisionProvider | null }) => {
+  /** `provider` absent answers `PROVIDER`. */
+  const configure = (c: { vision: FakeVisionProvider | null; provider?: string | null }) => {
     configured = c;
   };
-  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes };
+  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes, providerLanes };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;

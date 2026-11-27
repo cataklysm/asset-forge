@@ -59,8 +59,8 @@ export function createAnalyzeFileHandler(deps: {
   /** The provider of the job's lane (its entry id) when the job runs; null when that entry does not exist or cannot be used. */
   vision: (lane: string | null) => VisionProvider | null;
   images: ModelImageSource;
-  /** Adapter kind recorded in the fingerprint of every analysis. */
-  provider: string;
+  /** The fingerprint provider id of the job's lane; null when the lane has no usable entry. */
+  provider: (lane: string | null) => string | null;
 }): JobHandler {
   const { session: s, images } = deps;
 
@@ -83,6 +83,8 @@ export function createAnalyzeFileHandler(deps: {
           : { prompt: ANALYSIS_PROMPT, limit: LEGACY_TAG_LIMIT, promptName: null };
       const vision = deps.vision(job.lane);
       if (vision === null) throw new JobError('provider_not_configured');
+      const provider = deps.provider(job.lane);
+      if (provider === null) throw new JobError('provider_not_configured');
       const { image, sha256 } = await readModelImage(s, images, fileId);
       signal.throwIfAborted();
       const answer = await vision.analyzeImage({ image, prompt: request.prompt, schema: ANALYSIS_SCHEMA, model, signal });
@@ -90,7 +92,7 @@ export function createAnalyzeFileHandler(deps: {
       signal.throwIfAborted();
       const tags = cleanAnalysisTags(answer, request.limit);
       if (tags.length === 0) throw new JobError('invalid_response');
-      const fingerprint = { provider: deps.provider, model, promptVersion: ANALYSIS_PROMPT_VERSION };
+      const fingerprint = { provider, model, promptVersion: ANALYSIS_PROMPT_VERSION };
       const { promptName } = request;
       const now = s.now().toISOString();
       const written =

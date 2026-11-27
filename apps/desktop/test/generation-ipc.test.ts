@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, IMAGE_INPUT_MAX_BYTES, type Generation, type IpcChannel, type ProviderView } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, IMAGE_INPUT_MAX_BYTES, type Generation, type IpcChannel, purposeOf, type ProviderView } from '@assetforge/contracts';
 import { NotFoundError, type ImageProvider } from '@assetforge/core';
 import {
   MOCK_EDIT_MODEL,
@@ -303,8 +303,8 @@ describe('image provider directory', () => {
   const entries = [venice, ollama];
   const store = {
     get: (id: string) => entries.find((e) => e.id === id) ?? null,
-    resolve: vi.fn((id: string | undefined, kind: string) => {
-      if (id === undefined) return entries.find((e) => e.kind === kind) ?? null;
+    resolve: vi.fn((id: string | undefined, purpose: string) => {
+      if (id === undefined) return entries.find((e) => purposeOf(e.kind) === purpose) ?? null;
       const found = entries.find((e) => e.id === id) ?? null;
       if (found === null) throw new NotFoundError('This provider does not exist');
       return found;
@@ -313,11 +313,11 @@ describe('image provider directory', () => {
   } as unknown as ProviderStore;
   const adapter = {} as ImageProvider;
 
-  it('resolves venice entries only, and answers adapter and existence from store and gateway', () => {
+  it('resolves image entries only, and answers adapter and existence from store and gateway', () => {
     const gateway = { image: (id: string | null) => (id === venice.id ? adapter : null) } as unknown as ProviderGateway;
     const directory = createImageProviderDirectory(store, gateway);
     expect(directory.resolve(undefined)).toEqual({ id: venice.id, name: 'Venice' });
-    expect(store.resolve).toHaveBeenLastCalledWith(undefined, 'venice');
+    expect(store.resolve).toHaveBeenLastCalledWith(undefined, 'image');
     expect(directory.exists(venice.id)).toBe(true);
     expect(directory.exists(ollama.id)).toBe(false);
     expect(directory.exists(UNKNOWN)).toBe(false);

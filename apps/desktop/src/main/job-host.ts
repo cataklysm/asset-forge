@@ -54,8 +54,8 @@ export interface JobHostDeps {
   /** The adapter of a lane (a provider entry id) when a job runs; null when no such entry exists. */
   vision: (lane: string | null) => VisionProvider | null;
   images: ModelImageSource;
-  /** Adapter kind recorded with every analysis. */
-  provider: string;
+  /** The fingerprint provider id of a lane (the kind of its vision entry); null when the lane has no vision entry. */
+  provider: (lane: string | null) => string | null;
   pause: PauseGate;
   /** The entry that active analysis jobs without a provider are assigned to when a workspace opens; null when there is none. */
   firstEntry: () => { id: string; name: string; taggingModel: string | null } | null;

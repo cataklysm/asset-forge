@@ -154,6 +154,24 @@ describe('the analyze file handler', () => {
     expect(await db.analyses.getProposal(file.id)).toBeNull();
   });
 
+  it('fails provider_not_configured when the lane has no fingerprint provider id, before reading the image', async () => {
+    const { db, file, vision, images, handler, configure, providerLanes } = await setup();
+    configure({ vision, provider: null });
+    await rejectsWith(handler.run(jobFor(file.id, LEGACY_V4, 'x'), new AbortController().signal), 'provider_not_configured');
+    expect(providerLanes).toEqual(['x']);
+    expect(images.calls).toEqual([]);
+    expect(vision.calls).toEqual([]);
+    expect(await db.analyses.get(file.id)).toBeNull();
+  });
+
+  it('writes the fingerprint with the provider id of the job lane', async () => {
+    const { db, file, vision, handler, configure, providerLanes } = await setup();
+    configure({ vision, provider: 'openai' });
+    await handler.run(jobFor(file.id, LEGACY_V4, 'lane-b'), new AbortController().signal);
+    expect(providerLanes).toEqual(['lane-b']);
+    expect(await db.analyses.get(file.id)).toMatchObject({ provider: 'openai', model: 'mock-vision' });
+  });
+
   it('fails provider_not_configured for a v1 payload without asking the provider', async () => {
     const { db, file, vision, images, handler } = await setup();
     await rejectsWith(handler.run(jobFor(file.id, { version: 1 }), new AbortController().signal), 'provider_not_configured');

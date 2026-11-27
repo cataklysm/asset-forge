@@ -1,5 +1,10 @@
-import { IMAGE_GENERATE_JOB, ImageGeneratePayloadSchema, JOB_ERROR_MESSAGES, type ProviderKind } from '@assetforge/contracts';
-import { OLLAMA_PROVIDER } from '@assetforge/providers';
+import {
+  IMAGE_GENERATE_JOB,
+  ImageGeneratePayloadSchema,
+  JOB_ERROR_MESSAGES,
+  purposeOf,
+  type ProviderKind,
+} from '@assetforge/contracts';
 import {
   acceptProposal,
   cancelAllJobs,
@@ -89,14 +94,17 @@ export function createJobHandlers(
   /** The current name of an existing entry; otherwise the name copied into a payload, if any. */
   const nameOf = (lane: string | null, copied: string | null): string | null =>
     (lane === null ? null : providers.get(lane)?.name) ?? copied;
-  /** True when the lane belongs to an existing `venice` entry: its jobs are generations, never analyses. */
-  const isImageLane = (lane: string | null): boolean => lane !== null && providers.get(lane)?.kind === 'venice';
+  /** True when the lane belongs to an existing image entry: its jobs are generations, never analyses. */
+  const isImageLane = (lane: string | null): boolean => {
+    const entry = lane === null ? null : providers.get(lane);
+    return entry !== null && purposeOf(entry.kind) === 'image';
+  };
 
   return {
     'analysis:preview': (r) =>
       manager.read((s) => {
         const entry = entryFor(r.providerId);
-        return previewAnalysis(s, { target: r.target, model: r.model, provider: OLLAMA_PROVIDER, entry });
+        return previewAnalysis(s, { target: r.target, model: r.model, provider: entry.kind, entry });
       }),
     'analysis:enqueue': async (r) => {
       const { target, model, mode, force } = r;
@@ -109,7 +117,8 @@ export function createJobHandlers(
           model,
           mode,
           force,
-          provider: OLLAMA_PROVIDER,
+          // The fingerprint provider id is the entry's kind, equal to OLLAMA_PROVIDER or OPENAI_PROVIDER.
+          provider: entry.kind,
           prompt: { name, text, maxTags },
           entry: { id: entry.id, name: entry.name },
         });
@@ -183,9 +192,12 @@ export function createJobHandlers(
             if (lane !== null) pausedHosts.push({ host: lane, reason });
             continue;
           }
-          // A generation lane pauses only for a venice entry; an analysis lane only for an ollama one.
-          const kind: ProviderKind = resourceClass === 'remote_api' ? 'venice' : 'ollama';
-          const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : await generationLaneName(s, lane));
+          // The kind of the lane's entry; for a lane whose entry is gone, what its resource class implies.
+          const entry = lane === null ? null : providers.get(lane);
+          const kind: ProviderKind = entry?.kind ?? (resourceClass === 'remote_api' ? 'venice' : 'ollama');
+          // The name copied into the jobs is read by the resource class: an analysis lane or a generation lane.
+          const providerName =
+            entry?.name ?? (resourceClass === 'remote_api' ? await generationLaneName(s, lane) : await laneName(s, lane));
           paused.push({ providerId: lane, providerName, kind, reason });
         }
         return { ...counts, changes: jobs.changes(), paused, pausedHosts };
@@ -246,7 +258,7 @@ export function createJobHandlers(
       const result = await manager.read((s) => {
         // Only analysis jobs move, and only between analysis entries; generation jobs never move.
         if (isImageLane(r.fromProviderId)) throw new InvalidOperationError(CANNOT_ANALYSE);
-        const to = providers.resolve(r.toProviderId, 'ollama')!;
+        const to = providers.resolve(r.toProviderId, 'vision')!;
         return rerouteJobs(s, { fromLane: r.fromProviderId, to: { id: to.id, name: to.name }, model: r.model });
       });
       if (result.moved > 0) jobs.resume(r.fromProviderId, PROVIDER_CLASSES);

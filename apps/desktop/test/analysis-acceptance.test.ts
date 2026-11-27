@@ -58,7 +58,7 @@ describe('phase 4a acceptance', () => {
       manager,
       vision: provider.vision,
       images: { jpeg: (path) => readFile(path) },
-      provider: OLLAMA_PROVIDER,
+      provider: () => OLLAMA_PROVIDER,
       pause: createPauseGate({}),
       firstEntry: () => provider.store.first(),
       ...noGenerations,

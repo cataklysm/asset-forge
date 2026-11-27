@@ -7,7 +7,7 @@ import {
   type RemoteFileSource,
   type VisionProvider,
 } from '@assetforge/core';
-import { createOllamaVision, createVeniceImage } from '@assetforge/providers';
+import { createOllamaVision, createOpenAiVision, createVeniceImage } from '@assetforge/providers';
 import { createAnalysisPromptHandlers } from '../src/main/analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from '../src/main/analysis-prompts.js';
 import type { AppServices, HostActions } from '../src/main/ipc.js';
@@ -96,7 +96,7 @@ export function mockProviderEntry(
   url: string,
 ): { store: ProviderStore; entry: ProviderView; vision: (lane: string | null) => VisionProvider | null } {
   const store = createProviderStore({ userData, secrets: new FakeCodec(), env: {} });
-  const gateway = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: () => {} });
+  const gateway = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: createVeniceImage, log: () => {} });
   const entry = store.save({ name: 'Mock', baseUrl: url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
   return { store, entry, vision: (lane) => gateway.vision(lane) };
 }

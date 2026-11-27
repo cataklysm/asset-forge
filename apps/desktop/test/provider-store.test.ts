@@ -119,7 +119,7 @@ describe('provider store: upgrade and start', () => {
     expect(readdirSync(credentials())).toEqual([`vision-api-key-${id}`]);
     expect(s.apiKeyFor(id, 'http://192.168.1.20:11434')).toBe(KEY);
     expect(readSettings()).toEqual({
-      version: 3,
+      version: 4,
       providers: [
         {
           id,
@@ -130,6 +130,7 @@ describe('provider store: upgrade and start', () => {
           taggingModel: 'tagger',
           promptModel: null,
           editModel: null,
+          options: DEFAULT_PROVIDER_OPTIONS,
         },
       ],
       lastUsed: { vision: null, image: null },
@@ -149,7 +150,7 @@ describe('provider store: upgrade and start', () => {
     writeLegacyKey();
     expect(store().list().providers).toEqual([]);
     expect(existsSync(legacyKeyFile())).toBe(false);
-    expect(readSettings()).toEqual({ version: 3, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null });
+    expect(readSettings()).toEqual({ version: 4, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null });
   });
 
   it('adopts the legacy key after a crash between writing version 2 and the rename', () => {
@@ -212,7 +213,7 @@ describe('provider store: upgrade and start', () => {
 
   it.each([
     ['not JSON', 'not json'],
-    ['an unknown version', JSON.stringify({ version: 4, providers: [] })],
+    ['an unknown version', JSON.stringify({ version: 5, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null })],
     ['a version 3 without slots', JSON.stringify({ version: 3, providers: [], adoptLegacyKey: null })],
     [
       'a venice entry with a tagging model',
@@ -687,15 +688,16 @@ describe('provider store: version 3', () => {
     expect(store().list()).toEqual(list);
   });
 
-  it('writes version 3 atomically on the first write', () => {
+  it('writes version 4 atomically on the first write', () => {
     writeV2WithTwo();
     const s = store();
     s.markUsed(PREPARED);
+    const options = DEFAULT_PROVIDER_OPTIONS;
     expect(readSettings()).toEqual({
-      version: 3,
+      version: 4,
       providers: [
-        { id: PREPARED, kind: 'ollama', name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null },
-        { id: SECOND, kind: 'ollama', name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer', editModel: null },
+        { id: PREPARED, kind: 'ollama', name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null, options },
+        { id: SECOND, kind: 'ollama', name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer', editModel: null, options },
       ],
       lastUsed: { vision: PREPARED, image: null },
       adoptLegacyKey: null,
@@ -727,8 +729,7 @@ describe('provider store: kinds', () => {
       options: null,
     });
     expect(readSettings().providers[1]).toMatchObject({ kind: 'venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
-    // The options are held in memory only until the file format carries them.
-    for (const p of readSettings().providers) expect(p).not.toHaveProperty('options');
+    expect(readSettings().providers.map((p: { options: unknown }) => p.options)).toEqual([DEFAULT_PROVIDER_OPTIONS, null]);
     expect(store().get(v.id)).toMatchObject({ kind: 'venice', editModel: 'edit-a' });
   });
 
@@ -833,26 +834,26 @@ describe('provider store: resolve by kind', () => {
   it('resolves the image entry used last, else the first venice entry, else null', () => {
     const s = store();
     const o = s.save(input({ name: 'O' }));
-    expect(s.resolve(undefined, 'venice')).toBeNull();
-    expect(s.first('venice')).toBeNull();
+    expect(s.resolve(undefined, 'image')).toBeNull();
+    expect(s.first('image')).toBeNull();
     const v1 = s.save(venice({ name: 'V1' }));
     const v2 = s.save(venice({ name: 'V2' }));
     expect(s.first()?.id).toBe(o.id);
-    expect(s.first('ollama')?.id).toBe(o.id);
-    expect(s.first('venice')?.id).toBe(v1.id);
+    expect(s.first('vision')?.id).toBe(o.id);
+    expect(s.first('image')?.id).toBe(v1.id);
     expect(s.resolve(undefined)?.id).toBe(o.id);
-    expect(s.resolve(undefined, 'venice')?.id).toBe(v1.id);
+    expect(s.resolve(undefined, 'image')?.id).toBe(v1.id);
     s.markUsed(v2.id);
     expect(s.list()).toMatchObject({ lastUsedId: null, lastUsedImageId: v2.id });
-    expect(s.resolve(undefined, 'venice')?.id).toBe(v2.id);
+    expect(s.resolve(undefined, 'image')?.id).toBe(v2.id);
     expect(s.resolve(undefined)?.id).toBe(o.id);
-    expect(store().resolve(undefined, 'venice')?.id).toBe(v2.id);
+    expect(store().resolve(undefined, 'image')?.id).toBe(v2.id);
     s.markUsed(o.id);
     expect(s.list()).toMatchObject({ lastUsedId: o.id, lastUsedImageId: v2.id });
     expect(readSettings().lastUsed).toEqual({ vision: o.id, image: v2.id });
     s.delete(v2.id);
     expect(s.list()).toMatchObject({ lastUsedId: o.id, lastUsedImageId: null });
-    expect(s.resolve(undefined, 'venice')?.id).toBe(v1.id);
+    expect(s.resolve(undefined, 'image')?.id).toBe(v1.id);
   });
 
   it('skips an entry of the other kind as the first one', () => {
@@ -860,18 +861,18 @@ describe('provider store: resolve by kind', () => {
     const v = s.save(venice());
     expect(s.first()).toBeNull();
     expect(s.resolve(undefined)).toBeNull();
-    expect(s.first('venice')?.id).toBe(v.id);
+    expect(s.first('image')?.id).toBe(v.id);
   });
 
   it('resolves a given id of the right kind and refuses one of the wrong kind', () => {
     const s = store();
     const o = s.save(input());
     const v = s.save(venice());
-    expect(s.resolve(v.id, 'venice')?.id).toBe(v.id);
+    expect(s.resolve(v.id, 'image')?.id).toBe(v.id);
     expect(s.resolve(o.id)?.id).toBe(o.id);
-    expect(errorOf(() => s.resolve(o.id, 'venice'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
+    expect(errorOf(() => s.resolve(o.id, 'image'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
     expect(errorOf(() => s.resolve(v.id))).toEqual({ code: 'invalid_operation', message: 'This provider cannot analyse images' });
-    expect(errorOf(() => s.resolve(UNKNOWN, 'venice'))).toEqual({ code: 'not_found', message: 'This provider does not exist' });
+    expect(errorOf(() => s.resolve(UNKNOWN, 'image'))).toEqual({ code: 'not_found', message: 'This provider does not exist' });
   });
 
   it('lists only the environment entry in environment mode, with no image entry used last', () => {
@@ -879,9 +880,136 @@ describe('provider store: resolve by kind', () => {
     const s = store({ ASSETFORGE_VISION_BASE_URL: 'http://127.0.0.1:11500' });
     expect(s.list()).toMatchObject({ providers: [{ id: 'environment', kind: 'ollama' }], lastUsedImageId: null });
     expect(s.list().providers).toHaveLength(1);
-    expect(s.resolve(undefined, 'venice')).toBeNull();
-    expect(s.first('venice')).toBeNull();
+    expect(s.resolve(undefined, 'image')).toBeNull();
+    expect(s.first('image')).toBeNull();
     s.markUsed('environment');
     expect(s.list()).toMatchObject({ lastUsedId: 'environment', lastUsedImageId: null });
+  });
+});
+
+const openai = (overrides: Partial<SaveProvider> = {}): SaveProvider =>
+  input({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:1/v1', ...overrides });
+
+const CUSTOM = { temperature: 0.7, thinking: 'off', maxTokens: 512, extra: '{"top_p":0.9}' } as const;
+
+describe('provider store: version 4 and options', () => {
+  const SECOND = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  const v3Entries = [
+    { id: PREPARED, kind: 'ollama', name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null },
+    { id: SECOND, kind: 'venice', name: 'V', baseUrl: 'https://v.example.test/api/v1', timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: 'edit-a' },
+  ];
+  const writeFile = (version: number, providers: unknown[]) =>
+    writeFileSync(settingsFile(), JSON.stringify({ version, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }));
+
+  it('reads version 3 with default options on ollama and none on venice, and writes version 4 on the first write', () => {
+    writeFile(3, v3Entries);
+    const before = readFileSync(settingsFile(), 'utf8');
+    const s = store();
+    const listed = s.list().providers;
+    expect(listed.map((p) => p.options)).toEqual([DEFAULT_PROVIDER_OPTIONS, null]);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    s.markUsed(PREPARED);
+    expect(readSettings()).toMatchObject({
+      version: 4,
+      providers: [
+        { ...v3Entries[0], options: DEFAULT_PROVIDER_OPTIONS },
+        { ...v3Entries[1], options: null },
+      ],
+    });
+    expect(store().list().providers).toEqual(listed);
+  });
+
+  it('creates an openai entry with its options and reads it back', () => {
+    const s = store();
+    const saved = s.save(openai({ options: CUSTOM }));
+    expect(saved).toMatchObject({ kind: 'openai', baseUrl: 'http://127.0.0.1:1/v1', taggingModel: 'tagger', promptModel: 'writer', editModel: null, options: CUSTOM });
+    expect(readSettings().providers[0]).toMatchObject({ kind: 'openai', options: CUSTOM });
+    expect(store().get(saved.id)).toEqual(s.get(saved.id));
+    expect(s.save(openai({ name: 'Plain' })).options).toEqual(DEFAULT_PROVIDER_OPTIONS);
+  });
+
+  it('gives a new vision entry the defaults and keeps the stored options when they are absent on an edit', () => {
+    const s = store();
+    const o = s.save(input());
+    expect(o.options).toEqual(DEFAULT_PROVIDER_OPTIONS);
+    const edited = s.save(input({ id: o.id, options: CUSTOM }));
+    expect(edited.options).toEqual(CUSTOM);
+    expect(s.save(input({ id: o.id, name: 'Renamed' })).options).toEqual(CUSTOM);
+    expect(store().get(o.id)?.options).toEqual(CUSTOM);
+  });
+
+  it.each([
+    ['[1]', 'The extra parameters are not a JSON object'],
+    ['{not json', 'The extra parameters are not a JSON object'],
+    ['{"model":"x"}', 'The extra parameters must not set model'],
+  ])('refuses the extra parameters %s and writes nothing', (extra, message) => {
+    const s = store();
+    const o = s.save(input());
+    const before = readFileSync(settingsFile(), 'utf8');
+    expect(errorOf(() => s.save(input({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))).toEqual({
+      code: 'validation_failed',
+      message,
+    });
+    expect(errorOf(() => s.save(openai({ options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))?.message).toBe(message);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    expect(s.get(o.id)?.options).toEqual(DEFAULT_PROVIDER_OPTIONS);
+  });
+
+  it('refuses response_format for an openai entry and accepts it for an ollama entry', () => {
+    const s = store();
+    const options = { ...DEFAULT_PROVIDER_OPTIONS, extra: '{"response_format":{}}' };
+    expect(errorOf(() => s.save(openai({ options })))).toEqual({
+      code: 'validation_failed',
+      message: 'The extra parameters must not set response_format',
+    });
+    expect(s.list().providers).toEqual([]);
+    expect(s.save(input({ options })).options).toEqual(options);
+  });
+
+  it('stores null options for a venice entry even when options are sent', () => {
+    const s = store();
+    const v = s.save(venice({ options: CUSTOM }));
+    expect(v.options).toBeNull();
+    expect(s.save(venice({ id: v.id, options: { ...DEFAULT_PROVIDER_OPTIONS, extra: '[1]' } })).options).toBeNull();
+    expect(readSettings().providers[0].options).toBeNull();
+  });
+
+  it('refuses a kind change from ollama to openai and the reverse', () => {
+    const s = store();
+    const o = s.save(input());
+    const a = s.save(openai());
+    expect(errorOf(() => s.save(openai({ id: o.id })))).toEqual({ code: 'invalid_operation', message: 'The kind of a provider cannot be changed' });
+    expect(errorOf(() => s.save(input({ id: a.id, kind: 'ollama' })))?.message).toBe('The kind of a provider cannot be changed');
+    const { kind: _omit, ...noKind } = openai({ id: a.id, name: 'Still openai' });
+    expect(s.save(noKind).kind).toBe('openai');
+  });
+
+  it('resolves an openai entry for analysis and refuses it for images', () => {
+    const s = store();
+    const o = s.save(input({ name: 'O' }));
+    const a = s.save(openai());
+    expect(s.resolve(undefined)?.id).toBe(o.id);
+    s.markUsed(a.id);
+    expect(s.list().lastUsedId).toBe(a.id);
+    expect(s.resolve(undefined)?.id).toBe(a.id);
+    expect(s.resolve(undefined, 'vision')?.id).toBe(a.id);
+    expect(store().resolve(undefined)?.id).toBe(a.id);
+    expect(s.resolve(a.id)?.id).toBe(a.id);
+    expect(s.resolve(undefined, 'image')).toBeNull();
+    expect(errorOf(() => s.resolve(a.id, 'image'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
+    s.delete(o.id);
+    expect(s.first()?.id).toBe(a.id);
+  });
+
+  it.each([
+    ['a vision entry without options', [{ ...v3Entries[0], options: null }]],
+    ['a vision entry without the options key', [v3Entries[0]]],
+    ['a venice entry with options', [{ ...v3Entries[1], options: DEFAULT_PROVIDER_OPTIONS }]],
+    ['refused extra parameters', [{ ...v3Entries[0], kind: 'openai', options: { ...DEFAULT_PROVIDER_OPTIONS, extra: '{"n":2}' } }]],
+    ['options out of bounds', [{ ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, temperature: 3 } }]],
+  ])('sets a version 4 file with %s aside', (_label, providers) => {
+    writeFile(4, providers);
+    expect(store().list().providers).toEqual([]);
+    expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
   });
 });

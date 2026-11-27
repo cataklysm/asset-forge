@@ -11,10 +11,10 @@ import {
   type RemoteFileSource,
   type WorkspaceHost,
 } from '@assetforge/core';
-import { IMAGE_GENERATE_JOB, WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
+import { IMAGE_GENERATE_JOB, isVisionKind, WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
-import { createOllamaVision, createVeniceImage, OLLAMA_PROVIDER } from '@assetforge/providers';
+import { createOllamaVision, createOpenAiVision, createVeniceImage } from '@assetforge/providers';
 import { createUrlSource, LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
 import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
@@ -125,7 +125,12 @@ export function createAnalysisServices(o: {
 }): AnalysisServices {
   const store = createProviderStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
   // Registers its change listener first, so the entry's adapter is dropped before its lane resumes.
-  const gateway = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: o.log });
+  const gateway = createProviderGateway({
+    store,
+    createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+    createImage: createVeniceImage,
+    log: o.log,
+  });
   const imageProviders = createImageProviderDirectory(store, gateway);
   let jobHost: JobHost | null = null;
   const pause = createPauseGate({
@@ -142,7 +147,11 @@ export function createAnalysisServices(o: {
     manager: o.manager,
     vision: (lane) => gateway.vision(lane),
     images: o.images,
-    provider: OLLAMA_PROVIDER,
+    // The fingerprint provider id is the kind of the lane's vision entry (OLLAMA_PROVIDER or OPENAI_PROVIDER).
+    provider: (lane) => {
+      const entry = lane === null ? null : store.get(lane);
+      return entry !== null && isVisionKind(entry.kind) ? entry.kind : null;
+    },
     pause,
     firstEntry: () => store.first(),
     imageProviders,

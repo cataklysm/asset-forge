@@ -7,6 +7,7 @@ import {
   type ImageProviderDirectory,
   type WorkspaceManager,
 } from '@assetforge/core';
+import { purposeOf } from '@assetforge/contracts';
 import { LIST_MODELS_TIMEOUT_MS } from '@assetforge/providers';
 import type { IpcHandlers } from './ipc.js';
 import type { JobHost } from './job-host.js';
@@ -33,10 +34,13 @@ export function createImageProviderDirectory(
   const timeoutMs = o.timeoutMs ?? LIST_MODELS_TIMEOUT_MS;
   return {
     resolve(id) {
-      const entry = store.resolve(id, 'venice');
+      const entry = store.resolve(id, 'image');
       return entry === null ? null : { id: entry.id, name: entry.name };
     },
-    exists: (id) => store.get(id)?.kind === 'venice',
+    exists: (id) => {
+      const entry = store.get(id);
+      return entry !== null && purposeOf(entry.kind) === 'image';
+    },
     adapter: (id) => gateway.image(id),
     async models(id, signal) {
       const deadline = new AbortController();

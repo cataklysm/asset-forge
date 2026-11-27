@@ -7,12 +7,12 @@ import { ipcContract, type IpcChannel, type IpcRequest, type IpcResponse, type I
 import { composeTaggingRequest, type WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS, type PauseGate } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
-import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analysis-prompts.js';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
+import type { ProviderStore } from '../src/main/provider-store.js';
 import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
@@ -25,6 +25,8 @@ let handlers: IpcHandlers;
 let logs: string[];
 /** The id of the mock's provider entry. */
 let entryId: string;
+/** The provider store the handlers and the job host read. */
+let store: ProviderStore;
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
@@ -51,12 +53,16 @@ async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Pr
   mock = await startMockProvider({ port: 0, failures });
   const provider = mockProviderEntry(join(base, 'userData'), mock.url);
   entryId = provider.entry.id;
+  store = provider.store;
   pause = createPauseGate({});
   jobHost = createJobHost({
     manager,
     vision: provider.vision,
     images: { jpeg: (path) => readFile(path) },
-    provider: OLLAMA_PROVIDER,
+    provider: (lane) => {
+      const entry = lane === null ? null : provider.store.get(lane);
+      return entry === null || entry.kind === 'venice' ? null : entry.kind;
+    },
     pause,
     firstEntry: firstEntry ?? (() => provider.store.first()),
     ...noGenerations,
@@ -441,6 +447,46 @@ describe('analysis:enqueue with an analysis prompt', () => {
     expect(after.pausedHosts).toEqual([]);
     expect(after.paused).toHaveLength(1);
     expect(await call('jobs:resumeHost', { host: '' })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
+  /** An `openai` entry on the mock's OpenAI-compatible API, without a key. */
+  const openAiEntry = () =>
+    store.save({ kind: 'openai', name: 'vLLM', baseUrl: `${mock!.url}/v1`, timeoutSeconds: 30, taggingModel: null, promptModel: null });
+
+  it('reports the real kind of a paused lane, and for a lane whose entry is gone what its resource class implies', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const openai = openAiEntry();
+    pause.record('local_gpu', openai.id, 'provider_unauthorized');
+    pause.record('local_gpu', uuid, 'provider_unauthorized');
+    pause.record('remote_api', entryId, 'provider_unauthorized');
+
+    const { paused } = await ok('jobs:summary', {});
+    expect(paused).toEqual([
+      { providerId: openai.id, providerName: 'vLLM', kind: 'openai', reason: 'provider_unauthorized' },
+      { providerId: uuid, providerName: null, kind: 'ollama', reason: 'provider_unauthorized' },
+      { providerId: entryId, providerName: 'Mock', kind: 'ollama', reason: 'provider_unauthorized' },
+    ]);
+  });
+
+  it('moves the waiting jobs of an ollama entry onto an openai entry, which then runs them', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    pause.record('local_gpu', entryId, 'provider_unauthorized');
+    const fileIds = await importImages(2);
+    await ok('analysis:enqueue', { ...filesRequest(fileIds), providerId: entryId });
+    expect(await ok('jobs:waitingByProvider', {})).toEqual([{ providerId: entryId, providerName: 'Mock', waiting: 2 }]);
+    const openai = openAiEntry();
+
+    expect(await ok('jobs:reroute', { fromProviderId: entryId, toProviderId: openai.id, model: MOCK_MODEL })).toEqual({ moved: 2 });
+    await until((s) => s.succeeded === 2);
+
+    const { items } = await ok('jobs:list', page);
+    for (const job of items) expect(job).toMatchObject({ providerId: openai.id, providerName: 'vLLM' });
+    expect(mock!.requests.map((r) => r.path).filter((p) => p.endsWith('/chat/completions'))).toEqual([
+      '/v1/chat/completions',
+      '/v1/chat/completions',
+    ]);
   });
 
   it('resumes only the queues of the request when a host and a provider lane share a name', async () => {
