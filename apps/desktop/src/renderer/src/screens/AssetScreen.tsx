@@ -22,13 +22,14 @@ import { SourceList } from '../components/SourceList';
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
+import { SiteImportDialog } from '../components/SiteImportDialog';
 import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
 import { useLoad } from '../hooks/useLoad';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useChanges } from '../jobs-context';
-import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, URL_IMPORT_LABEL } from '../labels';
+import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
@@ -75,6 +76,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [importing, setImporting] = useState(false);
   // The target of the open URL import dialog: the role as chosen when the dialog opened.
   const [urlImportTarget, setUrlImportTarget] = useState<FileTarget | null>(null);
+  // The same for the open site import dialog.
+  const [siteImportTarget, setSiteImportTarget] = useState<FileTarget | null>(null);
   const [importResult, setImportResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [fileCount, setFileCount] = useState<number | null>(null);
@@ -255,6 +258,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             >
               {URL_IMPORT_LABEL}
             </button>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={importing}
+              onClick={() => setSiteImportTarget({ assetId: id, role: importRole })}
+            >
+              {SITE_IMPORT_LABEL}
+            </button>
             {importProgress.progress !== null ? (
               <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
             ) : (
@@ -365,6 +376,9 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       {analysis.dialogs}
       {zipChoice.dialog}
       {urlImportTarget !== null && <UrlImportDialog target={urlImportTarget} onClose={() => setUrlImportTarget(null)} />}
+      {siteImportTarget !== null && (
+        <SiteImportDialog target={siteImportTarget} onClose={() => setSiteImportTarget(null)} onImported={() => loaded.reload()} />
+      )}
     </div>
   );
 }

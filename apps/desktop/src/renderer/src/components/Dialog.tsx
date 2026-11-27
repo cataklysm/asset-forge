@@ -9,12 +9,14 @@ interface Props {
   /** Focused when the dialog opens; otherwise the browser focuses the first focusable element. */
   initialFocusRef?: RefObject<HTMLElement | null>;
   /** `detail` renders its content edge to edge; the content brings its own header. */
-  size?: 'form' | 'detail';
+  size?: 'form' | 'wide' | 'detail';
   children: ReactNode;
 }
 
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
+  /** A form with two columns. */
+  wide: 'w-[min(94vw,64rem)]',
   // The window size minus an even margin; the UA's max-width/max-height would cap it otherwise.
   detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none overflow-hidden',
 } as const;

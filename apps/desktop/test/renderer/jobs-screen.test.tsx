@@ -188,6 +188,27 @@ it('a download job with a file shows the file name; an already present one says 
   expect(cells('moss.png').slice(0, 4)).toEqual(['Download', 'moss.png', 'example.com', 'Done']);
 });
 
+it('a download the site profile filtered out says Filtered in its status', async () => {
+  install({
+    'jobs:list': listOf([
+      job({
+        type: FILE_DOWNLOAD_JOB,
+        status: 'succeeded',
+        attempt: 1,
+        fileId: null,
+        fileName: null,
+        url: 'https://example.com/small.png',
+        host: 'example.com',
+        result: 'filtered',
+      }),
+    ]),
+  });
+  renderScreen();
+  const cell = await screen.findByText('example.com/small.png');
+  const cells = within(cell.closest<HTMLElement>('[role="row"]')!).getAllByRole('gridcell').map((c) => c.textContent);
+  expect(cells.slice(0, 4)).toEqual(['Download', 'example.com/small.png', 'example.com', 'Filtered']);
+});
+
 it('the shortened URL is at most 60 characters, and an address that does not parse is cut to 60', async () => {
   const long = `https://example.com/${'a'.repeat(80)}.png`;
   const broken = `not a url ${'b'.repeat(80)}`;

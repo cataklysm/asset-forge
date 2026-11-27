@@ -1018,6 +1018,65 @@ it('Import from URLs follows Import files, is disabled while importing and sends
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
+it('Import from site follows Import from URLs, is disabled while importing and imports without a target', async () => {
+  const user = userEvent.setup();
+  const picked = deferred<string[]>();
+  const profile = {
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Shop',
+    site: 'example.com',
+    thumbnails: '//a',
+    pagination: '',
+    file: '',
+    kinds: ['image' as const],
+    minBytes: 0,
+    urlContains: '',
+    maxPages: 20,
+    maxFiles: 1000,
+  };
+  const crawlId = '33333333-3333-4333-8333-333333333333';
+  const api = install([], {
+    'dialog:pickFiles': () => picked.promise,
+    'sites:list': () => ({ profiles: [profile] }),
+    'sites:crawl': () => ({
+      crawlId,
+      files: ['https://example.com/a.png'],
+      pages: 1,
+      duplicates: 0,
+      filtered: 0,
+      disallowed: 0,
+      invalid: 0,
+      pageFailures: 0,
+      truncated: null,
+      cancelled: false,
+    }),
+    'sites:crawlProgress': () => null,
+    'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+  });
+  render(<Harness />);
+  await screen.findByText('Inbox is empty');
+  const siteButton = screen.getByRole('button', { name: 'Import from site' }) as HTMLButtonElement;
+  expect(siteButton.previousElementSibling?.textContent).toBe('Import from URLs');
+  expect(siteButton.className).toBe(screen.getAllByRole('button', { name: 'Import files' })[0]!.className);
+
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  expect(siteButton.disabled).toBe(true);
+  picked.resolve([]);
+  await waitFor(() => expect(siteButton.disabled).toBe(false));
+
+  await user.click(siteButton);
+  const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
+  await waitFor(() => expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'));
+  await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URL' }), 'https://example.com/g');
+  await user.click(within(dialog).getByRole('button', { name: 'Test' }));
+  await within(dialog).findByRole('list', { name: 'Found files' });
+  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+  expect(await within(dialog).findByText('Queued 1')).toBeTruthy();
+  expect(callsOf(api, 'sites:import')).toEqual([{ crawlId, target: null }]);
+  await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('a running import shows its progress, reloads the list while done changes and keeps selection and scroll; a cancel ends the title', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {

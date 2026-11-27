@@ -1264,6 +1264,57 @@ it('Import from URLs follows Import files and targets the asset with the selecte
   ]);
 });
 
+it('Import from site follows Import from URLs, targets the asset with the selected role and reads the asset again', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const profile = {
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Shop',
+    site: 'example.com',
+    thumbnails: '//a',
+    pagination: '',
+    file: '',
+    kinds: ['image' as const],
+    minBytes: 0,
+    urlContains: '',
+    maxPages: 20,
+    maxFiles: 1000,
+  };
+  const crawlId = '33333333-3333-4333-8333-333333333333';
+  const api = install(asset, {
+    'sites:list': () => ({ profiles: [profile] }),
+    'sites:crawl': () => ({
+      crawlId,
+      files: ['https://example.com/a.png'],
+      pages: 1,
+      duplicates: 0,
+      filtered: 0,
+      disallowed: 0,
+      invalid: 0,
+      pageFailures: 0,
+      truncated: null,
+      cancelled: false,
+    }),
+    'sites:crawlProgress': () => null,
+    'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+  });
+  render(<Harness id={asset.id} />);
+  await user.selectOptions(await screen.findByRole('combobox', { name: 'Role for imported files' }), 'concept');
+  const siteButton = screen.getByRole('button', { name: 'Import from site' });
+  expect(siteButton.previousElementSibling?.textContent).toBe('Import from URLs');
+  await user.click(siteButton);
+  const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
+  await waitFor(() => expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'));
+  await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URL' }), 'https://example.com/g');
+  await user.click(within(dialog).getByRole('button', { name: 'Test' }));
+  await within(dialog).findByRole('list', { name: 'Found files' });
+  const reads = callsOf(api, 'assets:get').length;
+  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+  expect(await within(dialog).findByText('Queued 1')).toBeTruthy();
+  expect(callsOf(api, 'sites:import')).toEqual([{ crawlId, target: { assetId: asset.id, role: 'concept' } }]);
+  await waitFor(() => expect(callsOf(api, 'assets:get').length).toBeGreaterThan(reads));
+});
+
 it('Import from URLs is disabled while files are imported', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();

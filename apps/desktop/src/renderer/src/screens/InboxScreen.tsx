@@ -11,6 +11,7 @@ import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
 import { SelectionBar } from '../components/SelectionBar';
+import { SiteImportDialog } from '../components/SiteImportDialog';
 import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
 import { fileMenuItems } from '../file-actions';
@@ -21,7 +22,7 @@ import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
 import { useChanges } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
-import { DELETE_LABEL, DELETE_SELECTION_TITLE, URL_IMPORT_LABEL } from '../labels';
+import { DELETE_LABEL, DELETE_SELECTION_TITLE, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
 import { useStudio } from '../studio-context';
 import { renameInRecord, renameInSelection } from '../tag-rename';
@@ -65,6 +66,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const trash = useTrash();
   const zipChoice = useZipChoice();
   const [urlImportOpen, setUrlImportOpen] = useState(false);
+  const [siteImportOpen, setSiteImportOpen] = useState(false);
 
   // A file a job added to the inbox (or a reset of the change feed) changes the count; the list
   // follows the change feed itself.
@@ -231,6 +233,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           <button type="button" className={BUTTON} disabled={importing} onClick={() => setUrlImportOpen(true)}>
             {URL_IMPORT_LABEL}
           </button>
+          <button type="button" className={BUTTON} disabled={importing} onClick={() => setSiteImportOpen(true)}>
+            {SITE_IMPORT_LABEL}
+          </button>
         </>
       }
       detail={
@@ -336,6 +341,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
         {analysis.dialogs}
         {zipChoice.dialog}
         {urlImportOpen && <UrlImportDialog target={null} onClose={() => setUrlImportOpen(false)} />}
+        {siteImportOpen && <SiteImportDialog target={null} onClose={() => setSiteImportOpen(false)} />}
       </div>
     </Page>
   );

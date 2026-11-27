@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, type FileTarget, type UrlImportResult } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
@@ -24,7 +24,7 @@ interface Props {
 }
 
 /** A message of a failed call: fixed main-process messages as sent, anything else described. */
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
 }
 
@@ -161,27 +161,42 @@ export function UrlImportDialog({ target, onClose }: Props) {
           </div>
         </form>
       ) : (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1 text-sm text-text">
-            <p>{`${URL_IMPORT_COUNT_LABELS.queued} ${result.queued}`}</p>
-            {result.alreadyImported > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyImported} ${result.alreadyImported}`}</p>}
-            {result.alreadyQueued > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyQueued} ${result.alreadyQueued}`}</p>}
-            {result.invalid.length > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.invalid} ${result.invalid.length}`}</p>}
-          </div>
-          {result.invalid.length > 0 && (
-            <ul className={`max-h-48 overflow-y-auto rounded-control border p-2 text-sm text-muted ${BORDER}`}>
-              {result.invalid.map((entry) => (
-                <li key={entry.line} className="break-all">{`${entry.line}: ${entry.text}`}</li>
-              ))}
-            </ul>
-          )}
-          <div className="flex justify-end">
-            <button ref={closeRef} type="button" className={BUTTON} onClick={onClose}>
-              {CLOSE_LABEL}
-            </button>
-          </div>
-        </div>
+        <UrlImportResultView result={result} closeRef={closeRef} onClose={onClose} />
       )}
     </Dialog>
+  );
+}
+
+/** The answer of a started URL import: the counts above 0 (Queued always), the unusable lines and Close. */
+export function UrlImportResultView({
+  result,
+  closeRef,
+  onClose,
+}: {
+  result: UrlImportResult;
+  closeRef: RefObject<HTMLButtonElement | null>;
+  onClose(): void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1 text-sm text-text">
+        <p>{`${URL_IMPORT_COUNT_LABELS.queued} ${result.queued}`}</p>
+        {result.alreadyImported > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyImported} ${result.alreadyImported}`}</p>}
+        {result.alreadyQueued > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyQueued} ${result.alreadyQueued}`}</p>}
+        {result.invalid.length > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.invalid} ${result.invalid.length}`}</p>}
+      </div>
+      {result.invalid.length > 0 && (
+        <ul className={`max-h-48 overflow-y-auto rounded-control border p-2 text-sm text-muted ${BORDER}`}>
+          {result.invalid.map((entry) => (
+            <li key={entry.line} className="break-all">{`${entry.line}: ${entry.text}`}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex justify-end">
+        <button ref={closeRef} type="button" className={BUTTON} onClick={onClose}>
+          {CLOSE_LABEL}
+        </button>
+      </div>
+    </div>
   );
 }
