@@ -347,8 +347,8 @@ describe('site access', () => {
   it('answers null for an unknown profile and off the site, without asking the session', async () => {
     const sessions = { cookies: vi.fn(async () => [{ name: 'sid', value: 's' }]), userAgent: vi.fn(() => 'UA') };
     const access = createSiteAccess(store, sessions);
-    expect(await access.has(profile.id)).toBe(true);
-    expect(await access.has('11111111-2222-4333-8444-555555555555')).toBe(false);
+    expect(await access.siteOf(profile.id)).toBe(profile.site);
+    expect(await access.siteOf('11111111-2222-4333-8444-555555555555')).toBeNull();
     expect(await access.headersFor('11111111-2222-4333-8444-555555555555', 'https://example.com/1.jpg')).toBeNull();
     expect(await access.headersFor(profile.id, 'https://cdn.other.org/1.jpg')).toBeNull();
     expect(await access.headersFor(profile.id, 'https://example.com.evil.org/1.jpg')).toBeNull();

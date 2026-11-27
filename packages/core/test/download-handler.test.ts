@@ -533,9 +533,9 @@ describe('site downloads (payload v2)', () => {
     const has: string[] = [];
     const asked: [string, string][] = [];
     const sites: SiteAccess = {
-      has: async (id) => {
+      siteOf: async (id) => {
         has.push(id);
-        return known && id === PROFILE;
+        return known && id === PROFILE ? 'a.example' : null;
       },
       headersFor: async (id, url) => {
         asked.push([id, url]);
@@ -680,6 +680,20 @@ describe('site downloads (payload v2)', () => {
     const t = await setup({ sites: fakeSites().sites });
     const url = 'https://a.example/x.png';
     t.remote.hops.set(url, ['https://cdn.other.example/go', url]);
+    t.remote.answers.set(url, new RemoteFileError('blocked'));
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_blocked');
+  });
+
+  it('a refusal on the site stays download_blocked when the profile is deleted during the download', async () => {
+    const f = fakeSites();
+    const url = 'https://a.example/x.png';
+    const sites: SiteAccess = {
+      siteOf: f.sites.siteOf,
+      headersFor: async () => null,
+    };
+    const t = await setup({ sites });
+    t.remote.hops.set(url, [url]);
     t.remote.answers.set(url, new RemoteFileError('blocked'));
     const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
     expect(codeOf(await t.run(job))).toBe('download_blocked');

@@ -341,6 +341,32 @@ for (const [what, problems, headline] of [
   });
 }
 
+it('a cancelled test without files shows the cancelled state and no diagnosis', async () => {
+  const { user } = setup([profileOf()], {
+    'sites:crawl': () =>
+      crawlOf({
+        files: [],
+        cancelled: true,
+        problems: [{ url: 'https://example.com/g', stage: 'gallery', reason: 'no_thumbnails', detail: null }],
+      }),
+  });
+  await waitFor(() => expect(field('Name').value).toBe('Shop'));
+  await user.type(field('Gallery URL'), 'https://example.com/g');
+  await user.click(button('Test'));
+  await within(dialog()).findByText('Files 0');
+  const lines = Array.from(dialog().querySelectorAll('p')).map((p) => p.textContent ?? '');
+  expect(lines.some((line) => line.startsWith('No thumbnail matched.'))).toBe(false);
+  expect(lines).not.toContain('No files found');
+});
+
+it('reads a robots_unavailable problem without a host sensibly', async () => {
+  await tested({
+    'sites:crawl': () =>
+      crawlOf({ problems: [{ url: 'https://cdn.other.org/8.png', stage: 'file', reason: 'robots_unavailable', detail: '' }] }),
+  });
+  expect(within(dialog()).getByText('robots.txt could not be read')).toBeTruthy();
+});
+
 it('Import stays disabled for a test without files, for a new profile and for unsaved changes', async () => {
   const { user } = setup([profileOf()], { 'sites:crawl': () => crawlOf({ files: [] }) });
   await waitFor(() => expect(field('Name').value).toBe('Shop'));

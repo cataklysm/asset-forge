@@ -82,6 +82,24 @@ function originAndPath(url: string): string {
  * `cancelled: true`. Throws ValidationFailedError for a gallery URL off the site or an invalid expression, and
  * InvalidOperationError when the robots.txt of the gallery URL's origin cannot be read.
  */
+/** A host (with an optional port) the crawl answer may carry; '' when it is too long or looks odd. */
+const SAFE_HOST = /^[a-z0-9.\-_[\]:]{1,253}$/;
+function safeHost(host: string): string {
+  const lower = host.toLowerCase();
+  return SAFE_HOST.test(lower) ? lower : '';
+}
+
+/** A page-controlled value for the answer: control and format characters removed, cut without splitting a pair. */
+function cutValue(text: string): string {
+  const clean = text.replace(/[\p{Cc}\p{Cf}]/gu, '');
+  let out = '';
+  for (const ch of clean) {
+    if (out.length + ch.length > SITE_PROBLEM_VALUE_MAX) break;
+    out += ch;
+  }
+  return out;
+}
+
 export async function crawlSite(
   deps: SiteCrawlDeps,
   r: {
@@ -149,7 +167,7 @@ export async function crawlSite(
     if (robots.kind === 'none') return true;
     if (robots.kind === 'unavailable') {
       answer.disallowed++;
-      problem(url, stage, 'robots_unavailable', new URL(url).host);
+      problem(url, stage, 'robots_unavailable', safeHost(new URL(url).host));
       return false;
     }
     if (robotsAllows(robots.rules, url)) return true;
@@ -168,7 +186,7 @@ export async function crawlSite(
         urls.push(normalizeDownloadUrl(new URL(text, pageUrl).href));
       } catch {
         answer.invalid++;
-        problem(pageUrl, 'link', 'invalid_link', text.slice(0, SITE_PROBLEM_VALUE_MAX));
+        problem(pageUrl, 'link', 'invalid_link', cutValue(text));
       }
     }
     return urls;
@@ -185,7 +203,7 @@ export async function crawlSite(
         problem(url, stage, 'timeout');
         break;
       case 'left_site':
-        problem(url, stage, 'left_site', result.host);
+        problem(url, stage, 'left_site', safeHost(result.host));
         break;
       case 'http_error':
         problem(url, stage, 'http_error', String(result.status));

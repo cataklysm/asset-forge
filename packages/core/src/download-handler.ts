@@ -1,4 +1,4 @@
-import { FileDownloadPayloadSchema, type JobErrorCode, type JobResult } from '@assetforge/contracts';
+import { belongsToSite, FileDownloadPayloadSchema, type JobErrorCode, type JobResult } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { SourceNotReadableError } from './errors.js';
@@ -90,11 +90,12 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     if (payload.v === 2) {
       const sites = deps.sites;
       const profileId = payload.siteProfileId;
-      if (sites === undefined || !(await sites.has(profileId))) throw new JobError('download_profile_missing');
+      const profileSite = sites === undefined ? null : await sites.siteOf(profileId);
+      if (sites === undefined || profileSite === null) throw new JobError('download_profile_missing');
       openOptions = {
         headersFor: async (hopUrl) => {
           const headers = await sites.headersFor(profileId, hopUrl);
-          lastHopOffSite = headers === null;
+          lastHopOffSite = !belongsToSite(hopUrl, profileSite);
           return headers;
         },
       };

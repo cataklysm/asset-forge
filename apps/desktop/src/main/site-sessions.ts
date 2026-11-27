@@ -414,7 +414,7 @@ const NO_WINDOWS = 'Site logins are not available';
 /** The logins of the profiles for the download path (spec "Download"). */
 export function createSiteAccess(store: Pick<SiteProfileStore, 'get'>, sessions: Pick<SiteSessions, 'cookies' | 'userAgent'>): SiteAccess {
   return {
-    has: async (profileId) => store.get(profileId) !== null,
+    siteOf: async (profileId) => store.get(profileId)?.site ?? null,
     async headersFor(profileId, url): Promise<RemoteRequestHeaders | null> {
       const profile = store.get(profileId);
       if (profile === null || !belongsToSite(url, profile.site)) return null;

@@ -227,6 +227,6 @@ describe('site import', () => {
     // The access as wired answers nothing for a URL off the site and nothing for an unknown profile.
     const access = createSiteAccess(store, sessions);
     expect(await access.headersFor(profile.id, `${cdn.origin}/files/3.png`)).toBeNull();
-    expect(await access.has(crypto.randomUUID())).toBe(false);
+    expect(await access.siteOf(crypto.randomUUID())).toBeNull();
   });
 });

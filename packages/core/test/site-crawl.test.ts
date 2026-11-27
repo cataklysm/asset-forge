@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SITE_MAX_PROBLEMS, type SiteCrawlProblem, type SiteProfile } from '@assetforge/contracts';
+import { SITE_MAX_PROBLEMS, SiteCrawlResultSchema, type SiteCrawlProblem, type SiteProfile } from '@assetforge/contracts';
 import {
   crawlSite,
   InvalidOperationError,
@@ -582,6 +582,33 @@ describe('crawl problems', () => {
       { url: 'https://cdn.other.test:8443/3.jpg', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.test:8443' },
     ]);
     expect(result.disallowed).toBe(2);
+  });
+
+  it('keeps a long host out of the answer so it still passes the contract', async () => {
+    const host = `${'a'.repeat(300)}.test`;
+    const d = deps(
+      { [`${G}/g`]: ok({ thumbnails: [`https://${host}/1.jpg`] }) },
+      { [`https://${host}`]: { kind: 'unavailable' } },
+    );
+    const result = await run(d, profile());
+    expect(result.problems).toEqual([
+      { url: `https://${host}/1.jpg`, stage: 'file', reason: 'robots_unavailable', detail: '' },
+    ]);
+    expect(SiteCrawlResultSchema.safeParse({ ...result, crawlId: '00000000-0000-4000-8000-000000000009' }).success).toBe(true);
+  });
+
+  it('strips control and format characters from an invalid_link value and cuts without splitting a pair', async () => {
+    const value = `ftp://\u202Ex${'y'.repeat(192)}\u{1F600}tail`;
+    const d = deps({ [`${G}/g`]: ok({ thumbnails: [value] }) });
+    const result = await run(d, profile());
+    const detail = result.problems[0]?.detail ?? '';
+    expect(detail).not.toContain('\u202E');
+    expect(detail.length).toBeLessThanOrEqual(200);
+    expect(detail).toBe(`ftp://x${'y'.repeat(192)}`);
+    const emoji = deps({ [`${G}/g`]: ok({ thumbnails: [`ftp://x${'y'.repeat(193)}\u{1F600}`] }) });
+    const cut = (await run(emoji, profile())).problems[0]?.detail ?? '';
+    expect(cut).toBe(`ftp://x${'y'.repeat(193)}`);
+    expect(/[\uD800-\uDFFF]/.test(cut)).toBe(false);
   });
 
   it('records invalid_link with the page and the value cut to 200 characters', async () => {

@@ -128,7 +128,8 @@ export interface RemoteFileSource {
 
 /** The logins of the site profiles, as the download path sees them. */
 export interface SiteAccess {
-  has(profileId: string): Promise<boolean>;
+  /** The site of the profile; null when the profile does not exist. */
+  siteOf(profileId: string): Promise<string | null>;
   /** Null unless the URL belongs to the profile's site. */
   headersFor(profileId: string, url: string): Promise<RemoteRequestHeaders | null>;
 }

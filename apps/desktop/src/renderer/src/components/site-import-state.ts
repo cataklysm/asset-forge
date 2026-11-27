@@ -160,8 +160,8 @@ export function problemText(problem: Pick<SiteCrawlProblem, 'reason' | 'detail'>
  * The one line above the problems of a test that found no file, or null when it found some. Problems keep the
  * crawl's order, so the first one belongs to the first gallery page whenever that page gave nothing.
  */
-export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problems'>): string | null {
-  if (result.files.length > 0) return null;
+export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problems' | 'cancelled'>): string | null {
+  if (result.files.length > 0 || result.cancelled) return null;
   const first = result.problems[0];
   if (first === undefined) return NO_FILES_FOUND_LABEL;
   if (first.stage === 'gallery') {
