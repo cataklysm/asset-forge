@@ -212,6 +212,10 @@ describe('createUrlSource: status mapping', () => {
     ['1', 5_000],
     ['99999', 900_000],
     ['soon', 60_000],
+    ['2026', 900_000],
+    ['tomorrow', 60_000],
+    ['2026-11-27', 60_000],
+    ['Sunday, 06-Nov-94 08:49:37 GMT', 60_000],
   ])('reads Retry-After %s', async (value, ms) => {
     handler = (_req, res) => {
       res.writeHead(429, { 'Retry-After': value });
@@ -361,6 +365,46 @@ describe('createUrlSource: abort', () => {
     await expect(opening).rejects.toBe(reason);
   });
 
+  it('rejects promptly with the abort reason when the abort falls between two hops, and sends no second request', async () => {
+    handler = (req, res) => {
+      if (req.url === '/start') {
+        res.writeHead(302, { Location: `${base}/second` });
+        res.end();
+      }
+      // The second hop never answers: only its header timeout would end a request to it.
+    };
+    const controller = new AbortController();
+    const reason = new Error('stop');
+    let checks = 0;
+    // The address check of the second hop runs after the first hop settled and before the second is sent,
+    // outside every abort listener.
+    const allowAddress = () => {
+      checks++;
+      if (checks === 2) controller.abort(reason);
+      return true;
+    };
+    const started = Date.now();
+    await expect(open(`${base}/start`, { allowAddress, headerTimeoutMs: 3_000 }, controller.signal)).rejects.toBe(reason);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(requests.map((r) => r.url)).toEqual(['/start']);
+  });
+
+  it('rejects with the abort reason when the abort comes while the first hop prepares its redirect', async () => {
+    const controller = new AbortController();
+    const reason = new Error('stop');
+    handler = (req, res) => {
+      if (req.url === '/start') {
+        controller.abort(reason);
+        res.writeHead(302, { Location: `${base}/second` });
+        res.end();
+      }
+    };
+    const started = Date.now();
+    await expect(open(`${base}/start`, { headerTimeoutMs: 3_000 }, controller.signal)).rejects.toBe(reason);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(requests.map((r) => r.url)).toEqual(['/start']);
+  });
+
   it('rejects at once for an aborted signal', async () => {
     const controller = new AbortController();
     const reason = new Error('stop');
@@ -377,6 +421,15 @@ describe('createUrlSource: the default address policy', () => {
 
   it('refuses a loopback literal without sending a request', async () => {
     const error = await failureOf(strict().open(`${base}/`, new AbortController().signal));
+    expect(error.failure).toBe('address_refused');
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each([
+    ['the IPv6 loopback', (p: number) => `http://[::1]:${p}/`],
+    ['an IPv4-mapped loopback', (p: number) => `http://[::ffff:127.0.0.1]:${p}/`],
+  ])('refuses %s literal without sending a request', async (_name, url) => {
+    const error = await failureOf(strict().open(url(port), new AbortController().signal));
     expect(error.failure).toBe('address_refused');
     expect(requests).toHaveLength(0);
   });

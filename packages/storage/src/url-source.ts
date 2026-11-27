@@ -56,8 +56,8 @@ async function systemLookup(host: string): Promise<string[]> {
 }
 
 /**
- * The network side of the URL import over Node's `http`/`https`. Every hop passes the URL rule and the address
- * check (every resolved address must pass `allowAddress`); the socket connects to exactly the checked address while
+ * The network side of the URL import over Node's `http`/`https`. Every hop passes the scheme and user-info rule and
+ * the address check (every resolved address must pass `allowAddress`); the socket connects to exactly the checked address while
  * `Host`, SNI and the certificate check use the host name. Redirects are followed by hand. Nothing is logged.
  */
 export function createUrlSource(options: UrlSourceOptions): RemoteFileSource {
@@ -79,6 +79,8 @@ async function openUrl(input: string, signal: AbortSignal, config: Config): Prom
   const deadline = Date.now() + config.totalTimeoutMs;
   let current = parseHop(input);
   for (let hop = 0; ; hop++) {
+    // An abort between two hops fails at once instead of waiting for the next hop's timeout.
+    signal.throwIfAborted();
     const hopDeadline = Math.min(deadline, Date.now() + config.headerTimeoutMs);
     const address = await vetHost(current, config, signal, hopDeadline);
     const outcome = await fetchHop(current, address, config, signal, deadline, hopDeadline);
@@ -120,6 +122,12 @@ async function vetHost(url: URL, config: Config, signal: AbortSignal, until: num
 /** `promise` bounded by `signal` (rejects with its reason) and `until` (rejects `unreachable`); its failure is `unreachable`. */
 function bounded<T>(promise: Promise<T>, signal: AbortSignal, until: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    // A listener added to an aborted signal never fires.
+    if (signal.aborted) {
+      promise.catch(() => {});
+      reject(signal.reason);
+      return;
+    }
     let finished = false;
     const finish = (settle: () => void) => {
       if (finished) return;
@@ -149,6 +157,11 @@ function fetchHop(
   hopDeadline: number,
 ): Promise<HopOutcome> {
   return new Promise<HopOutcome>((resolve, reject) => {
+    // A listener added to an aborted signal never fires, so an aborted hop sends no request.
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
     const family = net.isIP(address);
     const pinnedLookup: net.LookupFunction = (_hostname, lookupOptions, callback) => {
       if (lookupOptions.all) callback(null, [{ address, family }]);
@@ -290,7 +303,9 @@ function bodyStream(
 
   const onAbort = () => fail(signal.reason);
   const total = setTimeout(() => fail(failure('unreachable')), Math.max(0, deadline - Date.now()));
-  signal.addEventListener('abort', onAbort, { once: true });
+  // A listener added to an aborted signal never fires.
+  if (signal.aborted) fail(signal.reason);
+  else signal.addEventListener('abort', onAbort, { once: true });
   // A lost connection before the first read; the body itself is only consumed once the stream is read.
   res.on('error', () => fail(failure('unreachable')));
   res.on('close', () => {
@@ -334,11 +349,15 @@ function statusFailure(status: number, retryAfter: string | undefined): RemoteFi
   return failure('rejected');
 }
 
-/** `Retry-After` as integer seconds or an HTTP date, clamped; the default when absent or unparsable. */
+/** The shape of an IMF-fixdate, e.g. `Sun, 06 Nov 1994 08:49:37 GMT`. */
+const HTTP_DATE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+
+/** `Retry-After` as integer seconds or an IMF-fixdate, clamped; the default when absent or of any other shape. */
 function retryAfterMs(value: string | undefined): number {
   if (value === undefined) return clampRetryAfterMs(null);
   const text = value.trim();
   if (/^\d+$/.test(text)) return clampRetryAfterMs(Number(text) * 1000);
+  if (!HTTP_DATE.test(text)) return clampRetryAfterMs(null);
   const at = Date.parse(text);
   return clampRetryAfterMs(Number.isNaN(at) ? null : Math.max(0, at - Date.now()));
 }
