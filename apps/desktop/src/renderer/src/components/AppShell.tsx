@@ -7,6 +7,8 @@ import {
   PROMPTS_LABEL,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
+  OPEN_SITE_LABEL,
+  OPEN_SITE_TITLE,
   RESUME_LABEL,
   RESUME_TITLE,
   TRASH_LABEL,
@@ -38,6 +40,10 @@ interface Props {
   pausedHosts?: readonly PausedHost[];
   /** Resumes one host (`jobs:resumeHost`); a rejection shows in its line. */
   onResumeHost?(host: string): Promise<void>;
+  /** The paused hosts that are the site of a profile: a browser check there offers Open site. */
+  checkHosts?: ReadonlySet<string>;
+  /** Opens the site check of one host (`sites:openCheck`); a rejection shows in its line. */
+  onOpenCheck?(host: string): Promise<void>;
   onNavigate(section: Section): void;
   onClose(): void;
   children: ReactNode;
@@ -60,6 +66,7 @@ const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''
 
 const NOTHING_PAUSED: readonly PausedProvider[] = [];
 const NO_PAUSED_HOSTS: readonly PausedHost[] = [];
+const NO_CHECK_HOSTS: ReadonlySet<string> = new Set();
 
 /** The application frame: header, navigation, the alert region and the page slot. */
 export function AppShell({
@@ -74,6 +81,8 @@ export function AppShell({
   onMove = () => {},
   pausedHosts = NO_PAUSED_HOSTS,
   onResumeHost = async () => {},
+  checkHosts = NO_CHECK_HOSTS,
+  onOpenCheck = async () => {},
   onNavigate,
   onClose,
   children,
@@ -184,7 +193,14 @@ export function AppShell({
                 />
               ))}
               {pausedHosts.map((entry) => (
-                <HostPauseLine key={`host:${entry.host}`} entry={entry} onResume={() => onResumeHost(entry.host)} />
+                <HostPauseLine
+                  key={`host:${entry.host}`}
+                  entry={entry}
+                  onResume={() => onResumeHost(entry.host)}
+                  onOpenCheck={
+                    entry.reason === 'download_browser_check' && checkHosts.has(entry.host) ? () => onOpenCheck(entry.host) : null
+                  }
+                />
               ))}
             </div>
           )}
@@ -205,7 +221,7 @@ interface PauseLineProps {
   onSettings(): void;
 }
 
-/** Resume of one banner line: one call at a time; a rejection is kept until the next try or a new reason. */
+/** One action of a banner line (Resume, Open site): one call at a time; a rejection is kept until the next try or a new reason. */
 function useResume(reason: JobErrorCode, onResume: () => Promise<void>) {
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -231,15 +247,30 @@ function useResume(reason: JobErrorCode, onResume: () => Promise<void>) {
   return { resuming, resumeError, resume };
 }
 
-/** One paused download host in the banner: the host, the reason and Resume. */
-function HostPauseLine({ entry, onResume }: { entry: PausedHost; onResume(): Promise<void> }) {
+interface HostPauseLineProps {
+  entry: PausedHost;
+  onResume(): Promise<void>;
+  /** Opens the site check; null hides Open site. */
+  onOpenCheck: (() => Promise<void>) | null;
+}
+
+const NO_CHECK = async () => {};
+
+/** One paused download host in the banner: the host, the reason, Open site for a browser check and Resume. */
+function HostPauseLine({ entry, onResume, onOpenCheck }: HostPauseLineProps) {
   const { resuming, resumeError, resume } = useResume(entry.reason, onResume);
+  const check = useResume(entry.reason, onOpenCheck ?? NO_CHECK);
   return (
     <div role="group" aria-label={entry.host} className="flex items-center justify-between gap-4">
       <span className="min-w-0 break-words">
-        <span className="font-semibold">{entry.host}</span> {resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
+        <span className="font-semibold">{entry.host}</span> {resumeError ?? check.resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
       </span>
       <div className="flex shrink-0 items-center gap-2">
+        {onOpenCheck !== null && (
+          <button type="button" className={BUTTON} title={OPEN_SITE_TITLE} disabled={check.resuming} onClick={() => void check.resume()}>
+            {OPEN_SITE_LABEL}
+          </button>
+        )}
         <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
           {RESUME_LABEL}
         </button>

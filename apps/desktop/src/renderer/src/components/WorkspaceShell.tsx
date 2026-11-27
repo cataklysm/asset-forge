@@ -1,4 +1,4 @@
-import { useCallback, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useState, type ComponentProps } from 'react';
 import type { PausedHost, PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { JobsProvider, useJobs } from '../jobs-context';
@@ -63,18 +63,55 @@ function sectionOf(view: View): Section {
 
 const NOTHING_PAUSED: PausedProvider[] = [];
 const NO_PAUSED_HOSTS: PausedHost[] = [];
+const NO_SITES: ReadonlySet<string> = new Set();
+
+/**
+ * The sites of the site profiles, read whenever the set of hosts a browser check paused changes; empty while none is
+ * paused for that reason or the list cannot be read.
+ *
+ * @param pausedHosts the paused download hosts of the job summary
+ * @returns the profile sites among which Open site is offered
+ */
+function useCheckHosts(pausedHosts: readonly PausedHost[]): ReadonlySet<string> {
+  const [sites, setSites] = useState<ReadonlySet<string>>(NO_SITES);
+  const checked = pausedHosts
+    .filter((entry) => entry.reason === 'download_browser_check')
+    .map((entry) => entry.host)
+    .join(' ');
+  useEffect(() => {
+    if (checked === '') {
+      setSites(NO_SITES);
+      return;
+    }
+    let current = true;
+    call('sites:list', {}).then(
+      ({ profiles }) => {
+        if (current) setSites(new Set(profiles.map((profile) => profile.site)));
+      },
+      () => {
+        if (current) setSites(NO_SITES);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [checked]);
+  return sites;
+}
 
 /**
  * The app frame with the active jobs, the paused providers and hosts of the surrounding `JobsProvider` and
  * the trash count of the `TrashProvider`; `Move jobs` in the pause banner opens the move dialog.
  */
 export function JobsAppShell(
-  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove' | 'pausedHosts' | 'onResumeHost'>,
+  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove' | 'pausedHosts' | 'onResumeHost' | 'checkHosts' | 'onOpenCheck'>,
 ) {
   const { active, summary, refresh } = useJobs();
   const trash = useTrash();
   // The provider whose waiting jobs the open move dialog moves; absent while it is closed.
   const [moving, setMoving] = useState<{ source: string | null } | null>(null);
+  const pausedHosts = summary?.pausedHosts ?? NO_PAUSED_HOSTS;
+  const checkHosts = useCheckHosts(pausedHosts);
   return (
     <>
       <AppShell
@@ -87,10 +124,14 @@ export function JobsAppShell(
           refresh();
         }}
         onMove={(source) => setMoving({ source })}
-        pausedHosts={summary?.pausedHosts ?? NO_PAUSED_HOSTS}
+        pausedHosts={pausedHosts}
         onResumeHost={async (host) => {
           await call('jobs:resumeHost', { host });
           refresh();
+        }}
+        checkHosts={checkHosts}
+        onOpenCheck={async (host) => {
+          await call('sites:openCheck', { host });
         }}
       />
       {moving !== null && <MoveJobsDialog source={moving.source} onClose={() => setMoving(null)} />}

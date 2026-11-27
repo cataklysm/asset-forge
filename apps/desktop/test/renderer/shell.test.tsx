@@ -373,6 +373,101 @@ it('a paused host alone shows the banner, and a failed resume shows in its line 
   expect(within(line).getByRole('button', { name: 'Resume' })).toBeTruthy();
 });
 
+it('offers Open site only for a browser check on the site of a profile; it sends the host only and is disabled while it runs', async () => {
+  const user = userEvent.setup();
+  const summary: JobSummary = {
+    ...IDLE,
+    pausedHosts: [
+      { host: 'example.com', reason: 'download_browser_check' },
+      { host: 'cdn.example.org', reason: 'download_browser_check' },
+      { host: 'shop.example.net', reason: 'download_blocked' },
+    ],
+  };
+  const opening = deferred<Record<string, never>>();
+  const { api } = jobsShell(() => summary, {
+    'sites:list': () => ({
+      profiles: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          name: 'Shop',
+          site: 'example.com',
+          thumbnails: '//a',
+          pagination: '',
+          file: '',
+          kinds: ['image'],
+          minBytes: 0,
+          urlContains: '',
+          maxPages: 20,
+          maxFiles: 1000,
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          name: 'Other shop',
+          site: 'shop.example.net',
+          thumbnails: '//a',
+          pagination: '',
+          file: '',
+          kinds: ['image'],
+          minBytes: 0,
+          urlContains: '',
+          maxPages: 20,
+          maxFiles: 1000,
+        },
+      ],
+    }),
+    'sites:openCheck': () => opening.promise,
+  });
+  const banner = await screen.findByRole('alert');
+  const site = within(banner).getByRole('group', { name: 'example.com' });
+  expect(site.textContent).toContain(JOB_ERROR_MESSAGES.download_browser_check);
+  const open = await within(site).findByRole('button', { name: 'Open site' });
+  expect(within(site).getAllByRole('button').map((b) => b.textContent)).toEqual(['Open site', 'Resume']);
+  expect(open.getAttribute('title')).toBe('Opens the site so you can pass its check; Resume then repeats the refused downloads');
+  // No profile for that host, or another reason: Resume only.
+  expect(within(within(banner).getByRole('group', { name: 'cdn.example.org' })).getAllByRole('button').map((b) => b.textContent)).toEqual([
+    'Resume',
+  ]);
+  expect(within(within(banner).getByRole('group', { name: 'shop.example.net' })).getAllByRole('button').map((b) => b.textContent)).toEqual([
+    'Resume',
+  ]);
+
+  await user.click(open);
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(true));
+  expect(api.calls.filter((c) => c.channel === 'sites:openCheck').map((c) => c.request)).toEqual([{ host: 'example.com' }]);
+  await act(async () => opening.resolve({}));
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false));
+  expect(api.calls.some((c) => c.channel === 'jobs:resumeHost')).toBe(false);
+});
+
+it('a failed Open site shows in its line and keeps it', async () => {
+  const user = userEvent.setup();
+  const onOpenCheck = vi.fn((_host: string) => {
+    throw fakeError('invalid_operation', 'Another login window is open');
+  });
+  render(
+    <AppShell
+      workspaceName="Studio"
+      rootPath="D:/work/studio"
+      section="assets"
+      busy={false}
+      activeJobs={0}
+      pausedHosts={[{ host: 'example.com', reason: 'download_browser_check' }]}
+      checkHosts={new Set(['example.com'])}
+      onOpenCheck={async (host) => onOpenCheck(host)}
+      onNavigate={() => {}}
+      onClose={() => {}}
+    >
+      <p>content</p>
+    </AppShell>,
+  );
+  const line = within(screen.getByRole('alert')).getByRole('group', { name: 'example.com' });
+  await user.click(within(line).getByRole('button', { name: 'Open site' }));
+  await waitFor(() => expect(line.textContent).toContain('Another login window is open'));
+  expect(line.textContent).not.toContain(JOB_ERROR_MESSAGES.download_browser_check);
+  expect(onOpenCheck).toHaveBeenCalledWith('example.com');
+  expect(within(line).getByRole('button', { name: 'Open site' })).toBeTruthy();
+});
+
 it('sameSummary compares the pause list entry by entry', () => {
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL }] })).toBe(true);
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, reason: 'provider_unauthorized' }] })).toBe(false);
