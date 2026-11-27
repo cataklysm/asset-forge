@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, type FileRecord, type TagAssignment, type UpscaleScale } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, variableKey, type FileRecord, type TagAssignment, type UpscaleScale } from '@assetforge/contracts';
 import { call } from './api';
 import { FileDetailDialog } from './components/FileDetailDialog';
 import { GenerationStudio } from './components/GenerationStudio';
@@ -23,6 +23,10 @@ export interface StudioState {
   openFile(fileId: string): Promise<void>;
   /** Why no generation can start (no image provider entry), as tooltip of the disabled entries; null while the list is unknown. */
   blocked: string | null;
+  /** The value typed last for a library prompt variable of this name (regardless of case), for as long as the provider lives. */
+  recallVariable(name: string): string | undefined;
+  /** Remembers typed variable values by name; an empty value forgets the name. */
+  rememberVariables(values: Readonly<Record<string, string>>): void;
 }
 
 const EMPTY: StudioState = {
@@ -30,6 +34,8 @@ const EMPTY: StudioState = {
   upscale: () => Promise.reject(new Error(NO_IMAGE_PROVIDER_TITLE)),
   openFile: async () => {},
   blocked: null,
+  recallVariable: () => undefined,
+  rememberVariables: () => {},
 };
 
 const StudioContext = createContext<StudioState>(EMPTY);
@@ -106,7 +112,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     [refresh],
   );
 
-  const value = useMemo<StudioState>(() => ({ open, upscale, openFile, blocked }), [open, upscale, openFile, blocked]);
+  // Variable values typed in the studio, by `variableKey`; in memory only.
+  const variables = useRef(new Map<string, string>());
+  const recallVariable = useCallback((name: string) => variables.current.get(variableKey(name)), []);
+  const rememberVariables = useCallback((values: Readonly<Record<string, string>>) => {
+    for (const [name, value] of Object.entries(values)) {
+      if (value.trim() === '') variables.current.delete(variableKey(name));
+      else variables.current.set(variableKey(name), value);
+    }
+  }, []);
+
+  const value = useMemo<StudioState>(
+    () => ({ open, upscale, openFile, blocked, recallVariable, rememberVariables }),
+    [open, upscale, openFile, blocked, recallVariable, rememberVariables],
+  );
 
   const changeLinked = (fileId: string, change: (file: FileRecord) => FileRecord) =>
     setLinked((current) => (current !== null && current.file.id === fileId ? { ...current, file: change(current.file) } : current));

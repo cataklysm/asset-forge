@@ -6,6 +6,8 @@ import {
   type FileRecord,
   type Generation,
   type ImageModel,
+  type PromptDetail,
+  type PromptVersion,
   type UpscaleScale,
 } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
@@ -17,15 +19,20 @@ import {
   PROMPT_TOO_LONG_TITLE,
   SOURCE_IMAGE_LABEL,
   STUDIO_TITLE,
+  VARIABLE_MISSING_TITLE,
 } from '../labels';
 import { formatLabel } from '../media-url';
 import { useImageProviderChoice } from '../provider-choice';
 import { useProviders } from '../provider-context';
 import { imageProviderGate } from '../provider-gate';
+import { useStudio } from '../studio-context';
+import { attach, preview } from '../studio-prompt';
 import { constrain, formFromGeneration, readSafeMode, tileState, writeSafeMode, type StudioForm as Form } from '../studio-state';
 import { ALERT, BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
 import { CoverImage } from './CoverImage';
 import { Dialog } from './Dialog';
+import { PromptPicker } from './PromptPicker';
+import { SavePromptDialog } from './SavePromptDialog';
 import { StudioForm } from './StudioForm';
 import { StudioResults } from './StudioResults';
 
@@ -38,7 +45,16 @@ export interface GenerationStudioProps {
 }
 
 /** The form fields the studio holds itself; provider and model come from the provider choice. */
-type Fields = Pick<Form, 'prompt' | 'aspectRatio' | 'resolution' | 'safeMode'>;
+type Fields = Pick<Form, 'prompt' | 'attached' | 'origin' | 'aspectRatio' | 'resolution' | 'safeMode'>;
+
+const freshFields = (safeMode: boolean): Fields => ({
+  prompt: '',
+  attached: null,
+  origin: null,
+  aspectRatio: null,
+  resolution: null,
+  safeMode,
+});
 
 /** A message of a failed call: fixed main-process messages as sent, anything else described. */
 function messageOf(error: unknown): string {
@@ -56,10 +72,13 @@ const newestFirst = (a: Generation, b: Generation) =>
 export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudioProps): JSX.Element | null {
   const providers = useProviders();
   const { changeToken, refresh } = useJobs();
+  const { recallVariable, rememberVariables } = useStudio();
   const choice = useImageProviderChoice(file.id);
   const { providerId, model } = choice;
 
-  const [fields, setFields] = useState<Fields>(() => ({ prompt: '', aspectRatio: null, resolution: null, safeMode: readSafeMode() }));
+  const [fields, setFields] = useState<Fields>(() => freshFields(readSafeMode()));
+  const [picking, setPicking] = useState(false);
+  const [saving, setSaving] = useState(false);
   // "Use settings" on another entry: its model is chosen once the entry is selected.
   const [pendingModel, setPendingModel] = useState<{ providerId: string; model: string | null } | null>(null);
   if (pendingModel !== null && providerId === pendingModel.providerId) {
@@ -80,7 +99,9 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const [shownFileId, setShownFileId] = useState(file.id);
   if (shownFileId !== file.id) {
     setShownFileId(file.id);
-    setFields((current) => ({ prompt: '', aspectRatio: null, resolution: null, safeMode: current.safeMode }));
+    setFields((current) => freshFields(current.safeMode));
+    setPicking(false);
+    setSaving(false);
     setPendingModel(null);
     setResults(null);
     setUpscales([]);
@@ -167,9 +188,16 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const providerBlocked =
     providers.list !== null && !hasImageProvider ? NO_IMAGE_PROVIDER_TITLE : imageProviderGate(providers, providerId, model).blocked;
   const limit = Math.min(imageModel?.promptCharacterLimit ?? GENERATION_PROMPT_MAX, GENERATION_PROMPT_MAX);
-  const promptLength = form.prompt.trim().length;
+  const shown = form.attached === null ? null : preview(form.attached);
+  const promptLength = (shown?.text ?? form.prompt).trim().length;
   const promptBlocked =
-    promptLength < 1 || promptLength > GENERATION_PROMPT_MAX ? PROMPT_LENGTH_TITLE : promptLength > limit ? PROMPT_TOO_LONG_TITLE : null;
+    shown?.blocked != null
+      ? VARIABLE_MISSING_TITLE
+      : promptLength < 1 || promptLength > GENERATION_PROMPT_MAX
+        ? PROMPT_LENGTH_TITLE
+        : promptLength > limit
+          ? PROMPT_TOO_LONG_TITLE
+          : null;
   const blocked = providerBlocked ?? promptBlocked;
   const upscaleBlocked = providerId === null || !hasImageProvider ? NO_IMAGE_PROVIDER_TITLE : null;
 
@@ -190,7 +218,9 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
         fileId: file.id,
         providerId,
         model,
-        prompt: form.prompt,
+        ...(form.attached !== null
+          ? { promptVersionId: form.attached.version.id, variables: form.attached.values }
+          : { prompt: form.prompt }),
         ...(form.aspectRatio !== null ? { aspectRatio: form.aspectRatio } : {}),
         ...(form.resolution !== null ? { resolution: form.resolution } : {}),
         safeMode: form.safeMode,
@@ -253,10 +283,98 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       changed();
     });
 
+  // Only the newest library load may attach a prompt; a free text chosen since then wins.
+  const promptSeq = useRef(0);
+  useEffect(() => {
+    promptSeq.current += 1;
+  }, [file.id]);
+
+  /** Loads a library prompt and attaches the version `pickVersion` chooses; resolves false when superseded. */
+  async function loadPrompt(
+    promptId: string,
+    pickVersion: (detail: PromptDetail) => PromptVersion | undefined,
+    given: Readonly<Record<string, string>> = {},
+  ): Promise<boolean> {
+    const seq = ++promptSeq.current;
+    const detail = await call('prompts:get', { promptId });
+    if (disposed.current || seq !== promptSeq.current) return false;
+    const version = pickVersion(detail);
+    if (version === undefined) return false;
+    setFields((current) => ({ ...current, attached: attach(detail, version, recallVariable, given), origin: null }));
+    setStartError(null);
+    return true;
+  }
+
+  async function pickPrompt(promptId: string) {
+    try {
+      if (await loadPrompt(promptId, (detail) => detail.currentVersion)) setPicking(false);
+    } catch (e) {
+      throw new Error(messageOf(e));
+    }
+  }
+
+  function loadCurrent() {
+    const attached = form.attached;
+    if (attached === null) return;
+    loadPrompt(attached.promptId, (detail) => detail.currentVersion, attached.values).catch((e: unknown) => {
+      if (!disposed.current) setStartError(messageOf(e));
+    });
+  }
+
+  function editText() {
+    const attached = form.attached;
+    if (attached === null) return;
+    promptSeq.current += 1;
+    setFields((current) => ({
+      ...current,
+      prompt: preview(attached).text,
+      attached: null,
+      origin: { promptId: attached.promptId, title: attached.title },
+    }));
+    setStartError(null);
+  }
+
+  function setVariable(name: string, value: string) {
+    rememberVariables({ [name]: value });
+    setStartError(null);
+    setFields((current) =>
+      current.attached === null ? current : { ...current, attached: { ...current.attached, values: { ...current.attached.values, [name]: value } } },
+    );
+  }
+
+  function chooseRecent(prompt: string) {
+    promptSeq.current += 1;
+    setStartError(null);
+    setFields((current) => ({ ...current, prompt, attached: null, origin: null }));
+  }
+
+  function saved(detail: PromptDetail) {
+    promptSeq.current += 1;
+    setSaving(false);
+    setStartError(null);
+    setFields((current) => ({ ...current, attached: attach(detail, detail.currentVersion, recallVariable), origin: null }));
+  }
+
   function applySettings(g: Generation) {
     const next = formFromGeneration(g, form);
-    setFields({ prompt: next.prompt, aspectRatio: next.aspectRatio, resolution: next.resolution, safeMode: next.safeMode });
+    setFields({
+      prompt: next.prompt,
+      attached: next.attached,
+      origin: next.origin,
+      aspectRatio: next.aspectRatio,
+      resolution: next.resolution,
+      safeMode: next.safeMode,
+    });
     setStartError(null);
+    if (g.kind === 'edit') {
+      const { promptId, promptVersionId } = g;
+      if (promptId !== null && promptVersionId !== null) {
+        // A prompt that is gone (or cannot be read) leaves its resolved text as the free prompt.
+        loadPrompt(promptId, (detail) => detail.versions.find((v) => v.id === promptVersionId), g.promptVariables ?? {}).catch(
+          () => {},
+        );
+      } else promptSeq.current += 1;
+    }
     setPendingModel(null);
     if (next.providerId === providerId) {
       if (next.model !== model) choice.setModel(next.model);
@@ -310,6 +428,12 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
                 choice.setModel(next);
               }}
               onChange={change}
+              onRecent={chooseRecent}
+              onLibrary={() => setPicking(true)}
+              onVariable={setVariable}
+              onEditText={editText}
+              onLoadCurrent={loadCurrent}
+              onSaveToLibrary={() => setSaving(true)}
               blocked={blocked}
               startError={startError}
               busy={starting}
@@ -340,6 +464,8 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
           </section>
         </div>
       </div>
+      {picking && <PromptPicker onPick={pickPrompt} onClose={() => setPicking(false)} />}
+      {saving && <SavePromptDialog prompt={form.prompt} origin={form.origin} onSaved={saved} onClose={() => setSaving(false)} />}
     </Dialog>
   );
 }

@@ -340,7 +340,7 @@ export function fakePrompts(seed: PromptDetail[] = []): {
   };
   const handlers: { [C in LibraryChannel]: NonNullable<FakeHandlers[C]> } = {
     'prompts:list': ({ query, tagNames = [], offset, limit }) => {
-      const words = (query ?? '').toLowerCase().split(/s+/).filter((word) => word !== '');
+      const words = (query ?? '').toLowerCase().split(/\s+/).filter((word) => word !== '');
       const matching = state.prompts.filter((item) => {
         const text = `${item.title} ${item.description} ${item.currentVersion.content}`.toLowerCase();
         return words.every((word) => text.includes(word)) && tagNames.every((name) => item.tags.some((tag) => tag.name === name));

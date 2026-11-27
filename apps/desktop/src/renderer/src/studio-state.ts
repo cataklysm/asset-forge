@@ -1,4 +1,5 @@
 import type { Generation, ImageModel } from '@assetforge/contracts';
+import type { AttachedPrompt } from './studio-prompt';
 
 /** The edit form of the studio; null aspect ratio or resolution leaves the model's default. */
 export interface StudioForm {
@@ -8,9 +9,16 @@ export interface StudioForm {
   aspectRatio: string | null;
   resolution: string | null;
   safeMode: boolean;
+  /** A library prompt is in use; `prompt` is ignored while set. */
+  attached: AttachedPrompt | null;
+  /** The library prompt a free text was detached from. */
+  origin: { promptId: string; title: string } | null;
 }
 
-/** The form of a generation's "Use settings": an edit's settings; an upscale copies nothing but the provider. */
+/**
+ * The form of a generation's "Use settings": an edit's settings with its resolved text as a free prompt
+ * (the studio attaches the library prompt itself); an upscale copies nothing but the provider.
+ */
 export function formFromGeneration(g: Generation, form: StudioForm): StudioForm {
   const parameters = g.parameters;
   if (g.kind !== 'edit' || !('safeMode' in parameters)) return { ...form, providerId: g.providerId };
@@ -21,6 +29,8 @@ export function formFromGeneration(g: Generation, form: StudioForm): StudioForm 
     aspectRatio: parameters.aspectRatio,
     resolution: parameters.resolution,
     safeMode: parameters.safeMode,
+    attached: null,
+    origin: null,
   };
 }
 

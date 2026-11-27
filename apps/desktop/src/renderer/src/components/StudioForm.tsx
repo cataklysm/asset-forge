@@ -1,16 +1,24 @@
 import { useId, type RefObject } from 'react';
-import { GENERATION_PROMPT_MAX, type ImageModel } from '@assetforge/contracts';
+import { GENERATION_PROMPT_MAX, PROMPT_VARIABLE_VALUE_MAX, type ImageModel } from '@assetforge/contracts';
 import {
   ASPECT_LABEL,
+  attachedPromptLabel,
+  EDIT_PROMPT_TEXT_LABEL,
+  EDIT_PROMPT_TEXT_TITLE,
   GENERATE_BUTTON,
+  LIBRARY_PROMPT_LABEL,
+  LIBRARY_PROMPT_TITLE,
   MODEL_DEFAULT_OPTION,
+  NEWER_VERSION_TITLE,
   PROMPT_LABEL,
   RECENT_PROMPTS_LABEL,
   RESOLUTION_LABEL,
   SAFE_MODE_LABEL,
+  SAVE_TO_LIBRARY_LABEL,
 } from '../labels';
+import { preview } from '../studio-prompt';
 import type { StudioForm as Form } from '../studio-state';
-import { BUTTON, FOCUS, LABEL, SELECT, TEXTAREA } from '../ui';
+import { BUTTON, BUTTON_INLINE, FOCUS, INPUT, LABEL, SELECT, TEXTAREA } from '../ui';
 import { EditModelSelect } from './ModelSelect';
 import { ProviderSelect } from './ProviderSelect';
 
@@ -23,6 +31,18 @@ interface Props {
   onProvider(id: string | null): void;
   onModel(model: string | null): void;
   onChange(patch: Partial<Pick<Form, 'prompt' | 'aspectRatio' | 'resolution' | 'safeMode'>>): void;
+  /** A recent prompt was chosen as the free text. */
+  onRecent(prompt: string): void;
+  /** Opens the library picker. */
+  onLibrary(): void;
+  /** A value typed for a variable of the attached prompt, by the version's spelling. */
+  onVariable(name: string, value: string): void;
+  /** Detaches the attached prompt; its preview becomes the free text. */
+  onEditText(): void;
+  /** Attaches the prompt's current version in place of the older one in use. */
+  onLoadCurrent(): void;
+  /** Saves the free text to the library. */
+  onSaveToLibrary(): void;
   /** Why Generate cannot start, as its tooltip; null when it can. */
   blocked: string | null;
   /** Why the last start failed, as the tooltip of Generate; null after a start that went through. */
@@ -74,6 +94,12 @@ export function StudioForm({
   onProvider,
   onModel,
   onChange,
+  onRecent,
+  onLibrary,
+  onVariable,
+  onEditText,
+  onLoadCurrent,
+  onSaveToLibrary,
   blocked,
   startError,
   busy,
@@ -81,6 +107,9 @@ export function StudioForm({
   promptRef,
 }: Props) {
   const promptId = useId();
+  const variablesId = useId();
+  const { attached } = form;
+  const text = attached === null ? form.prompt : preview(attached).text;
   const limit = Math.min(model?.promptCharacterLimit ?? GENERATION_PROMPT_MAX, GENERATION_PROMPT_MAX);
   const ratios = model?.aspectRatios ?? null;
   const resolutions = model?.resolutions ?? null;
@@ -95,33 +124,78 @@ export function StudioForm({
         <label htmlFor={promptId} className={LABEL}>
           {PROMPT_LABEL}
         </label>
-        {recentPrompts.length > 0 && (
-          <select
-            className={`min-w-0 max-w-48 ${SELECT}`}
-            aria-label={RECENT_PROMPTS_LABEL}
-            value=""
-            onChange={(e) => {
-              if (e.target.value !== '') onChange({ prompt: e.target.value });
-            }}
-          >
-            <option value="">{RECENT_PROMPTS_LABEL}</option>
-            {recentPrompts.map((p) => (
-              <option key={p} value={p} title={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex min-w-0 items-center gap-2">
+          <button type="button" className={BUTTON_INLINE} title={LIBRARY_PROMPT_TITLE} onClick={onLibrary}>
+            {LIBRARY_PROMPT_LABEL}
+          </button>
+          {recentPrompts.length > 0 && (
+            <select
+              className={`min-w-0 max-w-48 ${SELECT}`}
+              aria-label={RECENT_PROMPTS_LABEL}
+              value=""
+              onChange={(e) => {
+                if (e.target.value !== '') onRecent(e.target.value);
+              }}
+            >
+              <option value="">{RECENT_PROMPTS_LABEL}</option>
+              {recentPrompts.map((p) => (
+                <option key={p} value={p} title={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
+      {attached !== null && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            {attached.version.id === attached.currentVersionId ? (
+              <span className="min-w-0 truncate text-sm font-medium text-text" title={attached.title}>
+                {attachedPromptLabel(attached.title, attached.version.number)}
+              </span>
+            ) : (
+              <button type="button" className={`min-w-0 ${BUTTON_INLINE}`} title={NEWER_VERSION_TITLE} onClick={onLoadCurrent}>
+                <span className="truncate">{attachedPromptLabel(attached.title, attached.version.number)}</span>
+              </button>
+            )}
+            <button type="button" className={BUTTON_INLINE} title={EDIT_PROMPT_TEXT_TITLE} onClick={onEditText}>
+              {EDIT_PROMPT_TEXT_LABEL}
+            </button>
+          </div>
+          {attached.version.variables.map((variable, index) => (
+            <div key={variable.name} className="flex flex-col gap-1">
+              <label htmlFor={`${variablesId}-${index}`} className={LABEL}>
+                {variable.name}
+              </label>
+              <input
+                id={`${variablesId}-${index}`}
+                className={INPUT}
+                value={attached.values[variable.name] ?? ''}
+                maxLength={PROMPT_VARIABLE_VALUE_MAX}
+                onChange={(e) => onVariable(variable.name, e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         id={promptId}
         ref={promptRef}
         className={TEXTAREA}
-        value={form.prompt}
-        maxLength={GENERATION_PROMPT_MAX}
-        title={`${form.prompt.length} / ${limit}`}
+        value={text}
+        readOnly={attached !== null}
+        maxLength={attached === null ? GENERATION_PROMPT_MAX : undefined}
+        title={`${text.length} / ${limit}`}
         onChange={(e) => onChange({ prompt: e.target.value })}
       />
+      {attached === null && form.prompt.trim() !== '' && (
+        <div>
+          <button type="button" className={BUTTON_INLINE} onClick={onSaveToLibrary}>
+            {SAVE_TO_LIBRARY_LABEL}
+          </button>
+        </div>
+      )}
       {(ratios !== null || resolutions !== null) && (
         <div className="flex gap-2">
           {ratios !== null && (

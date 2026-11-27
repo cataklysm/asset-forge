@@ -142,6 +142,8 @@ it('More offers the studio entries the host passes; a failing upscale shows its 
       throw new Error('The provider could not be reached');
     }),
     blocked: null,
+    recallVariable: () => undefined,
+    rememberVariables: () => {},
   };
   const file = fileRecord();
   render(<Harness file={file} asset={null} actions={{ ...ACTIONS, studio }} />);

@@ -35,6 +35,8 @@ const FORM: StudioForm = {
   aspectRatio: null,
   resolution: null,
   safeMode: true,
+  attached: null,
+  origin: null,
 };
 
 const ID = '00000000-0000-4000-8000-0000000000a1';
@@ -109,7 +111,22 @@ describe('formFromGeneration', () => {
       aspectRatio: '16:9',
       resolution: '2K',
       safeMode: false,
+      attached: null,
+      origin: null,
     });
+  });
+
+  it('returns the free text of a library prompt and drops an attached prompt and its origin', () => {
+    const fromLibrary = generation({
+      prompt: 'A side of a hero',
+      promptId: '00000000-0000-4000-8000-0000000000c1',
+      promptVersionId: '00000000-0000-4000-8000-0000000000c2',
+      promptTitle: 'Hero shot',
+      promptVersionNumber: 2,
+      promptVariables: { view: 'side' },
+    });
+    const form = { ...FORM, origin: { promptId: '00000000-0000-4000-8000-0000000000c3', title: 'Other' } };
+    expect(formFromGeneration(fromLibrary, form)).toMatchObject({ prompt: 'A side of a hero', attached: null, origin: null });
   });
 
   it('copies nothing but the provider of an upscale', () => {

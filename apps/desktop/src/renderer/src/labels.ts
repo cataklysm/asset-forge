@@ -428,3 +428,23 @@ export function promptVersionLabel(number: number, createdAt: string): string {
 export function promptCountLabel(count: number): string {
   return promptCount(count);
 }
+
+/** Library prompts in the studio form (StudioForm, PromptPicker, SavePromptDialog). */
+export const LIBRARY_PROMPT_LABEL = 'Library';
+export const LIBRARY_PROMPT_TITLE = 'Choose a prompt from the library';
+export const EDIT_PROMPT_TEXT_LABEL = 'Edit text';
+export const EDIT_PROMPT_TEXT_TITLE = 'Use the text as a free prompt';
+export const SAVE_TO_LIBRARY_LABEL = 'Save to library';
+export const VARIABLE_MISSING_TITLE = 'Fill in every variable';
+export const NEWER_VERSION_TITLE = 'A newer version exists; click to load it';
+export const NEW_LIBRARY_PROMPT_LABEL = 'New prompt';
+
+/** 'Hero shot v3'. */
+export function attachedPromptLabel(title: string, number: number): string {
+  return `${title} v${number}`;
+}
+
+/** 'New version of Hero shot'. */
+export function newVersionOfLabel(title: string): string {
+  return `New version of ${title}`;
+}

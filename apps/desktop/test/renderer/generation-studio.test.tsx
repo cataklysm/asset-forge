@@ -1,7 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
+  buildPromptVariables,
   JOB_ERROR_MESSAGES,
+  type PromptDetail,
+  type PromptVersion,
   type FileRecord,
   type Generation,
   type ImageModel,
@@ -10,10 +13,22 @@ import {
   type StartGeneration,
 } from '@assetforge/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { GenerationStudio } from '../../src/renderer/src/components/GenerationStudio';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import {
+  attachedPromptLabel,
+  CLOSE_LABEL,
   DELETED_MARK,
+  EDIT_PROMPT_TEXT_LABEL,
+  LIBRARY_PROMPT_LABEL,
+  NEWER_VERSION_TITLE,
+  newVersionOfLabel,
+  PROMPTS_LABEL,
+  SAVE_LABEL,
+  SAVE_TO_LIBRARY_LABEL,
+  STUDIO_TITLE,
+  VARIABLE_MISSING_TITLE,
   EDIT_MODEL_LABEL,
   GENERATE_BUTTON,
   GENERATION_STATUS_LABELS,
@@ -27,8 +42,19 @@ import {
   UPSCALES_LABEL,
 } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
 import { SAFE_MODE_KEY } from '../../src/renderer/src/studio-state';
-import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { TagsProvider } from '../../src/renderer/src/tags-context';
+import {
+  deferred,
+  fakeError,
+  fakePrompts,
+  fakeProviders,
+  installFakeApi,
+  promptDetail,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { fileRecord, nextId } from './fixtures';
 
 const MOCK_EDIT: ImageModel = {
@@ -104,15 +130,16 @@ interface Options {
   /** The generations made from other files, by file id. */
   byFile?: Record<string, Generation[]>;
   recent?: string[];
+  /** The library prompts. */
+  prompts?: PromptDetail[];
   handlers?: FakeHandlers;
 }
 
-function setup(options: Options = {}) {
-  const file = fileRecord({ originalName: 'file.png' });
+function studioHandlers(file: FileRecord, options: Options, state: { results: Generation[]; byFile: Record<string, Generation[]>; summary: JobSummary }): FakeHandlers {
   const providers = options.providers ?? [VENICE];
-  const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
-  const api = installFakeApi({
+  return {
     ...fakeProviders({ providers, lastUsedImageId: providers[0]?.id ?? null }).handlers,
+    ...fakePrompts(options.prompts ?? []).handlers,
     'providers:listImageModels': () => ({ ok: true, models: [MOCK_EDIT, MOCK_EDIT_BASIC, RES_ONLY] }),
     'jobs:summary': () => state.summary,
     'generations:forFile': ({ fileId }) => ({
@@ -120,12 +147,18 @@ function setup(options: Options = {}) {
       results: structuredClone(fileId === file.id ? state.results : (state.byFile[fileId] ?? [])),
     }),
     'generations:recentPrompts': () => ({ prompts: options.recent ?? [] }),
-    'generations:start': (request) => ({ ok: true, generation: generation(file, { status: 'pending', jobStatus: 'queued', outputs: [], prompt: 'prompt' in request ? request.prompt : null }) }),
+    'generations:start': (request) => ({ ok: true, generation: generation(file, { status: 'pending', jobStatus: 'queued', outputs: [], prompt: 'prompt' in request ? (request.prompt ?? null) : null }) }),
     'generations:retry': ({ generationId }) => ({ ...state.results.find((g) => g.id === generationId)!, status: 'pending' }),
     'generations:remove': () => ({}),
     'files:trashMany': ({ fileIds }) => ({ items: fileIds.map((fileId) => ({ fileId, file: null, error: null })) }),
     ...options.handlers,
-  });
+  };
+}
+
+function setup(options: Options = {}) {
+  const file = fileRecord({ originalName: 'file.png' });
+  const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
+  const api = installFakeApi(studioHandlers(file, options, state));
   const onClose = vi.fn();
   const onOpenFile = vi.fn();
   const ui = (shown: FileRecord) => (
@@ -580,5 +613,298 @@ describe('GenerationStudio', () => {
     await modelsReady();
     expect(document.activeElement).toBe(promptBox());
     expect(screen.queryByRole('region', { name: 'Studio' })).toBeNull();
+  });
+});
+
+function versionOf(content: string, number: number, defaults: Record<string, string> = {}): PromptVersion {
+  return { id: nextId(), number, content, variables: buildPromptVariables(content, defaults), createdAt: `2026-11-2${number}T08:00:00.000Z` };
+}
+
+/** `A {{view}} of {{who}}` with the default `front` for view and none for who. */
+const hero = () => promptDetail({ title: 'Hero shot', content: 'A {{view}} of {{who}}', defaults: { view: 'front' } });
+
+const textbox = (name: string) => screen.getByRole('textbox', { name }) as HTMLInputElement;
+
+/** Opens the library picker and chooses the prompt titled `title`. */
+async function pickPrompt(user: ReturnType<typeof userEvent.setup>, title: string, number = 1) {
+  await user.click(button(LIBRARY_PROMPT_LABEL));
+  const picker = await screen.findByRole('dialog', { name: PROMPTS_LABEL });
+  await user.click(await within(picker).findByText(title));
+  await screen.findByText(attachedPromptLabel(title, number));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: PROMPTS_LABEL })).toBeNull());
+}
+
+const startRequests = (api: ReturnType<typeof installFakeApi>) =>
+  callsOf(api, 'generations:start').map((c) => c.request as StartGeneration);
+
+describe('GenerationStudio with library prompts', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('a picked prompt shows its variables with their defaults and blocks Generate until all are filled', async () => {
+    const prompt = hero();
+    const { api, file } = setup({ prompts: [prompt] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    expect(textbox('view').value).toBe('front');
+    expect(textbox('who').value).toBe('');
+    expect(promptBox().readOnly).toBe(true);
+    expect(promptBox().value).toBe('A front of {{who}}');
+    expect(button(GENERATE_BUTTON).disabled).toBe(true);
+    expect(button(GENERATE_BUTTON).title).toBe(VARIABLE_MISSING_TITLE);
+
+    await user.type(textbox('who'), 'a hero');
+    expect(promptBox().value).toBe('A front of a hero');
+    expect(button(GENERATE_BUTTON).disabled).toBe(false);
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(startRequests(api)).toHaveLength(1));
+    const request = startRequests(api)[0]!;
+    expect(request).toEqual({
+      kind: 'edit',
+      fileId: file.id,
+      providerId: VENICE.id,
+      model: 'mock-edit',
+      promptVersionId: prompt.currentVersion.id,
+      variables: { view: 'front', who: 'a hero' },
+      resolution: '1K',
+      safeMode: true,
+    });
+    expect('prompt' in request).toBe(false);
+  });
+
+  it('a resolved text over the model limit blocks Generate with the prompt length reason', async () => {
+    setup({ prompts: [promptDetail({ title: 'Long', content: '{{who}}' })] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Long');
+    await user.click(textbox('who'));
+    await user.paste('x'.repeat(1501));
+    expect(button(GENERATE_BUTTON).title).toBe('The prompt is longer than this model allows');
+  });
+
+  it('a value typed for a variable is prefilled for the same name in another prompt, also in a studio opened anew', async () => {
+    const a = fileRecord({ originalName: 'a.png' });
+    const b = fileRecord({ originalName: 'b.png' });
+    const state = { results: [], byFile: {}, summary: IDLE };
+    installFakeApi(studioHandlers(a, { prompts: [hero(), promptDetail({ title: 'Close-up', content: 'Close-up of the {{View}}' })] }, state));
+    function Opener() {
+      const studio = useStudio();
+      return (
+        <>
+          {[a, b].map((f) => (
+            <button key={f.id} type="button" onClick={() => studio.open(f)}>
+              {`open ${f.originalName}`}
+            </button>
+          ))}
+        </>
+      );
+    }
+    const wrap = (children: ReactNode) => (
+      <JobsProvider>
+        <ProviderSettingsProvider>
+          <TagsProvider>
+            <StudioProvider>{children}</StudioProvider>
+          </TagsProvider>
+        </ProviderSettingsProvider>
+      </JobsProvider>
+    );
+    render(wrap(<Opener />));
+    const user = userEvent.setup();
+    await user.click(button('open a.png'));
+    await screen.findByRole('dialog', { name: `${STUDIO_TITLE} a.png` });
+    await modelsReady();
+    await pickPrompt(user, 'Hero shot');
+    await user.clear(textbox('view'));
+    await user.type(textbox('view'), 'side');
+    await pickPrompt(user, 'Close-up');
+    expect(textbox('View').value).toBe('side');
+
+    await user.click(button(CLOSE_LABEL));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: `${STUDIO_TITLE} a.png` })).toBeNull());
+    await user.click(button('open b.png'));
+    await screen.findByRole('dialog', { name: `${STUDIO_TITLE} b.png` });
+    await modelsReady();
+    await pickPrompt(user, 'Close-up');
+    expect(textbox('View').value).toBe('side');
+  });
+
+  it('Edit text makes the resolved text a free prompt and the next start sends only the prompt', async () => {
+    const { api } = setup({ prompts: [hero()] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.type(textbox('who'), 'a hero');
+    await user.click(button(EDIT_PROMPT_TEXT_LABEL));
+    expect(promptBox().readOnly).toBe(false);
+    expect(promptBox().value).toBe('A front of a hero');
+    expect(screen.queryByRole('textbox', { name: 'who' })).toBeNull();
+    await user.type(promptBox(), ' now');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(startRequests(api)).toHaveLength(1));
+    const request = startRequests(api)[0]!;
+    expect(request).toMatchObject({ prompt: 'A front of a hero now' });
+    expect('promptVersionId' in request || 'variables' in request).toBe(false);
+  });
+
+  it('Save to library after Edit text offers a new version of the prompt and attaches the form to it', async () => {
+    const prompt = hero();
+    const { api } = setup({ prompts: [prompt] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.click(button(EDIT_PROMPT_TEXT_LABEL));
+    await user.clear(promptBox());
+    await user.type(promptBox(), 'A {{{{view}} at night');
+    await user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    const asVersion = (await within(dialog).findByRole('radio', { name: newVersionOfLabel('Hero shot') })) as HTMLInputElement;
+    expect(asVersion.checked).toBe(true);
+    await user.click(within(dialog).getByRole('button', { name: SAVE_LABEL }));
+    await waitFor(() =>
+      expect(callsOf(api, 'prompts:saveVersion').map((c) => c.request)).toEqual([
+        { promptId: prompt.id, baseVersionId: prompt.currentVersion.id, content: 'A {{view}} at night', defaults: { view: 'front', who: '' } },
+      ]),
+    );
+    expect(callsOf(api, 'prompts:create')).toEqual([]);
+    await screen.findByText(attachedPromptLabel('Hero shot', 2));
+    expect(screen.queryByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL })).toBeNull();
+    expect(textbox('view').value).toBe('front');
+    expect(promptBox().readOnly).toBe(true);
+    expect(promptBox().value).toBe('A front at night');
+  });
+
+  it('Save to library of a typed prompt creates a prompt, shows a refusal inside the dialog and attaches the form', async () => {
+    const { api } = setup({ prompts: [promptDetail({ title: 'Taken' })] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    expect(within(dialog).queryAllByRole('radio')).toEqual([]);
+    const title = within(dialog).getByRole('textbox', { name: 'Title' });
+    await user.type(title, 'taken');
+    await user.click(within(dialog).getByRole('button', { name: SAVE_LABEL }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('This title is already used');
+    await user.clear(title);
+    await user.type(title, 'Blue');
+    await user.click(within(dialog).getByRole('button', { name: SAVE_LABEL }));
+    await screen.findByText(attachedPromptLabel('Blue', 1));
+    expect(callsOf(api, 'prompts:create').map((c) => c.request).at(-1)).toEqual({
+      title: 'Blue',
+      description: '',
+      content: 'make it blue',
+      defaults: {},
+    });
+    expect(callsOf(api, 'prompts:saveVersion')).toEqual([]);
+    expect(promptBox().readOnly).toBe(true);
+    expect(screen.queryByRole('button', { name: SAVE_TO_LIBRARY_LABEL })).toBeNull();
+  });
+
+  it('a recent prompt forgets the origin of a detached text', async () => {
+    const { api } = setup({ prompts: [hero()], recent: ['paint it red'] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.click(button(EDIT_PROMPT_TEXT_LABEL));
+    await waitFor(() => expect(optionsOf(combobox(RECENT_PROMPTS_LABEL))).toContain('paint it red'));
+    await user.selectOptions(combobox(RECENT_PROMPTS_LABEL), 'paint it red');
+    await user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    expect(within(dialog).queryAllByRole('radio')).toEqual([]);
+    expect(callsOf(api, 'prompts:get')).toHaveLength(1);
+  });
+
+  it('Use settings attaches the version of a library result with its values; a newer version loads on a click', async () => {
+    const older = versionOf('A {{view}} of {{who}}', 1);
+    const current = versionOf('A {{view}} of {{who}} at night', 2);
+    const prompt = promptDetail({ title: 'Hero shot', versions: [current, older] });
+    const file = fileRecord();
+    const made = generation(file, {
+      prompt: 'A back of a villain',
+      promptId: prompt.id,
+      promptVersionId: older.id,
+      promptTitle: 'Hero shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'back', who: 'a villain' },
+    });
+    setup({ prompts: [prompt], results: [made] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    const titleButton = await screen.findByRole('button', { name: attachedPromptLabel('Hero shot', 1) });
+    expect(titleButton.title).toBe(NEWER_VERSION_TITLE);
+    expect(textbox('view').value).toBe('back');
+    expect(textbox('who').value).toBe('a villain');
+    expect(promptBox().value).toBe('A back of a villain');
+
+    await user.click(titleButton);
+    await screen.findByText(attachedPromptLabel('Hero shot', 2));
+    expect(screen.queryByRole('button', { name: attachedPromptLabel('Hero shot', 2) })).toBeNull();
+    expect(textbox('view').value).toBe('back');
+    expect(promptBox().value).toBe('A back of a villain at night');
+  });
+
+  it('Use settings on a free result fills the free text and loads no prompt', async () => {
+    const { api } = setup({ prompts: [hero()], results: [generation(fileRecord(), { prompt: 'paint it red' })] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    expect(promptBox().readOnly).toBe(false);
+    expect(promptBox().value).toBe('paint it red');
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+    expect(callsOf(api, 'prompts:get')).toHaveLength(1);
+  });
+
+  it('a late answer of an earlier Use settings is ignored', async () => {
+    const prompt = hero();
+    const file = fileRecord();
+    const fromLibrary = generation(file, {
+      createdAt: '2026-01-02T00:00:00.000Z',
+      prompt: 'A side of a hero',
+      promptId: prompt.id,
+      promptVersionId: prompt.currentVersion.id,
+      promptTitle: 'Hero shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side', who: 'a hero' },
+    });
+    fromLibrary.outputs[0]!.name = 'library.png';
+    const free = generation(file, { prompt: 'paint it red' });
+    free.outputs[0]!.name = 'free.png';
+    const pending = deferred<PromptDetail>();
+    setup({ prompts: [prompt], results: [fromLibrary, free], handlers: { 'prompts:get': () => pending.promise } });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'library.png' }));
+    await user.click(button('Use settings'));
+    await user.click(screen.getByRole('button', { name: 'free.png' }));
+    await user.click(button('Use settings'));
+    await act(async () => pending.resolve(structuredClone(prompt)));
+    expect(promptBox().value).toBe('paint it red');
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+  });
+
+  it('a not_found start shows the message and keeps the prompt and its values', async () => {
+    setup({
+      prompts: [hero()],
+      handlers: {
+        'generations:start': () => {
+          throw fakeError('not_found', 'This prompt version does not exist');
+        },
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.type(textbox('who'), 'a hero');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe('This prompt version does not exist'));
+    expect(screen.getByText(attachedPromptLabel('Hero shot', 1))).toBeTruthy();
+    expect(textbox('view').value).toBe('front');
+    expect(textbox('who').value).toBe('a hero');
   });
 });
