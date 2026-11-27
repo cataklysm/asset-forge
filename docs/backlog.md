@@ -508,6 +508,21 @@ Found in the final review and not fixed:
 - No test follows the details link with a dirty Prompts draft; the `WorkspaceShell` `openPrompt` callback is untested.
 - Missing renderer tests: `Use settings` falling back to the resolved text, a stale picker answer, a stale `Use settings` from one library prompt to another, and Space on a list row.
 
+## URL import
+
+Deferred by design:
+
+- No site adapters: a gallery page is not turned into a list of URLs, there is no HTML parsing and no browser worker. A later adapter is a discovery job that inserts the same `file.download` jobs.
+- No view that groups the jobs of one import and no import history (a nullable batch id on the job could carry one).
+- The URL of a purged file is forgotten, so it can be downloaded again.
+- No editing, removing, searching or filtering of origins; they are not carried on list rows.
+- No perceptual hash or similar-image detection; only identical content (SHA-256) is recognised.
+- Two downloads with identical content running at the same moment may both be stored.
+- A host pauses for the application session only; the pause is not persisted.
+- A full disk fails each download individually with `download_no_space` instead of pausing all hosts.
+- No cookies, logins, API keys, per-site headers or proxies, and no setting to relax the address check.
+- No automatic tagging or analysis after a download, and a downloaded ZIP is never unpacked.
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
