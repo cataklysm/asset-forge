@@ -44,13 +44,21 @@ function lastSegment(finalUrl: string): string | null {
 }
 
 /**
- * The name a download is stored under: the Content-Disposition name, else the last path segment of the final URL,
- * else `download`; through `sanitizeFileName`. A name of an unknown kind whose extension is none of the mapped ones
- * gets the extension of a known content type.
+ * The name a download announces, before any extension is appended: the Content-Disposition name, else the last path
+ * segment of the final URL, else `download`; through `sanitizeFileName`. A refusal is checked on it as well, so an
+ * appended extension cannot disguise a refused type.
+ */
+export function downloadBaseName(r: { finalUrl: string; dispositionName: string | null }): string {
+  const raw = r.dispositionName !== null && r.dispositionName.trim() !== '' ? r.dispositionName : lastSegment(r.finalUrl);
+  return sanitizeFileName(raw ?? FALLBACK_NAME);
+}
+
+/**
+ * The name a download is stored under: `downloadBaseName`. A name of an unknown kind whose extension is none of the
+ * mapped ones gets the extension of a known content type.
  */
 export function downloadFileName(r: { finalUrl: string; contentType: string | null; dispositionName: string | null }): string {
-  const raw = r.dispositionName !== null && r.dispositionName.trim() !== '' ? r.dispositionName : lastSegment(r.finalUrl);
-  const name = sanitizeFileName(raw ?? FALLBACK_NAME);
+  const name = downloadBaseName(r);
   if (fileKind(name) !== 'other') return name;
   const current = importExtension(name);
   if (current !== null && MAPPED_EXTENSIONS.has(current)) return name;

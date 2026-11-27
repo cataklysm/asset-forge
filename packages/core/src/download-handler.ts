@@ -1,6 +1,6 @@
 import { FileDownloadPayloadSchema, type JobErrorCode, type JobResult } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
-import { isWebPage, downloadFileName } from './download-name.js';
+import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { SourceNotReadableError } from './errors.js';
 import { importStream, isRefusedImportName, type ImportContext } from './import-file.js';
 import { JobError, type Job, type JobHandler } from './jobs.js';
@@ -24,10 +24,15 @@ const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
   too_large: 'download_too_large',
 };
 
-/** The job error of a source failure; a throttled one always carries a wait. No cause: it could hold the URL. */
+/** The job error of a source failure; only a throttled one carries a wait, and always one. No cause: it could hold the URL. */
 function jobErrorOf(error: RemoteFileError): JobError {
-  const retryAfterMs = error.failure === 'throttled' ? clampRetryAfterMs(error.retryAfterMs) : error.retryAfterMs;
+  const retryAfterMs = error.failure === 'throttled' ? clampRetryAfterMs(error.retryAfterMs) : null;
   return new JobError(FAILURE_CODES[error.failure], { retryAfterMs });
+}
+
+/** The job error of whatever ended the source stream: a source failure keeps its code, anything else is internal. */
+function streamFailure(error: unknown): JobError {
+  return error instanceof RemoteFileError ? jobErrorOf(error) : new JobError('internal_error');
 }
 
 /**
@@ -79,6 +84,12 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
       if (error instanceof RemoteFileError) throw jobErrorOf(error);
       throw error;
     }
+    // The stream is ours from here. Listen before any await: an adapter that destroys it with an error (cancel,
+    // lost connection) must never find it without a listener, which would be an uncaught error in the main process.
+    let streamError: unknown = null;
+    remote.stream.on('error', (error: unknown) => {
+      streamError ??= error;
+    });
     const refuse = (code: JobErrorCode): never => {
       remote.stream.destroy();
       throw new JobError(code);
@@ -89,15 +100,21 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     }
     if (isWebPage(remote.contentType)) refuse('download_not_a_file');
     const name = downloadFileName(remote);
-    if (isRefusedImportName(name)) refuse('download_type_refused');
+    if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse('download_type_refused');
     try {
       await requireSpace(remote.contentLength ?? 0);
     } catch (error) {
       remote.stream.destroy();
       throw error;
     }
+    // A failure while the space was checked; `run` turns it into the abort when the signal fired.
+    const early = streamError ?? remote.stream.errored;
+    if (early != null || signal.aborted) {
+      remote.stream.destroy();
+      signal.throwIfAborted();
+      throw streamFailure(early);
+    }
 
-    let streamError: unknown = null;
     const imported = await importStream(
       ctx,
       { sourcePath: '', entryName: null, name, stream: remote.stream },
@@ -106,7 +123,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
         skipDuplicate: skipDuplicates,
         discardOnFailure: true,
         onStreamError: (error) => {
-          streamError = error;
+          streamError ??= error;
         },
       },
     );
@@ -121,8 +138,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     }
     const file = imported.file;
     if (imported.error !== null || file === null || file.status !== 'complete') {
-      if (streamError instanceof RemoteFileError) throw jobErrorOf(streamError);
-      throw new JobError('internal_error');
+      throw streamFailure(streamError);
     }
 
     // Nothing after this point fails the run: a later retry would keep a stale outcome.

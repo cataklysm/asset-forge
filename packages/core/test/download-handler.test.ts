@@ -180,6 +180,8 @@ describe('createFileDownloadHandler', () => {
     expect(t.jobRow(job.id).fileId).toBe(file.id);
     expect(t.db.jobs.results.get(job.id)).toBe('already_present');
     expect(t.staged()).toEqual([]);
+    // The discarded pending row took its origin with it; only the two of the kept file remain.
+    expect(t.db.fileOrigins.rows.size).toBe(2);
   });
 
   it('with skipDuplicates never moves the existing file into the target', async () => {
@@ -229,6 +231,65 @@ describe('createFileDownloadHandler', () => {
     expect(codeOf(error)).toBe('download_type_refused');
     expect(t.files()).toEqual([]);
     expect(t.remote.streams[0]!.destroyed).toBe(true);
+  });
+
+  it('refuses a refused name that a content-type extension would disguise', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x', { dispositionName: 'evil.exe', contentType: 'image/png' });
+    const { error } = await t.download('https://a.example/x');
+    expect(codeOf(error)).toBe('download_type_refused');
+    expect(t.files()).toEqual([]);
+    expect(t.remote.streams[0]!.destroyed).toBe(true);
+  });
+
+  it('only a throttled failure carries a wait', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', new RemoteFileError('unavailable', 90_000));
+    const { error } = await t.download('https://a.example/x.png');
+    expect(error).toMatchObject({ code: 'download_unavailable', retryAfterMs: null });
+  });
+
+  it('a stream that fails while the free space is checked maps the failure and leaves nothing behind', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', { contentLength: 10 });
+    let calls = 0;
+    t.storage.freeBytes = async () => {
+      if (++calls === 2) {
+        t.remote.streams[0]!.destroy(new RemoteFileError('unreachable'));
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return null;
+    };
+    const { error } = await t.download('https://a.example/x.png');
+    expect(codeOf(error)).toBe('download_unreachable');
+    expect(t.files()).toEqual([]);
+    expect(t.db.fileOrigins.rows.size).toBe(0);
+    expect(t.staged()).toEqual([]);
+  });
+
+  it('an abort while the free space is checked rejects with the abort', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', {
+      stream: (signal) => {
+        const stream = Readable.from([Buffer.from('x')]);
+        signal.addEventListener('abort', () => stream.destroy(signal.reason as Error), { once: true });
+        return stream;
+      },
+    });
+    const controller = new AbortController();
+    let calls = 0;
+    t.storage.freeBytes = async () => {
+      if (++calls === 2) {
+        controller.abort();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return null;
+    };
+    const job = await t.claim('https://a.example/x.png');
+    const error = await t.run(job, controller.signal);
+    expect(error).toMatchObject({ name: 'AbortError' });
+    expect(t.files()).toEqual([]);
+    expect(t.staged()).toEqual([]);
   });
 
   it('maps a failure of the source to its code and carries the wait', async () => {

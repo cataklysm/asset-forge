@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { downloadFileName, isWebPage } from '../src/index.js';
+import { downloadBaseName, downloadFileName, isWebPage } from '../src/index.js';
 
 const name = (finalUrl: string, contentType: string | null = null, dispositionName: string | null = null) =>
   downloadFileName({ finalUrl, contentType, dispositionName });
@@ -76,5 +76,13 @@ describe('isWebPage', () => {
     expect(isWebPage('image/png')).toBe(false);
     expect(isWebPage('text/plain')).toBe(false);
     expect(isWebPage(null)).toBe(false);
+  });
+});
+
+describe('downloadBaseName', () => {
+  it('is the name before a content-type extension is appended', () => {
+    const r = { finalUrl: 'https://a.example/x', contentType: 'image/png', dispositionName: 'evil.exe' };
+    expect(downloadBaseName(r)).toBe('evil.exe');
+    expect(downloadFileName(r)).toBe('evil.exe.png');
   });
 });
