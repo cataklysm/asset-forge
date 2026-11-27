@@ -194,7 +194,8 @@ const count = z.number().int().nonnegative();
 
 /**
  * A provider whose jobs are paused; `providerId` null is the jobs without a provider. `kind` follows
- * the resource class of the paused lane: `remote_api` is `venice`, `local_gpu` is `ollama`.
+ * the kind of the lane's entry (`purposeOf` tells a vision lane from an image lane); for a lane whose
+ * entry no longer exists the resource class decides: `remote_api` is `venice`, `local_gpu` is `ollama`.
  */
 export const PausedProviderSchema = z.object({
   providerId: ProviderIdSchema.nullable(),

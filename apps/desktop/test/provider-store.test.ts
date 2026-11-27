@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SaveProvider } from '@assetforge/contracts';
+import { DEFAULT_PROVIDER_OPTIONS } from '@assetforge/contracts';
 import { AssetForgeError } from '@assetforge/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProviderStore, UNUSABLE_ENV_BASE_URL } from '../src/main/provider-store.js';
@@ -110,6 +111,7 @@ describe('provider store: upgrade and start', () => {
         promptModel: null,
         editModel: null,
         hasApiKey: true,
+        options: DEFAULT_PROVIDER_OPTIONS,
       },
     ]);
     const id = providers[0]!.id;
@@ -254,6 +256,7 @@ describe('provider store: save', () => {
       promptModel: 'writer',
       editModel: null,
       hasApiKey: false,
+      options: DEFAULT_PROVIDER_OPTIONS,
     });
     const edited = s.save(input({ id: a.id, name: 'A2', timeoutSeconds: 60 }));
     expect(edited).toMatchObject({ id: a.id, name: 'A2', timeoutSeconds: 60 });
@@ -583,6 +586,7 @@ describe('provider store: environment', () => {
           promptModel: 'env-model',
           editModel: null,
           hasApiKey: false,
+          options: DEFAULT_PROVIDER_OPTIONS,
         },
       ],
       lastUsedId: null,
@@ -720,8 +724,11 @@ describe('provider store: kinds', () => {
       promptModel: null,
       editModel: 'edit-a',
       hasApiKey: false,
+      options: null,
     });
     expect(readSettings().providers[1]).toMatchObject({ kind: 'venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
+    // The options are held in memory only until the file format carries them.
+    for (const p of readSettings().providers) expect(p).not.toHaveProperty('options');
     expect(store().get(v.id)).toMatchObject({ kind: 'venice', editModel: 'edit-a' });
   });
 

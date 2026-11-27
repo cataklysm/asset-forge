@@ -297,6 +297,7 @@ describe('image provider directory', () => {
     taggingModel: null,
     promptModel: null,
     editModel: null,
+    options: null,
   };
   const ollama: ProviderEntry = { ...venice, id: randomUUID(), kind: 'ollama', name: 'Ollama' };
   const entries = [venice, ollama];

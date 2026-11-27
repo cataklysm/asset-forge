@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  DEFAULT_PROVIDER_OPTIONS,
   ENVIRONMENT_PROVIDER_ID,
   ErrorCodeSchema,
   ListModelsResultSchema,
@@ -19,7 +20,7 @@ import {
 
 const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
 const save = { name: 'RunPod', baseUrl: 'http://127.0.0.1:11500', timeoutSeconds: 120, taggingModel: 'qwen', promptModel: null };
-const view = { ...save, id: uuid, kind: 'ollama', editModel: null, hasApiKey: false };
+const view = { ...save, id: uuid, kind: 'ollama', editModel: null, hasApiKey: false, options: DEFAULT_PROVIDER_OPTIONS };
 const veniceView = {
   ...view,
   kind: 'venice',
@@ -27,6 +28,7 @@ const veniceView = {
   taggingModel: null,
   promptModel: null,
   editModel: 'qwen-image',
+  options: null,
 };
 
 describe('provider entries', () => {
@@ -88,7 +90,7 @@ describe('provider entries', () => {
   });
 
   test('a view names its kind; a venice view has an edit model', () => {
-    expect(ProviderKindSchema.options).toEqual(['ollama', 'venice']);
+    expect(ProviderKindSchema.options).toEqual(['ollama', 'openai', 'venice']);
     expect(VENICE_DEFAULT_BASE_URL).toBe('https://api.venice.ai/api/v1');
     const { kind: _kind, ...withoutKind } = view;
     expect(ProviderViewSchema.safeParse(withoutKind).success).toBe(false);

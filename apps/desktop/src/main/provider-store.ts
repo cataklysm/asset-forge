@@ -3,7 +3,9 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
+  DEFAULT_PROVIDER_OPTIONS,
   ENVIRONMENT_PROVIDER_ID,
+  isVisionKind,
   MAX_PROVIDERS,
   ModelNameSchema,
   ProviderKindSchema,
@@ -14,6 +16,7 @@ import {
   VISION_TIMEOUT_MIN_SECONDS,
   type ProviderKind,
   type ProviderList,
+  type ProviderOptions,
   type ProviderView,
   type SaveProvider,
 } from '@assetforge/contracts';
@@ -27,7 +30,7 @@ import { writeAtomic } from './atomic-file.js';
 import type { SecretCodec } from './secret-codec.js';
 import { usableBaseUrl } from './vision-config.js';
 
-// App-level provider entries (`ollama` for vision, `venice` for images) in `userData/provider-settings.json`
+// App-level provider entries (`ollama` and `openai` for vision, `venice` for images) in `userData/provider-settings.json`
 // (version 3) and one API key per entry, encrypted by the OS credential store, in
 // `userData/credentials/vision-api-key-<id>` (the name predates the kinds and is kept for every kind).
 // Kept free of Electron imports. A key is decrypted only when asked for and is never cached.
@@ -69,9 +72,14 @@ export interface ProviderEntry {
   taggingModel: string | null;
   /** Always null for `venice`. */
   promptModel: string | null;
-  /** Always null for `ollama`. */
+  /** Always null for a vision kind. */
   editModel: string | null;
+  /** The request options of a vision kind; always null for `venice`. Held in memory only for now: always the defaults. */
+  options: ProviderOptions | null;
 }
+
+/** The options an entry of the kind starts with. */
+const optionsFor = (kind: ProviderKind): ProviderOptions | null => (isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null);
 
 export interface ProviderStore {
   list(): ProviderList;
@@ -188,7 +196,9 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   let state: Stored | null = null;
 
   const write = (next: Stored): void => {
-    writeAtomic(settingsPath, `${JSON.stringify({ version: 3, ...next }, null, 2)}\n`);
+    // The options are not part of version 3 and stay out of the file.
+    const providers = next.providers.map(({ options: _options, ...entry }) => entry);
+    writeAtomic(settingsPath, `${JSON.stringify({ version: 3, ...next, providers }, null, 2)}\n`);
   };
   /** Writes `next` and only then makes it the state, so a failed write changes nothing. */
   const commit = (next: Stored): void => {
@@ -227,6 +237,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
       taggingModel: vision.taggingModel,
       promptModel: vision.promptModel,
       editModel: null,
+      options: optionsFor('ollama'),
     };
     const marked: Stored = { ...EMPTY, providers: [entry], adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
     write(marked);
@@ -370,7 +381,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
         encrypted = o.secrets.encrypt(apiKey);
       }
 
-      // A `venice` entry keeps no vision models, an `ollama` entry no edit model. An absent edit model keeps the stored one.
+      // A `venice` entry keeps no vision models, a vision entry no edit model. An absent edit model keeps the stored one.
       const editModel = parsed.data.editModel === undefined ? (previous?.editModel ?? null) : parsed.data.editModel;
       const entry: ProviderEntry = {
         id: previous?.id ?? randomUUID(),
@@ -380,7 +391,8 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
         timeoutSeconds,
         taggingModel: kind === 'venice' ? null : parsed.data.taggingModel,
         promptModel: kind === 'venice' ? null : parsed.data.promptModel,
-        editModel: kind === 'ollama' ? null : editModel,
+        editModel: kind === 'venice' ? editModel : null,
+        options: optionsFor(kind),
       };
       const providers = previous === null ? [...current.providers, entry] : current.providers.map((p) => (p.id === entry.id ? entry : p));
       // The key is bound to the origin it was entered for. The old key goes first, so a failure
@@ -445,6 +457,7 @@ function environment(env: NodeJS.ProcessEnv): ProviderEntry | null {
     taggingModel: usableModel,
     promptModel: usableModel,
     editModel: null,
+    options: optionsFor('ollama'),
   };
 }
 
@@ -487,7 +500,10 @@ function readStored(path: string): ReadResult {
   const v3 = V3FileSchema.safeParse(json);
   if (v3.success) {
     const { providers, lastUsed, adoptLegacyKey } = v3.data;
-    return { kind: 'stored', stored: { providers, lastUsed, adoptLegacyKey } };
+    return {
+      kind: 'stored',
+      stored: { providers: providers.map((p) => ({ ...p, options: optionsFor(p.kind) })), lastUsed, adoptLegacyKey },
+    };
   }
   const v2 = V2FileSchema.safeParse(json);
   if (v2.success) {
@@ -496,7 +512,7 @@ function readStored(path: string): ReadResult {
     return {
       kind: 'stored',
       stored: {
-        providers: providers.map((p) => ({ ...p, kind: 'ollama' as const, editModel: null })),
+        providers: providers.map((p) => ({ ...p, kind: 'ollama' as const, editModel: null, options: optionsFor('ollama') })),
         lastUsed: { vision: lastUsedId, image: null },
         adoptLegacyKey,
       },

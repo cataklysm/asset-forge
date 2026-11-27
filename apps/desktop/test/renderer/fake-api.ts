@@ -16,7 +16,13 @@ import type {
   ProviderView,
   UrlImportResult,
 } from '@assetforge/contracts';
-import { buildPromptVariables, cleanTagText, normalizeTagName } from '@assetforge/contracts';
+import {
+  DEFAULT_PROVIDER_OPTIONS,
+  buildPromptVariables,
+  cleanTagText,
+  isVisionKind,
+  normalizeTagName,
+} from '@assetforge/contracts';
 import {
   BUILT_IN_IMAGE_PROMPT_TEXT,
   BUILT_IN_TAGGING_TEXT,
@@ -134,9 +140,10 @@ type ProviderChannel = 'providers:list' | 'providers:save' | 'providers:delete' 
 
 /** A stored provider entry: `Local` on the mock address, with a tagging and a prompt model and no key. */
 export function providerView(p: Partial<ProviderView> = {}): ProviderView {
+  const kind = p.kind ?? 'ollama';
   return {
     id: nextId(),
-    kind: 'ollama',
+    kind,
     name: 'Local',
     baseUrl: 'http://127.0.0.1:11500',
     timeoutSeconds: 120,
@@ -144,6 +151,7 @@ export function providerView(p: Partial<ProviderView> = {}): ProviderView {
     promptModel: 'vision-a',
     editModel: null,
     hasApiKey: false,
+    options: isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null,
     ...p,
   };
 }
@@ -190,7 +198,7 @@ export function fakeProviders(
         throw fakeError('invalid_operation', 'The kind of a provider cannot be changed');
       const kind = before?.kind ?? request.kind ?? 'ollama';
       const editModel = request.editModel === undefined ? (before?.editModel ?? null) : request.editModel;
-      // A venice entry keeps no vision models, an ollama entry no edit model.
+      // A venice entry keeps no vision models and no options, a vision entry no edit model.
       const next: ProviderView = {
         id: before?.id ?? nextId(),
         kind,
@@ -199,8 +207,9 @@ export function fakeProviders(
         timeoutSeconds: request.timeoutSeconds,
         taggingModel: kind === 'venice' ? null : request.taggingModel,
         promptModel: kind === 'venice' ? null : request.promptModel,
-        editModel: kind === 'ollama' ? null : editModel,
+        editModel: kind === 'venice' ? editModel : null,
         hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
+        options: isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null,
       };
       state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
       return structuredClone(next);

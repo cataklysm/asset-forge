@@ -106,6 +106,7 @@ export const PROVIDER_STATE_LABELS = {
 /** The kind of a provider entry (ProviderSettings). */
 export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   ollama: 'Ollama',
+  openai: 'OpenAI-compatible',
   venice: 'Venice',
 };
 export const PROVIDER_KIND_LABEL = 'Kind';

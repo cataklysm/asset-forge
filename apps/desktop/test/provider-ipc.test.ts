@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult } from '@assetforge/contracts';
+import { DEFAULT_PROVIDER_OPTIONS } from '@assetforge/contracts';
 import { createOllamaVision, createVeniceImage } from '@assetforge/providers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MOCK_EDIT_BASIC_MODEL, MOCK_EDIT_MODEL, MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
@@ -88,6 +89,7 @@ describe('provider IPC', () => {
       promptModel: null,
       editModel: null,
       hasApiKey: true,
+      options: DEFAULT_PROVIDER_OPTIONS,
     });
     expect((await h.ok('providers:list', {})).providers).toEqual([saved]);
     const listed = await h.ok('providers:listModels', { providerId: saved.id });
@@ -156,6 +158,7 @@ describe('provider IPC', () => {
           promptModel: 'env-model',
           editModel: null,
           hasApiKey: false,
+          options: DEFAULT_PROVIDER_OPTIONS,
         },
       ],
       lastUsedId: null,

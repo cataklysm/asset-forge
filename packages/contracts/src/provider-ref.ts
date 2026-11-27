@@ -11,9 +11,24 @@ export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ProviderNameSchema = z.string().trim().min(1).max(PROVIDER_NAME_MAX);
 
-/** `ollama` entries analyse images (vision); `venice` entries edit and upscale them. A kind never changes. */
-export const ProviderKindSchema = z.enum(['ollama', 'venice']);
+/**
+ * Entries of a `vision` kind (`ollama`, `openai`) analyse images; `venice` entries (purpose `image`)
+ * edit and upscale them. A kind never changes.
+ */
+export const ProviderKindSchema = z.enum(['ollama', 'openai', 'venice']);
 export type ProviderKind = z.infer<typeof ProviderKindSchema>;
+
+/** What an entry is used for: `vision` analyses images, `image` generates them. */
+export type ProviderPurpose = 'vision' | 'image';
+export type VisionKind = 'ollama' | 'openai';
+
+export function purposeOf(kind: ProviderKind): ProviderPurpose {
+  return kind === 'venice' ? 'image' : 'vision';
+}
+
+export function isVisionKind(kind: ProviderKind): kind is VisionKind {
+  return purposeOf(kind) === 'vision';
+}
 
 /** The base URL a new `venice` entry starts with. */
 export const VENICE_DEFAULT_BASE_URL = 'https://api.venice.ai/api/v1';
