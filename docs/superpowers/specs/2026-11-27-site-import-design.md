@@ -151,7 +151,7 @@ crawl found and robots allowed is queued. `files:importUrls` is unchanged. The j
 `siteProfileId` and `filter { kinds, minBytes }`; v1 payloads run unchanged, and every reader of the
 payload (Jobs screen fields, host lanes, host pause) reads both.
 
-- New core port `SiteAccess { has(profileId), headersFor(profileId, url) }`, implemented in the
+- New core port `SiteAccess { siteOf(profileId), headersFor(profileId, url) }`, implemented in the
   main process from the profile's session (`cookies.get({ url })`). `headersFor` answers `null`
   unless the URL belongs to the profile's site. An unknown profile fails the job with `download_profile_missing`
   (`The site profile of this download no longer exists`, not retried).

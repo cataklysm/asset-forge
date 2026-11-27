@@ -598,6 +598,10 @@ Known gaps:
 - A profile left out of a damaged `site-profiles.json` keeps its partition's cookies, and nothing in the app can clear them.
 - A profile stored with a single-label site before the rule existed still loads; the rule applies on save.
 - The final URL of a redirected page is not added to the pages seen, so a pagination link back to it is loaded once more (bounded by `maxPages`).
+- A slow redirect inside the site that never arrives can be reported as `no_thumbnails` instead of `timeout`: the page loader counts the page as loaded once the replaced navigation settles as aborted.
+- The crawl keeps the keys of all problems for its dedupe also after the cap of 200 is reached (bounded like the set of seen files).
+- `off_site` links are listed as problems but have no counter of their own.
+- `download_login_not_sent` also covers HTTP 407 and 451 from a host outside the site, because the downloader reports them as one refusal.
 - A crawl and its kept answer live in memory only; nothing survives a restart, and one crawl runs at a time for the whole app.
 
 Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted.
