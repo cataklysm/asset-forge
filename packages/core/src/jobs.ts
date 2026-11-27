@@ -50,10 +50,12 @@ export class JobError extends Error {
   /** For a retryable code: wait at least this long before the next run and hold the job's lane until then. */
   readonly retryAfterMs: number | null;
 
-  constructor(code: JobErrorCode, options?: { cause?: unknown; retryAfterMs?: number }) {
-    super(JOB_ERROR_MESSAGES[code], options);
+  constructor(code: JobErrorCode, options?: { cause?: unknown; retryAfterMs?: number | null }) {
+    super(JOB_ERROR_MESSAGES[code], options?.cause === undefined ? undefined : { cause: options.cause });
     this.code = code;
-    this.retryAfterMs = options?.retryAfterMs ?? null;
+    const wait = options?.retryAfterMs;
+    // Only a finite wait of zero or more is kept; NaN, an infinity or a negative value would break the timer.
+    this.retryAfterMs = typeof wait === 'number' && Number.isFinite(wait) && wait >= 0 ? wait : null;
     this.name = new.target.name;
   }
 }

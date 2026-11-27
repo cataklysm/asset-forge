@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
   importFile,
+  importStream,
   inboxPath,
   REFUSED_IMPORT_MESSAGE,
   sanitizeFileName,
@@ -432,5 +433,128 @@ describe('importing the content of a trashed file', () => {
     await trashForTest(session, [first!.file!.id]);
     const [second] = await manager.importFiles(['/src/b.png']);
     expect(second!.duplicateOf).toEqual([]);
+  });
+});
+
+describe('importStream options', () => {
+  const source = (data: Buffer | Readable, name = 'a.png') => ({
+    sourcePath: '',
+    entryName: null,
+    name,
+    stream: Buffer.isBuffer(data) ? Readable.from([data]) : data,
+  });
+  const failing = (error: Error) =>
+    new Readable({
+      read() {
+        this.push(Buffer.from('part'));
+        this.destroy(error);
+      },
+    });
+
+  it('with skipDuplicate an existing content ends the import without a file', async () => {
+    const { ctx, db, storage } = await setup();
+    const first = await importStream(ctx, source(Buffer.from('same'), 'first.png'));
+    const second = await importStream(ctx, source(Buffer.from('same'), 'second.png'), { skipDuplicate: true });
+
+    expect(second).toEqual({ sourcePath: '', entryName: null, file: null, error: null, duplicateOf: [first.file!.id] });
+    expect([...db.files.records.keys()]).toEqual([first.file!.id]);
+    expect(stagingEntries(storage)).toEqual([]);
+    expect(inboxEntries(storage)).toEqual([first.file!.relativePath]);
+  });
+
+  it('with skipDuplicate lists the duplicates oldest first', async () => {
+    const { ctx } = await setup();
+    let tick = Date.parse('2026-01-01T00:00:00.000Z');
+    ctx.now = () => new Date((tick -= 1000));
+    const younger = await importStream(ctx, source(Buffer.from('same'), 'b.png'));
+    const oldest = await importStream(ctx, source(Buffer.from('same'), 'a.png'));
+    const result = await importStream(ctx, source(Buffer.from('same')), { skipDuplicate: true });
+    expect(result.duplicateOf).toEqual([oldest.file!.id, younger.file!.id]);
+  });
+
+  it('with skipDuplicate a new content is imported as usual', async () => {
+    const { ctx } = await setup();
+    const result = await importStream(ctx, source(Buffer.from('hello')), { skipDuplicate: true });
+    expect(result.file?.status).toBe('complete');
+    expect(result.duplicateOf).toEqual([]);
+  });
+
+  it('with skipDuplicate a trashed file with the same content is no duplicate', async () => {
+    const { ctx, manager } = await setup();
+    const first = await importStream(ctx, source(Buffer.from('same')));
+    await trashForTest(await manager.read(async (s) => s), [first.file!.id]);
+    const result = await importStream(ctx, source(Buffer.from('same')), { skipDuplicate: true });
+    expect(result.file?.status).toBe('complete');
+  });
+
+  it('without the option a duplicate is stored and reported', async () => {
+    const { ctx } = await setup();
+    const first = await importStream(ctx, source(Buffer.from('same')));
+    const second = await importStream(ctx, source(Buffer.from('same')));
+    expect(second.file?.status).toBe('complete');
+    expect(second.duplicateOf).toEqual([first.file!.id]);
+  });
+
+  it('with discardOnFailure a failing stream leaves no row and no staged bytes', async () => {
+    const { ctx, db, storage } = await setup();
+    const result = await importStream(ctx, source(failing(new Error('cut off'))), { discardOnFailure: true });
+
+    expect(result.file).toBeNull();
+    expect(result.error).toBe('Import failed');
+    expect(result.duplicateOf).toEqual([]);
+    expect(db.files.records.size).toBe(0);
+    expect(stagingEntries(storage)).toEqual([]);
+    expect(inboxEntries(storage)).toEqual([]);
+  });
+
+  it('with discardOnFailure a failure after the move removes the inbox file and the origin too', async () => {
+    const { ctx, db, storage } = await setup();
+    const markComplete = db.files.markComplete.bind(db.files);
+    db.files.markComplete = async () => {
+      throw new Error('disk I/O error');
+    };
+    const origin = { id: crypto.randomUUID(), url: 'https://a.example/a.png' };
+    const result = await importStream(ctx, source(Buffer.from('hello')), { discardOnFailure: true, origin });
+    db.files.markComplete = markComplete;
+
+    expect(result.file).toBeNull();
+    expect(db.files.records.size).toBe(0);
+    expect(db.fileOrigins.rows.size).toBe(0);
+    expect(inboxEntries(storage)).toEqual([]);
+    expect(stagingEntries(storage)).toEqual([]);
+  });
+
+  it('without discardOnFailure a failing stream leaves a failed row as before', async () => {
+    const { ctx, db } = await setup();
+    const result = await importStream(ctx, source(failing(new Error('cut off'))));
+    expect(result.file?.status).toBe('failed');
+    expect(db.files.records.get(result.file!.id)?.status).toBe('failed');
+  });
+
+  it('reports the error that ended the stream through onStreamError', async () => {
+    const { ctx } = await setup();
+    const cause = new Error('cut off');
+    const seen: unknown[] = [];
+    await importStream(ctx, source(failing(cause)), { discardOnFailure: true, onStreamError: (e) => seen.push(e) });
+    expect(seen).toEqual([cause]);
+  });
+
+  it('does not call onStreamError for a failure that is not the stream', async () => {
+    const { ctx, storage } = await setup();
+    storage.failNext('move', new Error('busy'));
+    const seen: unknown[] = [];
+    const result = await importStream(ctx, source(Buffer.from('hello')), { discardOnFailure: true, onStreamError: (e) => seen.push(e) });
+    expect(result.error).not.toBeNull();
+    expect(seen).toEqual([]);
+  });
+
+  it('inserts the origin with the pending row, so the complete file carries it', async () => {
+    const { ctx, db } = await setup();
+    const originId = crypto.randomUUID();
+    const result = await importStream(ctx, source(Buffer.from('hello')), { origin: { id: originId, url: 'https://a.example/a.png' } });
+    expect(result.file?.status).toBe('complete');
+    await expect(db.fileOrigins.listByFile(result.file!.id)).resolves.toEqual([
+      { id: originId, url: 'https://a.example/a.png', createdAt: result.file!.importedAt },
+    ]);
   });
 });

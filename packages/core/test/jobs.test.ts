@@ -6,6 +6,7 @@ import {
   clearFinishedJobs,
   countJobs,
   InvalidOperationError,
+  JobError,
   listJobs,
   NotFoundError,
   retryFailedJobs,
@@ -159,5 +160,17 @@ describe('jobs of trashed files', () => {
     await trashForTest(session, [fileId]);
     expect(await retryFailedJobs(session)).toBe(1);
     expect(db.jobs.rows.find((r) => r.id === trashedJob)!.status).toBe('failed');
+  });
+});
+
+describe('JobError', () => {
+  it('keeps a finite wait of zero or more and drops anything else', () => {
+    expect(new JobError('download_throttled', { retryAfterMs: 90_000 }).retryAfterMs).toBe(90_000);
+    expect(new JobError('download_throttled', { retryAfterMs: 0 }).retryAfterMs).toBe(0);
+    expect(new JobError('download_throttled').retryAfterMs).toBeNull();
+    expect(new JobError('download_throttled', { retryAfterMs: null }).retryAfterMs).toBeNull();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+      expect(new JobError('download_throttled', { retryAfterMs: bad }).retryAfterMs).toBeNull();
+    }
   });
 });

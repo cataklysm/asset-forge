@@ -158,6 +158,50 @@ describe('recoverIncompleteImports', () => {
   });
 });
 
+describe('recoverIncompleteImports of downloads', () => {
+  const ORIGIN = '55555555-5555-4555-8555-555555555555';
+
+  it('deletes a pending row with an origin, with its staged and inbox bytes, and lists it as discarded', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending({ ...pending(ID1, 'a.png'), origin: { id: ORIGIN, url: 'https://a.example/a.png' } });
+    storage.files.set(stagingPath(ID1), Buffer.from('partial'));
+    storage.files.set(inboxPath(ID1, 'a.png'), Buffer.from('moved'));
+
+    const result = await recoverIncompleteImports({ storage, files: db.files });
+
+    expect(result.discardedIds).toEqual([ID1]);
+    expect(result.failedIds).toEqual([]);
+    expect(db.files.records.has(ID1)).toBe(false);
+    expect(db.fileOrigins.rows.size).toBe(0);
+    expect(storage.files.has(stagingPath(ID1))).toBe(false);
+    expect(storage.files.has(inboxPath(ID1, 'a.png'))).toBe(false);
+  });
+
+  it('still marks a pending row without an origin failed', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending({ ...pending(ID1, 'a.png'), origin: { id: ORIGIN, url: 'https://a.example/a.png' } });
+    await db.files.insertPending(pending(ID2, 'b.png'));
+
+    const result = await recoverIncompleteImports({ storage, files: db.files });
+
+    expect(result.discardedIds).toEqual([ID1]);
+    expect(result.failedIds).toEqual([ID2]);
+    expect(db.files.records.get(ID2)?.status).toBe('failed');
+  });
+
+  it('keeps a download row pending when its bytes cannot be removed', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending({ ...pending(ID1, 'a.png'), origin: { id: ORIGIN, url: 'https://a.example/a.png' } });
+    storage.failNext('remove', new Error('EBUSY'));
+
+    const result = await recoverIncompleteImports({ storage, files: db.files });
+
+    expect(result.discardedIds).toEqual([]);
+    expect(result.skippedPaths).toEqual([stagingPath(ID1)]);
+    expect(db.files.records.get(ID1)?.status).toBe('pending');
+  });
+});
+
 describe('recoverIncompleteImports best-effort', () => {
   it('keeps a row pending and reports the path when its removal fails, and continues', async () => {
     const { storage, db } = await setup();
@@ -199,6 +243,21 @@ describe('recoverIncompleteImports best-effort', () => {
 
     expect(result.skippedPaths).toEqual([stagingPath(ID3)]);
     expect(result.removedStagingFiles).toEqual([]);
+  });
+
+  it('leaves the pending rows for the next open when the download ids cannot be listed', async () => {
+    const { storage, db } = await setup();
+    await db.files.insertPending({ ...pending(ID1, 'a.png'), origin: { id: '55555555-5555-4555-8555-555555555555', url: 'https://a.example/a.png' } });
+    const files = Object.create(db.files) as typeof db.files;
+    files.listPendingDownloadIds = async () => {
+      throw new Error('db gone');
+    };
+
+    const result = await recoverIncompleteImports({ storage, files });
+
+    expect(result.discardedIds).toEqual([]);
+    expect(result.failedIds).toEqual([]);
+    expect(db.files.records.get(ID1)?.status).toBe('pending');
   });
 
   it('does not throw when listing fails', async () => {

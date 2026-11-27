@@ -62,6 +62,51 @@ export interface Storage {
   list(relDir: string): Promise<string[]>; // entry names; [] if dir missing
   /** Absolute path of a path inside the storage root; validated like every other operation. Never sent to the renderer. */
   absolutePath(relativePath: string): Promise<string>;
+  /** Free bytes of the volume holding the storage root; null when unknown. */
+  freeBytes(): Promise<number | null>;
+}
+
+/** Why a remote file could not be fetched; each maps to exactly one `download_<failure>` job error code. */
+export type RemoteFileFailure =
+  | 'unreachable'
+  | 'unavailable'
+  | 'throttled'
+  | 'blocked'
+  | 'not_found'
+  | 'rejected'
+  | 'address_refused'
+  | 'too_large';
+
+/** The typed failure of a `RemoteFileSource`. Its message is the failure kind only, never a URL or an address. */
+export class RemoteFileError extends Error {
+  constructor(
+    readonly failure: RemoteFileFailure,
+    /** For `throttled`: how long the server asked to wait; null when it did not say. */
+    readonly retryAfterMs: number | null = null,
+    options?: { cause?: unknown },
+  ) {
+    super(`Remote file failure: ${failure}`, options);
+    this.name = new.target.name;
+  }
+}
+
+/** An opened remote file: the response headers are in, the body is `stream`. */
+export interface RemoteFile {
+  /** Fails with RemoteFileError('too_large') past the size limit and ('unreachable') on a stall or a lost connection. */
+  stream: Readable;
+  /** The address after redirects; used only to name the file. */
+  finalUrl: string;
+  /** Lower case, without parameters. */
+  contentType: string | null;
+  contentLength: number | null;
+  /** Raw file name from Content-Disposition. */
+  dispositionName: string | null;
+}
+
+/** The network behind the URL import. */
+export interface RemoteFileSource {
+  /** Rejects with RemoteFileError, or with the abort reason once `signal` aborts. */
+  open(url: string, signal: AbortSignal): Promise<RemoteFile>;
 }
 
 export interface SourceFiles {
@@ -125,6 +170,7 @@ export interface FileRepository {
   /** Stores the pixel size; rejects with NotFoundError for an unknown id. */
   setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord>;
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
+  /** Complete files outside the trash with this checksum, oldest import first, then id. */
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   listByStatus(status: ImportStatus): Promise<FileRecord[]>;
   get(id: string): Promise<FileRecord | null>;

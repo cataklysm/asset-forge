@@ -70,8 +70,34 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
   return importStream(ctx, { sourcePath, entryName: null, name: opened.name, stream: opened.stream });
 }
 
+/** Options of `importStream`; without them it behaves as the file import always did. */
+export interface ImportOptions {
+  /** Inserted with the pending row, in the same transaction. */
+  origin?: { id: string; url: string };
+  /**
+   * After the checksum, before the move: a complete file outside the trash with this SHA-256 ends the import
+   * without a file. Staging is removed, the pending row deleted, and `duplicateOf` lists those files oldest first.
+   */
+  skipDuplicate?: boolean;
+  /** A failure removes staging and deletes the pending row instead of marking it failed; the result has no file. */
+  discardOnFailure?: boolean;
+  /** Called on a failed import with the error that ended the source stream, when the stream failed. */
+  onStreamError?(error: unknown): void;
+}
+
+/** Removes the paths, best effort; startup recovery cleans leftovers of pending rows. */
+async function removeQuietly(storage: Storage, paths: readonly string[]): Promise<void> {
+  for (const path of paths) {
+    try {
+      await storage.remove(path);
+    } catch {
+      // Best effort.
+    }
+  }
+}
+
 /** The import steps of an opened source; takes ownership of its stream and never rejects. */
-export async function importStream(ctx: ImportContext, source: ImportSource): Promise<ImportResult> {
+export async function importStream(ctx: ImportContext, source: ImportSource, options: ImportOptions = {}): Promise<ImportResult> {
   const { sourcePath, entryName, name, stream } = source;
   const id = ctx.newId();
   const staging = stagingPath(id);
@@ -84,7 +110,16 @@ export async function importStream(ctx: ImportContext, source: ImportSource): Pr
     mimeType: mimeFromFileName(name),
     importedAt: ctx.now().toISOString(),
     kind: fileKind(name),
+    ...(options.origin === undefined ? {} : { origin: options.origin }),
   };
+
+  // Only listened to for a caller that asks: the first error the source stream emits.
+  let streamError: { error: unknown } | null = null;
+  if (options.onStreamError !== undefined) {
+    stream.on('error', (error: unknown) => {
+      streamError ??= { error };
+    });
+  }
 
   try {
     await ctx.files.insertPending(pending);
@@ -103,6 +138,15 @@ export async function importStream(ctx: ImportContext, source: ImportSource): Pr
       throw new ChecksumMismatchError(`Checksum mismatch after staging: expected ${sha256}, got ${verified}`);
     }
     const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
+    if (options.skipDuplicate === true && duplicateOf.length > 0) {
+      await removeQuietly(ctx.storage, [staging]);
+      try {
+        await ctx.files.deletePending(id);
+      } catch {
+        // The row stays pending; recovery deletes a download row and fails any other on the next open.
+      }
+      return { sourcePath, entryName, file: null, error: null, duplicateOf };
+    }
     await ctx.storage.move(staging, finalPath);
     moved = true;
     // A failed measurement never fails the import; the file is measured on demand later.
@@ -143,13 +187,18 @@ export async function importStream(ctx: ImportContext, source: ImportSource): Pr
     return { sourcePath, entryName, file, error: null, duplicateOf };
   } catch (error) {
     const message = messageOf(error);
+    // Read before our own destroy, which ends the stream without an error.
+    const ended = (streamError as { error: unknown } | null) ?? (stream.errored == null ? null : { error: stream.errored });
     stream.destroy();
-    for (const path of moved ? [staging, finalPath] : [staging]) {
+    await removeQuietly(ctx.storage, moved ? [staging, finalPath] : [staging]);
+    if (ended !== null) options.onStreamError?.(ended.error);
+    if (options.discardOnFailure === true) {
       try {
-        await ctx.storage.remove(path);
+        await ctx.files.deletePending(id);
       } catch {
-        // Best effort; startup recovery cleans leftovers of pending rows.
+        // The row stays pending; recovery deletes a download row and fails any other on the next open.
       }
+      return { sourcePath, entryName, file: null, error: message, duplicateOf: [] };
     }
     try {
       await ctx.files.markFailed(id, message);

@@ -203,6 +203,14 @@ export class InMemoryStorage implements Storage {
     return `/memory/${relPath}`;
   }
 
+  /** What `freeBytes` answers; null is a storage that cannot tell. */
+  free: number | null = null;
+
+  async freeBytes(): Promise<number | null> {
+    await this.guard('freeBytes');
+    return this.free;
+  }
+
   private addDir(dir: string): void {
     const parts = dir.split('/');
     for (let i = 1; i <= parts.length; i++) this.dirs.add(parts.slice(0, i).join('/'));
@@ -575,6 +583,8 @@ class InMemoryFiles implements FileRepository {
   async findCompleteBySha256(sha256: string): Promise<FileRecord[]> {
     return [...this.records.values()]
       .filter((r) => r.status === 'complete' && r.deletedAt === null && r.sha256 === sha256)
+      // Mirrors the database: oldest import first, then id.
+      .sort((a, b) => (a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .map((r) => this.withTags(r));
   }
 

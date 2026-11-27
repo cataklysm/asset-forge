@@ -243,6 +243,11 @@ export class LocalFileSystemStorage implements Storage {
     return this.guarded(relPath, () => this.resolve(relPath, false));
   }
 
+  /** Not measured yet: a storage that cannot tell never blocks a download. */
+  async freeBytes(): Promise<number | null> {
+    return null;
+  }
+
   /** The single place where file-system failures are translated (see `translateFsError`). */
   private async guarded<T>(
     relPath: string,
