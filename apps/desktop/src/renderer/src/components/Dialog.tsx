@@ -54,10 +54,15 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
 
   // Unmounted while open: the element is gone and focus would fall back to the body. The
   // connectivity check skips StrictMode's simulated unmount, which leaves the element in place.
+  // Focus that is still on an element elsewhere stays there: the dialog is then mounted anew from
+  // another dialog, and the new one takes that element as its opener.
   useEffect(() => {
     const dialog = ref.current;
     return () => {
-      if (dialog !== null && !dialog.isConnected) restoreFocus();
+      if (dialog === null || dialog.isConnected) return;
+      const active = document.activeElement;
+      if (active === null || active === document.body || !active.isConnected) restoreFocus();
+      else opener.current = null;
     };
   }, []);
 

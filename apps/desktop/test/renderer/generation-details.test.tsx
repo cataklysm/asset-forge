@@ -163,7 +163,7 @@ it('without a Venice entry the studio entries are disabled with the reason as th
   expect(api.calls.some((c) => c.channel === 'generations:start')).toBe(false);
 });
 
-it('Upscale 4× starts an upscale with scale 4 on the Venice entry', async () => {
+it('Upscale 4× starts an upscale with scale 4 and leaves the entry to the main process', async () => {
   const file = fileRecord();
   const api = install({ 'generations:start': () => ({ ok: true, generation: generation({ kind: 'upscale' }) }) });
   render(
@@ -178,7 +178,6 @@ it('Upscale 4× starts an upscale with scale 4 on the Venice entry', async () =>
   expect(api.calls.find((c) => c.channel === 'generations:start')?.request).toEqual({
     kind: 'upscale',
     fileId: file.id,
-    providerId: VENICE.id,
     scale: 4,
   });
 });
