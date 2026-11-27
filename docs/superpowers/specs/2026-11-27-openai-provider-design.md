@@ -168,8 +168,9 @@ The three analysis dialogs, the provider select with its states, the gate, the p
 
 `docker/mock-provider/server.mjs` gains the OpenAI endpoints under `/v1`, behind the same optional `MOCK_API_KEY` check and recorded in `requests` like the Ollama ones:
 
-- `GET /v1/models` → `{ object: 'list', data: [{ id }] }` with the three existing model names plus `mock-thinking` and `mock-fenced`. The Ollama list (`/api/tags`) stays as it is.
-- `POST /v1/chat/completions` → `{ choices: [{ message: { role: 'assistant', content } }] }`. With a `response_format` of type `json_schema` the content is the deterministic tag JSON the Ollama path gives for the same image; without it the plain-text description. `mock-thinking` answers with a leading `<think>…</think>` block before the content, `mock-fenced` wraps the JSON in a code fence; the model that answers on `/api/chat` answers here too, any other name is a 404. A new switch makes the mock refuse `response_format` with HTTP 400 (for the fallback above). The existing failure queue and slow-answer switches are shared: a queued failure is consumed by the next chat request on either API.
+- `GET /v1/models` → `{ object: 'list', data: [{ id }] }` with seven ids: the three existing names, `mock-thinking`, `mock-fenced`, `mock-reasoning-only` and `Qwen/Mock-VL:7B`. The Ollama list (`/api/tags`) stays as it is.
+- `POST /v1/chat/completions` → `{ choices: [{ message: { role: 'assistant', content } }] }`. With a `response_format` of type `json_schema` the content is the deterministic tag JSON the Ollama path gives for the same image; without it the plain-text description. `mock-thinking` answers with a leading `<think>…</think>` block before the content, `mock-fenced` wraps the JSON in a code fence, `mock-reasoning-only` answers `content: null` with the text in `reasoning_content`, and `Qwen/Mock-VL:7B` behaves like `mock-vision` (a name with `/` and `:`). `mock-text` and `mock-legacy` are listed but chat answers 404 for them, as for any other name; a request without an image answers 400. The existing failure queue and slow-answer switches are shared: a queued failure is consumed by the next chat request on either API.
+- The start option `refuseResponseFormat` answers HTTP 400 to a chat request carrying `response_format` and the tag JSON to one without it (for the fallback above).
 
 ## 6. Tests
 

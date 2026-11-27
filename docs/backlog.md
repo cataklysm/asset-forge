@@ -416,7 +416,7 @@ Found in the final review and not fixed:
 
 Deferred by design:
 
-- No second kind of provider (OpenAI-compatible servers, vLLM, a llama.cpp server, RunPod serverless); every entry speaks the Ollama API (see the note on the provider id routes under "Main process").
+- No other kind of analysis provider than Ollama-compatible and OpenAI-compatible (RunPod serverless API, native vendor APIs).
 - No automatic failover: the app never moves jobs or switches a provider by itself.
 - No starting, stopping or loading anything on a provider (pods, Ollama model load control).
 - No setting for parallel analyses per provider; each provider runs one at a time.
@@ -429,6 +429,14 @@ Deferred by design:
 - The origin binding of a key lives in the plaintext settings file (it is the stored base URL), now per entry.
 - The Jobs-screen provider filter offers `All providers` and the existing entries; there is no option for jobs without a provider or for the lanes of a deleted provider.
 - In environment mode an unusable `ASSETFORGE_VISION_BASE_URL` gives an empty provider list rather than one entry that reports the error.
+- No environment mode for the `openai` kind: `ASSETFORGE_VISION_BASE_URL` yields one `ollama` entry.
+- The thinking switch of the `openai` kind sets only `chat_template_kwargs.enable_thinking`; a model steered another way needs its parameter in the extra parameters.
+- No capability report for `openai` entries: every model the server lists is offered, with `vision` unknown, so a model without vision fails at the first request.
+- Options are per entry, not per model or per analysis prompt.
+- Options are not part of the fingerprint: a file analysed before a change counts as analysed until `force`.
+- A request in flight keeps the options it was built with; a save applies from the next request.
+- The `openai` adapter and its request options were tested only against the mock provider, never against a real vLLM server.
+- The option limits (temperature 0 to 2, tokens 1 to 100 000) are repeated as literals in the renderer form and are not exported as constants from contracts.
 
 Found in the final review and not fixed:
 
