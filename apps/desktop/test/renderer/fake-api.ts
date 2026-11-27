@@ -9,9 +9,12 @@ import type {
   IpcResponse,
   IpcResult,
   ListModelsResult,
+  PromptDetail,
+  PromptSummary,
   ProviderList,
   ProviderView,
 } from '@assetforge/contracts';
+import { buildPromptVariables, cleanTagText, normalizeTagName } from '@assetforge/contracts';
 import {
   BUILT_IN_IMAGE_PROMPT_TEXT,
   BUILT_IN_TAGGING_TEXT,
@@ -261,6 +264,123 @@ export function fakeAssetSources(asset: AssetDetail): {
       if (!find(assetId).sources.some((s) => s.id === sourceId)) throw fakeError('not_found', 'The source does not exist');
       state.opened.push(sourceId);
       return null;
+    },
+  };
+  return { state, handlers };
+}
+
+type LibraryChannel =
+  | 'prompts:list'
+  | 'prompts:get'
+  | 'prompts:create'
+  | 'prompts:update'
+  | 'prompts:saveVersion'
+  | 'prompts:delete'
+  | 'prompts:addTag'
+  | 'prompts:removeTag';
+
+let promptClock = Date.parse('2026-11-27T08:00:00.000Z');
+const promptTime = () => new Date((promptClock += 60_000)).toISOString();
+
+/** A stored library prompt with one version (`content`, defaults from `defaults`), or the given versions. */
+export function promptDetail(
+  p: Partial<Omit<PromptDetail, 'currentVersion' | 'versions'>> & {
+    content?: string;
+    defaults?: Record<string, string>;
+    versions?: PromptDetail['versions'];
+  } = {},
+): PromptDetail {
+  const { content = 'A {{view}} of the subject', defaults = {}, versions, ...rest } = p;
+  const createdAt = rest.createdAt ?? promptTime();
+  const all = versions ?? [
+    { id: nextId(), number: 1, content, variables: buildPromptVariables(content, defaults), createdAt },
+  ];
+  return {
+    id: nextId(),
+    title: 'Prompt',
+    description: '',
+    tags: [],
+    updatedAt: all[0]!.createdAt,
+    createdAt,
+    ...rest,
+    currentVersion: all[0]!,
+    versions: all,
+  };
+}
+
+const summaryOf = ({ versions: _versions, createdAt: _createdAt, ...summary }: PromptDetail): PromptSummary => summary;
+
+/**
+ * In-memory handlers for the library's `prompts:*` channels, refusing what core refuses with its fixed
+ * messages. The list matches `query` in title, description and current text, and needs every tag.
+ */
+export function fakePrompts(seed: PromptDetail[] = []): {
+  state: { prompts: PromptDetail[] };
+  handlers: { [C in LibraryChannel]: NonNullable<FakeHandlers[C]> };
+} {
+  const state = { prompts: structuredClone(seed) };
+  const find = (id: string) => {
+    const prompt = state.prompts.find((item) => item.id === id);
+    if (prompt === undefined) throw fakeError('not_found', 'This prompt does not exist');
+    return prompt;
+  };
+  const store = (next: PromptDetail) => {
+    state.prompts = state.prompts.map((item) => (item.id === next.id ? next : item));
+    return structuredClone(next);
+  };
+  const checkTitle = (title: string, id: string | null) => {
+    if (title === '') throw fakeError('validation_failed', 'A prompt needs a title');
+    if (state.prompts.some((item) => item.id !== id && item.title.toLowerCase() === title.toLowerCase()))
+      throw fakeError('validation_failed', 'This title is already used');
+  };
+  const versionOf = (content: string, defaults: Record<string, string>, number: number) => {
+    const text = content.trim();
+    if (text === '') throw fakeError('validation_failed', 'A prompt needs a text');
+    return { id: nextId(), number, content: text, variables: buildPromptVariables(text, defaults), createdAt: promptTime() };
+  };
+  const handlers: { [C in LibraryChannel]: NonNullable<FakeHandlers[C]> } = {
+    'prompts:list': ({ query, tagNames = [], offset, limit }) => {
+      const words = (query ?? '').toLowerCase().split(/s+/).filter((word) => word !== '');
+      const matching = state.prompts.filter((item) => {
+        const text = `${item.title} ${item.description} ${item.currentVersion.content}`.toLowerCase();
+        return words.every((word) => text.includes(word)) && tagNames.every((name) => item.tags.some((tag) => tag.name === name));
+      });
+      return { items: matching.slice(offset, offset + limit).map((item) => structuredClone(summaryOf(item))), total: matching.length };
+    },
+    'prompts:get': ({ promptId }) => structuredClone(find(promptId)),
+    'prompts:create': ({ title, description, content, defaults }) => {
+      checkTitle(title.trim(), null);
+      const version = versionOf(content, defaults, 1);
+      const created = promptDetail({ title: title.trim(), description: description.trim(), versions: [version], createdAt: version.createdAt });
+      state.prompts = [created, ...state.prompts];
+      return structuredClone(created);
+    },
+    'prompts:update': ({ promptId, title, description }) => {
+      const current = find(promptId);
+      checkTitle(title.trim(), promptId);
+      return store({ ...current, title: title.trim(), description: description.trim(), updatedAt: promptTime() });
+    },
+    'prompts:saveVersion': ({ promptId, baseVersionId, content, defaults }) => {
+      const current = find(promptId);
+      if (current.currentVersion.id !== baseVersionId) throw fakeError('invalid_operation', 'This prompt was changed in the meantime');
+      const version = versionOf(content, defaults, current.currentVersion.number + 1);
+      return store({ ...current, currentVersion: version, versions: [version, ...current.versions], updatedAt: version.createdAt });
+    },
+    'prompts:delete': ({ promptId }) => {
+      find(promptId);
+      state.prompts = state.prompts.filter((item) => item.id !== promptId);
+      return {};
+    },
+    'prompts:addTag': ({ promptId, name }) => {
+      const current = find(promptId);
+      const normalised = normalizeTagName(name);
+      if (normalised === null) throw fakeError('validation_failed', 'invalid tag');
+      if (current.tags.some((tag) => tag.name === normalised)) return structuredClone(current);
+      return store({ ...current, tags: [...current.tags, { name: normalised, displayName: cleanTagText(name), origin: 'manual' }] });
+    },
+    'prompts:removeTag': ({ promptId, name }) => {
+      const current = find(promptId);
+      return store({ ...current, tags: current.tags.filter((tag) => tag.name !== name) });
     },
   };
   return { state, handlers };

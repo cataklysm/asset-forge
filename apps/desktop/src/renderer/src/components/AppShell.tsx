@@ -1,9 +1,10 @@
-import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, Settings, Trash2, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, ScrollText, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { JOB_ERROR_MESSAGES, type JobErrorCode, type PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import {
   laneLabel,
+  PROMPTS_LABEL,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
   RESUME_LABEL,
@@ -16,7 +17,7 @@ import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 /** Pause reasons the user fixes on the settings screen: the banner offers the way there. */
 const SETTINGS_REASONS: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured']);
 
-export type Section = 'assets' | 'projects' | 'inbox' | 'trash' | 'jobs' | 'settings';
+export type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
 interface Props {
   workspaceName: string;
@@ -41,6 +42,7 @@ interface Props {
 const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'assets', label: 'Assets', icon: Package },
   { section: 'projects', label: 'Projects', icon: FolderOpen },
+  { section: 'prompts', label: PROMPTS_LABEL, icon: ScrollText },
   { section: 'inbox', label: 'Inbox', icon: Inbox },
   { section: 'trash', label: TRASH_LABEL, icon: Trash2 },
   { section: 'jobs', label: 'Jobs', icon: ListChecks },

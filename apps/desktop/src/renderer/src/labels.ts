@@ -10,6 +10,7 @@ import {
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
 } from '@assetforge/contracts';
+import { formatDateTime } from './format';
 
 /** 'in_progress' -> 'In progress'. */
 export function label(value: string): string {
@@ -223,7 +224,7 @@ export const PROMPT_PURPOSE_TITLES: Record<AnalysisPromptPurpose, string> = {
 };
 export const PROMPTS_LOAD_FAILED = 'The analysis prompts could not be read';
 export const RETRY_LABEL = 'Retry';
-export const NEW_PROMPT_LABEL = 'New';
+export const ANALYSIS_NEW_PROMPT_LABEL = 'New';
 export const NEW_PROMPT_TITLE = 'Adds a prompt with the built-in text';
 /** The name of a new prompt: 'New prompt', then 'New prompt 2', … */
 export const NEW_PROMPT_NAME = 'New prompt';
@@ -231,12 +232,12 @@ export const PROMPT_NAME_LABEL = 'Name';
 export const PROMPT_NAME_TITLE = 'Shown in the analysis dialogs; unique within its list';
 export const PROMPT_TAG_LIMIT_LABEL = 'Tag limit';
 export const PROMPT_TAG_LIMIT_TITLE = `At most this many tags are kept from one answer (${ANALYSIS_TAG_LIMIT_MIN}–${ANALYSIS_TAG_LIMIT_MAX})`;
-export const PROMPT_TEXT_LABEL = 'Text';
-export const PROMPT_TEXT_TITLE = 'Sent to the vision model together with the image';
+export const ANALYSIS_PROMPT_TEXT_LABEL = 'Text';
+export const ANALYSIS_PROMPT_TEXT_TITLE = 'Sent to the vision model together with the image';
 export const SAVE_LABEL = 'Save';
 export const RESET_LABEL = 'Reset';
 export const RESET_PROMPT_TITLE = 'Replaces the text with the built-in one; the name stays';
-export const DELETE_PROMPT_TITLE = 'Deletes the prompt; asks first';
+export const ANALYSIS_DELETE_PROMPT_TITLE = 'Deletes the prompt; asks first';
 export const LAST_PROMPT_TITLE = 'The last prompt cannot be deleted';
 export const UNSAVED_CHANGES = 'Unsaved changes';
 export const NO_CHANGES = 'No unsaved changes';
@@ -292,6 +293,7 @@ export const ORIGIN_LABEL = 'Origin';
 
 const fileCount = (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`;
 const assetCount = (count: number) => `${count} ${count === 1 ? 'asset' : 'assets'}`;
+const promptCount = (count: number) => `${count} ${count === 1 ? 'prompt' : 'prompts'}`;
 
 /** The rename tag dialog (RenameTagDialog) and the pencil on an editable tag chip. */
 export const RENAME_TAG_TITLE = 'Rename tag';
@@ -304,13 +306,20 @@ export function renameTagLabel(displayName: string): string {
   return `${RENAME_LABEL} ${displayName}`;
 }
 
-/** 'front view · 42 files · 3 assets'. */
-export function tagUsageLine(usage: { displayName: string; files: number; assets: number }): string {
-  return `${usage.displayName} · ${fileCount(usage.files)} · ${assetCount(usage.assets)}`;
+interface TagUsageCounts {
+  displayName: string;
+  files: number;
+  assets: number;
+  prompts: number;
 }
 
-/** 'Merges with front · 118 files · 5 assets'. */
-export function tagMergeLine(usage: { displayName: string; files: number; assets: number }): string {
+/** 'front view · 42 files · 3 assets · 1 prompt'. */
+export function tagUsageLine(usage: TagUsageCounts): string {
+  return `${usage.displayName} · ${fileCount(usage.files)} · ${assetCount(usage.assets)} · ${promptCount(usage.prompts)}`;
+}
+
+/** 'Merges with front · 118 files · 5 assets · 0 prompts'. */
+export function tagMergeLine(usage: TagUsageCounts): string {
   return `Merges with ${tagUsageLine(usage)}`;
 }
 
@@ -390,3 +399,32 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   'vision.analyze_file': 'Analysis',
   'image.generate': 'Generation',
 };
+
+/** The prompt library (Prompts screen); the analysis prompts of the settings keep their own labels above. */
+export const PROMPTS_LABEL = 'Prompts';
+export const NEW_PROMPT_LABEL = 'New';
+export const PROMPT_TITLE_LABEL = 'Title';
+export const PROMPT_DESCRIPTION_LABEL = 'Description';
+export const PROMPT_TEXT_LABEL = 'Text';
+export const PROMPT_TEXT_TITLE = 'Write {{name}} for a part that changes';
+export const PROMPT_VERSION_LABEL = 'Version';
+export const USE_VERSION_LABEL = 'Use this version';
+export const UNSAVED_PROMPT_TITLE = 'Discard the unsaved changes?';
+export const DISCARD_LABEL = 'Discard';
+export const DELETE_PROMPT_TITLE = 'Delete this prompt?';
+export const SEARCH_PROMPTS_LABEL = 'Search prompts';
+export const PROMPT_TAG_FILTER_TITLE = 'Prompts that carry all these tags';
+export const PROMPT_TAGS_LABEL = 'Prompt tags';
+export const NO_PROMPTS_TEXT = 'No prompts';
+export const NO_MATCHING_PROMPTS_TEXT = 'No matching prompts';
+export const NO_PROMPT_SELECTED_TEXT = 'No prompt selected';
+
+/** 'v3 · <date and time as the lists format them>'. */
+export function promptVersionLabel(number: number, createdAt: string): string {
+  return `v${number} · ${formatDateTime(createdAt)}`;
+}
+
+/** '1 prompt' / '12 prompts'. */
+export function promptCountLabel(count: number): string {
+  return promptCount(count);
+}

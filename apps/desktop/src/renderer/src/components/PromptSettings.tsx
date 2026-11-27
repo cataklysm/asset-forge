@@ -13,11 +13,11 @@ import { describeError } from '../api';
 import { useAnalysisPrompts } from '../analysis-prompts-context';
 import {
   DELETE_LABEL,
-  DELETE_PROMPT_TITLE,
+  ANALYSIS_DELETE_PROMPT_TITLE,
   ENTER_NAME,
   ENTER_TEXT,
   LAST_PROMPT_TITLE,
-  NEW_PROMPT_LABEL,
+  ANALYSIS_NEW_PROMPT_LABEL,
   NEW_PROMPT_NAME,
   NEW_PROMPT_TITLE,
   NO_CHANGES,
@@ -27,8 +27,8 @@ import {
   PROMPT_PURPOSE_TITLES,
   PROMPT_TAG_LIMIT_LABEL,
   PROMPT_TAG_LIMIT_TITLE,
-  PROMPT_TEXT_LABEL,
-  PROMPT_TEXT_TITLE,
+  ANALYSIS_PROMPT_TEXT_LABEL,
+  ANALYSIS_PROMPT_TEXT_TITLE,
   PROMPTS_LOAD_FAILED,
   PROMPTS_TITLE,
   RESET_LABEL,
@@ -212,7 +212,7 @@ export function PromptSettings() {
                       disabled={busy}
                       onClick={() => void createIn(purpose)}
                     >
-                      {NEW_PROMPT_LABEL}
+                      {ANALYSIS_NEW_PROMPT_LABEL}
                     </button>
                   </div>
                 </div>
@@ -334,8 +334,8 @@ function Editor({ prompt, draft, dirty, only, busy, onChange, onSave, onReset, o
           />
         </label>
       )}
-      <label className="flex flex-col gap-1" title={PROMPT_TEXT_TITLE}>
-        <span className={LABEL}>{PROMPT_TEXT_LABEL}</span>
+      <label className="flex flex-col gap-1" title={ANALYSIS_PROMPT_TEXT_TITLE}>
+        <span className={LABEL}>{ANALYSIS_PROMPT_TEXT_LABEL}</span>
         <textarea
           className={TEXTAREA}
           value={draft.text}
@@ -355,7 +355,7 @@ function Editor({ prompt, draft, dirty, only, busy, onChange, onSave, onReset, o
         <button
           type="button"
           className={BUTTON}
-          title={only ? LAST_PROMPT_TITLE : DELETE_PROMPT_TITLE}
+          title={only ? LAST_PROMPT_TITLE : ANALYSIS_DELETE_PROMPT_TITLE}
           disabled={busy || only}
           onClick={onDelete}
         >

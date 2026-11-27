@@ -4,7 +4,7 @@ import { TagChip } from './TagChip';
 
 interface Props {
   tags: readonly { name: string; displayName: string }[];
-  kind: 'asset' | 'file';
+  kind: 'asset' | 'file' | 'prompt';
   max: number;
   matched?: ReadonlySet<string>;
   /** Wraps onto further lines instead of clipping at the end of one line. */
@@ -19,7 +19,7 @@ export function TagList({ tags, kind, max, matched, wrap = false }: Props) {
   return (
     <div className={`flex min-w-0 items-center gap-1.5 ${wrap ? '' : 'overflow-hidden whitespace-nowrap'}`}>
       {kind === 'file' && <ImageIcon size={16} role="img" aria-label="Image tags" className="shrink-0 text-muted" />}
-      <ul aria-label={kind === 'asset' ? 'Asset tags' : undefined} className={`flex min-w-0 items-center gap-1.5 ${wrap ? 'flex-wrap' : ''}`}>
+      <ul aria-label={kind === 'asset' ? 'Asset tags' : kind === 'prompt' ? 'Prompt tags' : undefined} className={`flex min-w-0 items-center gap-1.5 ${wrap ? 'flex-wrap' : ''}`}>
         {shown.map((tag) => (
           <li key={tag.name} className="min-w-0">
             <TagChip tag={tag} matched={matched?.has(tag.name) ?? false} />

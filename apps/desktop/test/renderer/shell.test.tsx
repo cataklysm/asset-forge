@@ -8,11 +8,11 @@ import { AppShell } from '../../src/renderer/src/components/AppShell';
 import { JobsAppShell, WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import { JOB_POLL_MS, JobsProvider, sameSummary } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakePrompts, installFakeApi, promptDetail, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, pageOf, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
-type Section = 'assets' | 'projects' | 'inbox' | 'trash' | 'jobs' | 'settings';
+type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
 function shell(
   props: {
@@ -376,12 +376,12 @@ it('choosing Settings shows the Settings page, also without a configured provide
   expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('');
 });
 
-it('Trash follows Inbox in the navigation', () => {
+it('Prompts follows Projects and Trash follows Inbox in the navigation', () => {
   render(shell({}));
   const names = within(screen.getByRole('navigation', { name: 'Main' }))
     .getAllByRole('link')
     .map((link) => link.textContent);
-  expect(names).toEqual(['Assets', 'Projects', 'Inbox', 'Trash', 'Jobs', 'Settings']);
+  expect(names).toEqual(['Assets', 'Projects', 'Prompts', 'Inbox', 'Trash', 'Jobs', 'Settings']);
 });
 
 it('the trash entry shows its count and names it "Trash, 3 files"', async () => {
@@ -492,4 +492,26 @@ it('a rename on the asset screen rewrites the gallery filter that is not mounted
       api.calls.some((c) => c.channel === 'assets:list' && (c.request as { tagNames?: string[] }).tagNames?.join() === 'front'),
     ).toBe(true),
   );
+});
+
+it('a dirty prompt draft asks before the main navigation leaves; cancel stays, discard leaves', async () => {
+  const user = userEvent.setup();
+  workspaceShell(() => IDLE, () => {}, { 'tags:suggest': () => [], ...fakePrompts([promptDetail({ title: 'Hero' })]).handlers });
+  await user.click(screen.getByRole('link', { name: 'Prompts' }));
+  expect(screen.getByRole('link', { name: 'Prompts' }).getAttribute('aria-current')).toBe('page');
+  const listbox = await screen.findByRole('listbox', { name: 'Prompts' });
+  await user.click(await within(listbox).findByText('Hero'));
+  const editor = screen.getByRole('region', { name: 'Prompt' });
+  const title = await within(editor).findByDisplayValue('Hero');
+  await user.type(title, ' shot');
+
+  await user.click(screen.getByRole('link', { name: 'Assets' }));
+  const ask = await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' });
+  await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('link', { name: 'Prompts' }).getAttribute('aria-current')).toBe('page');
+  expect(within(editor).getByDisplayValue('Hero shot')).toBeTruthy();
+
+  await user.click(screen.getByRole('link', { name: 'Assets' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', { name: 'Discard' }));
+  await waitFor(() => expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-current')).toBe('page'));
 });

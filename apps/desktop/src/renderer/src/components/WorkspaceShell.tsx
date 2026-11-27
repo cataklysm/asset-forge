@@ -2,6 +2,7 @@ import { useCallback, useState, type ComponentProps } from 'react';
 import type { PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { JobsProvider, useJobs } from '../jobs-context';
+import { LeaveGuardProvider, useConfirmLeave } from '../leave-guard';
 import { AnalysisPromptsProvider } from '../analysis-prompts-context';
 import { ProviderSettingsProvider } from '../provider-context';
 import {
@@ -23,6 +24,7 @@ import { InboxScreen } from '../screens/InboxScreen';
 import { JobsScreen } from '../screens/JobsScreen';
 import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
+import { PromptsScreen } from '../screens/PromptsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TrashScreen } from '../screens/TrashScreen';
 import type { TagRename } from '../tag-rename';
@@ -90,7 +92,17 @@ export function JobsAppShell(
   );
 }
 
-export function WorkspaceShell({ workspace, onClosed }: Props) {
+/** The workspace frame; a screen with unsaved changes can hold the main navigation back. */
+export function WorkspaceShell(props: Props) {
+  return (
+    <LeaveGuardProvider>
+      <WorkspaceFrame {...props} />
+    </LeaveGuardProvider>
+  );
+}
+
+function WorkspaceFrame({ workspace, onClosed }: Props) {
+  const confirmLeave = useConfirmLeave();
   const [view, setView] = useState<View>({ name: 'assets' });
   const [error, setError] = useState<string | null>(null);
   // The inbox reports a running import so closing cannot interrupt the batch.
@@ -126,6 +138,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
   }
 
   async function closeWorkspace() {
+    if (!(await confirmLeave())) return;
     try {
       await call('workspace:close', {});
       onClosed();
@@ -134,15 +147,17 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
     }
   }
 
-  function navigate(section: Section) {
+  async function navigate(section: Section) {
+    if (!(await confirmLeave())) return;
     setError(null);
     setView({ name: section } as View);
   }
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback(async () => {
+    if (!(await confirmLeave())) return;
     setError(null);
     setView({ name: 'settings' });
-  }, []);
+  }, [confirmLeave]);
 
   return (
     <JobsProvider>
@@ -155,7 +170,7 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
                 rootPath={workspace.rootPath}
                 section={sectionOf(view)}
                 busy={busy}
-                onNavigate={navigate}
+                onNavigate={(section) => void navigate(section)}
                 onClose={() => void closeWorkspace()}
               >
                 {/* The screens bring their own padding. */}
@@ -190,6 +205,8 @@ export function WorkspaceShell({ workspace, onClosed }: Props) {
                       <InboxScreen state={shell.inboxList} onStateChange={setInboxList} onBusyChange={setBusy} />
                     ) : view.name === 'trash' ? (
                       <TrashScreen state={shell.trashList} onStateChange={setTrashList} />
+                    ) : view.name === 'prompts' ? (
+                      <PromptsScreen key={view.id ?? ''} busy={busy} initialId={view.id ?? null} />
                     ) : view.name === 'jobs' ? (
                       <JobsScreen />
                     ) : view.name === 'settings' ? (

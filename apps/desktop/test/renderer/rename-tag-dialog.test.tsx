@@ -13,21 +13,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const usage = (name: string, displayName: string, files: number, assets: number): TagUsage => ({
+const usage = (name: string, displayName: string, files: number, assets: number, prompts = 0): TagUsage => ({
   exists: true,
   name,
   displayName,
   files,
   assets,
-  prompts: 0,
+  prompts,
 });
 
 /** Tags known to the fake `tags:usage`; any other valid text is free. */
 function usageTable(): Map<string, TagUsage> {
   return new Map([
-    ['front view', usage('front view', 'Front View', 42, 3)],
+    ['front view', usage('front view', 'Front View', 42, 3, 2)],
     ['front', usage('front', 'Front', 118, 5)],
-    ['oak', usage('oak', 'Oak', 1, 1)],
+    ['oak', usage('oak', 'Oak', 1, 1, 1)],
   ]);
 }
 
@@ -67,7 +67,7 @@ it('opens with the display name selected and the usage of the tag', async () => 
   expect(input.selectionStart).toBe(0);
   expect(input.selectionEnd).toBe('Front View'.length);
   await settle(0);
-  expect(screen.getByText('Front View · 42 files · 3 assets')).not.toBeNull();
+  expect(screen.getByText('Front View · 42 files · 3 assets · 2 prompts')).not.toBeNull();
   expect(usageRequests(api)).toEqual([{ name: 'front view' }]);
   expect(screen.getByRole('button', { name: 'Cancel' })).not.toBeNull();
 });
@@ -75,7 +75,7 @@ it('opens with the display name selected and the usage of the tag', async () => 
 it('the usage line uses the singular for one file and one asset', async () => {
   setup({}, { name: 'oak', displayName: 'Oak' });
   await settle(0);
-  expect(screen.getByText('Oak · 1 file · 1 asset')).not.toBeNull();
+  expect(screen.getByText('Oak · 1 file · 1 asset · 1 prompt')).not.toBeNull();
 });
 
 it('confirm is disabled for an unchanged, empty or invalid name, and an invalid one is not looked up', async () => {
@@ -126,7 +126,7 @@ it('the name of another tag shows the merge line and confirms a merge', async ()
   await settle(0);
   type('  front ');
   await settle();
-  expect(screen.getByText('Merges with Front · 118 files · 5 assets')).not.toBeNull();
+  expect(screen.getByText('Merges with Front · 118 files · 5 assets · 0 prompts')).not.toBeNull();
   expect(confirmButton().textContent).toBe('Merge');
   expect(confirmButton().disabled).toBe(false);
   fireEvent.click(confirmButton());
@@ -163,7 +163,7 @@ it('a stale lookup answer is dropped', async () => {
   await settle();
   expect(confirmButton().textContent).toBe('Rename');
   expect(confirmButton().disabled).toBe(false);
-  await act(async () => first.resolve(usage('oak', 'Oak', 1, 1)));
+  await act(async () => first.resolve(usage('oak', 'Oak', 1, 1, 1)));
   expect(screen.queryByText(/^Merges with/)).toBeNull();
   expect(confirmButton().textContent).toBe('Rename');
   expect(confirmButton().disabled).toBe(false);
@@ -226,7 +226,7 @@ it('a failed lookup after a refused rename shows the error and keeps confirm dis
   failing = false;
   type('Side ');
   await settle();
-  expect(screen.getByText('Merges with Side · 2 files · 1 asset')).not.toBeNull();
+  expect(screen.getByText('Merges with Side · 2 files · 1 asset · 0 prompts')).not.toBeNull();
   expect(confirmButton().textContent).toBe('Merge');
   expect(confirmButton().disabled).toBe(false);
   fireEvent.click(confirmButton());
@@ -268,7 +268,7 @@ it('a target that appeared meanwhile shows the message, looks up again and offer
   await settle(0);
   expect(screen.getByRole('alert').textContent).toBe('A tag with this name already exists');
   expect(usageRequests(api).filter((r) => (r as { name: string }).name === 'side')).toHaveLength(2);
-  expect(screen.getByText('Merges with Side · 2 files · 1 asset')).not.toBeNull();
+  expect(screen.getByText('Merges with Side · 2 files · 1 asset · 0 prompts')).not.toBeNull();
   expect(confirmButton().textContent).toBe('Merge');
   expect(confirmButton().disabled).toBe(false);
   expect(onClose).not.toHaveBeenCalled();

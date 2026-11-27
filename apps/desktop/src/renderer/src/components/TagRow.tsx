@@ -9,8 +9,8 @@ import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
 
 interface Props {
-  label: 'Asset tags' | 'Image tags' | 'File tags' | 'Shared image tags';
-  kind: 'asset' | 'file';
+  label: 'Asset tags' | 'Image tags' | 'File tags' | 'Shared image tags' | 'Prompt tags';
+  kind: 'asset' | 'file' | 'prompt';
   /**
    * `inline` (the default): label, chips and a boxed input in one wrapping row. `stacked`: the label
    * as a panel heading, the chips below it and the input as an action after them.
@@ -171,7 +171,7 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
           }}
           onCommit={(value) => void add(value)}
           placeholder="+ Add tag"
-          label={kind === 'asset' ? 'Add asset tag' : 'Add image tag'}
+          label={kind === 'asset' ? 'Add asset tag' : kind === 'prompt' ? 'Add prompt tag' : 'Add image tag'}
           inputRef={setInput}
           onKeyDown={onInputKeyDown}
           disabled={disabled}
