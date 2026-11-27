@@ -262,6 +262,7 @@ export function createAnalysisServices(o: {
     analysisPrompts: createAnalysisPromptHandlers(prompts),
     prompts,
     describe,
+    isSiteLane: (host) => siteStore.list().some((profile) => profile.site === host),
     sites: createSiteHandlers({
       store: siteStore,
       sessions: siteSessions,

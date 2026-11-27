@@ -191,6 +191,7 @@ describe('site profile schemas', () => {
       'sites:save',
       'sites:delete',
       'sites:openLogin',
+      'sites:openCheck',
       'sites:crawl',
       'sites:crawlProgress',
       'sites:cancelCrawl',
@@ -198,6 +199,9 @@ describe('site profile schemas', () => {
     ]);
     expect(ipcContract['sites:openLogin'].request.safeParse({ profileId: uuid }).success).toBe(true);
     expect(ipcContract['sites:openLogin'].request.safeParse({ profileId: uuid, url: 'https://example.com/' }).success).toBe(true);
+    expect(ipcContract['sites:openCheck'].request.safeParse({ host: 'example.com' }).success).toBe(true);
+    expect(ipcContract['sites:openCheck'].request.safeParse({ host: '' }).success).toBe(false);
+    expect(ipcContract['sites:openCheck'].request.safeParse({ host: 'example.com', url: 'https://example.com/' }).success).toBe(false);
     expect(ipcContract['sites:crawl'].request.safeParse({ profileId: uuid }).success).toBe(false);
     expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid, target: null }).success).toBe(true);
     expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid }).success).toBe(false);

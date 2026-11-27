@@ -71,6 +71,8 @@ export interface AppServices {
   describe: DescribeController;
   /** The `sites:*` channels. */
   sites: SiteHandlers;
+  /** Whether a download lane is the site of a site profile; without it no lane is. */
+  isSiteLane?: (host: string) => boolean;
 }
 
 export function createWorkspaceHandlers(
@@ -118,7 +120,7 @@ export function createWorkspaceHandlers(
       return null;
     },
     ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders),
+    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders, services.isSiteLane),
     ...createGenerationHandlers(manager, jobs, services.imageProviders),
     ...createPromptHandlers(manager),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),

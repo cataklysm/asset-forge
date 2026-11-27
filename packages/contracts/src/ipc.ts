@@ -199,6 +199,15 @@ export const ipcContract = {
     request: z.object({ profileId: IdSchema, url: z.string().max(2000).optional() }),
     response: z.object({}),
   },
+  /**
+   * Opens the login window of the profile whose site is `host` (a paused download lane) so the owner can pass the
+   * site's browser check by hand: on the newest download of that lane a browser check refused, else on
+   * `https://<site>/`. The renderer names only the lane, never a URL. Nothing is solved automatically.
+   */
+  'sites:openCheck': {
+    request: z.object({ host: z.string().min(1).max(300) }).strict(),
+    response: z.object({}),
+  },
   /** Reads the gallery at `url`, which must belong to the profile's site; one crawl at a time. Downloads nothing. */
   'sites:crawl': {
     request: z.object({ profileId: IdSchema, url: z.string().max(2000) }),

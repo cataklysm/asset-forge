@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
+  belongsToSite,
   FILE_DOWNLOAD_JOB,
   FileDownloadPayloadSchema,
   type JobStatus,
   type SiteCrawlProgress,
+  type SiteProfile,
   type SiteFilter,
 } from '@assetforge/contracts';
 import {
   addAssetSource,
+  browserCheckFailures,
   crawlSite,
   enqueueUrlImport,
   InvalidOperationError,
@@ -35,6 +38,7 @@ export type SiteHandlers = Pick<
   | 'sites:save'
   | 'sites:delete'
   | 'sites:openLogin'
+  | 'sites:openCheck'
   | 'sites:crawl'
   | 'sites:crawlProgress'
   | 'sites:cancelCrawl'
@@ -78,6 +82,27 @@ async function hasActiveDownloads(s: WorkspaceSession, profileId: string): Promi
     }
   }
   return false;
+}
+
+/**
+ * The URL of the newest download of the profile's lane that a browser check refused, where the owner passes the check.
+ * Only a v2 payload of this profile whose URL belongs to its site counts.
+ *
+ * @param s the open workspace
+ * @param profile the profile whose site is the lane
+ * @returns the URL, or null when no such download exists
+ */
+async function refusedDownloadUrl(s: WorkspaceSession, profile: SiteProfile): Promise<string | null> {
+  // Newest refusal first: by the end of the failed run, then by creation.
+  const failures = (await browserCheckFailures(s, profile.site)).sort(
+    (a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt) || b.createdAt.localeCompare(a.createdAt),
+  );
+  for (const job of failures) {
+    const payload = FileDownloadPayloadSchema.safeParse(job.payload);
+    if (!payload.success || payload.data.v !== 2 || payload.data.siteProfileId !== profile.id) continue;
+    if (belongsToSite(payload.data.url, profile.site)) return payload.data.url;
+  }
+  return null;
 }
 
 interface RunningCrawl {
@@ -176,6 +201,30 @@ export function createSiteHandlers(deps: {
       // The typed address passes the URL rule of the sources (`validation_failed`); it may be on any public host.
       const target = url === undefined ? `https://${profile.site}/` : normalizeSourceUrl(url);
       sessions.openLogin(profile, target);
+      return {};
+    },
+
+    'sites:openCheck': async ({ host }) => {
+      const profile = store.list().find((p) => p.site === host);
+      if (profile === undefined) throw new NotFoundError(SITE_PROFILE_NOT_FOUND);
+      const open = sessions.loginProfileId();
+      if (open !== null) {
+        if (open !== profile.id) throw new InvalidOperationError(OTHER_LOGIN);
+        sessions.focusLogin();
+        return {};
+      }
+      let target: string | null = null;
+      if (manager.current() !== null) {
+        try {
+          target = await manager.read((s) => refusedDownloadUrl(s, profile));
+        } catch (error) {
+          // Closed meanwhile: the site's start page.
+          if (!(error instanceof NoWorkspaceOpenError)) throw error;
+        }
+      }
+      // A login window may have opened while the workspace was read.
+      if (sessions.loginProfileId() !== null) throw new InvalidOperationError(OTHER_LOGIN);
+      sessions.openLogin(profile, target ?? `https://${profile.site}/`);
       return {};
     },
 

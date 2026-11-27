@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { FILE_DOWNLOAD_JOB } from '@assetforge/contracts';
 import {
+  browserCheckFailures,
   clampRetryAfterMs,
   createAsset,
   enqueueUrlImport,
@@ -9,6 +10,7 @@ import {
   listFileOrigins,
   normalizeDownloadUrl,
   resolveFileOriginUrl,
+  retryBrowserCheckFailures,
   RETRY_AFTER_DEFAULT_MS,
   RETRY_AFTER_MAX_MS,
   RETRY_AFTER_MIN_MS,
@@ -213,5 +215,27 @@ describe('file origins', () => {
     const [origin] = await listFileOrigins(session, file.id);
     db.fileOrigins.rows.get(origin!.id)!.url = 'javascript:alert(1)';
     await expect(resolveFileOriginUrl(session, { fileId: file.id, originId: origin!.id })).rejects.toMatchObject({ code: 'validation_failed' });
+  });
+});
+
+describe('browser check failures', () => {
+  it('requeues only the failed downloads of the lane that a browser check refused', async () => {
+    const { db, session } = await setup();
+    const site = { profileId: '11111111-1111-4111-8111-111111111111', site: 'gallery.example', filter: { kinds: [], minBytes: 0 } };
+    const urls = ['https://gallery.example/1.png', 'https://gallery.example/2.png', 'https://gallery.example/3.png'];
+    await enqueueUrlImport(session, { urls, target: null, skipDuplicates: true, site });
+    await enqueueUrlImport(session, { urls: ['https://other.example/4.png'], target: null, skipDuplicates: true });
+    const [checked, blocked, waiting, other] = db.jobs.rows;
+    Object.assign(checked!, { status: 'failed', errorCode: 'download_browser_check', attempt: 1 });
+    Object.assign(blocked!, { status: 'failed', errorCode: 'download_blocked' });
+    Object.assign(other!, { status: 'failed', errorCode: 'download_browser_check' });
+
+    expect((await browserCheckFailures(session, 'gallery.example')).map((j) => j.id)).toEqual([checked!.id]);
+    expect(await retryBrowserCheckFailures(session, 'gallery.example')).toBe(1);
+    expect(checked).toMatchObject({ status: 'queued', errorCode: null, attempt: 0 });
+    expect(blocked!.status).toBe('failed');
+    expect(waiting!.status).toBe('queued');
+    expect(other!.status).toBe('failed');
+    expect(await retryBrowserCheckFailures(session, 'gallery.example')).toBe(0);
   });
 });

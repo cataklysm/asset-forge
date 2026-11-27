@@ -320,6 +320,99 @@ describe('site handlers', () => {
     expect(deleted.ok).toBe(false);
   });
 
+  /**
+   * Queues the two downloads of a crawl of the profile and lets each one fail with `code`, the first one first.
+   *
+   * @param profileId the profile whose crawl is imported
+   * @param code the error code the downloads end with
+   * @returns the URLs of the failed jobs in the order they failed
+   */
+  async function failDownloads(profileId: string, code: 'download_browser_check' | 'download_blocked'): Promise<string[]> {
+    const crawl = await h!.ok('sites:crawl', { profileId, url: GALLERY });
+    await h!.ok('sites:import', { crawlId: crawl.crawlId, target: null });
+    const urls: string[] = [];
+    for (let i = 0; ; i++) {
+      const now = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
+      const job = await h!.manager.read((s) => s.database.jobs.claimNext({ resourceClass: 'io', types: ['file.download'], now }));
+      if (job === null) return urls;
+      await h!.manager.read((s) => s.database.jobs.finish(job.id, { status: 'failed', errorCode: code, now }));
+      urls.push((job.payload as { url: string }).url);
+    }
+  }
+
+  it('opens the site check on the download a browser check refused last, never on a URL of the renderer', async () => {
+    await harness({ holdJobs: true });
+    const a = await h!.ok('sites:save', profileRequest());
+    const failed = await failDownloads(a.id, 'download_browser_check');
+    expect(failed).toHaveLength(2);
+    expect(await h!.ok('sites:openCheck', { host: a.site })).toEqual({});
+    expect(sessions.opened).toEqual([{ profileId: a.id, url: failed[1] }]);
+    // The window of the profile is focused again; another profile's check is refused meanwhile.
+    expect(await h!.ok('sites:openCheck', { host: a.site })).toEqual({});
+    expect(sessions.focused).toBe(1);
+    const b = await h!.ok('sites:save', profileRequest({ name: 'Other', url: 'https://other.example.org/' }));
+    expect(await error('sites:openCheck', { host: b.site })).toEqual({ code: 'invalid_operation', message: 'Another login window is open' });
+    expect(sessions.opened).toHaveLength(1);
+    expect(await error('sites:openCheck', { host: a.site, url: 'https://evil.example.net/' })).toMatchObject({ code: 'invalid_request' });
+  });
+
+  it('opens the start page of the site without a refused download, without a workspace or for another reason', async () => {
+    await harness({ workspace: false });
+    const a = await h!.ok('sites:save', profileRequest());
+    expect(await error('sites:openCheck', { host: 'unknown.example.net' })).toMatchObject({ code: 'not_found' });
+    expect(await error('sites:openCheck', { host: 'img.' + a.site })).toMatchObject({ code: 'not_found' });
+    expect(await h!.ok('sites:openCheck', { host: a.site })).toEqual({});
+    expect(sessions.opened).toEqual([{ profileId: a.id, url: 'https://example.com/' }]);
+
+    await h!.close();
+    await harness({ holdJobs: true });
+    const c = await h!.ok('sites:save', profileRequest());
+    await failDownloads(c.id, 'download_blocked');
+    expect(await h!.ok('sites:openCheck', { host: c.site })).toEqual({});
+    expect(sessions.opened).toEqual([{ profileId: c.id, url: 'https://example.com/' }]);
+  });
+
+  it('ignores a refused download of another profile in the same lane', async () => {
+    await harness({ holdJobs: true });
+    const a = await h!.ok('sites:save', profileRequest());
+    await failDownloads(a.id, 'download_browser_check');
+    // A second profile of the same site: the refusals belong to the first one.
+    const b = await h!.ok('sites:save', profileRequest({ name: 'Second' }));
+    expect(b.site).toBe(a.site);
+    const opened = await h!.manager.read((s) => s.database.jobs.listByStatus('failed'));
+    expect(opened.every((job) => (job.payload as { siteProfileId: string }).siteProfileId === a.id)).toBe(true);
+    // `find` takes the first profile with the site, which owns the refusals.
+    expect(await h!.ok('sites:openCheck', { host: a.site })).toEqual({});
+    expect(sessions.opened[0]!.profileId).toBe(a.id);
+    expect(sessions.opened[0]!.url).not.toBe('https://example.com/');
+  });
+
+  it('queues the downloads a browser check refused again when the lane of a profile resumes, and nothing else', async () => {
+    await harness({ holdJobs: true });
+    const a = await h!.ok('sites:save', profileRequest());
+    await failDownloads(a.id, 'download_browser_check');
+    expect(await h!.ok('jobs:resumeHost', { host: a.site })).toEqual({});
+    expect((await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).map((job) => job.lane)).toEqual([a.site, a.site]);
+
+    // Other failures of the lane stay failed.
+    await h!.ok('jobs:cancelAll', {});
+    await h!.ok('jobs:clearFinished', {});
+    await failDownloads(a.id, 'download_blocked');
+    expect(await h!.ok('jobs:resumeHost', { host: a.site })).toEqual({});
+    expect(await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).toEqual([]);
+    expect(await h!.manager.read((s) => s.database.jobs.listByStatus('failed'))).toHaveLength(2);
+  });
+
+  it('leaves a lane that is no profile site alone on resume', async () => {
+    await harness({ holdJobs: true });
+    const a = await h!.ok('sites:save', profileRequest());
+    await failDownloads(a.id, 'download_browser_check');
+    // The profile is gone: its lane is a plain host lane now.
+    expect(await h!.ok('sites:delete', { id: a.id })).toEqual({});
+    expect(await h!.ok('jobs:resumeHost', { host: a.site })).toEqual({});
+    expect(await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).toEqual([]);
+  });
+
   it('waits abortably between page loads', async () => {
     const controller = new AbortController();
     const waiting = abortableWait(60_000, controller.signal);

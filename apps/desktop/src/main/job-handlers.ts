@@ -9,6 +9,7 @@ import {
   acceptProposal,
   cancelAllJobs,
   cancelJob,
+  NoWorkspaceOpenError,
   clearFinishedJobs,
   countJobs,
   discardProposal,
@@ -22,6 +23,7 @@ import {
   previewAnalysis,
   ProviderNotConfiguredError,
   rerouteJobs,
+  retryBrowserCheckFailures,
   retryFailedJobs,
   retryGeneration,
   retryJob,
@@ -80,6 +82,7 @@ export function createJobHandlers(
   prompts: AnalysisPromptStore,
   providers: ProviderStore,
   imageProviders: ImageProviderDirectory,
+  isSiteLane?: (host: string) => boolean,
 ): JobHandlers {
   /** A job row changed outside the scheduler: raise the counter and let the scheduler look for work. */
   const touched = () => {
@@ -251,6 +254,16 @@ export function createJobHandlers(
     },
     // Like `jobs:resume`: a paused download host belongs to the app session, not to a workspace. Only the download queue.
     'jobs:resumeHost': async (r) => {
+      // The lane of a site profile: the owner passed the site's check by hand, so the downloads it refused run again.
+      if (isSiteLane?.(r.host) === true && manager.current() !== null) {
+        try {
+          await manager.read((s) => retryBrowserCheckFailures(s, r.host));
+        } catch (error) {
+          // Closed meanwhile: nothing to queue again.
+          if (!(error instanceof NoWorkspaceOpenError)) throw error;
+        }
+      }
+      // Raises the change counter and wakes the scheduler.
       jobs.resume(r.host, DOWNLOAD_CLASSES);
       return {};
     },

@@ -81,6 +81,7 @@ export const idleServices: AppServices = {
     'sites:save': notUsed,
     'sites:delete': notUsed,
     'sites:openLogin': notUsed,
+    'sites:openCheck': notUsed,
     'sites:crawl': notUsed,
     'sites:crawlProgress': async () => null,
     'sites:cancelCrawl': async () => ({ cancelling: false }),
