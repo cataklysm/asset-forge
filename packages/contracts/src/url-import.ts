@@ -6,6 +6,8 @@ export const MAX_IMPORT_URLS = 5000;
 export const MAX_FILE_ORIGINS = 50;
 /** A longer line is reported as invalid by the use case, not refused by the schema. */
 export const IMPORT_URL_LINE_MAX = 2000;
+/** The schema refuses a request holding a longer line; the dialog never sends one. */
+export const IMPORT_URL_STRING_MAX = 10000;
 
 const IdSchema = z.uuid();
 const count = z.number().int().nonnegative();

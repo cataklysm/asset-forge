@@ -149,6 +149,37 @@ it(`more than ${MAX_IMPORT_URLS} lines with at most ${MAX_IMPORT_URLS} addresses
   expect(requests(api)[0]).toEqual({ urls: lines, skipDuplicates: true });
 });
 
+it('moves the focus to Close when the answer arrives', async () => {
+  const { user } = setup({ 'files:importUrls': () => urlImportResultOf({ queued: 1 }) });
+  await paste(user, 'https://a.test/x.png');
+  await user.click(importButton());
+  const close = await within(dialog()).findByRole('button', { name: 'Close' });
+  await waitFor(() => expect(document.activeElement).toBe(close));
+});
+
+it(`numbers the invalid lines as typed when more than ${MAX_IMPORT_URLS} lines went as the non-empty ones`, async () => {
+  const lines = ['', '', ...Array.from({ length: MAX_IMPORT_URLS - 1 }, (_, i) => `https://a.test/${i}`), '', 'nope'];
+  const { api, user } = setup({
+    // The answer numbers the lines as sent: `nope` is the 5000th non-empty line.
+    'files:importUrls': () => urlImportResultOf({ queued: MAX_IMPORT_URLS - 1, invalid: [{ line: MAX_IMPORT_URLS, text: 'nope' }] }),
+  });
+  await paste(user, lines.join('\n'));
+  await user.click(importButton());
+  await waitFor(() => expect(requests(api)).toHaveLength(1));
+  expect((requests(api)[0] as { urls: string[] }).urls).toHaveLength(MAX_IMPORT_URLS);
+  const list = await within(dialog()).findByRole('list');
+  expect(within(list).getByText(`${lines.length}: nope`)).toBeTruthy();
+});
+
+it('sends a line over 10000 characters trimmed and cut, so the request stays valid', async () => {
+  const { api, user } = setup();
+  const long = `https://a.test/${'x'.repeat(12_000)}`;
+  await paste(user, ` ${long}\nhttps://a.test/y.png`);
+  await user.click(importButton());
+  await waitFor(() => expect(requests(api)).toHaveLength(1));
+  expect(requests(api)[0]).toEqual({ urls: [long.slice(0, 10_000), 'https://a.test/y.png'], skipDuplicates: true });
+});
+
 it('Cancel closes without a request', async () => {
   const { api, onClose, user } = setup();
   await paste(user, 'https://a.test/x.png');

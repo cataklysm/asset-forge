@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { MAX_IMPORT_URLS, type FileTarget, type UrlImportResult } from '@assetforge/contracts';
+import { IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, type FileTarget, type UrlImportResult } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import {
@@ -30,17 +30,23 @@ function messageOf(error: unknown): string {
 
 const isBlank = (line: string) => line.trim() === '';
 
+/** A line the schema would refuse goes trimmed and cut: still over the length limit, it is reported as invalid. */
+const sendable = (line: string) => (line.length > IMPORT_URL_STRING_MAX ? line.trim().slice(0, IMPORT_URL_STRING_MAX) : line);
+
 /**
- * The lines to send and whether there are too many addresses. Up to the limit the lines go as typed
- * (trailing empty lines dropped), so the `line` numbers of the answer match the input; beyond it only
- * the non-empty lines go.
+ * The lines to send, the typed line number (from 1) of each, and whether there are too many addresses. Up to
+ * the limit the lines go as typed (trailing empty lines dropped); beyond it only the non-empty lines go, and
+ * `lineNumbers` maps the `line` numbers of the answer back to the lines as typed.
  */
-export function urlLines(text: string): { urls: string[]; addresses: number; tooMany: boolean } {
+export function urlLines(text: string): { urls: string[]; lineNumbers: number[]; addresses: number; tooMany: boolean } {
   const lines = text.split(/\r?\n/);
   while (lines.length > 0 && isBlank(lines[lines.length - 1]!)) lines.pop();
-  const filled = lines.filter((line) => !isBlank(line));
+  const numbered = lines.map((line, index) => ({ line: sendable(line), number: index + 1 }));
+  const filled = numbered.filter(({ line }) => !isBlank(line));
+  const sent = lines.length <= MAX_IMPORT_URLS ? numbered : filled;
   return {
-    urls: lines.length <= MAX_IMPORT_URLS ? lines : filled,
+    urls: sent.map(({ line }) => line),
+    lineNumbers: sent.map(({ number }) => number),
     addresses: filled.length,
     tooMany: filled.length > MAX_IMPORT_URLS,
   };
@@ -67,6 +73,13 @@ export function UrlImportDialog({ target, onClose }: Props) {
     };
   }, []);
 
+  // The field leaves the dialog with the answer; focus goes to the one button that is left.
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const done = result !== null;
+  useEffect(() => {
+    if (done) closeRef.current?.focus();
+  }, [done]);
+
   const lines = urlLines(text);
   const blocked = sending || lines.addresses === 0 || lines.tooMany;
 
@@ -75,14 +88,17 @@ export function UrlImportDialog({ target, onClose }: Props) {
     sendingRef.current = true;
     setSending(true);
     setError(null);
+    const { urls, lineNumbers } = lines;
     try {
       const answer = await call('files:importUrls', {
-        urls: lines.urls,
+        urls,
         ...(target === null ? {} : { target }),
         skipDuplicates,
       });
       jobs.refresh();
-      if (!disposed.current) setResult(answer);
+      // The answer numbers the lines as sent; the list shows the numbers of the lines as typed.
+      const invalid = answer.invalid.map((entry) => ({ ...entry, line: lineNumbers[entry.line - 1] ?? entry.line }));
+      if (!disposed.current) setResult({ ...answer, invalid });
     } catch (e) {
       if (!disposed.current) setError(messageOf(e));
     } finally {
@@ -160,7 +176,7 @@ export function UrlImportDialog({ target, onClose }: Props) {
             </ul>
           )}
           <div className="flex justify-end">
-            <button type="button" className={BUTTON} onClick={onClose}>
+            <button ref={closeRef} type="button" className={BUTTON} onClick={onClose}>
               {CLOSE_LABEL}
             </button>
           </div>

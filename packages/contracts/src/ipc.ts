@@ -81,7 +81,7 @@ import {
   SavePromptVersionSchema,
   UpdatePromptSchema,
 } from './prompts';
-import { FileOriginSchema, MAX_IMPORT_URLS, UrlImportResultSchema } from './url-import';
+import { FileOriginSchema, IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, UrlImportResultSchema } from './url-import';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -144,7 +144,7 @@ export const ipcContract = {
    */
   'files:importUrls': {
     request: z.object({
-      urls: z.array(z.string().max(10000)).min(1).max(MAX_IMPORT_URLS),
+      urls: z.array(z.string().max(IMPORT_URL_STRING_MAX)).min(1).max(MAX_IMPORT_URLS),
       target: FileTargetSchema.optional(),
       skipDuplicates: z.boolean().optional(),
     }),
