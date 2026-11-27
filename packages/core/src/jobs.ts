@@ -47,10 +47,13 @@ export interface NewJob {
 /** The failure of a job run. Its message is always the fixed text of its code; the cause is never stored. */
 export class JobError extends Error {
   readonly code: JobErrorCode;
+  /** For a retryable code: wait at least this long before the next run and hold the job's lane until then. */
+  readonly retryAfterMs: number | null;
 
-  constructor(code: JobErrorCode, options?: { cause?: unknown }) {
+  constructor(code: JobErrorCode, options?: { cause?: unknown; retryAfterMs?: number }) {
     super(JOB_ERROR_MESSAGES[code], options);
     this.code = code;
+    this.retryAfterMs = options?.retryAfterMs ?? null;
     this.name = new.target.name;
   }
 }

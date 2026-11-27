@@ -3,6 +3,8 @@ import { JobError, type Job, type JobControl, type JobHandler, type JobOutcome, 
 import type { PauseGate } from './pause-gate.js';
 
 export const DEFAULT_LIMITS: Record<ResourceClass, number> = { cpu: 2, io: 2, local_gpu: 1, remote_api: 2 };
+/** Running jobs per class across all its lanes; a class without an entry is bounded only per lane. */
+export const DEFAULT_TOTALS: Partial<Record<ResourceClass, number>> = { io: 4 };
 /** Runs per job, the first one included. */
 export const MAX_ATTEMPTS = 3;
 /** Delay before the second and before the third run. */
@@ -22,6 +24,8 @@ export interface SchedulerOptions {
   jobs: JobRepository;
   handlers: Record<string, JobHandler>;
   limits?: Record<ResourceClass, number>;
+  /** Running jobs per class across all its lanes. Default `DEFAULT_TOTALS`. */
+  totals?: Partial<Record<ResourceClass, number>>;
   now?(): Date;
   setTimer?(fn: () => void, ms: number): unknown;
   clearTimer?(handle: unknown): void;
@@ -52,6 +56,7 @@ type Outcome = { ok: true } | { ok: false; error: unknown };
 export function createScheduler(options: SchedulerOptions): Scheduler {
   const { jobs, handlers } = options;
   const limits = options.limits ?? DEFAULT_LIMITS;
+  const totals = options.totals ?? DEFAULT_TOTALS;
   const now = options.now ?? (() => new Date());
   const setTimer = options.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
@@ -114,6 +119,15 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return n;
   };
 
+  /** The class runs its total across all lanes. */
+  const atTotal = (rc: ResourceClass): boolean => {
+    const total = totals[rc];
+    if (total === undefined) return false;
+    let n = 0;
+    for (const run of active.values()) if (run.resourceClass === rc) n++;
+    return n >= total;
+  };
+
   /** Lanes the class may not claim from: the paused ones and those already running the class's limit. */
   const excludedLanes = (rc: ResourceClass): (string | null)[] => {
     const excluded = new Set<string | null>(options.pause ? options.pause.paused(rc).map((p) => p.lane) : []);
@@ -147,8 +161,12 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     for (const [rc, types] of typesOf) {
       if (types.length === 0 || limits[rc] <= 0) continue;
       // The excluded lanes are worked out again before every claim: a run may end or a lane pause in between.
+      let full = false;
       for (;;) {
         if (stopping) return;
+        // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
+        full = atTotal(rc);
+        if (full) break;
         const job = await jobs.claimNext({ resourceClass: rc, types, now: iso(), excludeLanes: excludedLanes(rc) });
         if (!job) break;
         if (stopping) {
@@ -159,6 +177,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         changed();
       }
       if (stopping) return;
+      if (full) continue;
       // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
       // resume; only the other lanes need the timer.
       const next = await jobs.nextRunAfter(types, excludedLanes(rc));
@@ -256,10 +275,23 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       log(`Job ${job.id} of type ${job.type} failed`, error);
       return finish({ status: 'failed', errorCode: 'internal_error' });
     }
-    if (!isRetryableJobError(error.code) || job.attempt >= MAX_ATTEMPTS) return finish({ status: 'failed', errorCode: error.code });
-    const delay = RETRY_DELAYS_MS[Math.min(job.attempt, RETRY_DELAYS_MS.length) - 1] ?? RETRY_DELAYS_MS[1];
+    if (!isRetryableJobError(error.code)) return finish({ status: 'failed', errorCode: error.code });
+    const wait = error.retryAfterMs;
+    if (job.attempt >= MAX_ATTEMPTS) {
+      await finish({ status: 'failed', errorCode: error.code });
+      if (wait !== null) await holdLane(job, new Date(now().getTime() + wait).toISOString());
+      return;
+    }
+    const usual = RETRY_DELAYS_MS[Math.min(job.attempt, RETRY_DELAYS_MS.length) - 1] ?? RETRY_DELAYS_MS[1];
+    const delay = wait === null ? usual : Math.max(usual, wait);
     const runAfter = new Date(now().getTime() + delay).toISOString();
     await jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter, now: iso() });
+    if (wait !== null) await holdLane(job, runAfter);
+  }
+
+  /** Makes the waiting jobs of the job's class and lane wait until `until`; their run counts stay. Not a pause. */
+  async function holdLane(job: Job, until: string): Promise<void> {
+    await jobs.holdLane({ types: typesOf.get(job.resourceClass) ?? [job.type], lane: job.lane, until, now: iso() });
   }
 
   async function recover(): Promise<void> {

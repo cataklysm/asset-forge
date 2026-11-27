@@ -193,3 +193,34 @@ describe('createPauseGate', () => {
     expect(g.reason('local_gpu', null)).toBeNull();
   });
 });
+
+describe('createPauseGate with download codes', () => {
+  it('pauses a host lane after three download_blocked in a row', () => {
+    const { g } = gate();
+    for (let i = 0; i < 2; i++) g.record('io', 'example.com', 'download_blocked');
+    expect(g.reason('io', 'example.com')).toBeNull();
+    g.record('io', 'example.com', 'download_blocked');
+    expect(g.reason('io', 'example.com')).toBe('download_blocked');
+    expect(g.reason('io', 'other.example')).toBeNull();
+  });
+
+  it('counts download_unreachable, download_unavailable and download_throttled', () => {
+    const { g } = gate();
+    g.record('io', 'h', 'download_unreachable');
+    g.record('io', 'h', 'download_unavailable');
+    g.record('io', 'h', 'download_throttled');
+    expect(g.reason('io', 'h')).toBe('download_throttled');
+  });
+
+  it('resets the count on download_not_found', () => {
+    const { g } = gate();
+    g.record('io', 'h', 'download_blocked');
+    g.record('io', 'h', 'download_blocked');
+    g.record('io', 'h', 'download_not_found');
+    g.record('io', 'h', 'download_blocked');
+    g.record('io', 'h', 'download_blocked');
+    expect(g.reason('io', 'h')).toBeNull();
+    g.record('io', 'h', 'download_blocked');
+    expect(g.reason('io', 'h')).toBe('download_blocked');
+  });
+});

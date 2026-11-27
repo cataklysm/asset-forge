@@ -4,7 +4,15 @@ import type { JobErrorCode, ResourceClass } from '@assetforge/contracts';
 export const DEFAULT_PAUSE_THRESHOLD = 3;
 
 /** Codes that say the provider is down; they pause a lane once they repeat `threshold` times in a row. */
-const DOWN: ReadonlySet<JobErrorCode> = new Set(['provider_unreachable', 'provider_unavailable', 'provider_timeout']);
+const DOWN: ReadonlySet<JobErrorCode> = new Set([
+  'provider_unreachable',
+  'provider_unavailable',
+  'provider_timeout',
+  'download_unreachable',
+  'download_unavailable',
+  'download_throttled',
+  'download_blocked',
+]);
 /** Codes that pause a lane at once: no later run can succeed until the settings or the account change. */
 const FATAL: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured', 'provider_insufficient_balance']);
 

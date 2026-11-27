@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryJobRepository } from '../../core/test/memory-jobs.js';
 import {
   DEFAULT_LIMITS,
+  DEFAULT_TOTALS,
   MAX_ATTEMPTS,
   RETRY_DELAYS_MS,
   createPauseGate,
@@ -64,6 +65,7 @@ async function flush(): Promise<void> {
 function setup(o: {
   handlers: Record<string, JobHandler>;
   limits?: Record<ResourceClass, number>;
+  totals?: Partial<Record<ResourceClass, number>>;
   repo?: (fake: InMemoryJobRepository) => JobRepository;
   pause?: PauseGate;
 }) {
@@ -89,6 +91,7 @@ function setup(o: {
     jobs: counted,
     handlers: o.handlers,
     ...(o.limits ? { limits: o.limits } : {}),
+    ...(o.totals ? { totals: o.totals } : {}),
     ...(o.pause ? { pause: o.pause } : {}),
     now: () => new Date(t),
     setTimer: (fn, ms) => {
@@ -1290,5 +1293,144 @@ describe('createScheduler with a settled hook', () => {
     expect(s.row(a1)).toMatchObject({ status: 'failed', errorCode: 'provider_insufficient_balance' });
     expect(s.row(a2).status).toBe('running');
     expect(s.row(a3).status).toBe('queued');
+  });
+});
+
+describe('total limit per class', () => {
+  it('has the agreed totals', () => {
+    expect(DEFAULT_TOTALS).toEqual({ io: 4 });
+  });
+
+  it('runs at most the total of a class across all lanes', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 2 }, totals: { io: 4 } });
+    const ids: string[] = [];
+    for (const lane of ['a', 'b', 'c', 'd', 'e', 'f']) ids.push(...(await s.enqueue('dl', 'io', 1, lane)));
+    await s.scheduler.start();
+    expect(h.runs.map((r) => r.job.id)).toEqual(ids.slice(0, 4));
+    expect(s.row(ids[4]!).status).toBe('queued');
+    expect(s.timers).toHaveLength(0);
+
+    h.runOf(ids[0]!).resolve();
+    await flush();
+    expect(h.runs.map((r) => r.job.id)).toEqual(ids.slice(0, 5));
+    expect(s.row(ids[5]!).status).toBe('queued');
+
+    // Two runs ending together free two places, never more.
+    h.runOf(ids[1]!).resolve();
+    h.runOf(ids[2]!).resolve();
+    await flush();
+    expect(h.runs.map((r) => r.job.id)).toEqual(ids);
+    expect(ids.filter((id) => s.row(id).status === 'running')).toHaveLength(3);
+  });
+
+  it('applies the default total of 4 to io', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler } });
+    for (const lane of ['a', 'b', 'c', 'd', 'e']) await s.enqueue('dl', 'io', 1, lane);
+    await s.scheduler.start();
+    expect(h.runs).toHaveLength(4);
+  });
+
+  it('leaves classes without a total unbounded across lanes', async () => {
+    const h = controlled('local_gpu');
+    const s = setup({ handlers: { t: h.handler } });
+    for (const lane of ['a', 'b', 'c', 'd', 'e', 'f']) await s.enqueue('t', 'local_gpu', 1, lane);
+    await s.scheduler.start();
+    expect(h.runs).toHaveLength(6);
+  });
+});
+
+describe('JobError retryAfterMs', () => {
+  it('defaults to null and carries a given wait', () => {
+    expect(new JobError('download_unreachable').retryAfterMs).toBeNull();
+    const error = new JobError('download_throttled', { retryAfterMs: 120_000 });
+    expect(error.retryAfterMs).toBe(120_000);
+    expect(error.message).toBe('The server asked to slow down');
+  });
+});
+
+describe('lane hold', () => {
+  it('holds the lane for the wait of a throttled job and runs it all after the wait', async () => {
+    const h = controlled('io');
+    const pause = createPauseGate({});
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 }, pause });
+    const [a1, a2, a3] = (await s.enqueue('dl', 'io', 3, 'a')) as [string, string, string];
+    await s.scheduler.start();
+    expect(h.runs.map((r) => r.job.id)).toEqual([a1]);
+
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
+    await flush();
+    const until = new Date(Date.parse(s.iso()) + 120_000).toISOString();
+    expect(s.row(a1)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 1, errorCode: 'download_throttled' });
+    expect(s.row(a2)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0, errorCode: null });
+    expect(s.row(a3)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0, errorCode: null });
+    expect(s.timers.map((x) => x.ms)).toEqual([120_000]);
+    expect(pause.paused('io')).toEqual([]);
+
+    const [b1] = (await s.enqueue('dl', 'io', 1, 'b')) as [string];
+    s.scheduler.wake();
+    await flush();
+    expect(s.row(b1).status).toBe('running');
+    expect(h.runs).toHaveLength(2);
+
+    // The enqueue above moved the clock by 1 ms.
+    s.advance(120_000 - 1);
+    await s.fireTimer();
+    expect(s.row(a1)).toMatchObject({ status: 'running', attempt: 2 });
+    h.runOf(a1).resolve();
+    await flush();
+    expect(s.row(a2)).toMatchObject({ status: 'running', attempt: 1 });
+    h.runOf(a2).resolve();
+    await flush();
+    expect(s.row(a3)).toMatchObject({ status: 'running', attempt: 1 });
+    h.runOf(a3).resolve();
+    await flush();
+    expect([a1, a2, a3].map((id) => s.row(id).status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
+  });
+
+  it('keeps the usual delay when the wait is shorter', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1, a2] = (await s.enqueue('dl', 'io', 2, 'a')) as [string, string];
+    await s.scheduler.start();
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 1_000 }));
+    await flush();
+    const until = new Date(Date.parse(s.iso()) + 5_000).toISOString();
+    expect(s.row(a1)).toMatchObject({ status: 'retry_wait', runAfter: until });
+    expect(s.row(a2)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0 });
+    expect(s.timers.map((x) => x.ms)).toEqual([5_000]);
+  });
+
+  it('does not hold the lane for a retryable error without a wait', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1, a2] = (await s.enqueue('dl', 'io', 2, 'a')) as [string, string];
+    await s.scheduler.start();
+    h.runOf(a1).reject(new JobError('download_unreachable'));
+    await flush();
+    expect(s.row(a1).status).toBe('retry_wait');
+    expect(s.row(a2).status).toBe('running');
+  });
+
+  it('still holds the lane when the throttled job has used its last run', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1, a2] = (await s.enqueue('dl', 'io', 2, 'a')) as [string, string];
+    await s.scheduler.start();
+    for (let run = 1; run < MAX_ATTEMPTS; run++) {
+      h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 60_000 }));
+      await flush();
+      expect(s.row(a1)).toMatchObject({ status: 'retry_wait', attempt: run });
+      s.advance(60_000);
+      await s.fireTimer();
+      expect(s.row(a1)).toMatchObject({ status: 'running', attempt: run + 1 });
+    }
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 60_000 }));
+    await flush();
+    const until = new Date(Date.parse(s.iso()) + 60_000).toISOString();
+    expect(s.row(a1)).toMatchObject({ status: 'failed', attempt: MAX_ATTEMPTS, errorCode: 'download_throttled' });
+    expect(s.row(a2)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0 });
+    expect(s.timers.map((x) => x.ms)).toEqual([60_000]);
   });
 });
