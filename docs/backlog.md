@@ -589,6 +589,8 @@ Deferred by design:
 - The page a file was found on is not kept; the file's origin is its URL.
 - The number of detail pages of a crawl has no limit of its own (only the distinct thumbnail links of at most `maxPages` gallery pages).
 - `Crawl-delay` in a `robots.txt` is ignored; the gap between two pages is the fixed half second.
+- A session download (spec "Browser check") vets the host's addresses before every request but is not pinned to them: Electron resolves again, so DNS rebinding can reach a private address. Direction: the proxy named above.
+- A browser check that fails inside an Electron window stays unsolved; nothing solves a check automatically.
 - No public-suffix list: a profile for `co.uk` covers every host below it. Single-label sites are refused; Chromium's own cookie matching bounds what would be sent.
 - The crawl cannot tell an expired login from an empty gallery.
 - No streamed video (HLS/DASH), no scheduled runs, no proxies, no minimum resolution.
@@ -605,7 +607,7 @@ Known gaps:
 - `download_login_not_sent` also covers HTTP 407 and 451 from a host outside the site, because the downloader reports them as one refusal.
 - A crawl and its kept answer live in memory only; nothing survives a restart, and one crawl runs at a time for the whole app.
 
-Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted.
+Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted. For the browser check (spec "Browser check"; the session download, `sites:openCheck` and the requeue are tested only with fakes, and whether the session's request filter applies to `net.request` is not verified): a real site answering `cf-mitigated: challenge`, the lane pausing with `Open site`, passing the check in the login window, Resume repeating the refused downloads, and those downloads arriving through the session. The owner's check is pending.
 
 ## Not covered by any automated check
 

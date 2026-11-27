@@ -182,6 +182,7 @@ New job error codes with fixed messages (never a cause, a path or the URL):
 | `download_blocked` | 407, 451 | no | yes |
 | `download_unauthorized` | 401 | no | yes |
 | `download_forbidden` | 403 | no | yes |
+| `download_browser_check` | `cf-mitigated: challenge` (any status); site import spec "Browser check" | no | pauses at once |
 | `download_not_found` | 404, 410 | no | no |
 | `download_rejected` | other 4xx, a refused redirect, a content encoding | no | no |
 | `download_address_refused` | the address check failed (URL or redirect target) | no | no |

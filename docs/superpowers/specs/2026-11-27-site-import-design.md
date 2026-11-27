@@ -180,7 +180,7 @@ crawl of it runs (`This profile is in use`).
 
 ### Channels
 
-`sites:list`, `sites:save`, `sites:delete`, `sites:openLogin`, `sites:crawl`, `sites:crawlProgress`,
+`sites:list`, `sites:save`, `sites:delete`, `sites:openLogin`, `sites:openCheck` (see "Browser check"), `sites:crawl`, `sites:crawlProgress`,
 `sites:cancelCrawl`, `sites:import` (needs a workspace) — all without a workspace except that the renderer only offers them where an
 import is possible. No channel carries a cookie.
 
@@ -201,6 +201,60 @@ server will not hand the file to this request, for example because it expects a 
 browser, which the app deliberately does not imitate). 407 and 451 stay `download_blocked`. The
 status travels as `RemoteFileError.status`; all three codes are not retried and count for the host
 pause. A refusal on a hop outside the profile's site is still `download_login_not_sent`.
+
+### Browser check
+
+A site behind Cloudflare (or a similar service) may answer a download with a browser check instead
+of the file: the response carries `cf-mitigated: challenge`, usually with HTTP 403. The app
+recognises the check, the owner passes it by hand, and the downloads then run through the browser
+that passed it. Nothing solves, imitates or bypasses a check automatically.
+
+- **Recognise.** A response with `cf-mitigated: challenge` (any status, also on a redirect) is the
+  failure `challenge` of `RemoteFileError`, in the Node source and in the session download alike. The
+  job ends as `download_browser_check` (`The site asks for a browser check`): not retried, and the
+  host pause stops the lane at once, like `provider_unauthorized` does for a provider. The rule for
+  `download_login_not_sent` stays for `blocked` only; a check is never reported as a missing login.
+- **Pass by hand.** The banner line of a lane paused for this reason offers `Open site` when the lane
+  is the site of a profile. `sites:openCheck { host }` (strict: the renderer names the lane, never a
+  URL) finds the profile whose `site` is `host` (`not_found` otherwise), applies the guards of
+  `sites:openLogin` (another login window open: `Another login window is open`; the profile's own
+  window: focused), and opens the profile's login window on the URL of the newest failed job of that
+  lane with code `download_browser_check` — only when its payload is v2, of this profile, and its URL
+  belongs to the site; otherwise on `https://<site>/`. The owner passes the check there.
+- **Repeat.** `jobs:resumeHost` on a lane that is a profile's site queues that lane's
+  `download_browser_check` failures again (`retryBrowserCheckFailures` in core; a job whose URL is
+  held by another active job stays failed), then resumes the lane. Other failures stay failed.
+- **Download through the session.** Clearance is bound to the browser that passed the check, so a
+  v2 download no longer goes out through Node for hops on the site. `SiteAccess.open` (optional,
+  implemented in `apps/desktop/src/main/site-download.ts`, absent without Electron) runs the hop loop
+  itself, at most `MAX_DOWNLOAD_REDIRECTS` hops, and asks `headersFor` for every hop as before. A hop
+  that belongs to the site goes through Electron's `net.request` on the profile's session with
+  `redirect: 'manual'`, `useSessionCookies: true`, `referrerPolicy: 'no-referrer'`, `cache: 'no-store'`
+  and only the headers `Accept: */*` and `Accept-Encoding: identity`: the session adds its cookies and
+  its unchanged Electron user agent, nothing sets a cookie or a `Referer` by hand. A redirect is
+  aborted in the `redirect` event and its location becomes the next hop, so every hop is decided
+  here. The first hop off the site is handed to the Node source (`remote.open`) and the rest of the
+  download follows its rules (pinned public address, no login).
+- **Same limits.** Status mapping as in the Node source (`statusFailure`), size, header, idle and
+  total limits, `contentType` in lower case without parameters, the file name from
+  `Content-Disposition`. Chromium decodes a content encoding itself, so for an encoded body the
+  announced length is unknown (`contentLength: null`) and the size limit applies to the decoded
+  bytes. An abort rejects with the abort reason; every other failure is a `RemoteFileError` kind
+  without a cause, a URL or a header.
+- **Address vetting.** Before every session request the host is resolved and every address must
+  pass `isPublicAddress` (a failed or empty lookup is `unreachable`, a private address
+  `address_refused`). The session's request filter vets the request once more, as it does for the
+  windows.
+
+The cost: the session request is vetted by address but not pinned to the vetted address, because
+Electron's network stack resolves the host again. A host that changes its address between the
+check and the request (DNS rebinding) can make a session download reach a private address; the Node
+source pins and is not affected. A check that cannot be passed in an Electron window (one that
+rejects its browser, or asks for something the window cannot give) stays unsolved: the downloads
+stay failed and the owner decides. Nothing is solved automatically, and a check met again later
+pauses the lane again. The handoff to the Node source starts a fresh redirect budget and a fresh
+total deadline there, so a download that leaves the site can take up to twice the hops and the time
+of one that stays.
 
 ### One download at a time
 
@@ -246,4 +300,5 @@ the test Electron, otherwise the port double is the limit and the rest is a manu
 
 Login survives a restart; a real gallery with pagination and detail pages; a file behind the login
 downloads; a file on another host arrives or fails cleanly; a site with a `robots.txt` disallow
-gives no result.
+gives no result. A site behind a browser check: the lane pauses with `Open site`, the check passes in the
+login window, and Resume repeats the refused downloads, which then arrive through the session.
