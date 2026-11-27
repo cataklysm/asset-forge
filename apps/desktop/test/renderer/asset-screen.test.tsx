@@ -684,7 +684,7 @@ function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
       ? fakeProviders().handlers
       : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
           .handlers),
-    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] }),
+    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] }),
     'analysis:getProposal': () => ({ proposal: null, job: null }),
     'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 0 }),
     'analysis:enqueue': () => ({ enqueued: 2, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 } }),

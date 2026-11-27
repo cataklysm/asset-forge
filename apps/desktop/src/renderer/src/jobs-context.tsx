@@ -33,10 +33,17 @@ const samePaused = (a: JobSummary['paused'], b: JobSummary['paused']) =>
     (p, i) => p.providerId === b[i]!.providerId && p.providerName === b[i]!.providerName && p.reason === b[i]!.reason,
   );
 
-/** Every count by value, and the pause list entry by entry (each poll parses new `paused` objects). */
+const samePausedHosts = (a: JobSummary['pausedHosts'], b: JobSummary['pausedHosts']) =>
+  a.length === b.length && a.every((p, i) => p.host === b[i]!.host && p.reason === b[i]!.reason);
+
+/** Every count by value, and both pause lists entry by entry (each poll parses new objects). */
 export const sameSummary = (a: JobSummary, b: JobSummary) =>
   (Object.keys(a) as (keyof JobSummary)[]).every((key) =>
-    key === 'paused' ? samePaused(a.paused, b.paused) : a[key] === b[key],
+    key === 'paused'
+      ? samePaused(a.paused, b.paused)
+      : key === 'pausedHosts'
+        ? samePausedHosts(a.pausedHosts, b.pausedHosts)
+        : a[key] === b[key],
   );
 
 /**

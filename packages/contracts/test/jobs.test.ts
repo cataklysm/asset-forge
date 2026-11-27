@@ -36,6 +36,9 @@ const view = {
   providerId: null,
   providerName: null,
   model: null,
+  url: null,
+  host: null,
+  result: null,
 };
 
 describe('job contracts', () => {
@@ -70,9 +73,17 @@ describe('job contracts', () => {
     expect(ImageGeneratePayloadSchema.safeParse({ v: 1, generationId: 'x' }).success).toBe(false);
   });
 
-  test('only transient provider errors are retryable', () => {
+  test('only transient provider and download errors are retryable', () => {
     const retryable = JobErrorCodeSchema.options.filter(isRetryableJobError);
-    expect(retryable).toEqual(['provider_unreachable', 'provider_timeout', 'provider_unavailable', 'invalid_response']);
+    expect(retryable).toEqual([
+      'provider_unreachable',
+      'provider_timeout',
+      'provider_unavailable',
+      'invalid_response',
+      'download_unreachable',
+      'download_unavailable',
+      'download_throttled',
+    ]);
   });
 
   test('active and finished statuses cover all statuses', () => {
@@ -91,7 +102,7 @@ describe('job contracts', () => {
   });
 
   test('summary counts are non-negative integers and a pause names its reason', () => {
-    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: [] };
+    const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: [], pausedHosts: [] };
     expect(JobSummarySchema.safeParse(ok).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, failed: -1 }).success).toBe(false);
     const pause = { providerId: 'environment', providerName: 'Environment', kind: 'ollama', reason: 'provider_unauthorized' };

@@ -312,6 +312,9 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
             finishedAt: row.finishedAt,
             runAfter: row.runAfter,
             providerId: row.providerId,
+            url: null,
+            host: null,
+            result: null,
           }));
           return { items, total };
         },

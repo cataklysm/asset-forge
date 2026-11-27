@@ -94,7 +94,7 @@ const VENICE: ProviderView = providerView({
   hasApiKey: true,
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 
 function generation(source: FileRecord, p: Partial<Generation> = {}): Generation {
   return {

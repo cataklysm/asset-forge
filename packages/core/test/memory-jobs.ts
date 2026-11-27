@@ -238,6 +238,9 @@ export class InMemoryJobRepository implements JobRepository {
         finishedAt: r.finishedAt,
         runAfter: r.runAfter,
         providerId: r.lane,
+        url: null,
+        host: null,
+        result: null,
       }),
     );
     return { items, total: matching.length };

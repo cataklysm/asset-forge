@@ -381,6 +381,9 @@ describe('job repository', () => {
       providerId: null,
       providerName: null,
       model: null,
+      url: null,
+      host: null,
+      result: null,
     });
     expect(rest.items[0]).toMatchObject({ fileId: null, fileName: null });
 

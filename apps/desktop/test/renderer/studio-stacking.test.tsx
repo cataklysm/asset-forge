@@ -17,7 +17,7 @@ import { fileRecord, nextId } from './fixtures';
 // The real studio inside the real provider: whichever of the studio and the linked file dialog was
 // requested last must call `showModal()` last, so that it sits on top of the other one.
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 const VENICE = providerView({ kind: 'venice', name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', taggingModel: null, promptModel: null, editModel: 'mock-edit', hasApiKey: true });
 const MODEL: ImageModel = { name: 'mock-edit', aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null };
 const SOURCE = fileRecord({ originalName: 'oak.png' });

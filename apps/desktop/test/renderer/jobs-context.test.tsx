@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JOB_POLL_MS, JobsProvider, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi } from './fake-api';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 
 let seen: JobState[] = [];
 

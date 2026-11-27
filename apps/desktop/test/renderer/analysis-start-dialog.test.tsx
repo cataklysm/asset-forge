@@ -55,7 +55,7 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 
 const PREVIEW: AnalysisPreview = { analysable: 7, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 };
 const NOTHING_NEW: AnalysisPreview = { analysable: 0, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 };

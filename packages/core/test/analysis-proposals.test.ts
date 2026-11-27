@@ -86,6 +86,9 @@ describe('getProposal', () => {
         providerId: 'environment',
         providerName: 'Environment',
         model: MODEL,
+        url: null,
+        host: null,
+        result: null,
       },
     });
   });

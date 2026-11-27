@@ -105,7 +105,7 @@ it('Ctrl+F focuses the page search field', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: [] };
+const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: [], pausedHosts: [] };
 
 function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}, handlers: FakeHandlers = {}) {
   const api = installFakeApi({
@@ -309,6 +309,10 @@ it('sameSummary compares the pause list entry by entry', () => {
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, paused: [PAUSED_LOCAL] })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, failed: 1 })).toBe(false);
+  const host = { host: 'example.com', reason: 'download_blocked' } as const;
+  expect(sameSummary({ ...IDLE, pausedHosts: [host] }, { ...IDLE, pausedHosts: [{ ...host }] })).toBe(true);
+  expect(sameSummary({ ...IDLE, pausedHosts: [host] }, { ...IDLE, pausedHosts: [{ ...host, reason: 'download_throttled' }] })).toBe(false);
+  expect(sameSummary(IDLE, { ...IDLE, pausedHosts: [host] })).toBe(false);
 });
 
 /** The inbox of the workspace shell with one image that has a tag proposal; the provider is not configured. */

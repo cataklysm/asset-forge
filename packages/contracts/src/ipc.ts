@@ -81,6 +81,7 @@ import {
   SavePromptVersionSchema,
   UpdatePromptSchema,
 } from './prompts';
+import { FileOriginSchema, MAX_IMPORT_URLS, UrlImportResultSchema } from './url-import';
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
@@ -136,6 +137,28 @@ export const ipcContract = {
       unpackArchives: z.boolean().optional(),
     }),
     response: z.array(ImportResultSchema),
+  },
+  /**
+   * Queues one download job per usable line; `skipDuplicates` defaults to true. A line over the length
+   * limit is reported as invalid, not refused by the schema.
+   */
+  'files:importUrls': {
+    request: z.object({
+      urls: z.array(z.string()).min(1).max(MAX_IMPORT_URLS),
+      target: FileTargetSchema.optional(),
+      skipDuplicates: z.boolean().optional(),
+    }),
+    response: UrlImportResultSchema,
+  },
+  /** The addresses a file was downloaded from, oldest first. */
+  'files:origins': {
+    request: z.object({ fileId: IdSchema }),
+    response: z.array(FileOriginSchema),
+  },
+  // Opens a stored origin in the system browser; the renderer never passes the address itself.
+  'files:openOrigin': {
+    request: z.object({ fileId: IdSchema, originId: IdSchema }),
+    response: z.object({}),
   },
   'files:list': {
     /** `hasProposal` is a list filter only; it is not part of `FileListFilter` in an analysis target. */
@@ -590,6 +613,11 @@ export const ipcContract = {
   /** Ends the pause of one provider's analysis queue; `null` is the jobs without a provider. */
   'jobs:resume': {
     request: z.object({ providerId: ProviderIdSchema.nullable() }),
+    response: z.object({}),
+  },
+  /** Ends the pause of one download host. */
+  'jobs:resumeHost': {
+    request: z.object({ host: z.string().min(1).max(300) }),
     response: z.object({}),
   },
   /** Moves every waiting analysis job of one provider onto another with this model; a running job stays. */

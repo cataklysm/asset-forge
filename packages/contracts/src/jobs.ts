@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
+import { FileTargetSchema } from './files';
 import { ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
 
 export const JobStatusSchema = z.enum([
@@ -29,6 +30,17 @@ export const JobErrorCodeSchema = z.enum([
   'provider_outcome_unknown',
   'provider_insufficient_balance',
   'provider_content_refused',
+  'download_unreachable',
+  'download_unavailable',
+  'download_throttled',
+  'download_blocked',
+  'download_not_found',
+  'download_rejected',
+  'download_address_refused',
+  'download_too_large',
+  'download_not_a_file',
+  'download_type_refused',
+  'download_no_space',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -49,6 +61,17 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   provider_outcome_unknown: 'The provider may have processed this request; it was not repeated',
   provider_insufficient_balance: 'The provider account has no balance left',
   provider_content_refused: 'The provider refused this content',
+  download_unreachable: 'The address could not be reached',
+  download_unavailable: 'The server is temporarily unavailable',
+  download_throttled: 'The server asked to slow down',
+  download_blocked: 'The server refused access',
+  download_not_found: 'The file was not found at this address',
+  download_rejected: 'The server rejected the request',
+  download_address_refused: 'This address is not allowed',
+  download_too_large: 'The file is larger than the download limit',
+  download_not_a_file: 'This address is a web page, not a file',
+  download_type_refused: 'This file type cannot be imported',
+  download_no_space: 'There is not enough free disk space',
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
@@ -56,6 +79,9 @@ const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
   'provider_timeout',
   'provider_unavailable',
   'invalid_response',
+  'download_unreachable',
+  'download_unavailable',
+  'download_throttled',
 ]);
 
 export function isRetryableJobError(code: JobErrorCode): boolean {
@@ -64,6 +90,31 @@ export function isRetryableJobError(code: JobErrorCode): boolean {
 
 export const ANALYZE_FILE_JOB = 'vision.analyze_file';
 export const IMAGE_GENERATE_JOB = 'image.generate';
+export const FILE_DOWNLOAD_JOB = 'file.download';
+
+/** What a succeeded job produced besides its file; null on an ordinary result. */
+export const JobResultSchema = z.enum(['already_present']);
+export type JobResult = z.infer<typeof JobResultSchema>;
+
+/** A download job of the URL import; `target` null leaves the file in the inbox. */
+export const FileDownloadPayloadSchema = z.object({
+  v: z.literal(1),
+  url: z.string().min(1).max(2000),
+  target: FileTargetSchema.nullable(),
+  skipDuplicates: z.boolean(),
+});
+export type FileDownloadPayload = z.infer<typeof FileDownloadPayloadSchema>;
+
+/** { url, host } of a download payload; nulls for anything else. `host` is lower case with a non-default port. */
+export function downloadJobFields(payload: unknown): { url: string | null; host: string | null } {
+  const parsed = FileDownloadPayloadSchema.safeParse(payload);
+  if (!parsed.success) return { url: null, host: null };
+  try {
+    return { url: parsed.data.url, host: new URL(parsed.data.url).host };
+  } catch {
+    return { url: null, host: null };
+  }
+}
 
 /** An image generation job names its generation row; everything else lives on that row. */
 export const ImageGeneratePayloadSchema = z.object({ v: z.literal(1), generationId: z.uuid() });
@@ -131,6 +182,11 @@ export const JobViewSchema = z.object({
   /** The provider name copied into the payload at enqueue; null before payload v4. */
   providerName: z.string().nullable(),
   model: ModelNameSchema.nullable(),
+  /** The address of a download job; null for any other job. A download has no provider id, name or model. */
+  url: z.string().nullable(),
+  /** The host lane of a download job; null for any other job. */
+  host: z.string().nullable(),
+  result: JobResultSchema.nullable(),
 });
 export type JobView = z.infer<typeof JobViewSchema>;
 
@@ -148,6 +204,10 @@ export const PausedProviderSchema = z.object({
 });
 export type PausedProvider = z.infer<typeof PausedProviderSchema>;
 
+/** A download host whose jobs are paused for the application session. */
+export const PausedHostSchema = z.object({ host: z.string(), reason: JobErrorCodeSchema });
+export type PausedHost = z.infer<typeof PausedHostSchema>;
+
 /** `waiting` is `retry_wait` and `waiting_remote` together. */
 export const JobSummarySchema = z.object({
   queued: count,
@@ -159,6 +219,8 @@ export const JobSummarySchema = z.object({
   changes: count,
   /** Every provider whose analysis queue is paused because it is down or refused the request; empty otherwise. */
   paused: z.array(PausedProviderSchema),
+  /** Every download host that is paused after repeated failures; empty otherwise. */
+  pausedHosts: z.array(PausedHostSchema),
 });
 export type JobSummary = z.infer<typeof JobSummarySchema>;
 

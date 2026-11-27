@@ -181,7 +181,7 @@ export function createJobHandlers(
           const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : await generationLaneName(s, lane));
           paused.push({ providerId: lane, providerName, kind, reason });
         }
-        return { ...counts, changes: jobs.changes(), paused };
+        return { ...counts, changes: jobs.changes(), paused, pausedHosts: [] };
       }),
     'jobs:cancel': async (r) => {
       await manager.read((s) => cancelJob(s, jobs, r.jobId));

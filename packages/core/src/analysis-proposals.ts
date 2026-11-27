@@ -20,6 +20,9 @@ function viewOf(job: Job, fileName: string | null): JobView {
     runAfter: job.runAfter,
     providerId: job.lane,
     ...analysisJobFields(job.payload),
+    url: null,
+    host: null,
+    result: null,
   };
 }
 

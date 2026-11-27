@@ -444,7 +444,7 @@ it('assigning in the detail dialog moves on to the following file; assigning the
 });
 
 const VISION: ProviderView = providerView();
-const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [] };
+const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 
 /** The provider, job and analysis channels the dialogs use; `entry` null means no provider is configured. */
 function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
@@ -738,7 +738,7 @@ it('without a configured provider the analysis entries are disabled with the rea
   expect(item.title).toBe(reason);
 });
 
-const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [] };
+const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [], pausedHosts: [] };
 
 /** The inbox under a job provider; `succeed()` makes the next poll report a finished job. */
 function withJobs(files: FileRecord[]) {

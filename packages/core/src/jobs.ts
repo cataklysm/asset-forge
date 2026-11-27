@@ -101,7 +101,7 @@ export function listJobs(
 }
 
 /** Jobs per status; `waiting` is `retry_wait` and `waiting_remote` together. */
-export async function countJobs(s: WorkspaceSession): Promise<Omit<JobSummary, 'changes' | 'paused'>> {
+export async function countJobs(s: WorkspaceSession): Promise<Omit<JobSummary, 'changes' | 'paused' | 'pausedHosts'>> {
   const c = await s.database.jobs.counts();
   return {
     queued: c.queued,
