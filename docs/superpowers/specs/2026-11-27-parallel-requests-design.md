@@ -46,8 +46,8 @@ an entry gets at once.
 The file stays version 4. A stored vision entry whose options lack `parallelRequests` reads as 1 (a default in
 the stored-entry schema only, not in the IPC schema); a stored value outside the rule also reads as 1 and keeps
 the entry. The first write stores the field. The upgrades from versions 1–3 give the default.
-`providers:save` with options refuses a value outside the rule as `validation_failed` like every other
-schema violation.
+`providers:save` with options refuses a value outside the rule like every other schema violation of the
+options (`invalid_request` from the IPC schema, `invalid_operation` from the store).
 
 ### Scheduler (`packages/jobs`)
 
