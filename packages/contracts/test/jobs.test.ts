@@ -58,10 +58,16 @@ describe('job contracts', () => {
     expect(JOB_ERROR_MESSAGES.file_unavailable).toBe('The file is not available');
     expect(JOB_ERROR_MESSAGES.provider_not_configured).toBe('No provider is configured');
     expect(JOB_ERROR_MESSAGES.internal_error).toBe('The job failed unexpectedly');
+    expect(JOB_ERROR_MESSAGES.generation_result_not_stored).toBe('The provider answered, but the result could not be stored');
   });
 
   test('the generation codes are not retryable', () => {
-    for (const code of ['provider_outcome_unknown', 'provider_insufficient_balance', 'provider_content_refused'] as const) {
+    for (const code of [
+      'provider_outcome_unknown',
+      'provider_insufficient_balance',
+      'provider_content_refused',
+      'generation_result_not_stored',
+    ] as const) {
       expect(isRetryableJobError(code)).toBe(false);
     }
   });

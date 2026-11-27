@@ -92,7 +92,8 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
         nameFor = (extension) => generationNames.upscale(input.name, scale, extension);
         answer = await provider.upscaleImage({ image: source.image, scale, signal });
       }
-      // Listen at once: an import failure is `provider_outcome_unknown` when the answer stream itself failed.
+      // Listen at once: an import failure is `provider_outcome_unknown` when the answer stream itself failed,
+      // and `generation_result_not_stored` when the answer arrived but could not be kept.
       let streamErrored = false;
       answer.stream.on('error', () => {
         streamErrored = true;
@@ -110,10 +111,20 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
         throw new JobError('provider_outcome_unknown');
       }
       const name = nameFor(extension);
-      const imported = await importStream(ctx, { sourcePath: '', entryName: null, name, stream: answer.stream });
+      // A failed import discards its row: no failed entry is left in the inbox.
+      const imported = await importStream(
+        ctx,
+        { sourcePath: '', entryName: null, name, stream: answer.stream },
+        {
+          discardOnFailure: true,
+          onStreamError: () => {
+            streamErrored = true;
+          },
+        },
+      );
       const file = imported.file;
       if (imported.error !== null || file === null || file.status !== 'complete' || file.sha256 === null) {
-        throw new JobError(streamErrored ? 'provider_outcome_unknown' : 'internal_error');
+        throw new JobError(streamErrored ? 'provider_outcome_unknown' : 'generation_result_not_stored');
       }
 
       let linked: boolean;
@@ -127,7 +138,8 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
         // The complete result stays unlinked in the inbox; the job fails like an interrupted run.
         throw new JobError('provider_outcome_unknown', { cause });
       }
-      if (!linked) throw new JobError('internal_error');
+      // The complete result stays unlinked in the inbox; the paid answer is reported as not stored.
+      if (!linked) throw new JobError('generation_result_not_stored');
 
       let placedIn: string | null = null;
       try {

@@ -193,11 +193,9 @@ describe('the image.generate handler', () => {
     const g = await started(t, edit(t.file.id));
     t.providers.provider.answer = async () => ({ stream: failingStream(), mimeType: 'image/png' });
     expectJobError((await runNext(t)).error, 'provider_outcome_unknown');
-    // The import leaves exactly its own failed inbox row, with no binary, like any failed import.
-    const left = results(t);
-    expect(left).toHaveLength(1);
-    expect(left[0]).toMatchObject({ originalName: 'face edit 1.png', status: 'failed', assetId: null, sha256: null });
-    expect(t.storage.files.has(left[0]!.relativePath)).toBe(false);
+    // The import discards its row: no failed inbox row and no binary remain.
+    expect(results(t)).toEqual([]);
+    expect([...t.storage.files.keys()].filter((p) => p.startsWith('inbox/') && p !== t.file.relativePath)).toEqual([]);
     expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
   });
 
@@ -222,12 +220,32 @@ describe('the image.generate handler', () => {
     expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
   });
 
-  it('fails internal_error when the import fails for a storage reason', async () => {
+  it('fails generation_result_not_stored when the import fails for a storage reason, leaving no row', async () => {
     const t = await setup();
     const g = await started(t, edit(t.file.id));
     t.storage.failNext('writeStream', new Error('ENOSPC'));
-    expectJobError((await runNext(t)).error, 'internal_error');
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'internal_error', outputs: [] });
+    expectJobError((await runNext(t)).error, 'generation_result_not_stored');
+    expect(results(t)).toEqual([]);
+    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'generation_result_not_stored', outputs: [] });
+  });
+
+  it('fails generation_result_not_stored when the move after the checksum fails, leaving no row', async () => {
+    const t = await setup();
+    const g = await started(t, edit(t.file.id));
+    t.storage.failNext('move', new Error('EBUSY'));
+    expectJobError((await runNext(t)).error, 'generation_result_not_stored');
+    expect(results(t)).toEqual([]);
+    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'generation_result_not_stored' });
+  });
+
+  it('fails generation_result_not_stored when nothing was linked, keeping the complete result', async () => {
+    const t = await setup();
+    const g = await started(t, edit(t.file.id));
+    t.db.generations.succeed = async () => false;
+    expectJobError((await runNext(t)).error, 'generation_result_not_stored');
+    const [result] = results(t);
+    expect(result).toMatchObject({ status: 'complete', assetId: null });
+    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'generation_result_not_stored', outputs: [] });
   });
 
   it('a crash between import and link leaves an unlinked complete inbox file and, after recovery, provider_outcome_unknown', async () => {
