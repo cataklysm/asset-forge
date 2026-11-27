@@ -1004,3 +1004,99 @@ it('Import from URLs follows Import files, is disabled while importing and sends
   await user.click(within(dialog).getByRole('button', { name: 'Close' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
+
+it('a running import shows its progress, reloads the list while done changes and keeps selection and scroll; a cancel ends the title', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const items = Array.from({ length: 200 }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+    const a = fileRecord({ originalName: 'a.png' });
+    const running = deferred<IpcResponse<'files:import'>>();
+    let progress: IpcResponse<'files:importProgress'> = null;
+    const api = install(items, {
+      'dialog:pickFiles': () => ['C:\\in\\a.png', 'C:\\in\\b.png'],
+      'files:import': () => running.promise,
+      'files:importProgress': () => progress,
+      'files:cancelImport': () => {
+        if (progress !== null) progress = { ...progress, cancelling: true };
+        return { cancelling: true };
+      },
+    });
+    render(<Harness />);
+    await user.click(await screen.findByText('File 0.png'));
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    const grid = screen.getByRole('listbox', { name: 'Files' });
+    Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+
+    await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+    // No progress known yet: the plain busy text.
+    await waitFor(() => expect(callsOf(api, 'files:import')).toHaveLength(1));
+    expect(screen.getByText('Importing…')).toBeTruthy();
+
+    progress = { done: 0, total: 2, currentBytes: 5, currentSize: 10, cancelling: false };
+    expect(await screen.findByText('0 of 2')).toBeTruthy();
+    expect(screen.queryByText('Importing…')).toBeNull();
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('25');
+
+    // done moves: the list reloads where it was, the selection stays.
+    api.calls.length = 0;
+    api.setFiles([a, ...items]);
+    progress = { done: 1, total: 2, currentBytes: 0, currentSize: null, cancelling: false };
+    expect(await screen.findByText('1 of 2')).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
+    const list = within(screen.getByRole('listbox', { name: 'Files' }));
+    expect(list.queryByText('File 0.png')).toBeNull();
+    expect(list.getByText('File 100.png')).toBeTruthy();
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+
+    // done unchanged: no further reload.
+    api.calls.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(callsOf(api, 'files:list').filter((r) => (r as ListRequest).limit === 60)).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(callsOf(api, 'files:cancelImport')).toEqual([{}]);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true));
+
+    progress = null;
+    running.resolve([importResultOf('C:\\in\\a.png', { file: a })]);
+    expect(await screen.findByText('1 imported, 0 failed, 0 duplicates, cancelled')).toBeTruthy();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByText('Importing…')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('the next import after a cancelled one has no cancelled title', async () => {
+  const user = userEvent.setup();
+  const a = fileRecord({ originalName: 'a.png' });
+  const running = deferred<IpcResponse<'files:import'>>();
+  let first = true;
+  const api = install([], {
+    'dialog:pickFiles': () => ['C:\\in\\a.png'],
+    'files:import': () => (first ? running.promise : [importResultOf('C:\\in\\a.png', { file: a })]),
+    'files:importProgress': () => ({ done: 0, total: 1, currentBytes: 0, currentSize: null, cancelling: false }),
+    'files:cancelImport': () => ({ cancelling: true }),
+  });
+  render(<Harness />);
+  await screen.findByText('Inbox is empty');
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(callsOf(api, 'files:cancelImport')).toHaveLength(1));
+  first = false;
+  running.resolve([]);
+  expect(await screen.findByText('0 imported, 0 failed, 0 duplicates, cancelled')).toBeTruthy();
+
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  expect(await screen.findByText('1 imported, 0 failed, 0 duplicates')).toBeTruthy();
+});

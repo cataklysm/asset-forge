@@ -373,7 +373,7 @@ Left from the reviews:
 
 Deferred by design:
 
-- No progress display and no cancel for a running import, also not while an archive is unpacked.
+- A cancel stops an unpacking archive only between entries, never inside one (see "Import progress").
 - No archive format other than ZIP (7z, RAR, tar, gz).
 - No password-protected archives; an encrypted entry is refused.
 - No nested archives: a `.zip` entry is refused, not unpacked.
@@ -542,6 +542,16 @@ Known gaps:
 - After a crash between the completed import and the job outcome, the rerun finds its own file and reports `already_present`.
 - Several tests wait fixed real time before a negative assertion or rely on claim order (the 429 acceptance case, the dialog refresh assertion).
 - No TLS fixture test for the pinned lookup.
+
+## Import progress
+
+Deferred by design:
+
+- No abort inside one file: a cancel waits until the item in progress is finished, however large it is.
+- No progress of its own for a second import that waits in the workspace queue behind a running one: `files:importProgress` describes only the import that runs, and a cancel marks only that one.
+- No progress for the URL import beyond the Jobs screen; its downloads are jobs.
+- The progress lives in memory only: no persisted import, no import as jobs, nothing survives a restart.
+- No estimate of the remaining time, no transfer rate and no name of the current file.
 
 ## Not covered by any automated check
 

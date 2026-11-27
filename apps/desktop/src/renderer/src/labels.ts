@@ -301,6 +301,16 @@ export const IMPORT_AS_FILE_LABEL = 'Import as file';
 export const IMPORT_AS_FILE_TITLE = 'Imports the archive itself as one file';
 export const ZIP_CANCEL_TITLE = 'Imports nothing';
 
+/** The progress of a running file import (ImportProgressView). */
+export const IMPORT_PROGRESS_LABEL = 'Import progress';
+export const IMPORT_CANCEL_LABEL = 'Cancel';
+export const IMPORT_CANCEL_TITLE = 'Stops after the current file';
+
+/** '3 of 10'. */
+export function importCountText(done: number, total: number): string {
+  return `${done} of ${total}`;
+}
+
 /** The import from a list of addresses (UrlImportDialog) and its entry buttons. */
 export const URL_IMPORT_LABEL = 'Import from URLs';
 export const URLS_LABEL = 'URLs';

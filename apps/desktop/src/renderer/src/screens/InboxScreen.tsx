@@ -6,6 +6,7 @@ import { SelectionAnalysisButtons, useAnalysisDialogs } from '../components/Anal
 import { FileBrowser } from '../components/FileBrowser';
 import { FileDetailDialog } from '../components/FileDetailDialog';
 import { AssignFileControl } from '../components/FileRoleControls';
+import { ImportProgressView } from '../components/ImportProgressView';
 import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
@@ -13,6 +14,7 @@ import { SelectionBar } from '../components/SelectionBar';
 import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
 import { fileMenuItems } from '../file-actions';
+import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useLoad } from '../hooks/useLoad';
@@ -98,6 +100,13 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   const reload = () => setReloadToken((t) => t + 1);
 
+  // While the `files:import` call is pending: its progress, and the list fills meanwhile.
+  const [running, setRunning] = useState(false);
+  const importProgress = useImportProgress(running);
+  const cancelRequested = useRef(false);
+  cancelRequested.current = importProgress.cancelRequested;
+  useImportReload(running, importProgress.progress, reload);
+
   const studio = useStudio();
   const analysis = useAnalysisDialogs({
     onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
@@ -119,13 +128,18 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
       if (sourcePaths.length === 0) return;
       const unpackArchives = await zipChoice.choose(sourcePaths);
       if (unpackArchives === null) return;
+      // A cancel of an earlier import does not count for this one, even before the next render.
+      cancelRequested.current = false;
+      setRunning(true);
       const results = await call('files:import', { sourcePaths, unpackArchives });
-      setImportResult({ title: importTitle(results, { duplicates: true }), failures: importFailures(results) });
+      const cancelled = cancelRequested.current;
+      setImportResult({ title: importTitle(results, { duplicates: true, cancelled }), failures: importFailures(results) });
       reload();
     } catch (e) {
       setError(describeError(e));
     } finally {
       importingRef.current = false;
+      setRunning(false);
       setImporting(false);
     }
   }
@@ -204,7 +218,11 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
       countTitle="Files in the inbox"
       actions={
         <>
-          {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
+          {importProgress.progress !== null ? (
+            <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
+          ) : (
+            importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
+          )}
           {importButton}
           <button type="button" className={BUTTON} disabled={importing} onClick={() => setUrlImportOpen(true)}>
             {URL_IMPORT_LABEL}

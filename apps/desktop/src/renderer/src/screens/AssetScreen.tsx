@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AssetStatusSchema,
   FileRoleSchema,
@@ -15,6 +15,7 @@ import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetPicker } from '../components/AssetPicker';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { CommitInput } from '../components/CommitInput';
+import { ImportProgressView } from '../components/ImportProgressView';
 import { Link } from '../components/Link';
 import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
 import { SourceList } from '../components/SourceList';
@@ -24,6 +25,7 @@ import { WorkflowSection } from '../components/WorkflowSection';
 import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
 import { useLoad } from '../hooks/useLoad';
+import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useJobs } from '../jobs-context';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, URL_IMPORT_LABEL } from '../labels';
@@ -122,6 +124,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     loaded.reload();
   }
 
+  // While the `files:import` call is pending: its progress, and the Files tab and its count fill
+  // meanwhile (the asset itself is read again once the import has ended).
+  const [running, setRunning] = useState(false);
+  const importProgress = useImportProgress(running);
+  const cancelRequested = useRef(false);
+  cancelRequested.current = importProgress.cancelRequested;
+  useImportReload(running, importProgress.progress, () => setReloadToken((t) => t + 1));
+
   const saveAsset = (patch: Patch) =>
     attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
 
@@ -138,12 +148,17 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       if (sourcePaths.length === 0) return;
       const unpackArchives = await zipChoice.choose(sourcePaths);
       if (unpackArchives === null) return;
+      // A cancel of an earlier import does not count for this one, even before the next render.
+      cancelRequested.current = false;
+      setRunning(true);
       const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole }, unpackArchives });
-      setImportResult({ title: importTitle(results, { duplicates: false }), failures: importFailures(results) });
+      const cancelled = cancelRequested.current;
+      setImportResult({ title: importTitle(results, { duplicates: false, cancelled }), failures: importFailures(results) });
       filesChanged();
     } catch (e) {
       setError(describeError(e));
     } finally {
+      setRunning(false);
       setImporting(false);
     }
   }
@@ -236,7 +251,11 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             >
               {URL_IMPORT_LABEL}
             </button>
-            {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
+            {importProgress.progress !== null ? (
+              <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
+            ) : (
+              importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
+            )}
             <button
               type="button"
               className={BUTTON}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import {
@@ -1223,4 +1223,49 @@ it('Import from URLs is disabled while files are imported', async () => {
   expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(true);
   picked.resolve([]);
   await waitFor(() => expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(false));
+});
+
+it('a running import in the asset screen shows its progress, reloads the files while done changes and ends the title after a cancel', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const asset = assetDetail();
+    const a = fileRecord({ originalName: 'a.png', assetId: asset.id, role: 'reference' });
+    let files: FileRecord[] = [];
+    const running = deferred<IpcResponse<'files:import'>>();
+    let progress: IpcResponse<'files:importProgress'> = null;
+    const api = install(asset, {
+      'files:list': (request) => listOf(files)(request),
+      'dialog:pickFiles': () => ['C:\\in\\a.png', 'C:\\in\\b.png'],
+      'files:import': () => running.promise,
+      'files:importProgress': () => progress,
+      'files:cancelImport': () => ({ cancelling: true }),
+    });
+    render(<Harness id={asset.id} />);
+    await user.click(await screen.findByRole('button', { name: 'Import files' }));
+    await waitFor(() => expect(callsOf(api, 'files:import')).toHaveLength(1));
+    expect(screen.getByText('Importing…')).toBeTruthy();
+
+    progress = { done: 0, total: 2, currentBytes: 0, currentSize: null, cancelling: false };
+    expect(await screen.findByText('0 of 2')).toBeTruthy();
+    expect(screen.queryByText('Importing…')).toBeNull();
+
+    files = [a];
+    progress = { ...progress, done: 1 };
+    expect(await screen.findByText('1 of 2')).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(await screen.findByText('a.png')).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: 'Files 1' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(callsOf(api, 'files:cancelImport')).toEqual([{}]);
+    progress = null;
+    running.resolve([importResultOf('C:\\in\\a.png', { file: a })]);
+    expect(await screen.findByText('1 imported, 0 failed, cancelled')).toBeTruthy();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
