@@ -14,6 +14,7 @@ import {
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
 import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from '@assetforge/media';
 import { createAnalysisServices, createWorkspaceManager } from './composition.js';
+import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
@@ -63,14 +64,22 @@ function start(): void {
   });
 
 
+  const importDirectory = createImportDirectoryMemory(join(app.getPath('userData'), IMPORT_DIRECTORY_FILE));
+
   const dialogs: Dialogs = {
     async pickDirectory() {
       const result = await showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     async pickFiles() {
-      const result = await showOpenDialog({ properties: ['openFile', 'multiSelections'] });
-      return result.canceled ? [] : result.filePaths;
+      const defaultPath = importDirectory.current();
+      const result = await showOpenDialog({
+        properties: ['openFile', 'multiSelections'],
+        ...(defaultPath === undefined ? {} : { defaultPath }),
+      });
+      if (result.canceled) return [];
+      importDirectory.remember(result.filePaths);
+      return result.filePaths;
     },
     async confirmRemoveWorkspace(workspace) {
       const options: MessageBoxOptions = {

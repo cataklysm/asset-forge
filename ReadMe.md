@@ -439,6 +439,7 @@ A storage abstraction encapsulates resolving, reading/writing as streams, listin
 ├── settings.json                   # Local settings and workspace registry
 ├── provider-settings.json          # Provider entries of all kinds (version 4), never a key
 ├── analysis-prompts.json           # Analysis prompts and the one used last per purpose
+├── import-directory.json           # Directory of the last import, `{ v: 1, directory }`
 ├── credentials/                    # Only OS-protected encrypted values
 │   └── vision-api-key-<provider-id>  # One vision API key per entry, encrypted by safeStorage
 ├── workspaces/
@@ -451,6 +452,8 @@ A storage abstraction encapsulates resolving, reading/writing as streams, listin
 ```
 
 The application determines OS-conformant paths instead of hard-coding `%APPDATA%` or other platform-specific paths. Local caches can reside on a suitable fast drive. `cache/thumbnails` and `cache/previews` exist (phase 3a); their entries are keyed by the content checksum of the file (§15.1), so they can be deleted at any time and are regenerated on demand. There is a separate database per workspace; this allows a workspace to be backed up independently.
+
+The file picker of the import opens in the directory of the first file chosen last time: `import-directory.json` holds that absolute path at app level, only the main process reads and writes it (best effort, never logged, never sent over IPC), and a directory that no longer exists is ignored.
 
 **Provider settings and the API key** (phase 4b) are app-level, not part of any workspace: a workspace database is copied and backed up, and a secret does not belong there.
 
