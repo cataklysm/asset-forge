@@ -316,7 +316,7 @@ export class LocalFileSystemStorage implements Storage {
       throw new PathEscapeError('Path escapes the workspace');
     }
     if (segments.length === 0 && !allowRoot) {
-      throw new PathEscapeError(`Path resolves to the workspace root: ${JSON.stringify(relPath)}`);
+      throw new PathEscapeError('Path resolves to the workspace root');
     }
     const target = path.join(this.root, ...segments);
     const realRoot = await realpathOfDeepestAncestor(this.root);

@@ -318,6 +318,12 @@ describe('path escape', () => {
     );
   });
 
+  it('rejects a path that reduces to the root with a fixed message', async () => {
+    for (const p of ['', '.', './/.']) {
+      await expect(storage.readText(p)).rejects.toThrow(new PathEscapeError('Path resolves to the workspace root'));
+    }
+  });
+
   it('rejects both arguments of move', async () => {
     await storage.writeText('inbox/a.txt', 'A');
     await expect(storage.move('inbox/a.txt', '../x')).rejects.toBeInstanceOf(PathEscapeError);
