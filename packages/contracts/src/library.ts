@@ -105,7 +105,7 @@ export const AssetSummarySchema = AssetSchema.extend({
   projectCount: count,
   fileCount: count,
   workflowProgress: WorkflowProgressSchema.nullable(), // null when the asset has no workflow
-  coverFileId: id.nullable(), // effective cover: the chosen one, else the first previewable image
+  coverFileId: id.nullable(), // effective cover: the chosen one, else the first previewable image, else the first video
   tags: z.array(TagAssignmentSchema), // asset tags only
   coverTags: z.array(TagAssignmentSchema), // tags of the effective cover file; empty without a cover
   matchedTags: z.array(MatchedTagSchema).optional(), // one per requested filter tag; only when the list filtered by tags

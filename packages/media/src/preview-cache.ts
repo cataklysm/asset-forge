@@ -91,6 +91,9 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
   const cleanupEvery = options.cleanupEvery ?? CLEANUP_EVERY;
   const failed = new Set<string>();
   const inflight = new Map<string, Promise<string | null>>();
+  /** Video measurements by format and source path: the running ones, and those that failed this session. */
+  const measuring = new Map<string, Promise<VideoInfo | null>>();
+  const failedMeasurements = new Set<string>();
   const newEntries = { thumb: 0, full: 0 };
   let cleaning: Promise<void> | undefined;
   let closed = false;
@@ -200,17 +203,32 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
       inflight.set(key, promise);
       return promise;
     },
-    async measureVideo(sourcePath, format) {
-      if (closed || !frames || !VIDEO_FORMATS.includes(format)) return null;
-      // Ends in `.tmp`, so a target left by a crash is removed by the stale-file sweep of the cleanup.
-      const target = join(cacheDir, FRAMES_DIRECTORY, `measure-${randomUUID()}.tmp`);
-      try {
-        return await frames.extract(sourcePath, format, target);
-      } catch {
-        return null;
-      } finally {
-        await rm(target, { force: true, maxRetries: 3 }).catch(() => undefined);
-      }
+    measureVideo(sourcePath, format) {
+      if (closed || !frames || !VIDEO_FORMATS.includes(format)) return Promise.resolve(null);
+      const key = `${format}:${sourcePath}`;
+      if (failedMeasurements.has(key)) return Promise.resolve(null);
+      const running = measuring.get(key);
+      if (running) return running;
+      const extractor = frames;
+      const promise = (async () => {
+        // Ends in `.tmp`, so a target left by a crash is removed by the stale-file sweep of the cleanup.
+        const target = join(cacheDir, FRAMES_DIRECTORY, `measure-${randomUUID()}.tmp`);
+        let info: VideoInfo | null = null;
+        try {
+          info = await extractor.extract(sourcePath, format, target);
+        } catch {
+          info = null;
+        } finally {
+          await rm(target, { force: true, maxRetries: 3 }).catch(() => undefined);
+        }
+        // A source that is gone (or unreachable) may come back, so only a present one is remembered as failed.
+        if (info === null && !closed && (await exists(sourcePath))) failedMeasurements.add(key);
+        return info;
+      })()
+        .catch(() => null)
+        .finally(() => measuring.delete(key));
+      measuring.set(key, promise);
+      return promise;
     },
     cleanup,
     async close() {

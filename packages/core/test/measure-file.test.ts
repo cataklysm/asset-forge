@@ -126,6 +126,96 @@ describe('measureFile of a video', () => {
   });
 });
 
+describe('WorkspaceManager.measureFile', () => {
+  async function managerSetup() {
+    const fake = createFakeHost();
+    const manager = new WorkspaceManager(fake.host);
+    const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const db = fake.databases.get(summary.id)!;
+    fake.sources.set('/src/clip.mp4', Buffer.from('video'));
+    fake.videoProbe.result = { width: 1920, height: 1080, durationMs: 4500 };
+    const file = (await manager.importFiles(['/src/clip.mp4']))[0]!.file!;
+    let release!: () => void;
+    fake.videoProbe.gate = new Promise<void>((resolve) => (release = resolve));
+    const started = async () => {
+      while (fake.videoProbe.calls.length === 0) await new Promise((r) => setTimeout(r, 1));
+    };
+    return { fake, manager, db, file, release, started };
+  }
+
+  it('probes outside the workspace queue and stores the result when the probe ends', async () => {
+    const { manager, db, file, release, started } = await managerSetup();
+    const measuring = manager.measureFile(file.id);
+    await started();
+    await expect(manager.exclusive(async () => 'done')).resolves.toBe('done');
+    expect(await db.files.get(file.id)).toMatchObject({ width: null, height: null });
+    release();
+    await expect(measuring).resolves.toMatchObject({ id: file.id, width: 1920, height: 1080, durationMs: 4500 });
+    expect(await db.files.get(file.id)).toMatchObject({ width: 1920, height: 1080, durationMs: 4500 });
+  });
+
+  it('writes nothing and answers the current record when the file was trashed meanwhile', async () => {
+    const { manager, db, file, release, started } = await managerSetup();
+    const measuring = manager.measureFile(file.id);
+    await started();
+    await manager.exclusive((s) => trashForTest(s, [file.id]));
+    release();
+    const answer = await measuring;
+    expect(answer).toMatchObject({ id: file.id, width: null, height: null });
+    expect(answer.deletedAt).not.toBeNull();
+    expect(await db.files.get(file.id)).toMatchObject({ width: null, height: null });
+  });
+
+  it('writes nothing when the content or the measurement changed meanwhile', async () => {
+    const { manager, db, file, release, started } = await managerSetup();
+    const measuring = manager.measureFile(file.id);
+    await started();
+    db.files.records.set(file.id, { ...file, sha256: 'b'.repeat(64) });
+    release();
+    await expect(measuring).resolves.toMatchObject({ width: null, sha256: 'b'.repeat(64) });
+
+    const other = await managerSetup();
+    const second = other.manager.measureFile(other.file.id);
+    await other.started();
+    other.db.files.records.set(other.file.id, { ...other.file, width: 10, height: 20, durationMs: 30 });
+    other.release();
+    await expect(second).resolves.toMatchObject({ width: 10, height: 20, durationMs: 30 });
+  });
+
+  it('answers not_found and writes nothing when the file was purged meanwhile', async () => {
+    const { manager, db, file, release, started } = await managerSetup();
+    const measuring = manager.measureFile(file.id);
+    await started();
+    db.files.records.delete(file.id);
+    release();
+    await expect(measuring).rejects.toBeInstanceOf(NotFoundError);
+    expect(db.files.records.has(file.id)).toBe(false);
+  });
+
+  it('writes nothing when the workspace was closed or switched meanwhile', async () => {
+    const { manager, db, file, release, started } = await managerSetup();
+    const measuring = manager.measureFile(file.id);
+    await started();
+    await manager.close();
+    release();
+    await expect(measuring).resolves.toMatchObject({ id: file.id, width: null });
+    expect(await db.files.get(file.id)).toMatchObject({ width: null, height: null });
+
+    const other = await managerSetup();
+    const second = other.manager.measureFile(other.file.id);
+    await other.started();
+    await other.manager.create({ name: 'Other', rootPath: '/ws/b' });
+    other.release();
+    await expect(second).resolves.toMatchObject({ id: other.file.id, width: null });
+    expect(await other.db.files.get(other.file.id)).toMatchObject({ width: null });
+  });
+
+  it('answers no_workspace_open without an open workspace', async () => {
+    const manager = new WorkspaceManager(createFakeHost().host);
+    await expect(manager.measureFile(UNKNOWN_ID)).rejects.toMatchObject({ code: 'no_workspace_open' });
+  });
+});
+
 describe('measureFile of a trashed file', () => {
   it('measureFile still measures it', async () => {
     const { session, file, probe } = await setup();

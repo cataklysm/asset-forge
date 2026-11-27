@@ -545,6 +545,36 @@ describe('preview cache', () => {
       expect(await service(fakePool()).measureVideo(sourcePath, 'mp4')).toBeNull();
     });
 
+    it('measureVideo shares one run between concurrent calls for the same source and format', async () => {
+      const frames = fakeFrames();
+      const s = videoService(fakePool(), frames);
+      const sourcePath = await source('a.mp4');
+      const answers = await Promise.all([s.measureVideo(sourcePath, 'mp4'), s.measureVideo(sourcePath, 'mp4')]);
+      expect(answers).toEqual([
+        { width: 640, height: 360, durationMs: 4000 },
+        { width: 640, height: 360, durationMs: 4000 },
+      ]);
+      expect(frames.calls).toHaveLength(1);
+      await s.measureVideo(sourcePath, 'webm');
+      expect(frames.calls).toHaveLength(2);
+      await s.measureVideo(sourcePath, 'mp4');
+      expect(frames.calls).toHaveLength(3);
+    });
+
+    it('measureVideo remembers a failed measurement of a present source for the session', async () => {
+      const frames = fakeFrames();
+      const s = videoService(fakePool(), frames);
+      const broken = await source('broken.mp4');
+      expect(await s.measureVideo(broken, 'mp4')).toBeNull();
+      expect(await s.measureVideo(broken, 'mp4')).toBeNull();
+      expect(frames.calls).toHaveLength(1);
+
+      const missing = join(dir, 'gone-broken.mp4');
+      expect(await s.measureVideo(missing, 'mp4')).toBeNull();
+      expect(await s.measureVideo(missing, 'mp4')).toBeNull();
+      expect(frames.calls).toHaveLength(3);
+    });
+
     it('runs real video previews end to end', async () => {
       const sourcePath = join(dir, 'a.mp4');
       await new Promise<void>((resolve, reject) =>

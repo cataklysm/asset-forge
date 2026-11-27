@@ -34,7 +34,6 @@ import {
   renameTag,
   resolveAssetSourceUrl,
   resolveFileOriginUrl,
-  measureFile,
   purgeFiles,
   resolveFilePath,
   restoreFiles,
@@ -216,7 +215,8 @@ export function createLibraryHandlers(
     'files:addTagMany': async (r) => ({ items: await manager.exclusive((s) => addFileTags(s, r)) }),
     'files:removeTagMany': async (r) => ({ items: await manager.exclusive((s) => removeFileTags(s, r)) }),
 
-    'files:measure': (r) => manager.exclusive((s) => measureFile(s, r.fileId)),
+    // The probe runs outside the workspace queue; only storing its result is queued.
+    'files:measure': (r) => manager.measureFile(r.fileId),
     'files:openExternal': async (r) => {
       const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));
       // The shell's text may contain paths; it is never forwarded.

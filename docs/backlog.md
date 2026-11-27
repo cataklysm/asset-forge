@@ -562,7 +562,10 @@ Deferred by design:
 - No `mov`, `mkv`, `avi` or audio files; no conversion of a video the built-in player cannot decode (the stage offers `Open externally` instead).
 - No analysis, Image to prompt or generation studio for videos.
 - No choice of the frame, no preview on hover, no scrubbing over a tile, no chapters or subtitles, no loop or speed control of our own, no picture-in-picture.
-- Packaging: no packager exists yet. The ffmpeg binary must be shipped outside the archive (an executable cannot run from inside `app.asar`), with the GPL licence notice and the source offer of the build, before the app is distributed; the bundled build may also have to be replaced by an LGPL one.
+- Packaging: no packager exists yet. The ffmpeg binary must be shipped outside the archive (an executable cannot run from inside `app.asar`), with the GPL licence notice and the source offer of the build, before the app is distributed; the bundled build may also have to be replaced by an LGPL one. Concretely: unpack the binary from the asar (`asarUnpack`) and swap its path to `app.asar.unpacked` before it is hashed, because a process cannot be spawned from inside an asar.
+- The ffmpeg binary is verified against its checksum once per start, not before every spawn. Accepted: whoever can write there can change the app's code as well.
+- The checksum of the ffmpeg binary is computed on the main process as a stream; a worker would be stricter.
+- The first open of a video runs ffmpeg twice (poster frame and measurement); the measurement could be derived from the frame extraction.
 - The bundled ffmpeg is 6.1.1 (from `ffmpeg-static@5.3.0`, built in 2023) and should be replaced by a current build. Only `win32-x64` has a recorded checksum; on every other platform the tool stays disabled and videos have no picture.
 - A frame that failed is remembered as failed for the app session (the same `failed` memory as image previews): a video whose frame could not be made shows the placeholder until the app is restarted, even when the cause is gone.
 

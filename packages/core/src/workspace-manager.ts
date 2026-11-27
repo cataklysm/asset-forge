@@ -3,6 +3,7 @@ import {
   WORKSPACE_FORMAT_VERSION,
   WorkspaceManifestSchema,
   type FileList,
+  type FileRecord,
   type FileTarget,
   type ImportProgress,
   type ImportResult,
@@ -28,6 +29,7 @@ import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
 import { isZipArchive } from './media-types.js';
+import { planMeasurement, probeMeasurement, storeMeasurement } from './measure-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
 import type { ArchiveReader, FileQuery, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
@@ -125,6 +127,23 @@ export class WorkspaceManager {
 
   listFiles(q: FileQuery): Promise<FileList> {
     return this.read((s) => listFiles(s, q));
+  }
+
+  /**
+   * Measures a file like `measureFile`, but reads and probes outside the queue, so a slow probe never holds up
+   * queued operations; only storing the result is queued. When the workspace that was read is no longer the open
+   * one by then, nothing is written and the record as read is answered.
+   */
+  async measureFile(fileId: string): Promise<FileRecord> {
+    const session = this.session();
+    const { file, target } = await planMeasurement(session, fileId);
+    if (target === null) return file;
+    const size = await probeMeasurement(session, target);
+    if (size === null) return file;
+    return this.queue.run(async () => {
+      if (this.open_ === null || this.open_.database !== session.database) return file;
+      return storeMeasurement(this.session(), target, size);
+    });
   }
 
   /** Runs `fn` with the open workspace's session, without waiting for queued operations. */

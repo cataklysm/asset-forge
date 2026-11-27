@@ -1710,9 +1710,12 @@ export class FakeVideoProbe implements VideoProbe {
   readonly calls: { absolutePath: string; format: VideoFormat }[] = [];
   result: VideoInfo | null = null;
   failure: Error | null = null;
+  /** While set, every measurement waits for it before answering. */
+  gate: Promise<void> | null = null;
 
   async measure(absolutePath: string, format: VideoFormat): Promise<VideoInfo | null> {
     this.calls.push({ absolutePath, format });
+    if (this.gate) await this.gate;
     if (this.failure) throw this.failure;
     return this.result;
   }
