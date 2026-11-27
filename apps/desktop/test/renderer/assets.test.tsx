@@ -590,3 +590,20 @@ it('the Selection column follows a rename when no loaded page holds the selected
   expect(within(column).getByText('Side')).toBeTruthy();
   expect(within(column).queryByText('Front View')).toBeNull();
 });
+
+it('the file type filter offers Video and asks for assets with a video', async () => {
+  const api = install({ 'assets:list': listOf(many(2)) });
+  render(<Harness />);
+  await screen.findByText('Asset 0');
+  const select = screen.getByRole('combobox', { name: 'File type' });
+  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+    'All file types',
+    'Image',
+    'Video',
+    '3D model',
+    'Document',
+    'Other',
+  ]);
+  await userEvent.setup().selectOptions(select, 'Video');
+  await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, fileKind: 'video' }));
+});

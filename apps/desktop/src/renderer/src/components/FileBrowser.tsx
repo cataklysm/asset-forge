@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { FileRoleSchema, type FileKind, type FileListFilter, type FileRecord, type FileScope } from '@assetforge/contracts';
+import { FileRoleSchema, type FileListFilter, type FileRecord, type FileScope } from '@assetforge/contracts';
 import { call } from '../api';
 import { columnsForWidth, pagesForRows, rowItems } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -21,7 +21,7 @@ import {
   type ViewRestore,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { label, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
+import { FILE_KIND_OPTIONS, label, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
 import { findLoaded, PAGE_SIZE, retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import {
@@ -46,12 +46,7 @@ import { TagFilter } from './TagFilter';
 import { TagList } from './TagList';
 
 const ROLES = FileRoleSchema.options;
-const KINDS: { kind: FileKind; title: string }[] = [
-  { kind: 'image', title: 'Image' },
-  { kind: 'model', title: '3D model' },
-  { kind: 'document', title: 'Document' },
-  { kind: 'other', title: 'Other' },
-];
+const KINDS = FILE_KIND_OPTIONS;
 
 const VIEWS = [
   { view: 'grid', tooltip: 'Show as tiles', icon: LayoutGrid },
@@ -751,7 +746,7 @@ function GridItem(
             >
               <Search size={16} aria-hidden />
             </button>
-            {file.id === coverFileId && <span className={`absolute bottom-2 left-2 ${BADGE}`}>Cover</span>}
+            {file.id === coverFileId && <span className={`absolute bottom-2 ${file.kind === 'video' ? 'left-10' : 'left-2'} ${BADGE}`}>Cover</span>}
           </div>
           <div className="px-3 py-3">
             <div className="flex min-w-0 items-center gap-1.5">

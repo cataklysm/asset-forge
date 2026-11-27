@@ -52,7 +52,8 @@ export function fileRecord(p: Partial<FileRecord> = {}): FileRecord {
     error: null,
     importedAt: NOW,
     previewable: true,
-    thumbnail: true,
+    // A raster image has a thumbnail; a fixture that turns the preview off loses it unless it says otherwise.
+    thumbnail: p.previewable ?? true,
     openable: true,
     kind: 'image',
     width: null,
@@ -82,6 +83,20 @@ export function nonImageRecord(originalName: string, p: Partial<FileRecord> = {}
     previewable: false,
     thumbnail: false,
     kind: originalName.endsWith('.pdf') ? 'document' : 'model',
+    ...p,
+  });
+}
+
+/** A completely imported MP4 video: a thumbnail from one frame, no image preview. */
+export function videoRecord(p: Partial<FileRecord> = {}): FileRecord {
+  return fileRecord({
+    originalName: 'clip.mp4',
+    relativePath: 'files/clip.mp4',
+    mimeType: 'video/mp4',
+    previewable: false,
+    thumbnail: true,
+    openable: true,
+    kind: 'video',
     ...p,
   });
 }

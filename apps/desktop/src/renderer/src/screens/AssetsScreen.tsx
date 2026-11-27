@@ -1,6 +1,6 @@
 import { LayoutGrid, List, Plus, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AssetStatusSchema, FileRoleSchema, type AssetSummary, type FileKind } from '@assetforge/contracts';
+import { AssetStatusSchema, FileRoleSchema, type AssetSummary } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call } from '../api';
 import { AnalyseAllButton, useAnalysisDialogs } from '../components/AnalysisDialogs';
@@ -18,7 +18,7 @@ import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValu
 import { useLoad } from '../hooks/useLoad';
 import { usePagedList } from '../hooks/usePagedList';
 import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
-import { ANALYSE_ASSETS_TITLE, label } from '../labels';
+import { ANALYSE_ASSETS_TITLE, FILE_KIND_OPTIONS, label } from '../labels';
 import {
   hasFilters,
   listKey,
@@ -37,12 +37,7 @@ import { ALERT, BUTTON, ICON_BUTTON, MUTED, SELECT } from '../ui';
 
 const STATUSES = AssetStatusSchema.options;
 const ROLES = FileRoleSchema.options;
-const KINDS: { kind: FileKind; title: string }[] = [
-  { kind: 'image', title: 'Image' },
-  { kind: 'model', title: '3D model' },
-  { kind: 'document', title: 'Document' },
-  { kind: 'other', title: 'Other' },
-];
+const KINDS = FILE_KIND_OPTIONS;
 
 const VIEWS = [
   { view: 'grid', tooltip: 'Show as tiles', icon: LayoutGrid },

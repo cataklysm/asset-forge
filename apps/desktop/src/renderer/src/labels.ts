@@ -2,6 +2,7 @@ import {
   ANALYSIS_TAG_LIMIT_MAX,
   ANALYSIS_TAG_LIMIT_MIN,
   type AnalysisPromptPurpose,
+  type FileKind,
   type GenerationParameters,
   type GenerationStatus,
   type JobStatus,
@@ -347,6 +348,21 @@ export const INBOX_LABEL = 'Inbox';
 export const TRASH_EMPTY_TEXT = 'Trash is empty';
 export const DELETED_LABEL = 'Deleted';
 export const ORIGIN_LABEL = 'Origin';
+
+/** The entries of the file type filters, in this order. */
+export const FILE_KIND_OPTIONS: readonly { kind: FileKind; title: string }[] = [
+  { kind: 'image', title: 'Image' },
+  { kind: 'video', title: 'Video' },
+  { kind: 'model', title: '3D model' },
+  { kind: 'document', title: 'Document' },
+  { kind: 'other', title: 'Other' },
+];
+
+/** The accessible name of the film icon on video tiles and film strip entries. */
+export const VIDEO_LABEL = 'Video';
+export const VIDEO_UNPLAYABLE_TEXT = 'This video cannot be played here';
+export const OPEN_EXTERNALLY_LABEL = 'Open externally';
+export const DURATION_LABEL = 'Duration';
 
 const fileCount = (count: number) => `${count} ${count === 1 ? 'file' : 'files'}`;
 const assetCount = (count: number) => `${count} ${count === 1 ? 'asset' : 'assets'}`;

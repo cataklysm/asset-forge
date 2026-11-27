@@ -3,16 +3,37 @@ import { BUTTON, ICON_BUTTON } from '../ui';
 import type { ViewerControls } from './ImageStage';
 
 interface Props {
-  controls: ViewerControls;
+  /** `null` (a video) renders only the fullscreen button. */
+  controls: ViewerControls | null;
   /** `null` renders no fullscreen button. */
   fullscreen: { active: boolean; toggle(): void } | null;
 }
 
-/** Zoom, rotation and fullscreen controls above the image stage. */
+/** Zoom, rotation and fullscreen controls above the stage. */
 export function ViewerToolbar({ controls, fullscreen }: Props) {
-  const { zoom, percent, marker, canActual } = controls;
   return (
     <div role="toolbar" aria-label="Viewer" className="flex items-center gap-2">
+      {controls !== null && <ImageControls controls={controls} />}
+      {fullscreen !== null && (
+        <button
+          type="button"
+          className={ICON_BUTTON}
+          title={fullscreen.active ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
+          aria-label="Fullscreen"
+          aria-pressed={fullscreen.active}
+          onClick={fullscreen.toggle}
+        >
+          {fullscreen.active ? <Minimize size={18} aria-hidden /> : <Maximize size={18} aria-hidden />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ImageControls({ controls }: { controls: ViewerControls }) {
+  const { zoom, percent, marker, canActual } = controls;
+  return (
+    <>
       <button type="button" className={BUTTON} title="Fit (0)" aria-pressed={zoom.mode === 'fit'} onClick={controls.fit}>
         Fit
       </button>
@@ -43,18 +64,6 @@ export function ViewerToolbar({ controls, fullscreen }: Props) {
       <button type="button" className={ICON_BUTTON} title="Rotate (R)" aria-label="Rotate" onClick={controls.rotate}>
         <RotateCw size={18} aria-hidden />
       </button>
-      {fullscreen !== null && (
-        <button
-          type="button"
-          className={ICON_BUTTON}
-          title={fullscreen.active ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
-          aria-label="Fullscreen"
-          aria-pressed={fullscreen.active}
-          onClick={fullscreen.toggle}
-        >
-          {fullscreen.active ? <Minimize size={18} aria-hidden /> : <Maximize size={18} aria-hidden />}
-        </button>
-      )}
-    </div>
+    </>
   );
 }

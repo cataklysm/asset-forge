@@ -1,9 +1,10 @@
+import { Film } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { formatBytes } from '../format';
 import type { ViewHandle, ViewRestore, VirtualRows, VisibleRows } from '../hooks/useVirtualRows';
 import { formatLabel } from '../media-url';
-import { INBOX_LABEL, label } from '../labels';
+import { INBOX_LABEL, label, VIDEO_LABEL } from '../labels';
 import type { PagedState } from '../paged-list';
 import { FOCUS, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
@@ -19,10 +20,27 @@ export function FileFrame({ file, className }: { file: FileRecord; className: st
       </span>
     );
   }
-  if (file.previewable) {
-    return <CoverImage fileId={file.id} size="thumb" fallback={formatLabel(file.originalName)} className={className} />;
-  }
-  return <span className={`${plain} ${MUTED}`}>{formatLabel(file.originalName)}</span>;
+  const picture = file.thumbnail ? (
+    <CoverImage fileId={file.id} size="thumb" fallback={formatLabel(file.originalName)} className={className} />
+  ) : (
+    <span className={`${plain} ${MUTED}`}>{formatLabel(file.originalName)}</span>
+  );
+  if (file.kind !== 'video') return picture;
+  return (
+    <span className={`relative block ${className}`}>
+      {picture}
+      <VideoMark className="absolute bottom-2 left-2" />
+    </span>
+  );
+}
+
+/** The film icon in a corner of a video's tile or film strip entry; named only for assistive technology and the tooltip. */
+export function VideoMark({ className }: { className: string }) {
+  return (
+    <span role="img" aria-label={VIDEO_LABEL} title={VIDEO_LABEL} className={`flex rounded-control bg-surface/85 p-1 text-text ${className}`}>
+      <Film size={16} aria-hidden />
+    </span>
+  );
 }
 
 /** Where a trashed file came from: the name of its former asset, or the inbox. */

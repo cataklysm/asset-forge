@@ -4,6 +4,7 @@ import { formatLabel } from '../media-url';
 import { MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
 import type { ViewerList } from './FileBrowser';
+import { VideoMark } from './FileTile';
 
 const TILE = 96;
 const GAP = 8;
@@ -57,11 +58,12 @@ export function FilmStrip({ list }: { list: ViewerList }) {
             >
               {file === null ? (
                 <span className={frame} />
-              ) : file.status === 'complete' && file.previewable ? (
+              ) : file.status === 'complete' && file.thumbnail ? (
                 <CoverImage fileId={file.id} size="thumb" fallback={formatLabel(file.originalName)} className={frame} />
               ) : (
                 <span className={`${frame} ${MUTED}`}>{file.status === 'complete' ? formatLabel(file.originalName) : ''}</span>
               )}
+              {file?.kind === 'video' && <VideoMark className="absolute bottom-1 left-1" />}
             </button>
           );
         })}

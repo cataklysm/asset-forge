@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources, several vision providers and generation studio reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources, several vision providers, generation studio and video playback reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
@@ -554,6 +554,23 @@ Deferred by design:
 - No progress for the URL import beyond the Jobs screen; its downloads are jobs.
 - The progress lives in memory only: no persisted import, no import as jobs, nothing survives a restart.
 - No estimate of the remaining time, no transfer rate and no name of the current file.
+
+## Video playback
+
+Deferred by design:
+
+- No `mov`, `mkv`, `avi` or audio files; no conversion of a video the built-in player cannot decode (the stage offers `Open externally` instead).
+- No analysis, Image to prompt or generation studio for videos.
+- No choice of the frame, no preview on hover, no scrubbing over a tile, no chapters or subtitles, no loop or speed control of our own, no picture-in-picture.
+- Packaging: no packager exists yet. The ffmpeg binary must be shipped outside the archive (an executable cannot run from inside `app.asar`), with the GPL licence notice and the source offer of the build, before the app is distributed; the bundled build may also have to be replaced by an LGPL one.
+- The bundled ffmpeg is 6.1.1 (from `ffmpeg-static@5.3.0`, built in 2023) and should be replaced by a current build. Only `win32-x64` has a recorded checksum; on every other platform the tool stays disabled and videos have no picture.
+- A frame that failed is remembered as failed for the app session (the same `failed` memory as image previews): a video whose frame could not be made shows the placeholder until the app is restarted, even when the cause is gone.
+
+Found while building:
+
+- `db:generate` for migration `0016` wanted to rebuild the `generation` table, because its CHECK on `provider_kind` in the Drizzle schema includes `openai` while no migration ever added it. Migration `0016` leaves the old CHECK in place; that is harmless since generations only store `venice`, but the schema and the database disagree until a migration rebuilds the table.
+
+Not covered by any automated check: real playback (decoding in Chromium), seeking through the `video/` route of the media protocol, the poster and the arrow, `Shift`+arrow and `Space` keys against the element's own key handling, fullscreen of the stage with a playing video, and volume and mute carried over between videos. The owner checks these by hand.
 
 ## Not covered by any automated check
 

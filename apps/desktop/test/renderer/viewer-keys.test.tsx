@@ -94,3 +94,41 @@ it('prevents the default of a handled key only', () => {
   target.dispatchEvent(other);
   expect(other.defaultPrevented).toBe(false);
 });
+
+function SeekProbe({ actions }: { actions: ViewerKeyActions }) {
+  const root = useRef<HTMLDivElement>(null);
+  useViewerKeys(root, actions);
+  return (
+    <div ref={root}>
+      <div tabIndex={-1} data-testid="stage" />
+      <button type="button">Target</button>
+    </div>
+  );
+}
+
+it('with the video actions Shift+arrows seek and Space toggles outside buttons', async () => {
+  const actions = { ...actionsMock(), seek: vi.fn(), togglePlayback: vi.fn() };
+  render(<SeekProbe actions={actions} />);
+  const user = userEvent.setup();
+  screen.getByTestId('stage').focus();
+  await user.keyboard('{Shift>}{ArrowLeft}{ArrowRight}{/Shift}');
+  expect(actions.seek.mock.calls).toEqual([[-5], [5]]);
+  expect(actions.previous).not.toHaveBeenCalled();
+  expect(actions.next).not.toHaveBeenCalled();
+  await user.keyboard(' ');
+  expect(actions.togglePlayback).toHaveBeenCalledTimes(1);
+  screen.getByRole('button', { name: 'Target' }).focus();
+  await user.keyboard(' ');
+  expect(actions.togglePlayback).toHaveBeenCalledTimes(1);
+});
+
+it('without the video actions Shift+arrows step on and Space is left alone', () => {
+  const actions = actionsMock();
+  render(<SeekProbe actions={actions} />);
+  const stage = screen.getByTestId('stage');
+  stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true }));
+  expect(actions.next).toHaveBeenCalledTimes(1);
+  const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+  stage.dispatchEvent(space);
+  expect(space.defaultPrevented).toBe(false);
+});

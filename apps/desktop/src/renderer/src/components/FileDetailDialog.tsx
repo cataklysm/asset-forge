@@ -3,8 +3,8 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
-import { formatBytes, formatDateTime } from '../format';
-import { DELETED_LABEL, label, ORIGIN_LABEL } from '../labels';
+import { formatBytes, formatDateTime, formatDuration } from '../format';
+import { DELETED_LABEL, DURATION_LABEL, label, ORIGIN_LABEL } from '../labels';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED, PANEL_TITLE, SECTION_TITLE } from '../ui';
 import { useViewerKeys } from '../hooks/useViewerKeys';
@@ -20,6 +20,7 @@ import { Menu } from './Menu';
 import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 import { TagRow } from './TagRow';
+import { VideoStage, videoControls } from './VideoStage';
 import { ViewerToolbar } from './ViewerToolbar';
 
 interface Props {
@@ -33,10 +34,10 @@ interface Props {
   /** Receives the updated file after `files:addTag` / `files:removeTag`. */
   onFileChange(file: FileRecord): void;
   /**
-   * Receives the dimensions `files:measure` found for the file with id `fileId`; merges only them
-   * into the shown record and must not reload the list.
+   * Receives the dimensions (and for a video the duration) `files:measure` found for the file with
+   * id `fileId`; merges only them into the shown record and must not reload the list.
    */
-  onMeasured(fileId: string, size: Dimensions): void;
+  onMeasured(fileId: string, size: Measured): void;
   onOpenAsset?(assetId: string): void;
   /** The list of the file browser the dialog was opened from; steps through it. */
   list: ViewerList | null;
@@ -47,6 +48,9 @@ interface Dimensions {
   width: number;
   height: number;
 }
+
+/** What a measurement adds to the record: the dimensions, for a video also the duration. */
+export type Measured = Dimensions & { durationMs?: number | null };
 
 export function FileDetailDialog({
   file: given,
@@ -63,10 +67,9 @@ export function FileDetailDialog({
   // Files imported before dimensions were stored are measured once per dialog. The result is
   // remembered, so a record without dimensions (the list's, when the viewer steps back to the file)
   // shows it at once; failed measurements are not repeated and show nothing.
-  const measured = useRef(new Map<string, Dimensions | 'pending' | 'failed'>());
+  const measured = useRef(new Map<string, Measured | 'pending' | 'failed'>());
   const remembered = measured.current.get(given.id);
-  const file =
-    given.width === null && typeof remembered === 'object' ? { ...given, width: remembered.width, height: remembered.height } : given;
+  const file = given.width === null && typeof remembered === 'object' ? { ...given, ...remembered } : given;
   // Error and viewer controls belong to the file they came from; stepping on leaves them behind.
   const [failure, setFailure] = useState<{ fileId: string; message: string } | null>(null);
   const [stage, setStage] = useState<{ fileId: string; controls: ViewerControls } | null>(null);
@@ -80,10 +83,13 @@ export function FileDetailDialog({
   // A file in the trash: read-only, without a role or assign control.
   const trashed = file.deletedAt !== null;
   const viewable = complete && file.previewable;
+  // A video plays in the video stage; its toolbar has only the fullscreen button.
+  const playable = complete && file.kind === 'video';
+  const staged = viewable || playable;
 
   const onMeasuredRef = useRef(onMeasured);
   onMeasuredRef.current = onMeasured;
-  const unmeasured = viewable && file.width === null;
+  const unmeasured = staged && file.width === null;
   useEffect(() => {
     if (!unmeasured || measured.current.has(fileId)) return;
     const results = measured.current;
@@ -94,7 +100,10 @@ export function FileDetailDialog({
           results.set(fileId, 'failed');
           return;
         }
-        const size = { width: record.width, height: record.height };
+        const size: Measured =
+          record.kind === 'video'
+            ? { width: record.width, height: record.height, durationMs: record.durationMs }
+            : { width: record.width, height: record.height };
         results.set(fileId, size);
         onMeasuredRef.current(fileId, size);
       },
@@ -130,6 +139,8 @@ export function FileDetailDialog({
     }
     onClose();
   };
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const video = playable ? videoControls(videoRef) : null;
   useViewerKeys(rootRef, {
     previous: () => list?.show(list.index - 1),
     next: () => list?.show(list.index + 1),
@@ -139,8 +150,9 @@ export function FileDetailDialog({
     actual: () => controls?.actual(),
     rotate: () => controls?.rotate(),
     fullscreen: () => {
-      if (controls !== null) toggleFullscreen();
+      if (controls !== null || playable) toggleFullscreen();
     },
+    ...(video === null ? {} : { seek: video.seek, togglePlayback: video.togglePlayback }),
   });
 
   const title = asset === null ? file.originalName : `${file.originalName} | ${asset.name}`;
@@ -167,6 +179,13 @@ export function FileDetailDialog({
     onPurge: guard(actions.onPurge),
     onError: report,
   }).filter((item) => item.label !== 'Details');
+
+  // The same action and rule as Open externally in the More menu.
+  const canOpenExternally = complete && file.openable && !trashed;
+  const openExternally = () => {
+    setError(null);
+    call('files:openExternal', { fileId: file.id }).catch((e: unknown) => report(describeError(e)));
+  };
 
   async function changeTag(channel: 'files:addTag' | 'files:removeTag', name: string) {
     onFileChange(await call(channel, { fileId: file.id, name }));
@@ -230,6 +249,12 @@ export function FileDetailDialog({
                 <dd title={file.mimeType}>{formatLabel(file.originalName)}</dd>
                 <dt className={LABEL}>Dimensions</dt>
                 <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
+                {file.durationMs !== null && (
+                  <>
+                    <dt className={LABEL}>{DURATION_LABEL}</dt>
+                    <dd className="tabular-nums">{formatDuration(file.durationMs)}</dd>
+                  </>
+                )}
                 <dt className={LABEL}>Size</dt>
                 <dd>{formatBytes(file.sizeBytes)}</dd>
                 <dt className={LABEL}>Imported</dt>
@@ -311,17 +336,25 @@ export function FileDetailDialog({
             </div>
           </div>
           <div ref={stageBox} className="flex min-w-0 flex-1 flex-col bg-surface">
-            {viewable && (
+            {staged && (
               <div className="shrink-0 px-4 py-3">
                 <div className="h-9">
-                  {controls !== null && (
+                  {(controls !== null || playable) && (
                     <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />
                   )}
                 </div>
               </div>
             )}
-            <div className={`relative min-h-0 flex-1 ${viewable ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}>
-              {viewable ? (
+            <div className={`relative min-h-0 flex-1 ${staged ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}>
+              {playable ? (
+                <VideoStage
+                  key={file.id}
+                  file={file}
+                  videoRef={videoRef}
+                  canOpenExternally={canOpenExternally}
+                  onOpenExternally={openExternally}
+                />
+              ) : viewable ? (
                 <ImageStage file={file} onControls={setControls} />
               ) : (
                 <div className={`flex h-full w-full items-center justify-center bg-raised text-lg ${MUTED}`}>

@@ -8,6 +8,11 @@ export function originalUrl(fileId: string): string {
   return `assetforge-media://original/${fileId}`;
 }
 
+/** The original video, streamed with byte ranges by the main process. */
+export function videoUrl(fileId: string): string {
+  return `assetforge-media://video/${fileId}`;
+}
+
 /** The large image of the viewer; null for `none`. */
 export function viewUrl(file: Pick<FileRecord, 'id' | 'mimeType' | 'width' | 'height'>): {
   source: ViewSource;

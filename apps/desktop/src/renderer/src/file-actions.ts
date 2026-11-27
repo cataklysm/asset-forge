@@ -96,7 +96,10 @@ export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuIte
   }
   if (cover !== null && onSetCover !== undefined) {
     if (cover.isChosen) items.push({ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) });
-    else if (complete && file.previewable) items.push({ label: 'Use as cover', title: 'Show this image as the asset cover', onSelect: () => onSetCover(file.id) });
+    else if (complete && file.thumbnail) {
+      const title = file.kind === 'video' ? 'Show this video as the asset cover' : 'Show this image as the asset cover';
+      items.push({ label: 'Use as cover', title, onSelect: () => onSetCover(file.id) });
+    }
   }
   if (onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: onDetach });
   if (ctx.onDelete !== undefined && file.status !== 'pending') {

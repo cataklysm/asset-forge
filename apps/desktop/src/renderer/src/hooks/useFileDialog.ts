@@ -62,9 +62,21 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
     setFile((current) => (current?.id === record.id ? record : current));
   }
 
-  /** Merges measured dimensions into the shown file when it has id `id`; other fields stay as they are. */
-  function setDimensions(id: string, size: { width: number; height: number }) {
-    setFile((current) => (current?.id === id ? { ...current, width: size.width, height: size.height } : current));
+  /**
+   * Merges measured dimensions (and a video's duration, when given) into the shown file when it has
+   * id `id`; other fields stay as they are.
+   */
+  function setDimensions(id: string, size: { width: number; height: number; durationMs?: number | null }) {
+    setFile((current) =>
+      current?.id === id
+        ? {
+            ...current,
+            width: size.width,
+            height: size.height,
+            ...(size.durationMs === undefined ? {} : { durationMs: size.durationMs }),
+          }
+        : current,
+    );
   }
 
   return { file, open, show, close, update, setDimensions };

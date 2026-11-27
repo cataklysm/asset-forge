@@ -678,3 +678,20 @@ it('the trash scope has no role filter, no Proposals toggle and no Analyse all',
   expect(screen.queryByRole('button', { name: /Analyse all/ })).toBeNull();
   expect(listRequests(api)[0]).toMatchObject({ scope: TRASH_SCOPE });
 });
+
+it('the file type filter offers Video and asks for the kind video', async () => {
+  const api = install({ 'files:list': listOf(many(2)) });
+  render(<Harness />);
+  await screen.findByText('File 0.png');
+  const select = screen.getByRole('combobox', { name: 'File type' });
+  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+    'All file types',
+    'Image',
+    'Video',
+    '3D model',
+    'Document',
+    'Other',
+  ]);
+  await userEvent.setup().selectOptions(select, 'Video');
+  await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, scope: ASSET_SCOPE, kind: 'video' }));
+});
