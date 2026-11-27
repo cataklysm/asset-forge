@@ -94,7 +94,7 @@ The owner chose A. A grouped view can be added later on top of A (a nullable bat
 - The URL rule is the one of asset sources (`normalizeSourceUrl`: `http`/`https`, a host, no user name or password, at
   most 2000 characters) with one addition: the fragment is dropped, since it is never sent. The normalised `href` is the
   identity of a URL everywhere below. The same URL twice in one request counts once (the repeat is `alreadyQueued`).
-- `alreadyImported`: a file row with this origin exists (also one in the trash — a file the owner threw away is not
+- `alreadyImported`: a complete file with this origin exists (also one in the trash — a file the owner threw away is not
   brought back by importing the list again; after a purge the URL is forgotten). No job is created.
 - `alreadyQueued`: an active job for this URL exists (dedupe key `url:<href>`). No job is created.
 - All jobs of one request are inserted in one transaction; then the scheduler is woken.
@@ -108,28 +108,36 @@ The owner chose A. A grouped view can be added later on top of A (a nullable bat
   per resource class in the scheduler, because lanes are otherwise unbounded in number (ReadMe §15.3: 2–4 concurrent
   downloads). The total applies to the class, not to a job type.
 - Run:
-  1. If a file with this origin exists by now, succeed with the result `already_present` without any request.
-  2. Open the URL through the port (§7.3). Derive the file name (§7.4) and refuse types the import refuses.
-  3. Hand the stream to the import steps (pending row → staging → checksum → move → complete).
+  1. If a complete file with this origin exists by now, succeed with the result `already_present` without any request.
+  2. Free-space check (§7.3); then open the URL through the port. Derive the file name (§7.4) and refuse types the
+     import refuses.
+  3. Hand the stream to the import steps (pending row → staging → checksum → move → complete). The pending row is
+     inserted **together with its origin row in one transaction**, so a file row of a URL import carries its origin
+     from the first moment; that origin is also what marks the row as a download.
   4. With `skipDuplicates` and a complete file outside the trash with the same SHA-256: the staged bytes and the pending
      row are removed, the oldest such file gets the URL as a further origin (unless it already carries 50), and the job
-     succeeds with the result `already_present` and that file. This needs a `skip` option in `importStream`, checked
-     after the checksum and before the move; without the option the import behaves exactly as today.
-  5. Otherwise the file is completed **together with its origin row in one transaction** — a complete file of a URL
-     import always has its origin — and the job points at the new file.
+     succeeds with the result `already_present` and that file. This is checked after the checksum and before the move.
+  5. Otherwise the file is completed and the job points at the new file.
   6. With a target, the file is moved into the asset with the role (best effort, as for generation results: when the
      asset is gone or the move fails the file stays in the inbox and the job still succeeds).
 - The job records what it produced: `job.file_id` is set to the resulting or existing file and a new nullable column
   `job.result` holds `already_present` or null; `JobView` carries both (`result` as an enum with that one value).
-- A cancel aborts the request and removes staging and the pending row through the existing failure path of the import
-  steps. `jobs:retry` and `jobs:retryFailed` requeue download jobs like analysis jobs; `jobs:reroute` never touches them.
+- **A download that does not end in a complete file leaves no file row.** The job row is the record of the failure.
+  `importStream` gets options for this (an origin to insert with the pending row, skip on duplicate, discard on
+  failure); without them it behaves exactly as today, so `files:import`, ZIP entries and generation results still
+  leave a `failed` row. A failure, a cancel or a stop removes staging and deletes the pending row (a new repository
+  method; the origin goes with it). Startup recovery deletes a pending row that has an origin, with its staged bytes,
+  instead of marking it failed; its requeued job downloads again.
+- A cancel aborts the request. `jobs:retry` and `jobs:retryFailed` requeue download jobs like analysis jobs; `jobs:reroute` never touches them.
 - Two downloads with identical content running at the same moment may both be stored (each checks before the other
   completes). Accepted; they are then marked as duplicates of each other as today.
 
 ### 7.3 The network port and its rules
 
 Core port `RemoteFileSource`: `open(url, signal)` → `{ stream, finalUrl, contentType, contentLength, dispositionName }`
-or a typed failure that maps to exactly one job error code. The adapter (Node `http`/`https`, in `packages/storage`
+or a typed failure that maps to exactly one job error code. `finalUrl` is used only for the file name (§7.4): the
+origin that is stored and compared is always the requested URL, never a redirect target, so a link that redirects to
+a signed, changing address is still recognised the next time. The adapter (Node `http`/`https`, in `packages/storage`
 beside the ZIP reader) applies these rules; they are the security core of the feature:
 
 - Schemes `http` and `https` only, any port. Method `GET`, headers `User-Agent: AssetForge/<version>`,
@@ -143,6 +151,11 @@ beside the ZIP reader) applies these rules; they are the security core of the fe
   address check again. A redirect to another scheme, without a usable `Location` or beyond the limit is refused.
 - **Limits:** 500 MiB per file — refused from `Content-Length` before the body, and cut off while streaming when the
   header is missing or wrong; 30 s until the response headers, 60 s without received data, 30 min in total.
+- **Free space:** before a request and again when the response headers are in, the free space of the volume that
+  holds the workspace storage must exceed 2 GiB plus the announced `Content-Length` (2 GiB when none is announced);
+  otherwise the job fails `download_no_space` without downloading. With the total of 4 running downloads this bounds
+  what a long list can do to a disk. A storage that cannot report its free space does not block downloads. Such jobs
+  fail quickly and without a request; after freeing space the owner uses `Retry failed`.
 - The address policy is a parameter of the adapter so tests can serve from an in-process server; the application wires
   the public-only policy and there is no setting, environment variable or flag to weaken it.
 
@@ -173,6 +186,7 @@ New job error codes with fixed messages (never a cause, a path or the URL):
 | `download_too_large` | over the size limit | no | no |
 | `download_not_a_file` | an HTML page | no | no |
 | `download_type_refused` | a type the import refuses | no | no |
+| `download_no_space` | the free-space check failed | no | no |
 
 - Retry as today: three runs with 5 s and 30 s between them.
 - **Throttling:** a `download_throttled` failure carries a wait — `Retry-After` (seconds or a date) clamped to
@@ -212,10 +226,10 @@ codes) and §16 (the address check) are brought in line at the end; leftovers go
 
 ## 8. Left to the builder
 
-- File and function names not fixed above, the exact shape of the extended `paused` entries and of `jobs:resume`,
+- File and function names not fixed above, the widening of `JobView.providerId` and the paused entries to host lanes, the exact shape of the extended `paused` entries and of `jobs:resume`,
   how the scheduler stores the lane hold, and how the handler hands `file_id`/`result` to the job row.
 - Label texts and tooltips (English, in `labels.ts`), the layout of the dialog and of the `Source` lines.
-- The exact wording of the ten fixed messages.
+- The exact wording of the eleven fixed messages.
 - Where in the renderer the reload signal is taken from.
 
 ## 9. Calls made by the designer (not asked)
@@ -225,8 +239,11 @@ codes) and §16 (the address check) are brought in line at the end; leftovers go
 3. Size limit 500 MiB; timeouts 30 s / 60 s idle / 30 min.
 4. A URL whose file is in the trash counts as already imported; a purged one does not.
 5. Up to 5000 URLs per request; the fragment is not part of a URL's identity.
-6. HTML answers are refused with their own message; a ZIP is stored unpacked-never.
+6. HTML answers are refused with their own message; a downloaded ZIP is stored as a file and never unpacked.
 7. Honest `User-Agent`, no cookies or `Referer`; hosts that refuse such clients simply fail.
 8. With `Skip duplicates` the existing file is never moved: a duplicate downloaded "into an asset" leaves the existing
    file where it is and only adds the origin.
 9. Origins are read-only in this version and are fetched per file, not carried on every list row.
+10. A failed, cancelled or interrupted download leaves no `failed` file in the inbox; it shows only as a job.
+11. The stored origin is the address as pasted, not the address a redirect led to.
+12. Downloads stop (fail fast, `Retry failed` later) when the workspace volume has less than 2 GiB free beyond the file.
