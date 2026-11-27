@@ -1,5 +1,7 @@
-import { lstat, readdir, stat, unlink, utimes } from 'node:fs/promises';
+import { lstat, readdir, rm, stat, unlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import type { VideoFormat, VideoFrames, VideoInfo } from './video-frames.js';
 import type { WorkerPool } from './worker-pool.js';
 
 export type PreviewSize = 'thumb' | 'detail' | 'full';
@@ -14,8 +16,15 @@ export const CLEANUP_EVERY = 500;
 /** Full renditions are large, so they trigger a cleanup far sooner than thumbnails. */
 export const FULL_CLEANUP_EVERY = 8;
 
+/** Version of the extracted video frames, independent of the preview versions. */
+export const FRAME_FORMAT_VERSION = 1;
+
 const DIRECTORIES: Record<PreviewSize, string> = { thumb: 'thumbnails', detail: 'previews', full: 'full' };
+const FRAMES_DIRECTORY = 'frames';
+/** Every directory the LRU cleanup trims, each against its own budget. */
+const CACHE_DIRECTORIES = [...Object.values(DIRECTORIES), FRAMES_DIRECTORY];
 const SHA256 = /^[0-9a-f]{64}$/;
+const VIDEO_FORMATS: readonly string[] = ['mp4', 'webm'] satisfies VideoFormat[];
 /** A temporary file this old belongs to a write that will never be renamed. */
 const STALE_TMP_MS = 60 * 60 * 1000;
 
@@ -27,18 +36,27 @@ export function previewRelativePath(sha256: string, size: PreviewSize): string {
   return `${DIRECTORIES[size]}/${sha256.slice(0, 2)}/${sha256}-${PREVIEW_EDGE[size]}-v${PREVIEW_FORMAT_VERSION}.webp`;
 }
 
+/** Path of an extracted video frame relative to the cache root, e.g. `frames/ab/<sha256>-v1.jpg`. */
+export function frameRelativePath(sha256: string): string {
+  return `${FRAMES_DIRECTORY}/${sha256.slice(0, 2)}/${sha256}-v${FRAME_FORMAT_VERSION}.jpg`;
+}
+
 export interface PreviewRequest {
   sha256: string;
   sourcePath: string;
   size: PreviewSize;
+  /** Set for a video: the preview is rendered from one extracted frame, never from the video. */
+  video?: VideoFormat;
 }
 
 export interface PreviewService {
   /** Absolute path of the cached WebP (PNG for `full`), or null for "no preview". Never throws. */
   get(request: PreviewRequest): Promise<string | null>;
+  /** Size and duration of a video through a temporary frame that is removed afterwards. Never throws. */
+  measureVideo(sourcePath: string, format: VideoFormat): Promise<VideoInfo | null>;
   /**
-   * Evicts least recently used entries from `thumbnails`, `previews` and `full`, each directory
-   * separately against `limitBytes`; concurrent calls share one run. Never throws.
+   * Evicts least recently used entries from `thumbnails`, `previews`, `full` and `frames`, each
+   * directory separately against `limitBytes`; concurrent calls share one run. Never throws.
    */
   cleanup(): Promise<void>;
   close(): Promise<void>;
@@ -47,6 +65,8 @@ export interface PreviewService {
 export interface PreviewServiceOptions {
   cacheDir: string;
   pool: WorkerPool;
+  /** Without it a video has no preview. */
+  frames?: VideoFrames;
   limitBytes?: number;
   cleanupEvery?: number;
 }
@@ -66,48 +86,89 @@ async function exists(path: string): Promise<boolean> {
  * preview is remembered for the session, a source that cannot be reached is not.
  */
 export function createPreviewService(options: PreviewServiceOptions): PreviewService {
-  const { cacheDir, pool } = options;
+  const { cacheDir, pool, frames } = options;
   const limitBytes = options.limitBytes ?? CACHE_LIMIT_BYTES;
   const cleanupEvery = options.cleanupEvery ?? CLEANUP_EVERY;
   const failed = new Set<string>();
   const inflight = new Map<string, Promise<string | null>>();
-  const newEntries: Record<PreviewSize, number> = { thumb: 0, detail: 0, full: 0 };
+  const newEntries = { thumb: 0, full: 0 };
   let cleaning: Promise<void> | undefined;
   let closed = false;
+
+  /** Thumbnails, previews and frames share one counter, full renditions have their own. */
+  function countNewEntry(counter: 'thumb' | 'full'): void {
+    newEntries[counter]++;
+    if (newEntries[counter] >= (counter === 'full' ? FULL_CLEANUP_EVERY : cleanupEvery)) {
+      newEntries[counter] = 0;
+      void cleanup();
+    }
+  }
+
+  async function touch(path: string): Promise<void> {
+    const now = new Date();
+    await utimes(path, now, now).catch(() => undefined);
+  }
+
+  /** The cached frame of a video, extracted once; deduplicated and remembered like a preview. */
+  function frameOf(request: PreviewRequest & { video: VideoFormat }, extractor: VideoFrames): Promise<string | null> {
+    const key = `${request.sha256}:frame`;
+    if (failed.has(key)) return Promise.resolve(null);
+    const running = inflight.get(key);
+    if (running) return running;
+    const promise = (async () => {
+      const framePath = join(cacheDir, frameRelativePath(request.sha256));
+      if (await exists(framePath)) {
+        await touch(framePath);
+        return framePath;
+      }
+      if (!(await exists(request.sourcePath))) return null;
+      if (await extractor.extract(request.sourcePath, request.video, framePath)) {
+        countNewEntry('thumb');
+        return framePath;
+      }
+      if (!closed && (await exists(request.sourcePath))) failed.add(key);
+      return null;
+    })()
+      .catch(() => null)
+      .finally(() => inflight.delete(key));
+    inflight.set(key, promise);
+    return promise;
+  }
 
   async function resolvePreview(key: string, request: PreviewRequest): Promise<string | null> {
     const targetPath = join(cacheDir, previewRelativePath(request.sha256, request.size));
     if (await exists(targetPath)) {
-      const now = new Date();
-      await utimes(targetPath, now, now).catch(() => undefined);
+      await touch(targetPath);
       return targetPath;
     }
-    if (!(await exists(request.sourcePath))) return null;
+    let renderSource = request.sourcePath;
+    if (request.video) {
+      // A video never reaches the worker pool: only its extracted frame does.
+      const frame = frames ? await frameOf({ ...request, video: request.video }, frames) : null;
+      if (!frame) return null;
+      renderSource = frame;
+    } else if (!(await exists(request.sourcePath))) {
+      return null;
+    }
     const result = await pool.run({
-      sourcePath: request.sourcePath,
+      sourcePath: renderSource,
       targetPath,
       longestEdge: PREVIEW_EDGE[request.size],
       format: request.size === 'full' ? 'png' : 'webp',
     });
     if (result === 'ok') {
-      // Thumbnails and previews share one counter, full renditions have their own.
-      const counter = request.size === 'full' ? 'full' : 'thumb';
-      newEntries[counter]++;
-      if (newEntries[counter] >= (counter === 'full' ? FULL_CLEANUP_EVERY : cleanupEvery)) {
-        newEntries[counter] = 0;
-        void cleanup();
-      }
+      countNewEntry(request.size === 'full' ? 'full' : 'thumb');
       return targetPath;
     }
-    // A pool that was closed or a source that vanished meanwhile says nothing about the content.
-    if (!closed && (await exists(request.sourcePath))) failed.add(key);
+    // A pool that was closed or a source (or frame) that vanished meanwhile says nothing about the content.
+    if (!closed && (await exists(renderSource))) failed.add(key);
     return null;
   }
 
   function cleanup(): Promise<void> {
     cleaning ??= (async () => {
       // Each directory has its own budget (ReadMe §15.3).
-      for (const directory of Object.values(DIRECTORIES)) {
+      for (const directory of CACHE_DIRECTORIES) {
         await evictLeastRecentlyUsed(join(cacheDir, directory), limitBytes, CACHE_TARGET_RATIO).catch(
           () => undefined,
         );
@@ -123,6 +184,12 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
       if (closed || !SHA256.test(request.sha256) || !(request.size in PREVIEW_EDGE)) {
         return Promise.resolve(null);
       }
+      if (
+        request.video !== undefined &&
+        (!frames || request.size === 'full' || !VIDEO_FORMATS.includes(request.video))
+      ) {
+        return Promise.resolve(null);
+      }
       const key = `${request.sha256}:${request.size}`;
       if (failed.has(key)) return Promise.resolve(null);
       const running = inflight.get(key);
@@ -133,9 +200,22 @@ export function createPreviewService(options: PreviewServiceOptions): PreviewSer
       inflight.set(key, promise);
       return promise;
     },
+    async measureVideo(sourcePath, format) {
+      if (closed || !frames || !VIDEO_FORMATS.includes(format)) return null;
+      // Ends in `.tmp`, so a target left by a crash is removed by the stale-file sweep of the cleanup.
+      const target = join(cacheDir, FRAMES_DIRECTORY, `measure-${randomUUID()}.tmp`);
+      try {
+        return await frames.extract(sourcePath, format, target);
+      } catch {
+        return null;
+      } finally {
+        await rm(target, { force: true, maxRetries: 3 }).catch(() => undefined);
+      }
+    },
     cleanup,
     async close() {
       closed = true;
+      frames?.close();
       await pool.close();
       await cleaning;
     },

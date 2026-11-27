@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import ffmpegPath from 'ffmpeg-static';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewJob, PreviewResult } from '../src/messages.js';
@@ -10,6 +12,8 @@ import {
   CACHE_TARGET_RATIO,
   CLEANUP_EVERY,
   createPreviewService,
+  FRAME_FORMAT_VERSION,
+  frameRelativePath,
   FULL_CLEANUP_EVERY,
   FULL_FORMAT_VERSION,
   evictLeastRecentlyUsed,
@@ -18,6 +22,7 @@ import {
   previewRelativePath,
   type PreviewService,
 } from '../src/preview-cache.js';
+import { createVideoFrames, type VideoFormat, type VideoFrames, type VideoInfo } from '../src/video-frames.js';
 import { createWorkerPool, type WorkerPool } from '../src/worker-pool.js';
 import { TEST_WORKER_URL } from './worker-url.js';
 
@@ -382,6 +387,188 @@ describe('preview cache', () => {
     expect(cleanupRuns).toBe(1);
     expect(await exists(first)).toBe(false);
     expect(await exists(third)).toBe(true);
+  });
+
+  describe('videos', () => {
+    /** Writes a 50-byte frame unless the source contains `broken`; records every call. */
+    function fakeFrames() {
+      const fake = {
+        calls: [] as { sourcePath: string; format: VideoFormat; targetPath: string }[],
+        closed: false,
+        async extract(sourcePath: string, format: VideoFormat, targetPath: string): Promise<VideoInfo | null> {
+          fake.calls.push({ sourcePath, format, targetPath });
+          if (sourcePath.includes('broken')) return null;
+          await mkdir(dirname(targetPath), { recursive: true });
+          await writeFile(targetPath, Buffer.alloc(50));
+          return { width: 640, height: 360, durationMs: 4000 };
+        },
+        close() {
+          fake.closed = true;
+        },
+      };
+      return fake;
+    }
+
+    function videoService(pool: WorkerPool, frames: VideoFrames, options: { limitBytes?: number; cleanupEvery?: number } = {}) {
+      const created = createPreviewService({ cacheDir, pool, frames, ...options });
+      services.push(created);
+      return created;
+    }
+
+    it('the frame key carries its own format version', () => {
+      expect(FRAME_FORMAT_VERSION).toBe(1);
+      expect(frameRelativePath(A)).toBe(`frames/${A.slice(0, 2)}/${A}-v1.jpg`);
+    });
+
+    it('renders thumb and detail from one extracted frame, never from the video', async () => {
+      const pool = fakePool();
+      const frames = fakeFrames();
+      const s = videoService(pool, frames);
+      const sourcePath = await source('a.mp4');
+      const framePath = join(cacheDir, frameRelativePath(A));
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).toBe(
+        join(cacheDir, previewRelativePath(A, 'thumb')),
+      );
+      expect(await s.get({ sha256: A, sourcePath, size: 'detail', video: 'mp4' })).toBe(
+        join(cacheDir, previewRelativePath(A, 'detail')),
+      );
+      expect(frames.calls).toEqual([{ sourcePath, format: 'mp4', targetPath: framePath }]);
+      expect(pool.calls.map((call) => call.sourcePath)).toEqual([framePath, framePath]);
+      expect(pool.calls.map((call) => call.longestEdge)).toEqual([256, 1024]);
+      expect(pool.calls.every((call) => call.format === 'webp')).toBe(true);
+    });
+
+    it('full answers null for a video', async () => {
+      const pool = fakePool();
+      const frames = fakeFrames();
+      const s = videoService(pool, frames);
+      expect(await s.get({ sha256: A, sourcePath: await source('a.webm'), size: 'full', video: 'webm' })).toBeNull();
+      expect(frames.calls).toHaveLength(0);
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('without a frame tool a video answers null', async () => {
+      const pool = fakePool();
+      const s = service(pool);
+      expect(await s.get({ sha256: A, sourcePath: await source('a.mp4'), size: 'thumb', video: 'mp4' })).toBeNull();
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('concurrent requests share one extraction', async () => {
+      const pool = fakePool();
+      const frames = fakeFrames();
+      const s = videoService(pool, frames);
+      const sourcePath = await source('a.mp4');
+      await Promise.all([
+        s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' }),
+        s.get({ sha256: A, sourcePath, size: 'detail', video: 'mp4' }),
+        s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' }),
+      ]);
+      expect(frames.calls).toHaveLength(1);
+      expect(pool.calls).toHaveLength(2);
+    });
+
+    it('a video without a frame is remembered for the session', async () => {
+      const pool = fakePool();
+      const frames = fakeFrames();
+      const s = videoService(pool, frames);
+      const sourcePath = await source('broken.mp4');
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).toBeNull();
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).toBeNull();
+      expect(await s.get({ sha256: A, sourcePath, size: 'detail', video: 'mp4' })).toBeNull();
+      expect(frames.calls).toHaveLength(1);
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('a missing video is not remembered as failed', async () => {
+      const frames = fakeFrames();
+      const s = videoService(fakePool(), frames);
+      const sourcePath = join(dir, 'later.mp4');
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).toBeNull();
+      expect(frames.calls).toHaveLength(0);
+      await writeFile(sourcePath, 'source');
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).not.toBeNull();
+    });
+
+    it('a cached frame is reused after its previews were evicted', async () => {
+      const pool = fakePool();
+      const frames = fakeFrames();
+      const s = videoService(pool, frames);
+      const sourcePath = await source('a.mp4');
+      await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' });
+      await rm(join(cacheDir, 'thumbnails'), { recursive: true });
+      expect(await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' })).not.toBeNull();
+      expect(frames.calls).toHaveLength(1);
+      expect(pool.calls).toHaveLength(2);
+    });
+
+    it('frames count towards the cleanup trigger and have their own budget', async () => {
+      const s = videoService(fakePool(), fakeFrames(), { cleanupEvery: 2, limitBytes: 120 });
+      let cleanupRuns = 0;
+      let framesWalked = 0;
+      hooks.beforeReaddir = (path) => {
+        if (path === join(cacheDir, 'thumbnails')) cleanupRuns++;
+        if (path === join(cacheDir, 'frames')) framesWalked++;
+      };
+      const sourcePath = await source('a.mp4');
+      // One frame and one thumbnail are two new entries, so the first request starts a run.
+      await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' });
+      expect(cleanupRuns).toBe(1);
+      await s.cleanup();
+      expect(framesWalked).toBeGreaterThan(0);
+      await s.get({ sha256: B, sourcePath, size: 'thumb', video: 'mp4' });
+      await s.get({ sha256: C, sourcePath, size: 'thumb', video: 'mp4' });
+      await s.cleanup();
+      // 150 bytes of frames against 120: the frames directory is trimmed on its own.
+      const left = await Promise.all([A, B, C].map((sha) => exists(join(cacheDir, frameRelativePath(sha)))));
+      expect(left.filter(Boolean).length).toBe(2);
+    });
+
+    it('close closes the frame tool', async () => {
+      const frames = fakeFrames();
+      const s = createPreviewService({ cacheDir, pool: fakePool(), frames });
+      await s.close();
+      expect(frames.closed).toBe(true);
+      expect(await s.get({ sha256: A, sourcePath: await source('a.mp4'), size: 'thumb', video: 'mp4' })).toBeNull();
+    });
+
+    it('measureVideo uses a temporary target that is removed afterwards', async () => {
+      const frames = fakeFrames();
+      const s = videoService(fakePool(), frames);
+      const sourcePath = await source('a.mp4');
+      expect(await s.measureVideo(sourcePath, 'mp4')).toEqual({ width: 640, height: 360, durationMs: 4000 });
+      expect(frames.calls).toHaveLength(1);
+      const target = frames.calls[0]?.targetPath as string;
+      expect(dirname(target).startsWith(cacheDir)).toBe(true);
+      expect(await exists(target)).toBe(false);
+      expect(await s.measureVideo(join(dir, 'broken.mp4'), 'webm')).toBeNull();
+      expect(await service(fakePool()).measureVideo(sourcePath, 'mp4')).toBeNull();
+    });
+
+    it('runs real video previews end to end', async () => {
+      const sourcePath = join(dir, 'a.mp4');
+      await new Promise<void>((resolve, reject) =>
+        execFile(
+          ffmpegPath as string,
+          ['-nostdin', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=25:duration=2',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', sourcePath],
+          { windowsHide: true },
+          (error) => (error ? reject(error) : resolve()),
+        ),
+      );
+      const s = videoService(
+        createWorkerPool({ workerUrl: TEST_WORKER_URL, size: 1, timeoutMs: 30_000 }),
+        createVideoFrames({ binaryPath: ffmpegPath }),
+      );
+      const thumb = await s.get({ sha256: A, sourcePath, size: 'thumb', video: 'mp4' });
+      expect(thumb).toBe(join(cacheDir, previewRelativePath(A, 'thumb')));
+      const info = await sharp(await readFile(thumb as string)).metadata();
+      expect(info).toMatchObject({ format: 'webp', width: 256, height: 144 });
+      expect(await exists(join(cacheDir, frameRelativePath(A)))).toBe(true);
+      expect(await s.get({ sha256: A, sourcePath, size: 'full', video: 'mp4' })).toBeNull();
+      expect(await s.measureVideo(sourcePath, 'mp4')).toEqual({ width: 640, height: 360, durationMs: 2000 });
+      expect((await readdir(join(cacheDir, 'frames'))).filter((name) => !/^[0-9a-f]{2}$/.test(name))).toEqual([]);
+    });
   });
 
   it('runs real previews end to end', async () => {
