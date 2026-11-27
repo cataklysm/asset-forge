@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { FileTarget, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
+import type { FileTarget, SiteCrawlProblem, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { SiteImportDialog } from '../../src/renderer/src/components/SiteImportDialog';
 import { bytesOfKb, draftOf, saveRequestOf } from '../../src/renderer/src/components/site-import-state';
@@ -243,6 +243,103 @@ it('Test shows the counts and the list of found files, and enables Import', asyn
   ]);
   expect(button('Import').disabled).toBe(false);
 });
+
+it('lists every problem with its reason and the shortened URL, the full URL in the title, and the dropped count', async () => {
+  const problems: SiteCrawlProblem[] = [
+    { url: 'https://example.com/g?p=2', stage: 'gallery', reason: 'no_thumbnails', detail: null },
+    { url: 'https://example.com/d/1', stage: 'detail', reason: 'no_file', detail: null },
+    { url: 'https://example.com/d/2', stage: 'detail', reason: 'left_site', detail: 'login.example.org' },
+    { url: 'https://example.com/d/3', stage: 'detail', reason: 'left_site', detail: '' },
+    { url: 'https://example.com/d/4', stage: 'detail', reason: 'http_error', detail: '404' },
+    { url: 'https://example.com/d/5', stage: 'detail', reason: 'timeout', detail: null },
+    { url: 'https://example.com/d/6', stage: 'detail', reason: 'load_failed', detail: null },
+    { url: 'https://example.com/private/7.png', stage: 'file', reason: 'robots_disallowed', detail: null },
+    { url: 'https://cdn.other.org/8.png', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.org' },
+    { url: 'https://example.com/g', stage: 'link', reason: 'invalid_link', detail: 'javascript:void(0)' },
+    { url: 'https://other.org/d/9', stage: 'detail', reason: 'off_site', detail: null },
+    { url: 'https://example.com/a.pdf', stage: 'file', reason: 'filtered_kind', detail: null },
+    { url: 'https://example.com/small/b.png', stage: 'file', reason: 'filtered_text', detail: null },
+  ];
+  await tested({ 'sites:crawl': () => crawlOf({ problems, problemsDropped: 7 }) });
+  const list = within(dialog()).getByRole('list', { name: 'Problems' });
+  const items = within(list).getAllByRole('listitem');
+  expect(items.map((li) => li.firstElementChild?.textContent ?? li.textContent)).toEqual([
+    'No thumbnail matched on this page',
+    'No file matched on this page',
+    'Redirected to login.example.org',
+    'Redirected off the site',
+    'The site answered HTTP 404',
+    'The page did not finish loading',
+    'The page could not be loaded',
+    'Disallowed by robots.txt',
+    'robots.txt of cdn.other.org could not be read',
+    'Not a usable link: javascript:void(0)',
+    'Link leaves the site',
+    'Left out by the kinds filter',
+    'Left out by the address filter',
+    'and 7 more',
+  ]);
+  const address = items[7]!.lastElementChild as HTMLElement;
+  expect(address.textContent).toBe('example.com/7.png');
+  expect(address.getAttribute('title')).toBe('https://example.com/private/7.png');
+  expect(within(list).queryAllByRole('link')).toEqual([]);
+  // Files were found: no headline.
+  expect(within(dialog()).queryByText('No files found')).toBeNull();
+});
+
+it('shows no problem list for a test without problems', async () => {
+  await tested();
+  expect(within(dialog()).queryByRole('list', { name: 'Problems' })).toBeNull();
+});
+
+for (const [what, problems, headline] of [
+  ['no problem', [], 'No files found'],
+  [
+    'no thumbnail on the first page',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'no_thumbnails', detail: null }],
+    'No thumbnail matched. The login may have expired, or the expression does not fit',
+  ],
+  [
+    'a redirect off the site',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'left_site', detail: 'login.example.org' }],
+    'The site redirected to login.example.org. Log in again',
+  ],
+  [
+    'HTTP 401',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'http_error', detail: '401' }],
+    'The site refused the page (HTTP 401). Log in again',
+  ],
+  [
+    'HTTP 403',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'http_error', detail: '403' }],
+    'The site refused the page (HTTP 403). Log in again',
+  ],
+  [
+    'HTTP 500',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'http_error', detail: '500' }],
+    'The site answered HTTP 500',
+  ],
+  [
+    'a timeout',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'timeout', detail: null }],
+    'The page did not finish loading',
+  ],
+  [
+    'robots.txt',
+    [{ url: 'https://example.com/g', stage: 'gallery', reason: 'robots_disallowed', detail: null }],
+    'Disallowed by robots.txt',
+  ],
+] as const) {
+  it(`a test without files heads the problems with one line for ${what}`, async () => {
+    const { user } = setup([profileOf()], { 'sites:crawl': () => crawlOf({ files: [], problems: [...problems] }) });
+    await waitFor(() => expect(field('Name').value).toBe('Shop'));
+    await user.type(field('Gallery URL'), 'https://example.com/g');
+    await user.click(button('Test'));
+    await within(dialog()).findByText('Files 0');
+    const lines = Array.from(dialog().querySelectorAll('p')).map((p) => p.textContent);
+    expect(lines.filter((line) => line === headline)).toHaveLength(1);
+  });
+}
 
 it('Import stays disabled for a test without files, for a new profile and for unsaved changes', async () => {
   const { user } = setup([profileOf()], { 'sites:crawl': () => crawlOf({ files: [] }) });

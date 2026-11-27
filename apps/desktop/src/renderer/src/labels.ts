@@ -10,6 +10,7 @@ import {
   PARALLEL_REQUESTS_MIN,
   type ProviderKind,
   type RelationKind,
+  type SiteCrawlProblemReason,
   type Thinking,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
@@ -400,7 +401,48 @@ export const SITE_CRAWL_COUNT_LABELS = {
 export const CRAWL_TRUNCATED_LABELS = { pages: 'Stopped at Max. pages', files: 'Stopped at Max. files' } as const;
 export const CRAWL_CANCELLED_LABEL = 'Cancelled';
 
-/** The status text of a succeeded download that the site profile's kinds or minimum size left out. */
+/** The list of why pages or addresses of a test gave nothing. */
+export const CRAWL_PROBLEMS_LABEL = 'Problems';
+
+/** 'and 12 more': the problems the answer only counted. */
+export function moreProblemsText(count: number): string {
+  return `and ${count} more`;
+}
+
+/** One problem line per reason; `detail` is the host, the status or the found value (spec "Diagnostics"). */
+export const CRAWL_PROBLEM_TEXTS: Record<SiteCrawlProblemReason, (detail: string) => string> = {
+  no_thumbnails: () => 'No thumbnail matched on this page',
+  no_file: () => 'No file matched on this page',
+  timeout: () => 'The page did not finish loading',
+  left_site: (host) => (host === '' ? 'Redirected off the site' : `Redirected to ${host}`),
+  http_error: (status) => `The site answered HTTP ${status}`,
+  load_failed: () => 'The page could not be loaded',
+  robots_disallowed: () => 'Disallowed by robots.txt',
+  robots_unavailable: (host) => `robots.txt of ${host} could not be read`,
+  invalid_link: (value) => `Not a usable link: ${value}`,
+  off_site: () => 'Link leaves the site',
+  filtered_kind: () => 'Left out by the kinds filter',
+  filtered_text: () => 'Left out by the address filter',
+};
+
+/** The headline of a test that found no file. */
+export const NO_FILES_FOUND_LABEL = 'No files found';
+export const NO_THUMBNAILS_HEADLINE = 'No thumbnail matched. The login may have expired, or the expression does not fit';
+
+/** 'The site redirected to login.example.com. Log in again'. */
+export function leftSiteHeadline(host: string): string {
+  return host === '' ? 'The site redirected elsewhere. Log in again' : `The site redirected to ${host}. Log in again`;
+}
+
+/** 'The site refused the page (HTTP 403). Log in again'. */
+export function refusedPageHeadline(status: string): string {
+  return `The site refused the page (HTTP ${status}). Log in again`;
+}
+
+/** The status texts of a succeeded download that the site profile's kinds or minimum size left out. */
+export const FILTERED_KIND_LABEL = 'Filtered: kind';
+export const FILTERED_SIZE_LABEL = 'Filtered: below minimum size';
+/** A download of an older version that was left out for either reason. */
 export const FILTERED_LABEL = 'Filtered';
 
 /** '2 archives'; the dialog names a single archive by its file name instead. */

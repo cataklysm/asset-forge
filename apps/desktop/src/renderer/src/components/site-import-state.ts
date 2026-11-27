@@ -9,12 +9,20 @@ import {
   SITE_XPATH_MAX,
   type FileKind,
   type SaveSiteProfile,
+  type SiteCrawlProblem,
   type SiteCrawlProgress,
   type SiteCrawlResult,
   type SiteProfile,
 } from '@assetforge/contracts';
 import { call } from '../api';
-import { FILE_KIND_OPTIONS } from '../labels';
+import {
+  CRAWL_PROBLEM_TEXTS,
+  FILE_KIND_OPTIONS,
+  leftSiteHeadline,
+  NO_FILES_FOUND_LABEL,
+  NO_THUMBNAILS_HEADLINE,
+  refusedPageHeadline,
+} from '../labels';
 
 export const CRAWL_POLL_MS = 500;
 /** Min. size is typed in KB and sent as bytes. */
@@ -141,6 +149,27 @@ export function canImport(crawl: CrawlAnswer | null, profileId: string | null, d
     crawl.url === url &&
     crawl.result.files.length > 0
   );
+}
+
+/** The line of one problem: the fixed text of its reason, filled with its detail. */
+export function problemText(problem: Pick<SiteCrawlProblem, 'reason' | 'detail'>): string {
+  return CRAWL_PROBLEM_TEXTS[problem.reason](problem.detail ?? '');
+}
+
+/**
+ * The one line above the problems of a test that found no file, or null when it found some. Problems keep the
+ * crawl's order, so the first one belongs to the first gallery page whenever that page gave nothing.
+ */
+export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problems'>): string | null {
+  if (result.files.length > 0) return null;
+  const first = result.problems[0];
+  if (first === undefined) return NO_FILES_FOUND_LABEL;
+  if (first.stage === 'gallery') {
+    if (first.reason === 'no_thumbnails') return NO_THUMBNAILS_HEADLINE;
+    if (first.reason === 'left_site') return leftSiteHeadline(first.detail ?? '');
+    if (first.reason === 'http_error' && (first.detail === '401' || first.detail === '403')) return refusedPageHeadline(first.detail);
+  }
+  return problemText(first);
 }
 
 export interface CrawlProgressState {

@@ -7,6 +7,7 @@ import {
   CRAWL_CANCEL_LABEL,
   CRAWL_CANCEL_TITLE,
   CRAWL_CANCELLED_LABEL,
+  CRAWL_PROBLEMS_LABEL,
   CRAWL_PROGRESS_LABEL,
   CRAWL_TRUNCATED_LABELS,
   crawlProgressText,
@@ -28,6 +29,7 @@ import {
   MAX_PAGES_TITLE,
   MIN_SIZE_LABEL,
   MIN_SIZE_TITLE,
+  moreProblemsText,
   NEW_SITE_PROFILE_LABEL,
   NEW_SITE_PROFILE_OPTION,
   NEW_SITE_PROFILE_TITLE,
@@ -51,6 +53,7 @@ import {
   URL_CONTAINS_LABEL,
   URL_CONTAINS_TITLE,
 } from '../labels';
+import { shortUrl } from '../format';
 import { ALERT, BORDER, BUTTON, FOCUS, INPUT, LABEL, MUTED, SELECT } from '../ui';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Dialog } from './Dialog';
@@ -58,7 +61,9 @@ import {
   canImport,
   draftOf,
   newDraft,
+  noFilesHeadline,
   orderedKinds,
+  problemText,
   sameDraft,
   saveRequestOf,
   useCrawlProgress,
@@ -482,6 +487,30 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
                       {counts.truncated !== null && <p>{CRAWL_TRUNCATED_LABELS[counts.truncated]}</p>}
                       {counts.cancelled && <p>{CRAWL_CANCELLED_LABEL}</p>}
                     </div>
+                    {noFilesHeadline(counts) !== null && (
+                      <p className="text-sm text-text">
+                        {noFilesHeadline(counts)}
+                      </p>
+                    )}
+                    {counts.problems.length > 0 && (
+                      <ul
+                        aria-label={CRAWL_PROBLEMS_LABEL}
+                        className={`max-h-40 overflow-y-auto rounded-control border p-2 text-sm text-muted ${BORDER}`}
+                      >
+                        {counts.problems.map((problem) => (
+                          <li
+                            key={`${problem.stage}\n${problem.reason}\n${problem.url}\n${problem.detail ?? ''}`}
+                            className="flex flex-wrap gap-x-2"
+                          >
+                            <span className="break-all text-text">{problemText(problem)}</span>
+                            <span className="break-all" title={problem.url}>
+                              {shortUrl(problem.url)}
+                            </span>
+                          </li>
+                        ))}
+                        {counts.problemsDropped > 0 && <li>{moreProblemsText(counts.problemsDropped)}</li>}
+                      </ul>
+                    )}
                     {counts.files.length > 0 && (
                       <ul
                         aria-label={FOUND_FILES_LABEL}
