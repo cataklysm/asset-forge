@@ -12,6 +12,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 - `JsonWorkspaceRegistry` read-modify-write is unserialized and quarantine on read is racy; it drops unknown keys in `settings.json`.
 - `database.close()` throwing inside the `open` error path masks the original error.
+- The remembered import directory (`import-directory.ts`) is checked with a synchronous `statSync` in the main process before the file picker opens. A disconnected mapped drive or an unreachable SMB share can block that call for several seconds; an asynchronous check with a short limit would keep the event loop free. The unchanged-directory comparison is a plain string compare, so a different spelling of the same Windows path is written again (harmless).
 - `isInside` rejects valid names that start with `..` (e.g. `..config`); compare against `..` and `..` + separator.
 - A failed move leaves an empty target parent directory.
 - `LocalStorage.move` checks for the target and then renames; a target created in between can be replaced.
