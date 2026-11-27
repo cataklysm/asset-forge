@@ -139,6 +139,77 @@ it('editing the text sends prompts:saveVersion with the loaded version as base',
   expect(within(editor()).getByRole('combobox', { name: 'Version' }).textContent).toMatch(/^v2 · .*v1 · /);
 });
 
+/** A gate a fake handler awaits, so a request stays open until the test releases it. */
+function gate() {
+  let release = () => {};
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { opened, release };
+}
+
+it('while an update and a new version are being saved the fields take no typing, so no edit is lost', async () => {
+  const user = userEvent.setup();
+  const prompt = promptDetail({ title: 'Hero', description: 'Shop', content: 'A {{view}}', defaults: { view: 'front' } });
+  const store = fakePrompts([prompt]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:update': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:update']!(request as never);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  const field = (name: string) => within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
+  await user.type(field('Title'), ' shot');
+  await user.type(field('Text'), ' at night');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:update')).toHaveLength(1));
+  for (const name of ['Title', 'Description', 'Text', 'view']) await user.type(field(name), ' late');
+  expect(field('Title').value).toBe('Hero shot');
+  expect(field('Description').value).toBe('Shop');
+  expect(field('Text').value).toBe('A {{view}} at night');
+  expect(field('view').value).toBe('front');
+  hold.release();
+  await waitFor(() => expect(requests(api, 'prompts:saveVersion')).toHaveLength(1));
+  await waitFor(() => expect(saveButton().disabled).toBe(true));
+  expect(field('Title').value).toBe('Hero shot');
+  expect(field('Text').value).toBe('A {{view}} at night');
+  await user.type(field('Title'), '!');
+  expect(field('Title').value).toBe('Hero shot!');
+});
+
+it('while a new prompt is being created the fields take no typing, so no edit is lost', async () => {
+  const user = userEvent.setup();
+  const store = fakePrompts([]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:create': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:create']!(request as never);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await screen.findByText('No prompts');
+  await user.click(screen.getByRole('button', { name: 'New' }));
+  const field = (name: string) => within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
+  await user.type(field('Title'), 'Hero');
+  await user.type(field('Text'), 'A cat');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:create')).toHaveLength(1));
+  await user.type(field('Title'), ' late');
+  await user.type(field('Text'), ' late');
+  expect(field('Title').value).toBe('Hero');
+  expect(field('Text').value).toBe('A cat');
+  hold.release();
+  await option('Hero');
+  await waitFor(() => expect(field('Title').value).toBe('Hero'));
+  expect(field('Text').value).toBe('A cat');
+});
+
 it('a failed saveVersion shows the message and keeps the draft', async () => {
   const user = userEvent.setup();
   install([promptDetail({ title: 'Hero', content: 'A {{view}}' })], {

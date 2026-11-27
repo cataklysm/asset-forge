@@ -173,7 +173,8 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
     setViewing(null);
   }
 
-  const readOnly = viewing !== null;
+  // While a save runs the fields take no typing: its answer replaces the draft it was sent with.
+  const readOnly = viewing !== null || saving;
   const content = viewing?.content ?? draft.content;
   const variables = viewing?.variables ?? variablesOf(draft);
 
@@ -184,6 +185,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
         <input
           className={INPUT}
           maxLength={PROMPT_TITLE_MAX}
+          readOnly={saving}
           value={draft.title}
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
         />
@@ -194,6 +196,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
           rows={2}
           className={`h-auto py-1.5 ${INPUT}`}
           maxLength={PROMPT_DESCRIPTION_MAX}
+          readOnly={saving}
           value={draft.description}
           onChange={(e) => setDraft({ ...draft, description: e.target.value })}
         />
