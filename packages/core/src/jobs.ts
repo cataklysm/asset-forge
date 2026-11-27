@@ -79,12 +79,21 @@ export interface JobHandler {
   settled?(job: Job, outcome: JobOutcome): void;
 }
 
+export interface CancelOptions {
+  /** Cancel the job only while it is pending; never abort a running one. */
+  pendingOnly?: boolean;
+}
+
 /** What use cases need of a running scheduler. */
 export interface JobControl {
   /** Call after enqueue, retry or cancel, so the scheduler looks for work. */
   wake(): void;
-  /** Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the handler. */
-  cancel(jobId: string): Promise<void>;
+  /**
+   * Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the
+   * handler. With `pendingOnly` a running job is left alone: only a job still pending when the cancel reaches the
+   * database ends, so a job claimed meanwhile keeps running.
+   */
+  cancel(jobId: string, options?: CancelOptions): Promise<void>;
   /** Cancels every pending job and aborts every running one. Answers how many. */
   cancelAll(): Promise<number>;
 }
@@ -135,11 +144,11 @@ export async function countJobs(s: WorkspaceSession): Promise<Omit<JobSummary, '
   };
 }
 
-/** Cancels a pending or running job; a finished job is left alone. */
-export async function cancelJob(s: WorkspaceSession, control: JobControl, jobId: string): Promise<void> {
+/** Cancels a pending or running job (with `pendingOnly` only a pending one); a finished job is left alone. */
+export async function cancelJob(s: WorkspaceSession, control: JobControl, jobId: string, options?: CancelOptions): Promise<void> {
   const job = await requireJob(s, jobId);
   if (FINISHED.includes(job.status)) return;
-  await control.cancel(jobId);
+  await (options === undefined ? control.cancel(jobId) : control.cancel(jobId, options));
 }
 
 /**

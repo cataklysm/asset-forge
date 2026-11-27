@@ -1,6 +1,7 @@
-import type { FileRecord } from '@assetforge/contracts';
+import { IMAGE_GENERATE_JOB, type FileRecord } from '@assetforge/contracts';
 import { resolvePendingFileMove } from './asset-files.js';
 import { AssetForgeError, InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
+import { settleGenerationOfJob } from './generations.js';
 import { cancelJob, type JobControl } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
 import type { FileRepository, Storage } from './ports.js';
@@ -11,7 +12,8 @@ export type FileBatchItem = { fileId: string; file: FileRecord | null; error: Er
 
 const EMPTY_CHUNK = 200;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MOVE_FAILED = 'The file could not be moved; it may be in use, missing, or the target already exists';
+const RUNNING_GENERATION = 'This file still has a running generation';
+const MOVE_FAILED ='The file could not be moved; it may be in use, missing, or the target already exists';
 
 /** Runs `op` for each id in request order; a failure is reported for its file and never stops the next. */
 async function eachFile(
@@ -55,9 +57,40 @@ function resolvePendingMove(s: WorkspaceSession, fileId: string): Promise<'compl
   return resolvePendingFileMove({ storage: s.storage, files: s.database.files, fileMoves: s.database.fileMoves }, fileId);
 }
 
-/** Cancels every active job of the file; a running one is only asked to stop, not awaited. */
-async function cancelFileJobs(s: WorkspaceSession, control: JobControl, fileId: string): Promise<void> {
+/**
+ * Cancels the active jobs of a file being trashed; a running one is only asked to stop, not awaited. A running
+ * generation is paid work and finishes (its result goes to the asset the file was in); a waiting one is cancelled
+ * only while it is still pending, so one claimed meanwhile finishes too.
+ */
+async function cancelJobsOnTrash(s: WorkspaceSession, control: JobControl, fileId: string): Promise<void> {
+  for (const job of await s.database.jobs.activeForFile(fileId)) {
+    if (job.type !== IMAGE_GENERATE_JOB) await cancelJob(s, control, job.id);
+    else if (job.status !== 'running') await cancelJob(s, control, job.id, { pendingOnly: true });
+  }
+}
+
+/**
+ * Ends the jobs of a file before its purge. Refused while a generation of the file runs. The check and the cancel
+ * of every pending job (a generation settled `cancelled`) are one transaction, so no generation can start in
+ * between; a running job of another type is then asked to stop.
+ */
+async function cancelJobsOnPurge(s: WorkspaceSession, control: JobControl, fileId: string): Promise<void> {
+  const { refused } = await s.database.jobs.cancelPendingOfFile({
+    fileId,
+    refuseRunning: [IMAGE_GENERATE_JOB],
+    now: s.now().toISOString(),
+    settled: (job) => settleGenerationOfJob(s, job, { status: 'cancelled' }),
+  });
+  if (refused) throw new InvalidOperationError(RUNNING_GENERATION);
   for (const job of await s.database.jobs.activeForFile(fileId)) await cancelJob(s, control, job.id);
+}
+
+/** Refuses a purge before anything is written while a generation of the file runs. */
+async function refuseRunningGeneration(s: WorkspaceSession, fileId: string): Promise<void> {
+  const jobs = await s.database.jobs.activeForFile(fileId);
+  if (jobs.some((job) => job.type === IMAGE_GENERATE_JOB && job.status === 'running')) {
+    throw new InvalidOperationError(RUNNING_GENERATION);
+  }
 }
 
 /**
@@ -101,7 +134,7 @@ export function trashFiles(s: WorkspaceSession, control: JobControl, fileIds: re
       return null;
     }
 
-    await cancelFileJobs(s, control, file.id);
+    await cancelJobsOnTrash(s, control, file.id);
     const target = trashPath(file.id, file.originalName);
     await s.database.fileMoves.begin({
       fileId: file.id,
@@ -165,19 +198,21 @@ export function restoreFiles(s: WorkspaceSession, fileIds: readonly string[]): P
 
 /**
  * Deletes trashed files for good: the row (with its tags, analysis, proposal and jobs) first, then
- * the binary. A binary that cannot be removed now is left for `sweepTrash`; the file counts as purged.
+ * the binary. A binary that cannot be removed now is left for `sweepTrash`; the file counts as purged. A file
+ * with a running generation is refused (`This file still has a running generation`) before anything is written.
  */
 export function purgeFiles(s: WorkspaceSession, control: JobControl, fileIds: readonly string[]): Promise<FileBatchItem[]> {
   return eachFile(fileIds, async (fileId) => {
     let file = await requireFile(s, fileId);
     if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
     await requireReachable(s);
+    await refuseRunningGeneration(s, file.id);
     if ((await resolvePendingMove(s, file.id)) !== null) {
       file = await requireFile(s, fileId);
       // An earlier restore whose commit failed has just been completed: the file is live again.
       if (file.deletedAt === null) throw new InvalidOperationError('The file is not in the trash');
     }
-    await cancelFileJobs(s, control, file.id);
+    await cancelJobsOnPurge(s, control, file.id);
     if (!(await s.database.files.purge(file.id))) throw new InvalidOperationError('The file is not in the trash');
     if (file.relativePath.startsWith(`${TRASH_DIR}/`)) {
       try {

@@ -188,8 +188,8 @@ export function createJobHost(deps: JobHostDeps): JobHost {
       scheduler?.wake();
     },
 
-    async cancel(jobId) {
-      await scheduler?.cancel(jobId);
+    async cancel(jobId, options) {
+      await scheduler?.cancel(jobId, options);
     },
 
     // Without a scheduler nothing runs; a generation left pending is closed by the reconcile on the next open.

@@ -3,6 +3,7 @@ import {
   IMAGE_GENERATE_JOB,
   IMAGE_INPUT_MAX_PIXELS,
   IMAGE_INPUT_MIN_PIXELS,
+  ImageGeneratePayloadSchema,
   MAX_FILE_GENERATIONS,
   MAX_RECENT_PROMPTS,
   resolvePromptText,
@@ -15,7 +16,7 @@ import {
   type StartGenerationResult,
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, ProviderNotConfiguredError, ValidationFailedError } from './errors.js';
-import type { JobControl, NewJob } from './jobs.js';
+import type { Job, JobControl, JobOutcome, NewJob } from './jobs.js';
 import { measureFile } from './measure-file.js';
 import { isPreviewable } from './media-types.js';
 import type { GenerationPromptRef, ImageProviderDirectory } from './ports.js';
@@ -202,6 +203,18 @@ export function recentGenerationPrompts(s: WorkspaceSession): Promise<string[]> 
 /** Ends every pending generation whose job is gone or finished; run when a workspace opens. Answers how many. */
 export function reconcileGenerations(s: WorkspaceSession): Promise<number> {
   return s.database.generations.reconcile(s.now().toISOString());
+}
+
+/**
+ * Writes the outcome of an ended `image.generate` job onto its generation; synchronous, so it runs inside the
+ * transaction that ends the job. Changes only a pending generation, so a late cancel never undoes a committed
+ * result. Answers whether a generation changed; false for every other job type.
+ */
+export function settleGenerationOfJob(s: WorkspaceSession, job: Job, outcome: JobOutcome): boolean {
+  if (job.type !== IMAGE_GENERATE_JOB) return false;
+  const payload = ImageGeneratePayloadSchema.safeParse(job.payload);
+  if (!payload.success) return false;
+  return s.database.generations.settle({ id: payload.data.generationId, outcome, now: s.now().toISOString() });
 }
 
 const baseName = (name: string) => {

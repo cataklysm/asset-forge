@@ -515,6 +515,17 @@ export interface JobRepository {
    */
   cancelPending(r: { id?: string; now: string; settled?: (job: Job) => void }): Promise<number>;
   /**
+   * One transaction over the jobs of one file: when one of them is `running` and of a type in `refuseRunning`,
+   * changes nothing and answers `refused: true`; otherwise every queued, retry_wait or waiting_remote job of the
+   * file becomes cancelled like `cancelPending` (with `settled` per job, a throw rolls every cancel back).
+   */
+  cancelPendingOfFile(r: {
+    fileId: string;
+    refuseRunning: readonly string[];
+    now: string;
+    settled?: (job: Job) => void;
+  }): Promise<{ refused: boolean; cancelled: number }>;
+  /**
    * failed | cancelled → queued with attempt 0, error, run_after, started_at and finished_at cleared; for one job or for all,
    * newest created_at first, skipping a job whose dedupe key is held by an active job and a job of one of `excludeTypes`.
    * Clears `result`, and for `FILE_DOWNLOAD_JOB` jobs `file_id`. Returns how many.

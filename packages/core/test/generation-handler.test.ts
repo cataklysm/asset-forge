@@ -311,6 +311,60 @@ describe('the image.generate handler', () => {
   });
 });
 
+describe('a source trashed while its generation runs', () => {
+  /** Trashes the source while the provider is answering, then answers as before. */
+  function trashDuringAnswer(t: Setup): void {
+    const answer = t.providers.provider.answer;
+    t.providers.provider.answer = async () => {
+      await trashForTest(t.session, [t.file.id]);
+      return answer();
+    };
+  }
+
+  it('places the result in the asset the source was in, with role generated, and reports that asset', async () => {
+    const t = await setup();
+    const assetId = await newAsset(t, 'Hero');
+    await relocateFile(t.session, t.file.id, { assetId, role: 'reference' });
+    const g = await started(t, edit(t.file.id));
+    trashDuringAnswer(t);
+    expect((await runNext(t)).error).toBeNull();
+    expect(t.db.files.records.get(t.file.id)).toMatchObject({ assetId: null, trashedAssetId: assetId });
+    const [result] = results(t);
+    expect(result).toMatchObject({ assetId, role: 'generated', status: 'complete', deletedAt: null });
+    expect(await generation(t, g.id)).toMatchObject({ status: 'succeeded', outputs: [{ fileId: result!.id }] });
+    expect(t.effects.added).toEqual([assetId, null]);
+  });
+
+  it('places the result in the inbox when the former asset no longer exists', async () => {
+    const t = await setup();
+    const assetId = await newAsset(t, 'Hero');
+    await relocateFile(t.session, t.file.id, { assetId, role: 'reference' });
+    const g = await started(t, edit(t.file.id));
+    const answer = t.providers.provider.answer;
+    t.providers.provider.answer = async () => {
+      await trashForTest(t.session, [t.file.id]);
+      t.db.assets.rows.delete(assetId);
+      return answer();
+    };
+    expect((await runNext(t)).error).toBeNull();
+    const [result] = results(t);
+    expect(result).toMatchObject({ assetId: null, role: null, status: 'complete', deletedAt: null });
+    expect(await generation(t, g.id)).toMatchObject({ status: 'succeeded', outputs: [{ fileId: result!.id }] });
+    expect(t.effects.added).toEqual([null]);
+  });
+
+  it('places the result in the inbox when the source came from the inbox', async () => {
+    const t = await setup();
+    const g = await started(t, edit(t.file.id));
+    trashDuringAnswer(t);
+    expect((await runNext(t)).error).toBeNull();
+    const [result] = results(t);
+    expect(result).toMatchObject({ assetId: null, role: null, status: 'complete', deletedAt: null });
+    expect(await generation(t, g.id)).toMatchObject({ status: 'succeeded' });
+    expect(t.effects.added).toEqual([null]);
+  });
+});
+
 describe('the effects of the generation handler', () => {
   it("reports the source's asset and the inbox it passed for a result placed in it", async () => {
     const t = await setup();

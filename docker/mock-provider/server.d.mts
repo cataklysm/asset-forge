@@ -3,6 +3,8 @@ export type MockFailure = number | 'invalid' | 'hang';
 export interface MockProvider {
   url: string;
   close(): Promise<void>;
+  /** Answers every waiting `MOCK_PROMPT_SLOW` request now and keeps the server running. */
+  releaseSlow(): void;
   requests: {
     method: string;
     path: string;

@@ -1251,6 +1251,27 @@ describe('createScheduler with a settled hook', () => {
     expect(h.settled).toEqual([{ id, outcome: { status: 'cancelled' }, rowStatus: 'cancelled' }]);
   });
 
+  it('a pendingOnly cancel leaves a running job alone and cancels a pending one', async () => {
+    const h = hooked('cpu');
+    const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 1 } });
+    h.bind(s.fake);
+    const [running, queued] = (await s.enqueue('t', 'cpu', 2)) as [string, string];
+    await s.scheduler.start();
+
+    await s.scheduler.cancel(running, { pendingOnly: true });
+    expect(h.runOf(running).signal.aborted).toBe(false);
+    expect(s.row(running).status).toBe('running');
+
+    await s.scheduler.cancel(queued, { pendingOnly: true });
+    expect(s.row(queued).status).toBe('cancelled');
+    expect(h.settled).toEqual([{ id: queued, outcome: { status: 'cancelled' }, rowStatus: 'cancelled' }]);
+    expect(s.changes.ids).toContain(queued);
+
+    h.runOf(running).resolve();
+    await flush();
+    expect(s.row(running).status).toBe('succeeded');
+  });
+
   it('cancelAll does not count a run an earlier cancel already aborted', async () => {
     const h = hooked('cpu');
     const s = setup({ handlers: { t: h.handler } });

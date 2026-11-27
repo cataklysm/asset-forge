@@ -198,7 +198,7 @@ describe('generation studio end to end', () => {
     expect(await generation(sourceId, busy.id)).toMatchObject({ status: 'failed', errorCode: 'provider_unavailable' });
   });
 
-  it('cancels a running and a queued generation when their source goes to the trash, and never sends them again', async () => {
+  it('lets running generations finish into the former asset when their source goes to the trash, cancels the queued one and never repeats a request', async () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
     const running = [await started(edit(sourceId, MOCK_PROMPT_SLOW)), await started(edit(sourceId, MOCK_PROMPT_SLOW))];
@@ -210,16 +210,24 @@ describe('generation studio end to end', () => {
     expect(await h.ok('jobs:summary', {})).toMatchObject({ running: 2, queued: 1 });
 
     expect(await h.ok('files:trashMany', { fileIds: [sourceId] })).toMatchObject({ items: [{ error: null }] });
-    await h.until((s) => s.cancelled === 3 && active(s) === 0);
+    await h.until((s) => s.cancelled === 1 && s.running === 2);
+    // The paid requests already sent finish: their answers are kept.
+    mock!.releaseSlow();
+    await h.until((s) => s.succeeded === 2 && s.cancelled === 1 && active(s) === 0);
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     const { results } = await h.ok('generations:forFile', { fileId: sourceId });
     expect(new Map(results.map((g) => [g.id, g.status]))).toEqual(
-      new Map([...running, queued].map((g) => [g.id, 'cancelled'])),
+      new Map([...running.map((g) => [g.id, 'succeeded'] as const), [queued.id, 'cancelled'] as const]),
     );
     // One request for each running generation, none for the queued one, and none repeated.
     expect(mock!.imageRequests).toHaveLength(2);
-    expect((await filesOf(assetId)).map((f) => f.id)).toEqual([]);
+    const files = await filesOf(assetId);
+    expect(files).toHaveLength(2);
+    for (const file of files) expect(file).toMatchObject({ status: 'complete', assetId, role: 'generated' });
+    expect(files.map((f) => f.id).sort()).toEqual(
+      results.filter((g) => g.status === 'succeeded').map((g) => g.outputs[0]!.fileId!).sort(),
+    );
   });
 
   it('fails a slow edit interrupted by closing as provider_outcome_unknown and sends it only once', async () => {

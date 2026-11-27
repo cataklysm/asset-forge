@@ -448,6 +448,9 @@ export async function startMockProvider(options = {}) {
     url: `http://${host}:${actualPort}`,
     requests,
     imageRequests,
+    releaseSlow() {
+      for (const send of [...slow]) send();
+    },
     close() {
       for (const timer of timers) clearTimeout(timer);
       timers.clear();

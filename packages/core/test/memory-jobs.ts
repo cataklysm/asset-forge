@@ -212,6 +212,31 @@ export class InMemoryJobRepository implements JobRepository {
     });
   }
 
+  async cancelPendingOfFile({
+    fileId,
+    refuseRunning,
+    now,
+    settled,
+  }: {
+    fileId: string;
+    refuseRunning: readonly string[];
+    now: string;
+    settled?: (job: Job) => void;
+  }): Promise<{ refused: boolean; cancelled: number }> {
+    return this.inTransaction(() => {
+      const ofFile = this.rows.filter((r) => r.fileId === fileId);
+      if (ofFile.some((r) => r.status === 'running' && refuseRunning.includes(r.type))) return { refused: true, cancelled: 0 };
+      let cancelled = 0;
+      for (const row of ofFile) {
+        if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
+        Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
+        settled?.(structuredClone(row));
+        cancelled++;
+      }
+      return { refused: false, cancelled };
+    });
+  }
+
   async retry({ id, now, excludeTypes }: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number> {
     const candidates = this.rows
       .filter((r) => (id === undefined || r.id === id) && (r.status === 'failed' || r.status === 'cancelled'))

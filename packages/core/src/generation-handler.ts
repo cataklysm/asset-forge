@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 import { EditParametersSchema, ImageGeneratePayloadSchema, UpscaleParametersSchema } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
 import { SourceNotReadableError } from './errors.js';
-import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generations.js';
+import { GENERATION_RESULT_EXTENSIONS, generationNames, settleGenerationOfJob } from './generations.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
 import type { GenerationImageSource, ImageInput, ImageProviderDirectory } from './ports.js';
@@ -12,7 +12,7 @@ export interface ImageGenerateHandlerDeps {
   session: WorkspaceSession;
   providers: ImageProviderDirectory;
   images: GenerationImageSource;
-  /** Told where the linked result ended up: the source's asset, or the inbox. */
+  /** Told where the linked result ended up: the source's asset (or, for a trashed source, its former one), or the inbox. */
   effects?: JobEffects;
 }
 
@@ -20,7 +20,8 @@ export interface ImageGenerateHandlerDeps {
  * The `image.generate` job: sends the input image to the generation's provider, imports the answer and links it
  * as the generation's output. Paid work with an unclear outcome is never repeated: an interrupted run fails
  * `provider_outcome_unknown`. The result is linked only once it is a complete file; placing it in the source's
- * asset afterwards is best effort and leaves it in the inbox when it fails.
+ * asset afterwards (for a source trashed meanwhile, the asset it was in) is best effort and leaves it in the inbox
+ * when it fails. The result itself is never trashed.
  */
 export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobHandler {
   const s = deps.session;
@@ -144,8 +145,18 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
       let placedIn: string | null = null;
       try {
         const current = await s.database.files.get(source.id);
-        if (current?.assetId != null) {
-          placedIn = (await relocateFile(s, file.id, { assetId: current.assetId, role: 'generated' })).assetId;
+        // A source trashed while the request ran still hands its result to the asset it was in, when that is left.
+        const assetId =
+          current === null
+            ? null
+            : current.assetId ??
+              (current.deletedAt !== null &&
+              current.trashedAssetId !== null &&
+              (await s.database.assets.get(current.trashedAssetId)) !== null
+                ? current.trashedAssetId
+                : null);
+        if (assetId !== null) {
+          placedIn = (await relocateFile(s, file.id, { assetId, role: 'generated' })).assetId;
         }
       } catch {
         // Best effort: the linked result stays in the inbox.
@@ -156,10 +167,7 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
     },
 
     settled(job: Job, outcome): void {
-      const payload = ImageGeneratePayloadSchema.safeParse(job.payload);
-      if (!payload.success) return;
-      // Changes only a pending generation, so a late cancel never undoes a committed result.
-      s.database.generations.settle({ id: payload.data.generationId, outcome, now: s.now().toISOString() });
+      settleGenerationOfJob(s, job, outcome);
     },
   };
 }

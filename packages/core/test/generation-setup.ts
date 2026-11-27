@@ -12,6 +12,7 @@ import {
   type ImageProviderDirectory,
   type GenerationImageSource,
   type Job,
+  type CancelOptions,
   type JobControl,
   type JobOutcome,
   type WorkspaceSession,
@@ -177,8 +178,12 @@ export class SettlingControl implements JobControl {
     this.wakes++;
   }
 
-  async cancel(jobId: string): Promise<void> {
+  /** The ids cancelled with `pendingOnly`; they are in `cancelled` too. */
+  readonly pendingOnly: string[] = [];
+
+  async cancel(jobId: string, options?: CancelOptions): Promise<void> {
     this.cancelled.push(jobId);
+    if (options?.pendingOnly === true) this.pendingOnly.push(jobId);
     await this.s.database.jobs.cancelPending({
       id: jobId,
       now: this.s.now().toISOString(),

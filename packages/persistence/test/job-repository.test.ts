@@ -293,6 +293,42 @@ describe('job repository', () => {
     expect((await db.jobs.get(uuid(14)))?.status).toBe('queued');
   });
 
+  test('cancelPendingOfFile refuses while a job of a listed type of the file runs and changes nothing', async () => {
+    const gen = { type: 'image.generate', resourceClass: 'remote_api' as const, fileId: FILE_ID };
+    await enqueue(T0, newJob(10, gen), newJob(11, { fileId: FILE_ID }), newJob(12, gen));
+    await claim(T0, 'remote_api', ['image.generate']); // 10 running
+    const settled = vi.fn();
+    expect(
+      await db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: ['image.generate'], now: T1, settled }),
+    ).toEqual({ refused: true, cancelled: 0 });
+    expect(settled).not.toHaveBeenCalled();
+    expect((await db.jobs.get(uuid(11)))?.status).toBe('queued');
+    expect((await db.jobs.get(uuid(12)))?.status).toBe('queued');
+    expect((await db.jobs.get(uuid(10)))?.status).toBe('running');
+  });
+
+  test('cancelPendingOfFile cancels only the pending jobs of the file, running settled per job', async () => {
+    await enqueue(T0, newJob(10, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(12), newJob(13, { fileId: FILE_ID }));
+    await claim(T0); // 10 running: not of a refused type, so it stays and is not counted
+    const seen: string[] = [];
+    expect(
+      await db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: ['image.generate'], now: T1, settled: (j) => seen.push(j.id) }),
+    ).toEqual({ refused: false, cancelled: 2 });
+    expect(seen.sort()).toEqual([uuid(11), uuid(13)]);
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'cancelled', finishedAt: T1 });
+    expect((await db.jobs.get(uuid(10)))?.status).toBe('running');
+    expect((await db.jobs.get(uuid(12)))?.status).toBe('queued');
+
+    await enqueue(T2, newJob(14, { fileId: FILE_ID }), newJob(15, { fileId: FILE_ID }));
+    let calls = 0;
+    const throwing = () => {
+      if (++calls === 2) throw new Error('boom');
+    };
+    await expect(db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: [], now: T3, settled: throwing })).rejects.toThrow('boom');
+    expect((await db.jobs.get(uuid(14)))?.status).toBe('queued');
+    expect((await db.jobs.get(uuid(15)))?.status).toBe('queued');
+  });
+
   test('retry with excludeTypes skips jobs of those types, for all and by id', async () => {
     await failedJob(10, T0);
     await enqueue(T0, newJob(11, { type: 'image.generate', resourceClass: 'remote_api' }));

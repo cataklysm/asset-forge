@@ -252,6 +252,28 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
         return rows.length;
       });
     },
+    async cancelPendingOfFile({ fileId, refuseRunning, now, settled }): Promise<{ refused: boolean; cancelled: number }> {
+      // Synchronous, so no claim can turn a pending job of the file into a running one between check and cancel.
+      return db.transaction((tx) => {
+        if (refuseRunning.length > 0) {
+          const running = tx
+            .select({ id: job.id })
+            .from(job)
+            .where(and(eq(job.fileId, fileId), eq(job.status, 'running'), inArray(job.type, [...refuseRunning])))
+            .limit(1)
+            .get();
+          if (running) return { refused: true, cancelled: 0 };
+        }
+        const rows = tx
+          .update(job)
+          .set({ status: 'cancelled', finishedAt: now, updatedAt: now })
+          .where(and(eq(job.fileId, fileId), inArray(job.status, ['queued', 'retry_wait', 'waiting_remote'])))
+          .returning()
+          .all();
+        if (settled) for (const row of rows) settled(toJob(row));
+        return { refused: false, cancelled: rows.length };
+      });
+    },
     async retry({ id, now, excludeTypes }): Promise<number> {
       return db.transaction((tx) => {
         const candidates = tx

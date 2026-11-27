@@ -358,10 +358,11 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
 
     wake,
 
-    async cancel(jobId) {
+    async cancel(jobId, options) {
       if (stopping) return;
       const run = active.get(jobId);
-      if (run) {
+      // A pending-only cancel goes to the database, which ends the job only while it is still pending.
+      if (run && options?.pendingOnly !== true) {
         if (run.settled) return;
         run.cancelled = true;
         run.controller.abort();
