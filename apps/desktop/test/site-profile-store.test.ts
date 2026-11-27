@@ -76,6 +76,16 @@ describe('site profile store', () => {
     expect(existsSync(file())).toBe(false);
   });
 
+  it('refuses a single-label site but takes an IP literal', () => {
+    const s = store();
+    for (const url of ['https://localhost/', 'http://intranet:8080/g', 'https://www.intranet/']) {
+      expect(errorOf(() => s.save(input({ url })))).toEqual({ code: 'validation_failed', message: 'This is not a web address' });
+    }
+    expect(s.list()).toEqual([]);
+    expect(s.save(input({ url: 'http://127.0.0.1:8080/g' })).site).toBe('127.0.0.1');
+    expect(s.save(input({ url: 'http://[::1]:8080/g', name: 'Six' })).site).toBe('[::1]');
+  });
+
   it('refuses a name another profile has, regardless of case', () => {
     const s = store();
     const first = s.save(input());

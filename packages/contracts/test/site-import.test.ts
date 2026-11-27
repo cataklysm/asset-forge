@@ -37,6 +37,8 @@ describe('siteOf', () => {
     ['http://example.com:8080/a', 'example.com'],
     ['https://sub.example.com/', 'sub.example.com'],
     ['https://www.sub.example.com/', 'sub.example.com'],
+    ['http://127.0.0.1:8080/g', '127.0.0.1'],
+    ['http://[::1]:8080/g', '[::1]'],
   ])('%s → %s', (url, site) => {
     expect(siteOf(url)).toBe(site);
   });
@@ -49,6 +51,11 @@ describe('siteOf', () => {
     ['file:///C:/x'],
     ['https://example.com./'],
     ['https://www./'],
+    // A single label would let every host under it belong to the site.
+    ['https://localhost/'],
+    ['https://intranet/'],
+    ['https://www.intranet/'],
+    ['https://www/'],
   ])('%s → null', (url) => {
     expect(siteOf(url)).toBeNull();
   });
