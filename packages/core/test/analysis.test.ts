@@ -33,10 +33,12 @@ describe('isAnalysable', () => {
     error: null,
     importedAt: '2026-11-26T10:00:00.000Z',
     previewable: true,
+    thumbnail: true,
     openable: true,
     kind: 'image',
     width: null,
     height: null,
+    durationMs: null,
     tags: [],
     hasProposal: false,
     deletedAt: null,
@@ -50,6 +52,12 @@ describe('isAnalysable', () => {
     expect(
       isAnalysable({ ...complete, relativePath: '.assetforge/trash/a.png', openable: false, deletedAt: '2026-11-26T11:00:00.000Z' }),
     ).toBe(false);
+  });
+
+  it('is false for a video', () => {
+    for (const mimeType of ['video/mp4', 'video/webm']) {
+      expect(isAnalysable({ ...complete, originalName: 'a.mp4', relativePath: 'inbox/a.mp4', mimeType, kind: 'video', previewable: false, thumbnail: true })).toBe(false);
+    }
   });
 });
 

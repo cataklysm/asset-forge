@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Asset, FileRole, ImportStatus } from '@assetforge/contracts';
-import { BUILT_IN_ASSET_TYPES, type WorkspaceDatabase } from '@assetforge/core';
+import { automaticCover, BUILT_IN_ASSET_TYPES, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T1 = '2026-01-01T00:00:00.000Z';
@@ -212,5 +212,50 @@ describe('asset cover repository', () => {
     const small = await countFor(3);
     const large = await countFor(30);
     expect(large).toBe(small);
+  });
+});
+
+const MP4 = 'video/mp4';
+const WEBM = 'video/webm';
+
+describe('asset cover repository with videos', () => {
+  test('an earlier video and a later image: the image is the automatic cover', async () => {
+    const a = await addAsset(10, 'Alpha');
+    await addFile({ n: 100, assetId: a.id, importedAt: T1, mimeType: MP4 });
+    const image = await addFile({ n: 101, assetId: a.id, importedAt: T2 });
+    await expect(covers()).resolves.toEqual([['Alpha', image]]);
+    await expect(db.assets.getCover(a.id)).resolves.toEqual({ coverFileId: image, coverIsChosen: false });
+  });
+
+  test('without an image the earliest complete video is the automatic cover, ties by id', async () => {
+    const a = await addAsset(10, 'Alpha');
+    await addFile({ n: 99, assetId: a.id, importedAt: T1, mimeType: MP4, status: 'pending' });
+    await addFile({ n: 102, assetId: a.id, importedAt: T1, mimeType: WEBM });
+    await addFile({ n: 101, assetId: a.id, importedAt: T1, mimeType: MP4 });
+    await addFile({ n: 100, assetId: a.id, importedAt: T2, mimeType: MP4 });
+    await addFile({ n: 98, assetId: a.id, importedAt: T1, mimeType: 'image/svg+xml' });
+    await expect(covers()).resolves.toEqual([['Alpha', uuid(101)]]);
+  });
+
+  test('the SQL rule and automaticCover agree on mixed assets', async () => {
+    const types = [PNG, MP4, WEBM, 'image/jpeg', BLEND, 'image/svg+xml', 'video/quicktime'];
+    const statuses: ImportStatus[] = ['complete', 'complete', 'pending', 'failed'];
+    const expected = new Map<string, string | null>();
+    let n = 1000;
+    for (let i = 0; i < 24; i++) {
+      const a = await addAsset(100 + i, `Asset ${String(i).padStart(2, '0')}`);
+      const candidates: { id: string; status: ImportStatus; mimeType: string; importedAt: string }[] = [];
+      for (let j = 0; j < 1 + (i % 4); j++) {
+        const mimeType = types[(i * 3 + j * 5) % types.length]!;
+        const status = statuses[(i + j) % statuses.length]!;
+        const importedAt = (i + j) % 2 === 0 ? T1 : T2;
+        const id = await addFile({ n: n++, assetId: a.id, mimeType, status, importedAt });
+        candidates.push({ id, status, mimeType, importedAt });
+      }
+      expected.set(a.name, automaticCover(candidates));
+    }
+    const listed = await covers();
+    expect(listed).toEqual([...expected.entries()].map(([name, id]) => [name, id]));
+    expect(listed.some(([, id]) => id !== null)).toBe(true);
   });
 });

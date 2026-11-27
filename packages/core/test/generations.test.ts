@@ -126,6 +126,12 @@ describe('startGeneration', () => {
     await refused(t, edit(svg.id), InvalidOperationError, NOT_USABLE);
   });
 
+  it('refuses a video', async () => {
+    const t = await setup();
+    const video = await t.importOne('clip.mp4');
+    await refused(t, edit(video.id), InvalidOperationError, NOT_USABLE);
+  });
+
   it('refuses 200 x 200 pixels, measuring a file without dimensions on demand', async () => {
     const t = await setup();
     t.fake.probe.result = { width: 200, height: 200 };

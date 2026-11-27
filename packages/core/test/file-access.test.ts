@@ -5,6 +5,7 @@ import {
   resolveFilePath,
   resolveOriginalSource,
   resolvePreviewSource,
+  resolveVideoSource,
   StorageUnreachableError,
   ValidationFailedError,
   WorkspaceManager,
@@ -31,7 +32,7 @@ describe('resolvePreviewSource', () => {
   it('returns sha256 and path for a complete image', async () => {
     const { session, file } = await setup();
     const source = await resolvePreviewSource(session, file.id);
-    expect(source).toEqual({ sha256: file.sha256, absolutePath: `/memory/${file.relativePath}` });
+    expect(source).toEqual({ sha256: file.sha256, absolutePath: `/memory/${file.relativePath}`, video: null });
   });
 
   it('ignores files that are not complete', async () => {
@@ -195,8 +196,69 @@ describe('trashed files', () => {
     const { session, db, file } = await setup();
     await trashForTest(session, [file.id]);
     const trashed = (await db.files.get(file.id))!;
-    expect(await resolvePreviewSource(session, file.id)).toEqual({ sha256: file.sha256, absolutePath: `/memory/${trashed.relativePath}` });
+    expect(await resolvePreviewSource(session, file.id)).toEqual({
+      sha256: file.sha256,
+      absolutePath: `/memory/${trashed.relativePath}`,
+      video: null,
+    });
     expect(file.width).not.toBeNull();
     expect(await resolveOriginalSource(session, file.id)).toMatchObject({ absolutePath: `/memory/${trashed.relativePath}` });
+  });
+});
+
+describe('videos', () => {
+  it('resolvePreviewSource answers the format of a complete video', async () => {
+    const { session, file } = await setup('clip.mp4');
+    expect(file).toMatchObject({ kind: 'video', mimeType: 'video/mp4', thumbnail: true, previewable: false });
+    expect(await resolvePreviewSource(session, file.id)).toEqual({
+      sha256: file.sha256,
+      absolutePath: `/memory/${file.relativePath}`,
+      video: 'mp4',
+    });
+    const webm = await setup('clip.webm');
+    expect(await resolvePreviewSource(webm.session, webm.file.id)).toMatchObject({ video: 'webm' });
+  });
+
+  it('resolveOriginalSource never serves a video', async () => {
+    const { session, db, file } = await setup('clip.mp4');
+    db.files.records.set(file.id, { ...file, width: 640, height: 360 });
+    expect(await resolveOriginalSource(session, file.id)).toBeNull();
+  });
+
+  it('resolveVideoSource answers path and type of a complete video, also in the trash', async () => {
+    const { session, db, file } = await setup('clip.webm');
+    expect(await resolveVideoSource(session, file.id)).toEqual({
+      absolutePath: `/memory/${file.relativePath}`,
+      mimeType: 'video/webm',
+    });
+    await trashForTest(session, [file.id]);
+    const trashed = (await db.files.get(file.id))!;
+    expect(await resolveVideoSource(session, file.id)).toEqual({
+      absolutePath: `/memory/${trashed.relativePath}`,
+      mimeType: 'video/webm',
+    });
+  });
+
+  it('resolveVideoSource refuses incomplete files, rows without a checksum and other types', async () => {
+    const { session, db, file } = await setup('clip.mp4');
+    db.files.records.set(file.id, { ...file, status: 'pending' });
+    expect(await resolveVideoSource(session, file.id)).toBeNull();
+    db.files.records.set(file.id, { ...file, status: 'failed', error: 'x' });
+    expect(await resolveVideoSource(session, file.id)).toBeNull();
+    db.files.records.set(file.id, { ...file, sha256: null });
+    expect(await resolveVideoSource(session, file.id)).toBeNull();
+    for (const mimeType of ['image/png', 'video/quicktime', 'VIDEO/MP4', 'application/octet-stream']) {
+      db.files.records.set(file.id, { ...file, mimeType });
+      expect(await resolveVideoSource(session, file.id)).toBeNull();
+    }
+    expect(await resolveVideoSource(session, UNKNOWN_ID)).toBeNull();
+    const image = await setup();
+    expect(await resolveVideoSource(image.session, image.file.id)).toBeNull();
+  });
+
+  it('resolveVideoSource propagates StorageUnreachableError', async () => {
+    const { session, storage, file } = await setup('clip.mp4');
+    storage.reachable = false;
+    await expect(resolveVideoSource(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
   });
 });

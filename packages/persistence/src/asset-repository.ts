@@ -1,5 +1,5 @@
 import type { Asset, AssetList, AssetSummary } from '@assetforge/contracts';
-import { PREVIEWABLE_MIME_TYPES, searchWords, type AssetRepository } from '@assetforge/core';
+import { PREVIEWABLE_MIME_TYPES, VIDEO_MIME_TYPES, searchWords, type AssetRepository } from '@assetforge/core';
 import { and, asc, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetFilter, outerAssetId } from './asset-filters.js';
@@ -27,8 +27,9 @@ const mandatoryStepsOfOuterAsset = sql`from ${assetWorkflowStep}
   where ${workflowAssetId} = ${outerAssetId} and ${qualified(workflowStepDefinition, workflowStepDefinition.mandatory)} = 1`;
 
 /**
- * Automatic cover of each given asset in one statement: its complete, previewable file with the
- * earliest importedAt, ties by id. Assets without such a file are missing from the map.
+ * Automatic cover of each given asset in one statement, the same rule as `automaticCover` in core:
+ * its complete, previewable image with the earliest importedAt, ties by id; only when it has none,
+ * its complete video by the same order. Assets without such a file are missing from the map.
  */
 function automaticCovers(tx: Pick<BetterSQLite3Database, 'select'>, assetIds: readonly string[]): Map<string, string> {
   if (assetIds.length === 0) return new Map();
@@ -36,14 +37,16 @@ function automaticCovers(tx: Pick<BetterSQLite3Database, 'select'>, assetIds: re
     .select({
       assetId: file.assetId,
       id: file.id,
-      rank: sql<number>`row_number() over (partition by ${file.assetId} order by ${file.importedAt}, ${file.id})`.as('rank'),
+      rank: sql<number>`row_number() over (partition by ${file.assetId} order by case when ${inArray(file.mimeType, [...PREVIEWABLE_MIME_TYPES])} then 0 else 1 end, ${file.importedAt}, ${file.id})`.as(
+        'rank',
+      ),
     })
     .from(file)
     .where(
       and(
         inArray(file.assetId, [...assetIds]),
         eq(file.status, 'complete'),
-        inArray(file.mimeType, [...PREVIEWABLE_MIME_TYPES]),
+        inArray(file.mimeType, [...PREVIEWABLE_MIME_TYPES, ...VIDEO_MIME_TYPES]),
       ),
     )
     .as('ranked');

@@ -145,6 +145,7 @@ export class WorkspaceManager {
       storageId,
       database,
       imageProbe: this.host.imageProbe,
+      videoProbe: this.host.videoProbe,
       newId: () => this.host.newId(),
       now: () => this.host.now(),
     };

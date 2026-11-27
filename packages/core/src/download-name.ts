@@ -14,6 +14,8 @@ const EXTENSION_BY_CONTENT_TYPE: Readonly<Record<string, string>> = {
   'application/pdf': 'pdf',
   'application/zip': 'zip',
   'model/gltf-binary': 'glb',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
 };
 const MAPPED_EXTENSIONS: ReadonlySet<string> = new Set(Object.values(EXTENSION_BY_CONTENT_TYPE));
 

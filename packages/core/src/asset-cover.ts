@@ -1,20 +1,31 @@
 import type { AssetDetail, FileRecord } from '@assetforge/contracts';
 import { NotFoundError, ValidationFailedError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
-import { isPreviewable } from './media-types.js';
+import { hasThumbnail, isPreviewable } from './media-types.js';
 import type { WorkspaceSession } from './session.js';
 
 type CoverCandidate = Pick<FileRecord, 'id' | 'status' | 'mimeType' | 'importedAt'>;
 
-/** The complete, previewable file with the earliest `importedAt`, ties by `id` ascending; null when there is none. */
+/**
+ * The complete, previewable image with the earliest `importedAt`, ties by `id` ascending; only when there is none
+ * the complete video chosen by the same order; null when there is neither.
+ */
 export function automaticCover(files: readonly CoverCandidate[]): string | null {
   let best: CoverCandidate | null = null;
   for (const f of files) {
-    if (f.status !== 'complete' || !isPreviewable(f.mimeType)) continue;
-    // Plain code-unit comparison, like SQLite's BINARY collation.
-    if (best === null || f.importedAt < best.importedAt || (f.importedAt === best.importedAt && f.id < best.id)) {
+    if (f.status !== 'complete' || !hasThumbnail(f.mimeType)) continue;
+    if (best === null) {
       best = f;
+      continue;
     }
+    const image = isPreviewable(f.mimeType);
+    const bestImage = isPreviewable(best.mimeType);
+    if (image !== bestImage) {
+      if (image) best = f;
+      continue;
+    }
+    // Plain code-unit comparison, like SQLite's BINARY collation.
+    if (f.importedAt < best.importedAt || (f.importedAt === best.importedAt && f.id < best.id)) best = f;
   }
   return best?.id ?? null;
 }
@@ -33,7 +44,7 @@ export async function getAssetDetail(s: WorkspaceSession, id: string): Promise<A
 
 /**
  * Chooses the cover of an asset, or returns to the automatic one with `fileId: null`. Only a
- * complete, previewable file attached to the asset can be chosen. Choosing is a change of the
+ * complete file with a thumbnail (a previewable image or a video) attached to the asset can be chosen. Choosing is a change of the
  * asset, so `updatedAt` moves.
  */
 export async function setAssetCover(
@@ -49,7 +60,7 @@ export async function setAssetCover(
       throw new ValidationFailedError(`File ${fileId} is not attached to asset ${assetId}`);
     }
     if (file.status !== 'complete') throw new ValidationFailedError(`File ${fileId} is not completely imported`);
-    if (!isPreviewable(file.mimeType)) throw new ValidationFailedError(`File ${fileId} has no preview`);
+    if (!hasThumbnail(file.mimeType)) throw new ValidationFailedError(`File ${fileId} has no preview`);
   }
   await s.database.assets.setCover(assetId, fileId, s.now().toISOString());
   return getAssetDetail(s, assetId);

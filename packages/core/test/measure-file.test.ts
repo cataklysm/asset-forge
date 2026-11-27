@@ -79,6 +79,53 @@ describe('measureFile', () => {
   });
 });
 
+describe('measureFile of a video', () => {
+  async function videoSetup(name = 'clip.mp4') {
+    const fake = createFakeHost();
+    const manager = new WorkspaceManager(fake.host);
+    const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const db = fake.databases.get(summary.id)!;
+    const session = await manager.read(async (s) => s);
+    fake.sources.set(`/src/${name}`, Buffer.from('video'));
+    fake.videoProbe.result = { width: 1920, height: 1080, durationMs: 4500 };
+    const file = (await manager.importFiles([`/src/${name}`]))[0]!.file!;
+    return { session, db, file, probe: fake.probe, videoProbe: fake.videoProbe };
+  }
+
+  it('the import does not measure a video', async () => {
+    const { file, probe, videoProbe } = await videoSetup();
+    expect(file).toMatchObject({ kind: 'video', mimeType: 'video/mp4', width: null, height: null, durationMs: null });
+    expect([probe.calls, videoProbe.calls]).toEqual([[], []]);
+  });
+
+  it('measures a complete video on demand through the video probe and stores size and duration', async () => {
+    const { session, db, file, probe, videoProbe } = await videoSetup();
+    const measured = await measureFile(session, file.id);
+    expect(videoProbe.calls).toEqual([{ absolutePath: `/memory/${file.relativePath}`, format: 'mp4' }]);
+    expect(probe.calls).toEqual([]);
+    expect(measured).toMatchObject({ id: file.id, width: 1920, height: 1080, durationMs: 4500 });
+    expect(await db.files.get(file.id)).toMatchObject({ width: 1920, height: 1080, durationMs: 4500 });
+    await measureFile(session, file.id);
+    expect(videoProbe.calls).toHaveLength(1);
+  });
+
+  it('passes the webm format and stores an unknown duration as null', async () => {
+    const { session, file, videoProbe } = await videoSetup('clip.webm');
+    videoProbe.result = { width: 640, height: 360, durationMs: null };
+    await expect(measureFile(session, file.id)).resolves.toMatchObject({ width: 640, height: 360, durationMs: null });
+    expect(videoProbe.calls[0]!.format).toBe('webm');
+  });
+
+  it('leaves the row unchanged when the video probe yields nothing or fails', async () => {
+    const { session, db, file, videoProbe } = await videoSetup();
+    videoProbe.result = null;
+    expect(await measureFile(session, file.id)).toEqual(file);
+    videoProbe.failure = new Error('/secret/path broke');
+    expect(await measureFile(session, file.id)).toEqual(file);
+    expect(await db.files.get(file.id)).toMatchObject({ width: null, height: null, durationMs: null });
+  });
+});
+
 describe('measureFile of a trashed file', () => {
   it('measureFile still measures it', async () => {
     const { session, file, probe } = await setup();

@@ -76,7 +76,7 @@ function originalUrl(fileId: string): string {
 
 function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps {
   return {
-    findSource: async (): Promise<PreviewSource> => ({ sha256: SHA, absolutePath: join(root, 'x.png') }),
+    findSource: async (): Promise<PreviewSource> => ({ sha256: SHA, absolutePath: join(root, 'x.png'), video: null }),
     findOriginal: async (): Promise<OriginalSource> => ({ absolutePath: originalPath, mimeType: 'image/png' }),
     previews: { get },
     readFile,

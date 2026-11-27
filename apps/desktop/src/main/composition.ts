@@ -7,6 +7,7 @@ import {
   WorkspaceManager,
   type GenerationImageSource,
   type ImageProbe,
+  type VideoProbe,
   type ModelImageSource,
   type RemoteFileSource,
   type WorkspaceHost,
@@ -44,6 +45,8 @@ export interface CompositionOptions {
   moveToTrash?: (absolutePath: string) => Promise<void>;
   /** Reads image dimensions (the media worker pool in the app). Defaults to a probe that never measures. */
   imageProbe?: ImageProbe;
+  /** Reads video size and duration (the frame tool in the app). Defaults to a probe that never measures. */
+  videoProbe?: VideoProbe;
 }
 
 const WorkspaceIdSchema = WorkspaceSummarySchema.shape.id;
@@ -66,6 +69,7 @@ export function createWorkspaceHost(opts: CompositionOptions): WorkspaceHost {
     sources: new NodeSourceFiles(),
     archives: new ZipArchiveReader(),
     imageProbe: opts.imageProbe ?? { measure: async () => null },
+    videoProbe: opts.videoProbe ?? { measure: async () => null },
     createStorage: (rootPath) => new LocalFileSystemStorage(rootPath),
     openDatabase: async (workspaceId) =>
       openWorkspaceDatabase(join(databaseDir(workspaceId), 'assetforge.sqlite'), migrationsFolder),

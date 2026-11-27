@@ -169,6 +169,36 @@ describe('derived-data step', () => {
     ]);
   });
 
+  test('an existing video row gets kind video and its MIME type; no other row changes its MIME type', async () => {
+    const video = await addFile(null, 'clip.mp4', 'other');
+    const m4v = await addFile(null, 'clip.M4V', 'other');
+    const webm = await addFile(null, 'clip.webm', 'other');
+    const image = await addFile(null, 'photo.png');
+    const text = await addFile(null, 'notes.txt', 'document');
+    const hidden = await addFile(null, '.mp4', 'other');
+    raw((s) => {
+      s.prepare("update file set mime_type = 'image/png' where id = ?").run(image);
+      s.prepare("update file set mime_type = 'text/x-own' where id = ?").run(text);
+    });
+    setStamp(1);
+
+    await db.ensureDerivedData();
+
+    const rows = raw((s) => s.prepare('select id, kind, mime_type as mimeType from file order by id').all());
+    expect(rows).toEqual(
+      [
+        { id: video, kind: 'video', mimeType: 'video/mp4' },
+        { id: m4v, kind: 'video', mimeType: 'video/mp4' },
+        { id: webm, kind: 'video', mimeType: 'video/webm' },
+        { id: image, kind: 'image', mimeType: 'image/png' },
+        { id: text, kind: 'document', mimeType: 'text/x-own' },
+        { id: hidden, kind: 'other', mimeType: 'application/octet-stream' },
+      ].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    );
+    await expect(db.files.get(video)).resolves.toMatchObject({ kind: 'video', mimeType: 'video/mp4', thumbnail: true, previewable: false });
+    expect(stamp()).toBe(2);
+  });
+
   test('an interrupted rebuild keeps the old stamp and completes on the next run', async () => {
     for (let n = 1; n <= 5; n++) {
       await db.assets.insert(asset(n, `Asset ${n}`));

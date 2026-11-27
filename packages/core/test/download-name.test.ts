@@ -51,10 +51,13 @@ describe('downloadFileName', () => {
       ['application/pdf', 'x.pdf'],
       ['application/zip', 'x.zip'],
       ['model/gltf-binary', 'x.glb'],
+      ['video/mp4', 'x.mp4'],
+      ['video/webm', 'x.webm'],
     ];
     for (const [type, expected] of cases) expect(name('https://a.example/x', type)).toBe(expected);
     expect(name('https://a.example/x', 'application/octet-stream')).toBe('x');
     expect(name('https://a.example/x', null)).toBe('x');
+    expect(name('https://a.example/clip.mp4', 'video/webm')).toBe('clip.mp4');
   });
 
   it('a long name keeps its appended extension', () => {

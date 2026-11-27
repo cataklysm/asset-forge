@@ -30,6 +30,7 @@ async function setup() {
     storageId: base.storageId,
     database: base.database,
     imageProbe: base.imageProbe,
+    videoProbe: base.videoProbe,
     newId: () => base.newId(),
     now: () => new Date((tick += 1000)),
   };

@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
 import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
 import { mimeFromFileName, sanitizeFileName } from './file-names.js';
-import { fileKind, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
+import { fileKind, hasThumbnail, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository, ImageProbe, SourceFiles, Storage } from './ports.js';
 
@@ -188,10 +188,12 @@ export async function importStream(ctx: ImportContext, source: ImportSource, opt
       error: null,
       importedAt: pending.importedAt,
       previewable: isPreviewable(pending.mimeType),
+      thumbnail: hasThumbnail(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
       width: size?.width ?? null,
       height: size?.height ?? null,
+      durationMs: null,
       tags: [],
       hasProposal: false,
       deletedAt: null,
@@ -234,10 +236,12 @@ export async function importStream(ctx: ImportContext, source: ImportSource, opt
       error: message,
       importedAt: pending.importedAt,
       previewable: isPreviewable(pending.mimeType),
+      thumbnail: hasThumbnail(pending.mimeType),
       openable: isOpenable(finalPath),
       kind: pending.kind,
       width: null,
       height: null,
+      durationMs: null,
       tags: [],
       hasProposal: false,
       deletedAt: null,

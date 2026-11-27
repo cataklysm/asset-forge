@@ -6,7 +6,7 @@ import { TagAssignmentSchema } from './tags';
 export const ImportStatusSchema = z.enum(['pending', 'complete', 'failed']);
 export type ImportStatus = z.infer<typeof ImportStatusSchema>;
 
-export const FileKindSchema = z.enum(['image', 'model', 'document', 'other']);
+export const FileKindSchema = z.enum(['image', 'model', 'document', 'video', 'other']);
 export type FileKind = z.infer<typeof FileKindSchema>;
 
 export const FileRecordSchema = z.object({
@@ -25,11 +25,16 @@ export const FileRecordSchema = z.object({
   status: ImportStatusSchema,
   error: z.string().nullable(),
   importedAt: z.iso.datetime(),
+  /** A raster image Sharp reads (thumbnails, viewer, analysis, studio input). */
   previewable: z.boolean(),
+  /** A thumbnail can be asked for: a previewable image or a video (from one of its frames). */
+  thumbnail: z.boolean(),
   openable: z.boolean(),
   kind: FileKindSchema,
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
+  /** The length of a video in milliseconds, once measured; null otherwise. */
+  durationMs: z.number().int().positive().nullable(),
   tags: z.array(TagAssignmentSchema), // file tags only
   /** A tag proposal of an analysis waits for the owner's decision. */
   hasProposal: z.boolean(),

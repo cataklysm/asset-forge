@@ -1,3 +1,5 @@
+import { diskExtension, fileKind, isVideo } from './media-types.js';
+
 const MAX_LENGTH = 100;
 const MAX_EXTENSION_LENGTH = 10;
 
@@ -67,10 +69,21 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   txt: 'text/plain',
   md: 'text/markdown',
   json: 'application/json',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
 };
 
+const OCTET_STREAM = 'application/octet-stream';
+
+/**
+ * The MIME type stored for a file of this name. A video type follows the same extension rule as `fileKind`, so a
+ * name has a video type exactly when its kind is `video`.
+ */
 export function mimeFromFileName(name: string): string {
+  if (fileKind(name) === 'video') return MIME_BY_EXTENSION[diskExtension(name)!]!;
   const dot = name.lastIndexOf('.');
-  if (dot < 0) return 'application/octet-stream';
-  return MIME_BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? 'application/octet-stream';
+  if (dot < 0) return OCTET_STREAM;
+  const type = MIME_BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? OCTET_STREAM;
+  return isVideo(type) ? OCTET_STREAM : type;
 }

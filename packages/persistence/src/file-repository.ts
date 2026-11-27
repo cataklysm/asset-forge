@@ -4,6 +4,7 @@ import {
   InvalidOperationError,
   NotFoundError,
   foldSearchWord,
+  hasThumbnail,
   isOpenable,
   isPreviewable,
   searchWords,
@@ -36,10 +37,12 @@ const toRecord = (
   error: row.error,
   importedAt: row.importedAt,
   previewable: isPreviewable(row.mimeType),
+  thumbnail: hasThumbnail(row.mimeType),
   openable: row.deletedAt === null && isOpenable(row.relativePath), // a trashed file is never opened
   kind: FileKindSchema.catch('other').parse(row.kind), // the column has no CHECK; an unknown value reads as 'other'
   width: row.width,
   height: row.height,
+  durationMs: row.durationMs,
   tags,
   hasProposal,
   deletedAt: row.deletedAt,
@@ -258,7 +261,12 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
     },
     async setDimensions(id, size) {
       return db.transaction((tx) => {
-        const row = tx.update(file).set({ width: size.width, height: size.height }).where(eq(file.id, id)).returning().get();
+        // An undefined duration leaves the column as it is; null clears it.
+        const values =
+          size.durationMs === undefined
+            ? { width: size.width, height: size.height }
+            : { width: size.width, height: size.height, durationMs: size.durationMs };
+        const row = tx.update(file).set(values).where(eq(file.id, id)).returning().get();
         if (!row) throw new NotFoundError(`File ${id} does not exist`);
         return toRecordWithTags(tx, row);
       });

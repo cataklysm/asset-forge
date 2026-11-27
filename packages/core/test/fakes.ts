@@ -34,7 +34,7 @@ import type {
 import { automaticCover } from '../src/asset-cover.js';
 import { trashFiles } from '../src/file-trash.js';
 import type { WorkspaceSession } from '../src/session.js';
-import { fileKind, isOpenable, isPreviewable } from '../src/media-types.js';
+import { fileKind, hasThumbnail, isOpenable, isPreviewable, type VideoFormat } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { foldSearchWord, searchWords, textWords } from '../src/search.js';
 import {
@@ -74,6 +74,8 @@ import type {
   FileQuery,
   FileRepository,
   ImageProbe,
+  VideoInfo,
+  VideoProbe,
   ModelImageSource,
   OpenArchive,
   Page,
@@ -546,10 +548,12 @@ class InMemoryFiles implements FileRepository {
       error: null,
       importedAt: r.importedAt,
       previewable: isPreviewable(r.mimeType),
+      thumbnail: hasThumbnail(r.mimeType),
       openable: isOpenable(r.relativePath),
       kind: r.kind,
       width: null,
       height: null,
+      durationMs: null,
       tags: [],
       hasProposal: false,
       deletedAt: null,
@@ -579,8 +583,9 @@ class InMemoryFiles implements FileRepository {
     this.records.set(id, { ...rec, status: 'complete', sizeBytes: r.sizeBytes, sha256: r.sha256, width: r.width, height: r.height, error: null });
   }
 
-  async setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord> {
-    const rec = { ...this.require(id), width: size.width, height: size.height };
+  async setDimensions(id: string, size: { width: number; height: number; durationMs?: number | null }): Promise<FileRecord> {
+    const current = this.require(id);
+    const rec = { ...current, width: size.width, height: size.height, durationMs: size.durationMs === undefined ? current.durationMs : size.durationMs };
     this.records.set(id, rec);
     return this.withTags(rec);
   }
@@ -1700,6 +1705,19 @@ export class FakeImageProbe implements ImageProbe {
   }
 }
 
+/** Records its calls; `result` (null by default) is returned, or `failure` is thrown when set. */
+export class FakeVideoProbe implements VideoProbe {
+  readonly calls: { absolutePath: string; format: VideoFormat }[] = [];
+  result: VideoInfo | null = null;
+  failure: Error | null = null;
+
+  async measure(absolutePath: string, format: VideoFormat): Promise<VideoInfo | null> {
+    this.calls.push({ absolutePath, format });
+    if (this.failure) throw this.failure;
+    return this.result;
+  }
+}
+
 /** Answers `jpeg` from `script` (one entry per call, the last entry repeating); records every path. */
 export class FakeModelImageSource implements ModelImageSource {
   readonly calls: string[] = [];
@@ -1754,6 +1772,7 @@ export async function trashForTest(s: WorkspaceSession, fileIds: readonly string
 export function createFakeHost(): {
   host: WorkspaceHost;
   probe: FakeImageProbe;
+  videoProbe: FakeVideoProbe;
   storages: Map<string, InMemoryStorage>;
   databases: Map<string, InMemoryDatabase>;
   sources: FakeSourceFiles;
@@ -1766,11 +1785,13 @@ export function createFakeHost(): {
   const sources = new FakeSourceFiles();
   const archives = new FakeArchives();
   const probe = new FakeImageProbe();
+  const videoProbe = new FakeVideoProbe();
   const host: WorkspaceHost = {
     registry: new InMemoryRegistry(),
     sources,
     archives,
     imageProbe: probe,
+    videoProbe,
     createStorage(rootPath) {
       let storage = storages.get(rootPath);
       if (!storage) {
@@ -1802,5 +1823,5 @@ export function createFakeHost(): {
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
-  return { host, probe, storages, databases, sources, archives, trash };
+  return { host, probe, videoProbe, storages, databases, sources, archives, trash };
 }

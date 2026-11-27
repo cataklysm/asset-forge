@@ -1,15 +1,15 @@
-import { fileKind } from '@assetforge/core';
+import { fileKind, mimeFromFileName } from '@assetforge/core';
 import { asc, eq, gt, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { reindexAsset } from './search-index.js';
 import { asset, assetSearchMap, file, workspace } from './schema.js';
 
 /**
- * Version of the data derived from stored rows: file kinds and the search index. Raise it whenever
- * the derivation changes (new kind extensions, a different searchable text), so the next open
- * rebuilds everything once.
+ * Version of the data derived from stored rows: file kinds, the MIME type of videos and the search
+ * index. Raise it whenever the derivation changes (new kind extensions, a different searchable
+ * text), so the next open rebuilds everything once. Version 2 added the video kind.
  */
-export const DERIVED_DATA_VERSION = 1;
+export const DERIVED_DATA_VERSION = 2;
 
 export interface DerivedDataOptions {
   /** Ids per transaction; default 500. */
@@ -24,8 +24,8 @@ const DEFAULT_BATCH_SIZE = 500;
 const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
- * Recomputes every file's kind and rebuilds the search index unless the stored stamp equals
- * `DERIVED_DATA_VERSION`. Each batch is its own transaction and the stamp is written last, so an
+ * Recomputes every file's kind (and a video's MIME type) and rebuilds the search index unless the
+ * stored stamp equals `DERIVED_DATA_VERSION`. Each batch is its own transaction and the stamp is written last, so an
  * interrupted run keeps the old stamp and the next open starts over. Each transaction is synchronous;
  * the function yields to the event loop after every batch.
  */
@@ -34,13 +34,14 @@ export async function ensureDerivedData(db: BetterSQLite3Database, options: Deri
   if (stored?.v === DERIVED_DATA_VERSION) return;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
 
-  // (1) File kinds from the original names, keyset by id; only rows whose kind differs are written.
+  // (1) File kinds from the original names, keyset by id; a video row also gets its MIME type from the same name and
+  // rule (other rows keep theirs). Only rows whose values differ are written.
   let afterFile: string | null = null;
   for (;;) {
     const from: string | null = afterFile;
     const last: string | null = db.transaction((tx): string | null => {
       const rows = tx
-        .select({ id: file.id, name: file.originalName, kind: file.kind })
+        .select({ id: file.id, name: file.originalName, kind: file.kind, mimeType: file.mimeType })
         .from(file)
         .where(from === null ? undefined : gt(file.id, from))
         .orderBy(asc(file.id))
@@ -48,7 +49,8 @@ export async function ensureDerivedData(db: BetterSQLite3Database, options: Deri
         .all();
       for (const row of rows) {
         const kind = fileKind(row.name);
-        if (kind !== row.kind) tx.update(file).set({ kind }).where(eq(file.id, row.id)).run();
+        const mimeType = kind === 'video' ? mimeFromFileName(row.name) : row.mimeType;
+        if (kind !== row.kind || mimeType !== row.mimeType) tx.update(file).set({ kind, mimeType }).where(eq(file.id, row.id)).run();
       }
       return rows.at(-1)?.id ?? null;
     });

@@ -1,5 +1,5 @@
 import { ORIGINAL_MIME_TYPES, viewSource } from '@assetforge/contracts';
-import { isOpenable, isPreviewable } from './media-types.js';
+import { isOpenable, isPreviewable, isVideo, videoFormat, type VideoFormat } from './media-types.js';
 import { NotFoundError, StorageUnreachableError, ValidationFailedError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { WorkspaceSession } from './session.js';
@@ -7,17 +7,39 @@ import type { WorkspaceSession } from './session.js';
 export interface PreviewSource {
   sha256: string;
   absolutePath: string;
+  /** The container format when the source is a video (its preview is rendered from a frame); null for an image. */
+  video: VideoFormat | null;
 }
 
-/** null unless the file exists, is complete, previewable and has a checksum. Storage errors propagate. */
+/**
+ * null unless the file exists, is complete, has a checksum and is previewable or a video. Storage errors
+ * propagate.
+ */
 export async function resolvePreviewSource(
   s: WorkspaceSession,
   fileId: string,
 ): Promise<PreviewSource | null> {
   const file = await s.database.files.get(fileId);
   if (file === null || file.status !== 'complete' || file.sha256 === null) return null;
-  if (!isPreviewable(file.mimeType)) return null;
-  return { sha256: file.sha256, absolutePath: await s.storage.absolutePath(file.relativePath) };
+  const video = videoFormat(file.mimeType);
+  if (video === null && !isPreviewable(file.mimeType)) return null;
+  return { sha256: file.sha256, absolutePath: await s.storage.absolutePath(file.relativePath), video };
+}
+
+export interface VideoSource {
+  absolutePath: string;
+  mimeType: string;
+}
+
+/**
+ * null unless the file exists, is complete, has a checksum and its MIME type is one of `VIDEO_MIME_TYPES`. Serves
+ * a file in the trash as well. Storage errors propagate.
+ */
+export async function resolveVideoSource(s: WorkspaceSession, fileId: string): Promise<VideoSource | null> {
+  const file = await s.database.files.get(fileId);
+  if (file === null || file.status !== 'complete' || file.sha256 === null) return null;
+  if (!isVideo(file.mimeType)) return null;
+  return { absolutePath: await s.storage.absolutePath(file.relativePath), mimeType: file.mimeType };
 }
 
 export interface OriginalSource {

@@ -1,0 +1,1 @@
+ALTER TABLE `file` ADD `duration_ms` integer;

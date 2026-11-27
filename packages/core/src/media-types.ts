@@ -14,6 +14,28 @@ export function isPreviewable(mimeType: string): boolean {
   return PREVIEWABLE_MIME_TYPES.includes(mimeType);
 }
 
+/** MIME types of the videos the app plays and takes a frame from. */
+export const VIDEO_MIME_TYPES: readonly string[] = ['video/mp4', 'video/webm'];
+
+/** The container format of a video, which decides how the frame tool reads it. */
+export type VideoFormat = 'mp4' | 'webm';
+
+export function isVideo(mimeType: string): boolean {
+  return VIDEO_MIME_TYPES.includes(mimeType);
+}
+
+/** The container format of a video MIME type; null for anything else. */
+export function videoFormat(mimeType: string): VideoFormat | null {
+  if (mimeType === 'video/mp4') return 'mp4';
+  if (mimeType === 'video/webm') return 'webm';
+  return null;
+}
+
+/** A thumbnail can be made: a previewable image, or a video through one of its frames. */
+export function hasThumbnail(mimeType: string): boolean {
+  return isPreviewable(mimeType) || isVideo(mimeType);
+}
+
 /** Extensions (lower case, no dot) per file kind; everything else, including no extension, is `other`. */
 export const FILE_KIND_EXTENSIONS: Readonly<Record<Exclude<FileKind, 'other'>, readonly string[]>> = {
   image: ['png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff', 'gif', 'avif', 'bmp', 'exr', 'hdr', 'tga', 'psd', 'svg'],
@@ -22,6 +44,7 @@ export const FILE_KIND_EXTENSIONS: Readonly<Record<Exclude<FileKind, 'other'>, r
     'sbs', 'sbsar',
   ],
   document: ['pdf', 'txt', 'md', 'doc', 'docx', 'odt', 'rtf'],
+  video: ['mp4', 'm4v', 'webm'],
 };
 
 /** Extensions (lower case, no dot) of programs, installers and shortcuts that are never imported. */
@@ -50,7 +73,7 @@ export function diskName(relativePath: string): string {
 export function fileKind(fileName: string): FileKind {
   const extension = diskExtension(fileName);
   if (extension === null) return 'other';
-  for (const kind of ['image', 'model', 'document'] as const) {
+  for (const kind of Object.keys(FILE_KIND_EXTENSIONS) as Exclude<FileKind, 'other'>[]) {
     if (FILE_KIND_EXTENSIONS[kind].includes(extension)) return kind;
   }
   return 'other';
@@ -83,7 +106,7 @@ export function isZipArchive(fileName: string): boolean {
   return importExtension(fileName) === 'zip';
 }
 
-/** A file can be opened externally when its kind is image, model or document, except SVG. */
+/** A file can be opened externally when its kind is image, model, document or video, except SVG. */
 export function isOpenable(relativePath: string): boolean {
   const name = diskName(relativePath);
   return fileKind(name) !== 'other' && diskExtension(name) !== 'svg';

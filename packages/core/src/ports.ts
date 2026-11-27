@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import type { VideoFormat } from './media-types.js';
 import type {
   AnalysisPreview,
   AnalysisTarget,
@@ -173,8 +174,11 @@ export interface FileRepository {
   /** Ids of pending rows that carry an origin. */
   listPendingDownloadIds(): Promise<string[]>;
   markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void>; // rejects with NotFoundError for an unknown id
-  /** Stores the pixel size; rejects with NotFoundError for an unknown id. */
-  setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord>;
+  /**
+   * Stores the pixel size, and the duration when `durationMs` is given (a video); rejects with NotFoundError for an
+   * unknown id.
+   */
+  setDimensions(id: string, size: { width: number; height: number; durationMs?: number | null }): Promise<FileRecord>;
   markFailed(id: string, error: string): Promise<void>; // rejects with NotFoundError for an unknown id
   /** Complete files outside the trash with this checksum, oldest import first, then id. */
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
@@ -819,6 +823,18 @@ export interface ImageProbe {
   measure(absolutePath: string): Promise<{ width: number; height: number } | null>;
 }
 
+/** The displayed size (after rotation) and length of a video; `durationMs` is null when unknown. */
+export interface VideoInfo {
+  width: number;
+  height: number;
+  durationMs: number | null;
+}
+
+/** Reads size and length of a video file; null when they cannot be determined. Implemented outside core. */
+export interface VideoProbe {
+  measure(absolutePath: string, format: VideoFormat): Promise<VideoInfo | null>;
+}
+
 /**
  * A vision provider; the model is an argument of every call, never bound to the instance. Each
  * method rejects with a `JobError` on provider failure, or with the signal's reason when `signal`
@@ -895,6 +911,7 @@ export interface WorkspaceHost {
   sources: SourceFiles;
   archives: ArchiveReader;
   imageProbe: ImageProbe;
+  videoProbe: VideoProbe;
   createStorage(rootPath: string): Storage;
   openDatabase(workspaceId: string): Promise<WorkspaceDatabase>; // creates the file and applies migrations
   deleteDatabase(workspaceId: string): Promise<void>; // removes the local database; no-op if missing

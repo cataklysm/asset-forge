@@ -1,5 +1,5 @@
 import type { WorkspaceSummary } from '@assetforge/contracts';
-import type { ImageProbe, Storage, WorkspaceDatabase } from './ports.js';
+import type { ImageProbe, Storage, VideoProbe, WorkspaceDatabase } from './ports.js';
 
 /** What a use case gets to work with while a workspace is open. */
 export interface WorkspaceSession {
@@ -9,6 +9,7 @@ export interface WorkspaceSession {
   readonly storageId: string;
   readonly database: WorkspaceDatabase;
   readonly imageProbe: ImageProbe;
+  readonly videoProbe: VideoProbe;
   newId(): string;
   now(): Date;
 }

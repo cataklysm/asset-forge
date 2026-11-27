@@ -316,6 +316,18 @@ describe('file dimensions', () => {
     expect((await db.files.get(fileId(1)))?.width).toBe(640);
   });
 
+  test('setDimensions stores the duration when given and keeps it otherwise', async () => {
+    await pending(1);
+    await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'a'.repeat(64), width: null, height: null });
+    expect(await db.files.get(fileId(1))).toMatchObject({ durationMs: null });
+    const record = await db.files.setDimensions(fileId(1), { width: 1920, height: 1080, durationMs: 4500 });
+    expect(record).toMatchObject({ width: 1920, height: 1080, durationMs: 4500 });
+    await db.files.setDimensions(fileId(1), { width: 1280, height: 720 });
+    expect(await db.files.get(fileId(1))).toMatchObject({ width: 1280, height: 720, durationMs: 4500 });
+    await db.files.setDimensions(fileId(1), { width: 1280, height: 720, durationMs: null });
+    expect(await db.files.get(fileId(1))).toMatchObject({ durationMs: null });
+  });
+
   test('setDimensions rejects for an unknown id', async () => {
     await expect(db.files.setDimensions(uuid(999), { width: 1, height: 1 })).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -372,8 +384,24 @@ describe('file placement and moves', () => {
       importedAt: '2026-01-04T00:00:00.000Z',
       kind: 'image',
     });
-    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ previewable: true, openable: true });
-    await expect(db.files.get(fileId(4))).resolves.toMatchObject({ previewable: false, openable: false });
+    await db.files.insertPending({
+      id: fileId(5),
+      storageId: STORAGE,
+      originalName: 'clip.webm',
+      relativePath: 'inbox/f5_clip.webm',
+      mimeType: 'video/webm',
+      importedAt: '2026-01-05T00:00:00.000Z',
+      kind: 'video',
+    });
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ previewable: true, thumbnail: true, openable: true });
+    await expect(db.files.get(fileId(4))).resolves.toMatchObject({ previewable: false, thumbnail: false, openable: false });
+    await expect(db.files.get(fileId(5))).resolves.toMatchObject({
+      previewable: false,
+      thumbnail: true,
+      openable: true,
+      kind: 'video',
+      durationMs: null,
+    });
     const listed = await db.files.list({ limit: 10, offset: 0, scope: { kind: 'inbox' } });
     expect(listed.items.find((f) => f.id === fileId(4))?.openable).toBe(false);
   });

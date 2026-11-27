@@ -44,7 +44,7 @@ async function addFile(
     name: string;
     mimeType: string;
     importedAt: string;
-    kind?: 'image';
+    kind?: 'image' | 'video';
     assetId?: string | null;
     role?: FileRole;
     status?: ImportStatus;
@@ -255,5 +255,55 @@ describe('asset cover of a trashed file', () => {
     const error = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: file.id }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(InvalidOperationError);
     expect((error as Error).message).toBe('The file is in the trash');
+  });
+});
+
+const mp4 = 'video/mp4';
+
+describe('asset cover with a video', () => {
+  it('automaticCover prefers any complete image over an earlier video', () => {
+    expect(
+      automaticCover([
+        { id: uuid(1), status: 'complete', mimeType: mp4, importedAt: T1 },
+        { id: uuid(2), status: 'complete', mimeType: png, importedAt: T3 },
+      ]),
+    ).toBe(uuid(2));
+  });
+
+  it('automaticCover takes the earliest complete video when there is no image, ties by id', () => {
+    expect(
+      automaticCover([
+        { id: uuid(3), status: 'complete', mimeType: 'video/webm', importedAt: T2 },
+        { id: uuid(5), status: 'complete', mimeType: mp4, importedAt: T1 },
+        { id: uuid(4), status: 'complete', mimeType: mp4, importedAt: T1 },
+        { id: uuid(1), status: 'pending', mimeType: mp4, importedAt: T1 },
+        { id: uuid(2), status: 'complete', mimeType: 'image/svg+xml', importedAt: T1 },
+      ]),
+    ).toBe(uuid(4));
+  });
+
+  it('an asset with an earlier video and a later image keeps the image as automatic cover', async () => {
+    const ctx = await setup();
+    await addFile(ctx, { id: uuid(1), name: 'clip.mp4', mimeType: mp4, importedAt: T1, kind: 'video', assetId: ctx.asset.id });
+    await addFile(ctx, { id: uuid(2), name: 'b.png', mimeType: png, importedAt: T2, assetId: ctx.asset.id });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: uuid(2), coverIsChosen: false });
+    const listed = await listAssets(ctx.session, { limit: 10, offset: 0 });
+    expect(listed.items.find((a) => a.id === ctx.asset.id)!.coverFileId).toBe(uuid(2));
+  });
+
+  it('an asset with only a video has it as automatic cover', async () => {
+    const ctx = await setup();
+    await addFile(ctx, { id: uuid(1), name: 'clip.webm', mimeType: 'video/webm', importedAt: T1, kind: 'video', assetId: ctx.asset.id });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: uuid(1), coverIsChosen: false });
+  });
+
+  it('setAssetCover accepts a complete video', async () => {
+    const ctx = await setup();
+    await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    await addFile(ctx, { id: uuid(2), name: 'clip.mp4', mimeType: mp4, importedAt: T2, kind: 'video', assetId: ctx.asset.id });
+    await expect(setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) })).resolves.toMatchObject({
+      coverFileId: uuid(2),
+      coverIsChosen: true,
+    });
   });
 });

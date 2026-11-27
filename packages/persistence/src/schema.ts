@@ -186,6 +186,7 @@ export const file = sqliteTable(
     kind: text('kind').notNull().default('other'),
     width: integer('width'),
     height: integer('height'),
+    durationMs: integer('duration_ms'),
     status: text('status', { enum: IMPORT_STATUSES }).notNull(),
     error: text('error'),
     importedAt: text('imported_at').notNull(),

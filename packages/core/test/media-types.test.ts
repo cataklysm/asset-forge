@@ -11,7 +11,12 @@ import {
   isOpenable,
   isPreviewable,
   isRefusedImport,
+  isVideo,
   isZipArchive,
+  hasThumbnail,
+  mimeFromFileName,
+  VIDEO_MIME_TYPES,
+  videoFormat,
 } from '../src/index.js';
 
 describe('media types', () => {
@@ -42,6 +47,7 @@ describe('media types', () => {
         'spp', 'sbs', 'sbsar',
       ],
       document: ['pdf', 'txt', 'md', 'doc', 'docx', 'odt', 'rtf'],
+      video: ['mp4', 'm4v', 'webm'],
     });
     expect(REFUSED_IMPORT_EXTENSIONS).toEqual([
       'exe', 'com', 'scr', 'msi', 'msp', 'msix', 'appx', 'appinstaller', 'bat', 'cmd', 'ps1', 'psm1', 'psd1',
@@ -55,6 +61,38 @@ describe('media types', () => {
     expect(fileKind('scene.blend')).toBe('model');
     expect(fileKind('a.exe.txt')).toBe('document');
     for (const name of ['a.py', 'README', 'a.']) expect(fileKind(name)).toBe('other');
+  });
+
+  it('fileKind and mimeFromFileName of a video', () => {
+    expect(fileKind('clip.MP4')).toBe('video');
+    expect(fileKind('clip.m4v')).toBe('video');
+    expect(fileKind('clip.webm')).toBe('video');
+    expect(mimeFromFileName('clip.MP4')).toBe('video/mp4');
+    expect(mimeFromFileName('clip.m4v')).toBe('video/mp4');
+    expect(mimeFromFileName('clip.webm')).toBe('video/webm');
+  });
+
+  it('kind and MIME type of a video come from one rule', () => {
+    for (const name of ['.mp4', 'a.mp4.', 'a.webm ', 'mp4', 'a.mp4.txt', 'a.txt.mp4', 'a.MOV', 'a.mkv', 'a.m4v']) {
+      expect(fileKind(name) === 'video').toBe(isVideo(mimeFromFileName(name)));
+    }
+    expect(mimeFromFileName('.mp4')).toBe('application/octet-stream');
+    expect(mimeFromFileName('a.mp4.')).toBe('video/mp4');
+  });
+
+  it('video types, hasThumbnail and videoFormat', () => {
+    expect(VIDEO_MIME_TYPES).toEqual(['video/mp4', 'video/webm']);
+    expect(isVideo('video/mp4')).toBe(true);
+    expect(isVideo('video/webm')).toBe(true);
+    for (const type of ['video/quicktime', 'image/png', 'application/octet-stream']) expect(isVideo(type)).toBe(false);
+    for (const type of [...PREVIEWABLE_MIME_TYPES, ...VIDEO_MIME_TYPES]) expect(hasThumbnail(type)).toBe(true);
+    for (const type of ['image/svg+xml', 'image/x-exr', 'video/quicktime', 'application/pdf']) {
+      expect(hasThumbnail(type)).toBe(false);
+    }
+    expect(videoFormat('video/mp4')).toBe('mp4');
+    expect(videoFormat('video/webm')).toBe('webm');
+    expect(videoFormat('image/png')).toBeNull();
+    for (const type of VIDEO_MIME_TYPES) expect(isPreviewable(type)).toBe(false);
   });
 
   it('importExtension takes the last extension and counts a leading dot', () => {
@@ -84,6 +122,7 @@ describe('media types', () => {
     expect(isOpenable('inbox/x_a.exe.txt')).toBe(true);
     expect(isOpenable('assets/a/working/x_scene.blend')).toBe(true);
     expect(isOpenable('inbox/x_Photo.PNG.')).toBe(true);
+    expect(isOpenable('inbox/x_clip.mp4')).toBe(true);
     for (const name of ['x_a.svg', 'x_a.py', 'x_README', 'x_a.zip']) expect(isOpenable(`inbox/${name}`)).toBe(false);
   });
 
