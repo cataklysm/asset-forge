@@ -155,8 +155,8 @@ it('the Jobs entry shows no number while idle and the active count otherwise', a
 
 const LOCAL_ID = '00000000-0000-4000-8000-00000000a001';
 const RUNPOD_ID = '00000000-0000-4000-8000-00000000b001';
-const PAUSED_LOCAL: PausedProvider = { providerId: LOCAL_ID, providerName: 'Local Ollama', reason: 'provider_unreachable' };
-const PAUSED_RUNPOD: PausedProvider = { providerId: RUNPOD_ID, providerName: 'RunPod', reason: 'provider_unauthorized' };
+const PAUSED_LOCAL: PausedProvider = { providerId: LOCAL_ID, providerName: 'Local Ollama', kind: 'ollama', reason: 'provider_unreachable' };
+const PAUSED_RUNPOD: PausedProvider = { providerId: RUNPOD_ID, providerName: 'RunPod', kind: 'ollama', reason: 'provider_unauthorized' };
 
 /** The app frame of the workspace shell inside its job and provider state, without the screens. */
 function jobsShell(summary: () => JobSummary, handlers: FakeHandlers = {}) {
@@ -224,6 +224,22 @@ it('Move jobs on a line opens the move dialog with that provider as the fixed so
   expect(screen.queryByRole('dialog', { name: 'Move jobs' })).toBeNull();
 });
 
+it('the line of a paused Venice lane offers Resume and Settings but no Move jobs', async () => {
+  const user = userEvent.setup();
+  const VENICE_ID = '00000000-0000-4000-8000-00000000c001';
+  const venice: PausedProvider = { providerId: VENICE_ID, providerName: 'Venice', kind: 'venice', reason: 'provider_unauthorized' };
+  const { api, onNavigate } = jobsShell(() => ({ ...IDLE, paused: [venice, PAUSED_LOCAL] }));
+  const banner = await screen.findByRole('alert');
+  const line = within(banner).getByRole('group', { name: 'Venice' });
+  expect(within(line).queryByRole('button', { name: 'Move jobs' })).toBeNull();
+  expect(within(within(banner).getByRole('group', { name: 'Local Ollama' })).getByRole('button', { name: 'Move jobs' })).toBeTruthy();
+  await user.click(within(line).getByRole('button', { name: 'Settings' }));
+  expect(onNavigate).toHaveBeenCalledWith('settings');
+  await user.click(within(line).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:resume')).toBe(true));
+  expect(api.calls.find((c) => c.channel === 'jobs:resume')?.request).toEqual({ providerId: VENICE_ID });
+});
+
 it('no paused provider shows no banner', async () => {
   const { api } = jobsShell(() => IDLE);
   await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:summary')).toBe(true));
@@ -240,8 +256,8 @@ it('a paused line without a name shows Removed provider, and No provider for the
       busy={false}
       activeJobs={0}
       paused={[
-        { providerId: LOCAL_ID, providerName: null, reason: 'provider_not_configured' },
-        { providerId: null, providerName: null, reason: 'provider_not_configured' },
+        { providerId: LOCAL_ID, providerName: null, kind: 'ollama', reason: 'provider_not_configured' },
+        { providerId: null, providerName: null, kind: 'ollama', reason: 'provider_not_configured' },
       ]}
       onNavigate={() => {}}
       onClose={() => {}}

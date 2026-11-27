@@ -13,7 +13,7 @@ import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analy
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
-import { mockProviderEntry, servicesWithPrompts } from './idle-job-host.js';
+import { mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
 let sources: string;
@@ -57,6 +57,7 @@ async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Pr
     provider: OLLAMA_PROVIDER,
     pause: createPauseGate({}),
     firstEntry: firstEntry ?? (() => provider.store.first()),
+    ...noGenerations,
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(

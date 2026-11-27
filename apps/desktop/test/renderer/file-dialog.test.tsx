@@ -133,6 +133,35 @@ it('a failing shell action shows the error inline', async () => {
   await screen.findByRole('alert');
 });
 
+it('More offers the studio entries the host passes; a failing upscale shows its message in the dialog', async () => {
+  install();
+  const studio = {
+    open: vi.fn(),
+    openFile: vi.fn(),
+    upscale: vi.fn(async () => {
+      throw new Error('The provider could not be reached');
+    }),
+    blocked: null,
+  };
+  const file = fileRecord();
+  render(<Harness file={file} asset={null} actions={{ ...ACTIONS, studio }} />);
+  const user = await openDialog();
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Generate from image' }));
+  expect(studio.open).toHaveBeenCalledWith(file);
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Upscale 2×' }));
+  expect(studio.upscale).toHaveBeenCalledWith(file, 2);
+  expect((await screen.findByRole('alert')).textContent).toBe('The provider could not be reached');
+});
+
+it('without a role control the dialog shows no Role or Assign section', async () => {
+  install();
+  render(<Harness file={fileRecord()} asset={null} roleControl={null} />);
+  await openDialog();
+  expect(screen.queryByRole('heading', { name: 'Assign' })).toBeNull();
+});
+
 it('the asset link follows to the asset', async () => {
   install();
   const onOpenAsset = vi.fn();

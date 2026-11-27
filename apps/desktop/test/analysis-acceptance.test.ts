@@ -14,7 +14,7 @@ import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
 import { createJobHost } from '../src/main/job-host.js';
 import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
-import { mockProviderEntry, servicesWithPrompts } from './idle-job-host.js';
+import { mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 /** The tags the mock answers for these image bytes. */
 async function mockTagsOf(mock: MockProvider, bytes: Uint8Array, headers: Record<string, string> = {}): Promise<string[]> {
@@ -61,6 +61,7 @@ describe('phase 4a acceptance', () => {
       provider: OLLAMA_PROVIDER,
       pause: createPauseGate({}),
       firstEntry: () => provider.store.first(),
+      ...noGenerations,
       limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
     });
     // While held, opening a workspace does not start its scheduler.
@@ -297,7 +298,7 @@ describe('phase 4b acceptance', () => {
 
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ failed: 1, queued: 2, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unauthorized' }]);
+    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unauthorized' }]);
     const [failed] = (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'failed' })).items;
     expect(failed).toMatchObject({ errorCode: 'provider_unauthorized' });
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -308,7 +309,7 @@ describe('phase 4b acceptance', () => {
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await h.ok('jobs:summary', {})).toMatchObject({
-      paused: [{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unauthorized' }],
+      paused: [{ providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unauthorized' }],
       queued: 2,
     });
 
@@ -332,7 +333,7 @@ describe('phase 4b acceptance', () => {
 
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ waiting: 3, queued: 1, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', reason: 'provider_unreachable' }]);
+    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unreachable' }]);
     for (const job of (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'retry_wait' })).items) {
       expect(job).toMatchObject({ attempt: 1, errorCode: 'provider_unreachable' });
     }
@@ -351,7 +352,7 @@ describe('phase 4b acceptance', () => {
     for (const channel of ['analysis:enqueue', 'analysis:preview'] as const) {
       expect(await h.call(channel, request)).toEqual({
         ok: false,
-        error: { code: 'provider_not_configured', message: 'No analysis provider is configured' },
+        error: { code: 'provider_not_configured', message: 'No provider is configured' },
       });
     }
     expect(await h.ok('jobs:summary', {})).toMatchObject({ queued: 0, failed: 0, paused: [] });

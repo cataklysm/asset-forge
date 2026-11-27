@@ -157,6 +157,23 @@ it('without a source the From select lists the lanes and switches the count and 
   await waitFor(() => expect(reroutes(api)).toEqual([{ fromProviderId: null, toProviderId: RUNPOD.id, model: 'big-vision' }]));
 });
 
+it('Move jobs offers no Venice target, even when it comes first or was used last', async () => {
+  const venice = providerView({ kind: 'venice', name: 'Venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
+  installFakeApi({
+    ...fakeProviders(
+      { providers: [venice, LOCAL, RUNPOD, SPARE], lastUsedId: null, lastUsedImageId: venice.id },
+      { [LOCAL.id]: UNREACHABLE, [RUNPOD.id]: READY, [SPARE.id]: READY },
+    ).handlers,
+    'jobs:summary': () => IDLE,
+    'jobs:waitingByProvider': () => LANES,
+  });
+  const { dialog } = renderDialog(LOCAL.id);
+  await within(dialog).findByText('312 waiting');
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(RUNPOD.id));
+  const options = within(targetSelect(dialog)).getAllByRole('option').map((o) => o.textContent);
+  expect(options).toEqual(['RunPod — ready', 'Spare — ready']);
+});
+
 it('Cancel closes without a request', async () => {
   const user = userEvent.setup();
   const api = install();

@@ -211,3 +211,66 @@ describe('InMemoryJobRepository lanes', () => {
     expect((await repo.list({ limit: 10, offset: 0 })).items[0]?.createdAt).toBe(T2);
   });
 });
+
+describe('InMemoryJobRepository settled hooks and retry exclusions', () => {
+  it('finish with settled runs it once, only when the row changed', async () => {
+    const repo = await repoWith([job('r', 'a'), job('q', 'a')]);
+    setStatus(repo, 'r', 'running');
+    let calls = 0;
+    const settled = () => {
+      calls++;
+    };
+    expect(await repo.finish('r', { status: 'failed', errorCode: 'provider_timeout', now: LATER, settled })).toBe(true);
+    expect(calls).toBe(1);
+    expect(await repo.finish('r', { status: 'failed', errorCode: 'provider_timeout', now: LATER, settled })).toBe(false);
+    expect(await repo.finish('q', { status: 'succeeded', errorCode: null, now: LATER, settled })).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('a throwing settled in finish rolls the end back', async () => {
+    const repo = await repoWith([job('r', 'a')]);
+    setStatus(repo, 'r', 'running');
+    const settled = () => {
+      throw new Error('boom');
+    };
+    await expect(repo.finish('r', { status: 'succeeded', errorCode: null, now: LATER, settled })).rejects.toThrow('boom');
+    expect(row(repo, 'r')).toMatchObject({ status: 'running', finishedAt: null });
+  });
+
+  it('cancelPending calls settled per cancelled job', async () => {
+    const repo = await repoWith([job('q', 'a'), job('w', 'a'), job('r', 'a'), job('f', 'a')]);
+    setStatus(repo, 'w', 'retry_wait', LATER);
+    setStatus(repo, 'r', 'running');
+    setStatus(repo, 'f', 'failed');
+    const seen: [string, string][] = [];
+    expect(await repo.cancelPending({ now: LATER, settled: (j) => seen.push([j.id, j.status]) })).toBe(2);
+    expect(seen.sort()).toEqual([
+      ['q', 'cancelled'],
+      ['w', 'cancelled'],
+    ]);
+    expect(await repo.cancelPending({ now: LATER, settled: (j) => seen.push([j.id, j.status]) })).toBe(0);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('a throwing settled in cancelPending rolls every cancel back', async () => {
+    const repo = await repoWith([job('q1', 'a'), job('q2', 'a')]);
+    let n = 0;
+    const settled = () => {
+      if (++n === 2) throw new Error('boom');
+    };
+    await expect(repo.cancelPending({ now: LATER, settled })).rejects.toThrow('boom');
+    expect(row(repo, 'q1').status).toBe('queued');
+    expect(row(repo, 'q2').status).toBe('queued');
+  });
+
+  it('retry with excludeTypes skips those rows', async () => {
+    const repo = await repoWith([job('a', 'a'), job('g', 'v', { v: 1 }, 'image.generate')]);
+    setStatus(repo, 'a', 'failed');
+    setStatus(repo, 'g', 'failed');
+    expect(await repo.retry({ now: LATER, excludeTypes: ['image.generate'] })).toBe(1);
+    expect(row(repo, 'a').status).toBe('queued');
+    expect(row(repo, 'g').status).toBe('failed');
+    expect(await repo.retry({ id: 'g', now: LATER, excludeTypes: ['image.generate'] })).toBe(0);
+    expect(await repo.retry({ id: 'g', now: LATER })).toBe(1);
+  });
+});

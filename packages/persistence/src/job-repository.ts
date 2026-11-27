@@ -1,6 +1,7 @@
 import {
   ACTIVE_JOB_STATUSES,
   FINISHED_JOB_STATUSES,
+  IMAGE_GENERATE_JOB,
   JOB_ERROR_MESSAGES,
   JobErrorCodeSchema,
   JobStatusSchema,
@@ -9,16 +10,16 @@ import {
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
-import type { Job, JobRepository } from '@assetforge/core';
+import type { Job, JobRepository, NewJob } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, min, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
-import { file, job } from './schema.js';
+import { file, generation, job } from './schema.js';
 
 type JobRow = typeof job.$inferSelect;
 
 /** The stored code; a value outside the vocabulary (the column has no CHECK) reads as `internal_error`. */
-const errorCodeOf = (value: string | null): JobErrorCode | null =>
+export const errorCodeOf = (value: string | null): JobErrorCode | null =>
   value === null ? null : JobErrorCodeSchema.catch('internal_error').parse(value);
 
 const toJob = (row: JobRow): Job => ({
@@ -75,6 +76,33 @@ function liveFile(tx: Pick<BetterSQLite3Database, 'select'>, fileId: string): bo
   );
 }
 
+/**
+ * Inserts the job as `queued`, attempt 0, unless its file is unknown or in the trash or its dedupe key is held;
+ * true when it was inserted. Runs on the caller's transaction.
+ */
+export function insertJob(tx: Pick<BetterSQLite3Database, 'select' | 'insert'>, j: NewJob, now: string): boolean {
+  // A job for a file that is unknown or in the trash is skipped like a held key.
+  if (j.fileId !== null && !liveFile(tx, j.fileId)) return false;
+  if (j.dedupeKey !== null && keyHeld(tx, j.dedupeKey)) return false;
+  tx.insert(job)
+    .values({
+      id: j.id,
+      type: j.type,
+      resourceClass: j.resourceClass,
+      status: 'queued',
+      fileId: j.fileId,
+      // A caller that leaves the lane out stores null.
+      providerId: j.lane ?? null,
+      payload: JSON.stringify(j.payload),
+      dedupeKey: j.dedupeKey,
+      attempt: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  return true;
+}
+
 /** A job without a file, or one whose file is not in the trash. */
 const notOfTrashedFile = sql`not exists (select 1 from ${file} where ${file.id} = ${job.fileId} and ${file.deletedAt} is not null)`;
 
@@ -116,26 +144,7 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
       return db.transaction((tx) => {
         const inserted: string[] = [];
         for (const j of jobs) {
-          // A job for a file that is unknown or in the trash is skipped like a held key.
-          if (j.fileId !== null && !liveFile(tx, j.fileId)) continue;
-          if (j.dedupeKey !== null && keyHeld(tx, j.dedupeKey)) continue;
-          tx.insert(job)
-            .values({
-              id: j.id,
-              type: j.type,
-              resourceClass: j.resourceClass,
-              status: 'queued',
-              fileId: j.fileId,
-              // A caller that leaves the lane out stores null.
-              providerId: j.lane ?? null,
-              payload: JSON.stringify(j.payload),
-              dedupeKey: j.dedupeKey,
-              attempt: 0,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .run();
-          inserted.push(j.id);
+          if (insertJob(tx, j, now)) inserted.push(j.id);
         }
         return inserted;
       });
@@ -190,8 +199,13 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
         .get();
       return row?.at ?? null;
     },
-    async finish(id, { status, errorCode, now }): Promise<boolean> {
-      return fromRunning(id, { status, ...errorOf(errorCode), finishedAt: now, updatedAt: now });
+    async finish(id, { status, errorCode, now, settled }): Promise<boolean> {
+      // `settled` runs on the same connection inside this transaction; a throw rolls the end back.
+      return db.transaction(() => {
+        const changed = fromRunning(id, { status, ...errorOf(errorCode), finishedAt: now, updatedAt: now });
+        if (changed) settled?.();
+        return changed;
+      });
     },
     async scheduleRetry(id, { errorCode, runAfter, now }): Promise<boolean> {
       return fromRunning(id, { status: 'retry_wait', ...errorOf(errorCode), runAfter, updatedAt: now });
@@ -204,19 +218,32 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
         updatedAt: now,
       });
     },
-    async cancelPending({ id, now }): Promise<number> {
-      return db
-        .update(job)
-        .set({ status: 'cancelled', finishedAt: now, updatedAt: now })
-        .where(and(one(id), inArray(job.status, ['queued', 'retry_wait', 'waiting_remote'])))
-        .run().changes;
+    async cancelPending({ id, now, settled }): Promise<number> {
+      // `settled` runs with each cancelled job inside this transaction; a throw rolls every cancel back.
+      return db.transaction((tx) => {
+        const rows = tx
+          .update(job)
+          .set({ status: 'cancelled', finishedAt: now, updatedAt: now })
+          .where(and(one(id), inArray(job.status, ['queued', 'retry_wait', 'waiting_remote'])))
+          .returning()
+          .all();
+        if (settled) for (const row of rows) settled(toJob(row));
+        return rows.length;
+      });
     },
-    async retry({ id, now }): Promise<number> {
+    async retry({ id, now, excludeTypes }): Promise<number> {
       return db.transaction((tx) => {
         const candidates = tx
           .select({ id: job.id, dedupeKey: job.dedupeKey })
           .from(job)
-          .where(and(one(id), inArray(job.status, ['failed', 'cancelled']), notOfTrashedFile))
+          .where(
+            and(
+              one(id),
+              inArray(job.status, ['failed', 'cancelled']),
+              notOfTrashedFile,
+              excludeTypes === undefined || excludeTypes.length === 0 ? undefined : notInArray(job.type, [...excludeTypes]),
+            ),
+          )
           .orderBy(desc(job.createdAt), desc(job.id))
           .all();
         let requeued = 0;
@@ -249,17 +276,29 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
       return db.transaction(
         (tx) => {
           const rows = tx
-            .select({ job, fileName: file.originalName })
+            .select({
+              job,
+              fileName: file.originalName,
+              generationProviderName: generation.providerName,
+              generationModel: generation.model,
+            })
             .from(job)
             .leftJoin(file, eq(file.id, job.fileId))
+            // The generation named in the payload, so an earlier run of a requeued generation is named too.
+            .leftJoin(
+              generation,
+              and(eq(job.type, IMAGE_GENERATE_JOB), sql`${generation.id} = json_extract(${job.payload}, '$.generationId')`),
+            )
             .where(where)
             .orderBy(desc(job.createdAt), desc(job.id))
             .limit(limit)
             .offset(offset)
             .all();
           const total = tx.select({ n: count() }).from(job).where(where).get()?.n ?? 0;
-          const items = rows.map(({ job: row, fileName }): JobView => ({
-            ...analysisJobFields(JSON.parse(row.payload) as unknown),
+          const items = rows.map(({ job: row, fileName, generationProviderName, generationModel }): JobView => ({
+            ...(row.type === IMAGE_GENERATE_JOB
+              ? { providerName: generationProviderName, model: generationModel }
+              : analysisJobFields(JSON.parse(row.payload) as unknown)),
             id: row.id,
             type: row.type,
             status: row.status,

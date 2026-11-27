@@ -14,6 +14,7 @@ import {
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
 import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from '@assetforge/media';
 import { createAnalysisServices, createWorkspaceManager } from './composition.js';
+import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
@@ -124,6 +125,7 @@ function start(): void {
     secrets: createSafeStorageCodec(),
     env: process.env,
     images: { jpeg: (path) => pool.jpeg(path) },
+    generationImages: createGenerationImageSource(previews),
     log: (line) => console.warn(line),
   });
 

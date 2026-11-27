@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
-import { ProviderIdSchema, ProviderNameSchema } from './provider-ref';
+import { ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
 
 export const JobStatusSchema = z.enum([
   'queued',
@@ -26,6 +26,9 @@ export const JobErrorCodeSchema = z.enum([
   'internal_error',
   'provider_unauthorized',
   'provider_not_configured',
+  'provider_outcome_unknown',
+  'provider_insufficient_balance',
+  'provider_content_refused',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -34,15 +37,18 @@ export const FINISHED_JOB_STATUSES = ['succeeded', 'failed', 'cancelled'] as con
 
 /** The only text a job row or IPC response carries for a failure. */
 export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
-  provider_unreachable: 'The analysis provider could not be reached',
-  provider_timeout: 'The analysis provider did not answer in time',
-  provider_unavailable: 'The analysis provider is temporarily unavailable',
-  provider_rejected: 'The analysis provider rejected the request',
-  invalid_response: 'The analysis provider returned an unusable answer',
-  file_unavailable: 'The file is not available for analysis',
+  provider_unreachable: 'The provider could not be reached',
+  provider_timeout: 'The provider did not answer in time',
+  provider_unavailable: 'The provider is temporarily unavailable',
+  provider_rejected: 'The provider rejected the request',
+  invalid_response: 'The provider returned an unusable answer',
+  file_unavailable: 'The file is not available',
   internal_error: 'The job failed unexpectedly',
-  provider_unauthorized: 'The analysis provider refused the API key',
-  provider_not_configured: 'No analysis provider is configured',
+  provider_unauthorized: 'The provider refused the API key',
+  provider_not_configured: 'No provider is configured',
+  provider_outcome_unknown: 'The provider may have processed this request; it was not repeated',
+  provider_insufficient_balance: 'The provider account has no balance left',
+  provider_content_refused: 'The provider refused this content',
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
@@ -57,6 +63,11 @@ export function isRetryableJobError(code: JobErrorCode): boolean {
 }
 
 export const ANALYZE_FILE_JOB = 'vision.analyze_file';
+export const IMAGE_GENERATE_JOB = 'image.generate';
+
+/** An image generation job names its generation row; everything else lives on that row. */
+export const ImageGeneratePayloadSchema = z.object({ v: z.literal(1), generationId: z.uuid() });
+export type ImageGeneratePayload = z.infer<typeof ImageGeneratePayloadSchema>;
 
 /** A model name as the provider lists it; stored and sent verbatim. */
 export const ModelNameSchema = z.string().min(1).max(200);
@@ -125,10 +136,14 @@ export type JobView = z.infer<typeof JobViewSchema>;
 
 const count = z.number().int().nonnegative();
 
-/** A provider whose analysis jobs are paused; `providerId` null is the jobs without a provider. */
+/**
+ * A provider whose jobs are paused; `providerId` null is the jobs without a provider. `kind` follows
+ * the resource class of the paused lane: `remote_api` is `venice`, `local_gpu` is `ollama`.
+ */
 export const PausedProviderSchema = z.object({
   providerId: ProviderIdSchema.nullable(),
   providerName: z.string().nullable(),
+  kind: ProviderKindSchema,
   reason: JobErrorCodeSchema,
 });
 export type PausedProvider = z.infer<typeof PausedProviderSchema>;

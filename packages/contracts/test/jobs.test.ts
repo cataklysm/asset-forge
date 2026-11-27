@@ -13,7 +13,12 @@ import {
   analysisJobFields,
   ipcContract,
   ProviderIdSchema,
+  IMAGE_GENERATE_JOB,
+  ImageGeneratePayloadSchema,
+  PausedProviderSchema,
 } from '../src/index';
+
+const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
 
 const view = {
   id: 'j1',
@@ -36,6 +41,33 @@ const view = {
 describe('job contracts', () => {
   test.each(JobErrorCodeSchema.options.map((c) => [c]))('%s has a message', (code) => {
     expect(JOB_ERROR_MESSAGES[code].length).toBeGreaterThan(0);
+  });
+
+  test('no job message mentions analysis', () => {
+    for (const code of JobErrorCodeSchema.options) expect(JOB_ERROR_MESSAGES[code].toLowerCase()).not.toContain('analysis');
+  });
+
+  test('the generation codes and the neutral messages', () => {
+    expect(JOB_ERROR_MESSAGES.provider_outcome_unknown).toBe('The provider may have processed this request; it was not repeated');
+    expect(JOB_ERROR_MESSAGES.provider_insufficient_balance).toBe('The provider account has no balance left');
+    expect(JOB_ERROR_MESSAGES.provider_content_refused).toBe('The provider refused this content');
+    expect(JOB_ERROR_MESSAGES.provider_unreachable).toBe('The provider could not be reached');
+    expect(JOB_ERROR_MESSAGES.file_unavailable).toBe('The file is not available');
+    expect(JOB_ERROR_MESSAGES.provider_not_configured).toBe('No provider is configured');
+    expect(JOB_ERROR_MESSAGES.internal_error).toBe('The job failed unexpectedly');
+  });
+
+  test('the generation codes are not retryable', () => {
+    for (const code of ['provider_outcome_unknown', 'provider_insufficient_balance', 'provider_content_refused'] as const) {
+      expect(isRetryableJobError(code)).toBe(false);
+    }
+  });
+
+  test('the image generation job type and payload', () => {
+    expect(IMAGE_GENERATE_JOB).toBe('image.generate');
+    expect(ImageGeneratePayloadSchema.safeParse({ v: 1, generationId: uuid }).success).toBe(true);
+    expect(ImageGeneratePayloadSchema.safeParse({ v: 2, generationId: uuid }).success).toBe(false);
+    expect(ImageGeneratePayloadSchema.safeParse({ v: 1, generationId: 'x' }).success).toBe(false);
   });
 
   test('only transient provider errors are retryable', () => {
@@ -62,12 +94,16 @@ describe('job contracts', () => {
     const ok = { queued: 0, running: 1, waiting: 0, failed: 2, cancelled: 0, succeeded: 3, changes: 4, paused: [] };
     expect(JobSummarySchema.safeParse(ok).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, failed: -1 }).success).toBe(false);
-    const pause = { providerId: 'environment', providerName: 'Environment', reason: 'provider_unauthorized' };
+    const pause = { providerId: 'environment', providerName: 'Environment', kind: 'ollama', reason: 'provider_unauthorized' };
     expect(JobSummarySchema.safeParse({ ...ok, paused: [pause] }).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, paused: [{ ...pause, providerId: null, providerName: null }] }).success).toBe(true);
     expect(JobSummarySchema.safeParse({ ...ok, paused: [{ ...pause, reason: 'nope' }] }).success).toBe(false);
     expect(JobSummarySchema.safeParse({ ...ok, paused: { reason: 'provider_unauthorized' } }).success).toBe(false);
     expect(JobSummarySchema.safeParse({ ...ok, paused: null }).success).toBe(false);
+    const { kind: _kind, ...withoutKind } = pause;
+    expect(PausedProviderSchema.safeParse(withoutKind).success).toBe(false);
+    expect(PausedProviderSchema.safeParse({ ...pause, kind: 'venice', reason: 'provider_insufficient_balance' }).success).toBe(true);
+    expect(PausedProviderSchema.safeParse({ ...pause, kind: 'other' }).success).toBe(false);
     expect(ipcContract['jobs:summary'].response.safeParse({ ...ok, paused: [pause] }).success).toBe(true);
     const { paused: _paused, ...withoutPause } = ok;
     expect(JobSummarySchema.safeParse(withoutPause).success).toBe(false);
@@ -80,7 +116,6 @@ describe('job contracts', () => {
   });
 });
 
-const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
 const prompt = { name: 'Default', text: 'Tag this image.', maxTags: 15 };
 
 describe('several providers', () => {

@@ -1,11 +1,18 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SaveProvider } from '@assetforge/contracts';
 import { JobError, type VisionProvider } from '@assetforge/core';
-import { createOllamaVision, type OllamaVisionOptions } from '@assetforge/providers';
+import { createOllamaVision, createVeniceImage, type OllamaVisionOptions, type VeniceImageOptions } from '@assetforge/providers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import {
+  MOCK_EDIT_BASIC_MODEL,
+  MOCK_EDIT_MODEL,
+  MOCK_MODEL,
+  startMockProvider,
+  type MockProvider,
+} from '../../../docker/mock-provider/server.mjs';
 import { createProviderGateway } from '../src/main/provider-gateway.js';
 import { createProviderStore, type ProviderStore } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
@@ -52,7 +59,7 @@ describe('provider gateway against two mock providers', () => {
   it('sends each entry only its own key, and no key after an entry moves to the other address', async () => {
     const mockA = await mock(KEY);
     const mockB = await mock(OTHER_KEY);
-    const g = createProviderGateway({ store, create: createOllamaVision, log: (l) => lines.push(l) });
+    const g = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: (l) => lines.push(l) });
     const a = store.save(input({ name: 'A', baseUrl: mockA.url, apiKey: KEY }));
     const b = store.save(input({ name: 'B', baseUrl: mockB.url, apiKey: OTHER_KEY }));
 
@@ -86,7 +93,7 @@ describe('provider gateway against two mock providers', () => {
 
   it('sends no key from a deleted entry to an entry recreated for the same address', async () => {
     const m = await mock(KEY);
-    const g = createProviderGateway({ store, create: createOllamaVision, log: (l) => lines.push(l) });
+    const g = createProviderGateway({ store, create: createOllamaVision, createImage: createVeniceImage, log: (l) => lines.push(l) });
     const old = store.save(input({ baseUrl: m.url, apiKey: KEY }));
     const stale = g.vision(old.id)!;
     store.delete(old.id);
@@ -113,7 +120,7 @@ describe('provider gateway with a fake adapter', () => {
       },
     };
   }
-  const gateway = () => createProviderGateway({ store, create: fakeCreate, log: (l) => lines.push(l) });
+  const gateway = () => createProviderGateway({ store, create: fakeCreate, createImage: createVeniceImage, log: (l) => lines.push(l) });
   const calls = (baseUrl: string) => listCalls.get(baseUrl) ?? 0;
 
   beforeEach(() => {
@@ -243,5 +250,159 @@ describe('provider gateway with a fake adapter', () => {
     await pending;
     listResult = async () => [{ name: 'new', vision: true }];
     expect(await g.models(a.id, false, signal())).toEqual({ ok: true, models: [{ name: 'new', vision: true }] });
+  });
+
+  it('refuses a model list of a venice entry', async () => {
+    const v = store.save(veniceInput());
+    await expect(gateway().models(v.id, false, signal())).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'This provider cannot analyse images',
+    });
+    expect(created).toEqual([]);
+  });
+});
+
+const veniceInput = (o: Partial<SaveProvider> = {}): SaveProvider =>
+  input({ kind: 'venice', name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', editModel: MOCK_EDIT_MODEL, ...o });
+
+describe('provider gateway: image adapters', () => {
+  let createdImage: VeniceImageOptions[];
+  let createdVision: OllamaVisionOptions[];
+
+  const recordingImage = (options: VeniceImageOptions) => {
+    createdImage.push(options);
+    return createVeniceImage(options);
+  };
+  const recordingVision = (options: OllamaVisionOptions) => {
+    createdVision.push(options);
+    return createOllamaVision(options);
+  };
+  const gateway = () => createProviderGateway({ store, create: recordingVision, createImage: recordingImage, log: (l) => lines.push(l) });
+  const veniceUrl = (m: MockProvider) => `${m.url}/api/v1`;
+
+  beforeEach(() => {
+    createdImage = [];
+    createdVision = [];
+  });
+
+  it('builds one image adapter per venice entry and none for ollama entries', () => {
+    const o = store.save(input());
+    const v = store.save(veniceInput({ apiKey: KEY, timeoutSeconds: 45 }));
+    const g = gateway();
+    expect(g.image(null)).toBeNull();
+    expect(g.image(UNKNOWN)).toBeNull();
+    expect(g.image(o.id)).toBeNull();
+    expect(g.vision(v.id)).toBeNull();
+    const adapter = g.image(v.id);
+    expect(adapter).not.toBeNull();
+    expect(g.image(v.id)).toBe(adapter);
+    expect(createdVision).toEqual([]);
+    expect(createdImage.map((c) => [c.baseUrl, c.timeoutMs])).toEqual([['https://api.venice.ai/api/v1', 45_000]]);
+    expect(createdImage[0]!.apiKey()).toBe(KEY);
+    expect(JSON.stringify(createdImage)).not.toContain('test-key-not-real');
+    store.delete(v.id);
+    expect(g.image(v.id)).toBeNull();
+  });
+
+  it('logs image failures with the id and the code only', () => {
+    const v = store.save(veniceInput({ apiKey: KEY }));
+    gateway().image(v.id);
+    createdImage[0]!.onFailure!('provider_insufficient_balance', 402);
+    createdImage[0]!.onFailure!('provider_unreachable', null);
+    expect(lines).toEqual([
+      `Image provider ${v.id} failed: provider_insufficient_balance (HTTP 402)`,
+      `Image provider ${v.id} failed: provider_unreachable`,
+    ]);
+  });
+
+  it('lists the edit models against the mock, cached until a refresh', async () => {
+    const m = await mock(KEY);
+    const v = store.save(veniceInput({ baseUrl: veniceUrl(m), apiKey: KEY }));
+    const g = gateway();
+    const first = await g.imageModels(v.id, false, signal());
+    expect(first.ok).toBe(true);
+    expect(first.ok && first.models.map((x) => x.name)).toEqual([MOCK_EDIT_MODEL, MOCK_EDIT_BASIC_MODEL]);
+    const count = m.requests.length;
+    expect(count).toBeGreaterThan(0);
+    expect(await g.imageModels(v.id, false, signal())).toEqual(first);
+    expect(m.requests.length).toBe(count);
+    expect(await g.imageModels(v.id, true, signal())).toEqual(first);
+    expect(m.requests.length).toBeGreaterThan(count);
+    expect(new Set(authorizations(m))).toEqual(new Set([`Bearer ${KEY}`]));
+    expect(JSON.stringify(first)).not.toContain('test-key-not-real');
+    expect(lines.join('\n')).not.toContain('test-key-not-real');
+  });
+
+  it('does not cache a failed list', async () => {
+    const m = await mock(KEY);
+    const v = store.save(veniceInput({ baseUrl: veniceUrl(m) }));
+    const g = gateway();
+    expect(await g.imageModels(v.id, false, signal())).toEqual({ ok: false, code: 'provider_unauthorized' });
+    expect(lines).toEqual([`Image provider ${v.id} failed: provider_unauthorized (HTTP 401)`]);
+    // The key is read per request: a key stored without a save (so no change event) is used at once.
+    mkdirSync(join(dir, 'credentials'), { recursive: true });
+    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(KEY));
+    const again = await g.imageModels(v.id, false, signal());
+    expect(again.ok && again.models.map((x) => x.name)).toEqual([MOCK_EDIT_MODEL, MOCK_EDIT_BASIC_MODEL]);
+  });
+
+  it('drops the adapter and the key when a venice entry moves to another origin', async () => {
+    const mockA = await mock(KEY);
+    const mockB = await mock(KEY);
+    const v = store.save(veniceInput({ baseUrl: veniceUrl(mockA), apiKey: KEY }));
+    const g = gateway();
+    const stale = g.image(v.id)!;
+    expect(await g.imageModels(v.id, false, signal())).toMatchObject({ ok: true });
+    store.save(veniceInput({ id: v.id, baseUrl: veniceUrl(mockB) }));
+    expect(store.apiKeyFor(v.id, veniceUrl(mockA))).toBeNull();
+    expect(store.apiKeyFor(v.id, veniceUrl(mockB))).toBeNull();
+    const rebuilt = g.image(v.id);
+    expect(rebuilt).not.toBe(stale);
+    expect(createdImage.map((c) => c.baseUrl)).toEqual([veniceUrl(mockA), veniceUrl(mockB)]);
+    // The cached list belonged to the old entry: the next call asks mock B, without a key.
+    expect(await g.imageModels(v.id, false, signal())).toEqual({ ok: false, code: 'provider_unauthorized' });
+    expect(mockB.requests.length).toBeGreaterThan(0);
+    for (const request of mockB.requests) expect(request.headers.authorization).toBeUndefined();
+    // The stale adapter still points at mock A and gets no key any more.
+    const before = mockA.requests.length;
+    await expect(stale.listEditModels(signal())).rejects.toBeInstanceOf(JobError);
+    const fromStale = mockA.requests.slice(before);
+    expect(fromStale.length).toBeGreaterThan(0);
+    for (const request of fromStale) expect(request.headers.authorization).toBeUndefined();
+  });
+
+  it('answers not_found for an unknown id and refuses an ollama entry', async () => {
+    const o = store.save(input());
+    const g = gateway();
+    await expect(g.imageModels(UNKNOWN, false, signal())).rejects.toMatchObject({ code: 'not_found', message: 'This provider does not exist' });
+    await expect(g.imageModels(o.id, false, signal())).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'This provider cannot generate images',
+    });
+  });
+
+  it('does not cache an image list that belongs to an earlier build of the entry', async () => {
+    const v = store.save(veniceInput());
+    let release!: () => void;
+    let answer = () =>
+      new Promise<{ name: string }[]>((resolve) => (release = () => resolve([{ name: 'old' }])));
+    const fakeImage = () => ({
+      listEditModels: async () =>
+        (await answer()).map((x) => ({ ...x, aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null })),
+      editImage: async () => {
+        throw new Error('unused');
+      },
+      upscaleImage: async () => {
+        throw new Error('unused');
+      },
+    });
+    const g = createProviderGateway({ store, create: createOllamaVision, createImage: fakeImage, log: (l) => lines.push(l) });
+    const pending = g.imageModels(v.id, false, signal());
+    store.save(veniceInput({ id: v.id, timeoutSeconds: 200 }));
+    release();
+    await pending;
+    answer = async () => [{ name: 'new' }];
+    const next = await g.imageModels(v.id, false, signal());
+    expect(next.ok && next.models.map((x) => x.name)).toEqual(['new']);
   });
 });

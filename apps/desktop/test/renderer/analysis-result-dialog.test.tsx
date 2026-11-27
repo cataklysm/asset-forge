@@ -247,10 +247,10 @@ describe('AnalysisResultDialog', () => {
     const job = jobOf(file, {
       status: 'failed',
       errorCode: 'provider_unreachable',
-      errorMessage: 'The analysis provider could not be reached',
+      errorMessage: 'The provider could not be reached',
     });
     const { api } = setup(file, { stored: { proposal: null, job } });
-    expect((await screen.findByRole('alert')).textContent).toContain('The analysis provider could not be reached');
+    expect((await screen.findByRole('alert')).textContent).toContain('The provider could not be reached');
     await providerReady();
     await userEvent.setup().click(button('Analyse'));
     await waitFor(() => expect(callsOf(api, 'analysis:enqueue')).toHaveLength(1));
@@ -536,7 +536,7 @@ describe('AnalysisResultDialog', () => {
     const { api, onOpenSettings, onClose } = setup(file, { provider: UNCONFIGURED });
     const settings = await screen.findByRole('button', { name: 'Settings' });
     expect(button('Analyse').disabled).toBe(true);
-    expect(button('Analyse').title).toBe('No analysis provider is configured');
+    expect(button('Analyse').title).toBe('No provider is configured');
     await userEvent.setup().click(settings);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);

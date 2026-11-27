@@ -3,6 +3,7 @@ import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
+import { useStudio } from '../studio-context';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE, label } from '../labels';
@@ -61,6 +62,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const containerRef = useRef<HTMLDivElement>(null);
   const detailDialog = useFileDialog(containerRef);
   const detail = detailDialog.file;
+  const studio = useStudio();
   const analysis = useAnalysisDialogs({
     onStarted: (started) => setResult({ title: enqueueTitle(started), failures: [] }),
     onChanged: onFilesChanged,
@@ -227,6 +229,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onReviewTags: () => analysis.review(file),
     onImageToPrompt: () => analysis.prompt(file),
     analysisBlocked: analysis.blocked,
+    studio,
   });
 
   const coverOf = (file: FileRecord) => ({

@@ -20,6 +20,7 @@ import { useJobs } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
+import { useStudio } from '../studio-context';
 import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
@@ -95,6 +96,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   const reload = () => setReloadToken((t) => t + 1);
 
+  const studio = useStudio();
   const analysis = useAnalysisDialogs({
     onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
     onChanged: reload,
@@ -190,6 +192,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     onReviewTags: () => analysis.review(file),
     onImageToPrompt: () => analysis.prompt(file),
     analysisBlocked: analysis.blocked,
+    studio,
   });
 
   return (

@@ -4,13 +4,16 @@ import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderView } from '@assetforge/contracts';
-import type { ModelImageSource, WorkspaceManager } from '@assetforge/core';
+import type { GenerationImageSource, ImageProbe, ModelImageSource, WorkspaceManager } from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createAnalysisServices, createWorkspaceManager, type AnalysisServices } from '../src/main/composition.js';
+import { createGenerationImageSource } from '../src/main/generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import type { SchedulerClock } from '../src/main/job-host.js';
 import { FakeCodec } from './fake-codec.js';
+import { pngOf, pngProbe } from './png-fixture.js';
 
 /** The keys the tests use; they must never show up anywhere but in the request header. */
 export const TEST_KEY = 'test-key-not-real';
@@ -39,6 +42,16 @@ export interface Harness {
     promptModel?: string | null;
     timeoutSeconds?: number;
   }): Promise<ProviderView>;
+  /** Saves a `venice` entry for a mock (its Venice endpoints live under `/api/v1`), like `provider`. */
+  venice(o: { name?: string; url: string; apiKey?: string | null; timeoutSeconds?: number }): Promise<ProviderView>;
+  /** Imports one real PNG of the given size, into the inbox or into an asset with a role; answers the file id. */
+  importPng(o: {
+    name: string;
+    width: number;
+    height: number;
+    shade?: number;
+    target?: { assetId: string; role: 'concept' | 'reference' };
+  }): Promise<string>;
   call(channel: IpcChannel, request: unknown): Promise<IpcResult<unknown>>;
   ok<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>>;
   importImages(count: number, prefix?: string): Promise<string[]>;
@@ -51,7 +64,15 @@ export interface Harness {
  * the given environment and the raw source bytes standing in for the model JPEG.
  */
 export async function createHarness(
-  o: { env?: NodeJS.ProcessEnv; codec?: FakeCodec; images?: ModelImageSource } = {},
+  o: {
+    env?: NodeJS.ProcessEnv;
+    codec?: FakeCodec;
+    images?: ModelImageSource;
+    imageProbe?: ImageProbe;
+    generationImages?: GenerationImageSource;
+    /** With it, every retry delay of the scheduler passes at once (the scheduler's clock jumps ahead). */
+    fastRetries?: boolean;
+  } = {},
 ): Promise<Harness> {
   const base = await mkdtemp(join(tmpdir(), 'af-analysis-'));
   const userData = join(base, 'userData');
@@ -65,15 +86,22 @@ export async function createHarness(
     vi.spyOn(console, level).mockImplementation(capture),
   );
 
-  const manager = createWorkspaceManager({ userDataPath: userData, migrationsFolder: MIGRATIONS_FOLDER });
+  const manager = createWorkspaceManager({
+    userDataPath: userData,
+    migrationsFolder: MIGRATIONS_FOLDER,
+    imageProbe: o.imageProbe ?? pngProbe,
+  });
   const services = createAnalysisServices({
     manager,
     userDataPath: userData,
     secrets: o.codec ?? new FakeCodec(),
     env: o.env ?? {},
     images: o.images ?? { jpeg: (path) => readFile(path) },
+    // No preview service: every test image is a small PNG, which is sent as it is.
+    generationImages: o.generationImages ?? createGenerationImageSource({ get: async () => null }),
     log: (line) => logs.push(line),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
+    ...(o.fastRetries === true ? { clock: jumpingClock() } : {}),
   });
   const handlers = createWorkspaceHandlers(
     manager,
@@ -135,6 +163,29 @@ export async function createHarness(
       saved.set(view.name, view.id);
       return view;
     },
+    async venice(p) {
+      const name = p.name ?? 'Venice';
+      const id = saved.get(name);
+      const view = await ok('providers:save', {
+        ...(id === undefined ? {} : { id }),
+        kind: 'venice',
+        name,
+        baseUrl: `${p.url}/api/v1`,
+        timeoutSeconds: p.timeoutSeconds ?? 30,
+        taggingModel: null,
+        promptModel: null,
+        ...(p.apiKey === undefined ? {} : { apiKey: p.apiKey }),
+      });
+      saved.set(view.name, view.id);
+      return view;
+    },
+    async importPng(p) {
+      const path = join(sources, p.name);
+      await writeFile(path, pngOf(p.width, p.height, p.shade ?? 0));
+      const [result] = await ok('files:import', { sourcePaths: [path], ...(p.target === undefined ? {} : { target: p.target }) });
+      if (result?.file == null || result.error !== null) throw new Error('The PNG could not be imported');
+      return result.file.id;
+    },
     async importImages(count, prefix = 'image') {
       const paths: string[] = [];
       for (let i = 0; i < count; i++) {
@@ -164,6 +215,19 @@ export async function createHarness(
         for (const spy of spies) spy.mockRestore();
       }
     },
+  };
+}
+
+/** A scheduler clock that jumps ahead by every delay it is asked to wait, and fires at once. */
+function jumpingClock(): SchedulerClock {
+  let offset = 0;
+  return {
+    now: () => new Date(Date.now() + offset),
+    setTimer(fn, ms) {
+      offset += Math.max(ms, 0);
+      return setTimeout(fn, 0);
+    },
+    clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
 }
 

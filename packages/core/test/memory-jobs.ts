@@ -20,6 +20,17 @@ const isWaiting = (status: JobStatus) => status === 'queued' || status === 'retr
 const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
 const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) => !(excludeLanes ?? []).includes(r.lane);
 
+/**
+ * Snapshots `rows` and answers a function that puts them back as they were. Restores in place, so
+ * references callers hold to a row stay valid.
+ */
+export function restoreInPlace<T extends object>(rows: T[]): () => void {
+  const before = rows.map((row) => [row, structuredClone(row)] as const);
+  return () => {
+    rows.splice(0, rows.length, ...before.map(([row, copy]) => Object.assign(row, copy)));
+  };
+}
+
 /** The job queue over an array, following the contract of the SQLite repository. */
 export class InMemoryJobRepository implements JobRepository {
   /** Stored rows; callers may inspect them. Every method returns copies. */
@@ -126,8 +137,34 @@ export class InMemoryJobRepository implements JobRepository {
     return times[0] ?? null;
   }
 
-  async finish(id: string, r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string }): Promise<boolean> {
-    return this.fromRunning(id, { status: r.status, ...errorOf(r.errorCode), finishedAt: r.now, updatedAt: r.now });
+  async finish(
+    id: string,
+    r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string; settled?: () => void },
+  ): Promise<boolean> {
+    return this.inTransaction(() => {
+      const changed = this.fromRunning(id, { status: r.status, ...errorOf(r.errorCode), finishedAt: r.now, updatedAt: r.now });
+      if (changed) r.settled?.();
+      return changed;
+    });
+  }
+
+  /** Other in-memory stores rolled back with a job transaction; `snapshot` answers the restore. */
+  private readonly participants: { snapshot(): () => void }[] = [];
+
+  /** Lets another in-memory store (the generations) take part in the transactions of `finish` and `cancelPending`. */
+  joinTransactions(participant: { snapshot(): () => void }): void {
+    this.participants.push(participant);
+  }
+
+  /** Runs `work` like a transaction: when it throws, every row (also of the participants) is put back as it was. */
+  private inTransaction<T>(work: () => T): T {
+    const restores = [restoreInPlace(this.rows), ...this.participants.map((p) => p.snapshot())];
+    try {
+      return work();
+    } catch (error) {
+      for (const restore of restores) restore();
+      throw error;
+    }
   }
 
   async scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean> {
@@ -139,20 +176,24 @@ export class InMemoryJobRepository implements JobRepository {
     return this.fromRunning(id, { status: 'queued', attempt: Math.max((row?.attempt ?? 0) - 1, 0), startedAt: null, updatedAt: now });
   }
 
-  async cancelPending({ id, now }: { id?: string; now: string }): Promise<number> {
-    let n = 0;
-    for (const row of this.rows) {
-      if (id !== undefined && row.id !== id) continue;
-      if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
-      Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
-      n++;
-    }
-    return n;
+  async cancelPending({ id, now, settled }: { id?: string; now: string; settled?: (job: Job) => void }): Promise<number> {
+    return this.inTransaction(() => {
+      let n = 0;
+      for (const row of this.rows) {
+        if (id !== undefined && row.id !== id) continue;
+        if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
+        Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
+        settled?.(structuredClone(row));
+        n++;
+      }
+      return n;
+    });
   }
 
-  async retry({ id, now }: { id?: string; now: string }): Promise<number> {
+  async retry({ id, now, excludeTypes }: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number> {
     const candidates = this.rows
       .filter((r) => (id === undefined || r.id === id) && (r.status === 'failed' || r.status === 'cancelled'))
+      .filter((r) => !(excludeTypes ?? []).includes(r.type))
       .filter((r) => r.fileId === null || this.fileState(r.fileId) !== 'trashed')
       .sort((a, b) => oldestFirst(b, a));
     let n = 0;

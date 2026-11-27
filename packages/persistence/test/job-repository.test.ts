@@ -253,6 +253,58 @@ describe('job repository', () => {
     expect((await db.jobs.get(uuid(11)))?.status).toBe('queued');
   });
 
+  test('finish runs settled once when the row changed and not for a job that is not running', async () => {
+    await enqueue(T0, newJob(10));
+    await claim(T0);
+    const settled = vi.fn();
+    expect(await db.jobs.finish(uuid(10), { status: 'succeeded', errorCode: null, now: T1, settled })).toBe(true);
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T2, settled })).toBe(false);
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
+
+  test('a settled callback that throws rolls finish back', async () => {
+    await enqueue(T0, newJob(10));
+    await claim(T0);
+    const settled = () => {
+      throw new Error('boom');
+    };
+    await expect(db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1, settled })).rejects.toThrow('boom');
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'running', errorCode: null, finishedAt: null });
+  });
+
+  test('cancelPending runs settled with each cancelled job, and a throw rolls every cancel back', async () => {
+    await enqueue(T0, newJob(10), newJob(11), newJob(12));
+    await claim(T0); // 10 running
+    const seen: [string, string][] = [];
+    expect(await db.jobs.cancelPending({ now: T1, settled: (j) => seen.push([j.id, j.status]) })).toBe(2);
+    expect(seen.sort()).toEqual([
+      [uuid(11), 'cancelled'],
+      [uuid(12), 'cancelled'],
+    ]);
+
+    await enqueue(T2, newJob(13), newJob(14));
+    let calls = 0;
+    const throwing = () => {
+      if (++calls === 2) throw new Error('boom');
+    };
+    await expect(db.jobs.cancelPending({ now: T3, settled: throwing })).rejects.toThrow('boom');
+    expect((await db.jobs.get(uuid(13)))?.status).toBe('queued');
+    expect((await db.jobs.get(uuid(14)))?.status).toBe('queued');
+  });
+
+  test('retry with excludeTypes skips jobs of those types, for all and by id', async () => {
+    await failedJob(10, T0);
+    await enqueue(T0, newJob(11, { type: 'image.generate', resourceClass: 'remote_api' }));
+    await db.jobs.cancelPending({ id: uuid(11), now: T1 });
+    expect(await db.jobs.retry({ id: uuid(11), now: T2, excludeTypes: ['image.generate'] })).toBe(0);
+    expect(await db.jobs.retry({ now: T2, excludeTypes: ['image.generate'] })).toBe(1);
+    expect((await db.jobs.get(uuid(10)))?.status).toBe('queued');
+    expect((await db.jobs.get(uuid(11)))?.status).toBe('cancelled');
+    expect(await db.jobs.retry({ now: T3, excludeTypes: [] })).toBe(1);
+    expect((await db.jobs.get(uuid(11)))?.status).toBe('queued');
+  });
+
   test('retry for all requeues only the newest of two failed jobs of one dedupe key', async () => {
     await failedJob(10, T0, 'k');
     await failedJob(11, T1, 'k');

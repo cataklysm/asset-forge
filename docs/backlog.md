@@ -1,6 +1,6 @@
 # Backlog
 
-Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources and several vision providers reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
+Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources, several vision providers and generation studio reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
 ## Requested features
 
@@ -454,6 +454,31 @@ Found in the final review and not fixed:
 - The acceptance test pins "one job at a time per provider" weakly; no desktop test runs a v1 job to success; no desktop test queues a job in environment mode.
 - `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
 - Moving jobs into a paused target lane leaves them waiting there with no hint in the dialog.
+
+## Generation studio
+
+- Trashing the source image of a generation cancels its running job, which aborts the paid request; the provider may already have charged it.
+- A job enqueued while "Cancel all" waits for running jobs may still start.
+- "Cancel all" answers 0 while no scheduler exists; the reconcile of pending generations on the next workspace open is the safety net.
+- One inconsistent provider entry (for example a `venice` entry with a plain `http` base URL to another machine, or an entry that breaks the kind rules) sets the whole `provider-settings.json` aside as unreadable, including the link to every stored key. This is the existing corrupt-file policy, widened by the kind rules.
+- The Venice adapter was built from the vendor's documentation and tested only against the mock provider. The price shape in `pricing`, the `/image/edit` request (experimental at the vendor) and the answer types are assumptions until they are checked with the real service.
+- The full-size rendition sent to the provider is capped at 8192 px per edge (`PREVIEW_EDGE.full`), so a larger image that is not sent as is arrives downscaled; the result is smaller than the source then.
+- Upscale checks only the pixel bounds of the app and of the input; the provider's own upscale limits are not read.
+- Result names (`<source name> edit <n>`, `<source name> <scale>x`) may repeat after a generation was removed or its file purged.
+- A failed import of a paid answer leaves a failed file row in the inbox. The generation ends as `provider_outcome_unknown` only when the answer stream itself failed; a local import failure (disk full, checksum mismatch) ends it as `internal_error`, although that request was certainly charged.
+- The image provider used last is not tracked in the renderer: it is not preselected in the studio until the provider list is reloaded, and the upscale from the file menu names no entry so that the main process resolves it.
+- An image that is still too large for the provider after the rendition (or whose rendition cannot be produced) is refused only when the job runs (`file_unavailable`), not at start as the design says.
+- A purge shortly after trashing the source of a running generation deletes its job row; the generation then stays `pending` until the reconcile on the next workspace open.
+- The guard that refuses deleting a provider entry with active jobs sees only the open workspace; jobs of that entry in another workspace fail later with `provider_not_configured`.
+- Tag edits in a file dialog opened from a link (source or result) do not reach the host list until it reloads; the linked dialog shows the asset name as plain text.
+- Opening a result from inside the studio does nothing visible when the file can no longer be read.
+- The upscales of the previously selected result show briefly under a newly selected one; the two result loads share one error slot.
+- A circular import between `studio-context`, `FileDetailDialog` and `GenerationDetails`.
+- No desktop test with a JPEG or WebP provider answer; a job found `running` after a crash is tested only in `packages/jobs`.
+- An upscale of an upscale is reachable only through that file's own studio.
+- A failed Generate start is visible only in the button tooltip.
+- Raising the studio above the linked file dialog remounts it. A Generate start still in flight at that moment no longer disables the button of the new instance, so a second click in that short window queues a second paid run.
+- There is no workspace-wide generations screen and no marker or filter for generated files in the file lists.
 
 ## Not covered by any automated check
 

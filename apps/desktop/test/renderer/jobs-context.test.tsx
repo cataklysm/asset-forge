@@ -135,8 +135,8 @@ describe('JobsProvider', () => {
   });
 
   it('a new pause list is taken, an equal one keeps the state object', async () => {
-    const a = { providerId: '00000000-0000-4000-8000-00000000a001', providerName: 'Local', reason: 'provider_unreachable' } as const;
-    const b = { providerId: '00000000-0000-4000-8000-00000000b001', providerName: 'RunPod', reason: 'provider_unauthorized' } as const;
+    const a = { providerId: '00000000-0000-4000-8000-00000000a001', providerName: 'Local', kind: 'ollama', reason: 'provider_unreachable' } as const;
+    const b = { providerId: '00000000-0000-4000-8000-00000000b001', providerName: 'RunPod', kind: 'ollama', reason: 'provider_unauthorized' } as const;
     let next: JobSummary = { ...IDLE, queued: 1, paused: [a] };
     installFakeApi({ 'jobs:summary': () => structuredClone(next) });
     render(

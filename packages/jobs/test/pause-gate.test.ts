@@ -161,6 +161,29 @@ describe('createPauseGate', () => {
     expect(g.paused('local_gpu')).toEqual([{ lane: null, reason: 'provider_timeout' }]);
   });
 
+  it('pauses remote_api lane a at once on provider_insufficient_balance', () => {
+    const { g, changes } = gate();
+    g.record('remote_api', 'a', 'provider_insufficient_balance');
+    expect(g.reason('remote_api', 'a')).toBe('provider_insufficient_balance');
+    expect(g.reason('remote_api', 'b')).toBeNull();
+    expect(changes.n).toBe(1);
+  });
+
+  it('resets the count on provider_outcome_unknown and provider_content_refused', () => {
+    for (const reset of ['provider_outcome_unknown', 'provider_content_refused'] as const) {
+      const { g } = gate();
+      g.record('remote_api', 'a', 'provider_unreachable');
+      g.record('remote_api', 'a', 'provider_unreachable');
+      g.record('remote_api', 'a', reset);
+      expect(g.reason('remote_api', 'a')).toBeNull();
+      g.record('remote_api', 'a', 'provider_unreachable');
+      g.record('remote_api', 'a', 'provider_unreachable');
+      expect(g.reason('remote_api', 'a')).toBeNull();
+      g.record('remote_api', 'a', 'provider_unreachable');
+      expect(g.reason('remote_api', 'a')).toBe('provider_unreachable');
+    }
+  });
+
   it('resume clears a partial count', () => {
     const { g } = gate();
     g.record('local_gpu', null, 'provider_unreachable');

@@ -13,6 +13,7 @@ import { createAnalysisTargetReader } from './analysis-target-reader.js';
 import { createFileAnalysisRepository } from './file-analysis-repository.js';
 import { createFileMoveRepository } from './file-move-repository.js';
 import { createFileRepository } from './file-repository.js';
+import { createGenerationRepository } from './generation-repository.js';
 import { createJobRepository } from './job-repository.js';
 import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
@@ -56,6 +57,7 @@ export async function openWorkspaceDatabase(
       jobs: createJobRepository(db),
       analyses: createFileAnalysisRepository(db),
       analysisTargets: createAnalysisTargetReader(db),
+      generations: createGenerationRepository(db),
       async ensureDerivedData() {
         await ensureDerivedData(db, options.derivedData);
       },

@@ -1,5 +1,6 @@
 import {
   FINISHED_JOB_STATUSES,
+  IMAGE_GENERATE_JOB,
   JOB_ERROR_MESSAGES,
   type JobErrorCode,
   type JobStatus,
@@ -54,13 +55,23 @@ export class JobError extends Error {
   }
 }
 
+/** How a job ended. */
+export type JobOutcome = { status: 'succeeded' } | { status: 'failed'; errorCode: JobErrorCode } | { status: 'cancelled' };
+
 /** Runs the jobs of one type. */
 export interface JobHandler {
   resourceClass: ResourceClass;
   /** What happens to a job found `running` when a workspace opens. `fail` is for paid work with an unclear outcome. */
   onInterrupted: 'requeue' | 'fail';
+  /** The error code an interrupted job fails with under `onInterrupted: 'fail'`; `internal_error` when absent. */
+  interruptedCode?: JobErrorCode;
   /** Resolves on success; throws `JobError(code)` otherwise. Must stop soon after `signal` aborts. */
   run(job: Job, signal: AbortSignal): Promise<void>;
+  /**
+   * Runs inside the transaction that ends the job, with the outcome it ends with. Synchronous; a throw
+   * rolls the end back.
+   */
+  settled?(job: Job, outcome: JobOutcome): void;
 }
 
 /** What use cases need of a running scheduler. */
@@ -69,6 +80,8 @@ export interface JobControl {
   wake(): void;
   /** Aborts a running job, which then ends `cancelled`, or cancels a pending one. Resolves without waiting for the handler. */
   cancel(jobId: string): Promise<void>;
+  /** Cancels every pending job and aborts every running one. Answers how many. */
+  cancelAll(): Promise<number>;
 }
 
 const FINISHED: readonly JobStatus[] = FINISHED_JOB_STATUSES;
@@ -107,12 +120,12 @@ export async function cancelJob(s: WorkspaceSession, control: JobControl, jobId:
   await control.cancel(jobId);
 }
 
-/** Cancels every pending job, then aborts every running one. Returns how many were cancelled or aborted. */
-export async function cancelAllJobs(s: WorkspaceSession, control: JobControl): Promise<number> {
-  const pending = await s.database.jobs.cancelPending({ now: s.now().toISOString() });
-  const running = await s.database.jobs.listByStatus('running');
-  for (const job of running) await control.cancel(job.id);
-  return pending + running.length;
+/**
+ * Cancels every pending job and aborts every running one through the scheduler, which ends each with its
+ * handler's `settled`. Returns how many.
+ */
+export function cancelAllJobs(_s: WorkspaceSession, control: JobControl): Promise<number> {
+  return control.cancelAll();
 }
 
 /** Queues a failed or cancelled job again; `invalid_operation` for any other status or when its file already has an active job. */
@@ -128,9 +141,12 @@ export async function retryJob(s: WorkspaceSession, jobId: string): Promise<void
   if (retried === 0) throw new InvalidOperationError('The file of this job already has an active job');
 }
 
-/** Queues every failed or cancelled job whose file has no active job. Returns how many. */
+/**
+ * Queues every failed or cancelled job whose file has no active job. Returns how many. Generation jobs are
+ * paid work and only ever run again through `retryGeneration`.
+ */
 export function retryFailedJobs(s: WorkspaceSession): Promise<number> {
-  return s.database.jobs.retry({ now: s.now().toISOString() });
+  return s.database.jobs.retry({ now: s.now().toISOString(), excludeTypes: [IMAGE_GENERATE_JOB] });
 }
 
 /** Deletes every succeeded, failed or cancelled job. Returns how many. */

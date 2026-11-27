@@ -236,9 +236,12 @@ function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps
             Settings
           </button>
         )}
-        <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
-          {MOVE_JOBS_LABEL}
-        </button>
+        {/* Only analysis jobs move; an image provider's generation jobs stay on it. */}
+        {entry.kind === 'ollama' && (
+          <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
+            {MOVE_JOBS_LABEL}
+          </button>
+        )}
         <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
           {RESUME_LABEL}
         </button>

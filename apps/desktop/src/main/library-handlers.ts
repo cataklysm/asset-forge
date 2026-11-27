@@ -111,7 +111,7 @@ export function createLibraryHandlers(
   manager: WorkspaceManager,
   dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
   host: Pick<HostActions, 'openPath' | 'showItemInFolder' | 'openExternal'>,
-  jobs: Pick<JobHost, 'cancel' | 'changed' | 'wake'>,
+  jobs: Pick<JobHost, 'cancel' | 'cancelAll' | 'changed' | 'wake'>,
 ): LibraryHandlers {
   /** Runs a channel that may have cancelled jobs; raises the counter and wakes the scheduler even when it fails. */
   const touchingJobs = async <T>(fn: () => Promise<T>): Promise<T> => {
