@@ -202,6 +202,42 @@ describe('workspace:remove', () => {
     expect(again).toMatchObject({ ok: true, value: { name: 'Demo' } });
   });
 
+  describe('lifecycle notifications', () => {
+    function recordingHandlers(): string[] {
+      const calls: string[] = [];
+      const host = {
+        ...noopHost,
+        workspaceOpened: async () => void calls.push('opened'),
+        workspaceClosing: async () => void calls.push('closing'),
+      };
+      handlers = createWorkspaceHandlers(manager, dialogs, host, idleJobHost, idleServices);
+      return calls;
+    }
+
+    it('leaves the open workspace alone when another one is removed', async () => {
+      const calls = recordingHandlers();
+      const { id } = await createWorkspace();
+      const other = await dispatch(handlers, 'workspace:create', { name: 'Other', rootPath: join(base, 'Other') });
+      if (!other.ok) throw new Error('create failed');
+      const otherId = (other.value as { id: string }).id;
+      calls.length = 0;
+      choice = 'forget';
+      const result = await dispatch(handlers, 'workspace:remove', { id });
+      expect(result).toEqual({ ok: true, value: { removed: true, folderTrashed: false } });
+      expect(calls).toEqual([]);
+      expect(manager.current()?.id).toBe(otherId);
+    });
+
+    it('notifies closing and opened as before when the open workspace is removed', async () => {
+      const calls = recordingHandlers();
+      const { id } = await createWorkspace();
+      calls.length = 0;
+      choice = 'forget';
+      await dispatch(handlers, 'workspace:remove', { id });
+      expect(calls).toEqual(['closing']);
+    });
+  });
+
   it('removes nothing for an unknown id', async () => {
     const { id } = await createWorkspace();
     choice = 'forget_and_trash_folder';

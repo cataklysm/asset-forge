@@ -57,6 +57,19 @@ describe('WorkspaceManager lifecycle', () => {
     await expect(manager.create({ name: 'Demo', rootPath: ROOT })).rejects.toBeInstanceOf(StorageUnreachableError);
   });
 
+  it('keeps the root path out of the messages of the lifecycle errors', async () => {
+    const { manager, host, storages } = setup();
+    host.createStorage(ROOT);
+    storages.get(ROOT)!.files.set('stray.txt', Buffer.from('x'));
+    const messageOf = async (run: () => Promise<unknown>): Promise<string> =>
+      ((await run().catch((e: unknown) => e)) as Error).message;
+    expect(await messageOf(() => manager.create({ name: 'Demo', rootPath: ROOT }))).toBe('Directory is not empty');
+    storages.get(ROOT)!.reachable = false;
+    expect(await messageOf(() => manager.create({ name: 'Demo', rootPath: ROOT }))).toBe('Storage is not reachable');
+    expect(await messageOf(() => manager.open({ rootPath: ROOT }))).toBe('Storage is not reachable');
+    expect(await messageOf(() => manager.open({ rootPath: '/ws/none' }))).toBe('No workspace found there');
+  });
+
   it('create, close, open returns the same id and name', async () => {
     const { manager } = setup();
     const created = await manager.create({ name: 'Demo', rootPath: ROOT });
@@ -171,6 +184,12 @@ describe('WorkspaceManager lifecycle', () => {
       expect(await host.registry.list()).toEqual([expect.objectContaining({ id: created.id, rootPath: '/ws/a' })]);
       expect(manager.current()).toBeNull();
       expect(databaseOpens()).toBe(0);
+    });
+
+    it('names no path in the copy message', async () => {
+      const { manager } = await createAndCopy();
+      const error = (await manager.open({ rootPath: '/ws/b' }).catch((e: unknown) => e)) as Error;
+      expect(error.message).toBe('This workspace is already known');
     });
 
     it('still opens the original', async () => {

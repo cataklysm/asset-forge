@@ -309,11 +309,11 @@ export class LocalFileSystemStorage implements Storage {
       relPath.startsWith('\\') ||
       /^[a-zA-Z]:/.test(relPath)
     ) {
-      throw new PathEscapeError(`Absolute path not allowed: ${relPath}`);
+      throw new PathEscapeError('Absolute path not allowed');
     }
     const segments = relPath.split(/[\\/]/).filter((s) => s !== '' && s !== '.');
     if (segments.includes('..')) {
-      throw new PathEscapeError(`Path escapes the workspace: ${relPath}`);
+      throw new PathEscapeError('Path escapes the workspace');
     }
     if (segments.length === 0 && !allowRoot) {
       throw new PathEscapeError(`Path resolves to the workspace root: ${JSON.stringify(relPath)}`);
@@ -322,7 +322,7 @@ export class LocalFileSystemStorage implements Storage {
     const realRoot = await realpathOfDeepestAncestor(this.root);
     const realTarget = await realpathOfDeepestAncestor(target);
     if (!isInside(realRoot, realTarget)) {
-      throw new PathEscapeError(`Path escapes the workspace: ${relPath}`);
+      throw new PathEscapeError('Path escapes the workspace');
     }
     return target;
   }

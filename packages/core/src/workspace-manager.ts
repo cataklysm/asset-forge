@@ -173,10 +173,10 @@ export class WorkspaceManager {
   private async doCreate(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
     const storage = this.host.createStorage(input.rootPath);
     if (!(await storage.isReachable())) {
-      throw new StorageUnreachableError(`Storage is not reachable: ${input.rootPath}`);
+      throw new StorageUnreachableError('Storage is not reachable');
     }
     if (!(await storage.isEmptyOrMissing())) {
-      throw new DirectoryNotEmptyError(`Directory is not empty: ${input.rootPath}`);
+      throw new DirectoryNotEmptyError('Directory is not empty');
     }
     await storage.ensureLayout();
     const manifest: WorkspaceManifest = {
@@ -193,7 +193,7 @@ export class WorkspaceManager {
     await this.doClose();
     const storage = this.host.createStorage(input.rootPath);
     if (!(await storage.isReachable())) {
-      throw new StorageUnreachableError(`Storage is not reachable: ${input.rootPath}`);
+      throw new StorageUnreachableError('Storage is not reachable');
     }
     const manifest = await this.readManifest(storage, input.rootPath);
     await this.rejectCopy(manifest.id, input.rootPath);
@@ -361,7 +361,7 @@ export class WorkspaceManager {
 
   private async readManifest(storage: Storage, rootPath: string): Promise<WorkspaceManifest> {
     const text = await storage.readText(MANIFEST_PATH);
-    if (text === null) throw new WorkspaceNotFoundError(`No workspace found at ${rootPath}`);
+    if (text === null) throw new WorkspaceNotFoundError('No workspace found there');
     let json: unknown;
     try {
       json = JSON.parse(text);
@@ -389,9 +389,7 @@ export class WorkspaceManager {
     const known = await this.host.registry.get(id);
     if (known === null || isSameRoot(known.rootPath, rootPath)) return;
     if (await this.holdsWorkspace(known.rootPath, id)) {
-      throw new WorkspaceDuplicateError(
-        `This folder is a copy of the workspace at ${known.rootPath}, which still exists`,
-      );
+      throw new WorkspaceDuplicateError('This workspace is already known');
     }
   }
 

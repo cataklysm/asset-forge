@@ -81,15 +81,15 @@ export function createWorkspaceHandlers(
   // wait for that queue), and start again for whatever workspace is open afterwards, also after a failure.
   // Lifecycle channels run one at a time, so a second one cannot close a workspace whose jobs were just started.
   const lifecycleQueue = new SerialQueue();
-  const lifecycle = <T>(fn: () => Promise<T>): Promise<T> =>
-    lifecycleQueue.run(async () => {
-      await notify(host, 'workspaceClosing');
-      try {
-        return await fn();
-      } finally {
-        if (manager.current() !== null) await notify(host, 'workspaceOpened');
-      }
-    });
+  const withNotifications = async <T>(fn: () => Promise<T>): Promise<T> => {
+    await notify(host, 'workspaceClosing');
+    try {
+      return await fn();
+    } finally {
+      if (manager.current() !== null) await notify(host, 'workspaceOpened');
+    }
+  };
+  const lifecycle = <T>(fn: () => Promise<T>): Promise<T> => lifecycleQueue.run(() => withNotifications(fn));
 
   return {
     'workspace:list': () => manager.list(),
@@ -103,8 +103,10 @@ export function createWorkspaceHandlers(
       if (!workspace) return { removed: false, folderTrashed: false };
       const choice = await dialogs.confirmRemoveWorkspace(workspace);
       if (choice === 'cancel') return { removed: false, folderTrashed: false };
-      const { folderTrashed } = await lifecycle(() =>
-        manager.remove({ id, trashFolder: choice === 'forget_and_trash_folder' }),
+      const remove = () => manager.remove({ id, trashFolder: choice === 'forget_and_trash_folder' });
+      // Only the open workspace is closed by a remove; a foreign one must not stop the scheduler.
+      const { folderTrashed } = await lifecycleQueue.run(() =>
+        manager.current()?.id === id ? withNotifications(remove) : remove(),
       );
       return { removed: true, folderTrashed };
     },

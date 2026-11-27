@@ -381,6 +381,12 @@ describe('absolutePath', () => {
     await expect(storage.absolutePath('inbox/link/a.png')).rejects.toBeInstanceOf(PathEscapeError);
   });
 
+  it('uses fixed messages without the relative path', async () => {
+    await storage.ensureLayout();
+    await expect(storage.absolutePath('../secret-name')).rejects.toThrow(/^Path escapes the workspace$/);
+    await expect(storage.absolutePath(path.resolve('secret-name'))).rejects.toThrow(/^Absolute path not allowed$/);
+  });
+
   it('rejects a dangling link without leaking the root path', async () => {
     await storage.ensureLayout();
     await fs.symlink(path.join(tmp, 'nowhere'), path.join(root, 'inbox', 'dangling'), 'junction');
