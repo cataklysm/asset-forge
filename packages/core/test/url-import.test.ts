@@ -103,13 +103,19 @@ describe('enqueueUrlImport', () => {
     });
   });
 
-  it('with a site writes payload v2 with the profile and the filter, same lane and dedupe key', async () => {
+  it('with a site writes payload v2 with the profile and the filter, the site as lane and the same dedupe key', async () => {
     const { db, session } = await setup();
-    const site = { profileId: '11111111-1111-4111-8111-111111111111', filter: { kinds: ['image' as const], minBytes: 100 } };
-    const result = await enqueueUrlImport(session, { urls: ['https://a.example/1.png'], target: null, skipDuplicates: true, site });
-    expect(result.queued).toBe(1);
+    const site = {
+      profileId: '11111111-1111-4111-8111-111111111111',
+      site: 'gallery.example',
+      filter: { kinds: ['image' as const], minBytes: 100 },
+    };
+    const urls = ['https://a.example/1.png', 'https://img2.gallery.example/2.png'];
+    const result = await enqueueUrlImport(session, { urls, target: null, skipDuplicates: true, site });
+    expect(result.queued).toBe(2);
+    expect(db.jobs.rows.map((job) => job.lane)).toEqual(['gallery.example', 'gallery.example']);
     expect(db.jobs.rows[0]).toMatchObject({
-      lane: 'a.example',
+      lane: 'gallery.example',
       dedupeKey: 'url:https://a.example/1.png',
       payload: {
         v: 2,

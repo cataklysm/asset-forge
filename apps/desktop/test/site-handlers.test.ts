@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SaveSiteProfile } from '@assetforge/contracts';
 import { RemoteFileError, type PageLoader, type PageLoadResult, type RemoteFileSource } from '@assetforge/core';
 import type { SiteSessions } from '../src/main/site-sessions.js';
+import { siteLaneLimit } from '../src/main/composition.js';
 import { abortableWait } from '../src/main/site-handlers.js';
 import { createHarness, type Harness } from './analysis-harness.js';
 
@@ -276,7 +277,14 @@ describe('site handlers', () => {
     for (const job of jobs) {
       expect(job.payload).toMatchObject({ v: 2, siteProfileId: a.id, filter: { kinds: ['image'], minBytes: 2048 } });
       expect(JSON.stringify(job.payload)).not.toMatch(/cookie|agent/i);
+      // Every download of the profile waits in the one lane of its site, which takes one job at a time.
+      expect(job.lane).toBe(a.site);
     }
+    const limit = siteLaneLimit({ list: () => [a] });
+    expect(limit('io', a.site)).toBe(1);
+    expect(limit('io', 'img.' + a.site)).toBeUndefined();
+    expect(limit('io', null)).toBeUndefined();
+    expect(limit('local_gpu', a.site)).toBeUndefined();
 
     // A second import of the same answer skips what is queued; the existing source does not fail it.
     const again = await h!.ok('sites:import', { crawlId: crawl.crawlId, target: { assetId: asset.id, role: 'reference' } });

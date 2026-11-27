@@ -231,12 +231,13 @@ export function createSiteHandlers(deps: {
       if (answer === null || answer.crawlId !== crawlId) throw new InvalidOperationError(RUN_AGAIN);
       const result = await manager.exclusive(async (s) => {
         // The profile may have been changed or deleted while this waited for the queue.
-        if (kept !== answer || store.get(answer.profileId) === null) throw new InvalidOperationError(RUN_AGAIN);
+        const profile = store.get(answer.profileId);
+        if (kept !== answer || profile === null) throw new InvalidOperationError(RUN_AGAIN);
         const queued = await enqueueUrlImport(s, {
           urls: answer.files,
           target,
           skipDuplicates: true,
-          site: { profileId: answer.profileId, filter: answer.filter },
+          site: { profileId: answer.profileId, site: profile.site, filter: answer.filter },
         });
         if (target !== null) {
           try {

@@ -33,7 +33,7 @@ import { createProviderHandlers } from './provider-handlers.js';
 import { createProviderStore, type ProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
 import { createSiteHandlers } from './site-handlers.js';
-import { createSiteProfileStore } from './site-profile-store.js';
+import { createSiteProfileStore, type SiteProfileStore } from './site-profile-store.js';
 import { createSiteAccess, type SiteSessions } from './site-sessions.js';
 
 export interface CompositionOptions {
@@ -108,6 +108,18 @@ export function providerLaneLimit(store: Pick<ProviderStore, 'get'>) {
     const entry = store.get(lane);
     return entry !== null && isVisionKind(entry.kind) ? entry.options?.parallelRequests : undefined;
   };
+}
+
+/**
+ * The downloads of one site profile run one after another: its jobs share the lane named after the profile's site,
+ * and that lane takes one job at a time. Every other download lane keeps the class limit.
+ *
+ * @param sites the site profiles; read at every claim, so a new or deleted profile applies at once
+ * @returns the scheduler's `laneLimit` for download lanes: 1 for the lane of a profile's site, otherwise undefined
+ */
+export function siteLaneLimit(sites: Pick<SiteProfileStore, 'list'>) {
+  return (resourceClass: ResourceClass, lane: string | null): number | undefined =>
+    resourceClass === 'io' && lane !== null && sites.list().some((profile) => profile.site === lane) ? 1 : undefined;
 }
 
 const NO_WINDOWS = 'Site logins are not available';
@@ -185,6 +197,8 @@ export function createAnalysisServices(o: {
   const remote = o.remote ?? createUrlSource({ userAgent: `AssetForge/${o.appVersion}` });
   const siteStore = createSiteProfileStore({ userData: o.userDataPath });
   const siteSessions = o.siteSessions ?? noSiteSessions;
+  const providerLimit = providerLaneLimit(store);
+  const siteLimit = siteLaneLimit(siteStore);
   let jobHost: JobHost | null = null;
   const pause = createPauseGate({
     // A pause or resume changes the summary; the listener must not throw.
@@ -215,7 +229,7 @@ export function createAnalysisServices(o: {
     ...(o.limits === undefined ? {} : { limits: o.limits }),
     ...(o.totals === undefined ? {} : { totals: o.totals }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
-    laneLimit: providerLaneLimit(store),
+    laneLimit: (resourceClass, lane) => providerLimit(resourceClass, lane) ?? siteLimit(resourceClass, lane),
   });
   jobHost = host;
   // A saved or deleted entry may fix what paused its lane, or change its parallel requests; the other lanes and every

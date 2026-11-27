@@ -61,8 +61,12 @@ export async function enqueueUrlImport(
     urls: readonly string[];
     target: FileTarget | null;
     skipDuplicates: boolean;
-    /** A site import: the jobs go out with this profile's login and keep only what passes `filter` (payload v2). */
-    site?: { profileId: string; filter: SiteFilter };
+    /**
+     * A site import: the jobs go out with this profile's login and keep only what passes `filter` (payload v2).
+     * They all share the lane `site` (the profile's site), whatever host a file is on, so the host limits them as
+     * one queue.
+     */
+    site?: { profileId: string; site: string; filter: SiteFilter };
   },
 ): Promise<UrlImportResult> {
   if (r.target !== null) await requireAsset(s, r.target.assetId);
@@ -108,7 +112,7 @@ export async function enqueueUrlImport(
       type: FILE_DOWNLOAD_JOB,
       resourceClass: 'io',
       fileId: null,
-      lane: new URL(url).host,
+      lane: r.site?.site ?? new URL(url).host,
       payload,
       dedupeKey: `url:${url}`,
     });

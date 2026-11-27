@@ -192,6 +192,17 @@ gallery URL, `Test`, progress with `Cancel`, then the counts and the list of fou
 `Import` (disabled until a test of the unchanged profile and URL has answered at least one file).
 After the import the usual URL import result line. Explanations only as tooltips; buttons from `ui.ts`.
 
+### One download at a time
+
+The downloads of a site import do not use the lane of the file's host: every job of a profile waits
+in the lane named after the profile's site (`enqueueUrlImport` with `site.site`), whatever host the
+file is on, and that lane takes one job at a time (`siteLaneLimit` in `composition.ts`, asked before
+every claim). So a gallery is fetched file by file, also when its files are spread over several
+subdomains. There is no pause between two files. A plain URL import keeps two per host and four in
+all; one that names exactly a profile's site as host shares that lane. A `Retry-After` hold and the
+host pause cover the whole lane, and the pause banner names the site. Jobs queued before this change
+keep their host lane.
+
 ### Diagnostics
 
 A test or download that gives nothing says why.
