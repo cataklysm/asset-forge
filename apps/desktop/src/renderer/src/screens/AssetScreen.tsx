@@ -27,7 +27,7 @@ import { useZipChoice } from '../components/ZipChoiceDialog';
 import { useLoad } from '../hooks/useLoad';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
-import { useJobs } from '../jobs-context';
+import { useChanges } from '../jobs-context';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, URL_IMPORT_LABEL } from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
@@ -79,8 +79,12 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [reloadToken, setReloadToken] = useState(0);
   const [fileCount, setFileCount] = useState<number | null>(null);
   const [fileCountError, setFileCountError] = useState<string | null>(null);
-  // A finished job may have changed file records (e.g. AI tags): the Files tab and its count reload.
-  const { resultToken } = useJobs();
+  // A file a job added to this asset (or a reset of the change feed) changes the Files tab count; the
+  // tab's list follows the change feed itself.
+  const [countToken, setCountToken] = useState(0);
+  useChanges((changes) => {
+    if (changes.reset || changes.added.some((place) => place.assetId === id)) setCountToken((t) => t + 1);
+  });
   // A tag rename re-reads the asset (its tags) and reloads the Files tab.
   const { renameToken } = useTags();
   const analysis = useAnalysisDialogs({
@@ -112,7 +116,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [id, reloadToken, resultToken]);
+  }, [id, reloadToken, countToken]);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -335,7 +339,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         {tab === 'files' && (
           <AssetFilesTab
             asset={asset}
-            reloadToken={reloadToken + resultToken + renameToken}
+            reloadToken={reloadToken + renameToken}
             onFilesChanged={filesChanged}
             onAssetChange={setAsset}
             onCountChange={setFileCount}

@@ -1,12 +1,20 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ANALYZE_FILE_JOB, FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB, type IpcRequest, type JobSummary, type JobView } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  FILE_DOWNLOAD_JOB,
+  IMAGE_GENERATE_JOB,
+  type Changes,
+  type IpcRequest,
+  type JobSummary,
+  type JobView,
+} from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { JobsScreen } from '../../src/renderer/src/screens/JobsScreen';
-import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, installFakeApi, noChanges, providerView, type FakeHandlers } from './fake-api';
 import { nextId, pageOf } from './fixtures';
 
 afterEach(() => {
@@ -48,6 +56,7 @@ function listOf(items: JobView[]) {
   return (request: ListRequest) => {
     const matching = items.filter(
       (j) =>
+        (request.ids === undefined || request.ids.includes(j.id)) &&
         (request.status === undefined || j.status === request.status) &&
         (request.providerId === undefined || j.providerId === request.providerId),
     );
@@ -394,29 +403,82 @@ it('a second click while an action runs sends nothing and the page actions wait 
   await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false));
 });
 
-it('a moved changes in the next poll loads the list again, keeping the rows meanwhile', async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  let summary: JobSummary = { ...IDLE, queued: 1, changes: 1 };
-  let jobs = [job({ fileName: 'first.png' })];
+/** The screen under a job provider whose next poll moves and answers `p` from `changes:since` (see `change`). */
+function withFeed(initial: JobView[], status?: JobSummary) {
+  let summary: JobSummary = status ?? { ...IDLE, queued: 1, changes: 1 };
+  let jobs = initial;
+  let changes = noChanges();
   const api = installFakeApi({
     'jobs:summary': () => summary,
     'jobs:list': (request) => listOf(jobs)(request),
+    'changes:since': () => changes,
   });
+  return {
+    api,
+    setJobs(next: JobView[]) {
+      jobs = next;
+    },
+    async change(p: Partial<Changes>) {
+      summary = { ...summary, changes: summary.changes + 1 };
+      changes = noChanges(p);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      });
+      changes = noChanges();
+    },
+  };
+}
+
+it('a changed job of the feed patches its row with one read of its id, in the same table', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const first = job({ fileName: 'first.png' });
+  const other = job({ fileName: 'other.png' });
+  const feed = withFeed([first, other]);
   renderScreen();
   await screen.findByText('first.png');
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
-  });
-  const before = listCalls(api).length;
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+  expect(within(rowOf('first.png')).getByText('Queued')).toBeTruthy();
 
-  jobs = [job({ fileName: 'second.png' }), ...jobs];
-  summary = { ...summary, queued: 2, changes: 2 };
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
-  });
-  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(before));
+  feed.setJobs([{ ...first, status: 'running', attempt: 1 }, other]);
+  feed.api.calls.length = 0;
+  await feed.change({ jobIds: [first.id] });
+  await waitFor(() => expect(within(rowOf('first.png')).getByText('Running')).toBeTruthy());
+  expect(listCalls(feed.api).map((c) => c.request)).toEqual([{ ids: [first.id], offset: 0, limit: 1 }]);
+  expect(screen.getByRole('grid', { name: 'Jobs' })).toBe(grid);
+
+  // A job that is not loaded is not read.
+  feed.api.calls.length = 0;
+  await feed.change({ jobIds: [nextId()] });
+  expect(listCalls(feed.api)).toEqual([]);
+});
+
+it('jobs changed in bulk (and a reset) refetch the visible page in place, keeping the rows meanwhile', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const first = job({ fileName: 'first.png' });
+  const feed = withFeed([first]);
+  renderScreen();
+  await screen.findByText('first.png');
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+
+  const page = deferred<{ items: JobView[]; total: number }>();
+  const second = job({ fileName: 'second.png' });
+  feed.api.set('jobs:list', () => page.promise);
+  feed.api.calls.length = 0;
+  await feed.change({ jobs: true });
+  expect(listCalls(feed.api).map((c) => c.request)).toEqual([{ offset: 0, limit: 60 }]);
+  // The old rows stay until the answer arrives.
+  expect(screen.getByText('first.png')).toBeTruthy();
+  expect(grid.querySelector('[aria-busy="true"]')).toBeNull();
+  await act(async () => page.resolve(pageOf([second, first], 2)));
   expect(await screen.findByText('second.png')).toBeTruthy();
   expect(screen.getByText('first.png')).toBeTruthy();
+  expect(screen.getByRole('grid', { name: 'Jobs' })).toBe(grid);
+
+  const third = job({ fileName: 'third.png' });
+  feed.api.set('jobs:list', listOf([third, second, first]));
+  await feed.change({ reset: true });
+  expect(await screen.findByText('third.png')).toBeTruthy();
+  expect(screen.getByRole('grid', { name: 'Jobs' })).toBe(grid);
 });
 
 it('an empty list shows No jobs', async () => {

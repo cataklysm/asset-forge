@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { JOB_ERROR_MESSAGES, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type ProviderView } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type Changes, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type ProviderView } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
@@ -13,7 +13,7 @@ import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/lis
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { deferred, fakeError, fakeProviders, importResultOf, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeProviders, importResultOf, installFakeApi, noChanges, providerView, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -22,10 +22,11 @@ const OAK = assetSummary({ name: 'Oak' });
 
 type ListRequest = IpcRequest<'files:list'>;
 
-/** Serves the files that `current()` returns, page by page. */
+/** Serves the files that `current()` returns, page by page; with `ids` only those. */
 function listOf(current: () => FileRecord[]) {
   return (request: ListRequest) => {
-    const items = current();
+    const ids = request.ids;
+    const items = ids === undefined ? current() : current().filter((f) => ids.includes(f.id));
     return pageOf(items.slice(request.offset, request.offset + request.limit), items.length);
   };
 }
@@ -740,22 +741,25 @@ it('without a configured provider the analysis entries are disabled with the rea
 
 const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [], pausedHosts: [] };
 
-/** The inbox under a job provider; `succeed()` makes the next poll report a finished job. */
+/** The inbox under a job provider; `change(p)` makes the next poll move and answer `p` from `changes:since`. */
 function withJobs(files: FileRecord[]) {
   let summary = JOBS_IDLE;
-  const api = install(files, { 'jobs:summary': () => summary });
+  let changes = noChanges();
+  const api = install(files, { 'jobs:summary': () => summary, 'changes:since': () => changes });
   return {
     api,
-    async succeed() {
-      summary = { ...summary, queued: summary.queued - 1, succeeded: summary.succeeded + 1, changes: summary.changes + 1 };
+    async change(p: Partial<Changes>) {
+      summary = { ...summary, changes: summary.changes + 1 };
+      changes = noChanges(p);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
       });
+      changes = noChanges();
     },
   };
 }
 
-it('a poll with risen succeeded reloads the inbox and keeps the scroll position', async () => {
+it('a file a job added to the inbox refreshes the list and the count in place, keeping the scroll position', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const items = Array.from({ length: 200 }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
@@ -771,7 +775,7 @@ it('a poll with risen succeeded reloads the inbox and keeps the scroll position'
     fireEvent.scroll(grid);
     await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
 
-    // A poll without a result reloads nothing.
+    // A poll without a change reloads nothing.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
     });
@@ -781,20 +785,26 @@ it('a poll with risen succeeded reloads the inbox and keeps the scroll position'
     });
     expect(callsOf(jobs.api, 'files:list')).toEqual([]);
 
-    await jobs.succeed();
+    // A file added to an asset is not the inbox's business.
+    await jobs.change({ added: [{ assetId: OAK.id }], jobIds: ['00000000-0000-4000-8000-000000000001'] });
+    expect(callsOf(jobs.api, 'files:list')).toEqual([]);
+
+    await jobs.change({ added: [{ assetId: null }] });
     await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
     // The title count reloads as well.
     expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 1, offset: 0, scope: { kind: 'inbox' } });
-    // The reloaded view starts where the old one was, not at the top.
-    await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
+    // Refreshed in place: the same view, still where it was, without placeholders.
+    expect(screen.getByRole('listbox', { name: 'Files' })).toBe(grid);
+    expect(grid.scrollTop).toBe(4800);
     expect(screen.queryByText('File 0.png')).toBeNull();
     expect(screen.getByText('File 100.png')).toBeTruthy();
+    expect(grid.querySelector('[aria-busy="true"]')).toBeNull();
   } finally {
     vi.useRealTimers();
   }
 });
 
-it('a poll with risen succeeded shows the fresh record in the open detail dialog', async () => {
+it('a changed record of the feed reaches the open detail dialog', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -813,9 +823,12 @@ it('a poll with risen succeeded shows the fresh record in the open detail dialog
     expect(within(dialog).queryByText('Moss')).toBeNull();
 
     jobs.api.set('files:list', listOf(() => [{ ...c1, tags: [tagOf('Moss', 'ai')] }, c2]));
-    await jobs.succeed();
+    jobs.api.calls.length = 0;
+    await jobs.change({ fileIds: [c1.id] });
     expect(await within(dialog).findByText('Moss')).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'c1.png' })).toBe(dialog);
+    // One read of the changed record; the count is not read again.
+    expect(callsOf(jobs.api, 'files:list')).toEqual([{ scope: { kind: 'inbox' }, ids: [c1.id], offset: 0, limit: 1 }]);
   } finally {
     vi.useRealTimers();
   }

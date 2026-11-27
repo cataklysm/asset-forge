@@ -150,6 +150,16 @@ export function dropPages<T>(state: PagedState<T>, pages: Iterable<number>): Pag
   return next === null ? state : { ...state, pages: next };
 }
 
+/** The distinct ids of `ids` that a loaded page holds, in the order of `ids`. */
+export function loadedIds<T extends { id: string }>(state: PagedState<T>, ids: readonly string[]): string[] {
+  if (ids.length === 0) return [];
+  const loaded = new Set<string>();
+  for (const entry of state.pages.values()) {
+    if (entry.status === 'loaded') for (const item of entry.items) loaded.add(item.id);
+  }
+  return [...new Set(ids)].filter((id) => loaded.has(id));
+}
+
 /** The loaded item with `id` and its index, or null when no loaded page holds it. */
 export function findLoaded<T extends { id: string }>(
   state: PagedState<T>,

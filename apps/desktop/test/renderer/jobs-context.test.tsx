@@ -1,8 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
-import type { JobSummary } from '@assetforge/contracts';
+import type { Changes, JobSummary } from '@assetforge/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JOB_POLL_MS, JobsProvider, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
-import { deferred, fakeError, installFakeApi } from './fake-api';
+import { JOB_POLL_MS, JobsProvider, useChanges, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
+import { deferred, fakeError, installFakeApi, noChanges } from './fake-api';
 
 const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
 
@@ -247,6 +247,121 @@ describe('JobsProvider', () => {
     await tick();
     expect(summaryCalls(api)).toBe(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  describe('useChanges', () => {
+    let received: Changes[] = [];
+    let renders = 0;
+
+    function Listener() {
+      renders += 1;
+      useChanges((changes) => received.push(changes));
+      return null;
+    }
+
+    beforeEach(() => {
+      received = [];
+      renders = 0;
+    });
+
+    const sinceCalls = (api: ReturnType<typeof installFakeApi>) =>
+      api.calls.filter((c) => c.channel === 'changes:since').map((c) => c.request);
+
+    it('asks after the first summary and after every poll in which changes moved, with the cursor answered last', async () => {
+      let next: JobSummary = { ...IDLE, changes: 3 };
+      let answers = 0;
+      const api = installFakeApi({
+        'jobs:summary': () => next,
+        'changes:since': ({ cursor }) => {
+          answers += 1;
+          return cursor === null
+            ? noChanges({ cursor: 'c1', reset: true })
+            : noChanges({ cursor: `c${answers}`, fileIds: ['f1'] });
+        },
+      });
+      render(
+        <JobsProvider>
+          <Listener />
+        </JobsProvider>,
+      );
+      await settle();
+      expect(sinceCalls(api)).toEqual([{ cursor: null }]);
+      expect(received).toEqual([noChanges({ cursor: 'c1', reset: true })]);
+      const rendersAfterFirst = renders;
+
+      // Nothing moved: no request.
+      await tick();
+      expect(sinceCalls(api)).toHaveLength(1);
+
+      next = { ...IDLE, changes: 4 };
+      await tick();
+      expect(sinceCalls(api)).toEqual([{ cursor: null }, { cursor: 'c1' }]);
+      expect(received.at(-1)).toEqual(noChanges({ cursor: 'c2', fileIds: ['f1'] }));
+
+      next = { ...IDLE, changes: 5 };
+      await tick();
+      expect(sinceCalls(api).at(-1)).toEqual({ cursor: 'c2' });
+      expect(received).toHaveLength(3);
+      // Delivering an answer renders nothing that only listens.
+      expect(renders).toBe(rendersAfterFirst);
+    });
+
+    it('a rejected request keeps the cursor and asks again with the next poll, also when changes did not move', async () => {
+      let fail = false;
+      const api = installFakeApi({
+        'jobs:summary': () => ({ ...IDLE, changes: fail ? 2 : 1 }),
+        'changes:since': ({ cursor }) => {
+          if (fail) throw fakeError('internal_error');
+          return noChanges({ cursor: cursor === null ? 'c1' : 'c2', reset: cursor === null });
+        },
+      });
+      render(
+        <JobsProvider>
+          <Listener />
+        </JobsProvider>,
+      );
+      await settle();
+      expect(received).toHaveLength(1);
+
+      fail = true;
+      await tick();
+      expect(sinceCalls(api)).toEqual([{ cursor: null }, { cursor: 'c1' }]);
+      expect(received).toHaveLength(1);
+
+      // changes stays at 2, but the failed answer is still owed.
+      fail = false;
+      api.set('jobs:summary', () => ({ ...IDLE, changes: 2 }));
+      await tick();
+      expect(sinceCalls(api)).toEqual([{ cursor: null }, { cursor: 'c1' }, { cursor: 'c1' }]);
+      expect(received.at(-1)?.cursor).toBe('c2');
+
+      // Settled: no further request without a move.
+      await tick();
+      expect(sinceCalls(api)).toHaveLength(3);
+    });
+
+    it('the next poll waits for a pending change request; an unmounted listener receives nothing', async () => {
+      const pending = deferred<Changes>();
+      const api = installFakeApi({
+        'jobs:summary': () => ({ ...IDLE }),
+        'changes:since': () => pending.promise,
+      });
+      const { rerender } = render(
+        <JobsProvider>
+          <Listener />
+        </JobsProvider>,
+      );
+      await settle();
+      await tick();
+      await tick();
+      expect(summaryCalls(api)).toBe(1);
+
+      rerender(<JobsProvider>{null}</JobsProvider>);
+      await act(async () => pending.resolve(noChanges({ reset: true })));
+      expect(received).toHaveLength(0);
+      await tick();
+      expect(summaryCalls(api)).toBe(2);
+    });
   });
 
   it('outside a provider useJobs gives the empty state with a no-op refresh', () => {

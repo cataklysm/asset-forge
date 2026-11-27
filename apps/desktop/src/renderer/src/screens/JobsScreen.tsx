@@ -5,6 +5,7 @@ import {
   ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
+  MAX_CHOSEN_IDS,
   type JobStatus,
   type JobView,
   type ProviderList,
@@ -23,7 +24,7 @@ import {
   type ViewRestore,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { useJobs } from '../jobs-context';
+import { useChanges, useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
   ALREADY_PRESENT_LABEL,
@@ -35,7 +36,7 @@ import {
   MOVE_JOBS_TITLE,
 } from '../labels';
 import { useProviders } from '../provider-context';
-import { retryIndex, slotAt, type PagedState } from '../paged-list';
+import { loadedIds, retryIndex, slotAt, type PagedState } from '../paged-list';
 import { ALERT, BORDER, BUTTON, BUTTON_INLINE, ICON_BUTTON, ITEM_HOVER, MUTED, SELECT } from '../ui';
 
 /** The scheduler's `MAX_ATTEMPTS` (packages/jobs), which the renderer does not import. */
@@ -68,7 +69,7 @@ function focusedIndex(root: HTMLElement | null): number | null {
 
 /** The jobs of the workspace, newest first, with a status filter, row and page actions. */
 export function JobsScreen() {
-  const { summary, active, changeToken, refresh } = useJobs();
+  const { summary, active, refresh } = useJobs();
   const [status, setStatus] = useState<JobStatus | ''>('');
   const providers = useProviders();
   const entries = providers.list?.providers ?? [];
@@ -76,13 +77,13 @@ export function JobsScreen() {
   const [chosenProvider, setChosenProvider] = useState('');
   const providerId = entries.some((p) => p.id === chosenProvider) ? chosenProvider : '';
   const [moving, setMoving] = useState(false);
-  // Bumped after every action of this screen; with `changeToken` it reloads the list.
+  // Bumped after every action of this screen; it reloads the list. Background changes follow the
+  // change feed in place instead.
   const [reloadToken, setReloadToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
-  const reloadKey = `${changeToken}|${reloadToken}`;
-  const key = JSON.stringify([status, providerId, reloadKey]);
+  const key = JSON.stringify([status, providerId, reloadToken]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // Where the next mounted table starts; read once by each table when it mounts.
@@ -90,14 +91,12 @@ export function JobsScreen() {
   const position = useRef<ViewHandle | null>(null);
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
+  // The list's filter without paging; also the base of a read of chosen ids.
+  const listRequest = { ...(status === '' ? {} : { status }), ...(providerId === '' ? {} : { providerId }) };
   const fetchPage = useCallback(
-    (offset: number, limit: number) =>
-      call('jobs:list', {
-        limit,
-        offset,
-        ...(status === '' ? {} : { status }),
-        ...(providerId === '' ? {} : { providerId }),
-      }),
+    (offset: number, limit: number) => call('jobs:list', { limit, offset, ...listRequest }),
+    // `status` and `providerId` are all `listRequest` holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [status, providerId],
   );
 
@@ -107,10 +106,38 @@ export function JobsScreen() {
   // Keyed by the displayed list: while a reload is pending, the old table stays where it was.
   const viewKey = paged.state.key;
 
+  const latest = useRef({ paged, key, listRequest });
+  latest.current = { paged, key, listRequest };
+
+  // Background changes reach the table in place: changed jobs are read again and patched, jobs
+  // added, removed or changed in bulk (or a reset) refresh the loaded pages.
+  useChanges((changes) => {
+    const { paged: current, key: startedKey, listRequest: request } = latest.current;
+    if (changes.reset || changes.jobs) {
+      current.refresh();
+      return;
+    }
+    const ids = loadedIds(current.state, changes.jobIds);
+    if (ids.length === 0) return;
+    if (ids.length > MAX_CHOSEN_IDS) {
+      current.refresh();
+      return;
+    }
+    call('jobs:list', { ...request, ids, offset: 0, limit: ids.length }).then(
+      (page) => {
+        // Started for another list: its rows must not reach this one.
+        if (latest.current.key !== startedKey) return;
+        if (page.items.length > 0) latest.current.paged.patch(page.items);
+      },
+      // The rows stay as they are until the next reload.
+      () => {},
+    );
+  });
+
   // A reload keeps the position and the focused row: the table remounts with the new list.
-  const lastReload = useRef(reloadKey);
-  if (lastReload.current !== reloadKey) {
-    lastReload.current = reloadKey;
+  const lastReload = useRef(reloadToken);
+  if (lastReload.current !== reloadToken) {
+    lastReload.current = reloadToken;
     const current = position.current?.viewKey === viewKey ? position.current.get() : null;
     const focused = focusedIndex(containerRef.current);
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: focused, focus: focused !== null };

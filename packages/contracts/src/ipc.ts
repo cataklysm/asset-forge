@@ -93,7 +93,9 @@ const IdRequestSchema = z.object({ id: IdSchema });
  * Narrows a list to these rows, within its scope and every other filter: how a list fetches the rows the change feed
  * named. A list filter only, never part of an analysis target.
  */
-const ChosenIdsSchema = z.array(IdSchema).min(1).max(100);
+/** The most ids one `files:list` or `jobs:list` request may choose. */
+export const MAX_CHOSEN_IDS = 100;
+const ChosenIdsSchema = z.array(IdSchema).min(1).max(MAX_CHOSEN_IDS);
 const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });
 const RelationKeySchema = z.object({
   fromAssetId: IdSchema,

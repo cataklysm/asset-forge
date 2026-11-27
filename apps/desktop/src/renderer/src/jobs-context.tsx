@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { JobSummary } from '@assetforge/contracts';
+import type { Changes, JobSummary } from '@assetforge/contracts';
 import { call } from './api';
 
 export const JOB_POLL_MS = 2000;
@@ -20,6 +20,13 @@ export interface JobState {
 const EMPTY: JobState = { summary: null, active: 0, changeToken: 0, resultToken: 0, refresh: () => {} };
 
 const JobsContext = createContext<JobState>(EMPTY);
+
+type ChangeListener = (changes: Changes) => void;
+
+/** Subscribes to the change answers; returns the unsubscribe function. Stable, so listening never re-renders. */
+type Subscribe = (listener: ChangeListener) => () => void;
+
+const ChangesContext = createContext<Subscribe>(() => () => {});
 
 interface Polled {
   summary: JobSummary | null;
@@ -54,6 +61,7 @@ export const sameSummary = (a: JobSummary, b: JobSummary) =>
 export function JobsProvider({ children }: { children: ReactNode }) {
   const [polled, setPolled] = useState<Polled>({ summary: null, changeToken: 0, resultToken: 0 });
   const control = useRef<{ poll(): void } | null>(null);
+  const listeners = useRef(new Set<ChangeListener>());
 
   useEffect(() => {
     let disposed = false;
@@ -61,6 +69,37 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     // A refresh while a poll runs: poll again as soon as it ends.
     let again = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // `changes` of the last answered summary; null before the first one.
+    let lastChanges: number | null = null;
+    // The cursor of the last change answer; null asks for a fresh one (answered with `reset`).
+    let cursor: string | null = null;
+    // A change request failed: the next poll asks again with the same cursor, so nothing is lost.
+    let owed = false;
+
+    function deliver(changes: Changes) {
+      for (const listener of [...listeners.current]) {
+        try {
+          listener(changes);
+        } catch {
+          // One listener failing must not keep the others from the answer.
+        }
+      }
+    }
+
+    /** Asks `changes:since` once and hands the answer to every listener; a failure keeps the cursor. */
+    function readChanges(): Promise<void> {
+      return call('changes:since', { cursor }).then(
+        (changes) => {
+          if (disposed) return;
+          cursor = changes.cursor;
+          owed = false;
+          deliver(changes);
+        },
+        () => {
+          owed = true;
+        },
+      );
+    }
 
     function schedule(delay: number) {
       timer = setTimeout(poll, delay);
@@ -80,6 +119,8 @@ export function JobsProvider({ children }: { children: ReactNode }) {
         .then(
           (next) => {
             if (disposed) return;
+            const changed = lastChanges === null || next.changes !== lastChanges;
+            lastChanges = next.changes;
             setPolled((current) => {
               const previous = current.summary;
               if (previous === null) return { ...current, summary: next };
@@ -91,6 +132,8 @@ export function JobsProvider({ children }: { children: ReactNode }) {
                 resultToken: current.resultToken + (moved && next.succeeded > previous.succeeded ? 1 : 0),
               };
             });
+            // Inside the poll cycle: the next poll is scheduled once this request has settled.
+            return changed || owed ? readChanges() : undefined;
           },
           // The last state stays; the next tick tries again.
           () => {},
@@ -119,7 +162,32 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     return { ...polled, active, refresh };
   }, [polled, refresh]);
 
-  return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
+  const subscribe = useCallback<Subscribe>((listener) => {
+    const set = listeners.current;
+    set.add(listener);
+    return () => {
+      set.delete(listener);
+    };
+  }, []);
+
+  return (
+    <ChangesContext.Provider value={subscribe}>
+      <JobsContext.Provider value={value}>{children}</JobsContext.Provider>
+    </ChangesContext.Provider>
+  );
+}
+
+/**
+ * Calls `listener` with every change answer while mounted; the latest listener is used, the subscription is
+ * stable. The answers come from `changes:since`, asked once after every poll in which `changes` moved and after
+ * the first one (which answers `reset`); delivering them sets no React state. Outside a `JobsProvider` it never
+ * calls.
+ */
+export function useChanges(listener: (changes: Changes) => void): void {
+  const subscribe = useContext(ChangesContext);
+  const latest = useRef(listener);
+  latest.current = listener;
+  useEffect(() => subscribe((changes) => latest.current(changes)), [subscribe]);
 }
 
 /** The job state of the surrounding `JobsProvider`; outside one the empty state with a no-op refresh. */

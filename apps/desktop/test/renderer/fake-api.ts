@@ -2,6 +2,7 @@ import type {
   AnalysisPrompt,
   AnalysisPromptList,
   AssetDetail,
+  Changes,
   ErrorCode,
   FileOrigin,
   ImportResult,
@@ -460,11 +461,16 @@ export function fakeGenerationDefaults(): { [C in GenerationChannel]: NonNullabl
   };
 }
 
+/** A `changes:since` answer without any change and without `reset`; `p` sets what changed. */
+export function noChanges(p: Partial<Changes> = {}): Changes {
+  return { cursor: 'fake-cursor', reset: false, jobIds: [], jobs: false, fileIds: [], added: [], ...p };
+}
+
 /**
  * Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see
  * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`), the
- * `generations:*` ones (see `fakeGenerationDefaults`) and the origin channels of files without
- * origins (see `fakeFileOrigins`).
+ * `generations:*` ones (see `fakeGenerationDefaults`), the origin channels of files without
+ * origins (see `fakeFileOrigins`) and `changes:since`, which answers no change (see `noChanges`).
  */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
@@ -475,6 +481,7 @@ export function installFakeApi(handlers: FakeHandlers): {
     ...fakeProviders().handlers,
     ...fakeGenerationDefaults(),
     ...fakeFileOrigins({}).handlers,
+    'changes:since': () => noChanges(),
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

@@ -8,8 +8,15 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { FileRoleSchema, type FileListFilter, type FileRecord, type FileScope } from '@assetforge/contracts';
+import {
+  FileRoleSchema,
+  MAX_CHOSEN_IDS,
+  type FileListFilter,
+  type FileRecord,
+  type FileScope,
+} from '@assetforge/contracts';
 import { call } from '../api';
+import { useChanges } from '../jobs-context';
 import { columnsForWidth, pagesForRows, rowItems } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { usePagedList } from '../hooks/usePagedList';
@@ -23,7 +30,7 @@ import {
 } from '../hooks/useVirtualRows';
 import { FILE_KIND_OPTIONS, label, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
-import { findLoaded, PAGE_SIZE, retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
+import { findLoaded, loadedIds, PAGE_SIZE, retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import {
   clickSelect,
   MAX_SELECTION,
@@ -70,7 +77,10 @@ export interface FileBrowserProps {
   positionRef?: MutableRefObject<ViewPosition | null>;
   selection: FileSelection;
   onSelectionChange(s: FileSelection): void;
-  /** Part of the list key; bump after a mutation to refetch. The position is kept. */
+  /**
+   * Part of the list key; bump after a mutation to refetch. The position is kept. Background changes
+   * (jobs) never go through it: the list follows the change feed in place.
+   */
   reloadToken: number;
   /** Shows the "Cover" badge on this file. */
   coverFileId?: string | null;
@@ -117,6 +127,20 @@ export interface ViewerList {
 
 const pageOf = (index: number) => Math.floor(index / PAGE_SIZE);
 
+/** Whether a file added to `assetId` (null: the inbox) belongs to the list of `scope`. */
+function addsTo(scope: FileScope, assetId: string | null): boolean {
+  switch (scope.kind) {
+    case 'asset':
+      return scope.assetId === assetId;
+    case 'inbox':
+      return assetId === null;
+    case 'all':
+      return true;
+    case 'trash':
+      return false;
+  }
+}
+
 /**
  * A paginated, virtualised list of files as tiles or a table, with its filters, endless
  * scrolling and multi-select (see `selection.ts`). Mounted by the asset Files tab, the inbox and
@@ -145,14 +169,10 @@ export function FileBrowser(props: FileBrowserProps) {
   const position = useRef<ViewHandle | null>(null);
   const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
 
+  // The list's request without paging; also the base of a read of chosen ids.
+  const listRequest = { ...toFileQuery(scope, effective), ...(withProposals ? { hasProposal: true } : {}) };
   const fetchPage = useCallback(
-    (offset: number, limit: number) =>
-      call('files:list', {
-        limit,
-        offset,
-        ...toFileQuery(scope, effective),
-        ...(withProposals ? { hasProposal: true } : {}),
-      }),
+    (offset: number, limit: number) => call('files:list', { limit, offset, ...listRequest }),
     // `key` encodes the scope and every filter value used above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key],
@@ -215,8 +235,34 @@ export function FileBrowser(props: FileBrowserProps) {
   const nextWanted = total === null ? [bootPage] : [...new Set([...viewerPages(total), ...rowPages])];
   if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
 
-  const latest = useRef({ props, viewKey, paged });
-  latest.current = { props, viewKey, paged };
+  const latest = useRef({ props, viewKey, paged, key, listRequest });
+  latest.current = { props, viewKey, paged, key, listRequest };
+
+  // Background changes reach the list in place: changed records are read again and patched, a file
+  // added to this list's place (or a reset) refreshes the loaded pages. The trash never reacts.
+  useChanges((changes) => {
+    if (scope.kind === 'trash') return;
+    const { paged: current, key: startedKey, listRequest: request } = latest.current;
+    if (changes.reset || changes.added.some((place) => addsTo(scope, place.assetId))) {
+      current.refresh();
+      return;
+    }
+    const ids = loadedIds(current.state, changes.fileIds);
+    if (ids.length === 0) return;
+    if (ids.length > MAX_CHOSEN_IDS) {
+      current.refresh();
+      return;
+    }
+    call('files:list', { ...request, ids, offset: 0, limit: ids.length }).then(
+      (page) => {
+        // Started for another list: its records must not reach this one.
+        if (latest.current.key !== startedKey) return;
+        if (page.items.length > 0) latest.current.paged.patch(page.items);
+      },
+      // The records stay as they are until the next reload.
+      () => {},
+    );
+  });
 
   function ask(file: FileRecord | null) {
     const current = latest.current.props.viewer;

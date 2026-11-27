@@ -4,6 +4,7 @@ import { useState } from 'react';
 import {
   JOB_ERROR_MESSAGES,
   type AssetAssignment,
+  type Changes,
   type AssetDetail,
   type AssetRelationView,
   type AssetType,
@@ -14,7 +15,7 @@ import {
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
-import { JobsProvider } from '../../src/renderer/src/jobs-context';
+import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ANALYSE_ASSET_TITLE } from '../../src/renderer/src/labels';
 import type { AssetTab } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
@@ -28,6 +29,7 @@ import {
   fakeProviders,
   importResultOf,
   installFakeApi,
+  noChanges,
   providerView,
   type FakeHandlers,
 } from './fake-api';
@@ -702,6 +704,55 @@ function renderWithProvider(id: string) {
     </JobsProvider>,
   );
 }
+
+it('a file a job added to this asset refreshes the files and the tab count in place; one added elsewhere does nothing', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const asset = assetDetail();
+    let files = Array.from({ length: 3 }, (_, i) => fileRecord({ originalName: `f${i}.png`, assetId: asset.id, role: 'reference' }));
+    let summary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [], pausedHosts: [] };
+    let changes = noChanges();
+    const api = install(asset, {
+      ...analysisHandlers(),
+      'jobs:summary': () => summary,
+      'changes:since': () => changes,
+      'files:list': (request) => listOf(files)(request),
+    });
+    const change = async (p: Partial<Changes>) => {
+      summary = { ...summary, changes: summary.changes + 1 };
+      changes = noChanges(p);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      });
+      changes = noChanges();
+    };
+    renderWithProvider(asset.id);
+    expect(await screen.findByRole('tab', { name: 'Files 3' })).toBeTruthy();
+    await screen.findByText('f0.png');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const listbox = screen.getByRole('listbox', { name: 'Files' });
+
+    api.calls.length = 0;
+    await change({ added: [{ assetId: nextId() }, { assetId: null }] });
+    expect(callsOf(api, 'files:list')).toEqual([]);
+
+    files = [...files, fileRecord({ originalName: 'f3.png', assetId: asset.id, role: 'generated' })];
+    await change({ added: [{ assetId: asset.id }] });
+    expect(await screen.findByText('f3.png')).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: 'Files 4' })).toBeTruthy();
+    expect(screen.getByRole('listbox', { name: 'Files' })).toBe(listbox);
+    expect(callsOf(api, 'files:list')).toEqual(
+      expect.arrayContaining([
+        { limit: 1, offset: 0, scope: { kind: 'asset', assetId: asset.id } },
+        { limit: 60, offset: 0, scope: { kind: 'asset', assetId: asset.id } },
+      ]),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 /** The Analyse button of the selection bar (the header has one for the whole asset). */
 function selectionAnalyse(): HTMLButtonElement {

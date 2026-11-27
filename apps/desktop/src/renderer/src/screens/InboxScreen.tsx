@@ -19,7 +19,7 @@ import { importTitle } from '../import-result';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
-import { useJobs } from '../jobs-context';
+import { useChanges } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE, URL_IMPORT_LABEL } from '../labels';
 import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
@@ -66,8 +66,12 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const zipChoice = useZipChoice();
   const [urlImportOpen, setUrlImportOpen] = useState(false);
 
-  // A finished job may have changed records (e.g. AI tags): the list and the count reload.
-  const { resultToken } = useJobs();
+  // A file a job added to the inbox (or a reset of the change feed) changes the count; the list
+  // follows the change feed itself.
+  const [countToken, setCountToken] = useState(0);
+  useChanges((changes) => {
+    if (changes.reset || changes.added.some((place) => place.assetId === null)) setCountToken((t) => t + 1);
+  });
 
   // A tag rename reloads the list; the selection and the shown file are copies it does not reach.
   const { renameToken } = useTags();
@@ -78,7 +82,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   });
 
   // The title shows the number of all inbox files, independent of the filters.
-  const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken, resultToken]);
+  const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: INBOX }), [reloadToken, countToken]);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -284,7 +288,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           positionRef={positionRef}
           selection={selection}
           onSelectionChange={setSelection}
-          reloadToken={reloadToken + resultToken + renameToken}
+          reloadToken={reloadToken + renameToken}
           onOpen={detail.open}
           menuItems={(file) =>
             fileMenuItems(file, {

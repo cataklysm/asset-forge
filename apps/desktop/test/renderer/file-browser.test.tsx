@@ -1,14 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { FileList, FileRecord, FileScope, IpcRequest } from '@assetforge/contracts';
+import type { Changes, FileList, FileRecord, FileScope, IpcRequest, JobSummary } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FileBrowser, type ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/renderer/src/list-state';
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
-import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
+import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
+import { deferred, installFakeApi, noChanges, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 
 afterEach(() => {
@@ -694,4 +695,174 @@ it('the file type filter offers Video and asks for the kind video', async () => 
   ]);
   await userEvent.setup().selectOptions(select, 'Video');
   await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, scope: ASSET_SCOPE, kind: 'video' }));
+});
+
+const FEED_IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 1,
+  paused: [],
+  pausedHosts: [],
+};
+
+/** A `files:list` fake over `items()` that honours `ids`. */
+function feedList(items: () => FileRecord[]) {
+  return (request: ListRequest) => {
+    const matching = request.ids === undefined ? items() : items().filter((f) => request.ids!.includes(f.id));
+    return pageOf(matching.slice(request.offset, request.offset + request.limit), matching.length);
+  };
+}
+
+/**
+ * The browser under a job provider; `change(p)` makes the next poll move and answer `p` from
+ * `changes:since`.
+ */
+function withFeed(handlers: FakeHandlers) {
+  let summary = FEED_IDLE;
+  let changes = noChanges();
+  const api = install({ 'jobs:summary': () => summary, 'changes:since': () => changes, ...handlers });
+  return {
+    api,
+    async change(p: Partial<Changes>) {
+      summary = { ...summary, changes: summary.changes + 1 };
+      changes = noChanges(p);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      });
+      changes = noChanges();
+    },
+  };
+}
+
+function renderFeed(scope: FileScope = ASSET_SCOPE) {
+  return render(
+    <JobsProvider>
+      <Harness scope={scope} showRoleFilter={scope.kind === 'asset'} />
+    </JobsProvider>,
+  );
+}
+
+/** The files at the start of a feed test, the scroll container with a scroll offset of its own, and the feed. */
+async function startFeed(scope: FileScope = ASSET_SCOPE) {
+  let items = many(6);
+  const feed = withFeed({ 'files:list': feedList(() => items) });
+  renderFeed(scope);
+  await screen.findByText('File 0.png');
+  // The provider's first summary and its change read.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const container = screen.getByRole('listbox', { name: 'Files' });
+  Object.defineProperty(container, 'scrollTop', { configurable: true, writable: true, value: 40 });
+  feed.api.calls.length = 0;
+  return {
+    ...feed,
+    container,
+    get items() {
+      return items;
+    },
+    setItems(next: FileRecord[]) {
+      items = next;
+    },
+  };
+}
+
+it('feed (a): a changed visible file is read once by its id and patched in place', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  const changed = { ...feed.items[2]!, tags: [tagOf('Moss')] };
+  feed.setItems(feed.items.map((f) => (f.id === changed.id ? changed : f)));
+  await feed.change({ fileIds: [changed.id] });
+  await waitFor(() => expect(itemOf('File 2.png').textContent).toContain('Moss'));
+  expect(listRequests(feed.api)).toEqual([{ limit: 1, offset: 0, scope: ASSET_SCOPE, ids: [changed.id] }]);
+  expect(screen.getByRole('listbox', { name: 'Files' })).toBe(feed.container);
+  expect(feed.container.scrollTop).toBe(40);
+});
+
+it('feed (b): a changed file that is not loaded is not read', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  await feed.change({ fileIds: [nextId()] });
+  expect(listRequests(feed.api)).toEqual([]);
+});
+
+it('feed (c): an id read without an item leaves the tile as it was', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  const gone = feed.items[1]!;
+  feed.setItems(feed.items.filter((f) => f.id !== gone.id));
+  await feed.change({ fileIds: [gone.id] });
+  await waitFor(() => expect(listRequests(feed.api)).toHaveLength(1));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(itemOf('File 1.png')).toBeTruthy();
+  expect(screen.getByRole('listbox', { name: 'Files' })).toBe(feed.container);
+});
+
+it('feed (d): a file added to another asset makes no call', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  await feed.change({ added: [{ assetId: nextId() }, { assetId: null }] });
+  expect(listRequests(feed.api)).toEqual([]);
+});
+
+it('feed (e, f): a file added to this asset, and a reset, refetch the visible page in place', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  const assetId = ASSET_SCOPE.kind === 'asset' ? ASSET_SCOPE.assetId : null;
+  const page = deferred<FileList>();
+  feed.api.set('files:list', () => page.promise);
+  await feed.change({ added: [{ assetId }] });
+  expect(listRequests(feed.api)).toEqual([{ limit: 60, offset: 0, scope: ASSET_SCOPE }]);
+  // The old tiles stay, without a placeholder, until the answer arrives.
+  expect(itemOf('File 0.png')).toBeTruthy();
+  expect(feed.container.querySelector('[aria-busy="true"]')).toBeNull();
+  const added = fileRecord({ originalName: 'Added.png', assetId, role: 'reference' });
+  await act(async () => page.resolve(pageOf([added, ...feed.items])));
+  expect(await screen.findByText('Added.png')).toBeTruthy();
+  expect(screen.getByRole('listbox', { name: 'Files' })).toBe(feed.container);
+  expect(feed.container.scrollTop).toBe(40);
+
+  const again = fileRecord({ originalName: 'Again.png', assetId, role: 'reference' });
+  feed.api.set('files:list', feedList(() => [again, added, ...feed.items]));
+  feed.api.calls.length = 0;
+  await feed.change({ reset: true });
+  expect(await screen.findByText('Again.png')).toBeTruthy();
+  expect(listRequests(feed.api)).toEqual([{ limit: 60, offset: 0, scope: ASSET_SCOPE }]);
+  expect(screen.getByRole('listbox', { name: 'Files' })).toBe(feed.container);
+});
+
+it('feed (g): the trash ignores every answer', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const items = [trashedRecord({ originalName: 'gone.png' })];
+  const feed = withFeed({ 'files:list': feedList(() => items) });
+  renderFeed(TRASH_SCOPE);
+  await screen.findByText('gone.png');
+  feed.api.calls.length = 0;
+  await feed.change({ reset: true, fileIds: [items[0]!.id], added: [{ assetId: null }] });
+  expect(listRequests(feed.api)).toEqual([]);
+});
+
+it('feed (h): an id read that answers after a filter change patches nothing', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const feed = await startFeed();
+  const target = feed.items[0]!;
+  const read = deferred<FileList>();
+  feed.api.set('files:list', (request) => (request.ids !== undefined ? read.promise : feedList(() => feed.items)(request)));
+  await feed.change({ fileIds: [target.id] });
+  expect(listRequests(feed.api).at(-1)?.ids).toEqual([target.id]);
+
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search files' }), { target: { value: 'file' } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(250);
+  });
+  await waitFor(() => expect(listRequests(feed.api).at(-1)?.query).toBe('file'));
+  await screen.findByText('File 0.png');
+  await act(async () => read.resolve(pageOf([{ ...target, tags: [tagOf('Moss')] }])));
+  expect(itemOf('File 0.png').textContent).not.toContain('Moss');
 });
