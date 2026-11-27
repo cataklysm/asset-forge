@@ -131,3 +131,14 @@ The owner runs series in the generation studio: one source image, many edits, mo
 - Persistence: migration `0014` on a phase 5a database; cascade on prompt delete with `set null` on generations and the copies kept; tag rename and merge over `prompt_tag`; list query and tags filter.
 - Desktop IPC: every channel with its error codes; `generations:start` with a version (record columns, resolved text sent to the mock provider), with both or neither prompt form, with a deleted version.
 - Renderer: the screen (create, save a version, old version back, delete, unsaved-changes guard), the studio (choose, fill, blocked states, detach, save to library, use settings), the details line with and without an existing prompt.
+
+## Amendments from planning
+
+Settled while writing the plan (`docs/superpowers/plans/2026-11-27-prompt-library.md`); where they differ from the text above, these win.
+
+1. **Paging.** `prompts:list` takes `{ query?, tagNames?, offset, limit }` and answers `{ items, total }`, like `projects:list`. The renderer's `usePagedList` pages by offset and total; a cursor would need a second list hook for no gain at this size.
+2. **Prompt id on the generation.** `Generation` carries `promptId` beside the four stored fields. It is read through the version row (no column) and is null as soon as the version is gone; the details link and `Use settings` need it.
+3. **Navigation position.** The `Prompts` entry sits directly after `Projects`, before Inbox.
+4. **Further messages.** A value for a name the version does not hold, or two keys for one variable, answers `This prompt has no such variable`; a title, description, default or value over its limit answers `This text is too long`; the 51st tag answers `This prompt cannot take more tags`; an unknown version at `generations:start` answers `not_found`.
+5. **Template rules live in `packages/contracts`.** Finding variables and resolving are pure functions there, so the studio preview and the main process share one implementation; core turns their outcomes into errors. In DTOs `variables` is a plain array and `promptVariables` a plain record; the `{ v: 1, … }` wrappers exist only in the database columns.
+6. **Unsaved changes.** The guard covers choosing another prompt, `New` and the main navigation. Closing the window is not guarded (backlog).
