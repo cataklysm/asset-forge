@@ -143,6 +143,39 @@ it('cancel calls files:cancelImport, marks the progress cancelling and resets on
   expect(requested()).toBe('false');
 });
 
+it('a poll already in flight does not undo the cancelling state', async () => {
+  const pending = deferred<ImportProgress | null>();
+  let count = 0;
+  installFakeApi({
+    'files:importProgress': () => {
+      count += 1;
+      return count === 1 ? progressOf({ done: 1 }) : count === 2 ? pending.promise : progressOf({ done: 2 });
+    },
+    'files:cancelImport': () => ({ cancelling: true }),
+  });
+  render(<Probe />);
+  await toggle();
+  await advance(IMPORT_POLL_MS * 2);
+  await stop();
+  pending.resolve(progressOf({ done: 2, cancelling: false }));
+  await advance(0);
+  expect(JSON.parse(shown()!)).toMatchObject({ done: 2, cancelling: true });
+  await advance(IMPORT_POLL_MS);
+  expect(JSON.parse(shown()!)).toMatchObject({ done: 2, cancelling: true });
+});
+
+it('a poll that resolves after the hook was deactivated leaves the progress null', async () => {
+  const pending = deferred<ImportProgress | null>();
+  installFakeApi({ 'files:importProgress': () => pending.promise });
+  render(<Probe />);
+  await toggle();
+  await advance(IMPORT_POLL_MS);
+  await toggle();
+  pending.resolve(progressOf({ done: 5 }));
+  await advance(0);
+  expect(shown()).toBe('none');
+});
+
 it('a cancel that was refused or failed is not counted as requested', async () => {
   let answer: () => { cancelling: boolean } = () => ({ cancelling: false });
   installFakeApi({
@@ -216,6 +249,7 @@ it('the view shows "<done> of <total>", the bar value and a Cancel button disabl
   expect(bar.getAttribute('aria-valuemin')).toBe('0');
   expect(bar.getAttribute('aria-valuemax')).toBe('100');
   expect(bar.getAttribute('aria-valuenow')).toBe('44');
+  expect(bar.getAttribute('aria-valuetext')).toBe('3 of 8');
   const button = screen.getByRole('button', { name: 'Cancel' });
   expect(button.getAttribute('title')).toBe('Stops after the current file');
   expect((button as HTMLButtonElement).disabled).toBe(false);

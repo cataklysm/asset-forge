@@ -22,7 +22,10 @@ export interface ImportProgressState {
   progress: ImportProgress | null;
   /** Asks the main process to stop the running import after its current item. */
   cancel(): void;
-  /** Whether a cancel was requested (and accepted) during the import that runs or ran last. */
+  /**
+   * True once a cancel was requested for the running import; turned back only when the answer
+   * `cancelling: false` (or a failure) arrives while that import still runs. Stays after the import ended.
+   */
   cancelRequested: boolean;
 }
 
@@ -35,7 +38,7 @@ export function useImportProgress(active: boolean): ImportProgressState {
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [cancelRequested, setCancelRequested] = useState(false);
   // Which activation a cancel belongs to; an answer that arrives after it ended is ignored.
-  const run = useRef({ active, id: 0 });
+  const run = useRef({ active, id: 0, requested: false });
   // Reset while rendering, so that the first render of a new import never shows the last one's cancel.
   const [seenActive, setSeenActive] = useState(active);
   if (seenActive !== active) {
@@ -44,7 +47,7 @@ export function useImportProgress(active: boolean): ImportProgressState {
   }
 
   useEffect(() => {
-    run.current = { active, id: run.current.id + 1 };
+    run.current = { active, id: run.current.id + 1, requested: false };
     if (!active) {
       setProgress(null);
       return;
@@ -57,7 +60,9 @@ export function useImportProgress(active: boolean): ImportProgressState {
       call('files:importProgress', {})
         .then(
           (next) => {
-            if (!disposed) setProgress(next);
+            if (!disposed) {
+              setProgress(next === null || !run.current.requested ? next : { ...next, cancelling: true });
+            }
           },
           // The last value stays; the next tick asks again.
           () => {},
@@ -77,10 +82,13 @@ export function useImportProgress(active: boolean): ImportProgressState {
   const cancel = useCallback(() => {
     if (!run.current.active) return;
     const id = run.current.id;
+    run.current.requested = true;
     setCancelRequested(true);
     setProgress((current) => (current === null ? null : { ...current, cancelling: true }));
     const refused = () => {
-      if (run.current.id === id) setCancelRequested(false);
+      if (run.current.id !== id) return;
+      run.current.requested = false;
+      setCancelRequested(false);
     };
     call('files:cancelImport', {}).then(({ cancelling }) => {
       if (!cancelling) refused();

@@ -20,6 +20,7 @@ export function ImportProgressView({ progress, onCancel }: Props) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
+        aria-valuetext={importCountText(progress.done, progress.total)}
         className="h-2 w-32 overflow-hidden rounded-full border border-line bg-surface"
       >
         <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
