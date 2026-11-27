@@ -7,6 +7,7 @@ import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
 import { FileFrame } from '../../src/renderer/src/components/FileTile';
 import { FilmStrip } from '../../src/renderer/src/components/FilmStrip';
+import { resetVideoSession } from '../../src/renderer/src/components/VideoStage';
 import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/file-actions';
 import { formatDuration } from '../../src/renderer/src/format';
 import { previewUrl, videoUrl } from '../../src/renderer/src/media-url';
@@ -23,6 +24,7 @@ beforeEach(() => {
 afterEach(() => {
   // Unmount while the stubs are in place: leaving a video pauses it.
   cleanup();
+  resetVideoSession();
   HTMLMediaElement.prototype.play = realPlay;
   HTMLMediaElement.prototype.pause = realPause;
 });
@@ -196,7 +198,7 @@ it('a failing Open externally shows its message in the dialog', async () => {
 
 it('Open externally in the error state is disabled for a file that cannot be opened', () => {
   install();
-  render(<Harness file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), openable: false })} />);
+  render(<Harness file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), deletedAt: '2026-11-27T00:00:00.000Z', openable: false })} />);
   fireEvent.error(videoElement());
   expect((screen.getByRole('button', { name: 'Open externally' }) as HTMLButtonElement).disabled).toBe(true);
 });
@@ -320,18 +322,141 @@ it('volume and mute carry over to the next video of the app session', () => {
   render(<Harness file={videoRecord({ width: 640, height: 360 })} />);
   expect(videoElement().volume).toBe(0.25);
   expect(videoElement().muted).toBe(true);
-  videoElement().volume = 1;
-  videoElement().muted = false;
-  fireEvent(videoElement(), new Event('volumechange'));
 });
 
-it('leaving the video pauses it', () => {
+it('leaving the video pauses it and releases the source', () => {
   install();
   const files = [videoRecord({ width: 640, height: 360 }), fileRecord()];
   const { unmount } = render(<Harness file={files[0]!} />);
-  const playback = stubPlayback(videoElement());
+  const video = videoElement();
+  const playback = stubPlayback(video);
+  const load = vi.fn();
+  video.load = load;
   unmount();
   expect(playback.pause).toHaveBeenCalled();
+  expect(video.hasAttribute('src')).toBe(false);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load.mock.invocationCallOrder[0]!).toBeGreaterThan(playback.pause.mock.invocationCallOrder[0]!);
+});
+
+it('a trashed video that could otherwise be opened gets no Open externally', () => {
+  install();
+  render(<Harness file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), deletedAt: '2026-11-27T00:00:00.000Z', openable: true })} />);
+  fireEvent.error(videoElement());
+  expect((screen.getByRole('button', { name: 'Open externally' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+/** The dialog over a list whose `show` really steps, as the file browser does. */
+function ListHarness({ files, start = 0 }: { files: FileRecord[]; start?: number }) {
+  const [index, setIndex] = useState(start);
+  const list: ViewerList = {
+    total: files.length,
+    index,
+    slot: (i) => (files[i] === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item: files[i] }),
+    show: (i) => {
+      if (i >= 0 && i < files.length) setIndex(i);
+    },
+    want: () => {},
+  };
+  return (
+    <FileDetailDialog
+      file={files[index]!}
+      asset={null}
+      actions={ACTIONS}
+      roleControl={null}
+      onFileChange={() => {}}
+      onMeasured={() => {}}
+      list={list}
+      onClose={() => {}}
+    />
+  );
+}
+
+
+it('keys stay alive after stepping video to video by keyboard', () => {
+  install();
+  const files = [videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 })];
+  render(<ListHarness files={files} />);
+  const first = videoElement();
+  // jsdom does not count a video with controls as focusable, as Chromium does.
+  first.tabIndex = 0;
+  first.focus();
+  expect(document.activeElement).toBe(first);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(videoElement()).not.toBe(first);
+  expect(document.activeElement).not.toBe(document.body);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(videoElement().getAttribute('src')).toBe(videoUrl(files[2]!.id));
+  expect(document.activeElement).not.toBe(document.body);
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+  const playback = stubPlayback(videoElement(), 20, 0);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight', shiftKey: true });
+  expect(playback.time()).toBe(5);
+  fireEvent.keyDown(document.activeElement!, { key: ' ' });
+  expect(playback.play).toHaveBeenCalledTimes(1);
+});
+
+it('keys stay alive after stepping image to video to image by keyboard', () => {
+  install();
+  const files = [fileRecord({ width: 100, height: 100 }), videoRecord({ width: 640, height: 360 }), fileRecord({ width: 100, height: 100 })];
+  render(<ListHarness files={files} />);
+  screen.getByRole('region', { name: 'Image' }).focus();
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(document.activeElement).not.toBe(document.body);
+  const playback = stubPlayback(videoElement(), 20, 0);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight', shiftKey: true });
+  expect(playback.time()).toBe(5);
+  fireEvent.keyDown(document.activeElement!, { key: ' ' });
+  expect(playback.play).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(screen.getByRole('region', { name: 'Image' })).toBeTruthy();
+  expect(document.activeElement).not.toBe(document.body);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+  expect(screen.getByRole('region', { name: 'Video' })).toBeTruthy();
+});
+
+it('a file change does not take focus from an element outside the stage', () => {
+  install();
+  const files = [videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 })];
+  render(<ListHarness files={files} />);
+  const current = videoElement();
+  current.tabIndex = 0;
+  current.focus();
+  expect(document.activeElement).toBe(current);
+  const close = screen.getByRole('button', { name: 'Close' });
+  close.focus();
+  fireEvent.click(screen.getByRole('button', { name: 'Next file' }));
+  expect(videoElement().getAttribute('src')).toBe(videoUrl(files[1]!.id));
+  expect(document.activeElement).toBe(close);
+});
+
+it('stepping on drops a failed state and the playback, video to video and video to image', () => {
+  install();
+  const files = [videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 }), fileRecord({ width: 100, height: 100 })];
+  render(<ListHarness files={files} />);
+  fireEvent.error(videoElement());
+  expect(screen.getByText('This video cannot be played here')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Next file' }));
+  expect(screen.queryByText('This video cannot be played here')).toBeNull();
+  const second = videoElement();
+  expect(second.getAttribute('src')).toBe(videoUrl(files[1]!.id));
+  const playback = stubPlayback(second);
+  fireEvent.keyDown(second, { key: ' ' });
+  expect(playback.play).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Next file' }));
+  expect(playback.pause).toHaveBeenCalled();
+  expect(second.isConnected).toBe(false);
+  expect(screen.queryByRole('region', { name: 'Video' })).toBeNull();
+  expect(screen.getByRole('region', { name: 'Image' })).toBeTruthy();
+});
+
+it('the unplayable message is a status', () => {
+  install();
+  render(<Harness file={videoRecord({ width: 640, height: 360 })} />);
+  fireEvent.error(videoElement());
+  expect(screen.getByRole('status').textContent).toBe('This video cannot be played here');
 });
 
 it('a video offers neither analysis nor the studio, but Open externally and Use as cover', () => {
@@ -377,7 +502,7 @@ it('a video tile shows its frame with the film icon, or the format label with th
 it('a video in the film strip carries the film icon', () => {
   const video = videoRecord({ originalName: 'clip.webm', mimeType: 'video/webm' });
   render(<FilmStrip list={listOf([video, fileRecord({ originalName: 'a.png' })], 1)} />);
-  const tile = screen.getByRole('button', { name: 'clip.webm' });
+  const tile = screen.getByRole('button', { name: 'clip.webm, Video' });
   expect(tile.querySelector('img')).not.toBeNull();
   expect(within(tile).getByTitle('Video')).toBeTruthy();
   expect(within(screen.getByRole('button', { name: 'a.png' })).queryByTitle('Video')).toBeNull();

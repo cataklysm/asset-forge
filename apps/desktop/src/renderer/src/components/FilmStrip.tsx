@@ -1,5 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
+import { VIDEO_LABEL } from '../labels';
 import { formatLabel } from '../media-url';
 import { MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
@@ -45,12 +46,13 @@ export function FilmStrip({ list }: { list: ViewerList }) {
             current ? 'border-accent' : 'border-line'
           }`;
           const file = slot.kind === 'loaded' ? slot.item : null;
+          const name = file === null ? undefined : file.kind === 'video' ? `${file.originalName}, ${VIDEO_LABEL}` : file.originalName;
           return (
             <button
               key={item.key}
               type="button"
               title={file?.originalName}
-              aria-label={file?.originalName}
+              aria-label={name}
               aria-current={current ? 'true' : undefined}
               className="absolute top-1 rounded-control"
               style={{ left: item.start, width: TILE, height: TILE }}

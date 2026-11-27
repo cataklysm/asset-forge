@@ -132,3 +132,35 @@ it('without the video actions Shift+arrows step on and Space is left alone', () 
   stage.dispatchEvent(space);
   expect(space.defaultPrevented).toBe(false);
 });
+
+it('Space is left to checkboxes, switches, tabs, radios, options, selects and summaries', () => {
+  const togglePlayback = vi.fn();
+  function Controls() {
+    const root = useRef<HTMLDivElement>(null);
+    useViewerKeys(root, { ...actionsMock(), togglePlayback });
+    return (
+      <div ref={root}>
+        {['checkbox', 'switch', 'tab', 'radio', 'option'].map((role) => (
+          <div key={role} role={role} tabIndex={0} aria-label={role} />
+        ))}
+        <select aria-label="select" />
+        <details>
+          <summary>summary</summary>
+        </details>
+        <div tabIndex={0} aria-label="plain" />
+      </div>
+    );
+  }
+  const { container } = render(<Controls />);
+  for (const name of ['checkbox', 'switch', 'tab', 'radio', 'option', 'select']) {
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    container.querySelector(`[aria-label="${name}"]`)!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+  const summary = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+  screen.getByText('summary').dispatchEvent(summary);
+  expect(summary.defaultPrevented).toBe(false);
+  expect(togglePlayback).not.toHaveBeenCalled();
+  container.querySelector('[aria-label="plain"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+  expect(togglePlayback).toHaveBeenCalledTimes(1);
+});
