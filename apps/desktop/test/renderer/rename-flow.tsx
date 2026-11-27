@@ -17,8 +17,8 @@ export function renameHandlers(
       const normalised = normalizeTagName(name) ?? '';
       const displayName = known[normalised];
       return displayName === undefined
-        ? { exists: false, name: normalised, displayName: '', files: 0, assets: 0 }
-        : { exists: true, name: normalised, displayName, files: 1, assets: 1 };
+        ? { exists: false, name: normalised, displayName: '', files: 0, assets: 0, prompts: 0 }
+        : { exists: true, name: normalised, displayName, files: 1, assets: 1, prompts: 0 };
     },
     'tags:rename': ({ to, merge }) => {
       const name = normalizeTagName(to) ?? '';

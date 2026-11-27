@@ -391,9 +391,9 @@ describe('library IPC', () => {
       await ok('files:addTag', { fileId: file.id, name: 'metal' });
       const usage = await ok('tags:usage', { name: ' METAL ' });
       expect(ipcContract['tags:usage'].response.safeParse(usage).success).toBe(true);
-      expect(usage).toEqual({ exists: true, name: 'metal', displayName: 'Metal', assets: 1, files: 1 });
-      expect(await ok('tags:usage', { name: 'wood' })).toEqual({ exists: false, name: 'wood', displayName: '', assets: 0, files: 0 });
-      expect(await ok('tags:usage', { name: '!!!' })).toEqual({ exists: false, name: '', displayName: '', assets: 0, files: 0 });
+      expect(usage).toEqual({ exists: true, name: 'metal', displayName: 'Metal', assets: 1, files: 1, prompts: 0 });
+      expect(await ok('tags:usage', { name: 'wood' })).toEqual({ exists: false, name: 'wood', displayName: '', assets: 0, files: 0, prompts: 0 });
+      expect(await ok('tags:usage', { name: '!!!' })).toEqual({ exists: false, name: '', displayName: '', assets: 0, files: 0, prompts: 0 });
     });
 
     it('tags:suggest rejects limit 0 and 51', async () => {

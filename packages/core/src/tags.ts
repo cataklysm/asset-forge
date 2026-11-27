@@ -26,9 +26,9 @@ export function tagName(input: string): { name: string; displayName: string } {
 /** How much the tag named by `r.name` (free text) touches; a text that is no valid tag name answers `exists: false`. */
 export async function tagUsage(s: WorkspaceSession, r: { name: string }): Promise<TagUsage> {
   const name = normalizeTagName(r.name);
-  if (name === null) return { exists: false, name: '', displayName: '', assets: 0, files: 0 };
+  if (name === null) return { exists: false, name: '', displayName: '', assets: 0, files: 0, prompts: 0 };
   const usage = await s.database.tags.usage(name);
-  if (usage === null) return { exists: false, name, displayName: '', assets: 0, files: 0 };
+  if (usage === null) return { exists: false, name, displayName: '', assets: 0, files: 0, prompts: 0 };
   return { exists: true, name, ...usage };
 }
 

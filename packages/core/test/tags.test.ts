@@ -336,13 +336,14 @@ describe('rename and merge', () => {
       displayName: 'Front View',
       assets: 1,
       files: 1,
+      prompts: 0,
     });
   });
 
   it('tagUsage of an unknown or invalid text answers exists false', async () => {
     const ctx = await setup();
-    expect(await tagUsage(ctx.session, { name: 'unknown' })).toEqual({ exists: false, name: 'unknown', displayName: '', assets: 0, files: 0 });
-    const empty = { exists: false, name: '', displayName: '', assets: 0, files: 0 };
+    expect(await tagUsage(ctx.session, { name: 'unknown' })).toEqual({ exists: false, name: 'unknown', displayName: '', assets: 0, files: 0, prompts: 0 });
+    const empty = { exists: false, name: '', displayName: '', assets: 0, files: 0, prompts: 0 };
     expect(await tagUsage(ctx.session, { name: '!!!' })).toEqual(empty);
     expect(await tagUsage(ctx.session, { name: '' })).toEqual(empty);
   });

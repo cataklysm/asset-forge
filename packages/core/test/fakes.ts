@@ -93,6 +93,7 @@ import type {
 } from '../src/ports.js';
 import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
+import { InMemoryPromptRepository, type PromptTagLink } from './memory-prompts.js';
 
 /** In-memory storage. Files live in `files`, directories in `dirs` (relative, `/`-separated). */
 export class InMemoryStorage implements Storage {
@@ -252,6 +253,8 @@ class InMemoryTags implements TagRepository {
   readonly tags = new Map<string, { id: string; displayName: string }>(); // by normalised name
   readonly assetAssignments: { assetId: string; name: string; origin: TagOrigin }[] = [];
   readonly fileAssignments: { fileId: string; name: string; origin: TagOrigin }[] = [];
+  /** Written by the prompt fake. */
+  readonly promptAssignments: PromptTagLink[] = [];
 
   private static sorted(rows: { name: string; origin: TagOrigin }[], tags: Map<string, { displayName: string }>): TagAssignment[] {
     return rows
@@ -263,7 +266,7 @@ class InMemoryTags implements TagRepository {
     const used = new Map<string, number>();
     // Mirrors the database: a file in the trash does not count.
     const liveFileAssignments = this.fileAssignments.filter((a) => !(this.files?.isTrashed(a.fileId) ?? false));
-    for (const a of [...this.assetAssignments, ...liveFileAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
+    for (const a of [...this.assetAssignments, ...liveFileAssignments, ...this.promptAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
     return [...used]
       .filter(([name]) => name.startsWith(q.prefix))
       .sort(([an, ac], [bn, bc]) => bc - ac || (an < bn ? -1 : an > bn ? 1 : 0))
@@ -343,7 +346,7 @@ class InMemoryTags implements TagRepository {
   /** Set by the database; a rename rewrites the waiting proposals. */
   proposals: ProposalRows | null = null;
 
-  async usage(name: string): Promise<{ displayName: string; assets: number; files: number } | null> {
+  async usage(name: string): Promise<{ displayName: string; assets: number; files: number; prompts: number } | null> {
     const tag = this.tags.get(name);
     if (!tag) return null;
     return {
@@ -351,6 +354,7 @@ class InMemoryTags implements TagRepository {
       assets: this.assetAssignments.filter((a) => a.name === name).length,
       // Mirrors the database: a file in the trash does not count.
       files: this.fileAssignments.filter((a) => a.name === name && !(this.files?.isTrashed(a.fileId) ?? false)).length,
+      prompts: this.promptAssignments.filter((a) => a.name === name).length,
     };
   }
 
@@ -382,6 +386,18 @@ class InMemoryTags implements TagRepository {
     };
     move(this.assetAssignments, (a, b) => a.assetId === b.assetId);
     move(this.fileAssignments, (a, b) => a.fileId === b.fileId);
+    // Prompt links have no origin: a prompt carrying both keeps one link with the earlier createdAt.
+    const promptLinks: PromptTagLink[] = [];
+    for (const link of this.promptAssignments) {
+      if (link.name !== r.from) {
+        promptLinks.push(link);
+        continue;
+      }
+      const other = this.promptAssignments.find((a) => a.name === r.name && a.promptId === link.promptId);
+      if (other === undefined) promptLinks.push({ ...link, name: r.name });
+      else if (link.createdAt < other.createdAt) other.createdAt = link.createdAt;
+    }
+    this.promptAssignments.splice(0, this.promptAssignments.length, ...promptLinks);
     this.tags.delete(r.from);
     if (target) target.displayName = r.displayName;
     else this.tags.set(r.name, { id: source.id, displayName: r.displayName });
@@ -1421,10 +1437,15 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   );
   readonly analyses = new InMemoryAnalyses(this.files, this.tags, this.proposals);
   readonly analysisTargets = new InMemoryAnalysisTargets(this.files, this.assets, this.analyses, this.jobs);
-  readonly generations = new InMemoryGenerationRepository(this.jobs, (fileId) => {
-    const rec = this.files.records.get(fileId);
-    return rec === undefined ? 'unknown' : rec.deletedAt === null ? 'live' : 'trashed';
-  });
+  readonly prompts = new InMemoryPromptRepository(this.tags);
+  readonly generations = new InMemoryGenerationRepository(
+    this.jobs,
+    (fileId) => {
+      const rec = this.files.records.get(fileId);
+      return rec === undefined ? 'unknown' : rec.deletedAt === null ? 'live' : 'trashed';
+    },
+    (versionId) => this.prompts.promptOfVersion(versionId),
+  );
   closed = false;
 
   constructor() {

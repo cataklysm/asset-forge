@@ -58,6 +58,11 @@ function generation(p: Partial<Generation> = {}): Generation {
     finishedAt: '2026-01-01T00:01:00.000Z',
     inputs: [{ fileId: FILE, name: 'a.png', sha256: 'a'.repeat(64), trashed: false }],
     outputs: [{ fileId: FILE, name: 'a edit 1.png', sha256: 'b'.repeat(64), trashed: false }],
+    promptId: null,
+    promptVersionId: null,
+    promptTitle: null,
+    promptVersionNumber: null,
+    promptVariables: null,
     ...p,
   };
 }

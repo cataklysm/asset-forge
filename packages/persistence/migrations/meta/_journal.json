@@ -99,6 +99,13 @@
       "when": 1795734950850,
       "tag": "0013_swift_purple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795765323466,
+      "tag": "0014_icy_prowler",
+      "breakpoints": true
     }
   ]
 }

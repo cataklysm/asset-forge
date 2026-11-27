@@ -112,6 +112,11 @@ describe('migration 0013', () => {
         'job_id',
         'created_at',
         'finished_at',
+        // Added by 0014.
+        'prompt_version_id',
+        'prompt_title',
+        'prompt_version_number',
+        'prompt_variables',
       ]);
       for (const table of ['generation_input', 'generation_output']) {
         expect(columnNames(check, table)).toEqual(['generation_id', 'position', 'file_id', 'sha256', 'original_name']);
@@ -123,7 +128,10 @@ describe('migration 0013', () => {
         );
         expect(indexColumns(check, `${table}_file_id_idx`)).toEqual(['file_id']);
       }
-      expect(check.pragma('foreign_key_list(generation)')).toEqual([]);
+      // 0013 adds none; the only one is 0014's prompt version reference.
+      expect(check.pragma('foreign_key_list(generation)')).toEqual([
+        expect.objectContaining({ table: 'prompt_version', from: 'prompt_version_id' }),
+      ]);
       expect(indexColumns(check, 'generation_job_id_idx')).toEqual(['job_id']);
       expect(indexColumns(check, 'generation_created_at_idx')).toEqual(['created_at', 'id']);
       expect(check.prepare('SELECT id, status, file_id, provider_id FROM job').all()).toEqual([

@@ -846,6 +846,7 @@ describe('tag rename and merge acceptance', () => {
         displayName: 'Front',
         assets: 1,
         files: 0,
+        prompts: 0,
       });
       expect(await call('tags:usage', { name: 'front view' })).toEqual({
         exists: true,
@@ -853,6 +854,7 @@ describe('tag rename and merge acceptance', () => {
         displayName: 'front view',
         assets: 0,
         files: 1,
+        prompts: 0,
       });
 
       expect(await raw('tags:rename', { from: 'front view', to: 'front', merge: false })).toMatchObject({

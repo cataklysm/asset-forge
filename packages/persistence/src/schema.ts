@@ -358,6 +358,54 @@ export const fileTag = sqliteTable(
   ],
 );
 
+/** A prompt of the library. `title_key` is the lower-cased title and keeps titles unique regardless of case. */
+export const prompt = sqliteTable(
+  'prompt',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    titleKey: text('title_key').notNull(),
+    description: text('description').notNull().default(''),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('prompt_title_key_unique').on(t.titleKey)],
+);
+
+/**
+ * A version of a prompt; rows are never updated. The current version is the one with the highest number.
+ * `variables` is JSON `{ "v": 1, "items": [{ name, defaultValue }] }`.
+ */
+export const promptVersion = sqliteTable(
+  'prompt_version',
+  {
+    id: text('id').primaryKey(),
+    promptId: text('prompt_id')
+      .notNull()
+      .references(() => prompt.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    content: text('content').notNull(),
+    variables: text('variables').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('prompt_version_prompt_id_number_unique').on(t.promptId, t.number)],
+);
+
+/** Tags of a prompt; always manual, so there is no origin column. */
+export const promptTag = sqliteTable(
+  'prompt_tag',
+  {
+    promptId: text('prompt_id')
+      .notNull()
+      .references(() => prompt.id, { onDelete: 'cascade' }),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tag.id),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.promptId, t.tagId] }), index('prompt_tag_tag_id_idx').on(t.tagId)],
+);
+
 /** The persistent job queue. `payload` is JSON; `error_message` is the fixed message of `error_code`. */
 export const job = sqliteTable(
   'job',
@@ -445,6 +493,13 @@ export const generation = sqliteTable(
     jobId: text('job_id'),
     createdAt: text('created_at').notNull(),
     finishedAt: text('finished_at'),
+    // The library prompt it was started from (migration 0014); all four null for an upscale or a free prompt.
+    // Title and number are copies taken at start, so they outlive the prompt; the version id is set null with it.
+    promptVersionId: text('prompt_version_id').references(() => promptVersion.id, { onDelete: 'set null' }),
+    promptTitle: text('prompt_title'),
+    promptVersionNumber: integer('prompt_version_number'),
+    /** JSON `{ "v": 1, "values": { <name>: <value> } }`. */
+    promptVariables: text('prompt_variables'),
   },
   (t) => [
     index('generation_job_id_idx').on(t.jobId),

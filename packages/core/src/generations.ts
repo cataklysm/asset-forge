@@ -109,6 +109,7 @@ export async function startGeneration(
       model,
       prompt,
       parameters,
+      promptRef: null,
       createdAt: s.now().toISOString(),
     },
     // A complete file always has a checksum.

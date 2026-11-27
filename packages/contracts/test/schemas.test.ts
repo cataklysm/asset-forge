@@ -584,6 +584,11 @@ describe('generation studio', () => {
     finishedAt: null,
     inputs: [{ fileId: uuid, name: 'oak.png', sha256: 'a'.repeat(64), trashed: false }],
     outputs: [],
+    promptId: null,
+    promptVersionId: null,
+    promptTitle: null,
+    promptVersionNumber: null,
+    promptVariables: null,
   };
 
   it('the constants', () => {

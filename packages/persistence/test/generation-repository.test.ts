@@ -30,6 +30,7 @@ const edit = (n: number, createdAt = T0, prompt = 'Make it night'): NewGeneratio
   model: 'qwen-image',
   prompt,
   parameters: { v: 1, aspectRatio: null, resolution: null, safeMode: true },
+  promptRef: null,
   createdAt,
 });
 
@@ -136,6 +137,11 @@ describe('generation repository', () => {
       finishedAt: null,
       inputs: [{ fileId: SOURCE, name: 'oak.png', sha256: 'a'.repeat(64), trashed: false }],
       outputs: [],
+      promptId: null,
+      promptVersionId: null,
+      promptTitle: null,
+      promptVersionNumber: null,
+      promptVariables: null,
     });
     expect(await db.jobs.get(uuid(101))).toMatchObject({
       status: 'queued',
@@ -420,5 +426,63 @@ describe('generation repository', () => {
       [uuid(1101), 'Venice', 'qwen-image'],
       [uuid(101), 'Venice', 'qwen-image'],
     ]);
+  });
+});
+
+describe('generation prompt reference', () => {
+  const PROMPT = uuid(700);
+  const VERSION = uuid(701);
+  const promptRef = { versionId: VERSION, title: 'Night', versionNumber: 1, variables: { Subject: 'oak' } };
+  const promptFields = {
+    promptId: PROMPT,
+    promptVersionId: VERSION,
+    promptTitle: 'Night',
+    promptVersionNumber: 1,
+    promptVariables: { Subject: 'oak' },
+  };
+
+  beforeEach(async () => {
+    await db.prompts.create({
+      id: PROMPT,
+      title: 'Night',
+      titleKey: 'night',
+      description: '',
+      version: { id: VERSION, content: 'Make {{Subject}} night', variables: [{ name: 'Subject', defaultValue: '' }] },
+      now: T0,
+    });
+  });
+
+  test('create with a prompt reference reads back the five fields', async () => {
+    await create({ ...edit(1), promptRef });
+    expect(await db.generations.get(uuid(1))).toMatchObject(promptFields);
+    expect(handle.prepare('select prompt_variables from generation where id = ?').get(uuid(1))).toEqual({
+      prompt_variables: JSON.stringify({ v: 1, values: { Subject: 'oak' } }),
+    });
+  });
+
+  test('deleting the prompt clears the ids and keeps title, number, variables and the resolved text', async () => {
+    await create({ ...edit(1), promptRef });
+    expect(await db.prompts.remove(PROMPT)).toBe(true);
+    expect(await db.generations.get(uuid(1))).toMatchObject({
+      promptId: null,
+      promptVersionId: null,
+      promptTitle: 'Night',
+      promptVersionNumber: 1,
+      promptVariables: { Subject: 'oak' },
+      prompt: 'Make it night',
+    });
+  });
+
+  test('requeue leaves the prompt reference', async () => {
+    await create({ ...edit(1), promptRef });
+    db.generations.settle({ id: uuid(1), outcome: { status: 'failed', errorCode: 'provider_rejected' }, now: T2 });
+    expect(await db.generations.requeue({ id: uuid(1), job: jobFor(1, 1), now: T3 })).toBe(true);
+    expect(await db.generations.get(uuid(1))).toMatchObject({ status: 'pending', ...promptFields });
+  });
+
+  test('a prompt variables column that does not parse reads as null', async () => {
+    await create({ ...edit(1), promptRef });
+    handle.prepare("update generation set prompt_variables = 'nope' where id = ?").run(uuid(1));
+    expect((await db.generations.get(uuid(1)))?.promptVariables).toBeNull();
   });
 });

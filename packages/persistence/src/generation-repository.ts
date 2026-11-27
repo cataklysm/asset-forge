@@ -1,12 +1,27 @@
-import { FINISHED_JOB_STATUSES, GenerationParametersSchema, type GenerationFile } from '@assetforge/contracts';
+import { FINISHED_JOB_STATUSES, GenerationParametersSchema, GenerationSchema, type GenerationFile } from '@assetforge/contracts';
 import type { GenerationFileRef, GenerationRepository, GenerationRow, JobOutcome } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { errorCodeOf, insertJob } from './job-repository.js';
-import { file, generation, generationInput, generationOutput, job } from './schema.js';
+import { file, generation, generationInput, generationOutput, job, promptVersion } from './schema.js';
 
 type Tx = Pick<BetterSQLite3Database, 'select'>;
 type FileTable = typeof generationInput | typeof generationOutput;
+
+const ValuesSchema = GenerationSchema.shape.promptVariables.unwrap();
+
+/** The `prompt_variables` column; null when absent or when it does not parse. */
+function parseValues(text: string | null): Record<string, string> | null {
+  if (text === null) return null;
+  try {
+    const column: unknown = JSON.parse(text);
+    if (typeof column !== 'object' || column === null || (column as { v?: unknown }).v !== 1) return null;
+    const parsed = ValuesSchema.safeParse((column as { values?: unknown }).values);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 const isFinishedJob = (status: string): status is (typeof FINISHED_JOB_STATUSES)[number] =>
   (FINISHED_JOB_STATUSES as readonly string[]).includes(status);
@@ -39,16 +54,17 @@ function filesOf(tx: Tx, table: FileTable, ids: readonly string[]): Map<string, 
 /** The generations matching `where` in `orderBy` order, with their job status and files. Throws on unparsable parameters. */
 function load(tx: Tx, where: SQL | undefined, order: SQL[] = [], limit?: number): GenerationRow[] {
   const query = tx
-    .select({ g: generation, jobStatus: job.status })
+    .select({ g: generation, jobStatus: job.status, promptId: promptVersion.promptId })
     .from(generation)
     .leftJoin(job, eq(job.id, generation.jobId))
+    .leftJoin(promptVersion, eq(promptVersion.id, generation.promptVersionId))
     .where(where)
     .orderBy(...order);
   const rows = limit === undefined ? query.all() : query.limit(limit).all();
   const ids = rows.map((r) => r.g.id);
   const inputs = filesOf(tx, generationInput, ids);
   const outputs = filesOf(tx, generationOutput, ids);
-  return rows.map(({ g, jobStatus }) => ({
+  return rows.map(({ g, jobStatus, promptId }) => ({
     id: g.id,
     kind: g.kind,
     status: g.status,
@@ -65,6 +81,11 @@ function load(tx: Tx, where: SQL | undefined, order: SQL[] = [], limit?: number)
     finishedAt: g.finishedAt,
     inputs: inputs.get(g.id) ?? [],
     outputs: outputs.get(g.id) ?? [],
+    promptId: g.promptVersionId === null ? null : promptId,
+    promptVersionId: g.promptVersionId,
+    promptTitle: g.promptTitle,
+    promptVersionNumber: g.promptVersionNumber,
+    promptVariables: parseValues(g.promptVariables),
   }));
 }
 
@@ -118,6 +139,10 @@ export function createGenerationRepository(db: BetterSQLite3Database): Generatio
             jobId: j.id,
             createdAt: g.createdAt,
             finishedAt: null,
+            promptVersionId: g.promptRef?.versionId ?? null,
+            promptTitle: g.promptRef?.title ?? null,
+            promptVersionNumber: g.promptRef?.versionNumber ?? null,
+            promptVariables: g.promptRef ? JSON.stringify({ v: 1, values: g.promptRef.variables }) : null,
           })
           .run();
         tx.insert(generationInput).values(refRow(g.id, 0, input)).run();

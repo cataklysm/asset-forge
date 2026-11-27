@@ -25,6 +25,7 @@ const edit = (n: number, createdAt = T0, prompt = 'Make it night'): NewGeneratio
   model: 'qwen-image',
   prompt,
   parameters: { v: 1, aspectRatio: null, resolution: null, safeMode: true },
+  promptRef: null,
   createdAt,
 });
 

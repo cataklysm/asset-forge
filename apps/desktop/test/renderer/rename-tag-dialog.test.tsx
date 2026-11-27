@@ -19,6 +19,7 @@ const usage = (name: string, displayName: string, files: number, assets: number)
   displayName,
   files,
   assets,
+  prompts: 0,
 });
 
 /** Tags known to the fake `tags:usage`; any other valid text is free. */
@@ -32,8 +33,8 @@ function usageTable(): Map<string, TagUsage> {
 
 function lookup(table: Map<string, TagUsage>, text: string): TagUsage {
   const name = normalizeTagName(text);
-  if (name === null) return { exists: false, name: '', displayName: '', files: 0, assets: 0 };
-  return table.get(name) ?? { exists: false, name, displayName: '', files: 0, assets: 0 };
+  if (name === null) return { exists: false, name: '', displayName: '', files: 0, assets: 0, prompts: 0 };
+  return table.get(name) ?? { exists: false, name, displayName: '', files: 0, assets: 0, prompts: 0 };
 }
 
 function setup(
@@ -110,7 +111,7 @@ it('a free name is looked up once after 250 ms and confirm waits for the answer'
   expect(confirmButton().textContent).toBe('Rename');
   expect(confirmButton().disabled).toBe(true);
 
-  await act(async () => answer.resolve({ exists: false, name: 'side', displayName: '', files: 0, assets: 0 }));
+  await act(async () => answer.resolve({ exists: false, name: 'side', displayName: '', files: 0, assets: 0, prompts: 0 }));
   expect(confirmButton().disabled).toBe(false);
   expect(confirmButton().textContent).toBe('Rename');
   expect(screen.queryByText(/^Merges with/)).toBeNull();

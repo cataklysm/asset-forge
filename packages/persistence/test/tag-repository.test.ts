@@ -410,14 +410,14 @@ describe('tag usage and rename', () => {
     await tagFile(gone, 'front view');
     await trash(gone);
     // The asset tagged only through one of its files counts under files only.
-    expect(await db.tags.usage('front view')).toEqual({ displayName: 'Front View', assets: 2, files: 2 });
+    expect(await db.tags.usage('front view')).toEqual({ displayName: 'Front View', assets: 2, files: 2, prompts: 0 });
   });
 
   test('usage of a tag without links counts zero; of an unknown name it is null', async () => {
     const a = await addAsset(10);
     await tagAsset(a.id, 'lonely', 'manual', 'Lonely');
     await db.tags.removeFromAsset({ assetId: a.id, name: 'lonely' });
-    expect(await db.tags.usage('lonely')).toEqual({ displayName: 'Lonely', assets: 0, files: 0 });
+    expect(await db.tags.usage('lonely')).toEqual({ displayName: 'Lonely', assets: 0, files: 0, prompts: 0 });
     expect(await db.tags.usage('unknown')).toBeNull();
   });
 
@@ -612,5 +612,82 @@ describe('tag usage and rename', () => {
     });
     expect(handle.prepare("select count(*) as n from file_tag where origin = 'manual'").get()).toEqual({ n: 3000 });
     expect(tagRow('front view')).toBeUndefined();
+  });
+});
+
+describe('prompt tags', () => {
+  const T0 = '2025-12-31T00:00:00.000Z';
+  const T2 = '2026-01-02T00:00:00.000Z';
+  const PROMPT_UPDATED = '2025-06-01T00:00:00.000Z';
+
+  async function addPrompt(n: number): Promise<string> {
+    const id = uuid(n);
+    await db.prompts.create({
+      id,
+      title: `P${n}`,
+      titleKey: `p${n}`,
+      description: '',
+      version: { id: uuid(n + 1000), content: 'x', variables: [] },
+      now: T0,
+    });
+    return id;
+  }
+  const tagPrompt = (promptId: string, name: string, now: string, displayName = name) =>
+    db.prompts.addTag({ promptId, name, displayName, newId: uuid(nextTagId++), now, max: 50 });
+  const tagRow = (name: string) => handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
+  const promptLinks = () => handle.prepare('select * from prompt_tag order by prompt_id, tag_id').all();
+  const promptUpdatedAt = () => handle.prepare('select id, updated_at from prompt order by id').all();
+
+  test('suggest returns a tag that only a prompt carries', async () => {
+    const p = await addPrompt(30);
+    const a = await addAsset(10);
+    await tagPrompt(p, 'storm', T1, 'Storm');
+    await tagAsset(a.id, 'stone');
+    await tagAsset(a.id, 'storm');
+    expect(await db.tags.suggest({ prefix: 'st', limit: 10 })).toEqual([
+      { name: 'storm', displayName: 'Storm' },
+      { name: 'stone', displayName: 'stone' },
+    ]);
+  });
+
+  test('usage counts the prompts carrying the tag', async () => {
+    const a = await addAsset(10);
+    await tagAsset(a.id, 'storm');
+    await tagPrompt(await addPrompt(30), 'storm', T1);
+    await tagPrompt(await addPrompt(31), 'storm', T1);
+    expect(await db.tags.usage('storm')).toEqual({ displayName: 'storm', assets: 1, files: 0, prompts: 2 });
+  });
+
+  test('rename to a free name keeps the prompt link and the prompt updated_at', async () => {
+    const p = await addPrompt(30);
+    await tagPrompt(p, 'storm', T1);
+    handle.prepare('update prompt set updated_at = ?').run(PROMPT_UPDATED);
+    const links = promptLinks();
+    expect(await db.tags.rename({ from: 'storm', name: 'tempest', displayName: 'Tempest', merge: false })).toEqual({ merged: false });
+    expect(promptLinks()).toEqual(links);
+    expect((await db.prompts.get(p))!.tags).toEqual([{ name: 'tempest', displayName: 'Tempest', origin: 'manual' }]);
+    expect(promptUpdatedAt()).toEqual([{ id: p, updated_at: PROMPT_UPDATED }]);
+  });
+
+  test('a merge leaves each prompt one link to the kept tag with the earlier created_at', async () => {
+    const both = await addPrompt(30); // source older
+    const sourceOnly = await addPrompt(31);
+    const bothTargetOlder = await addPrompt(32);
+    await tagPrompt(both, 'front view', T0);
+    await tagPrompt(both, 'front', T2);
+    await tagPrompt(sourceOnly, 'front view', T2);
+    await tagPrompt(bothTargetOlder, 'front view', T2);
+    await tagPrompt(bothTargetOlder, 'front', T0);
+    handle.prepare('update prompt set updated_at = ?').run(PROMPT_UPDATED);
+    const target = tagRow('front')!;
+
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({ merged: true });
+    expect(tagRow('front view')).toBeUndefined();
+    expect(promptLinks()).toEqual([
+      { prompt_id: both, tag_id: target.id, created_at: T0 },
+      { prompt_id: sourceOnly, tag_id: target.id, created_at: T2 },
+      { prompt_id: bothTargetOlder, tag_id: target.id, created_at: T0 },
+    ]);
+    expect(promptUpdatedAt()).toEqual([both, sourceOnly, bothTargetOlder].map((id) => ({ id, updated_at: PROMPT_UPDATED })));
   });
 });

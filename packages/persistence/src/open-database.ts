@@ -19,6 +19,7 @@ import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
 import { createProjectAssetRepository } from './project-asset-repository.js';
 import { createProjectRepository } from './project-repository.js';
+import { createPromptRepository } from './prompt-repository.js';
 import { registerSqlFunctions } from './sql-functions.js';
 import { createStorageRepository } from './storage-repository.js';
 import { createTagRepository } from './tag-repository.js';
@@ -58,6 +59,7 @@ export async function openWorkspaceDatabase(
       analyses: createFileAnalysisRepository(db),
       analysisTargets: createAnalysisTargetReader(db),
       generations: createGenerationRepository(db),
+      prompts: createPromptRepository(db),
       async ensureDerivedData() {
         await ensureDerivedData(db, options.derivedData);
       },

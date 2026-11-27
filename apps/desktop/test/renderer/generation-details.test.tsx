@@ -54,6 +54,11 @@ function generation(p: Partial<Generation> = {}): Generation {
     finishedAt: '2026-01-01T00:01:00.000Z',
     inputs: [fileOf(SOURCE)],
     outputs: [fileOf(RESULT)],
+    promptId: null,
+    promptVersionId: null,
+    promptTitle: null,
+    promptVersionNumber: null,
+    promptVariables: null,
     ...p,
   };
 }

@@ -346,7 +346,7 @@ it('the tag filter stops at 10 tags', async () => {
 });
 
 const TAG_USAGE = {
-  'tags:usage': ({ name }: { name: string }) => ({ exists: true, name, displayName: name, files: 1, assets: 0 }),
+  'tags:usage': ({ name }: { name: string }) => ({ exists: true, name, displayName: name, files: 1, assets: 0, prompts: 0 }),
 };
 
 it('a chip with onRename shows the pencil before the remove button; without it none', () => {

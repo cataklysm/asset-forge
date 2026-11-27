@@ -34,6 +34,7 @@ export const TagUsageSchema = z.object({
   displayName: z.string(),
   assets: z.number().int().min(0),
   files: z.number().int().min(0),
+  prompts: z.number().int().min(0),
 });
 export type TagUsage = z.infer<typeof TagUsageSchema>;
 

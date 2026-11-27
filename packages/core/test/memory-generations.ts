@@ -29,6 +29,7 @@ export class InMemoryGenerationRepository implements GenerationRepository {
   constructor(
     private readonly jobs: InMemoryJobRepository,
     private readonly fileState: (fileId: string) => 'live' | 'trashed' | 'unknown' = () => 'live',
+    private readonly promptOfVersion: (versionId: string) => string | null = () => null,
   ) {
     // A `settled` callback that settles a generation is rolled back with the job, as in one SQLite transaction.
     jobs.joinTransactions({ snapshot: () => restoreInPlace(this.rows) });
@@ -50,6 +51,7 @@ export class InMemoryGenerationRepository implements GenerationRepository {
 
   private view(row: StoredGeneration): GenerationRow {
     const job = row.jobId === null ? undefined : this.jobs.rows.find((j) => j.id === row.jobId);
+    const promptId = row.promptRef === null ? null : this.promptOfVersion(row.promptRef.versionId);
     return structuredClone({
       id: row.id,
       kind: row.kind,
@@ -67,6 +69,12 @@ export class InMemoryGenerationRepository implements GenerationRepository {
       finishedAt: row.finishedAt,
       inputs: row.inputs.map((f) => this.fileView(f)),
       outputs: row.outputs.map((f) => this.fileView(f)),
+      // Like the `set null` foreign key: both ids are gone once the version's prompt is deleted; the copies stay.
+      promptId,
+      promptVersionId: promptId === null ? null : row.promptRef!.versionId,
+      promptTitle: row.promptRef?.title ?? null,
+      promptVersionNumber: row.promptRef?.versionNumber ?? null,
+      promptVariables: row.promptRef?.variables ?? null,
     });
   }
 

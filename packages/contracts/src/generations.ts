@@ -72,6 +72,15 @@ export const GenerationSchema = z.object({
   finishedAt: z.string().nullable(),
   inputs: z.array(GenerationFileSchema),
   outputs: z.array(GenerationFileSchema),
+  /** The library prompt of the version, read through the version row; null once the prompt is deleted. */
+  promptId: z.uuid().nullable(),
+  /** The library prompt version it was started from; null for an upscale, a free prompt or a deleted prompt. */
+  promptVersionId: z.uuid().nullable(),
+  /** Copies taken at start; they outlive the prompt. */
+  promptTitle: z.string().nullable(),
+  promptVersionNumber: z.number().int().min(1).nullable(),
+  /** The values of the version's variables, by the version's spelling. */
+  promptVariables: z.record(z.string(), z.string()).nullable(),
 });
 export type Generation = z.infer<typeof GenerationSchema>;
 

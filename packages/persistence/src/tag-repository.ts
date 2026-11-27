@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { toRecords } from './file-repository.js';
 import { parseTags } from './proposal-tags.js';
-import { assetTag, file, fileAnalysisProposal, fileTag, tag } from './schema.js';
+import { assetTag, file, fileAnalysisProposal, fileTag, promptTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
 
 /**
@@ -126,6 +126,23 @@ function mergeLinks(tx: RenameTx, { table, owner }: LinkTable, sourceId: string,
 }
 
 /**
+ * Like `mergeLinks` for prompt links, which have no origin: a prompt carrying both keeps its
+ * target link dated to the earlier of the two; a link that only moves keeps its createdAt.
+ * Prompts keep their `updated_at`.
+ */
+function mergePromptLinks(tx: RenameTx, sourceId: string, targetId: string): void {
+  tx.run(sql`
+    update prompt_tag set created_at = (
+      select s.created_at from prompt_tag as s where s.tag_id = ${sourceId} and s.prompt_id = prompt_tag.prompt_id)
+    where tag_id = ${targetId}
+      and created_at > (select s.created_at from prompt_tag as s where s.tag_id = ${sourceId} and s.prompt_id = prompt_tag.prompt_id)`);
+  tx.run(sql`
+    delete from prompt_tag
+    where tag_id = ${sourceId} and prompt_id in (select t.prompt_id from prompt_tag as t where t.tag_id = ${targetId})`);
+  tx.run(sql`update prompt_tag set tag_id = ${targetId} where tag_id = ${sourceId}`);
+}
+
+/**
  * Every entry named `from` or `name` in a waiting proposal becomes `name` spelled `displayName`; a
  * list that then holds the name twice keeps the first. `instr` on the JSON text narrows the rows
  * (no LIKE wildcards); only lists that really change are written.
@@ -164,6 +181,8 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
           union all
           select ${fileTag.tagId} as tag_id from ${fileTag}
           join ${file} on ${file.id} = ${fileTag.fileId} and ${file.deletedAt} is null
+          union all
+          select ${promptTag.tagId} as tag_id from ${promptTag}
         ) as u on u.tag_id = ${tag.id}
         where ${tag.name} >= ${prefix} and ${tag.name} < ${prefix + PREFIX_END}
         group by ${tag.id}
@@ -232,13 +251,14 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
         .orderBy(asc(tag.name), asc(assetTag.origin))
         .all();
     },
-    async usage(name): Promise<{ displayName: string; assets: number; files: number } | null> {
-      const row = db.get<{ displayName: string; assets: number; files: number } | undefined>(sql`
+    async usage(name): Promise<{ displayName: string; assets: number; files: number; prompts: number } | null> {
+      const row = db.get<{ displayName: string; assets: number; files: number; prompts: number } | undefined>(sql`
         select t.display_name as displayName,
           (select count(distinct at.asset_id) from asset_tag as at where at.tag_id = t.id) as assets,
           (select count(distinct ft.file_id) from file_tag as ft
             join file as f on f.id = ft.file_id and f.deleted_at is null
-            where ft.tag_id = t.id) as files
+            where ft.tag_id = t.id) as files,
+          (select count(*) from prompt_tag as pt where pt.tag_id = t.id) as prompts
         from tag as t where t.name = ${name}`);
       return row ?? null;
     },
@@ -261,6 +281,7 @@ export function createTagRepository(db: BetterSQLite3Database): TagRepository {
         if (target) {
           mergeLinks(tx, ASSET_LINKS, source.id, target.id);
           mergeLinks(tx, FILE_LINKS, source.id, target.id);
+          mergePromptLinks(tx, source.id, target.id);
           // The foreign keys have no `on delete`: the links are gone or repointed before this.
           tx.delete(tag).where(eq(tag.id, source.id)).run();
           tx.update(tag).set({ displayName: r.displayName }).where(eq(tag.id, target.id)).run();
