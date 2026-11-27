@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import type { ImportProgress } from '@assetforge/contracts';
-import { ARCHIVE_EMPTY_MESSAGE, NotFoundError, REFUSED_IMPORT_MESSAGE, WorkspaceManager } from '../src/index.js';
+import { ARCHIVE_EMPTY_MESSAGE, ARCHIVE_TRUNCATED_MESSAGE, NotFoundError, REFUSED_IMPORT_MESSAGE, WorkspaceManager } from '../src/index.js';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -222,5 +222,84 @@ describe('import progress', () => {
     const results = await manager.importFiles(['/src/a.png', '/src/a.png']);
     expect(results).toHaveLength(2);
     expect(writes.map((w) => w[0])).toEqual([progress(0, 2, 0, 1), progress(1, 2, 0, 1)]);
+  });
+});
+
+/** The manager's live progress object, captured while the import runs and inspected after it settled. */
+function captureLive(manager: WorkspaceManager, onWrite: (fn: (index: number) => void) => void): () => ImportProgress | null {
+  let live: ImportProgress | null = null;
+  onWrite(() => {
+    live ??= (manager as unknown as { importProgress_: ImportProgress | null }).importProgress_;
+  });
+  return () => live;
+}
+
+describe('import progress when an item is done', () => {
+  it('resets the current item in the step that counts a plain source', async () => {
+    const { manager, sources, onWrite } = await setup();
+    sources.set('/src/a.png', Buffer.from('aaaa'));
+    const live = captureLive(manager, onWrite);
+
+    await manager.importFiles(['/src/a.png']);
+
+    expect(live()).toEqual(progress(1, 1, 0, null));
+  });
+
+  it('resets the current item in the step that counts an archive entry', async () => {
+    const { manager, unpack, archives, onWrite } = await setup();
+    archives.set('/src/pack.zip', [
+      { name: 'a.png', content: 'aaa' },
+      { name: 'b.png', content: 'bb' },
+    ]);
+    const live = captureLive(manager, onWrite);
+    const atClose: (ImportProgress | null)[] = [];
+    const open = archives.open.bind(archives);
+    archives.open = async (path, limits) => {
+      const archive = await open(path, limits);
+      const close = archive.close;
+      return { ...archive, close: async () => (atClose.push(manager.importProgress()), close()) };
+    };
+
+    await unpack(['/src/pack.zip']);
+
+    expect(atClose).toEqual([progress(2, 2, 0, null)]);
+    expect(live()).toEqual(progress(2, 2, 0, null));
+  });
+
+  it('counts a refused and an unreadable plain source', async () => {
+    const { manager, sources, onWrite } = await setup();
+    sources.set('/src/ok.png', Buffer.from('ok'));
+    sources.set('/src/gone.png', Buffer.from('x'));
+    sources.unreadable.add('/src/gone.png');
+    const live = captureLive(manager, onWrite);
+
+    const results = await manager.importFiles(['/src/ok.png', '/src/tool.exe', '/src/gone.png']);
+
+    expect(results.map((r) => [r.sourcePath, r.error])).toEqual([
+      ['/src/ok.png', null],
+      ['/src/tool.exe', REFUSED_IMPORT_MESSAGE],
+      ['/src/gone.png', 'This file cannot be read'],
+    ]);
+    expect(live()).toEqual(progress(3, 3, 0, null));
+  });
+
+  it('counts an archive entry that cannot be opened and still tries the following ones', async () => {
+    const { manager, unpack, archives, onWrite } = await setup();
+    archives.set('/src/pack.zip', [
+      { name: 'a.png', content: 'a' },
+      { name: 'broken.png', content: 'b', failOpen: true },
+      { name: 'c.png', content: 'c' },
+    ]);
+    const live = captureLive(manager, onWrite);
+
+    const results = await unpack(['/src/pack.zip']);
+
+    expect(results.map((r) => [r.entryName, r.error])).toEqual([
+      ['a.png', null],
+      ['broken.png', ARCHIVE_TRUNCATED_MESSAGE],
+      ['c.png', null],
+    ]);
+    expect(archives.openedEntries).toEqual([0, 1, 2]);
+    expect(live()).toEqual(progress(3, 3, 0, null));
   });
 });

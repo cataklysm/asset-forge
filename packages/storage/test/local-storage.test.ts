@@ -63,6 +63,17 @@ describe('files', () => {
     expect(reported).toEqual([2, 3, 5]);
   });
 
+  it('writes the file with its size and hash when onProgress throws', async () => {
+    const onProgress = vi.fn(() => {
+      throw new Error('observer failed');
+    });
+    const source = Readable.from([Buffer.from('he'), Buffer.from('llo')]);
+    const r = await storage.writeStream('inbox/a.txt', source, { onProgress });
+    expect(r).toEqual({ sizeBytes: 5, sha256: HELLO_SHA });
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(await storage.hashFile('inbox/a.txt')).toBe(HELLO_SHA);
+  });
+
   it('writes the same file with an empty options object', async () => {
     const r = await storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('hello')), {});
     expect(r).toEqual({ sizeBytes: 5, sha256: HELLO_SHA });

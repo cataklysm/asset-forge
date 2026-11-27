@@ -289,6 +289,11 @@ export class WorkspaceManager {
     const onProgress = (bytesWritten: number): void => {
       progress.currentBytes = bytesWritten;
     };
+    // The finished item's bytes never outlive its count, so `done + fraction` never exceeds `total`.
+    const finishItem = (): void => {
+      progress.done += 1;
+      startItem(null);
+    };
     this.importProgress_ = progress;
     try {
       const results: ImportResult[] = [];
@@ -307,11 +312,9 @@ export class WorkspaceManager {
             isCancelled: () => progress.cancelling,
             onEntryStart: (declaredSize) => startItem(declaredSize),
             onProgress,
-            onEntryDone: () => {
-              progress.done += 1;
-            },
+            onEntryDone: finishItem,
           });
-          if (!expanded) progress.done += 1;
+          if (!expanded) finishItem();
           results.push(...archiveResults);
           continue;
         }
@@ -323,7 +326,7 @@ export class WorkspaceManager {
         });
         await place(result);
         results.push(result);
-        progress.done += 1;
+        finishItem();
       }
       return results;
     } finally {
