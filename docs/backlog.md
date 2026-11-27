@@ -523,6 +523,15 @@ Deferred by design:
 - No cookies, logins, API keys, per-site headers or proxies, and no setting to relax the address check.
 - No automatic tagging or analysis after a download, and a downloaded ZIP is never unpacked.
 
+Known gaps:
+
+- A lane hold can be bypassed: a job enqueued or retried into a held lane is claimed at once, a second running job of the lane is unaffected, and there is a window between the retry write and the hold. Bounded by the pause after three failures. Direction: an in-memory "held until" per (class, lane) in the scheduler that excludes the lane from claims.
+- Claims under the `io` total of 4 are first-in-first-out across hosts; a large batch for one host delays a later small batch for another. Direction: rotate over lanes.
+- The skip-duplicate branch of the download handler writes the origin onto the existing file after the import step returned; if that file was purged in between, the job ends as `internal_error`.
+- After a crash between the completed import and the job outcome, the rerun finds its own file and reports `already_present`.
+- Several tests wait fixed real time before a negative assertion or rely on claim order (the 429 acceptance case, the dialog refresh assertion).
+- No TLS fixture test for the pinned lookup.
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
