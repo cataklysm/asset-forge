@@ -134,8 +134,12 @@ export interface SiteAccess {
 }
 
 export type PageLoadResult =
-  /** Absolute or relative strings as found, per query name. */
-  | { ok: true; results: Record<string, string[]> }
+  /**
+   * Absolute or relative strings as found, per query name. `baseUrl` is the document's base URL as the page
+   * reported it (after redirects and any `<base href>`); the crawl resolves against it only when it is a URL of the
+   * profile's site, so any string may come here.
+   */
+  | { ok: true; results: Record<string, string[]>; baseUrl: string }
   | { ok: false; reason: 'timeout' | 'left_site' | 'failed' }
   | { ok: false; reason: 'invalid_xpath'; query: string };
 

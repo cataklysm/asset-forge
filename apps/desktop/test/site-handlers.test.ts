@@ -41,6 +41,8 @@ interface FakeSessions extends SiteSessions {
   cleared: string[];
   loader: PageLoader;
   failClear: boolean;
+  /** The `onGone` of the page window opened last. */
+  gone: (() => void) | null;
 }
 
 function fakeSessions(): FakeSessions {
@@ -53,9 +55,10 @@ function fakeSessions(): FakeSessions {
     cleared: [],
     failClear: false,
     loader: {
-      load: async (): Promise<PageLoadResult> => ({
+      load: async (url): Promise<PageLoadResult> => ({
         ok: true,
         results: { thumbnails: ['/a.jpg', 'https://cdn.example.com/b.png'], pagination: [] },
+        baseUrl: url,
       }),
     },
     openLogin(profile, url) {
@@ -66,8 +69,10 @@ function fakeSessions(): FakeSessions {
     focusLogin() {
       fake.focused++;
     },
-    openPage() {
+    gone: null,
+    openPage(_profile, onGone) {
       fake.pages++;
+      fake.gone = onGone ?? null;
       return {
         loader: { load: (url, r) => fake.loader.load(url, r) },
         close: () => {
@@ -202,16 +207,35 @@ describe('site handlers', () => {
     expect(await h!.ok('sites:cancelCrawl', {})).toEqual({ cancelling: false });
   });
 
+  it('ends a crawl like a cancel when its page window goes away', async () => {
+    await harness({ workspace: false });
+    const a = await h!.ok('sites:save', profileRequest());
+    const blocking = blockingLoader();
+    sessions.loader = blocking;
+    const first = h!.call('sites:crawl', { profileId: a.id, url: GALLERY });
+    await blocking.started;
+    // What the Electron sessions do on shutdown: the window is destroyed and the crawl told.
+    sessions.gone!();
+    expect(await first).toMatchObject({ ok: true, value: { cancelled: true, files: [] } });
+    expect(await h!.ok('sites:crawlProgress', {})).toBeNull();
+  });
+
   it('closes the window and frees the crawl when the crawl throws', async () => {
     await harness({ workspace: false });
     const a = await h!.ok('sites:save', profileRequest());
     sessions.loader = { load: async () => ({ ok: false, reason: 'invalid_xpath', query: 'thumbnails' }) };
     expect(await error('sites:crawl', { profileId: a.id, url: GALLERY })).toMatchObject({ code: 'validation_failed' });
+    expect(sessions.pages).toBe(1);
     expect(sessions.closed).toBe(1);
-    // Off the site: refused before any window opens.
-    expect(await error('sites:crawl', { profileId: a.id, url: 'https://elsewhere.org/' })).toMatchObject({ code: 'validation_failed' });
-    expect(sessions.pages).toBe(2);
-    expect(sessions.closed).toBe(2);
+    // Off the site or not a web address: refused before any window opens.
+    expect(await error('sites:crawl', { profileId: a.id, url: 'https://elsewhere.org/' })).toEqual({
+      code: 'validation_failed',
+      message: "This address does not belong to the profile's site",
+    });
+    expect(await error('sites:crawl', { profileId: a.id, url: 'not a url' })).toMatchObject({ code: 'validation_failed' });
+    expect(sessions.pages).toBe(1);
+    expect(sessions.closed).toBe(1);
+    expect(await h!.ok('sites:crawlProgress', {})).toBeNull();
     sessions.loader = fakeSessions().loader;
     expect(await h!.ok('sites:crawl', { profileId: a.id, url: GALLERY })).toMatchObject({
       files: ['https://example.com/a.jpg', 'https://cdn.example.com/b.png'],

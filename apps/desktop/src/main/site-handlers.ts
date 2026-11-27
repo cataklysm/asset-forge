@@ -12,9 +12,9 @@ import {
   enqueueUrlImport,
   InvalidOperationError,
   NoWorkspaceOpenError,
-  normalizeDownloadUrl,
   normalizeSourceUrl,
   NotFoundError,
+  siteGalleryUrl,
   type SiteCrawlDeps,
   type WorkspaceManager,
   type WorkspaceSession,
@@ -182,12 +182,15 @@ export function createSiteHandlers(deps: {
     'sites:crawl': async ({ profileId, url }) => {
       if (running !== null) throw new InvalidOperationError(ALREADY_RUNNING);
       const profile = requireProfile(profileId);
+      // Refused before any page window opens (`validation_failed`).
+      const galleryUrl = siteGalleryUrl(profile, url);
       const entry: RunningCrawl = { profileId, controller: new AbortController(), progress: { pages: 0, files: 0 } };
       running = entry;
       kept = null;
       let page: ReturnType<SiteSessions['openPage']> | null = null;
       try {
-        page = sessions.openPage(profile);
+        // A page window that goes away (main window closed, app quitting) ends the crawl like a cancel.
+        page = sessions.openPage(profile, () => entry.controller.abort());
         const answer = await crawlSite(
           { pages: page.loader, robots: deps.robots, wait },
           {
@@ -203,8 +206,7 @@ export function createSiteHandlers(deps: {
         kept = {
           crawlId,
           profileId,
-          // crawlSite accepted it, so the rule passes.
-          galleryUrl: normalizeDownloadUrl(url),
+          galleryUrl,
           filter: { kinds: [...profile.kinds], minBytes: profile.minBytes },
           files: [...answer.files],
         };

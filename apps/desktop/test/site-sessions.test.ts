@@ -127,7 +127,11 @@ describe('extraction answer', () => {
     const limits = { maxResults: 2, maxLength: 3 };
     expect(
       readExtraction({ results: { a: ['abcdef', 7, 'x', 'y'], extra: ['z'] }, counts: { a: 4, extra: 1 } }, ['a', 'b'], limits),
-    ).toEqual({ kind: 'results', results: { a: ['abc', 'x'], b: [] }, counts: { a: 4, b: 0 } });
+    ).toEqual({ kind: 'results', results: { a: ['abc', 'x'], b: [] }, counts: { a: 4, b: 0 }, baseUrl: '' });
+    const base = (baseUrl: unknown) => readExtraction({ results: {}, counts: {}, baseUrl }, ['a']);
+    expect(base('https://example.com/g/')).toMatchObject({ baseUrl: 'https://example.com/g/' });
+    expect(base(7)).toMatchObject({ baseUrl: '' });
+    expect(base('x'.repeat(EXTRACT_LIMITS.maxLength + 1))).toMatchObject({ baseUrl: '' });
   });
 });
 
@@ -169,6 +173,7 @@ describe('page loader', () => {
     expect(await loader.load('https://example.com/g', request())).toEqual({
       ok: true,
       results: { thumbnails: ['/1.jpg'], pagination: ['?p=2'] },
+      baseUrl: '',
     });
     expect(view.calls()).toBe(3);
   });
@@ -207,6 +212,7 @@ describe('page loader', () => {
     expect(await createPageLoader(replaced, 'example.com', fast).load('https://example.com/g', request())).toEqual({
       ok: true,
       results: { thumbnails: ['/a'], pagination: [] },
+      baseUrl: '',
     });
   });
 
@@ -227,6 +233,41 @@ describe('page loader', () => {
     controller.abort();
     expect(await pending).toEqual({ ok: false, reason: 'failed' });
     expect(view.stops).toBe(1);
+  });
+
+  it('answers the base URL the page reports', async () => {
+    const view = fakeView({
+      evaluate: () => ({ results: { thumbnails: ['page2'] }, counts: { thumbnails: 1 }, baseUrl: 'https://example.com/g/' }),
+    });
+    expect(await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).toEqual({
+      ok: true,
+      results: { thumbnails: ['page2'], pagination: [] },
+      baseUrl: 'https://example.com/g/',
+    });
+  });
+
+  it('stops the view after every unsuccessful load before the next one starts, and never after a loaded one', async () => {
+    let hang = true;
+    const view = fakeView({
+      navigate: () => (hang ? new Promise(() => {}) : Promise.resolve('loaded')),
+      evaluate: () => ({ results: { thumbnails: ['/a'] }, counts: { thumbnails: 1 } }),
+    });
+    const loader = createPageLoader(view, 'example.com', { ...fast, totalMs: 30 });
+    expect(await loader.load('https://example.com/1', request())).toEqual({ ok: false, reason: 'timeout' });
+    expect(view.stops).toBe(1);
+    const leaving = loader.load('https://example.com/2', request());
+    await new Promise((r) => setTimeout(r, 5));
+    view.leave();
+    expect(await leaving).toEqual({ ok: false, reason: 'left_site' });
+    expect(view.stops).toBe(2);
+    hang = false;
+    // A signal of an earlier load that arrives between two loads ends nothing.
+    view.leave();
+    expect((await loader.load('https://example.com/3', request())).ok).toBe(true);
+    expect(view.stops).toBe(2);
+    view.navigate = async () => 'failed';
+    expect(await loader.load('https://example.com/4', request())).toEqual({ ok: false, reason: 'failed' });
+    expect(view.stops).toBe(3);
   });
 });
 
@@ -276,6 +317,7 @@ class FakeContents extends EventEmitter {
   executeJavaScriptInIsolatedWorld = vi.fn(async (_world: number, _scripts: { code: string }[]) => ({
     results: { thumbnails: ['/1.jpg'] },
     counts: { thumbnails: 1 },
+    baseUrl: 'https://example.com/g/',
   }));
   isDestroyed() {
     return this.destroyed;
@@ -296,12 +338,16 @@ class FakeWindow extends EventEmitter {
   title: string;
   destroyed = false;
   focused = 0;
+  menuRemoved = 0;
   constructor(readonly options: BrowserWindowConstructorOptions) {
     super();
     this.title = options.title ?? '';
   }
   setTitle(title: string) {
     this.title = title;
+  }
+  removeMenu() {
+    this.menuRemoved++;
   }
   isDestroyed() {
     return this.destroyed;
@@ -349,6 +395,7 @@ function fakeSession() {
     getUserAgent: () => 'Mozilla/5.0 Chrome Electron AssetForge/0.1.0',
     clearStorageData: vi.fn(async () => {}),
     clearCache: vi.fn(async () => {}),
+    clearAuthCache: vi.fn(async () => {}),
   };
   return session;
 }
@@ -418,9 +465,14 @@ describe('electron site sessions', () => {
     const prefs = w.options.webPreferences!;
     expect(w.options.show).toBe(true);
     expect(prefs).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
+    expect(prefs).toMatchObject({ disableDialogs: true, devTools: false });
     expect(prefs.preload).toBeUndefined();
     expect(prefs.session).toBe(e.session());
     expect(w.webContents.muted).toBe(true);
+    expect(w.menuRemoved).toBe(1);
+    let unloadForced = false;
+    w.webContents.emit('will-prevent-unload', { preventDefault: () => (unloadForced = true) });
+    expect(unloadForced).toBe(true);
     expect(w.webContents.loaded).toEqual(['https://example.com/login']);
     expect(w.title).toBe('Example – example.com');
     expect(e.site.loginProfileId()).toBe(profile.id);
@@ -450,13 +502,18 @@ describe('electron site sessions', () => {
     const w = e.windows[0]!;
     expect(w.options.show).toBe(false);
     expect(w.options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false });
+    expect(w.options.webPreferences).toMatchObject({ disableDialogs: true, devTools: false });
     expect(w.options.webPreferences!.preload).toBeUndefined();
     expect(w.webContents.muted).toBe(true);
+    expect(w.menuRemoved).toBe(1);
+    let unloadForced = false;
+    w.webContents.emit('will-prevent-unload', { preventDefault: () => (unloadForced = true) });
+    expect(unloadForced).toBe(true);
     expect(w.webContents.openHandler!({ url: 'https://example.com/popup' })).toEqual({ action: 'deny' });
     expect(w.webContents.loaded).toEqual([]);
 
     const result = await page.loader.load('https://example.com/g', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
-    expect(result).toEqual({ ok: true, results: { thumbnails: ['/1.jpg'] } });
+    expect(result).toEqual({ ok: true, results: { thumbnails: ['/1.jpg'] }, baseUrl: 'https://example.com/g/' });
     const [world, scripts] = w.webContents.executeJavaScriptInIsolatedWorld.mock.calls[0]!;
     expect(world).not.toBe(0);
     expect(scripts[0]!.code).toBe(extractionCode({ thumbnails: '//a' }));
@@ -488,6 +545,31 @@ describe('electron site sessions', () => {
     page.close();
   });
 
+  it('tells the crawl when its page window goes away', () => {
+    const e = electron();
+    let gone = 0;
+    const page = e.site.openPage(profile, () => gone++);
+    e.windows[0]!.destroy();
+    expect(gone).toBe(1);
+    page.close();
+    expect(gone).toBe(1);
+  });
+
+  it('shuts down: destroys the login and every page window, tells each crawl, and opens no window afterwards', () => {
+    const e = electron();
+    e.site.openLogin(profile, 'https://example.com/login');
+    let gone = 0;
+    e.site.openPage(profile, () => gone++);
+    e.site.shutdown();
+    expect(e.windows.map((w) => w.destroyed)).toEqual([true, true]);
+    expect(gone).toBe(1);
+    expect(e.site.loginProfileId()).toBeNull();
+    e.site.shutdown();
+    expect(() => e.site.openLogin(profile, 'https://example.com/')).toThrow('Site logins are not available');
+    expect(() => e.site.openPage(profile)).toThrow('Site logins are not available');
+    expect(e.windows).toHaveLength(2);
+  });
+
   it("answers the session's cookies and user agent and clears a session without logging details", async () => {
     const e = electron();
     expect(await e.site.cookies(profile.id, 'https://example.com/a')).toEqual([{ name: 'sid', value: 's' }]);
@@ -495,6 +577,14 @@ describe('electron site sessions', () => {
     expect(e.site.userAgent(profile.id)).toBe('Mozilla/5.0 Chrome Electron AssetForge/0.1.0');
     await e.site.clear(profile.id);
     expect(e.session().clearStorageData).toHaveBeenCalledTimes(1);
+    expect(e.session().clearAuthCache).toHaveBeenCalledTimes(1);
+    // A failed auth cache clear is logged the same way and does not stop the other clears.
+    e.session().clearAuthCache.mockRejectedValueOnce(new Error('C:\\Users\\x\\secret'));
+    await e.site.clear(profile.id);
+    expect(e.session().clearCache).toHaveBeenCalledTimes(2);
+    expect(e.log).toHaveBeenCalledTimes(1);
+    expect(e.log).toHaveBeenLastCalledWith(`site profile ${profile.id}: session_clear_failed`);
+    e.log.mockClear();
     e.session().clearStorageData.mockRejectedValueOnce(new Error('C:\\Users\\x\\secret'));
     await e.site.clear(profile.id);
     expect(e.log).toHaveBeenCalledWith(`site profile ${profile.id}: session_clear_failed`);

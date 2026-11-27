@@ -47,6 +47,28 @@ function kindOfUrl(url: string): string {
 }
 
 /**
+ * The normalised gallery URL a crawl of `url` would start from. Throws ValidationFailedError with the fixed
+ * off-site message for anything that is no usable URL or does not belong to the profile's site, so a caller can
+ * refuse it before any page window opens.
+ */
+export function siteGalleryUrl(profile: Pick<SiteProfile, 'site'>, url: string): string {
+  let galleryUrl: string;
+  try {
+    galleryUrl = normalizeDownloadUrl(url);
+  } catch {
+    throw new ValidationFailedError(OFF_SITE);
+  }
+  if (!belongsToSite(galleryUrl, profile.site)) throw new ValidationFailedError(OFF_SITE);
+  return galleryUrl;
+}
+
+/** Origin and path of a URL, the part robots rules and a redirect check look at. */
+function originAndPath(url: string): string {
+  const u = new URL(url);
+  return `${u.origin}${u.pathname}`;
+}
+
+/**
  * Reads a gallery with the profile's expressions and answers the file URLs found (spec "The crawl"). Pages are
  * loaded one after another with PAGE_GAP_MS between two loads. A cancel answers what was found so far with
  * `cancelled: true`. Throws ValidationFailedError for a gallery URL off the site or an invalid expression, and
@@ -62,13 +84,7 @@ export async function crawlSite(
   },
 ): Promise<CrawlAnswer> {
   const { profile, signal } = r;
-  let galleryUrl: string;
-  try {
-    galleryUrl = normalizeDownloadUrl(r.url);
-  } catch {
-    throw new ValidationFailedError(OFF_SITE);
-  }
-  if (!belongsToSite(galleryUrl, profile.site)) throw new ValidationFailedError(OFF_SITE);
+  const galleryUrl = siteGalleryUrl(profile, r.url);
 
   const answer: CrawlAnswer = {
     files: [],
@@ -143,6 +159,26 @@ export async function crawlSite(
     return result;
   };
 
+  /**
+   * The URL a loaded page's links resolve against: its document base when that is a URL on the profile's site
+   * (an in-site redirect or base element), otherwise the requested URL. Answers null when the base differs from
+   * the requested URL in origin or path and robots refuses it; the page then counts as disallowed.
+   */
+  const baseOf = async (page: { baseUrl: string }, requested: string): Promise<string | null> => {
+    let base: string;
+    try {
+      base = new URL(page.baseUrl).href;
+    } catch {
+      return requested;
+    }
+    if (!belongsToSite(base, profile.site)) return requested;
+    if (originAndPath(base) !== originAndPath(requested) && !(await allowed(base))) {
+      answer.disallowed++;
+      return null;
+    }
+    return base;
+  };
+
   const progress = () => r.onProgress?.({ pages: answer.pages, files: answer.files.length });
 
   /** Takes file URLs through uniqueness, urlContains, kind, robots and maxFiles (spec "The crawl", step 5). */
@@ -196,9 +232,14 @@ export async function crawlSite(
         progress();
         continue;
       }
+      const pageBase = await baseOf(page, pageUrl);
+      if (pageBase === null) {
+        progress();
+        continue;
+      }
       answer.pages++;
 
-      const thumbnails = resolveAll(page.results[SITE_QUERY.thumbnails], pageUrl);
+      const thumbnails = resolveAll(page.results[SITE_QUERY.thumbnails], pageBase);
       if (profile.file === '') {
         await addFiles(thumbnails);
       } else {
@@ -215,13 +256,14 @@ export async function crawlSite(
             progress();
             continue;
           }
-          await addFiles(resolveAll(detail.results[SITE_QUERY.file], detailUrl));
+          const detailBase = await baseOf(detail, detailUrl);
+          if (detailBase !== null) await addFiles(resolveAll(detail.results[SITE_QUERY.file], detailBase));
           progress();
         }
       }
 
       if (profile.pagination !== '') {
-        for (const next of resolveAll(page.results[SITE_QUERY.pagination], pageUrl)) {
+        for (const next of resolveAll(page.results[SITE_QUERY.pagination], pageBase)) {
           if (seenPages.has(next) || refusedPages.has(next) || !belongsToSite(next, profile.site)) continue;
           if (!(await allowed(next))) {
             refusedPages.add(next);

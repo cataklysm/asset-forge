@@ -5,6 +5,7 @@ import {
   InvalidOperationError,
   PAGE_GAP_MS,
   parseRobots,
+  siteGalleryUrl,
   ValidationFailedError,
   type PageLoadResult,
   type RobotsAnswer,
@@ -34,7 +35,8 @@ function profile(over: Partial<SiteProfile> = {}): SiteProfile {
 type Page = PageLoadResult | ((signal: AbortSignal) => PageLoadResult | Promise<PageLoadResult>);
 type Load = { url: string; queries: Record<string, string>; waitFor: string };
 
-const ok = (results: Record<string, string[]>): PageLoadResult => ({ ok: true, results });
+/** A loaded page; without `baseUrl` the double answers the requested URL as the base, like a page without redirect. */
+const ok = (results: Record<string, string[]>, baseUrl = ''): PageLoadResult => ({ ok: true, results, baseUrl });
 
 function deps(
   pages: Record<string, Page>,
@@ -55,7 +57,8 @@ function deps(
         events.push(`load ${url}`);
         const page = pages[url];
         if (page === undefined) return { ok: false, reason: 'failed' };
-        return typeof page === 'function' ? page(r.signal) : page;
+        const result = typeof page === 'function' ? await page(r.signal) : page;
+        return result.ok && result.baseUrl === '' ? { ...result, baseUrl: url } : result;
       },
     },
     async robots(origin) {
@@ -112,6 +115,65 @@ describe('crawlSite', () => {
     const d = deps({ 'https://www.gallery.test/g': ok({ thumbnails: ['/1.jpg'] }) });
     const result = await run(d, profile(), 'https://www.gallery.test/g');
     expect(result.files).toEqual(['https://www.gallery.test/1.jpg']);
+  });
+
+  it('names the gallery URL it would crawl, or refuses it like the crawl', () => {
+    expect(siteGalleryUrl(profile(), `${G}/g#top`)).toBe(`${G}/g`);
+    expect(() => siteGalleryUrl(profile(), 'https://evilgallery.test/g')).toThrow(
+      new ValidationFailedError("This address does not belong to the profile's site"),
+    );
+    expect(() => siteGalleryUrl(profile(), 'not a url')).toThrow(ValidationFailedError);
+  });
+
+  it('resolves links against the final URL of an in-site redirect', async () => {
+    const d = deps(
+      {
+        [`${G}/gallery`]: ok({ thumbnails: ['img/1.jpg'], pagination: ['page2'] }, `${G}/gallery/`),
+        [`${G}/gallery/page2`]: ok({ thumbnails: ['img/2.jpg'], pagination: [] }),
+      },
+      {},
+    );
+    const result = await run(d, profile({ pagination: '//a[@rel="next"]' }), `${G}/gallery`);
+    expect(result).toMatchObject({ files: [`${G}/gallery/img/1.jpg`, `${G}/gallery/img/2.jpg`], pages: 2, pageFailures: 0 });
+    expect(d.loads.map((l) => l.url)).toEqual([`${G}/gallery`, `${G}/gallery/page2`]);
+  });
+
+  it('resolves detail file links against the final URL of the detail page', async () => {
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['/d/1'] }),
+      [`${G}/d/1`]: ok({ file: ['full.jpg'] }, `${G}/d/1/`),
+    });
+    const result = await run(d, profile({ file: '//img' }));
+    expect(result.files).toEqual([`${G}/d/1/full.jpg`]);
+  });
+
+  it('ignores a base off the site or no URL and resolves against the requested URL', async () => {
+    for (const base of ['https://evil.test/x/', 'not a url', 'about:blank']) {
+      const d = deps({ [`${G}/a/g`]: ok({ thumbnails: ['1.jpg'] }, base) });
+      const result = await run(d, profile(), `${G}/a/g`);
+      expect(result).toMatchObject({ files: [`${G}/a/1.jpg`], pages: 1 });
+    }
+  });
+
+  it('drops a page whose final URL robots disallows', async () => {
+    const d = deps(
+      { [`${G}/g`]: ok({ thumbnails: ['/1.jpg'] }, `${G}/private/g`) },
+      { [G]: 'User-agent: *\nDisallow: /private' },
+    );
+    const result = await run(d, profile());
+    expect(result).toMatchObject({ files: [], pages: 0, disallowed: 1 });
+  });
+
+  it('drops a detail page whose final URL robots disallows', async () => {
+    const d = deps(
+      {
+        [`${G}/g`]: ok({ thumbnails: ['/d/1'] }),
+        [`${G}/d/1`]: ok({ file: ['/f/1.jpg'] }, `${G}/private/1`),
+      },
+      { [G]: 'User-agent: *\nDisallow: /private' },
+    );
+    const result = await run(d, profile({ file: '//img' }));
+    expect(result).toMatchObject({ files: [], pages: 1, disallowed: 1 });
   });
 
   it('throws when the robots.txt of the gallery origin cannot be read', async () => {

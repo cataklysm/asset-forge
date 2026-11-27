@@ -153,6 +153,14 @@ function start(): void {
 
   const appUrl = getAppUrl(windowOptions);
 
+  // One persistent browser session per site profile; its windows never get a preload or Node. Closing the main
+  // window or quitting ends a running crawl and closes the login window (shutdown).
+  const siteSessions = createElectronSiteSessions({
+    fromPartition: (partition) => session.fromPartition(partition),
+    createWindow: (options) => new BrowserWindow(options),
+    log: (line) => console.warn(line),
+  });
+
   // The vision settings store is the only source of the provider, its key and the default models.
   const services = createAnalysisServices({
     manager,
@@ -163,12 +171,7 @@ function start(): void {
     generationImages: createGenerationImageSource(previews),
     log: (line) => console.warn(line),
     appVersion: app.getVersion(),
-    // One persistent browser session per site profile; its windows never get a preload or Node.
-    siteSessions: createElectronSiteSessions({
-      fromPartition: (partition) => session.fromPartition(partition),
-      createWindow: (options) => new BrowserWindow(options),
-      log: (line) => console.warn(line),
-    }),
+    siteSessions,
   });
 
   const handlers = createWorkspaceHandlers(
@@ -220,6 +223,7 @@ function start(): void {
     event.preventDefault();
     if (shutdown === 'closing') return;
     shutdown = 'closing';
+    siteSessions.shutdown();
     // A describe request is cancelled and jobs stop before their database closes; workspaceClosing never rejects.
     services
       .workspaceClosing()
@@ -249,6 +253,7 @@ function start(): void {
       mainWindow = createMainWindow(windowOptions);
       mainWindow.on('closed', () => {
         mainWindow = null;
+        siteSessions.shutdown();
       });
     })
     .catch(failStartup);
