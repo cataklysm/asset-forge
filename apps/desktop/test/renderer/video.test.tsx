@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
@@ -337,6 +337,23 @@ it('leaving the video pauses it and releases the source', () => {
   expect(video.hasAttribute('src')).toBe(false);
   expect(load).toHaveBeenCalledTimes(1);
   expect(load.mock.invocationCallOrder[0]!).toBeGreaterThan(playback.pause.mock.invocationCallOrder[0]!);
+});
+
+it('the video keeps its source under StrictMode, whose simulated unmount leaves the element in place', () => {
+  install();
+  const file = videoRecord({ width: 640, height: 360 });
+  const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+  try {
+    render(
+      <StrictMode>
+        <Harness file={file} />
+      </StrictMode>,
+    );
+    expect(videoElement().getAttribute('src')).toBe(videoUrl(file.id));
+    expect(load).not.toHaveBeenCalled();
+  } finally {
+    load.mockRestore();
+  }
 });
 
 it('a trashed video that could otherwise be opened gets no Open externally', () => {

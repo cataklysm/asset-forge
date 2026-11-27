@@ -60,6 +60,9 @@ export function VideoStage({ file, videoRef, canOpenExternally, onOpenExternally
     video.muted = session.muted;
     return () => {
       // Leaving the file or closing the dialog ends playback and releases the request and the decoder.
+      // StrictMode's simulated unmount leaves the element in place; it must keep its source then,
+      // because React does not set an unchanged attribute again.
+      if (video.isConnected) return;
       try {
         video.pause();
         video.removeAttribute('src');
