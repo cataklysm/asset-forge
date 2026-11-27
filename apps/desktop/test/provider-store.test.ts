@@ -1005,11 +1005,31 @@ describe('provider store: version 4 and options', () => {
     ['a vision entry without options', [{ ...v3Entries[0], options: null }]],
     ['a vision entry without the options key', [v3Entries[0]]],
     ['a venice entry with options', [{ ...v3Entries[1], options: DEFAULT_PROVIDER_OPTIONS }]],
-    ['refused extra parameters', [{ ...v3Entries[0], kind: 'openai', options: { ...DEFAULT_PROVIDER_OPTIONS, extra: '{"n":2}' } }]],
     ['options out of bounds', [{ ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, temperature: 3 } }]],
   ])('sets a version 4 file with %s aside', (_label, providers) => {
     writeFile(4, providers);
     expect(store().list().providers).toEqual([]);
     expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['a reserved key', '{"n":2}'],
+    ['text that is not JSON', '{not json'],
+    ['a JSON array', '[1]'],
+  ])('keeps every entry and every key file when stored extra parameters hold %s', (_label, extra) => {
+    const refused = { ...v3Entries[0], kind: 'openai', options: { ...DEFAULT_PROVIDER_OPTIONS, extra } };
+    writeFile(4, [refused, { ...v3Entries[1], options: null }]);
+    mkdirSync(credentials());
+    writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
+    writeFileSync(keyFile(SECOND), codec.encrypt(OTHER_KEY));
+    const s = store();
+    expect(s.list().providers.map((p) => [p.id, p.hasApiKey])).toEqual([
+      [PREPARED, true],
+      [SECOND, true],
+    ]);
+    expect(s.get(PREPARED)?.options?.extra).toBe(extra);
+    expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
+    expect(readdirSync(credentials()).sort()).toEqual([`vision-api-key-${PREPARED}`, `vision-api-key-${SECOND}`].sort());
+    expect(errorOf(() => s.save(openai({ id: PREPARED, options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))?.code).toBe('validation_failed');
   });
 });

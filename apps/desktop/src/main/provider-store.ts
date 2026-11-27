@@ -190,9 +190,9 @@ const V4FileSchema = z.object({
     z
       .object({ ...V3EntryShape, options: ProviderOptionsSchema.nullable() })
       .refine(entryRules)
-      // Options exactly on a vision entry, and only extra parameters the save rule accepts.
-      .refine((e) => (e.options === null) === !isVisionKind(e.kind))
-      .refine((e) => e.options === null || !isVisionKind(e.kind) || parseExtraParameters(e.options.extra, e.kind).ok),
+      // Options exactly on a vision entry. Stored extra parameters the save rule refuses do not make the file
+      // unreadable: the gateway sends none for that entry, and the next save refuses the text.
+      .refine((e) => (e.options === null) === !isVisionKind(e.kind)),
   ),
   lastUsed: LastUsedSchema,
   adoptLegacyKey: MarkerSchema,

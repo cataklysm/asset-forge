@@ -174,6 +174,20 @@ describe('provider gateway with a fake adapter', () => {
     expect(created[2]!.requestOptions).toEqual({ temperature: 1, thinking: 'off', maxTokens: null, extra: {} });
   });
 
+  it('builds an entry whose stored extra parameters fail the rule with no extra parameters', () => {
+    const id = '11111111-2222-4333-8444-555555555555';
+    const entry = { id, kind: 'openai', name: 'vLLM', baseUrl: 'http://192.168.1.40:8000/v1', timeoutSeconds: 60, taggingModel: 'tagger', promptModel: null, editModel: null };
+    const options = { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"n":2,"top_k":20}' };
+    writeFileSync(
+      join(dir, 'provider-settings.json'),
+      JSON.stringify({ version: 4, providers: [{ ...entry, options }], lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+    );
+    store = createProviderStore({ userData: dir, secrets: new FakeCodec(), env: {} });
+    expect(gateway().vision(id)).not.toBeNull();
+    expect(created[0]!.requestOptions).toEqual({ temperature: 0.4, thinking: 'on', maxTokens: 300, extra: {} });
+    expect(lines.join('\n')).not.toContain('top_k');
+  });
+
   it('lists the models of an openai entry', async () => {
     const a = store.save(openaiInput());
     listResult = async () => [{ name: 'qwen', vision: null }];
