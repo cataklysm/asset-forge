@@ -443,6 +443,26 @@ describe('analysis:enqueue with an analysis prompt', () => {
     expect(await call('jobs:resumeHost', { host: '' })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 
+  it('resumes only the queues of the request when a host and a provider lane share a name', async () => {
+    await setup();
+    const lane = 'environment';
+    const pausedClasses = () => jobHost.paused().filter((p) => p.lane === lane).map((p) => p.resourceClass);
+    const pauseAll = () => {
+      for (let i = 0; i < 3; i++) pause.record('io', lane, 'download_blocked');
+      pause.record('local_gpu', lane, 'provider_unauthorized');
+      pause.record('remote_api', lane, 'provider_unauthorized');
+    };
+    pauseAll();
+    expect(pausedClasses()).toEqual(['local_gpu', 'remote_api', 'io']);
+
+    expect(await ok('jobs:resumeHost', { host: lane })).toEqual({});
+    expect(pausedClasses()).toEqual(['local_gpu', 'remote_api']);
+
+    pauseAll();
+    expect(await ok('jobs:resume', { providerId: lane })).toEqual({});
+    expect(pausedClasses()).toEqual(['io']);
+  });
+
   it('never offers or moves download jobs through jobs:waitingByProvider and jobs:reroute', async () => {
     await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });

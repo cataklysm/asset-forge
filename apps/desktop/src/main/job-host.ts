@@ -35,8 +35,11 @@ export interface JobHost extends JobControl {
    * each in the order they paused; `null` is the analysis jobs without a provider, a download lane is a host.
    */
   paused(): { lane: string | null; reason: JobErrorCode; resourceClass: ResourceClass }[];
-  /** Ends the pause of one lane in every queue and lets the scheduler claim again. Never throws. */
-  resume(lane: string | null): void;
+  /**
+   * Ends the pause of one lane in the given queues only and lets the scheduler claim again. A provider entry id
+   * and a download host may be the same string, so a resume never reaches the queues of the other kind. Never throws.
+   */
+  resume(lane: string | null, classes: readonly ResourceClass[]): void;
 }
 
 /** The scheduler's clock and timers. */
@@ -77,6 +80,10 @@ const GENERATION_CLASS: ResourceClass = 'remote_api';
 const DOWNLOAD_CLASS: ResourceClass = 'io';
 /** The queues whose lanes pause, in the order `paused` lists them. */
 const PAUSABLE: readonly ResourceClass[] = [ANALYSIS_CLASS, GENERATION_CLASS, DOWNLOAD_CLASS];
+/** The queues whose lanes are provider entries: what `jobs:resume`, a provider save and a reroute resume. */
+export const PROVIDER_CLASSES: readonly ResourceClass[] = [ANALYSIS_CLASS, GENERATION_CLASS];
+/** The queue whose lanes are download hosts: what `jobs:resumeHost` resumes. */
+export const DOWNLOAD_CLASSES: readonly ResourceClass[] = [DOWNLOAD_CLASS];
 
 export function createJobHost(deps: JobHostDeps): JobHost {
   const { manager, pause, clock } = deps;
@@ -167,8 +174,8 @@ export function createJobHost(deps: JobHostDeps): JobHost {
     paused: () =>
       PAUSABLE.flatMap((resourceClass) => pause.paused(resourceClass).map(({ lane, reason }) => ({ lane, reason, resourceClass }))),
 
-    resume(lane) {
-      for (const resourceClass of PAUSABLE) {
+    resume(lane, classes) {
+      for (const resourceClass of classes) {
         try {
           pause.resume(resourceClass, lane);
         } catch (cause) {

@@ -27,7 +27,7 @@ import {
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
 import type { IpcHandlers } from './ipc.js';
-import type { JobHost } from './job-host.js';
+import { DOWNLOAD_CLASSES, PROVIDER_CLASSES, type JobHost } from './job-host.js';
 import { CANNOT_ANALYSE, type ProviderStore } from './provider-store.js';
 
 const GENERATION_NOT_FOUND = 'This generation does not exist';
@@ -229,14 +229,15 @@ export function createJobHandlers(
             waiting,
           })),
       ),
-    // The pause belongs to the app session, so this works without an open workspace.
+    // The pause belongs to the app session, so this works without an open workspace. Only the provider queues:
+    // a download host may carry the same name as an entry id.
     'jobs:resume': async (r) => {
-      jobs.resume(r.providerId);
+      jobs.resume(r.providerId, PROVIDER_CLASSES);
       return {};
     },
-    // Like `jobs:resume`: a paused download host belongs to the app session, not to a workspace.
+    // Like `jobs:resume`: a paused download host belongs to the app session, not to a workspace. Only the download queue.
     'jobs:resumeHost': async (r) => {
-      jobs.resume(r.host);
+      jobs.resume(r.host, DOWNLOAD_CLASSES);
       return {};
     },
     // The target's pause is not lifted: the moved jobs wait in its lane until it is resumed. The source lane
@@ -248,7 +249,7 @@ export function createJobHandlers(
         const to = providers.resolve(r.toProviderId, 'ollama')!;
         return rerouteJobs(s, { fromLane: r.fromProviderId, to: { id: to.id, name: to.name }, model: r.model });
       });
-      if (result.moved > 0) jobs.resume(r.fromProviderId);
+      if (result.moved > 0) jobs.resume(r.fromProviderId, PROVIDER_CLASSES);
       return result;
     },
     'jobs:clearFinished': async () => {

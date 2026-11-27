@@ -21,7 +21,7 @@ import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
 import { createImageProviderDirectory } from './generation-handlers.js';
 import type { AppServices } from './ipc.js';
-import { createJobHost, type JobHost, type SchedulerClock } from './job-host.js';
+import { createJobHost, PROVIDER_CLASSES, type JobHost, type SchedulerClock } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
 import { createProviderGateway, type ProviderGateway } from './provider-gateway.js';
 import { createProviderHandlers } from './provider-handlers.js';
@@ -154,8 +154,8 @@ export function createAnalysisServices(o: {
     ...(o.clock === undefined ? {} : { clock: o.clock }),
   });
   jobHost = host;
-  // A saved or deleted entry may fix what paused its lane; the other lanes stay as they are.
-  store.onChange((id) => host.resume(id));
+  // A saved or deleted entry may fix what paused its lane; the other lanes and every download host stay as they are.
+  store.onChange((id) => host.resume(id, PROVIDER_CLASSES));
   const describe = createDescribeController({ manager: o.manager, vision: (id) => gateway.vision(id), images: o.images });
   const prompts = createAnalysisPromptStore({
     userData: o.userDataPath,
