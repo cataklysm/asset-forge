@@ -124,9 +124,10 @@ interface Size {
 
 /**
  * The displayed size of the first frame `showinfo` reports (the stored width times the sample
- * aspect ratio), or undefined for any other line.
+ * aspect ratio); null for such a line with an unusable size (beyond VIDEO_MAX_PIXELS, stored or
+ * displayed), undefined for any other line.
  */
-function sizeFromLine(line: string): Size | undefined {
+function sizeFromLine(line: string): Size | null | undefined {
   const match = /^\[Parsed_showinfo_0 @ [0-9a-fA-Fx]+\] n: +0 .* sar:(\d+)\/(\d+) s:(\d+)x(\d+) /.exec(line);
   if (!match) return undefined;
   const num = Number(match[1]);
@@ -134,33 +135,46 @@ function sizeFromLine(line: string): Size | undefined {
   const stored = Number(match[3]);
   const height = Number(match[4]);
   const width = num > 0 && den > 0 ? Math.round((stored * num) / den) : stored;
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) return undefined;
+  for (const value of [width, stored, height]) {
+    if (!Number.isSafeInteger(value) || value < 1) return null;
+  }
+  if (stored * height > VIDEO_MAX_PIXELS || width * height > VIDEO_MAX_PIXELS) return null;
   return { width, height };
 }
 
 /** Reads the diagnostics line by line; keeps only what the result needs. */
 function createDiagnosticsReader(): { line(text: string): void; result(): VideoInfo | null } {
-  let lastDuration: number | null = null;
+  /** The first duration after the latest input header. */
+  let inputDuration: number | null = null;
+  let durationSeen = true;
   let mapped = false;
   let durationMs: number | null = null;
-  let size: Size | undefined;
+  let size: Size | null | undefined;
   return {
     line(text) {
       // The file can make ffmpeg print lines of its choosing (a CodecID with newlines, for one),
-      // but only while the input is opened. Everything is read as of the last stream mapping,
-      // which ffmpeg prints itself after the input header and before the first frame.
+      // but only while the input is opened, before ffmpeg prints the input header itself. The
+      // duration is the first one after the last input header, and the size the first frame
+      // after the last stream mapping, which ffmpeg prints after the header and before any frame.
+      if (text.startsWith('Input #0, ')) {
+        inputDuration = null;
+        durationSeen = false;
+        return;
+      }
       if (text === 'Stream mapping:') {
         mapped = true;
-        durationMs = lastDuration;
+        durationMs = inputDuration;
+        durationSeen = true;
         size = undefined;
         return;
       }
       const duration = durationFromLine(text);
       if (duration !== undefined) {
-        lastDuration = duration;
+        if (!durationSeen) inputDuration = duration;
+        durationSeen = true;
         return;
       }
-      if (mapped) size ??= sizeFromLine(text);
+      if (mapped && size === undefined) size = sizeFromLine(text);
     },
     result() {
       return mapped && size ? { width: size.width, height: size.height, durationMs } : null;
@@ -307,13 +321,14 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
       const kill = () => {
         if (killed) return;
         killed = true;
+        // A process that does not exit is given up: the slot is freed and the caller cleans up.
+        // Set before kill(), so an error emitted from inside it clears the timer.
+        grace = setTimeout(() => settle({ info: null, killed: true }), killGraceMs);
         try {
           child.kill();
         } catch {
-          // Settled below all the same.
+          // Settled by the grace timer all the same.
         }
-        // A process that does not exit is given up: the slot is freed and the caller cleans up.
-        grace = setTimeout(() => settle({ info: null, killed: true }), killGraceMs);
       };
       const timer = setTimeout(kill, remaining);
       running.set(child, kill);
@@ -343,7 +358,7 @@ export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
       });
       child.stderr?.on('error', () => undefined);
       // A failed start (EMFILE, for one) may never be followed by a close.
-      child.once('error', () => settle({ info: null, killed }));
+      child.on('error', () => settle({ info: null, killed }));
       child.once('close', (code) => {
         if (!cut && pending) readLine(pending);
         settle({ info: killed || code !== 0 ? null : reader.result(), killed });

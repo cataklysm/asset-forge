@@ -472,6 +472,28 @@ describe('video frames', () => {
       expect(await readdir(dir)).toEqual([]);
     });
 
+    it('a kill that errors at once, and a second error, settle the call once', async () => {
+      const tool = frames({
+        timeoutMs: 100,
+        killGraceMs: 60_000,
+        spawnProcess: () => {
+          const child = fakeChild();
+          child.kill = () => {
+            child.emit('error', new Error('kill failed'));
+            // A later error without a listener would be thrown as an uncaught exception.
+            setTimeout(() => child.emit('error', new Error('again')), 0);
+            return false;
+          };
+          return child;
+        },
+      });
+      const started = Date.now();
+      expect(await tool.extract(fixture('h264.mp4'), 'mp4', join(dir, 'a.jpg'))).toBeNull();
+      // Settled by the error, not after the grace period.
+      expect(Date.now() - started).toBeLessThan(5000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
     it('the grace period is 2 s by default', () => {
       expect(KILL_GRACE_MS).toBe(2000);
     });
@@ -488,6 +510,7 @@ describe('video frames', () => {
           '  Duration: 09:00:00.00, start: 0.000000',
           mapping,
           info('99999x1'),
+          'Input #0, mov,mp4,m4a,3gp,3g2,mj2, from real',
           '  Duration: 00:00:02.00, start: 0.000000',
           mapping,
           info('320x240'),
@@ -498,7 +521,13 @@ describe('video frames', () => {
 
     it('a duration line after the mapping does not count', () => {
       expect(
-        readDiagnostics(['  Duration: 00:00:02.00, start: 0', mapping, '  Duration: 09:00:00.00, start: 0', info('320x240')]),
+        readDiagnostics([
+          'Input #0, mov',
+          '  Duration: 00:00:02.00, start: 0',
+          mapping,
+          '  Duration: 09:00:00.00, start: 0',
+          info('320x240'),
+        ]),
       ).toEqual({ width: 320, height: 240, durationMs: 2000 });
     });
 
@@ -510,6 +539,35 @@ describe('video frames', () => {
     it('applies the sample aspect ratio to the width', () => {
       expect(readDiagnostics([mapping, info('320x240', '16/15')])).toMatchObject({ width: 341, height: 240 });
       expect(readDiagnostics([mapping, info('320x240', '0/1')])).toMatchObject({ width: 320, height: 240 });
+    });
+
+    it('a size beyond the pixel limit answers null', () => {
+      expect(readDiagnostics([mapping, info('10000x10000')])).toMatchObject({ width: 10000, height: 10000 });
+      expect(readDiagnostics([mapping, info('10001x10000')])).toBeNull();
+      // The sample aspect ratio counts: a stored 320x240 at 100000:1 is far too wide.
+      expect(readDiagnostics([mapping, info('320x240', '100000/1')])).toBeNull();
+    });
+
+    it('a forged size before the mapping does not count even when it scales to the same frame', () => {
+      expect(readDiagnostics(['Input #0, mov', '  Duration: 00:00:02.00, start: 0', info('8000x4000'), mapping, info('4000x2000')]))
+        .toEqual({ width: 4000, height: 2000, durationMs: 2000 });
+    });
+
+    it('takes the first duration after the last input header', () => {
+      expect(
+        readDiagnostics([
+          'Input #0, matroska,webm, from forged',
+          '  Duration: 09:00:00.00, start: 0',
+          'Input #0, matroska,webm, from real',
+          '  Duration: 00:00:02.00, start: 0',
+          '  Duration: 05:00:00.00, start: 0',
+          mapping,
+          info('320x240'),
+        ]),
+      ).toEqual({ width: 320, height: 240, durationMs: 2000 });
+      expect(readDiagnostics(['  Duration: 00:00:02.00, start: 0', mapping, info('320x240')])).toMatchObject({
+        durationMs: null,
+      });
     });
 
     it('the frame must have the size the video scales to', () => {
