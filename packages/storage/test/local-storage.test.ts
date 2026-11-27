@@ -364,6 +364,34 @@ describe('path escape', () => {
     });
   }
 
+  it('moves into a directory that another writer creates while the path is checked', async () => {
+    await storage.writeText('inbox/a.txt', 'A');
+    const dir = path.join(root, 'assets', 'new-asset');
+    const realpath = fs.realpath.bind(fs);
+    // The first look at the directory misses it; another move creates it before the next look.
+    let raced = false;
+    const spy = vi.spyOn(fs, 'realpath').mockImplementation(async (p, ...rest) => {
+      if (!raced && p === dir) {
+        raced = true;
+        await fs.mkdir(dir);
+        throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      }
+      return realpath(p as string, ...(rest as []));
+    });
+    try {
+      await storage.move('inbox/a.txt', 'assets/new-asset/a.txt');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(raced).toBe(true);
+    expect(await storage.readText('assets/new-asset/a.txt')).toBe('A');
+  });
+
+  it('still refuses a dangling link found while the path is checked', async () => {
+    await fs.symlink(path.join(tmp, 'nowhere'), path.join(root, 'inbox', 'dangling'), 'junction');
+    await expect(storage.writeText('inbox/dangling/a.txt', 'x')).rejects.toThrow(new PathEscapeError('Path crosses a dangling link'));
+  });
+
   it('allows a junction that stays inside the root', async () => {
     await storage.writeText('inbox/a.txt', 'A');
     await fs.symlink(path.join(root, 'inbox'), path.join(root, 'assets', 'alias'), 'junction');

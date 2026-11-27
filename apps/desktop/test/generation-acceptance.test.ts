@@ -57,6 +57,15 @@ describe('generation studio end to end', () => {
     return found;
   }
 
+  /** Waits until `check` holds for the mock's state; fails the test after `timeoutMs`. */
+  async function untilMock(check: () => boolean, timeoutMs = 10_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!check()) {
+      if (Date.now() > deadline) throw new Error('Timed out waiting for the mock provider');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
   async function filesOf(assetId: string): Promise<FileRecord[]> {
     return (await h.ok('files:list', { ...page, scope: { kind: 'asset', assetId } })).items;
   }
@@ -236,19 +245,20 @@ describe('generation studio end to end', () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
     const running = [await started(edit(sourceId, MOCK_PROMPT_SLOW)), await started(edit(sourceId, MOCK_PROMPT_SLOW))];
-    await h.until((s) => s.running === 2);
-    const deadline = Date.now() + 10_000;
-    while (mock!.imageRequests.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    // Both requests were sent and wait at the mock for their answer.
+    await untilMock(() => mock!.slowWaiting() === 2);
+    expect(mock!.imageRequests).toHaveLength(2);
     // The remote limit is two per lane, so the third waits in the queue.
     const queued = await started(edit(sourceId, 'Make it night'));
     expect(await h.ok('jobs:summary', {})).toMatchObject({ running: 2, queued: 1 });
 
     expect(await h.ok('files:trashMany', { fileIds: [sourceId] })).toMatchObject({ items: [{ error: null }] });
-    await h.until((s) => s.cancelled === 1 && s.running === 2);
+    await h.until((s) => s.cancelled === 1 && s.queued === 0 && s.running === 2);
     // The paid requests already sent finish: their answers are kept.
     mock!.releaseSlow();
+    // With no job active nothing is left that could send a request again.
     await h.until((s) => s.succeeded === 2 && s.cancelled === 1 && active(s) === 0);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mock!.slowWaiting()).toBe(0);
 
     const { results } = await h.ok('generations:forFile', { fileId: sourceId });
     expect(new Map(results.map((g) => [g.id, g.status]))).toEqual(

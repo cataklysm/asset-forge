@@ -451,6 +451,9 @@ export async function startMockProvider(options = {}) {
     releaseSlow() {
       for (const send of [...slow]) send();
     },
+    slowWaiting() {
+      return slow.size;
+    },
     close() {
       for (const timer of timers) clearTimeout(timer);
       timers.clear();

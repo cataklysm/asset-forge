@@ -5,6 +5,8 @@ export interface MockProvider {
   close(): Promise<void>;
   /** Answers every waiting `MOCK_PROMPT_SLOW` request now and keeps the server running. */
   releaseSlow(): void;
+  /** How many `MOCK_PROMPT_SLOW` requests are waiting for their answer. */
+  slowWaiting(): number;
   requests: {
     method: string;
     path: string;
