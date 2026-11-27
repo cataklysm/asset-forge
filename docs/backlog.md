@@ -7,6 +7,7 @@ Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewe
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
 
 - **Duplicate check by hash.** The content hash is used to avoid duplicates. Today an import only reports that a file with the same SHA-256 already exists (`duplicateOf`, counted in the inbox's import result) and imports it all the same. Decided by the owner: a duplicate is never skipped (files would be missing and the user would wonder why) but is clearly identifiable, on an import into an asset as well as into the inbox; the check is workspace-wide (the same content may already sit in another asset the owner did not think of searching for); there is a "Find duplicates" action for what already exists; files in the trash do not count. Open for the design: how a duplicate is marked and where the marker stays visible after the import (tile, table, detail dialog, filter), how the other copies are reached from it, what "Find duplicates" shows and which actions it offers, and whether a stored hash index is needed.
+- **Image captions for LoRA training** (asked for on 2026-11-27). One stored caption per image file, as flowing prose (not a tag list), editable by hand and producible by the vision provider (single and as batch jobs), with manual and AI origin kept apart so a re-analysis never overwrites a hand-written text. Not part of the search index, no trigger word. Image to prompt already produces such a text but does not store it. An export of images with a same-named `.txt` belongs to it. Needs its own design round.
 
 ## Correctness and robustness
 
@@ -22,7 +23,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - File names are truncated by code points, so long non-ASCII names can exceed a 255-byte limit (ext4, Samba).
 - The same folder reached through a drive letter and a UNC path is reported as `workspace_duplicate`.
 - `EPERM` from a locked file is reported as `storage_access_denied`.
-- Error messages that carry absolute paths to the renderer: `PathEscapeError` for a dangling link (`packages/storage/src/local-storage.ts`) and "Storage is not reachable: …" on workspace create/open.
 - Non-domain import errors are not logged anywhere; the recovery results (imports and file moves) are not logged either.
 - Pre-migration database backup; migrations path for the packaged app.
 - Hashing moves off the main event loop once jobs exist.
@@ -167,8 +167,6 @@ Found during the build:
 - The "an AI assignment yields to any existing one" rule is coded twice (`FileAnalysisRepository.apply` and `linkFileTags`).
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
-- Before paid providers: `jobs:cancel` and `jobs:cancelAll` (`packages/core/src/jobs.ts`, `apps/desktop/src/main/job-host.ts`) report success without a scheduler (during `stop`, or after a failed `workspaceOpened`) while a pending job stays queued; fall back to `cancelPending` in core.
-- Before paid providers: `workspace:remove` of a workspace that is not open still stops the scheduler of the open one and starts it again (`apps/desktop/src/main/ipc.ts`), interrupting its running jobs.
 - `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
 - Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
 - `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
@@ -220,7 +218,6 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
-- The key's origin binding lives only in the plaintext settings file (an entry's stored base URL): a process with write access to `userData` can replace an entry's base URL and keep its key file, and the next request sends the key to the new host. Possible fix: encrypt `{ origin, key }` together and compare the origin after decrypting.
 
 Main process (`apps/desktop/src/main`):
 
@@ -431,7 +428,6 @@ Deferred by design:
 - No paid providers and no safeguards for them.
 - Jobs in workspaces that are not open are not checked when an entry is deleted; such a job later fails as `provider_not_configured` and can be moved.
 - Jobs without a provider are assigned to the first entry only when a workspace is opened, not when the first entry is created.
-- The origin binding of a key lives in the plaintext settings file (it is the stored base URL), now per entry.
 - The Jobs-screen provider filter offers `All providers` and the existing entries; there is no option for jobs without a provider or for the lanes of a deleted provider.
 - In environment mode an unusable `ASSETFORGE_VISION_BASE_URL` gives an empty provider list rather than one entry that reports the error.
 - No environment mode for the `openai` kind: `ASSETFORGE_VISION_BASE_URL` yields one `ollama` entry.
@@ -449,7 +445,11 @@ Found in the final review and not fixed:
 - A failed reload with a list already held is visible only to the caller.
 - A pending key removal is not shown and cannot be undone before saving.
 - The OpenAI-compatible adapter retries every HTTP 400 once without `response_format`, also one caused by the context length or an unknown extra parameter: that sends the image a second time, and after a success the model stays without `response_format` until the entry is saved again.
-- A settings file that is set aside as unreadable still leads to the removal of all key files at once; setting aside and the key sweep should be decoupled, so that the sweep runs only after the first successful write.
+- A `.corrupt-*` copy beside `provider-settings.json` blocks the key-file sweep until someone removes the copy by hand; there is no cleanup of old copies and no hint in Settings that entries were left out.
+- A settings file with a newer version number is set aside like an unreadable one; after a downgrade the entries are gone from the list (the keys stay).
+- A key file in the old form is bound to the origin its entry has at the first start with the new code; an edit of the base URL by hand before that start is trusted once.
+- Windows DPAPI is per user: the origin binding does not protect against code running as the same user.
+- The API key is decrypted on every `providers:list` (for `hasApiKey`), not only per request.
 - Focus is lost after deleting an entry in Settings.
 - The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
 - Key temporary files are swept only at start.
@@ -472,18 +472,13 @@ Found in the final review and not fixed:
 
 ## Generation studio
 
-- Trashing the source image of a generation cancels its running job, which aborts the paid request; the provider may already have charged it.
-- A job enqueued while "Cancel all" waits for running jobs may still start.
-- "Cancel all" answers 0 while no scheduler exists; the reconcile of pending generations on the next workspace open is the safety net.
 - One inconsistent provider entry (for example a `venice` entry with a plain `http` base URL to another machine, or an entry that breaks the kind rules) sets the whole `provider-settings.json` aside as unreadable, including the link to every stored key. This is the existing corrupt-file policy, widened by the kind rules.
 - The Venice adapter was built from the vendor's documentation and tested only against the mock provider. The price shape in `pricing`, the `/image/edit` request (experimental at the vendor) and the answer types are assumptions until they are checked with the real service.
 - The full-size rendition sent to the provider is capped at 8192 px per edge (`PREVIEW_EDGE.full`), so a larger image that is not sent as is arrives downscaled; the result is smaller than the source then.
 - Upscale checks only the pixel bounds of the app and of the input; the provider's own upscale limits are not read.
 - Result names (`<source name> edit <n>`, `<source name> <scale>x`) may repeat after a generation was removed or its file purged.
-- A failed import of a paid answer leaves a failed file row in the inbox. The generation ends as `provider_outcome_unknown` only when the answer stream itself failed; a local import failure (disk full, checksum mismatch) ends it as `internal_error`, although that request was certainly charged.
 - The image provider used last is not tracked in the renderer: it is not preselected in the studio until the provider list is reloaded, and the upscale from the file menu names no entry so that the main process resolves it.
 - An image that is still too large for the provider after the rendition (or whose rendition cannot be produced) is refused only when the job runs (`file_unavailable`), not at start as the design says.
-- A purge shortly after trashing the source of a running generation deletes its job row; the generation then stays `pending` until the reconcile on the next workspace open.
 - The guard that refuses deleting a provider entry with active jobs sees only the open workspace; jobs of that entry in another workspace fail later with `provider_not_configured`.
 - Tag edits in a file dialog opened from a link (source or result) do not reach the host list until it reloads; the linked dialog shows the asset name as plain text.
 - Opening a result from inside the studio does nothing visible when the file can no longer be read.
@@ -492,7 +487,12 @@ Found in the final review and not fixed:
 - No desktop test with a JPEG or WebP provider answer; a job found `running` after a crash is tested only in `packages/jobs`.
 - An upscale of an upscale is reachable only through that file's own studio.
 - A failed Generate start is visible only in the button tooltip.
-- Raising the studio above the linked file dialog remounts it. A Generate start still in flight at that moment no longer disables the button of the new instance, so a second click in that short window queues a second paid run.
+- The studio still remounts on a raise and restores a draft; the results selection, an open prompt picker and the save dialog are lost on a raise, and a start error that arrives after the studio was closed is dropped.
+- The file-menu Upscale entries are not shown disabled while an upscale of that file is in flight; the click is ignored.
+- A row stuck in `running` for an `image.generate` job (scheduler never started) blocks the purge of its source until the next recovery.
+- `generations:retry` on a generation that was cancelled because its source went to the trash is a new paid run after a restore; nothing marks why it was cancelled.
+- The acceptance test "fails a slow edit interrupted by closing" still waits on time (a 200 ms sleep and a 10 s loop); move it to `slowWaiting()` of the mock.
+- Not checked in the running app: the Generate lock and the kept form across a raise, a source trashed during a real generation, and the purge refusal.
 - There is no workspace-wide generations screen and no marker or filter for generated files in the file lists.
 
 ## Prompt library
