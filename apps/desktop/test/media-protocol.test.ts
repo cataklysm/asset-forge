@@ -23,6 +23,7 @@ import { createWorkspaceManager } from '../src/main/composition.js';
 import {
   findOriginalIn,
   findSourceIn,
+  findVideoIn,
   handleMediaRequest,
   MEDIA_SCHEME,
   openFile,
@@ -78,6 +79,7 @@ function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps
   return {
     findSource: async (): Promise<PreviewSource> => ({ sha256: SHA, absolutePath: join(root, 'x.png'), video: null }),
     findOriginal: async (): Promise<OriginalSource> => ({ absolutePath: originalPath, mimeType: 'image/png' }),
+    findVideo: async () => null,
     previews: { get },
     readFile,
     openFile,
@@ -89,6 +91,7 @@ function realDeps(): MediaProtocolDeps {
   return {
     findSource: findSourceIn(manager),
     findOriginal: findOriginalIn(manager),
+    findVideo: findVideoIn(manager),
     previews: { get },
     readFile,
     openFile,
@@ -212,7 +215,7 @@ describe('openFile', () => {
   it('closes the handle when the stream is cancelled', async () => {
     const opened = await openFile(originalPath);
     const handle = await lastHandle();
-    const reader = opened.stream.getReader();
+    const reader = opened.stream!.getReader();
     await reader.read();
     await reader.cancel();
     expect(await settled(handle)).toBe(-1);

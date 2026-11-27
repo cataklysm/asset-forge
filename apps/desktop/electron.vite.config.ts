@@ -49,8 +49,9 @@ export default defineConfig(({ command }) => ({
     },
     plugins: command === 'build' ? [copyMigrations()] : [],
     build: {
-      // Native modules (better-sqlite3, sharp) must be loaded from node_modules at runtime.
-      externalizeDeps: { exclude: WORKSPACE_PACKAGES, include: ['better-sqlite3', 'sharp'] },
+      // Native modules (better-sqlite3, sharp) must be loaded from node_modules at runtime; ffmpeg-static
+      // answers the path of its downloaded binary next to its own file, so it must stay there too.
+      externalizeDeps: { exclude: WORKSPACE_PACKAGES, include: ['better-sqlite3', 'sharp', 'ffmpeg-static'] },
       rolldownOptions: {
         input: { index: MAIN_ENTRY, 'preview-worker': PREVIEW_WORKER_ENTRY },
       },

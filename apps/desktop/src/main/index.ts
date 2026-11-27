@@ -12,14 +12,30 @@ import {
   type OpenDialogOptions,
 } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
-import { createPreviewService, createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from '@assetforge/media';
+import ffmpegPath from 'ffmpeg-static';
+import {
+  createPreviewService,
+  createVideoFrames,
+  createWorkerPool,
+  JOB_TIMEOUT_MS,
+  POOL_SIZE,
+} from '@assetforge/media';
 import { createAnalysisServices, createWorkspaceManager } from './composition.js';
+import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
-import { findOriginalIn, findSourceIn, handleMediaRequest, MEDIA_SCHEME, openFile } from './media-protocol.js';
+import {
+  findOriginalIn,
+  findSourceIn,
+  findVideoIn,
+  handleMediaRequest,
+  MEDIA_SCHEME,
+  MEDIA_SCHEME_PRIVILEGES,
+  openFile,
+} from './media-protocol.js';
 import { isTrustedSender } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 
@@ -31,11 +47,8 @@ const outMainDir = dirname(fileURLToPath(import.meta.url));
 // data directory does not depend on the package name.
 app.setName('AssetForge');
 
-// Privileges must be registered before the app is ready. `standard` makes preview URLs parse like
-// http URLs (host, path, canonical form); `secure` treats the scheme as a secure origin, so loading
-// previews into the page is not mixed content. The renderer's CSP admits them through its explicit
-// `img-src assetforge-media:` entry, not through either privilege.
-protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true } }]);
+// Privileges must be registered before the app is ready; MEDIA_SCHEME_PRIVILEGES says why each one is set.
+protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { ...MEDIA_SCHEME_PRIVILEGES } }]);
 
 // One writing client per machine: a second instance hands over to the first and quits.
 if (!app.requestSingleInstanceLock()) {
@@ -54,13 +67,23 @@ function start(): void {
     size: POOL_SIZE,
     timeoutMs: JOB_TIMEOUT_MS,
   });
-  const previews = createPreviewService({ cacheDir: join(app.getPath('userData'), 'cache'), pool });
+  // The binary is hashed once per start, off the hot path: frame requests made before the check has
+  // finished wait for it. Closing the preview service closes the frame tool.
+  const ffmpegBinary = resolveFfmpegBinary({
+    packagePath: ffmpegPath,
+    platform: process.platform,
+    arch: process.arch,
+    warn: (line) => console.warn(line),
+  });
+  const frames = createVideoFrames({ binaryPath: ffmpegBinary });
+  const previews = createPreviewService({ cacheDir: join(app.getPath('userData'), 'cache'), pool, frames });
 
   const manager = createWorkspaceManager({
     userDataPath: app.getPath('userData'),
     migrationsFolder: __ASSETFORGE_DEV_MIGRATIONS_FOLDER__ ?? join(outMainDir, 'migrations'),
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
     imageProbe: { measure: (path) => pool.measure(path) },
+    videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
   });
 
 
@@ -208,6 +231,7 @@ function start(): void {
         handleMediaRequest(request, {
           findSource: findSourceIn(manager),
           findOriginal: findOriginalIn(manager),
+          findVideo: findVideoIn(manager),
           previews,
           readFile,
           openFile,
