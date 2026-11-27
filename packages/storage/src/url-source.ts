@@ -1,23 +1,19 @@
 import dns from 'node:dns';
-import http from 'node:http';
-import https from 'node:https';
 import net from 'node:net';
-import { Readable } from 'node:stream';
 import {
-  clampRetryAfterMs,
   DOWNLOAD_HEADER_TIMEOUT_MS,
   DOWNLOAD_IDLE_TIMEOUT_MS,
   DOWNLOAD_TOTAL_TIMEOUT_MS,
   MAX_DOWNLOAD_BYTES,
   MAX_DOWNLOAD_REDIRECTS,
-  RemoteFileError,
   type RemoteFile,
-  type RemoteFileFailure,
   type RemoteFileSource,
   type RemoteOpenOptions,
-  type RemoteRequestHeaders,
 } from '@assetforge/core';
+import { bounded } from './bounded.js';
+import { bareHost, fetchHop, type HopHeaders } from './hop-request.js';
 import { isPublicAddress } from './public-address.js';
+import { failure } from './remote-failure.js';
 
 export interface UrlSourceOptions {
   /** Sent as `User-Agent`, e.g. `AssetForge/<version>`. */
@@ -33,7 +29,7 @@ export interface UrlSourceOptions {
   maxRedirects?: number;
 }
 
-interface Config {
+export interface Config {
   userAgent: string;
   allowAddress: (address: string) => boolean;
   lookup: (host: string) => Promise<string[]>;
@@ -44,15 +40,6 @@ interface Config {
   maxRedirects: number;
 }
 
-/** The statuses a hop follows as a redirect (to its `Location`). */
-export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
-const BLOCKED_STATUSES = new Set([401, 403, 407, 451]);
-const NOT_FOUND_STATUSES = new Set([404, 410]);
-
-/** A failure without a cause: a cause could carry the URL or an address. */
-function failure(kind: RemoteFileFailure, retryAfterMs: number | null = null): RemoteFileError {
-  return new RemoteFileError(kind, retryAfterMs);
-}
 
 async function systemLookup(host: string): Promise<string[]> {
   return (await dns.promises.lookup(host, { all: true })).map((entry) => entry.address);
@@ -77,11 +64,6 @@ export function createUrlSource(options: UrlSourceOptions): RemoteFileSource {
   return { open: (url, signal, openOptions) => openUrl(url, signal, config, openOptions?.headersFor) };
 }
 
-/** The headers of one hop besides the fixed ones. */
-interface HopHeaders {
-  userAgent: string;
-  cookie: string | null;
-}
 
 /** Anything Node cannot send in a header value, control characters (tab included) among them. */
 const UNSENDABLE = /[^\x20-\x7e\x80-\xff]/;
@@ -150,11 +132,6 @@ function parseHop(text: string, base?: URL): URL {
   return url;
 }
 
-function bareHost(url: URL): string {
-  const host = url.hostname;
-  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
-}
-
 /** The address the hop connects to: the literal, or the first of the resolved addresses once all of them passed. */
 async function vetHost(url: URL, config: Config, signal: AbortSignal, until: number): Promise<string> {
   const host = bareHost(url);
@@ -164,398 +141,4 @@ async function vetHost(url: URL, config: Config, signal: AbortSignal, until: num
     throw failure('address_refused');
   }
   return addresses[0]!;
-}
-
-/**
- * A promise bounded by an abort signal and a deadline.
- *
- * @param promise the work to wait for
- * @param signal rejects the result with its reason once it aborts
- * @param until the time (ms since the epoch) after which the result rejects `unreachable`
- * @returns the value of `promise`; its failure becomes `unreachable` without a cause
- */
-export function bounded<T>(promise: Promise<T>, signal: AbortSignal, until: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    // A listener added to an aborted signal never fires.
-    if (signal.aborted) {
-      promise.catch(() => {});
-      reject(signal.reason);
-      return;
-    }
-    let finished = false;
-    const finish = (settle: () => void) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      settle();
-    };
-    const onAbort = () => finish(() => reject(signal.reason));
-    const timer = setTimeout(() => finish(() => reject(failure('unreachable'))), Math.max(0, until - Date.now()));
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => finish(() => resolve(value)),
-      () => finish(() => reject(failure('unreachable'))),
-    );
-  });
-}
-
-type HopOutcome = { kind: 'file'; file: RemoteFile } | { kind: 'redirect'; location: string | undefined };
-
-function fetchHop(
-  url: URL,
-  address: string,
-  headers: HopHeaders,
-  config: Config,
-  signal: AbortSignal,
-  deadline: number,
-  hopDeadline: number,
-): Promise<HopOutcome> {
-  return new Promise<HopOutcome>((resolve, reject) => {
-    // A listener added to an aborted signal never fires, so an aborted hop sends no request.
-    if (signal.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    const family = net.isIP(address);
-    const pinnedLookup: net.LookupFunction = (_hostname, lookupOptions, callback) => {
-      if (lookupOptions.all) callback(null, [{ address, family }]);
-      else callback(null, address, family);
-    };
-    const req = (url.protocol === 'https:' ? https : http).request({
-      protocol: url.protocol,
-      hostname: bareHost(url),
-      port: url.port === '' ? undefined : Number(url.port),
-      path: `${url.pathname}${url.search}`,
-      method: 'GET',
-      agent: false,
-      lookup: pinnedLookup,
-      headers: {
-        'User-Agent': headers.userAgent,
-        Accept: '*/*',
-        'Accept-Encoding': 'identity',
-        ...(headers.cookie === null ? {} : { Cookie: headers.cookie }),
-      },
-    });
-
-    let settled = false;
-    const settle = (done: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      done();
-    };
-    const fail = (error: unknown) =>
-      settle(() => {
-        req.destroy();
-        reject(error);
-      });
-    const onAbort = () => fail(signal.reason);
-    const timer = setTimeout(() => fail(failure('unreachable')), Math.max(0, hopDeadline - Date.now()));
-    signal.addEventListener('abort', onAbort, { once: true });
-    req.on('error', () => fail(failure('unreachable')));
-
-    req.on('response', (res) => {
-      if (settled) {
-        res.destroy();
-        return;
-      }
-      const status = res.statusCode ?? 0;
-      const mitigated = headerText(res.headers['cf-mitigated']);
-      // A browser challenge is a failure whatever the status, a redirect or a 200 included.
-      if (status !== 200 || isChallenge(mitigated)) {
-        res.destroy();
-        if (REDIRECT_STATUSES.has(status) && !isChallenge(mitigated)) {
-          settle(() => {
-            req.destroy();
-            resolve({ kind: 'redirect', location: res.headers.location });
-          });
-        } else {
-          fail(statusFailure(status, { retryAfter: res.headers['retry-after'], mitigated }));
-        }
-        return;
-      }
-      const encoding = res.headers['content-encoding'];
-      if (encoding !== undefined && encoding.trim().toLowerCase() !== 'identity') {
-        res.destroy();
-        fail(failure('rejected'));
-        return;
-      }
-      const contentLength = parseContentLength(res.headers['content-length']);
-      if (contentLength !== null && contentLength > config.maxBytes) {
-        res.destroy();
-        fail(failure('too_large'));
-        return;
-      }
-      settle(() =>
-        resolve({
-          kind: 'file',
-          file: {
-            stream: limitedBody(
-              { destroy: () => req.destroy(), onError: (listener) => req.on('error', listener) },
-              res,
-              config,
-              signal,
-              deadline,
-              contentLength,
-            ),
-            finalUrl: url.href,
-            contentType: mediaType(res.headers['content-type']),
-            contentLength,
-            dispositionName: dispositionName(res.headers['content-disposition']),
-          },
-        }),
-      );
-    });
-    req.end();
-  });
-}
-
-/** The request side of a body: what ends it and where its failure is reported. */
-export interface BodyRequest {
-  /** Ends the request and its connection; may be called more than once. */
-  destroy(): void;
-  /** Registers a listener for a failure of the request. */
-  onError(listener: () => void): void;
-}
-
-/**
- * The response side of a body, as both Node's `http.IncomingMessage` and Electron's net `IncomingMessage` offer it.
- * `complete` is Node's flag; a source without it counts as complete only once it ended.
- */
-export interface BodySource {
-  on(event: 'data', listener: (chunk: Buffer) => void): unknown;
-  on(event: 'end' | 'close' | 'aborted', listener: () => void): unknown;
-  on(event: 'error', listener: (error: unknown) => void): unknown;
-  pause(): unknown;
-  resume(): unknown;
-  destroy(): unknown;
-  readonly complete?: boolean;
-}
-
-/** The limits a body is read under. */
-export interface BodyLimits {
-  maxBytes: number;
-  idleTimeoutMs: number;
-}
-
-/**
- * The body as a stream that counts bytes: past `maxBytes` it fails `too_large`; without data for the idle time
- * while it waits for some, past the total deadline, on a connection error, when the source closes before its end or
- * when it is shorter than `Content-Length` it fails `unreachable`; an abort fails it with the abort reason.
- * Destroying it destroys the request.
- *
- * @param req the request the body belongs to
- * @param res the response whose data is read
- * @param config the size limit and the idle time
- * @param signal aborts the body with its reason
- * @param deadline the time (ms since the epoch) after which the body fails `unreachable`
- * @param contentLength the announced length; null when unknown
- * @returns a readable stream of the body that fails only with `RemoteFileError` or the abort reason
- */
-export function limitedBody(
-  req: BodyRequest,
-  res: BodySource,
-  config: BodyLimits,
-  signal: AbortSignal,
-  deadline: number,
-  contentLength: number | null,
-): Readable {
-  let received = 0;
-  let done = false;
-  let started = false;
-  let idle: NodeJS.Timeout | undefined;
-
-  const stopIdle = () => clearTimeout(idle);
-  const startIdle = () => {
-    stopIdle();
-    idle = setTimeout(() => fail(failure('unreachable')), config.idleTimeoutMs);
-  };
-  const finish = () => {
-    done = true;
-    stopIdle();
-    clearTimeout(total);
-    signal.removeEventListener('abort', onAbort);
-  };
-  /**
-   * Ends the stream with `error`. Before the first read the error waits for the next turn of the event loop, so a
-   * consumer that attaches its listener right after `open` resolves always receives it.
-   */
-  const fail = (error: unknown) => {
-    if (done) return;
-    finish();
-    if (started) out.destroy(error as Error);
-    else setImmediate(() => out.destroy(error as Error));
-  };
-
-  const out = new Readable({
-    read() {
-      if (done) return;
-      if (!started) {
-        started = true;
-        attach();
-      }
-      startIdle();
-      res.resume();
-    },
-    destroy(error, callback) {
-      if (!done) finish();
-      res.destroy();
-      req.destroy();
-      callback(error);
-    },
-  });
-
-  const onAbort = () => fail(signal.reason);
-  const total = setTimeout(() => fail(failure('unreachable')), Math.max(0, deadline - Date.now()));
-  // A listener added to an aborted signal never fires.
-  if (signal.aborted) fail(signal.reason);
-  else signal.addEventListener('abort', onAbort, { once: true });
-  // A lost connection before the first read; the body itself is only consumed once the stream is read.
-  res.on('error', () => fail(failure('unreachable')));
-  res.on('aborted', () => fail(failure('unreachable')));
-  // After a complete body `end` came first and the stream is done, so this changes nothing then.
-  res.on('close', () => {
-    if (res.complete !== true) fail(failure('unreachable'));
-  });
-  req.onError(() => fail(failure('unreachable')));
-  return out;
-
-  function attach(): void {
-    res.on('data', (chunk: Buffer) => {
-      if (done) return;
-      received += chunk.length;
-      if (received > config.maxBytes) {
-        fail(failure('too_large'));
-        return;
-      }
-      if (out.push(chunk)) {
-        startIdle();
-      } else {
-        stopIdle();
-        res.pause();
-      }
-    });
-    res.on('end', () => {
-      if (done) return;
-      if (contentLength !== null && received < contentLength) {
-        fail(failure('unreachable'));
-        return;
-      }
-      finish();
-      out.push(null);
-    });
-  }
-}
-
-/**
- * Whether a `cf-mitigated` header value marks a browser challenge.
- *
- * @param value the header's value; undefined when absent
- * @returns true for `challenge`, trimmed and in any case
- */
-export function isChallenge(value: string | undefined): boolean {
-  return value !== undefined && value.trim().toLowerCase() === 'challenge';
-}
-
-/**
- * One header value as text: the first of several, undefined when absent.
- *
- * @param value a header value as Node or Electron hands it
- * @returns the value, or the first one of a list
- */
-export function headerText(value: string | readonly string[] | undefined): string | undefined {
-  return typeof value === 'string' ? value : value?.[0];
-}
-
-/**
- * The failure of an answer that is no file and no redirect. A browser challenge (`cf-mitigated: challenge`) wins
- * over the status, which it keeps.
- *
- * @param status the HTTP status
- * @param headers `Retry-After` and `cf-mitigated` of the answer
- * @returns the typed failure, without a cause
- */
-export function statusFailure(status: number, headers: { retryAfter?: string | undefined; mitigated?: string | undefined }): RemoteFileError {
-  if (isChallenge(headers.mitigated)) return new RemoteFileError('challenge', null, { status });
-  const retryAfter = headers.retryAfter;
-  if (status === 429 || status === 503) return failure('throttled', retryAfterMs(retryAfter));
-  if (BLOCKED_STATUSES.has(status)) return new RemoteFileError('blocked', null, { status });
-  if (NOT_FOUND_STATUSES.has(status)) return failure('not_found');
-  if (status === 408 || (status >= 500 && status <= 599)) return failure('unavailable');
-  return failure('rejected');
-}
-
-/** The shape of an IMF-fixdate, e.g. `Sun, 06 Nov 1994 08:49:37 GMT`. */
-const HTTP_DATE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
-
-/** `Retry-After` as integer seconds or an IMF-fixdate, clamped; the default when absent or of any other shape. */
-function retryAfterMs(value: string | undefined): number {
-  if (value === undefined) return clampRetryAfterMs(null);
-  const text = value.trim();
-  if (/^\d+$/.test(text)) return clampRetryAfterMs(Number(text) * 1000);
-  if (!HTTP_DATE.test(text)) return clampRetryAfterMs(null);
-  const at = Date.parse(text);
-  return clampRetryAfterMs(Number.isNaN(at) ? null : Math.max(0, at - Date.now()));
-}
-
-/**
- * An announced `Content-Length`.
- *
- * @param value the header's value
- * @returns the length, or null when absent or not a plain number
- */
-export function parseContentLength(value: string | undefined): number | null {
-  if (value === undefined || !/^\d+$/.test(value.trim())) return null;
-  return Number(value.trim());
-}
-
-/**
- * The lower-cased media type without parameters.
- *
- * @param value the `Content-Type` header
- * @returns the media type, or null when absent or empty
- */
-export function mediaType(value: string | undefined): string | null {
-  const type = value?.split(';')[0]?.trim().toLowerCase() ?? '';
-  return type === '' ? null : type;
-}
-
-/** The file name of a `Content-Disposition`: `filename*` (RFC 5987, UTF-8 or ISO-8859-1) first, then `filename`. */
-export function dispositionName(value: string | undefined): string | null {
-  if (value === undefined) return null;
-  const extended = /(?:^|;)\s*filename\*\s*=\s*([^;]*)/i.exec(value);
-  if (extended) {
-    const decoded = decodeExtended(extended[1]!.trim());
-    if (decoded !== null && decoded !== '') return decoded;
-  }
-  const quoted = /(?:^|;)\s*filename\s*=\s*"((?:[^"\\]|\\.)*)"/i.exec(value);
-  if (quoted) {
-    const name = quoted[1]!.replace(/\\(.)/g, '$1');
-    return name === '' ? null : name;
-  }
-  const token = /(?:^|;)\s*filename\s*=\s*([^;"\s][^;]*)/i.exec(value);
-  if (token) {
-    const name = token[1]!.trim();
-    return name === '' ? null : name;
-  }
-  return null;
-}
-
-function decodeExtended(value: string): string | null {
-  const m = /^([^']*)'[^']*'(.*)$/.exec(value);
-  if (!m) return null;
-  const charset = m[1]!.toLowerCase();
-  const encoded = m[2]!;
-  try {
-    if (charset === 'utf-8') return decodeURIComponent(encoded);
-    if (charset === 'iso-8859-1') {
-      if (/%(?![0-9a-f]{2})/i.test(encoded)) return null;
-      return encoded.replace(/%([0-9a-f]{2})/gi, (_all, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
