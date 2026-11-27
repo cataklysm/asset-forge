@@ -133,10 +133,11 @@ after the pattern of the import progress. `url` must belong to the profile's sit
    is decided at download), checked against robots, and cut at `maxFiles`.
 
 Answer: `{ crawlId, files: string[], pages, duplicates, filtered, disallowed, invalid, pageFailures,
-truncated: 'pages' | 'files' | null, cancelled }`. A cancel answers what was found so far. An invalid
-expression answers `validation_failed` with `The thumbnail expression is not valid XPath` (or
-`pagination`, `file`). The crawl cannot tell an expired login from an empty gallery; zero files is
-shown as such and the owner logs in again.
+truncated: 'pages' | 'files' | null, cancelled, problems, problemsDropped }` (see Diagnostics). A
+cancel answers what was found so far. An invalid expression answers `validation_failed` with `The
+thumbnail expression is not valid XPath` (or `pagination`, `file`). The crawl cannot tell an expired
+login from an empty gallery; zero files is shown with the first problem as its headline and the owner
+logs in again.
 
 The main process keeps the answer of the last crawl (its id, profile, filters and file URLs) in
 memory until the next crawl, a change or deletion of the profile, or the app's end.
@@ -160,9 +161,11 @@ payload (Jobs screen fields, host lanes, host pause) reads both.
   request keeps `AssetForge/<version>`. Everything else in `url-source.ts` is unchanged: pinned
   public address, limits, no `Referer`.
 - Filter at download: an announced length below `minBytes`, or a final file name whose kind is not in
-  `kinds`, ends the job as succeeded with the result `filtered` before anything is stored; an unknown
-  length is checked after staging and the staged file discarded. `filtered` joins the job results,
-  the job keeps no file id, and it is shown on the Jobs screen like `already_present`.
+  `kinds`, ends the job as succeeded with the result `filtered_size` or `filtered_kind` (the kind wins
+  when both apply) before anything is stored; an unknown length is checked after staging and the
+  staged file discarded (`filtered_size`). Both join the job results, the job keeps no file id, and
+  they are shown on the Jobs screen like `already_present` (`Filtered: kind`, `Filtered: below minimum
+  size`). The older result `filtered` still parses and reads `Filtered`; no new job writes it.
 - With a target asset, `sites:import` adds the crawl's gallery URL as an asset source through the
   existing rule. An existing source or a full list never fails the import.
 
@@ -183,6 +186,27 @@ screen. Left: profile select with `New`, the profile's fields, `Save`, `Delete`,
 gallery URL, `Test`, progress with `Cancel`, then the counts and the list of found file URLs, and
 `Import` (disabled until a test of the unchanged profile and URL has answered at least one file).
 After the import the usual URL import result line. Explanations only as tooltips; buttons from `ui.ts`.
+
+### Diagnostics
+
+A test or download that gives nothing says why.
+
+- Page outcomes of the `PageLoader`: `ok`, `no_match` (the document loaded, `waitFor` matched nothing
+  within 10 s), `timeout` (not finished within 30 s), `left_site { host }` (lower case, validated,
+  empty when unknown), `http_error { status }` (main-frame status of at least 400 from
+  `did-navigate`; a page that matches is ok whatever its status), `failed`, `invalid_xpath`.
+- The crawl answer carries `problems` (at most `SITE_MAX_PROBLEMS` = 200, each key once) and
+  `problemsDropped`. A problem is `{ url, stage: gallery | detail | file | link, reason, detail }` with
+  the reasons `no_thumbnails`, `no_file`, `timeout`, `left_site`, `http_error`, `load_failed`,
+  `robots_disallowed`, `robots_unavailable`, `invalid_link`, `off_site`, `filtered_kind`,
+  `filtered_text`; `detail` is a host, a status or the invalid value (cut at 200). Limits and duplicates
+  are no problems; the counters are unchanged. A failed first gallery page answers normally; a robots
+  failure of the gallery origin and an invalid XPath still answer their errors.
+- The dialog lists the problems (reason text, shortened URL, full URL in the tooltip, `and <n> more`)
+  and, when no file was found, a headline from the first problem.
+- Downloads: `download_login_not_sent` (`The server refused the file; the login is only sent to the
+  profile's site`) when a v2 job is refused (`blocked`) on a hop that went out without the login; not
+  retried, no host pause. A refusal on the site stays `download_blocked`. No URL or host in a job error.
 
 ## Left to the builder
 
