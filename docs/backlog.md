@@ -480,6 +480,28 @@ Found in the final review and not fixed:
 - Raising the studio above the linked file dialog remounts it. A Generate start still in flight at that moment no longer disables the button of the new instance, so a second click in that short window queues a second paid run.
 - There is no workspace-wide generations screen and no marker or filter for generated files in the file lists.
 
+## Prompt library
+
+- Negative prompts do not exist; the only image provider takes none. The version row is the seam.
+- Variables have no type, no list of allowed values and no nesting, and a template has no conditionals.
+- There is no list of the generations that used a prompt, and no link from a prompt to assets or projects.
+- The text of Image to prompt cannot be saved to the library directly; it has to be copied into a new prompt by hand.
+- Closing the window with unsaved prompt changes is not guarded; the guard covers choosing another prompt, `New` and the main navigation only.
+- There is no trash for prompts: `prompts:delete` removes the prompt and all its versions at once (generations keep the copies).
+- Prompts cannot be exported or imported, and not shared between workspaces.
+- Variable names compare with `toLowerCase`, which is not full Unicode case folding (for example `İ`, `ß`). The comparison must stay in JavaScript, never in SQL `lower()`.
+- `PromptDefaultsSchema` (`packages/contracts/src/prompts.ts`) has a `.refine` without a message; it is a transport bound only. Tests are missing for a defaults record of 40 keys, for a value of exactly 2000 characters and for a key that differs only by whitespace.
+- The list search (`prompts:list`) does not cap the number of query words: a query of 200 characters can produce about 100 `instr` terms. A cap (for example 20 words) would bound the query.
+- The correlated subqueries in `packages/persistence/src/prompt-repository.ts` (`isCurrent`, `matchesWord`, `carriesTag`) use plain Drizzle column references instead of `qualified()`; this works but departs from the convention.
+- `generation.prompt_version_id` has no index, so deleting a prompt scans the generations.
+- `migration-0013.test.ts` checks the latest schema, not the state at `0013`.
+- `generations:start` with a library version reads the version, then loads the model list, then writes the record. A prompt deleted in between fails the foreign key and answers `internal_error` instead of `not_found`; nothing is written. `startGeneration` has an overlong doc comment line, and core has no test for two value keys that name one variable.
+- `prompts-ipc.test.ts` types list items as `PromptDetail` instead of the summary type.
+- Prompts screen: a late answer of a `create` can still run its `onSaved` and replace a later selection; navigating to Prompts itself asks about unsaved changes and Discard then does nothing; a second guard question overwrites the resolver of the first.
+- `Retry` and some `aria-label` strings in the new components are literals outside `labels.ts` (the existing pattern); the Settings heading `PROMPTS_TITLE` is still `Prompts` beside the library's own label, and the analysis label constants carry an `ANALYSIS_` prefix while the library's do not. The screen's list code is copied from `ProjectsScreen`. No test asserts that the screen has no explanatory paragraph.
+- Studio: `promptSeq` is bumped only in a passive effect on a file change, so a late `prompts:get` could attach to the new file (compare `file.id` or bump in the render reset). A rejection of `loadCurrent` is unguarded and visible only as a tooltip. `value_too_long` maps to `VARIABLE_MISSING_TITLE`, which is unreachable by typing. `SavePromptDialog` loses focus when the title input becomes disabled in version mode. `messageOf` exists in three files and `pickPrompt` wraps errors only to unwrap them. `GenerationStudio` grew a prompt state machine (a `useStudioPrompt` hook is a candidate).
+- Missing renderer tests: `Use settings` falling back to the resolved text, a stale picker answer, a stale `Use settings` from one library prompt to another, and Space on a list row.
+
 ## Not covered by any automated check
 
 The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
