@@ -22,7 +22,7 @@ export interface SiteCrawlDeps {
 }
 
 /** The least time between two page loads of one crawl. */
-export const PAGE_GAP_MS = 1000;
+export const PAGE_GAP_MS = 500;
 
 /** The query names a crawl asks the page loader for. */
 export const SITE_QUERY = { thumbnails: 'thumbnails', pagination: 'pagination', file: 'file' } as const;

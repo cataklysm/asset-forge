@@ -7,6 +7,7 @@ import {
   createElectronSiteSessions,
   createHostVetter,
   createPageLoader,
+  pageResourceBlocked,
   createSiteAccess,
   EXTRACT_LIMITS,
   extractionCode,
@@ -138,7 +139,7 @@ describe('extraction answer', () => {
 
 /** A page view whose answers the test scripts. */
 function fakeView(o: {
-  navigate?: (url: string) => Promise<'loaded' | 'aborted' | 'failed'>;
+  navigate?: (url: string, onParsed?: () => void) => Promise<'loaded' | 'aborted' | 'failed'>;
   evaluate?: (call: number) => unknown;
 }) {
   let left: ((url: string) => void) | null = null;
@@ -316,7 +317,57 @@ describe('page loader', () => {
     });
   });
 
-  it('stops the view after every unsuccessful load before the next one starts, and never after a loaded one', async () => {
+  it('polls from the moment the document is parsed and takes a match once two polls saw the same counts', async () => {
+    let finishLoad: (value: 'loaded') => void = () => {};
+    const counts = [0, 2, 5, 5];
+    const view = fakeView({
+      navigate: (_url, onParsed) => {
+        setTimeout(() => onParsed?.(), 0);
+        return new Promise((resolve) => (finishLoad = resolve));
+      },
+      evaluate: (call) => {
+        const n = counts[Math.min(call, counts.length) - 1]!;
+        return { results: { thumbnails: Array.from({ length: n }, (_, i) => '/' + i) }, counts: { thumbnails: n } };
+      },
+    });
+    const result = await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request());
+    // The load never finished: the list was still growing at the second poll and stood still at the fourth.
+    expect(result).toMatchObject({ ok: true, results: { thumbnails: ['/0', '/1', '/2', '/3', '/4'] } });
+    expect(view.calls()).toBe(4);
+    expect(view.stops).toBe(1);
+    finishLoad('loaded');
+  });
+
+  it('takes the first match at once after the load finished', async () => {
+    const view = fakeView({ evaluate: () => ({ results: { thumbnails: ['/a'] }, counts: { thumbnails: 1 } }) });
+    expect((await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).ok).toBe(true);
+    expect(view.calls()).toBe(1);
+  });
+
+  it('does not answer no_match while the load is still under way, and counts the wait from its end', async () => {
+    let finishLoad: (value: 'loaded') => void = () => {};
+    const view = fakeView({
+      navigate: (_url, onParsed) => {
+        onParsed?.();
+        onParsed?.();
+        return new Promise((resolve) => (finishLoad = resolve));
+      },
+      evaluate: () => ({ results: {}, counts: { thumbnails: 0 } }),
+    });
+    const timing = { pollMs: 5, settleMs: 30, totalMs: 2000 };
+    let answer: unknown = null;
+    const pending = createPageLoader(view, 'example.com', timing)
+      .load('https://example.com/g', request())
+      .then((r) => (answer = r));
+    await new Promise((r) => setTimeout(r, 90));
+    expect(answer).toBeNull();
+    expect(view.calls()).toBeGreaterThan(2);
+    finishLoad('loaded');
+    await pending;
+    expect(answer).toEqual({ ok: false, reason: 'no_match' });
+  });
+
+  it('stops the view after every load before the next one starts', async () => {
     let hang = true;
     const view = fakeView({
       navigate: () => (hang ? new Promise(() => {}) : Promise.resolve('loaded')),
@@ -333,11 +384,12 @@ describe('page loader', () => {
     hang = false;
     // A signal of an earlier load that arrives between two loads ends nothing.
     view.leave();
+    // A page that answered loads nothing further.
     expect((await loader.load('https://example.com/3', request())).ok).toBe(true);
-    expect(view.stops).toBe(2);
+    expect(view.stops).toBe(3);
     view.navigate = async () => 'failed';
     expect(await loader.load('https://example.com/4', request())).toEqual({ ok: false, reason: 'failed' });
-    expect(view.stops).toBe(3);
+    expect(view.stops).toBe(4);
   });
 });
 
@@ -367,7 +419,10 @@ describe('site access', () => {
 
 // --- The Electron glue, against fakes of the few Electron calls it makes. ---
 
+let nextContentsId = 1;
+
 class FakeContents extends EventEmitter {
+  id = nextContentsId++;
   muted = false;
   openHandler: ((d: { url: string }) => { action: string }) | null = null;
   loaded: string[] = [];
@@ -438,7 +493,9 @@ class FakeWindow extends EventEmitter {
 
 type PermissionRequest = null | ((c: unknown, p: string, cb: (ok: boolean) => void) => void);
 type PermissionCheck = null | (() => boolean);
-type BeforeRequest = null | ((d: { url: string; resourceType: string }, cb: (r: { cancel?: boolean }) => void) => void);
+type BeforeRequest =
+  | null
+  | ((d: { url: string; resourceType: string; webContentsId?: number }, cb: (r: { cancel?: boolean }) => void) => void);
 
 function fakeSession() {
   const events = new EventEmitter();
@@ -491,8 +548,8 @@ function electron(resolve = async (host: string) => (host === 'example.com' ? ['
   return { site, sessions, windows, fromPartition, log, session: () => sessions.get(sitePartition(profile.id))! };
 }
 
-const decide = (s: ReturnType<typeof fakeSession>, url: string, resourceType = 'mainFrame') =>
-  new Promise<{ cancel?: boolean }>((resolve) => s.beforeRequest!({ url, resourceType }, resolve));
+const decide = (s: ReturnType<typeof fakeSession>, url: string, resourceType = 'mainFrame', webContentsId?: number) =>
+  new Promise<{ cancel?: boolean }>((resolve) => s.beforeRequest!({ url, resourceType, webContentsId }, resolve));
 
 describe('electron site sessions', () => {
   it('hardens each partition once: no permission, no download, only public hosts', async () => {
@@ -609,6 +666,53 @@ describe('electron site sessions', () => {
     page.close();
     page.close();
     expect(w.destroyed).toBe(true);
+  });
+
+  it('fetches no image, media or font for a page window, and everything for the login window', async () => {
+    const e = electron();
+    e.site.openLogin(profile, 'https://example.com/login');
+    const page = e.site.openPage(profile);
+    const login = e.windows[0]!.webContents.id;
+    const hidden = e.windows[1]!.webContents.id;
+    const s = e.session();
+    expect(pageResourceBlocked('image') && pageResourceBlocked('media') && pageResourceBlocked('font')).toBe(true);
+    for (const type of ['image', 'media', 'font']) {
+      expect(await decide(s, 'https://example.com/x', type, hidden)).toEqual({ cancel: true });
+      expect(await decide(s, 'https://example.com/x', type, login)).toEqual({});
+      expect(await decide(s, 'https://example.com/x', type)).toEqual({});
+    }
+    for (const type of ['mainFrame', 'subFrame', 'script', 'stylesheet', 'xhr']) {
+      expect(await decide(s, 'https://example.com/x', type, hidden)).toEqual({});
+    }
+    // The address rule still decides everything else of a page window.
+    expect(await decide(s, 'https://intranet.example/app.js', 'script', hidden)).toEqual({ cancel: true });
+    // A closed page window is forgotten.
+    page.close();
+    expect(await decide(s, 'https://example.com/x', 'image', hidden)).toEqual({});
+  });
+
+  it('starts the poll at dom-ready of the committed document and drops its listeners after the load', async () => {
+    const e = electron();
+    const page = e.site.openPage(profile);
+    const c = e.windows[0]!.webContents;
+    const before = { commit: c.listenerCount('did-navigate'), ready: c.listenerCount('dom-ready') };
+    let finishLoad: () => void = () => {};
+    c.loadResult = () => new Promise((resolve) => (finishLoad = resolve));
+    const pending = page.loader.load('https://example.com/g', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    // The document that is being replaced reports dom-ready: nothing is asked yet.
+    c.emit('dom-ready');
+    await new Promise((r) => setTimeout(r, 15));
+    expect(c.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    c.emit('did-navigate', {}, 'https://example.com/g', 200, 'OK');
+    c.emit('dom-ready');
+    expect((await pending).ok).toBe(true);
+    expect(c.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2);
+    expect(c.stopped).toBe(1);
+    finishLoad();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(c.listenerCount('did-navigate')).toBe(before.commit);
+    expect(c.listenerCount('dom-ready')).toBe(before.ready);
+    page.close();
   });
 
   it('maps a load replaced by another navigation to polling on and any other failure to failed', async () => {

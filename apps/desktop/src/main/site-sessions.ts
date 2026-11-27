@@ -15,7 +15,10 @@ import type { SiteProfileStore } from './site-profile-store.js';
 /** The partition of a profile's session; Chromium keeps its cookies under `userData`. */
 export const sitePartition = (profileId: string): string => `persist:site-${profileId}`;
 
-/** How a page load waits: poll every `pollMs`, at most `settleMs` after the load finished, `totalMs` in all. */
+/**
+ * How a page load waits: poll every `pollMs` from the moment the document is parsed, at most `settleMs` after the
+ * load finished, `totalMs` in all.
+ */
 export interface PageTiming {
   pollMs: number;
   settleMs: number;
@@ -31,6 +34,12 @@ const ISOLATED_WORLD_ID = 1777;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Request filter
+
+/** What a page window never fetches: the crawl reads links, nobody looks at the page. */
+const PAGE_BLOCKED_TYPES = new Set(['image', 'media', 'font']);
+
+/** Whether the hidden page window leaves a sub-resource of this type unloaded. The login window loads everything. */
+export const pageResourceBlocked = (resourceType: string): boolean => PAGE_BLOCKED_TYPES.has(resourceType);
 
 export type RequestDecision = 'allow' | 'refuse' | { host: string };
 
@@ -246,8 +255,11 @@ export function readExtraction(raw: unknown, names: readonly string[], limits = 
 
 /** A window's page as the loader drives it. */
 export interface PageView {
-  /** Navigates to `url`; `aborted` when another navigation replaced this one. */
-  navigate(url: string): Promise<'loaded' | 'aborted' | 'failed'>;
+  /**
+   * Navigates to `url`; `aborted` when another navigation replaced this one. `onParsed` is called when the
+   * document of the navigation is parsed, which is usually long before the load finishes.
+   */
+  navigate(url: string, onParsed?: () => void): Promise<'loaded' | 'aborted' | 'failed'>;
   /** Runs `code` in the isolated world and answers its value. */
   evaluate(code: string): Promise<unknown>;
   stop(): void;
@@ -276,10 +288,12 @@ export function leftSiteHost(url: string): string {
 const isStatus = (status: number): boolean => Number.isInteger(status) && status >= 100 && status <= 999;
 
 /**
- * The PageLoader of one page window (spec "The crawl", step 2, and "Diagnostics"). A load that ends without a page
- * stops the view at once, so a navigation of it that is still under way cannot redirect, or report leaving the
- * site, during the next load; a left-the-site signal or a status only ever reaches the load that is running when it
- * arrives. A main-frame status of 400 or more makes a load that found nothing an `http_error`; a page that matches
+ * The PageLoader of one page window (spec "The crawl", step 2, and "Diagnostics"). The poll starts when the
+ * document is parsed and does not wait for the load to finish; while the load is still under way a match counts
+ * only once two polls in a row saw the same number of nodes, so a list a script is still filling is not cut short.
+ * Every load stops the view when it ends: a page that answered loads nothing further, and a navigation still under
+ * way cannot redirect, or report leaving the site, during the next load; a left-the-site signal or a status only
+ * ever reaches the load that is running when it arrives. A main-frame status of 400 or more makes a load that found nothing an `http_error`; a page that matches
  * `waitFor` is a page whatever its status.
  */
 export function createPageLoader(view: PageView, site: string, timing: PageTiming = PAGE_TIMING): PageLoader {
@@ -315,12 +329,10 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
         done = true;
         if (leftListener === onLeft) leftListener = null;
         if (responseListener === onResponse) responseListener = null;
-        if (!result.ok) {
-          try {
-            view.stop();
-          } catch {
-            // A window already gone has nothing to stop.
-          }
+        try {
+          view.stop();
+        } catch {
+          // A window already gone has nothing to stop.
         }
         settle(result);
       };
@@ -330,16 +342,15 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
       responseListener = onResponse;
       const overall = setTimeout(() => finish(missed(loaded ? 'no_match' : 'timeout')), timing.totalMs);
 
-      const run = async () => {
-        const navigation = await view.navigate(url);
-        if (done) return;
-        if (navigation === 'failed') {
-          finish(missed('failed'));
-          return;
-        }
+      /** When the navigation ended; null while the load is still under way. */
+      let settledAt: number | null = null;
+      let polling = false;
+      const poll = async () => {
+        if (polling || done) return;
+        polling = true;
         loaded = true;
-        // `aborted`: a navigation within the site replaced the first one; its page is polled the same way.
-        const until = Date.now() + timing.settleMs;
+        /** The node counts of the last poll made while the load was still under way. */
+        let seen = '';
         for (;;) {
           let raw: unknown;
           try {
@@ -354,10 +365,16 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
             return;
           }
           if (extraction !== null && (extraction.counts[r.waitFor] ?? 0) > 0) {
-            finish({ ok: true, results: extraction.results, baseUrl: extraction.baseUrl });
-            return;
+            const counts = JSON.stringify(extraction.counts);
+            if (settledAt !== null || counts === seen) {
+              finish({ ok: true, results: extraction.results, baseUrl: extraction.baseUrl });
+              return;
+            }
+            seen = counts;
+          } else {
+            seen = '';
           }
-          if (Date.now() >= until) {
+          if (settledAt !== null && Date.now() >= settledAt + timing.settleMs) {
             finish(missed('no_match'));
             return;
           }
@@ -365,7 +382,21 @@ export function createPageLoader(view: PageView, site: string, timing: PageTimin
           if (done) return;
         }
       };
-      run().catch(() => finish({ ok: false, reason: 'failed' }));
+      const failed = () => finish({ ok: false, reason: 'failed' });
+      const run = async () => {
+        const navigation = await view.navigate(url, () => {
+          poll().catch(failed);
+        });
+        if (done) return;
+        if (navigation === 'failed') {
+          finish(missed('failed'));
+          return;
+        }
+        // `aborted`: a navigation within the site replaced the first one; its page is polled the same way.
+        settledAt = Date.now();
+        await poll();
+      };
+      run().catch(failed);
 
       try {
         return await ended;
@@ -479,6 +510,8 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
   const timing = deps.timing ?? PAGE_TIMING;
   let login: { profileId: string; window: BrowserWindow } | null = null;
   const pages = new Set<BrowserWindow>();
+  /** The ids of the page windows' contents, for the request filter. */
+  const pageContents = new Set<number>();
   let shutDown = false;
   const refuseAfterShutdown = (): void => {
     if (shutDown) throw new InvalidOperationError(NO_WINDOWS);
@@ -492,7 +525,7 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
     const session = deps.fromPartition(partition);
     if (!hardened.has(partition)) {
       hardened.add(partition);
-      harden(session, createHostVetter(deps.resolve));
+      harden(session, createHostVetter(deps.resolve), (contentsId) => pageContents.has(contentsId));
     }
     return session;
   };
@@ -541,11 +574,14 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
       const window = deps.createWindow(windowOptions(session, false, profile.name));
       prepareWindow(window);
       pages.add(window);
+      const contents = window.webContents;
+      const contentsId = contents.id;
+      pageContents.add(contentsId);
       window.on('closed', () => {
         pages.delete(window);
+        pageContents.delete(contentsId);
         onGone?.();
       });
-      const contents = window.webContents;
       const leftListeners: ((url: string) => void)[] = [];
       const responseListeners: ((status: number) => void)[] = [];
       const guard = (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
@@ -562,11 +598,29 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
       // A popup is refused and, unlike in the login window, not loaded: the crawl decides where this window goes.
       contents.setWindowOpenHandler(() => ({ action: 'deny' }));
       const view: PageView = {
-        navigate: (url) =>
-          contents.loadURL(url).then(
-            () => 'loaded' as const,
-            (error: unknown) => (isAborted(error) ? ('aborted' as const) : ('failed' as const)),
-          ),
+        navigate: (url, onParsed) => {
+          // `dom-ready` counts only after a main-frame document was committed since this call, so the page that
+          // is being replaced cannot stand in for the new one.
+          let committed = false;
+          const onCommit = () => {
+            committed = true;
+          };
+          const onReady = () => {
+            if (committed) onParsed?.();
+          };
+          contents.on('did-navigate', onCommit);
+          contents.on('dom-ready', onReady);
+          return contents
+            .loadURL(url)
+            .then(
+              () => 'loaded' as const,
+              (error: unknown) => (isAborted(error) ? ('aborted' as const) : ('failed' as const)),
+            )
+            .finally(() => {
+              contents.off('did-navigate', onCommit);
+              contents.off('dom-ready', onReady);
+            });
+        },
         evaluate: (code) => contents.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code }]),
         stop: () => {
           if (!contents.isDestroyed()) contents.stop();
@@ -607,8 +661,11 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
   };
 }
 
-/** Hardens one session once: no permission, no download, only public http/https (spec "Browser sessions"). */
-function harden(session: Session, vet: (host: string) => Promise<boolean>): void {
+/**
+ * Hardens one session once: no permission, no download, only public http/https, and no image, media or font for a
+ * page window (spec "Browser sessions").
+ */
+function harden(session: Session, vet: (host: string) => Promise<boolean>, isPage: (contentsId: number) => boolean): void {
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on('will-download', (event, item) => {
@@ -616,6 +673,10 @@ function harden(session: Session, vet: (host: string) => Promise<boolean>): void
     item.cancel();
   });
   session.webRequest.onBeforeRequest((details, callback) => {
+    if (details.webContentsId !== undefined && isPage(details.webContentsId) && pageResourceBlocked(details.resourceType)) {
+      callback({ cancel: true });
+      return;
+    }
     const decision = requestDecision(details.url, details.resourceType);
     if (decision === 'allow') {
       callback({});

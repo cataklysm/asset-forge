@@ -587,7 +587,7 @@ Deferred by design:
 - No endless scrolling, no "load more" and no other interaction with a page.
 - The page a file was found on is not kept; the file's origin is its URL.
 - The number of detail pages of a crawl has no limit of its own (only the distinct thumbnail links of at most `maxPages` gallery pages).
-- `Crawl-delay` in a `robots.txt` is ignored; the gap between two pages is the fixed second.
+- `Crawl-delay` in a `robots.txt` is ignored; the gap between two pages is the fixed half second.
 - No public-suffix list: a profile for `co.uk` covers every host below it. Single-label sites are refused; Chromium's own cookie matching bounds what would be sent.
 - The crawl cannot tell an expired login from an empty gallery.
 - No streamed video (HLS/DASH), no scheduled runs, no proxies, no minimum resolution.

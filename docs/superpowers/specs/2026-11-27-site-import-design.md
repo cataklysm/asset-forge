@@ -92,7 +92,9 @@ A request filter on the session (`webRequest.onBeforeRequest`) lets through only
 (plus `data:` and `blob:` sub-resources) and resolves every new host once: a host with any address
 that fails `isPublicAddress` is refused, for navigations and sub-resources alike. Unlike the
 downloader the socket is not pinned to the vetted address; that gap (DNS rebinding) is accepted for
-pages and stated in the backlog. Files never go through this path.
+pages and stated in the backlog. Files never go through this path. For the hidden page window the
+filter also cancels every request of the resource types `image`, `media` and `font`: the crawl
+reads links and nobody looks at the page. The login window loads everything.
 
 - **Login window** (`sites:openLogin { profileId }`): visible, titled `<profile name> – <current
   host>`, opens `https://<site>/` or the URL given. The owner may navigate anywhere public (a login
@@ -116,9 +118,12 @@ after the pattern of the import progress. `url` must belong to the profile's sit
    everything allowed. Any other failure: nothing of that origin is allowed (counted as
    `disallowed`); when it is the origin of the gallery URL the crawl answers `invalid_operation` (`The site's
    robots.txt could not be read`).
-2. Pages are loaded one after another with at least 1 s between two loads. A page counts as loaded
-   when `thumbnails` matches at least one node, checked every 250 ms after `did-finish-load` for at
-   most 10 s; the whole page has 30 s. XPath runs in an isolated world
+2. Pages are loaded one after another with at least 500 ms between two loads. A page counts as loaded
+   when `thumbnails` matches at least one node, checked every 250 ms from the moment the document is
+   parsed (`dom-ready`) until at most 10 s after `did-finish-load`; the whole page has 30 s. While
+   the load is still under way a match counts only once two checks in a row saw the same number of
+   nodes. A page that answered is stopped, so it loads nothing further. The page window never fetches
+   images, media or fonts (the login window does). XPath runs in an isolated world
    (`executeJavaScriptInIsolatedWorld`); only strings come back and are validated in main.
 3. On each gallery page: collect thumbnail URLs, then pagination URLs. Pagination URLs must belong to
    the site and pass robots; pages already seen are skipped; the crawl stops queuing pages at

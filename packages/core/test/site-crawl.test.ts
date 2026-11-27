@@ -427,7 +427,7 @@ describe('crawlSite', () => {
       [`${G}/g?p=2`]: ok({ thumbnails: [] }),
     });
     await run(d, profile({ pagination: '//p', file: '//img' }));
-    expect(PAGE_GAP_MS).toBe(1000);
+    expect(PAGE_GAP_MS).toBe(500);
     expect(d.events).toEqual([
       `load ${G}/g`,
       `wait ${PAGE_GAP_MS}`,
