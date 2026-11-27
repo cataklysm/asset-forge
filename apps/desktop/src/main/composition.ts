@@ -225,7 +225,7 @@ export function createAnalysisServices(o: {
     imageProviders,
     generationImages: o.generationImages,
     remote,
-    sites: createSiteAccess(siteStore, siteSessions),
+    sites: createSiteAccess(siteStore, siteSessions, { remote }),
     ...(o.limits === undefined ? {} : { limits: o.limits }),
     ...(o.totals === undefined ? {} : { totals: o.totals }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),

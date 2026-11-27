@@ -3,9 +3,22 @@ import { isIP } from 'node:net';
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
 import { z } from 'zod';
 import { belongsToSite, type SiteProfile } from '@assetforge/contracts';
-import { InvalidOperationError, type PageLoader, type PageLoadResult, type RemoteRequestHeaders, type SiteAccess } from '@assetforge/core';
+import {
+  InvalidOperationError,
+  type PageLoader,
+  type PageLoadResult,
+  type RemoteFileSource,
+  type RemoteRequestHeaders,
+  type SiteAccess,
+} from '@assetforge/core';
 import { isPublicAddress } from '@assetforge/storage';
 import type { SiteProfileStore } from './site-profile-store.js';
+import {
+  createSessionDownload,
+  SESSION_REQUEST_HEADERS,
+  type SessionDownloadLimits,
+  type SessionNetRequest,
+} from './site-download.js';
 
 // The browser sessions of the site profiles (spec "Browser sessions"). Everything that decides something is a pure
 // function here and tested as such; the Electron glue only wires those functions to a session and its windows.
@@ -428,6 +441,11 @@ export interface SiteSessions {
   userAgent(profileId: string): string;
   /** Clears the stored data of the profile's session (cookies, storage, cache, HTTP auth). */
   clear(profileId: string): Promise<void>;
+  /**
+   * Starts one GET of `url` through the profile's hardened session: the session's cookies and user agent, no
+   * Referer, no cache, redirects not followed (spec "Browser check"). Absent where no browser session exists.
+   */
+  request?(profileId: string, url: string): SessionNetRequest;
 }
 
 /** The Electron sessions, which also end with the app. */
@@ -442,9 +460,40 @@ export interface ElectronSiteSessions extends SiteSessions {
 
 const NO_WINDOWS = 'Site logins are not available';
 
-/** The logins of the profiles for the download path (spec "Download"). */
-export function createSiteAccess(store: Pick<SiteProfileStore, 'get'>, sessions: Pick<SiteSessions, 'cookies' | 'userAgent'>): SiteAccess {
+/** What the session download of `createSiteAccess` needs besides the sessions. */
+export interface SiteDownloadOptions {
+  /** The plain source that takes over at the first hop off the site. */
+  remote: RemoteFileSource;
+  lookup?: HostResolver;
+  limits?: Partial<SessionDownloadLimits>;
+}
+
+/**
+ * The logins of the profiles for the download path (spec "Download" and "Browser check").
+ *
+ * @param store reads the profiles
+ * @param sessions the profiles' sessions; with `request` the downloads of a profile go through its session
+ * @param download the plain source and the limits of a session download; without it `open` is absent
+ * @returns the site access of the download handler
+ */
+export function createSiteAccess(
+  store: Pick<SiteProfileStore, 'get'>,
+  sessions: Pick<SiteSessions, 'cookies' | 'userAgent' | 'request'>,
+  download?: SiteDownloadOptions,
+): SiteAccess {
+  const request = sessions.request?.bind(sessions);
+  const open =
+    request === undefined || download === undefined
+      ? undefined
+      : createSessionDownload({
+          siteOf: (profileId) => store.get(profileId)?.site ?? null,
+          request,
+          remote: download.remote,
+          ...(download.lookup === undefined ? {} : { lookup: download.lookup }),
+          ...(download.limits === undefined ? {} : { limits: download.limits }),
+        });
   return {
+    ...(open === undefined ? {} : { open }),
     siteOf: async (profileId) => store.get(profileId)?.site ?? null,
     async headersFor(profileId, url): Promise<RemoteRequestHeaders | null> {
       const profile = store.get(profileId);
@@ -463,6 +512,42 @@ export interface ElectronSiteSessionsDeps {
   /** One line with at most a profile id and a fixed code. */
   log?: (line: string) => void;
   timing?: PageTiming;
+  /** Electron's `net.request`; without it the sessions offer no `request`. */
+  netRequest?: (options: SessionRequestOptions) => SessionNetRequest;
+}
+
+/** The options of every session request; nothing else is ever passed to `net.request`. */
+export interface SessionRequestOptions {
+  method: 'GET';
+  url: string;
+  session: Session;
+  /** Each redirect is reported and aborted; the download vets and sends the next hop itself. */
+  redirect: 'manual';
+  /** The session's cookies go with the request and cookies it answers are stored, as in the login window. */
+  useSessionCookies: true;
+  referrerPolicy: 'no-referrer';
+  cache: 'no-store';
+  headers: Record<string, string>;
+}
+
+/**
+ * The options of one session request (spec "Browser check").
+ *
+ * @param session the profile's hardened session
+ * @param url the hop
+ * @returns the request options; only `Accept` and `Accept-Encoding` are set by hand
+ */
+export function sessionRequestOptions(session: Session, url: string): SessionRequestOptions {
+  return {
+    method: 'GET',
+    url,
+    session,
+    redirect: 'manual',
+    useSessionCookies: true,
+    referrerPolicy: 'no-referrer',
+    cache: 'no-store',
+    headers: { ...SESSION_REQUEST_HEADERS },
+  };
 }
 
 /** The fields both windows share (spec "Browser sessions"); no preload, the user agent untouched. */
@@ -530,7 +615,17 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
     return session;
   };
 
+  const netRequest = deps.netRequest;
+  const request =
+    netRequest === undefined
+      ? undefined
+      : (profileId: string, url: string): SessionNetRequest => {
+          refuseAfterShutdown();
+          return netRequest(sessionRequestOptions(sessionOf(profileId), url));
+        };
+
   return {
+    ...(request === undefined ? {} : { request }),
     openLogin(profile, url) {
       refuseAfterShutdown();
       const session = sessionOf(profile.id);
@@ -663,7 +758,8 @@ export function createElectronSiteSessions(deps: ElectronSiteSessionsDeps): Elec
 
 /**
  * Hardens one session once: no permission, no download, only public http/https, and no image, media or font for a
- * page window (spec "Browser sessions").
+ * page window (spec "Browser sessions"). The filter also sees the session downloads made with `net.request` on this
+ * session (no `webContentsId`, so no page rule applies to them): their host is vetted here a second time.
  */
 function harden(session: Session, vet: (host: string) => Promise<boolean>, isPage: (contentsId: number) => boolean): void {
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

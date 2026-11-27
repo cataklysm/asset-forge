@@ -6,6 +6,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  net,
   protocol,
   session,
   shell,
@@ -27,6 +28,7 @@ import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-dir
 import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
+import type { SessionNetRequest } from './site-download.js';
 import { createElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
 import {
@@ -158,6 +160,8 @@ function start(): void {
   const siteSessions = createElectronSiteSessions({
     fromPartition: (partition) => session.fromPartition(partition),
     createWindow: (options) => new BrowserWindow(options),
+    // Electron's IncomingMessage is a Readable at run time; its typings only declare the events.
+    netRequest: (options) => net.request(options) as unknown as SessionNetRequest,
     log: (line) => console.warn(line),
   });
 

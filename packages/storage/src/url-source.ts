@@ -166,8 +166,15 @@ async function vetHost(url: URL, config: Config, signal: AbortSignal, until: num
   return addresses[0]!;
 }
 
-/** `promise` bounded by `signal` (rejects with its reason) and `until` (rejects `unreachable`); its failure is `unreachable`. */
-function bounded<T>(promise: Promise<T>, signal: AbortSignal, until: number): Promise<T> {
+/**
+ * A promise bounded by an abort signal and a deadline.
+ *
+ * @param promise the work to wait for
+ * @param signal rejects the result with its reason once it aborts
+ * @param until the time (ms since the epoch) after which the result rejects `unreachable`
+ * @returns the value of `promise`; its failure becomes `unreachable` without a cause
+ */
+export function bounded<T>(promise: Promise<T>, signal: AbortSignal, until: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     // A listener added to an aborted signal never fires.
     if (signal.aborted) {
