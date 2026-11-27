@@ -181,6 +181,45 @@ it('while an update and a new version are being saved the fields take no typing,
   expect(field('Title').value).toBe('Hero shot!');
 });
 
+it('while a save runs no older version can be chosen or adopted, so the draft and the shown version stay', async () => {
+  const user = userEvent.setup();
+  const time = '2026-11-27T10:00:00.000Z';
+  const store = fakePrompts([
+    promptDetail({
+      title: 'Hero',
+      versions: [
+        { id: nextId(), number: 2, content: 'Current', variables: [], createdAt: time },
+        { id: nextId(), number: 1, content: 'Oldest', variables: [], createdAt: time },
+      ],
+    }),
+  ]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:saveVersion': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:saveVersion']!(request as never);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  const text = () => within(editor()).getByRole<HTMLTextAreaElement>('textbox', { name: 'Text' });
+  await user.clear(text());
+  await user.type(text(), 'New');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:saveVersion')).toHaveLength(1));
+  const select = within(editor()).getByRole<HTMLSelectElement>('combobox', { name: 'Version' });
+  expect(select.disabled).toBe(true);
+  const older = select.options[select.options.length - 1]!.value;
+  fireEvent.change(select, { target: { value: older } });
+  expect(within(editor()).queryByRole('button', { name: 'Use this version' })).toBeNull();
+  hold.release();
+  await waitFor(() => expect(within(editor()).getByRole('combobox', { name: 'Version' }).textContent).toMatch(/^v3 · /));
+  await waitFor(() => expect(saveButton().disabled).toBe(true));
+  expect(text().value).toBe('New');
+  expect(text().readOnly).toBe(false);
+});
+
 it('while a new prompt is being created the fields take no typing, so no edit is lost', async () => {
   const user = userEvent.setup();
   const store = fakePrompts([]);

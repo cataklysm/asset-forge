@@ -220,8 +220,11 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
             <select
               aria-label={PROMPT_VERSION_LABEL}
               className={SELECT}
+              disabled={saving}
               value={viewing?.id ?? detail.currentVersion.id}
               onChange={(e) => {
+                // A running save or delete answers with the draft it was sent with; no version is shown meanwhile.
+                if (saving) return;
                 const chosen = detail.versions.find((version) => version.id === e.target.value);
                 setViewing(chosen === undefined || chosen.id === detail.currentVersion.id ? null : chosen);
               }}
@@ -265,7 +268,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
       )}
       <div className="flex justify-end gap-2">
         {viewing !== null ? (
-          <button type="button" className={BUTTON} onClick={() => adoptVersion(viewing)}>
+          <button type="button" className={BUTTON} disabled={saving} onClick={() => adoptVersion(viewing)}>
             {USE_VERSION_LABEL}
           </button>
         ) : (
