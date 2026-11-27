@@ -61,6 +61,8 @@ import type { JobHost } from './job-host.js';
 export type LibraryHandlers = Pick<
   IpcHandlers,
   | 'files:import'
+  | 'files:importProgress'
+  | 'files:cancelImport'
   | 'files:importUrls'
   | 'files:origins'
   | 'files:openOrigin'
@@ -131,6 +133,9 @@ export function createLibraryHandlers(
 
   return {
     'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null, { unpackArchives: r.unpackArchives }),
+    // Both read or mark the running import without the queue, which that import holds; neither needs a workspace.
+    'files:importProgress': async () => manager.importProgress(),
+    'files:cancelImport': async () => ({ cancelling: manager.cancelImport() }),
     // Only the enqueue runs in the serial queue; the downloads are jobs and never hold it.
     'files:importUrls': async (r) => {
       const result = await manager.exclusive((s) =>

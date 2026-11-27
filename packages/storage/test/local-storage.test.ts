@@ -55,6 +55,19 @@ describe('files', () => {
     expect(await storage.hashFile('inbox/a.txt')).toBe(HELLO_SHA);
   });
 
+  it('reports the cumulative bytes written, ending at the file size', async () => {
+    const reported: number[] = [];
+    const source = Readable.from([Buffer.from('he'), Buffer.from('l'), Buffer.from('lo')]);
+    const r = await storage.writeStream('inbox/a.txt', source, { onProgress: (bytes) => reported.push(bytes) });
+    expect(r).toEqual({ sizeBytes: 5, sha256: HELLO_SHA });
+    expect(reported).toEqual([2, 3, 5]);
+  });
+
+  it('writes the same file with an empty options object', async () => {
+    const r = await storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('hello')), {});
+    expect(r).toEqual({ sizeBytes: 5, sha256: HELLO_SHA });
+  });
+
   it('rejects writing to an existing path and keeps its content', async () => {
     await storage.writeText('inbox/a.txt', 'original');
     await expect(

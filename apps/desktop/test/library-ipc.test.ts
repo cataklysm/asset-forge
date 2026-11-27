@@ -185,6 +185,40 @@ describe('library IPC', () => {
     ]);
   });
 
+  describe('files:importProgress and files:cancelImport', () => {
+    it('answer null and false without a workspace', async () => {
+      expect(await ok('files:importProgress', {})).toBeNull();
+      expect(await ok('files:cancelImport', {})).toEqual({ cancelling: false });
+    });
+
+    it('answer null and false with a workspace and no import running', async () => {
+      await openWorkspace();
+      expect(await ok('files:importProgress', {})).toBeNull();
+      expect(await ok('files:cancelImport', {})).toEqual({ cancelling: false });
+    });
+
+    it('answer the running import and mark it cancelled without waiting for the queue', async () => {
+      await openWorkspace();
+      const progress = { done: 1, total: 4, currentBytes: 5, currentSize: 10, cancelling: false };
+      const read = vi.spyOn(manager, 'importProgress').mockReturnValue(progress);
+      const cancel = vi.spyOn(manager, 'cancelImport').mockReturnValue(true);
+      // A queued operation held until the end: neither channel may wait for it.
+      let release = (): void => {};
+      const held = manager.exclusive(() => new Promise<void>((resolve) => (release = resolve)));
+
+      const answered = await ok('files:importProgress', {});
+      expect(answered).toEqual(progress);
+      expect(ipcContract['files:importProgress'].response.safeParse(answered).success).toBe(true);
+      expect(await ok('files:cancelImport', {})).toEqual({ cancelling: true });
+      release();
+      await held;
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      read.mockRestore();
+      cancel.mockRestore();
+    });
+  });
+
   describe('files:import', () => {
     it('answers no_workspace_open for an unpacking import without a workspace', async () => {
       const source = join(base, 'pack.zip');

@@ -145,14 +145,24 @@ export class InMemoryStorage implements Storage {
     this.files.set(relPath, Buffer.from(text, 'utf8'));
   }
 
-  async writeStream(relPath: string, source: Readable): Promise<{ sizeBytes: number; sha256: string }> {
+  async writeStream(
+    relPath: string,
+    source: Readable,
+    options: { onProgress?(bytesWritten: number): void } = {},
+  ): Promise<{ sizeBytes: number; sha256: string }> {
     await this.guard('writeStream');
     if (this.files.has(relPath)) {
       source.destroy();
       throw new Error(`Target exists: ${relPath}`);
     }
     const chunks: Buffer[] = [];
-    for await (const chunk of source) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    let written = 0;
+    for await (const chunk of source) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buffer);
+      written += buffer.length;
+      options.onProgress?.(written);
+    }
     const data = Buffer.concat(chunks);
     this.addParents(relPath);
     this.files.set(relPath, data);
@@ -1594,13 +1604,23 @@ export class FakeSourceFiles extends Map<string, Buffer> implements SourceFiles 
   readonly unreadable = new Set<string>();
   /** Every path `open` was called with. */
   readonly opened: string[] = [];
+  /** Paths whose size `open` does not answer. */
+  readonly unknownSize = new Set<string>();
+  /** When set, a source streams in chunks of this many bytes instead of one chunk. */
+  chunkSize: number | null = null;
 
-  async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
+  async open(absolutePath: string): Promise<{ name: string; stream: Readable; sizeBytes?: number }> {
     this.opened.push(absolutePath);
     const data = this.get(absolutePath);
     if (!data || this.unreadable.has(absolutePath)) throw new SourceNotReadableError();
     const name = absolutePath.split(/[\\/]/).pop() ?? absolutePath;
-    return { name, stream: Readable.from([data]) };
+    const size = this.chunkSize;
+    const chunks =
+      size === null || data.length === 0
+        ? [data]
+        : Array.from({ length: Math.ceil(data.length / size) }, (_, i) => data.subarray(i * size, (i + 1) * size));
+    const stream = Readable.from(chunks);
+    return this.unknownSize.has(absolutePath) ? { name, stream } : { name, stream, sizeBytes: data.length };
   }
 }
 

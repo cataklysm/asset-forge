@@ -4,7 +4,7 @@ import type { Readable } from 'node:stream';
 import { SourceNotReadableError, type SourceFiles } from '@assetforge/core';
 
 export class NodeSourceFiles implements SourceFiles {
-  async open(absolutePath: string): Promise<{ name: string; stream: Readable }> {
+  async open(absolutePath: string): Promise<{ name: string; stream: Readable; sizeBytes: number }> {
     let handle: fs.FileHandle | undefined;
     try {
       handle = await fs.open(absolutePath, 'r');
@@ -14,7 +14,7 @@ export class NodeSourceFiles implements SourceFiles {
       }
       // The stream takes ownership of the handle and closes it when done.
       const stream = handle.createReadStream();
-      return { name: path.basename(absolutePath), stream };
+      return { name: path.basename(absolutePath), stream, sizeBytes: stat.size };
     } catch (cause) {
       await handle?.close().catch(() => undefined);
       throw new SourceNotReadableError({ cause });

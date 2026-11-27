@@ -54,6 +54,19 @@ export const ImportResultSchema = z.object({
 });
 export type ImportResult = z.infer<typeof ImportResultSchema>;
 
+/**
+ * The progress of the running `files:import`: items done out of the known total (an unpacked archive counts its
+ * entries once its directory is read), and the bytes written of the item in progress, with its size when known.
+ */
+export const ImportProgressSchema = z.object({
+  done: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  currentBytes: z.number().int().nonnegative(),
+  currentSize: z.number().int().nonnegative().nullable(),
+  cancelling: z.boolean(),
+});
+export type ImportProgress = z.infer<typeof ImportProgressSchema>;
+
 /** Which files a list covers: every file, the unassigned inbox, the files of one asset, or the trash. */
 export const FileScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('all') }),

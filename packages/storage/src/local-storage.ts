@@ -141,7 +141,12 @@ export class LocalFileSystemStorage implements Storage {
     });
   }
 
-  writeStream(relPath: string, source: Readable): Promise<{ sizeBytes: number; sha256: string }> {
+  writeStream(
+    relPath: string,
+    source: Readable,
+    options: { onProgress?(bytesWritten: number): void } = {},
+  ): Promise<{ sizeBytes: number; sha256: string }> {
+    const { onProgress } = options;
     // A failing source is the source's problem, not the workspace storage's: pass it through.
     // A destination failure makes the pipeline destroy the source with that same error, so the
     // destination's error is recorded separately and never counts as the source's.
@@ -171,6 +176,13 @@ export class LocalFileSystemStorage implements Storage {
           transform(chunk: Buffer, _enc, cb) {
             hash.update(chunk);
             sizeBytes += chunk.length;
+            if (onProgress !== undefined) {
+              try {
+                onProgress(sizeBytes);
+              } catch {
+                // A progress observer never fails the write.
+              }
+            }
             cb(null, chunk);
           },
         });

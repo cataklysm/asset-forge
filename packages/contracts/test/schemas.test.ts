@@ -9,6 +9,7 @@ import {
   FileBatchResultSchema,
   FileRecordSchema,
   FileScopeSchema,
+  ImportProgressSchema,
   IpcErrorSchema,
   NameInputSchema,
   normalizeTagName,
@@ -155,6 +156,29 @@ describe('ipcContract', () => {
     expect(response.safeParse([result]).success).toBe(false);
     expect(response.safeParse([{ ...result, entryName: null }]).success).toBe(true);
     expect(response.safeParse([{ ...result, entryName: 'tex/a.png' }]).success).toBe(true);
+  });
+
+  it('files:importProgress takes nothing and answers a progress or null', () => {
+    const { request, response } = ipcContract['files:importProgress'];
+    expect(request.safeParse({}).success).toBe(true);
+    const progress = { done: 1, total: 3, currentBytes: 10, currentSize: 20, cancelling: false };
+    expect(response.safeParse(null).success).toBe(true);
+    expect(response.safeParse(progress).success).toBe(true);
+    expect(response.safeParse({ ...progress, currentSize: null }).success).toBe(true);
+    expect(ImportProgressSchema.safeParse(progress).success).toBe(true);
+    for (const bad of [{ done: -1 }, { total: 1.5 }, { currentBytes: -1 }, { currentSize: -2 }, { cancelling: 'no' }]) {
+      expect(response.safeParse({ ...progress, ...bad }).success, JSON.stringify(bad)).toBe(false);
+    }
+    const { done: _done, ...missing } = progress;
+    expect(response.safeParse(missing).success).toBe(false);
+  });
+
+  it('files:cancelImport takes nothing and answers whether an import is cancelling', () => {
+    const { request, response } = ipcContract['files:cancelImport'];
+    expect(request.safeParse({}).success).toBe(true);
+    expect(response.safeParse({ cancelling: true }).success).toBe(true);
+    expect(response.safeParse({ cancelling: false }).success).toBe(true);
+    expect(response.safeParse({}).success).toBe(false);
   });
 });
 

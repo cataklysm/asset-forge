@@ -4,6 +4,7 @@ import {
   WorkspaceManifestSchema,
   type FileList,
   type FileTarget,
+  type ImportProgress,
   type ImportResult,
   type WorkspaceManifest,
   type WorkspaceSummary,
@@ -61,6 +62,8 @@ interface OpenWorkspace {
 export class WorkspaceManager {
   private open_: OpenWorkspace | null = null;
   private readonly queue = new SerialQueue();
+  /** The live progress of the running `importFiles`; set from the start of the work until it settles. */
+  private importProgress_: ImportProgress | null = null;
 
   constructor(private readonly host: WorkspaceHost) {}
 
@@ -103,6 +106,21 @@ export class WorkspaceManager {
     options: { unpackArchives?: boolean } = {},
   ): Promise<ImportResult[]> {
     return this.queue.run(() => this.doImportFiles(sourcePaths, target, options));
+  }
+
+  /** A copy of the running import's progress, or null when none runs. Does not queue. */
+  importProgress(): ImportProgress | null {
+    return this.importProgress_ === null ? null : { ...this.importProgress_ };
+  }
+
+  /**
+   * Marks the running import to stop after the item in progress; what is imported stays. Does not queue.
+   * False when no import runs.
+   */
+  cancelImport(): boolean {
+    if (this.importProgress_ === null) return false;
+    this.importProgress_.cancelling = true;
+    return true;
   }
 
   listFiles(q: FileQuery): Promise<FileList> {
@@ -263,18 +281,54 @@ export class WorkspaceManager {
       }
     };
     const budget: ArchiveBudget = { entries: MAX_ARCHIVE_ENTRIES, bytes: MAX_ARCHIVE_BYTES };
-    const results: ImportResult[] = [];
-    for (const sourcePath of sourcePaths) {
-      const sourceName = sourcePath.split(/[\\/]/).pop() ?? '';
-      if (options.unpackArchives === true && isZipArchive(sourceName)) {
-        results.push(...(await importArchive(ctx, sourcePath, budget, place)));
-        continue;
+    const progress: ImportProgress = { done: 0, total: sourcePaths.length, currentBytes: 0, currentSize: null, cancelling: false };
+    const startItem = (size: number | null): void => {
+      progress.currentBytes = 0;
+      progress.currentSize = size;
+    };
+    const onProgress = (bytesWritten: number): void => {
+      progress.currentBytes = bytesWritten;
+    };
+    this.importProgress_ = progress;
+    try {
+      const results: ImportResult[] = [];
+      for (const sourcePath of sourcePaths) {
+        if (progress.cancelling) break;
+        startItem(null);
+        const sourceName = sourcePath.split(/[\\/]/).pop() ?? '';
+        if (options.unpackArchives === true && isZipArchive(sourceName)) {
+          // Until its directory is read the archive is one item; then each entry with a result is one.
+          let expanded = false;
+          const archiveResults = await importArchive(ctx, sourcePath, budget, place, {
+            onEntries: (count) => {
+              expanded = true;
+              progress.total += count - 1;
+            },
+            isCancelled: () => progress.cancelling,
+            onEntryStart: (declaredSize) => startItem(declaredSize),
+            onProgress,
+            onEntryDone: () => {
+              progress.done += 1;
+            },
+          });
+          if (!expanded) progress.done += 1;
+          results.push(...archiveResults);
+          continue;
+        }
+        const result = await importFile(ctx, sourcePath, {
+          onSize: (sizeBytes) => {
+            progress.currentSize = sizeBytes;
+          },
+          onProgress,
+        });
+        await place(result);
+        results.push(result);
+        progress.done += 1;
       }
-      const result = await importFile(ctx, sourcePath);
-      await place(result);
-      results.push(result);
+      return results;
+    } finally {
+      this.importProgress_ = null;
     }
-    return results;
   }
 
   private requireOpen(): OpenWorkspace {

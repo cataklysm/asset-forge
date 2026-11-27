@@ -55,7 +55,7 @@ export interface ImportSource {
  * pending row -> staging -> checksum verification -> move -> complete.
  * Per-file failures never reject; they are reported in the result.
  */
-export async function importFile(ctx: ImportContext, sourcePath: string): Promise<ImportResult> {
+export async function importFile(ctx: ImportContext, sourcePath: string, hooks: ImportFileHooks = {}): Promise<ImportResult> {
   const sourceName = sourcePath.slice(Math.max(sourcePath.lastIndexOf('/'), sourcePath.lastIndexOf('\\')) + 1);
   if (isRefusedImportName(sourceName)) {
     return { sourcePath, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
@@ -67,7 +67,17 @@ export async function importFile(ctx: ImportContext, sourcePath: string): Promis
   } catch (error) {
     return { sourcePath, entryName: null, file: null, error: messageOf(error), duplicateOf: [] };
   }
-  return importStream(ctx, { sourcePath, entryName: null, name: opened.name, stream: opened.stream });
+  if (opened.sizeBytes !== undefined) hooks.onSize?.(opened.sizeBytes);
+  const options: ImportOptions = hooks.onProgress === undefined ? {} : { onProgress: hooks.onProgress };
+  return importStream(ctx, { sourcePath, entryName: null, name: opened.name, stream: opened.stream }, options);
+}
+
+/** Observers of `importFile`, for the progress of a running import. */
+export interface ImportFileHooks {
+  /** The size of the opened source, when the source files answer it. */
+  onSize?(sizeBytes: number): void;
+  /** The cumulative number of bytes written to staging. */
+  onProgress?(bytesWritten: number): void;
 }
 
 /** Options of `importStream`; without them it behaves as the file import always did. */
@@ -83,6 +93,8 @@ export interface ImportOptions {
   discardOnFailure?: boolean;
   /** Called on a failed import with the error that ended the source stream, when the stream failed. */
   onStreamError?(error: unknown): void;
+  /** Passed on to `Storage.writeStream`: the cumulative number of bytes written to staging. */
+  onProgress?(bytesWritten: number): void;
 }
 
 /** Removes the paths, best effort; startup recovery cleans leftovers of pending rows. */
@@ -132,7 +144,10 @@ export async function importStream(ctx: ImportContext, source: ImportSource, opt
   // `move` rejects when the target exists, so the final path is ours to clean up only after it succeeded.
   let moved = false;
   try {
-    const { sizeBytes, sha256 } = await ctx.storage.writeStream(staging, stream);
+    const { sizeBytes, sha256 } =
+      options.onProgress === undefined
+        ? await ctx.storage.writeStream(staging, stream)
+        : await ctx.storage.writeStream(staging, stream, { onProgress: options.onProgress });
     const verified = await ctx.storage.hashFile(staging);
     if (verified !== sha256) {
       throw new ChecksumMismatchError(`Checksum mismatch after staging: expected ${sha256}, got ${verified}`);

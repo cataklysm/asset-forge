@@ -54,7 +54,12 @@ export interface Storage {
   ensureLayout(): Promise<void>; // creates root and LAYOUT_DIRS
   readText(relPath: string): Promise<string | null>; // null if missing
   writeText(relPath: string, text: string): Promise<void>; // atomic: temp file + rename
-  writeStream(relPath: string, source: Readable): Promise<{ sizeBytes: number; sha256: string }>;
+  /** `onProgress` receives the cumulative number of bytes as chunks are written. */
+  writeStream(
+    relPath: string,
+    source: Readable,
+    options?: { onProgress?(bytesWritten: number): void },
+  ): Promise<{ sizeBytes: number; sha256: string }>;
   hashFile(relPath: string): Promise<string>; // lowercase hex SHA-256
   move(from: string, to: string): Promise<void>; // rejects if `to` exists
   exists(relPath: string): Promise<boolean>;
@@ -110,7 +115,8 @@ export interface RemoteFileSource {
 }
 
 export interface SourceFiles {
-  open(absolutePath: string): Promise<{ name: string; stream: Readable }>; // rejects with SourceNotReadableError
+  /** Rejects with SourceNotReadableError; `sizeBytes` is the file's size when known. */
+  open(absolutePath: string): Promise<{ name: string; stream: Readable; sizeBytes?: number }>;
 }
 
 export interface ArchiveEntry {

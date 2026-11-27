@@ -26,6 +26,22 @@ describe('NodeSourceFiles', () => {
     expect(Buffer.concat(chunks).toString()).toBe('data');
   });
 
+  it('answers the size of the file', async () => {
+    const file = path.join(tmp, 'pic.png');
+    await fs.writeFile(file, 'twelve bytes');
+    const opened = await new NodeSourceFiles().open(file);
+    expect(opened.sizeBytes).toBe(12);
+    opened.stream.destroy();
+  });
+
+  it('answers size 0 for an empty file', async () => {
+    const file = path.join(tmp, 'empty.png');
+    await fs.writeFile(file, '');
+    const opened = await new NodeSourceFiles().open(file);
+    expect(opened.sizeBytes).toBe(0);
+    opened.stream.destroy();
+  });
+
   it('rejects a directory', async () => {
     await expect(new NodeSourceFiles().open(tmp)).rejects.toBeInstanceOf(SourceNotReadableError);
   });

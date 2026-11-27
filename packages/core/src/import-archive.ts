@@ -1,6 +1,13 @@
 import type { ImportResult } from '@assetforge/contracts';
 import { ArchiveTooLargeError, ValidationFailedError } from './errors.js';
-import { importStream, isRefusedImportName, REFUSED_IMPORT_MESSAGE, safeErrorMessage, type ImportContext } from './import-file.js';
+import {
+  importStream,
+  isRefusedImportName,
+  REFUSED_IMPORT_MESSAGE,
+  safeErrorMessage,
+  type ImportContext,
+  type ImportOptions,
+} from './import-file.js';
 import { isZipArchive } from './media-types.js';
 import type { ArchiveEntry, ArchiveReader } from './ports.js';
 
@@ -43,17 +50,32 @@ function refusal(entry: ArchiveEntry, fileName: string): string | null {
   return null;
 }
 
+/** Observers and the cancel check of `importArchive`, for the progress of a running import. */
+export interface ArchiveImportHooks {
+  /** Once the directory has passed the limits: how many entries give a result (directories and `__MACOSX/` do not). */
+  onEntries?(count: number): void;
+  /** Checked before every entry; once true, no further entry is started and the remaining ones give no result. */
+  isCancelled?(): boolean;
+  /** An entry starts, with its declared uncompressed size. */
+  onEntryStart?(declaredSize: number): void;
+  /** The cumulative number of bytes of the current entry written to staging. */
+  onProgress?(bytesWritten: number): void;
+  /** An entry has its result: placed (after `onImported`) or refused. */
+  onEntryDone?(): void;
+}
+
 /**
  * Unpacks the archive at `sourcePath`: every entry is imported flat under the last segment of
  * its path, in directory order. The limits are checked from the directory before anything is
  * written. `onImported` runs for each result with a complete file before the next entry starts.
- * Never rejects; failures are results.
+ * Never rejects; failures are results. An archive cancelled before its first entry answers no result.
  */
 export async function importArchive(
   ctx: ImportContext & { archives: ArchiveReader },
   sourcePath: string,
   budget: ArchiveBudget,
   onImported: (result: ImportResult) => Promise<void>,
+  hooks: ArchiveImportHooks = {},
 ): Promise<ImportResult[]> {
   const failed = (error: string): ImportResult[] => [{ sourcePath, entryName: null, file: null, error, duplicateOf: [] }];
 
@@ -71,15 +93,26 @@ export async function importArchive(
     budget.entries -= entries.length;
     budget.bytes -= bytes;
 
+    const counted = entries.filter((entry) => !isSkipped(entry)).length;
+    if (counted > 0) hooks.onEntries?.(counted);
+    const options: ImportOptions = hooks.onProgress === undefined ? {} : { onProgress: hooks.onProgress };
+
     const results: ImportResult[] = [];
+    let cancelled = false;
     for (const [index, entry] of entries.entries()) {
       if (isSkipped(entry)) continue;
+      if (hooks.isCancelled?.() === true) {
+        cancelled = true;
+        break;
+      }
+      hooks.onEntryStart?.(entry.uncompressedSize);
       const entryName = entry.name;
       const result = (error: string): ImportResult => ({ sourcePath, entryName, file: null, error, duplicateOf: [] });
       const fileName = entryName.split(/[\\/]/).pop() ?? '';
       const refused = refusal(entry, fileName);
       if (refused !== null) {
         results.push(result(refused));
+        hooks.onEntryDone?.();
         continue;
       }
       let stream;
@@ -88,13 +121,16 @@ export async function importArchive(
       } catch {
         // Only this entry fails; a later one may still be readable, so each is tried.
         results.push(result(ARCHIVE_TRUNCATED_MESSAGE));
+        hooks.onEntryDone?.();
         continue;
       }
-      const imported = await importStream(ctx, { sourcePath, entryName, name: fileName, stream });
+      const imported = await importStream(ctx, { sourcePath, entryName, name: fileName, stream }, options);
       if (imported.file?.status === 'complete') await onImported(imported);
       results.push(imported);
+      hooks.onEntryDone?.();
     }
-    return results.length === 0 ? failed(ARCHIVE_EMPTY_MESSAGE) : results;
+    if (results.length === 0) return cancelled ? [] : failed(ARCHIVE_EMPTY_MESSAGE);
+    return results;
   } finally {
     try {
       await archive.close();

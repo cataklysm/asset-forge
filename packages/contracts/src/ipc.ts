@@ -10,6 +10,7 @@ import {
   FileRecordSchema,
   FileRecordsSchema,
   FileTargetSchema,
+  ImportProgressSchema,
   ImportResultSchema,
   TrashSummarySchema,
 } from './files';
@@ -137,6 +138,16 @@ export const ipcContract = {
       unpackArchives: z.boolean().optional(),
     }),
     response: z.array(ImportResultSchema),
+  },
+  /** The progress of the running import; null when none runs or no workspace is open. Never waits for the queue. */
+  'files:importProgress': {
+    request: EmptyRequestSchema,
+    response: ImportProgressSchema.nullable(),
+  },
+  /** Marks the running import to stop after the item in progress; `cancelling` is false when none runs. */
+  'files:cancelImport': {
+    request: EmptyRequestSchema,
+    response: z.object({ cancelling: z.boolean() }),
   },
   /**
    * Queues one download job per usable line; `skipDuplicates` defaults to true. A line over the length
