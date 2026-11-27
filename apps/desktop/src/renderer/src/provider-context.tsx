@@ -231,8 +231,9 @@ export function useProviders(): ProvidersState {
 const UNREACHABLE: ReadonlySet<string> = new Set(['provider_unreachable', 'provider_timeout', 'provider_unavailable']);
 
 /**
- * The state of entry `id` from its model list answer: the edit model list for a `venice` entry,
- * the vision model list otherwise (also for an entry that is not listed).
+ * The state of entry `id` from its model list answer: the edit model list for an entry of the image
+ * purpose (`venice`), the vision model list for a vision entry (`ollama` or `openai`) and for an entry
+ * that is not listed.
  */
 export function providerStatus(
   state: Pick<ProvidersState, 'list' | 'models' | 'imageModels'>,

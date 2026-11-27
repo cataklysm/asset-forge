@@ -88,7 +88,7 @@ function ordered(models: readonly VisionModel[]): VisionModel[] {
 }
 
 /**
- * The models of `ollama` entry `providerId` as a select: models without vision cannot be chosen, and
+ * The models of vision entry `providerId` (`ollama` or `openai`) as a select: models without vision cannot be chosen, and
  * `value` stays shown and selected even when it is not (or not yet) in the list. It preselects nothing itself.
  */
 export function ModelSelect({ providerId, purpose, value, onChange, disabled = false }: Props) {

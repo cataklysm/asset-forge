@@ -59,7 +59,7 @@ export interface JobHostDeps {
   pause: PauseGate;
   /** The entry that active analysis jobs without a provider are assigned to when a workspace opens; null when there is none. */
   firstEntry: () => { id: string; name: string; taggingModel: string | null } | null;
-  /** The `venice` entries generation jobs run on. */
+  /** The entries of the image purpose (the `venice` kind) that generation jobs resolve and run on. */
   imageProviders: ImageProviderDirectory;
   /** Reads the image a generation sends. */
   generationImages: GenerationImageSource;

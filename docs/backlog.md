@@ -443,6 +443,8 @@ Found in the final review and not fixed:
 - Opening a dialog or the provider select discards each entry's last answer before re-checking, so a ready entry shows as being checked and Start is blocked until the answer arrives.
 - A failed reload with a list already held is visible only to the caller.
 - A pending key removal is not shown and cannot be undone before saving.
+- The OpenAI-compatible adapter retries every HTTP 400 once without `response_format`, also one caused by the context length or an unknown extra parameter: that sends the image a second time, and after a success the model stays without `response_format` until the entry is saved again.
+- A settings file that is set aside as unreadable still leads to the removal of all key files at once; setting aside and the key sweep should be decoupled, so that the sweep runs only after the first successful write.
 - Focus is lost after deleting an entry in Settings.
 - The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
 - Key temporary files are swept only at start.
