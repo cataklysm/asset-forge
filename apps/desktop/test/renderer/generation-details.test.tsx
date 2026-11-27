@@ -73,7 +73,7 @@ function install(handlers: FakeHandlers = {}, providers = [VENICE]) {
   });
 }
 
-function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => void }) {
+function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => Promise<boolean> }) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -383,7 +383,7 @@ it('Open in the studio shows the result in the file detail dialog', async () => 
 
 const FROM_LIBRARY = { promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: { hero: 'Ana', mood: 'calm' } };
 
-async function showDetails(made: Generation, onOpenPrompt?: (id: string) => void) {
+async function showDetails(made: Generation, onOpenPrompt?: (id: string) => Promise<boolean>) {
   install({ 'generations:forFile': () => ({ madeBy: made, results: [] }) });
   render(
     <Providers onOpenPrompt={onOpenPrompt}>
@@ -394,7 +394,7 @@ async function showDetails(made: Generation, onOpenPrompt?: (id: string) => void
 }
 
 it('a library prompt shows as a link with its values as tooltip and opens through onOpenPrompt', async () => {
-  const onOpenPrompt = vi.fn();
+  const onOpenPrompt = vi.fn(() => Promise.resolve(true));
   const block = await showDetails(generation(FROM_LIBRARY), onOpenPrompt);
   const link = block.getByRole('link', { name: 'Turnaround v3' });
   expect(link.getAttribute('title')).toBe('hero: Ana\nmood: calm');
@@ -410,5 +410,5 @@ it('a prompt deleted since is plain text, without a link', async () => {
 
 it('a generation without a library prompt shows no such line', async () => {
   const block = await showDetails(generation());
-  expect(block.queryByText(/ vd+$/)).toBeNull();
+  expect(block.queryByText('Library prompt')).toBeNull();
 });

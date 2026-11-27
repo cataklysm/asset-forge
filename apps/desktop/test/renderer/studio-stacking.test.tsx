@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
 import type { FileRecord, Generation, GenerationFile, ImageModel, JobSummary } from '@assetforge/contracts';
@@ -76,7 +76,7 @@ afterEach(() => {
   showModal.mockRestore();
 });
 
-function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => void }) {
+function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => Promise<boolean> }) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -180,8 +180,7 @@ it('Generate from image in the linked dialog raises the studio that was already 
   expect(screen.getByRole('dialog', { name: RESULT.originalName }).contains(document.activeElement)).toBe(true);
 });
 
-it('opening the library prompt closes the studio and the linked dialog and navigates', async () => {
-  const onOpenPrompt = vi.fn();
+async function openPromptFromLinked(onOpenPrompt: (id: string) => Promise<boolean>) {
   const made = { ...MADE, promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: {} };
   installFakeApi({
     ...fakeProviders({ providers: [VENICE], lastUsedImageId: VENICE.id }).handlers,
@@ -205,6 +204,20 @@ it('opening the library prompt closes the studio and the linked dialog and navig
   const linked = await screen.findByRole('dialog', { name: RESULT.originalName });
   const block = await within(linked).findByRole('region', { name: 'Generated from' });
   await user.click(within(block).getByRole('link', { name: 'Turnaround v3' }));
+}
+
+it('opening the library prompt closes the studio and the linked dialog once the navigation proceeds', async () => {
+  const onOpenPrompt = vi.fn(() => Promise.resolve(true));
+  await openPromptFromLinked(onOpenPrompt);
   expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('a declined leave guard keeps the studio and the linked dialog open', async () => {
+  const onOpenPrompt = vi.fn(() => Promise.resolve(false));
+  await openPromptFromLinked(onOpenPrompt);
+  await waitFor(() => expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1'));
+  await act(async () => {});
+  expect(studioDialog(SOURCE)).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: RESULT.originalName })).toBeTruthy();
 });

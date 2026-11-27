@@ -55,7 +55,7 @@ interface Linked {
  * The generation studio of the workspace, mounted once, and the linked file dialog that shows a
  * source or result followed from the studio or from the generation details of a file.
  */
-export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (promptId: string) => void }) {
+export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (promptId: string) => Promise<boolean> }) {
   const providers = useProviders();
   const { refresh } = useJobs();
   const [studioFile, setStudioFile] = useState<FileRecord | null>(null);
@@ -102,11 +102,15 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
 
   const openPrompt = useCallback(
     (promptId: string) => {
-      linkRequest.current += 1;
-      top.current = null;
-      setStudioFile(null);
-      setLinked(null);
-      onOpenPrompt?.(promptId);
+      // The host asks the leave guard first; a declined navigation keeps both dialogs as they are.
+      void (onOpenPrompt?.(promptId) ?? Promise.resolve(true)).then((proceeded) => {
+        if (!proceeded) return;
+        // An openFile still in flight must not show its dialog after the navigation.
+        linkRequest.current += 1;
+        top.current = null;
+        setStudioFile(null);
+        setLinked(null);
+      });
     },
     [onOpenPrompt],
   );
