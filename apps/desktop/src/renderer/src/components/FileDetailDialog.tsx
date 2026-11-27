@@ -153,6 +153,8 @@ export function FileDetailDialog({
   });
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const video = playable ? videoControls(videoRef) : null;
+  // The Delete key does what the More menu offers: Delete, or Delete permanently (which asks) in the trash.
+  const removeAction = trashed ? actions.onPurge : file.status !== 'pending' ? actions.onDelete : undefined;
   useViewerKeys(rootRef, {
     previous: () => list?.show(list.index - 1),
     next: () => list?.show(list.index + 1),
@@ -165,6 +167,7 @@ export function FileDetailDialog({
       if (controls !== null || playable) toggleFullscreen();
     },
     ...(video === null ? {} : { seek: video.seek, togglePlayback: video.togglePlayback }),
+    ...(removeAction === undefined ? {} : { remove: () => guard(removeAction)?.() }),
   });
 
   const title = asset === null ? file.originalName : `${file.originalName} | ${asset.name}`;

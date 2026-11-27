@@ -339,6 +339,39 @@ it('leaving the video pauses it and releases the source', () => {
   expect(load.mock.invocationCallOrder[0]!).toBeGreaterThan(playback.pause.mock.invocationCallOrder[0]!);
 });
 
+it('Delete in the viewer deletes the shown file, and asks to purge a trashed one', async () => {
+  install();
+  const onDelete = vi.fn();
+  const onPurge = vi.fn();
+  const first = render(<Harness file={videoRecord({ width: 640, height: 360 })} actions={{ ...ACTIONS, onDelete, onPurge }} />);
+  fireEvent.keyDown(videoElement(), { key: 'Delete' });
+  await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+  expect(onPurge).not.toHaveBeenCalled();
+  first.unmount();
+
+  render(
+    <Harness
+      file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), deletedAt: '2026-11-27T00:00:00.000Z' })}
+      actions={{ ...ACTIONS, onDelete, onPurge }}
+    />,
+  );
+  fireEvent.keyDown(videoElement(), { key: 'Delete' });
+  await waitFor(() => expect(onPurge).toHaveBeenCalledTimes(1));
+  expect(onDelete).toHaveBeenCalledTimes(1);
+});
+
+it('Delete does nothing for a pending file or without a delete action', async () => {
+  install();
+  const onDelete = vi.fn();
+  const first = render(<Harness file={{ ...fileRecord(), status: 'pending' }} actions={{ ...ACTIONS, onDelete }} />);
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Close' }), { key: 'Delete' });
+  first.unmount();
+  render(<Harness file={fileRecord()} />);
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Close' }), { key: 'Delete' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(onDelete).not.toHaveBeenCalled();
+});
+
 it('the video keeps its source under StrictMode, whose simulated unmount leaves the element in place', () => {
   install();
   const file = videoRecord({ width: 640, height: 360 });

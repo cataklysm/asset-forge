@@ -13,9 +13,11 @@ export interface ViewerKeyActions {
   seek?(seconds: number): void;
   /** Space on a video: play or pause. Without it Space is left alone. */
   togglePlayback?(): void;
+  /** Delete: removes the shown file. Without it Delete is left alone. A held key removes one file only. */
+  remove?(): void;
 }
 
-type PlainAction = Exclude<keyof ViewerKeyActions, 'seek' | 'togglePlayback'>;
+type PlainAction = Exclude<keyof ViewerKeyActions, 'seek' | 'togglePlayback' | 'remove'>;
 
 const KEYS: Record<string, PlainAction> = {
   ArrowLeft: 'previous',
@@ -52,6 +54,7 @@ function actionOf(event: KeyboardEvent, actions: ViewerKeyActions): (() => void)
   }
   const toggle = actions.togglePlayback;
   if (event.key === ' ') return toggle !== undefined && !isActivatable(event.target) ? toggle : null;
+  if (event.key === 'Delete') return actions.remove !== undefined && !event.shiftKey && !event.repeat ? actions.remove : null;
   const name = KEYS[event.key];
   return name === undefined ? null : () => actions[name]();
 }

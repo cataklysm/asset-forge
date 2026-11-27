@@ -133,6 +133,30 @@ it('without the video actions Shift+arrows step on and Space is left alone', () 
   expect(space.defaultPrevented).toBe(false);
 });
 
+it('Delete calls remove once, not on key repeat, with Shift or in a text field', async () => {
+  const actions = { ...actionsMock(), remove: vi.fn() };
+  render(<Probe actions={actions} />);
+  const target = screen.getByRole('button', { name: 'Target' });
+  const press = (init: KeyboardEventInit = {}, on: Element = target) => {
+    const event = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true, ...init });
+    on.dispatchEvent(event);
+    return event;
+  };
+  expect(press().defaultPrevented).toBe(true);
+  expect(actions.remove).toHaveBeenCalledTimes(1);
+  press({ repeat: true });
+  press({ shiftKey: true });
+  press({}, screen.getByRole('textbox', { name: 'Tag' }));
+  expect(actions.remove).toHaveBeenCalledTimes(1);
+});
+
+it('without remove Delete is left alone', () => {
+  render(<Probe actions={actionsMock()} />);
+  const event = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+  screen.getByRole('button', { name: 'Target' }).dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+});
+
 it('Space is left to checkboxes, switches, tabs, radios, options, selects and summaries', () => {
   const togglePlayback = vi.fn();
   function Controls() {
