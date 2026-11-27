@@ -22,6 +22,7 @@ import { createGenerationHandlers } from './generation-handlers.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
+import { createPromptHandlers } from './prompt-handlers.js';
 import type { ProviderHandlers } from './provider-handlers.js';
 import type { ProviderStore } from './provider-store.js';
 
@@ -114,6 +115,7 @@ export function createWorkspaceHandlers(
     ...createLibraryHandlers(manager, dialogs, host, jobs),
     ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders),
     ...createGenerationHandlers(manager, jobs, services.imageProviders),
+    ...createPromptHandlers(manager),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
     // App-level provider entries and analysis prompts: not behind the workspace guard.

@@ -23,6 +23,7 @@ export * from './job-lanes.js';
 export * from './jobs.js';
 export * from './paths.js';
 export * from './projects.js';
+export * from './prompts.js';
 export * from './recover-imports.js';
 export * from './relations.js';
 export type * from './ports.js';
