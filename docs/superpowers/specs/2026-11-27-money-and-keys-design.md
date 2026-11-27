@@ -40,10 +40,12 @@ The owner decided 1–3; the rest are the builder's calls recorded here.
 - The set of starts in flight lives in `StudioProvider` (keyed by source file id and kind) and is
   exposed as state, so a fresh `GenerationStudio` instance renders disabled. The existing upscale
   guard of the file menu uses the same set.
-- The studio's form state survives a raise. Left to the builder: stop remounting (re-raise the
-  dialog instead) or keep the draft per source file in the provider. Closing the studio drops it.
+- The studio's form state survives a raise. The studio keeps remounting on a raise; the draft
+  (prompt, attached library prompt and values, model, parameters) is kept per source file in the
+  provider and restored by the fresh instance. A start error is kept there too while the studio is
+  open. Closing the studio drops both.
 - Main process: `generations:start` keeps the source file ids of the starts it is handling; a second
-  start for the same file and kind while the first is in the call answers `busy`
+  start for the same file and kind while the first is in the call answers `invalid_operation`
   (`A generation for this file is already being started`). The entry is removed in `finally`.
 
 ### 2. Trash and purge against a running generation
@@ -71,8 +73,11 @@ The owner decided 1–3; the rest are the builder's calls recorded here.
 - The file is read as an envelope and each entry is checked on its own. A broken entry is left out;
   `lastUsedId` pointing at it becomes null. When anything was left out, or the whole file is
   unreadable, the original is **copied** to `.corrupt-<stamp>` (unreadable: set aside as today).
-- After such a degraded load no key file is swept for the rest of the app session. A clean load
-  sweeps as today.
+- No key file is swept while no settings file exists, after a degraded load, or while a
+  `.corrupt-*` copy lies beside the settings file; such a copy blocks the sweep until it is removed.
+  A clean load without such a copy sweeps as today.
+- When an entry is deleted or its origin changes, its key file is removed only after the settings
+  write has succeeded.
 - File-level rules that cannot be judged per entry (more than `MAX_PROVIDERS`, duplicate ids): the
   first ten, the first of each id.
 
@@ -106,7 +111,7 @@ the open one; the check runs inside the lifecycle queue.
 ## Tests
 
 Each point gets a test that fails today: a remounted studio with a start in flight is disabled and
-shows the typed prompt; a second `generations:start` in flight answers `busy`; trash leaves a running
+shows the typed prompt; a second `generations:start` in flight answers `invalid_operation`; trash leaves a running
 generation job and cancels a queued one; the result of a trashed source lands in its former asset;
 purge is refused while running; an import failure answers `generation_result_not_stored` and leaves
 no row; one broken entry keeps the others and every key file; a totally unreadable file keeps every
