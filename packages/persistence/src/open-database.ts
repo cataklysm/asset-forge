@@ -12,6 +12,7 @@ import { ensureDerivedData, type DerivedDataOptions } from './derived-data.js';
 import { createAnalysisTargetReader } from './analysis-target-reader.js';
 import { createFileAnalysisRepository } from './file-analysis-repository.js';
 import { createFileMoveRepository } from './file-move-repository.js';
+import { createFileOriginRepository } from './file-origin-repository.js';
 import { createFileRepository } from './file-repository.js';
 import { createGenerationRepository } from './generation-repository.js';
 import { createJobRepository } from './job-repository.js';
@@ -55,6 +56,7 @@ export async function openWorkspaceDatabase(
       assetWorkflows: createAssetWorkflowRepository(db),
       tags: createTagRepository(db),
       assetSources: createAssetSourceRepository(db),
+      fileOrigins: createFileOriginRepository(db),
       jobs: createJobRepository(db),
       analyses: createFileAnalysisRepository(db),
       analysisTargets: createAnalysisTargetReader(db),

@@ -13,7 +13,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
-import { asset, file, fileAnalysis, fileAnalysisProposal, fileMove, filePurge, fileTag, job, tag } from './schema.js';
+import { asset, file, fileAnalysis, fileAnalysisProposal, fileMove, fileOrigin, filePurge, fileTag, job, tag } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
 
 // Row shape equals FileRecord apart from the tags; spelled out so schema drift fails at compile time.
@@ -209,18 +209,40 @@ export function fileListSql(tx: ListTx, q: FileQuery): { page: SQL; count: SQL }
 export function createFileRepository(db: BetterSQLite3Database): FileRepository {
   return {
     async insertPending(r) {
-      db.insert(file)
-        .values({
-          id: r.id,
-          storageId: r.storageId,
-          originalName: r.originalName,
-          relativePath: r.relativePath,
-          mimeType: r.mimeType,
-          importedAt: r.importedAt,
-          kind: r.kind,
-          status: 'pending',
-        })
-        .run();
+      db.transaction((tx) => {
+        tx.insert(file)
+          .values({
+            id: r.id,
+            storageId: r.storageId,
+            originalName: r.originalName,
+            relativePath: r.relativePath,
+            mimeType: r.mimeType,
+            importedAt: r.importedAt,
+            kind: r.kind,
+            status: 'pending',
+          })
+          .run();
+        if (r.origin !== undefined) {
+          tx.insert(fileOrigin).values({ id: r.origin.id, fileId: r.id, url: r.origin.url, createdAt: r.importedAt }).run();
+        }
+      });
+    },
+    async deletePending(id) {
+      // The origins go by their cascade; a pending row has no other dependents.
+      return db
+        .delete(file)
+        .where(and(eq(file.id, id), eq(file.status, 'pending')))
+        .run().changes > 0;
+    },
+    async listPendingDownloadIds() {
+      return db
+        .selectDistinct({ id: file.id })
+        .from(file)
+        .innerJoin(fileOrigin, eq(fileOrigin.fileId, file.id))
+        .where(eq(file.status, 'pending'))
+        .orderBy(asc(file.id))
+        .all()
+        .map((r) => r.id);
     },
     async markComplete(id, r) {
       db.transaction((tx) => {
@@ -333,7 +355,8 @@ export function createFileRepository(db: BetterSQLite3Database): FileRepository 
           throw new InvalidOperationError('The file is being moved');
         }
         // Dependents first, so the foreign keys hold at every statement. A chosen cover is cleared by
-        // its `set null` rule (only a failed inbox file could still be one; a trashed file is none).
+        // its `set null` rule (only a failed inbox file could still be one; a trashed file is none), the
+        // origins by their cascade.
         tx.delete(fileTag).where(eq(fileTag.fileId, id)).run();
         tx.delete(fileAnalysis).where(eq(fileAnalysis.fileId, id)).run();
         tx.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, id)).run();

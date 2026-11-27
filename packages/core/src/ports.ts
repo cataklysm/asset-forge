@@ -11,12 +11,14 @@ import type {
   AssetStatus,
   AssetType,
   FileList,
+  FileOrigin,
   FileRecord,
   FileRole,
   FileKind,
   FileScope,
   ImportStatus,
   JobErrorCode,
+  JobResult,
   JobStatus,
   JobView,
   Project,
@@ -112,7 +114,13 @@ export interface FileRepository {
     mimeType: string;
     importedAt: string;
     kind: FileKind;
+    /** A download's origin, written in the same transaction with created_at = importedAt; it marks the row as a download. */
+    origin?: { id: string; url: string };
   }): Promise<void>;
+  /** Deletes a pending row (its origins cascade). False when the row is missing or not pending. */
+  deletePending(id: string): Promise<boolean>;
+  /** Ids of pending rows that carry an origin. */
+  listPendingDownloadIds(): Promise<string[]>;
   markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void>; // rejects with NotFoundError for an unknown id
   /** Stores the pixel size; rejects with NotFoundError for an unknown id. */
   setDimensions(id: string, size: { width: number; height: number }): Promise<FileRecord>;
@@ -390,6 +398,21 @@ export interface AssetSourceRepository {
   remove(id: string): Promise<boolean>;
 }
 
+/**
+ * Web addresses a file was downloaded from; a file carries a URL at most once and at most MAX_FILE_ORIGINS.
+ * The rows go with the file when it is purged; trash and restore keep them.
+ */
+export interface FileOriginRepository {
+  listByFile(fileId: string): Promise<FileOrigin[]>; // by createdAt, then id
+  get(id: string): Promise<(FileOrigin & { fileId: string }) | null>;
+  /** The oldest complete file (trash included) that carries this URL; null when none. */
+  findCompleteFileByUrl(url: string): Promise<string | null>;
+  /** Of `urls`, those carried by a complete file (trash included). */
+  knownUrls(urls: readonly string[]): Promise<Set<string>>;
+  /** False, writing nothing, when the file already has this URL or already carries MAX_FILE_ORIGINS. */
+  insert(row: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean>;
+}
+
 /** The persistent job queue of a workspace. Every transition is guarded by the status it starts from. */
 export interface JobRepository {
   /** One transaction. Inserts each job as `queued`, attempt 0; a job whose dedupe key is held by an active job (or by an earlier job of the same call) is skipped. Returns the inserted ids. */
@@ -419,6 +442,13 @@ export interface JobRepository {
   ): Promise<boolean>;
   /** running → retry_wait with run_after and the error. False when the row is not `running`. */
   scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean>;
+  /** Sets file_id and result of a running job. False when the row is not `running` or the file does not exist. */
+  setOutcome(id: string, r: { fileId: string; result: JobResult | null; now: string }): Promise<boolean>;
+  /**
+   * queued | retry_wait jobs of these types in this lane (`null` is the jobs without one) whose run_after is null or
+   * earlier than `until`: status retry_wait, run_after = until; attempt and error untouched. Returns how many.
+   */
+  holdLane(r: { types: readonly string[]; lane: string | null; until: string; now: string }): Promise<number>;
   /** running → queued, attempt − 1 (not below 0), started_at cleared. False when the row is not `running`. */
   release(id: string, now: string): Promise<boolean>;
   /**
@@ -429,7 +459,7 @@ export interface JobRepository {
   /**
    * failed | cancelled → queued with attempt 0, error, run_after, started_at and finished_at cleared; for one job or for all,
    * newest created_at first, skipping a job whose dedupe key is held by an active job and a job of one of `excludeTypes`.
-   * Returns how many.
+   * Clears `result`, and for `FILE_DOWNLOAD_JOB` jobs `file_id`. Returns how many.
    */
   retry(r: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number>;
   /** Deletes every succeeded, failed or cancelled job. Returns how many. */
@@ -437,7 +467,9 @@ export interface JobRepository {
   counts(): Promise<Record<JobStatus, number>>;
   /**
    * Newest created_at first, then id descending; with `lane` only the jobs of that lane. `fileName` is the file's
-   * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload.
+   * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload,
+   * `url` and `host` from `downloadJobFields`, `result` from the stored column. A `FILE_DOWNLOAD_JOB` answers
+   * `providerId`, `providerName` and `model` null.
    */
   list(q: { limit: number; offset: number; status?: JobStatus; lane?: string }): Promise<{ items: JobView[]; total: number }>;
   /** Jobs of this type in `queued` or `retry_wait`, counted per lane; lanes without such a job are left out. */
@@ -709,6 +741,7 @@ export interface WorkspaceDatabase {
   assetWorkflows: AssetWorkflowRepository;
   tags: TagRepository;
   assetSources: AssetSourceRepository;
+  fileOrigins: FileOriginRepository;
   jobs: JobRepository;
   analyses: FileAnalysisRepository;
   analysisTargets: AnalysisTargetReader;

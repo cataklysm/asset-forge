@@ -1,17 +1,21 @@
 import {
   ACTIVE_JOB_STATUSES,
+  FILE_DOWNLOAD_JOB,
   FINISHED_JOB_STATUSES,
   IMAGE_GENERATE_JOB,
   JOB_ERROR_MESSAGES,
   JobErrorCodeSchema,
+  JobResultSchema,
   JobStatusSchema,
   analysisJobFields,
+  downloadJobFields,
   type JobErrorCode,
+  type JobResult,
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
 import type { Job, JobRepository, NewJob } from '@assetforge/core';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, min, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, min, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import { file, generation, job } from './schema.js';
@@ -40,6 +44,9 @@ const toJob = (row: JobRow): Job => ({
   finishedAt: row.finishedAt,
   updatedAt: row.updatedAt,
 });
+
+/** The stored result; a value outside the vocabulary (the column has no CHECK) reads as null. */
+const resultOf = (value: string | null): JobResult | null => JobResultSchema.nullable().catch(null).parse(value);
 
 const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
 
@@ -210,6 +217,20 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
     async scheduleRetry(id, { errorCode, runAfter, now }): Promise<boolean> {
       return fromRunning(id, { status: 'retry_wait', ...errorOf(errorCode), runAfter, updatedAt: now });
     },
+    async setOutcome(id, { fileId, result, now }): Promise<boolean> {
+      return db.transaction((tx) => {
+        if (tx.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined) return false;
+        return fromRunning(id, { fileId, result, updatedAt: now });
+      });
+    },
+    async holdLane({ types, lane, until, now }): Promise<number> {
+      if (types.length === 0) return 0;
+      return db
+        .update(job)
+        .set({ status: 'retry_wait', runAfter: until, updatedAt: now })
+        .where(and(inArray(job.type, [...types]), inLane(lane), isWaiting, or(isNull(job.runAfter), lt(job.runAfter, until))))
+        .run().changes;
+    },
     async release(id, now): Promise<boolean> {
       return fromRunning(id, {
         status: 'queued',
@@ -234,7 +255,7 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
     async retry({ id, now, excludeTypes }): Promise<number> {
       return db.transaction((tx) => {
         const candidates = tx
-          .select({ id: job.id, dedupeKey: job.dedupeKey })
+          .select({ id: job.id, type: job.type, dedupeKey: job.dedupeKey })
           .from(job)
           .where(
             and(
@@ -251,7 +272,18 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
           // An earlier candidate of this loop holds the key once it is requeued.
           if (c.dedupeKey !== null && keyHeld(tx, c.dedupeKey)) continue;
           tx.update(job)
-            .set({ status: 'queued', attempt: 0, ...errorOf(null), runAfter: null, startedAt: null, finishedAt: null, updatedAt: now })
+            .set({
+              status: 'queued',
+              attempt: 0,
+              ...errorOf(null),
+              runAfter: null,
+              startedAt: null,
+              finishedAt: null,
+              result: null,
+              // A download produces its file anew; an earlier run's file is no longer this job's.
+              ...(c.type === FILE_DOWNLOAD_JOB ? { fileId: null } : {}),
+              updatedAt: now,
+            })
             .where(eq(job.id, c.id))
             .run();
           requeued++;
@@ -295,27 +327,33 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
             .offset(offset)
             .all();
           const total = tx.select({ n: count() }).from(job).where(where).get()?.n ?? 0;
-          const items = rows.map(({ job: row, fileName, generationProviderName, generationModel }): JobView => ({
-            ...(row.type === IMAGE_GENERATE_JOB
-              ? { providerName: generationProviderName, model: generationModel }
-              : analysisJobFields(JSON.parse(row.payload) as unknown)),
-            id: row.id,
-            type: row.type,
-            status: row.status,
-            attempt: row.attempt,
-            fileId: row.fileId,
-            fileName,
-            errorCode: errorCodeOf(row.errorCode),
-            errorMessage: row.errorMessage,
-            createdAt: row.createdAt,
-            startedAt: row.startedAt,
-            finishedAt: row.finishedAt,
-            runAfter: row.runAfter,
-            providerId: row.providerId,
-            url: null,
-            host: null,
-            result: null,
-          }));
+          const items = rows.map(({ job: row, fileName, generationProviderName, generationModel }): JobView => {
+            const payload = JSON.parse(row.payload) as unknown;
+            const download = row.type === FILE_DOWNLOAD_JOB;
+            return {
+              ...(row.type === IMAGE_GENERATE_JOB
+                ? { providerName: generationProviderName, model: generationModel }
+                : download
+                  ? { providerName: null, model: null }
+                  : analysisJobFields(payload)),
+              id: row.id,
+              type: row.type,
+              status: row.status,
+              attempt: row.attempt,
+              fileId: row.fileId,
+              fileName,
+              errorCode: errorCodeOf(row.errorCode),
+              errorMessage: row.errorMessage,
+              createdAt: row.createdAt,
+              startedAt: row.startedAt,
+              finishedAt: row.finishedAt,
+              runAfter: row.runAfter,
+              // A download's lane is its host, not a provider.
+              providerId: download ? null : row.providerId,
+              ...(download ? downloadJobFields(payload) : { url: null, host: null }),
+              result: resultOf(row.result),
+            };
+          });
           return { items, total };
         },
         { behavior: 'deferred' },

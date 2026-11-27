@@ -1,10 +1,13 @@
 import {
   ACTIVE_JOB_STATUSES,
+  FILE_DOWNLOAD_JOB,
   FINISHED_JOB_STATUSES,
   JOB_ERROR_MESSAGES,
   JobStatusSchema,
   analysisJobFields,
+  downloadJobFields,
   type JobErrorCode,
+  type JobResult,
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
@@ -35,6 +38,8 @@ export function restoreInPlace<T extends object>(rows: T[]): () => void {
 export class InMemoryJobRepository implements JobRepository {
   /** Stored rows; callers may inspect them. Every method returns copies. */
   readonly rows: Job[] = [];
+  /** The stored `result` column by job id; a job without an entry has null. */
+  readonly results = new Map<string, JobResult>();
 
   /**
    * `fileName(id)` supplies the original name of a job's file for `list`. With `fileState`, `enqueue`
@@ -171,6 +176,23 @@ export class InMemoryJobRepository implements JobRepository {
     return this.fromRunning(id, { status: 'retry_wait', ...errorOf(r.errorCode), runAfter: r.runAfter, updatedAt: r.now });
   }
 
+  async setOutcome(id: string, r: { fileId: string; result: JobResult | null; now: string }): Promise<boolean> {
+    if (this.fileState(r.fileId) === 'unknown') return false;
+    if (!this.fromRunning(id, { fileId: r.fileId, updatedAt: r.now })) return false;
+    if (r.result === null) this.results.delete(id);
+    else this.results.set(id, r.result);
+    return true;
+  }
+
+  async holdLane(r: { types: readonly string[]; lane: string | null; until: string; now: string }): Promise<number> {
+    const held = this.rows.filter(
+      (row) =>
+        r.types.includes(row.type) && row.lane === r.lane && isWaiting(row.status) && (row.runAfter === null || row.runAfter < r.until),
+    );
+    for (const row of held) Object.assign(row, { status: 'retry_wait', runAfter: r.until, updatedAt: r.now });
+    return held.length;
+  }
+
   async release(id: string, now: string): Promise<boolean> {
     const row = this.rows.find((r) => r.id === id);
     return this.fromRunning(id, { status: 'queued', attempt: Math.max((row?.attempt ?? 0) - 1, 0), startedAt: null, updatedAt: now });
@@ -200,6 +222,8 @@ export class InMemoryJobRepository implements JobRepository {
     for (const row of candidates) {
       if (row.dedupeKey !== null && this.keyHeld(row.dedupeKey)) continue;
       Object.assign(row, { status: 'queued', attempt: 0, ...errorOf(null), runAfter: null, startedAt: null, finishedAt: null, updatedAt: now });
+      if (row.type === FILE_DOWNLOAD_JOB) row.fileId = null;
+      this.results.delete(row.id);
       n++;
     }
     return n;
@@ -209,6 +233,7 @@ export class InMemoryJobRepository implements JobRepository {
     const before = this.rows.length;
     const kept = this.rows.filter((r) => !(FINISHED_JOB_STATUSES as readonly JobStatus[]).includes(r.status));
     this.rows.splice(0, this.rows.length, ...kept);
+    for (const id of [...this.results.keys()]) if (!kept.some((r) => r.id === id)) this.results.delete(id);
     return before - kept.length;
   }
 
@@ -222,9 +247,10 @@ export class InMemoryJobRepository implements JobRepository {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
       .sort((a, b) => oldestFirst(b, a));
-    const items = matching.slice(q.offset, q.offset + q.limit).map(
-      (r): JobView => ({
-        ...analysisJobFields(r.payload),
+    const items = matching.slice(q.offset, q.offset + q.limit).map((r): JobView => {
+      const download = r.type === FILE_DOWNLOAD_JOB;
+      return {
+        ...(download ? { providerName: null, model: null } : analysisJobFields(r.payload)),
         id: r.id,
         type: r.type,
         status: r.status,
@@ -237,12 +263,12 @@ export class InMemoryJobRepository implements JobRepository {
         startedAt: r.startedAt,
         finishedAt: r.finishedAt,
         runAfter: r.runAfter,
-        providerId: r.lane,
-        url: null,
-        host: null,
-        result: null,
-      }),
-    );
+        // A download's lane is its host, not a provider.
+        providerId: download ? null : r.lane,
+        ...(download ? downloadJobFields(r.payload) : { url: null, host: null }),
+        result: this.results.get(r.id) ?? null,
+      };
+    });
     return { items, total: matching.length };
   }
 

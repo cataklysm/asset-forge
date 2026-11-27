@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB } from '@assetforge/contracts';
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, MAX_FILE_ORIGINS } from '@assetforge/contracts';
 import type {
   AnalysisPreview,
   AnalysisTarget,
@@ -13,6 +13,7 @@ import type {
   AssetType,
   FileKind,
   FileList,
+  FileOrigin,
   FileRecord,
   ImportStatus,
   MatchedTag,
@@ -68,6 +69,7 @@ import type {
   WorkflowTemplateRepository,
   FileMove,
   FileMoveRepository,
+  FileOriginRepository,
   FilePlacement,
   FileQuery,
   FileRepository,
@@ -441,6 +443,7 @@ class InMemoryFiles implements FileRepository {
     private readonly covers: CoverChoices,
     private readonly tags: InMemoryTags,
     private readonly proposals: ProposalRows,
+    private readonly origins: InMemoryFileOrigins,
   ) {}
 
   /** Set by the database: the name of an asset, for `trashedAssetName`. */
@@ -506,7 +509,11 @@ class InMemoryFiles implements FileRepository {
     mimeType: string;
     importedAt: string;
     kind: FileKind;
+    origin?: { id: string; url: string };
   }): Promise<void> {
+    // Checked before anything is written, as the rolled-back transaction would leave nothing.
+    if (r.origin !== undefined && this.origins.rows.has(r.origin.id)) throw new Error('UNIQUE constraint failed: file_origin.id');
+    if (r.origin !== undefined) this.origins.rows.set(r.origin.id, { id: r.origin.id, fileId: r.id, url: r.origin.url, createdAt: r.importedAt });
     this.records.set(r.id, {
       id: r.id,
       storageId: r.storageId,
@@ -532,6 +539,21 @@ class InMemoryFiles implements FileRepository {
       trashedAssetName: null,
       trashedRole: null,
     });
+  }
+
+  async deletePending(id: string): Promise<boolean> {
+    if (this.records.get(id)?.status !== 'pending') return false;
+    this.records.delete(id);
+    this.origins.removeOfFile(id);
+    return true;
+  }
+
+  async listPendingDownloadIds(): Promise<string[]> {
+    const carrying = new Set([...this.origins.rows.values()].map((o) => o.fileId));
+    return [...this.records.values()]
+      .filter((r) => r.status === 'pending' && carrying.has(r.id))
+      .map((r) => r.id)
+      .sort();
   }
 
   async markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void> {
@@ -607,6 +629,7 @@ class InMemoryFiles implements FileRepository {
     if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
     this.onPurge(id);
     this.records.delete(id);
+    this.origins.removeOfFile(id);
     if (rec.deletedAt !== null) this.purged.add(id);
     return true;
   }
@@ -1411,6 +1434,58 @@ class InMemoryAssetSources implements AssetSourceRepository {
   }
 }
 
+/** Origins by id; one URL per file and at most MAX_FILE_ORIGINS, like the database. Rows go with their file. */
+class InMemoryFileOrigins implements FileOriginRepository {
+  readonly rows = new Map<string, FileOrigin & { fileId: string }>();
+  /** Set by the database: the file records, for the status of the file carrying an origin. */
+  records: Map<string, FileRecord> = new Map();
+
+  removeOfFile(fileId: string): void {
+    for (const [id, row] of this.rows) if (row.fileId === fileId) this.rows.delete(id);
+  }
+
+  private ofFile(fileId: string): (FileOrigin & { fileId: string })[] {
+    return [...this.rows.values()].filter((r) => r.fileId === fileId);
+  }
+
+  /** Complete files (trash included) carrying the URL, oldest import first, then id. */
+  private completeFilesWith(url: string): FileRecord[] {
+    return [...this.rows.values()]
+      .filter((o) => o.url === url)
+      .map((o) => this.records.get(o.fileId))
+      .filter((f): f is FileRecord => f !== undefined && f.status === 'complete')
+      .sort((a, b) => (a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  async listByFile(fileId: string): Promise<FileOrigin[]> {
+    return this.ofFile(fileId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map(({ id, url, createdAt }) => ({ id, url, createdAt }));
+  }
+
+  async get(id: string): Promise<(FileOrigin & { fileId: string }) | null> {
+    const row = this.rows.get(id);
+    return row === undefined ? null : { ...row };
+  }
+
+  async findCompleteFileByUrl(url: string): Promise<string | null> {
+    return this.completeFilesWith(url)[0]?.id ?? null;
+  }
+
+  async knownUrls(urls: readonly string[]): Promise<Set<string>> {
+    return new Set(urls.filter((url) => this.completeFilesWith(url).length > 0));
+  }
+
+  async insert(row: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean> {
+    const existing = this.ofFile(row.fileId);
+    if (existing.length >= MAX_FILE_ORIGINS || existing.some((r) => r.url === row.url)) return false;
+    if (!this.records.has(row.fileId)) throw new Error('FOREIGN KEY constraint failed');
+    if (this.rows.has(row.id)) throw new Error('UNIQUE constraint failed: file_origin.id');
+    this.rows.set(row.id, { ...row });
+    return true;
+  }
+}
+
 export class InMemoryDatabase implements WorkspaceDatabase {
   readonly meta = new InMemoryMeta();
   readonly storages = new InMemoryStorages();
@@ -1418,7 +1493,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly tags = new InMemoryTags();
   readonly assetSources = new InMemoryAssetSources();
   private readonly proposals = new ProposalRows();
-  readonly files = new InMemoryFiles(this.covers, this.tags, this.proposals);
+  readonly fileOrigins = new InMemoryFileOrigins();
+  readonly files = new InMemoryFiles(this.covers, this.tags, this.proposals, this.fileOrigins);
   readonly fileMoves = new InMemoryFileMoves(this.files);
   readonly assetTypes = new InMemoryAssetTypes();
   private readonly links = new AssignmentRows();
@@ -1451,6 +1527,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   constructor() {
     this.tags.files = this.files;
     this.tags.proposals = this.proposals;
+    this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     // The purge transaction: tags, analysis, proposal and jobs of the file go with it.

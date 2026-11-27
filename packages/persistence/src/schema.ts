@@ -211,6 +211,20 @@ export const file = sqliteTable(
   ],
 );
 
+/** Web addresses a file was downloaded from (URL import); at most MAX_FILE_ORIGINS per file, gone with the file. */
+export const fileOrigin = sqliteTable(
+  'file_origin',
+  {
+    id: text('id').primaryKey(),
+    fileId: text('file_id')
+      .notNull()
+      .references(() => file.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('file_origin_file_id_url_unique').on(t.fileId, t.url), index('file_origin_url_idx').on(t.url)],
+);
+
 export const fileMove = sqliteTable(
   'file_move',
   {
@@ -427,6 +441,8 @@ export const job = sqliteTable(
     startedAt: text('started_at'),
     finishedAt: text('finished_at'),
     updatedAt: text('updated_at').notNull(),
+    /** What a succeeded job produced besides its file (`JobResult`); null on an ordinary result. */
+    result: text('result'),
   },
   (t) => [
     index('job_claim_idx').on(t.status, t.resourceClass, t.createdAt, t.id),

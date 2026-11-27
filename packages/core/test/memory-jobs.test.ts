@@ -274,3 +274,67 @@ describe('InMemoryJobRepository settled hooks and retry exclusions', () => {
     expect(await repo.retry({ id: 'g', now: LATER })).toBe(1);
   });
 });
+
+describe('InMemoryJobRepository download jobs', () => {
+  const DL = 'file.download';
+  const UNTIL = '2026-11-26T10:30:00.000Z';
+  const download = (id: string, url: string, type = DL): NewJob => ({
+    id,
+    type,
+    resourceClass: 'io',
+    fileId: null,
+    lane: new URL(url).host,
+    payload: { v: 1, url, target: null, skipDuplicates: true },
+    dedupeKey: null,
+  });
+  const claimIo = (repo: InMemoryJobRepository, now: string) => repo.claimNext({ resourceClass: 'io', types: [DL], now });
+
+  it('setOutcome sets file and result of a running job only and list shows them', async () => {
+    const repo = new InMemoryJobRepository(
+      (id) => (id === 'f1' ? 'Pump.png' : null),
+      (id) => (id === 'f1' ? 'live' : 'unknown'),
+    );
+    await repo.enqueue({ jobs: [download('d1', 'https://example.org/a.png')], now: T0 });
+    expect(await repo.setOutcome('d1', { fileId: 'f1', result: 'already_present', now: T1 })).toBe(false);
+    await claimIo(repo, T1);
+    expect(await repo.setOutcome('d1', { fileId: 'nope', result: null, now: T1 })).toBe(false);
+    expect(await repo.setOutcome('d1', { fileId: 'f1', result: 'already_present', now: T2 })).toBe(true);
+    expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({
+      fileId: 'f1',
+      fileName: 'Pump.png',
+      result: 'already_present',
+      providerId: null,
+      providerName: null,
+      model: null,
+      host: 'example.org',
+      url: 'https://example.org/a.png',
+    });
+    await repo.finish('d1', { status: 'cancelled', errorCode: null, now: T2 });
+    expect(await repo.retry({ id: 'd1', now: LATER })).toBe(1);
+    expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({ fileId: null, result: null });
+  });
+
+  it('holdLane moves the waiting jobs of a lane that would run earlier', async () => {
+    const repo = await repoWith([
+      download('a1', 'https://a/1'),
+      download('a2', 'https://a/2'),
+      download('b1', 'https://b/1'),
+      download('a3', 'https://a/3'),
+      download('a4', 'https://a/4'),
+      download('o1', 'https://a/5', 'other.type'),
+    ]);
+    setStatus(repo, 'a3', 'running');
+    setStatus(repo, 'a4', 'retry_wait', LATER);
+    setStatus(repo, 'a2', 'retry_wait', T2);
+    expect(await repo.holdLane({ types: [DL], lane: 'a', until: UNTIL, now: T2 })).toBe(2);
+    expect(row(repo, 'a1')).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 0, errorCode: null, updatedAt: T2 });
+    expect(row(repo, 'a2')).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 2, errorCode: 'provider_timeout' });
+    expect(row(repo, 'b1')).toMatchObject({ status: 'queued' });
+    expect(row(repo, 'a3')).toMatchObject({ status: 'running' });
+    expect(row(repo, 'a4')).toMatchObject({ runAfter: LATER });
+    expect(row(repo, 'o1')).toMatchObject({ status: 'queued' });
+    expect((await claimIo(repo, T2))?.id).toBe('b1');
+    expect(await claimIo(repo, T2)).toBeNull();
+    expect((await claimIo(repo, UNTIL))?.id).toBe('a1');
+  });
+});

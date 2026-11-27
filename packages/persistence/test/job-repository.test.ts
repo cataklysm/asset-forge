@@ -791,3 +791,104 @@ describe('job lanes', () => {
     expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', lane: 'a', payload: { n: 1 } });
   });
 });
+
+describe('download jobs', () => {
+  const DL = 'file.download';
+  const LATER = '2026-01-01T01:00:00.000Z';
+  const UNTIL = '2026-01-01T00:30:00.000Z';
+  const download = (n: number, url: string, o: Partial<NewJob> = {}): NewJob =>
+    newJob(n, {
+      type: DL,
+      resourceClass: 'io',
+      lane: new URL(url).host,
+      payload: { v: 1, url, target: null, skipDuplicates: true },
+      ...o,
+    });
+  const claimIo = (now: string) => db.jobs.claimNext({ resourceClass: 'io', types: [DL], now });
+
+  test('setOutcome on a running job sets the file and the result, visible in list', async () => {
+    await enqueue(T0, download(10, 'https://example.org/a.png'));
+    expect(await db.jobs.setOutcome(uuid(10), { fileId: FILE_ID, result: 'already_present', now: T1 })).toBe(false);
+    expect((await claimIo(T1))?.id).toBe(uuid(10));
+    expect(await db.jobs.setOutcome(uuid(10), { fileId: uuid(999), result: null, now: T1 })).toBe(false);
+    expect(await db.jobs.setOutcome(uuid(10), { fileId: FILE_ID, result: 'already_present', now: T2 })).toBe(true);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'running', fileId: FILE_ID, updatedAt: T2 });
+    const { items } = await db.jobs.list({ limit: 10, offset: 0 });
+    expect(items[0]).toMatchObject({ id: uuid(10), fileId: FILE_ID, fileName: 'Pump.png', result: 'already_present' });
+  });
+
+  test('list answers host and url of a download job and no provider', async () => {
+    await enqueue(T0, download(10, 'https://Example.org:8443/a.png'));
+    await enqueue(T1, newJob(11, { lane: 'p1', payload: { version: 2, model: 'm2', mode: 'apply' } }));
+    const { items } = await db.jobs.list({ limit: 10, offset: 0 });
+    expect(items.map((i) => [i.id, i.providerId, i.providerName, i.model, i.host, i.url, i.result])).toEqual([
+      [uuid(11), 'p1', null, 'm2', null, null, null],
+      [uuid(10), null, null, null, 'example.org:8443', 'https://Example.org:8443/a.png', null],
+    ]);
+  });
+
+  test('retry of a download job clears the result and the file', async () => {
+    await enqueue(T0, download(10, 'https://example.org/a.png'));
+    await claimIo(T0);
+    await db.jobs.setOutcome(uuid(10), { fileId: FILE_ID, result: 'already_present', now: T1 });
+    await db.jobs.finish(uuid(10), { status: 'cancelled', errorCode: null, now: T1 });
+    expect(await db.jobs.retry({ id: uuid(10), now: T2 })).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', fileId: null });
+    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: null });
+  });
+
+  test('retry of another job keeps its file', async () => {
+    await enqueue(T0, newJob(10, { fileId: FILE_ID, resourceClass: 'remote_api' }));
+    await claim(T0, 'remote_api');
+    await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1 });
+    expect(await db.jobs.retry({ id: uuid(10), now: T2 })).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', fileId: FILE_ID });
+  });
+
+  test('holdLane moves the waiting jobs of one lane until a time and claimNext skips them until then', async () => {
+    await enqueue(T0, download(10, 'https://a/1'));
+    await enqueue(T1, download(11, 'https://a/2'));
+    await enqueue(T2, download(12, 'https://b/1'));
+    await enqueue(T3, download(13, 'https://a/3'));
+    await enqueue(T3, download(14, 'https://a/4'));
+    await enqueue(T3, download(15, 'https://a/5', { type: 'other.type' }));
+    // 13 runs, 14 already waits longer than the hold.
+    handle.prepare("update job set status = 'running', attempt = 1 where id = ?").run(uuid(13));
+    handle
+      .prepare("update job set status = 'retry_wait', run_after = ?, attempt = 2, error_code = 'provider_timeout' where id = ?")
+      .run(LATER, uuid(14));
+    // 11 waits shorter than the hold, with an error.
+    handle
+      .prepare("update job set status = 'retry_wait', run_after = ?, attempt = 1, error_code = 'provider_timeout', error_message = ? where id = ?")
+      .run(T3, JOB_ERROR_MESSAGES.provider_timeout, uuid(11));
+
+    expect(await db.jobs.holdLane({ types: [DL], lane: 'a', until: UNTIL, now: T9 })).toBe(2);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 0, errorCode: null, updatedAt: T9 });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({
+      status: 'retry_wait',
+      runAfter: UNTIL,
+      attempt: 1,
+      errorCode: 'provider_timeout',
+      errorMessage: JOB_ERROR_MESSAGES.provider_timeout,
+    });
+    expect(await db.jobs.get(uuid(12))).toMatchObject({ status: 'queued', runAfter: null });
+    expect(await db.jobs.get(uuid(13))).toMatchObject({ status: 'running' });
+    expect(await db.jobs.get(uuid(14))).toMatchObject({ status: 'retry_wait', runAfter: LATER });
+    expect(await db.jobs.get(uuid(15))).toMatchObject({ status: 'queued' });
+
+    expect((await claimIo(T9))?.id).toBe(uuid(12));
+    expect(await claimIo(T9)).toBeNull();
+    expect((await claimIo(UNTIL))?.id).toBe(uuid(10));
+    expect((await claimIo(UNTIL))?.id).toBe(uuid(11));
+    expect(await claimIo(UNTIL)).toBeNull();
+  });
+
+  test('holdLane with lane null holds the jobs without a lane only', async () => {
+    await enqueue(T0, download(10, 'https://a/1', { lane: null }));
+    await enqueue(T1, download(11, 'https://a/2'));
+    expect(await db.jobs.holdLane({ types: [DL], lane: null, until: UNTIL, now: T2 })).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'retry_wait', runAfter: UNTIL });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'queued' });
+    expect(await db.jobs.holdLane({ types: [], lane: 'a', until: UNTIL, now: T2 })).toBe(0);
+  });
+});
