@@ -382,20 +382,21 @@ it('an empty list opens the editor for a new entry', async () => {
 
 // --- OpenAI-compatible kind and request options ---
 
-const OPTION_FIELDS = ['Temperature', 'Thinking', 'Max. answer tokens', 'Extra parameters'];
+const OPTION_FIELDS = ['Temperature', 'Thinking', 'Max. answer tokens', 'Extra parameters', 'Parallel requests'];
 const TOOLTIPS: Record<string, string> = {
   Temperature: '0 gives the most repeatable answers',
   Thinking:
     'Sent as think (Ollama) or chat_template_kwargs.enable_thinking (OpenAI-compatible). For other models leave Server default and use Extra parameters',
   'Max. answer tokens': 'Empty: the server decides',
   'Extra parameters': 'A JSON object merged into every request of this provider',
+  'Parallel requests': 'Analysis requests sent at the same time',
 };
 const NOT_AN_OBJECT = 'The extra parameters are not a JSON object';
 const RESPONSE_FORMAT = 'The extra parameters must not set response_format';
 
 const TUNED = providerView({
   name: 'Tuned',
-  options: { temperature: 0.7, thinking: 'on', maxTokens: 512, extra: '{"top_k":40}' },
+  options: { temperature: 0.7, thinking: 'on', maxTokens: 512, extra: '{"top_k":40}', parallelRequests: 6 },
 });
 const VLLM = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: null, promptModel: null });
 
@@ -443,6 +444,8 @@ it('the option fields carry their explanation only as tooltips', async () => {
   const temperature = field('Temperature');
   expect([temperature.type, temperature.min, temperature.max, temperature.step]).toEqual(['number', '0', '2', '0.1']);
   expect(field('Max. answer tokens').type).toBe('number');
+  const parallel = field('Parallel requests');
+  expect([parallel.type, parallel.min, parallel.max, parallel.step, parallel.value]).toEqual(['number', '1', '64', '1', '1']);
   const extra = screen.getByLabelText('Extra parameters') as HTMLTextAreaElement;
   expect(extra.tagName).toBe('TEXTAREA');
   expect(extra.rows).toBe(4);
@@ -460,6 +463,38 @@ it('an existing entry shows its stored options', async () => {
   expect(select('Thinking').value).toBe('on');
   expect(field('Max. answer tokens').value).toBe('512');
   expect(field('Extra parameters').value).toBe('{"top_k":40}');
+  expect(field('Parallel requests').value).toBe('6');
+});
+
+it('Save sends a changed parallel requests value and keeps it after the save', async () => {
+  const user = userEvent.setup();
+  const { api, fake } = install({ providers: [TUNED, VLLM] });
+  renderSection();
+  await loaded();
+  await retype(user, 'Parallel requests', '12');
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect((callsOf(api, 'providers:save')[0]!.request as SaveRequest).options?.parallelRequests).toBe(12);
+  await waitFor(() => expect(fake.state.providers[0]!.options?.parallelRequests).toBe(12));
+  expect(field('Parallel requests').value).toBe('12');
+  await user.click(within(list()).getByRole('button', { name: 'vLLM' }));
+  expect(field('Parallel requests').value).toBe('1');
+  await retype(user, 'Parallel requests', '64');
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(2));
+  expect((callsOf(api, 'providers:save')[1]!.request as SaveRequest).options?.parallelRequests).toBe(64);
+});
+
+it('a Venice entry shows no parallel requests field', async () => {
+  const user = userEvent.setup();
+  const venice = providerView({ kind: 'venice', name: 'Venice', baseUrl: VENICE_DEFAULT_BASE_URL, taggingModel: null, promptModel: null, options: null });
+  install({ providers: [LOCAL, venice] });
+  renderSection();
+  await loaded();
+  expect(screen.getByLabelText('Parallel requests')).toBeTruthy();
+  await user.click(within(list()).getByRole('button', { name: 'Venice' }));
+  expect(screen.queryByLabelText('Parallel requests')).toBeNull();
+  expect(screen.queryByText('Parallel requests')).toBeNull();
 });
 
 it('Save sends the typed options, and an empty token field as null', async () => {
@@ -478,6 +513,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     thinking: 'off',
     maxTokens: 256,
     extra: '{"top_p":0.9}',
+    parallelRequests: 6,
   });
   await waitFor(() => expect(fake.state.providers[0]!.options?.maxTokens).toBe(256));
   await retype(user, 'Max. answer tokens', '');
@@ -488,6 +524,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     thinking: 'off',
     maxTokens: null,
     extra: '{"top_p":0.9}',
+    parallelRequests: 6,
   });
 });
 
@@ -520,6 +557,10 @@ it.each([
   ['Temperature', '3'],
   ['Max. answer tokens', '0'],
   ['Max. answer tokens', '1.5'],
+  ['Parallel requests', ''],
+  ['Parallel requests', '0'],
+  ['Parallel requests', '65'],
+  ['Parallel requests', '1.5'],
 ])('%s %j disables Save and marks the field invalid', async (name, text) => {
   const user = userEvent.setup();
   install();

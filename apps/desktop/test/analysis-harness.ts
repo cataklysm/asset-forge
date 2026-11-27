@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
-import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderView } from '@assetforge/contracts';
+import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderOptions, ProviderView } from '@assetforge/contracts';
 import type { GenerationImageSource, ImageProbe, ModelImageSource, RemoteFileSource, WorkspaceManager } from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
@@ -41,6 +41,8 @@ export interface Harness {
     taggingModel?: string | null;
     promptModel?: string | null;
     timeoutSeconds?: number;
+    /** Absent keeps the stored options (the defaults for a new entry). */
+    options?: ProviderOptions;
   }): Promise<ProviderView>;
   /** Saves a `venice` entry for a mock (its Venice endpoints live under `/api/v1`), like `provider`. */
   venice(o: { name?: string; url: string; apiKey?: string | null; timeoutSeconds?: number }): Promise<ProviderView>;
@@ -168,6 +170,7 @@ export async function createHarness(
         taggingModel: p.taggingModel ?? null,
         promptModel: p.promptModel ?? null,
         ...(p.apiKey === undefined ? {} : { apiKey: p.apiKey }),
+        ...(p.options === undefined ? {} : { options: p.options }),
       });
       saved.set(view.name, view.id);
       return view;

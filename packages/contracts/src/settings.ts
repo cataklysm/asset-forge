@@ -14,15 +14,24 @@ export type Thinking = z.infer<typeof ThinkingSchema>;
 
 export const PROVIDER_EXTRA_MAX = 4000;
 
+/** Analysis requests a vision entry gets at the same time. */
+export const PARALLEL_REQUESTS_MIN = 1;
+export const PARALLEL_REQUESTS_MAX = 64;
+export const PARALLEL_REQUESTS_DEFAULT = 1;
+
+export const ParallelRequestsSchema = z.number().int().min(PARALLEL_REQUESTS_MIN).max(PARALLEL_REQUESTS_MAX);
+
 /**
  * The request options of a vision entry. `maxTokens` null is not sent; `extra` is the JSON text as
- * typed, empty or a JSON object (see `parseExtraParameters`).
+ * typed, empty or a JSON object (see `parseExtraParameters`). `parallelRequests` bounds the analysis jobs of the
+ * entry that run at once; it is never part of a request.
  */
 export const ProviderOptionsSchema = z.object({
   temperature: z.number().min(0).max(2),
   thinking: ThinkingSchema,
   maxTokens: z.number().int().min(1).max(100_000).nullable(),
   extra: z.string().max(PROVIDER_EXTRA_MAX),
+  parallelRequests: ParallelRequestsSchema,
 });
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
 
@@ -31,6 +40,7 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   thinking: 'default',
   maxTokens: null,
   extra: '',
+  parallelRequests: PARALLEL_REQUESTS_DEFAULT,
 });
 
 /** Top-level keys the extra parameters must not set, because the adapter owns them. */

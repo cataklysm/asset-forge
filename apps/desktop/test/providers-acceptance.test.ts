@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ANALYZE_FILE_JOB, type JobSummary, type ProviderView } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, DEFAULT_PROVIDER_OPTIONS, type JobSummary, type ProviderView } from '@assetforge/contracts';
 import { MOCK_MODEL, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import { createProviderStore } from '../src/main/provider-store.js';
+import { providerLaneLimit } from '../src/main/composition.js';
 import { createHarness, filesBelow, NONE_SKIPPED, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
+import { FakeCodec } from './fake-codec.js';
 
 const active = (s: JobSummary) => s.queued + s.running + s.waiting;
 const page = { limit: 100, offset: 0 };
@@ -314,5 +317,96 @@ describe('several vision providers', () => {
     const summary = await h.until((s) => s.succeeded === 1 && active(s) === 0);
     expect(summary.paused).toEqual([{ providerId: b.id, providerName: 'Renamed', kind: 'ollama', reason: 'provider_unauthorized' }]);
     expect(chats(mocks.a).filter((r) => r.headers['authorization'] === `Bearer ${TEST_KEY}`)).toHaveLength(1);
+  });
+});
+
+describe('parallel requests per vision provider', () => {
+  let h: Harness;
+  let mocks: Awaited<ReturnType<typeof startTwoMocks>> | undefined;
+
+  beforeEach(async () => {
+    h = await createHarness();
+  });
+  afterEach(async () => {
+    await h.close();
+    await mocks?.close();
+    mocks = undefined;
+  });
+
+  const chats = (mock: MockProvider) => mock.requests.filter((r) => r.path === '/api/chat');
+  const request = (fileIds: string[], providerId: string) => ({
+    target: { kind: 'files' as const, fileIds },
+    model: MOCK_MODEL,
+    mode: 'apply' as const,
+    force: true,
+    providerId,
+  });
+  const parallel = (parallelRequests: number) => ({ ...DEFAULT_PROVIDER_OPTIONS, parallelRequests });
+
+  it('answers the value of the vision entry for the analysis class and nothing for other classes and lanes', async () => {
+    const store = createProviderStore({ userData: h.userData, secrets: new FakeCodec(), env: {} });
+    const limit = providerLaneLimit(store);
+    const vision = store.save({
+      kind: 'openai',
+      name: 'vLLM',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      options: parallel(8),
+    });
+    const plain = store.save({ name: 'Ollama', baseUrl: 'http://127.0.0.1:2', timeoutSeconds: 120, taggingModel: null, promptModel: null });
+    const venice = store.save({
+      kind: 'venice',
+      name: 'Venice',
+      baseUrl: 'https://v.example.test/api/v1',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+    });
+    expect(limit('local_gpu', vision.id)).toBe(8);
+    expect(limit('local_gpu', plain.id)).toBe(1);
+    expect(limit('local_gpu', venice.id)).toBeUndefined();
+    expect(limit('local_gpu', randomUUID())).toBeUndefined();
+    expect(limit('local_gpu', null)).toBeUndefined();
+    expect(limit('remote_api', venice.id)).toBeUndefined();
+    expect(limit('remote_api', vision.id)).toBeUndefined();
+    expect(limit('io', vision.id)).toBeUndefined();
+    store.save({ id: vision.id, kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:1/v1', timeoutSeconds: 120, taggingModel: null, promptModel: null, options: parallel(2) });
+    expect(limit('local_gpu', vision.id)).toBe(2);
+  });
+
+  it('answers one request at a time for the environment entry', () => {
+    const store = createProviderStore({ userData: h.userData, secrets: new FakeCodec(), env: { ASSETFORGE_VISION_BASE_URL: 'http://127.0.0.1:11500' } });
+    expect(providerLaneLimit(store)('local_gpu', 'environment')).toBe(1);
+  });
+
+  it('starts waiting jobs after a save with a higher value and never aborts one after a lower value', async () => {
+    mocks = await startTwoMocks({ failuresA: Array(6).fill('hang') });
+    const a = await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Parallel', rootPath: join(h.base, 'workspace') });
+    await h.ok('analysis:enqueue', request(await h.importImages(6), a.id));
+    await h.until((s) => s.running === 1 && chats(mocks!.a).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await h.ok('jobs:summary', {})).running).toBe(1);
+
+    expect((await h.provider({ name: 'A', url: mocks.a.url, options: parallel(3) })).options?.parallelRequests).toBe(3);
+    await h.until((s) => s.running === 3 && s.queued === 3 && chats(mocks!.a).length === 3);
+
+    await h.provider({ name: 'A', url: mocks.a.url, options: parallel(2) });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await h.ok('jobs:summary', {})).toMatchObject({ running: 3, queued: 3, cancelled: 0, failed: 0 });
+    expect(chats(mocks.a)).toHaveLength(3);
+
+    for (const r of chats(mocks.a)) expect(JSON.stringify(r.body)).not.toContain('parallel');
+    for (const response of h.responses.filter((r) => r.includes('"items"'))) expect(response).not.toContain('parallel');
+    await h.ok('jobs:cancelAll', {});
+    await h.until((s) => s.running === 0);
+    await h.manager.close();
+    for (const file of await filesBelow(h.base)) {
+      if (file.path.endsWith('provider-settings.json')) continue;
+      expect(file.text, file.path).not.toContain('parallelRequests');
+    }
+    for (const line of h.logs) expect(line).not.toContain('parallel');
   });
 });

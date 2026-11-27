@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import {
   DEFAULT_PROVIDER_OPTIONS,
+  PARALLEL_REQUESTS_DEFAULT,
+  PARALLEL_REQUESTS_MAX,
+  PARALLEL_REQUESTS_MIN,
   PROVIDER_EXTRA_MAX,
   ProviderOptionsSchema,
   ProviderViewSchema,
@@ -32,7 +35,7 @@ describe('kinds and purposes', () => {
 
 describe('request options', () => {
   test('the defaults', () => {
-    expect(DEFAULT_PROVIDER_OPTIONS).toEqual({ temperature: 0, thinking: 'default', maxTokens: null, extra: '' });
+    expect(DEFAULT_PROVIDER_OPTIONS).toEqual({ temperature: 0, thinking: 'default', maxTokens: null, extra: '', parallelRequests: 1 });
     expect(ProviderOptionsSchema.safeParse(DEFAULT_PROVIDER_OPTIONS).success).toBe(true);
     expect(PROVIDER_EXTRA_MAX).toBe(4000);
   });
@@ -45,6 +48,17 @@ describe('request options', () => {
     for (const maxTokens of [0, 1.5, 100_001]) expect(ok({ maxTokens }), String(maxTokens)).toBe(false);
     expect(ok({ extra: 'x'.repeat(4001) })).toBe(false);
     expect(ok({ thinking: 'auto' })).toBe(false);
+  });
+
+  test('parallel requests are an integer from 1 to 64, default 1', () => {
+    expect(PARALLEL_REQUESTS_MIN).toBe(1);
+    expect(PARALLEL_REQUESTS_MAX).toBe(64);
+    expect(PARALLEL_REQUESTS_DEFAULT).toBe(1);
+    const ok = (parallelRequests: unknown) => ProviderOptionsSchema.safeParse({ ...DEFAULT_PROVIDER_OPTIONS, parallelRequests }).success;
+    for (const value of [1, 8, 64]) expect(ok(value), String(value)).toBe(true);
+    for (const value of [0, 65, 1.5, -1, Number.NaN, '4', null]) expect(ok(value), String(value)).toBe(false);
+    const { parallelRequests: _p, ...without } = DEFAULT_PROVIDER_OPTIONS;
+    expect(ProviderOptionsSchema.safeParse(without).success).toBe(false);
   });
 });
 

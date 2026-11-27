@@ -4,6 +4,8 @@ import {
   DEFAULT_PROVIDER_OPTIONS,
   JOB_ERROR_MESSAGES,
   MAX_PROVIDERS,
+  PARALLEL_REQUESTS_MAX,
+  PARALLEL_REQUESTS_MIN,
   PROVIDER_EXTRA_MAX,
   PROVIDER_NAME_MAX,
   VENICE_DEFAULT_BASE_URL,
@@ -45,6 +47,9 @@ import {
   NEW_PROVIDER_TITLE,
   NO_KEY_STORE_TITLE,
   OPENAI_BASE_URL_PLACEHOLDER,
+  PARALLEL_REQUESTS_INVALID,
+  PARALLEL_REQUESTS_LABEL,
+  PARALLEL_REQUESTS_TITLE,
   PROMPT_MODEL_TITLE,
   PROVIDER_KIND_LABEL,
   PROVIDER_KIND_LABELS,
@@ -101,6 +106,7 @@ interface Draft {
   /** Empty means not sent. */
   maxTokens: string;
   extra: string;
+  parallelRequests: string;
 }
 
 const KINDS: readonly ProviderKind[] = ['ollama', 'openai', 'venice'];
@@ -126,6 +132,7 @@ function draftOf(view: ProviderView | null): Draft {
     thinking: options.thinking,
     maxTokens: options.maxTokens === null ? '' : String(options.maxTokens),
     extra: options.extra,
+    parallelRequests: String(options.parallelRequests),
   };
 }
 
@@ -134,6 +141,13 @@ function timeoutOf(text: string): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
   const value = Number(text.trim());
   return value >= VISION_TIMEOUT_MIN_SECONDS && value <= VISION_TIMEOUT_MAX_SECONDS ? value : null;
+}
+
+/** The parallel requests, or null when they are not a whole number in range. */
+function parallelRequestsOf(text: string): number | null {
+  if (!/^\d+$/.test(text.trim())) return null;
+  const value = Number(text.trim());
+  return value >= PARALLEL_REQUESTS_MIN && value <= PARALLEL_REQUESTS_MAX ? value : null;
 }
 
 /** The temperature, or null when the text is empty, not a number (`0,5`) or outside 0–2. */
@@ -166,6 +180,7 @@ const optionsOf = (draft: Draft): ProviderOptions => ({
   thinking: draft.thinking,
   maxTokens: maxTokensOf(draft.maxTokens)!,
   extra: draft.extra,
+  parallelRequests: parallelRequestsOf(draft.parallelRequests)!,
 });
 
 /** Why the draft cannot be saved, or null when it can. */
@@ -176,6 +191,7 @@ function invalidReason(draft: Draft): string | null {
   if (isVisionKind(draft.kind)) {
     if (temperatureOf(draft.temperature) === null) return TEMPERATURE_INVALID;
     if (maxTokensOf(draft.maxTokens) === undefined) return MAX_TOKENS_INVALID;
+    if (parallelRequestsOf(draft.parallelRequests) === null) return PARALLEL_REQUESTS_INVALID;
     return extraMessageOf(draft);
   }
   return null;
@@ -568,6 +584,21 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
               disabled={locked}
               aria-invalid={maxTokensOf(draft.maxTokens) === undefined || undefined}
               onChange={(e) => update({ maxTokens: e.target.value })}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1" title={PARALLEL_REQUESTS_TITLE}>
+            <span className={LABEL}>{PARALLEL_REQUESTS_LABEL}</span>
+            <input
+              type="number"
+              className={`w-32 ${INPUT}`}
+              min={PARALLEL_REQUESTS_MIN}
+              max={PARALLEL_REQUESTS_MAX}
+              step={1}
+              value={draft.parallelRequests}
+              disabled={locked}
+              aria-invalid={parallelRequestsOf(draft.parallelRequests) === null || undefined}
+              onChange={(e) => update({ parallelRequests: e.target.value })}
             />
           </label>
 

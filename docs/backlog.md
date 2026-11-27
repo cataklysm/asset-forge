@@ -420,7 +420,8 @@ Deferred by design:
 - No other kind of analysis provider than Ollama-compatible and OpenAI-compatible (RunPod serverless API, native vendor APIs).
 - No automatic failover: the app never moves jobs or switches a provider by itself.
 - No starting, stopping or loading anything on a provider (pods, Ollama model load control).
-- No setting for parallel analyses per provider; each provider runs one at a time.
+- No parallel-requests setting in environment mode: its one entry is read-only and runs one analysis at a time.
+- With many parallel requests the media worker pool, which prepares the image of every analysis request, may become the bottleneck; its size is not configurable.
 - No moving of a running job or of single jobs picked from the list; a move is all waiting jobs of one provider.
 - No background polling of reachability; a state is checked when a dialog, the select or the settings ask.
 - No record of which entry produced a stored analysis; the stored model name stays the record.

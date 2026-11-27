@@ -68,6 +68,7 @@ function setup(o: {
   totals?: Partial<Record<ResourceClass, number>>;
   repo?: (fake: InMemoryJobRepository) => JobRepository;
   pause?: PauseGate;
+  laneLimit?: (resourceClass: ResourceClass, lane: string | null) => number | undefined;
 }) {
   let t = Date.parse('2026-01-01T00:00:00.000Z');
   const iso = () => new Date(t).toISOString();
@@ -93,6 +94,7 @@ function setup(o: {
     ...(o.limits ? { limits: o.limits } : {}),
     ...(o.totals ? { totals: o.totals } : {}),
     ...(o.pause ? { pause: o.pause } : {}),
+    ...(o.laneLimit ? { laneLimit: o.laneLimit } : {}),
     now: () => new Date(t),
     setTimer: (fn, ms) => {
       const timer = { fn, ms };
@@ -1454,5 +1456,121 @@ describe('lane hold', () => {
     expect(s.row(a1)).toMatchObject({ status: 'failed', attempt: MAX_ATTEMPTS, errorCode: 'download_throttled' });
     expect(s.row(a2)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0 });
     expect(s.timers.map((x) => x.ms)).toEqual([60_000]);
+  });
+});
+
+describe('limit per lane', () => {
+  const running = (s: { row(id: string): Job }, ids: string[]) => ids.filter((id) => s.row(id).status === 'running');
+
+  it('runs three jobs of lane a with an answer of 3 and one of lane b without an answer', async () => {
+    const gpu = controlled('local_gpu');
+    const asked: [ResourceClass, string | null][] = [];
+    const s = setup({
+      handlers: { gpu: gpu.handler },
+      laneLimit: (rc, lane) => {
+        asked.push([rc, lane]);
+        return lane === 'a' ? 3 : undefined;
+      },
+    });
+    const a = await s.enqueue('gpu', 'local_gpu', 4, 'a');
+    const b = await s.enqueue('gpu', 'local_gpu', 2, 'b');
+    await s.scheduler.start();
+    expect(running(s, a)).toEqual(a.slice(0, 3));
+    expect(running(s, b)).toEqual(b.slice(0, 1));
+    expect(asked.some(([rc, lane]) => rc === 'local_gpu' && lane === 'a')).toBe(true);
+  });
+
+  it('starts more after a raised answer and a wake, without a restart', async () => {
+    const gpu = controlled('local_gpu');
+    let limit = 1;
+    const s = setup({ handlers: { gpu: gpu.handler }, laneLimit: () => limit });
+    const a = await s.enqueue('gpu', 'local_gpu', 5, 'a');
+    await s.scheduler.start();
+    expect(running(s, a)).toHaveLength(1);
+    limit = 4;
+    s.scheduler.wake();
+    await flush();
+    expect(running(s, a)).toEqual(a.slice(0, 4));
+  });
+
+  it('lets running jobs finish after a lowered answer and starts none until below', async () => {
+    const gpu = controlled('local_gpu');
+    let limit = 4;
+    const s = setup({ handlers: { gpu: gpu.handler }, laneLimit: () => limit });
+    const a = await s.enqueue('gpu', 'local_gpu', 6, 'a');
+    await s.scheduler.start();
+    expect(running(s, a)).toHaveLength(4);
+    limit = 2;
+    s.scheduler.wake();
+    await flush();
+    expect(running(s, a)).toHaveLength(4);
+    expect(gpu.runs.every((r) => !r.signal.aborted)).toBe(true);
+
+    gpu.runOf(a[0]!).resolve();
+    await flush();
+    expect(running(s, a)).toEqual(a.slice(1, 4));
+    gpu.runOf(a[1]!).resolve();
+    await flush();
+    expect(running(s, a)).toEqual(a.slice(2, 4));
+    gpu.runOf(a[2]!).resolve();
+    await flush();
+    expect(running(s, a)).toEqual([a[3], a[4]]);
+    expect(s.row(a[5]!).status).toBe('queued');
+  });
+
+  it.each([
+    ['0', () => 0],
+    ['2.5', () => 2.5],
+    ['NaN', () => Number.NaN],
+    ['Infinity', () => Number.POSITIVE_INFINITY],
+    ['a throw', () => {
+      throw new Error('broken');
+    }],
+  ])('falls back to the class limit for an answer of %s', async (_name, answer) => {
+    const gpu = controlled('local_gpu');
+    const s = setup({ handlers: { gpu: gpu.handler }, limits: { ...DEFAULT_LIMITS, local_gpu: 2 }, laneLimit: answer });
+    const a = await s.enqueue('gpu', 'local_gpu', 4, 'a');
+    await s.scheduler.start();
+    expect(running(s, a)).toEqual(a.slice(0, 2));
+    gpu.runOf(a[0]!).resolve();
+    await flush();
+    expect(running(s, a)).toEqual(a.slice(1, 3));
+  });
+
+  it('logs a throwing answer with a fixed message', async () => {
+    const gpu = controlled('local_gpu');
+    const failure = new Error('broken');
+    const s = setup({
+      handlers: { gpu: gpu.handler },
+      laneLimit: () => {
+        throw failure;
+      },
+    });
+    await s.enqueue('gpu', 'local_gpu', 1, 'a');
+    await s.scheduler.start();
+    expect(s.logged.length).toBeGreaterThan(0);
+    expect(s.logged.every((l) => l.message === 'Job lane limit failed' && l.cause === failure)).toBe(true);
+  });
+
+  it('claims nothing from a paused lane with a high answer and starts up to it after resume', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    const s = setup({ handlers: { gpu: gpu.handler }, pause, laneLimit: () => 8 });
+    const a = await s.enqueue('gpu', 'local_gpu', 10, 'a');
+    pause.record('local_gpu', 'a', 'provider_unauthorized');
+    await s.scheduler.start();
+    expect(running(s, a)).toHaveLength(0);
+    pause.resume('local_gpu', 'a');
+    s.scheduler.wake();
+    await flush();
+    expect(running(s, a)).toEqual(a.slice(0, 8));
+  });
+
+  it('keeps the class total over lane answers', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, totals: { io: 4 }, laneLimit: () => 10 });
+    const a = await s.enqueue('dl', 'io', 6, 'a');
+    await s.scheduler.start();
+    expect(running(s, a)).toHaveLength(4);
   });
 });

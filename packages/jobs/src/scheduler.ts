@@ -34,6 +34,11 @@ export interface SchedulerOptions {
   log?(message: string, cause: unknown): void;
   /** Outlives the scheduler: a lane it reports paused claims nothing, and every run end is recorded in it. */
   pause?: PauseGate;
+  /**
+   * The limit of one lane of a class, asked before every claim. An integer of at least 1 replaces the class limit
+   * for that lane; any other answer, or a throw, keeps the class limit. Class totals still apply.
+   */
+  laneLimit?(resourceClass: ResourceClass, lane: string | null): number | undefined;
 }
 
 interface ActiveRun {
@@ -51,7 +56,7 @@ type Outcome = { ok: true } | { ok: false; error: unknown };
 /**
  * Event-driven job scheduler: it looks for work on `start`, on `wake`, when a job ends and when the timer for the
  * earliest `run_after` fires. Claims first in, first out per resource class and lane, up to the class's limit in
- * every lane; jobs without a lane share the lane `null`.
+ * every lane (or the lane's own limit from `laneLimit`); jobs without a lane share the lane `null`.
  */
 export function createScheduler(options: SchedulerOptions): Scheduler {
   const { jobs, handlers } = options;
@@ -128,10 +133,23 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return n >= total;
   };
 
-  /** Lanes the class may not claim from: the paused ones and those already running the class's limit. */
+  /** The limit of one lane: the answer of `laneLimit` when it is an integer of at least 1, otherwise the class's. */
+  const limitOf = (rc: ResourceClass, lane: string | null): number => {
+    if (!options.laneLimit) return limits[rc];
+    let answer: unknown;
+    try {
+      answer = options.laneLimit(rc, lane);
+    } catch (cause) {
+      log('Job lane limit failed', cause);
+      return limits[rc];
+    }
+    return typeof answer === 'number' && Number.isInteger(answer) && answer >= 1 ? answer : limits[rc];
+  };
+
+  /** Lanes the class may not claim from: the paused ones and those already running their limit. */
   const excludedLanes = (rc: ResourceClass): (string | null)[] => {
     const excluded = new Set<string | null>(options.pause ? options.pause.paused(rc).map((p) => p.lane) : []);
-    for (const [lane, n] of runningOf(rc)) if (n >= limits[rc]) excluded.add(lane);
+    for (const [lane, n] of runningOf(rc)) if (n >= limitOf(rc, lane)) excluded.add(lane);
     return [...excluded];
   };
 

@@ -890,7 +890,7 @@ describe('provider store: resolve by kind', () => {
 const openai = (overrides: Partial<SaveProvider> = {}): SaveProvider =>
   input({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:1/v1', ...overrides });
 
-const CUSTOM = { temperature: 0.7, thinking: 'off', maxTokens: 512, extra: '{"top_p":0.9}' } as const;
+const CUSTOM = { temperature: 0.7, thinking: 'off', maxTokens: 512, extra: '{"top_p":0.9}', parallelRequests: 4 } as const;
 
 describe('provider store: version 4 and options', () => {
   const SECOND = '66666666-7777-4888-8999-aaaaaaaaaaaa';
@@ -1010,6 +1010,56 @@ describe('provider store: version 4 and options', () => {
     writeFile(4, providers);
     expect(store().list().providers).toEqual([]);
     expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toHaveLength(1);
+  });
+
+  it('reads a version 4 entry without parallel requests as 1 and writes the field on the first write', () => {
+    const { parallelRequests: _omit, ...withoutField } = DEFAULT_PROVIDER_OPTIONS;
+    writeFile(4, [{ ...v3Entries[0], options: { ...withoutField, temperature: 0.5 } }, { ...v3Entries[1], options: null }]);
+    const before = readFileSync(settingsFile(), 'utf8');
+    const s = store();
+    expect(s.list().providers.map((p) => p.options)).toEqual([{ ...DEFAULT_PROVIDER_OPTIONS, temperature: 0.5, parallelRequests: 1 }, null]);
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    s.markUsed(PREPARED);
+    expect(readSettings().providers.map((p: { options: unknown }) => p.options)).toEqual([
+      { ...DEFAULT_PROVIDER_OPTIONS, temperature: 0.5, parallelRequests: 1 },
+      null,
+    ]);
+  });
+
+  it.each([0, 65, 2.5, -3, '4', null])('reads a stored parallel requests value of %s as 1 and keeps the entry', (parallelRequests) => {
+    writeFile(4, [{ ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } }, { ...v3Entries[1], options: null }]);
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED, SECOND]);
+    expect(s.get(PREPARED)?.options?.parallelRequests).toBe(1);
+    expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
+  });
+
+  it('gives the upgrades from versions 1 to 3 one parallel request', () => {
+    writeFile(3, v3Entries);
+    expect(store().get(PREPARED)?.options?.parallelRequests).toBe(1);
+    writeV2({ baseUrl: 'http://192.168.1.20:11434', marker: null });
+    expect(store().get(PREPARED)?.options?.parallelRequests).toBe(1);
+    writeV1({ baseUrl: 'http://192.168.1.20:11434' });
+    expect(store().list().providers[0]?.options?.parallelRequests).toBe(1);
+  });
+
+  it('round-trips a parallel requests value through save and list', () => {
+    const s = store();
+    const o = s.save(openai({ options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests: 16 } }));
+    expect(o.options?.parallelRequests).toBe(16);
+    expect(readSettings().providers[0].options.parallelRequests).toBe(16);
+    expect(store().list().providers[0]?.options?.parallelRequests).toBe(16);
+    expect(s.save(openai({ id: o.id, name: 'Renamed' })).options?.parallelRequests).toBe(16);
+    expect(s.save(openai({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests: 64 } })).options?.parallelRequests).toBe(64);
+  });
+
+  it.each([0, 65, 1.5])('refuses a parallel requests value of %s and writes nothing', (parallelRequests) => {
+    const s = store();
+    const o = s.save(input());
+    const before = readFileSync(settingsFile(), 'utf8');
+    expect(codeOf(() => s.save(input({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } })))).toBe('invalid_operation');
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    expect(s.get(o.id)?.options?.parallelRequests).toBe(1);
   });
 
   it.each([

@@ -9,6 +9,8 @@ import {
   isVisionKind,
   MAX_PROVIDERS,
   ModelNameSchema,
+  PARALLEL_REQUESTS_DEFAULT,
+  ParallelRequestsSchema,
   parseExtraParameters,
   ProviderKindSchema,
   ProviderNameSchema,
@@ -184,11 +186,19 @@ const V3FileSchema = z.object({
   adoptLegacyKey: MarkerSchema,
 });
 
+/**
+ * Stored options: a missing or broken `parallelRequests` (written before the field existed, or edited by hand) reads
+ * as the default, so the entry is kept. The IPC schema has no such default.
+ */
+const StoredOptionsSchema = ProviderOptionsSchema.extend({
+  parallelRequests: ParallelRequestsSchema.catch(PARALLEL_REQUESTS_DEFAULT),
+});
+
 const V4FileSchema = z.object({
   version: z.literal(4),
   providers: entriesOf(
     z
-      .object({ ...V3EntryShape, options: ProviderOptionsSchema.nullable() })
+      .object({ ...V3EntryShape, options: StoredOptionsSchema.nullable() })
       .refine(entryRules)
       // Options exactly on a vision entry. Stored extra parameters the save rule refuses do not make the file
       // unreadable: the gateway sends none for that entry, and the next save refuses the text.

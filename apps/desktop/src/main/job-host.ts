@@ -70,6 +70,11 @@ export interface JobHostDeps {
   totals?: Partial<Record<ResourceClass, number>>;
   /** Real time without it. */
   clock?: SchedulerClock;
+  /**
+   * The limit of one lane, asked before every claim; an integer of at least 1 replaces the class limit for that
+   * lane, anything else keeps it. Without it every lane runs the class limit.
+   */
+  laneLimit?: (resourceClass: ResourceClass, lane: string | null) => number | undefined;
 }
 
 /** The resource class of the analysis queue. */
@@ -141,6 +146,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
           totals: deps.totals ?? DEFAULT_TOTALS,
           onChange: changed,
           pause,
+          ...(deps.laneLimit === undefined ? {} : { laneLimit: deps.laneLimit }),
           ...(clock === undefined
             ? {}
             : { now: () => clock.now(), setTimer: (fn, ms) => clock.setTimer(fn, ms), clearTimer: (h) => clock.clearTimer(h) }),

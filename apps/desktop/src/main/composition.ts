@@ -25,7 +25,7 @@ import { createJobHost, PROVIDER_CLASSES, type JobHost, type SchedulerClock } fr
 import { JsonWorkspaceRegistry } from './json-registry.js';
 import { createProviderGateway, type ProviderGateway } from './provider-gateway.js';
 import { createProviderHandlers } from './provider-handlers.js';
-import { createProviderStore } from './provider-store.js';
+import { createProviderStore, type ProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
 
 export interface CompositionOptions {
@@ -84,6 +84,19 @@ export function createWorkspaceHost(opts: CompositionOptions): WorkspaceHost {
 
 export function createWorkspaceManager(opts: CompositionOptions): WorkspaceManager {
   return new WorkspaceManager(createWorkspaceHost(opts));
+}
+
+/**
+ * The lane limit of the job host: for an analysis lane the `parallelRequests` of the vision entry with the lane's id,
+ * read on every call so a saved value applies on the next claim; `undefined` for every other class, an unknown lane
+ * and an entry without options, which keeps the class limit.
+ */
+export function providerLaneLimit(store: Pick<ProviderStore, 'get'>) {
+  return (resourceClass: ResourceClass, lane: string | null): number | undefined => {
+    if (resourceClass !== 'local_gpu' || lane === null) return undefined;
+    const entry = store.get(lane);
+    return entry !== null && isVisionKind(entry.kind) ? entry.options?.parallelRequests : undefined;
+  };
 }
 
 export interface AnalysisServices extends AppServices {
@@ -161,9 +174,11 @@ export function createAnalysisServices(o: {
     ...(o.limits === undefined ? {} : { limits: o.limits }),
     ...(o.totals === undefined ? {} : { totals: o.totals }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
+    laneLimit: providerLaneLimit(store),
   });
   jobHost = host;
-  // A saved or deleted entry may fix what paused its lane; the other lanes and every download host stay as they are.
+  // A saved or deleted entry may fix what paused its lane, or change its parallel requests; the other lanes and every
+  // download host stay as they are.
   store.onChange((id) => host.resume(id, PROVIDER_CLASSES));
   const describe = createDescribeController({ manager: o.manager, vision: (id) => gateway.vision(id), images: o.images });
   const prompts = createAnalysisPromptStore({

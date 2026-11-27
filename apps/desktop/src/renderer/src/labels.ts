@@ -5,6 +5,8 @@ import {
   type GenerationParameters,
   type GenerationStatus,
   type JobStatus,
+  PARALLEL_REQUESTS_MAX,
+  PARALLEL_REQUESTS_MIN,
   type ProviderKind,
   type RelationKind,
   type Thinking,
@@ -180,6 +182,9 @@ export const MAX_TOKENS_TITLE = 'Empty: the server decides';
 export const MAX_TOKENS_INVALID = 'The answer tokens must be empty or a whole number from 1 to 100000';
 export const EXTRA_PARAMETERS_LABEL = 'Extra parameters';
 export const EXTRA_PARAMETERS_TITLE = 'A JSON object merged into every request of this provider';
+export const PARALLEL_REQUESTS_LABEL = 'Parallel requests';
+export const PARALLEL_REQUESTS_TITLE = 'Analysis requests sent at the same time';
+export const PARALLEL_REQUESTS_INVALID = `The parallel requests must be a whole number from ${PARALLEL_REQUESTS_MIN} to ${PARALLEL_REQUESTS_MAX}`;
 export const PROVIDER_STATE_LABEL = 'State';
 export const FROM_ENVIRONMENT = 'From environment';
 export const FROM_ENVIRONMENT_TITLE = 'The provider comes from the environment and cannot be changed here';

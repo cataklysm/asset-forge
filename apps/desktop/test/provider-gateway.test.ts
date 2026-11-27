@@ -160,14 +160,14 @@ describe('provider gateway with a fake adapter', () => {
   });
 
   it('hands the factory the parsed request options and rebuilds the adapter when they change', () => {
-    const a = store.save(openaiInput({ options: { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"top_k":20}' } }));
+    const a = store.save(openaiInput({ options: { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"top_k":20}', parallelRequests: 8 } }));
     const o = store.save(input());
     const g = gateway();
     const first = g.vision(a.id);
     g.vision(o.id);
     expect(created[0]!.requestOptions).toEqual({ temperature: 0.4, thinking: 'on', maxTokens: 300, extra: { top_k: 20 } });
     expect(created[1]!.requestOptions).toEqual({ temperature: 0, thinking: 'default', maxTokens: null, extra: {} });
-    store.save(openaiInput({ id: a.id, options: { temperature: 1, thinking: 'off', maxTokens: null, extra: '' } }));
+    store.save(openaiInput({ id: a.id, options: { temperature: 1, thinking: 'off', maxTokens: null, extra: '', parallelRequests: 1 } }));
     const rebuilt = g.vision(a.id);
     expect(rebuilt).not.toBe(first);
     expect(kinds).toEqual(['openai', 'ollama', 'openai']);
