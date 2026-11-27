@@ -240,6 +240,17 @@ it('the line of a paused Venice lane offers Resume and Settings but no Move jobs
   expect(api.calls.find((c) => c.channel === 'jobs:resume')?.request).toEqual({ providerId: VENICE_ID });
 });
 
+it('the line of a paused OpenAI-compatible entry offers Move jobs, a Venice one does not', async () => {
+  const VLLM_ID = '00000000-0000-4000-8000-00000000d001';
+  const VENICE_ID = '00000000-0000-4000-8000-00000000c001';
+  const vllm: PausedProvider = { providerId: VLLM_ID, providerName: 'vLLM', kind: 'openai', reason: 'provider_unreachable' };
+  const venice: PausedProvider = { providerId: VENICE_ID, providerName: 'Venice', kind: 'venice', reason: 'provider_unreachable' };
+  jobsShell(() => ({ ...IDLE, paused: [vllm, venice] }));
+  const banner = await screen.findByRole('alert');
+  expect(within(within(banner).getByRole('group', { name: 'vLLM' })).getByRole('button', { name: 'Move jobs' })).toBeTruthy();
+  expect(within(within(banner).getByRole('group', { name: 'Venice' })).queryByRole('button', { name: 'Move jobs' })).toBeNull();
+});
+
 it('no paused provider shows no banner', async () => {
   const { api } = jobsShell(() => IDLE);
   await waitFor(() => expect(api.calls.some((c) => c.channel === 'jobs:summary')).toBe(true));

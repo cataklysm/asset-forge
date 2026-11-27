@@ -20,8 +20,10 @@ import {
   DEFAULT_PROVIDER_OPTIONS,
   buildPromptVariables,
   cleanTagText,
+  extraParametersMessage,
   isVisionKind,
   normalizeTagName,
+  parseExtraParameters,
 } from '@assetforge/contracts';
 import {
   BUILT_IN_IMAGE_PROMPT_TEXT,
@@ -198,6 +200,13 @@ export function fakeProviders(
         throw fakeError('invalid_operation', 'The kind of a provider cannot be changed');
       const kind = before?.kind ?? request.kind ?? 'ollama';
       const editModel = request.editModel === undefined ? (before?.editModel ?? null) : request.editModel;
+      // Absent options keep the stored ones, a new vision entry gets the defaults; venice has none.
+      let options: ProviderView['options'] = null;
+      if (isVisionKind(kind)) {
+        options = request.options ?? before?.options ?? { ...DEFAULT_PROVIDER_OPTIONS };
+        const extra = parseExtraParameters(options.extra, kind);
+        if (!extra.ok) throw fakeError('validation_failed', extraParametersMessage(extra));
+      }
       // A venice entry keeps no vision models and no options, a vision entry no edit model.
       const next: ProviderView = {
         id: before?.id ?? nextId(),
@@ -209,7 +218,7 @@ export function fakeProviders(
         promptModel: kind === 'venice' ? null : request.promptModel,
         editModel: kind === 'venice' ? editModel : null,
         hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
-        options: isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null,
+        options: options === null ? null : { ...options },
       };
       state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
       return structuredClone(next);

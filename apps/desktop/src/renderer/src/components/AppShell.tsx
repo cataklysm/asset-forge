@@ -1,6 +1,6 @@
 import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, ScrollText, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, type JobErrorCode, type PausedHost, type PausedProvider } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, purposeOf, type JobErrorCode, type PausedHost, type PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import {
   laneLabel,
@@ -273,7 +273,7 @@ function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps
           </button>
         )}
         {/* Only analysis jobs move; an image provider's generation jobs stay on it. */}
-        {entry.kind === 'ollama' && (
+        {purposeOf(entry.kind) === 'vision' && (
           <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
             {MOVE_JOBS_LABEL}
           </button>

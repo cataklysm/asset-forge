@@ -200,6 +200,19 @@ it('each gate treats an entry of the other kind as not configured', () => {
   expect(providerGate(s, LOCAL.id, 'vision-a').blocked).toBeNull();
 });
 
+it('an openai entry passes the analysis gate with models of unknown vision, and the image gate refuses it', () => {
+  const vllm = providerView({ kind: 'openai', name: 'vLLM' });
+  const unknown: ListModelsResult = { ok: true, models: [{ name: 'qwen-vl', vision: null }, { name: 'other', vision: null }] };
+  const s = gateState(
+    { [vllm.id]: unknown },
+    { list: { providers: [LOCAL, vllm], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true } },
+  );
+  expect(providerGate(s, vllm.id, 'qwen-vl')).toEqual({ blocked: null, offerSettings: false });
+  expect(providerGate(s, vllm.id, 'other')).toEqual({ blocked: null, offerSettings: false });
+  expect(providerGate(s, vllm.id, 'gone')).toEqual({ blocked: MODEL_NOT_LISTED, offerSettings: false });
+  expect(imageProviderGate(s, vllm.id, 'qwen-vl')).toEqual({ blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: true });
+});
+
 it('the image gate shares the list load states', () => {
   expect(imageProviderGate(imageState({}, { list: null, failed: true }), null, null)).toEqual({ blocked: SETTINGS_LOAD_FAILED, offerSettings: true });
   expect(imageProviderGate(imageState({}, { list: null, loading: true }), null, null)).toEqual({ blocked: START_LOADING, offerSettings: false });

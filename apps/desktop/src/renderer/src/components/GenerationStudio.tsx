@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import {
   GENERATION_PROMPT_MAX,
   JOB_ERROR_MESSAGES,
+  purposeOf,
   type FileRecord,
   type Generation,
   type ImageModel,
@@ -184,7 +185,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       : null;
   const form = constrain({ ...fields, providerId, model }, imageModel);
 
-  const hasImageProvider = providers.list?.providers.some((p) => p.kind === 'venice') ?? false;
+  const hasImageProvider = providers.list?.providers.some((p) => purposeOf(p.kind) === 'image') ?? false;
   const providerBlocked =
     providers.list !== null && !hasImageProvider ? NO_IMAGE_PROVIDER_TITLE : imageProviderGate(providers, providerId, model).blocked;
   const limit = Math.min(imageModel?.promptCharacterLimit ?? GENERATION_PROMPT_MAX, GENERATION_PROMPT_MAX);
@@ -381,7 +382,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       return;
     }
     // A result of an entry that is gone (or no longer an image entry) keeps the selected entry and model.
-    const listed = providers.list?.providers.some((p) => p.id === next.providerId && p.kind === 'venice') ?? false;
+    const listed = providers.list?.providers.some((p) => p.id === next.providerId && purposeOf(p.kind) === 'image') ?? false;
     if (next.providerId !== null && listed) {
       choice.setProvider(next.providerId);
       setPendingModel({ providerId: next.providerId, model: next.model });

@@ -3,7 +3,8 @@ import {
   JobErrorCodeSchema,
   type ListImageModelsResult,
   type ListModelsResult,
-  type ProviderKind,
+  purposeOf,
+  type ProviderPurpose,
   type ProviderList,
   type ProviderView,
   type SaveProvider,
@@ -26,15 +27,15 @@ export interface ProvidersState {
   loading: boolean;
   /** True when loading failed and no list is held (not the same as "no provider"). */
   failed: boolean;
-  /** The model list answer per `ollama` entry; undefined before the first answer and while a request runs. */
+  /** The model list answer per vision entry (Ollama or OpenAI-compatible); undefined before the first answer and while a request runs. */
   models: Readonly<Record<string, ListModelsResult | undefined>>;
-  /** The edit model list answer per `venice` entry; `checking` while a request runs, absent before the first. */
+  /** The edit model list answer per image entry (Venice); `checking` while a request runs, absent before the first. */
   imageModels: Readonly<Record<string, ListImageModelsResult | 'checking'>>;
   /** Loads the list again, then the model list of every entry; rejects when the list cannot be read. */
   reload(): Promise<void>;
   /**
-   * Asks for the models of one entry by its kind: vision models for `ollama`, edit models for
-   * `venice`; `refresh` asks the provider instead of the main process cache. Never rejects.
+   * Asks for the models of one entry by its purpose: vision models for a vision entry, edit models for
+   * an image entry; `refresh` asks the provider instead of the main process cache. Never rejects.
    */
   loadModels(id: string, refresh?: boolean): Promise<void>;
   /** Asks every entry with `refresh: true`, in parallel. */
@@ -84,9 +85,10 @@ function without<T>(record: Record<string, T>, id: string): Record<string, T> {
   return rest;
 }
 
-/** The kind of entry `id`; an entry that is not listed counts as `ollama`. */
-function kindOf(list: ProviderList | null | undefined, id: string): ProviderKind {
-  return list?.providers.find((p) => p.id === id)?.kind ?? 'ollama';
+/** The purpose of entry `id`; an entry that is not listed counts as a vision entry. */
+function purposeOfEntry(list: ProviderList | null | undefined, id: string): ProviderPurpose {
+  const kind = list?.providers.find((p) => p.id === id)?.kind;
+  return kind === undefined ? 'vision' : purposeOf(kind);
 }
 
 /**
@@ -115,7 +117,7 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
     modelRequests.current.set(id, request);
     const input = refresh ? { providerId: id, refresh: true } : { providerId: id };
     const newest = () => !disposed.current && modelRequests.current.get(id) === request;
-    if (kindOf(listRef.current, id) === 'venice') {
+    if (purposeOfEntry(listRef.current, id) === 'image') {
       setImageModels((m) => (m[id] === 'checking' ? m : { ...m, [id]: 'checking' }));
       let result: ListImageModelsResult;
       try {
@@ -237,7 +239,7 @@ export function providerStatus(
   id: string,
 ): ProviderStatus {
   let failure: Extract<ListModelsResult, { ok: false }>;
-  if (kindOf(state.list, id) === 'venice') {
+  if (purposeOfEntry(state.list, id) === 'image') {
     const answer = state.imageModels[id];
     if (answer === undefined || answer === 'checking') return 'checking';
     if (answer.ok) return answer.models.length > 0 ? 'ready' : 'no_edit_model';
@@ -254,14 +256,14 @@ export function providerStatus(
 }
 
 /**
- * The entry of `kind` a dialog preselects: the one of that kind used last when it is still listed,
- * otherwise the first of that kind; null without any.
+ * The entry of `purpose` a dialog preselects: the one of that purpose used last when it is still listed,
+ * otherwise the first of that purpose; null without any.
  */
-export function defaultProviderId(state: Pick<ProvidersState, 'list'>, kind: ProviderKind = 'ollama'): string | null {
+export function defaultProviderId(state: Pick<ProvidersState, 'list'>, purpose: ProviderPurpose = 'vision'): string | null {
   const list = state.list;
   if (list === null) return null;
-  const providers = list.providers.filter((p) => p.kind === kind);
-  const lastUsed = kind === 'venice' ? list.lastUsedImageId : list.lastUsedId;
+  const providers = list.providers.filter((p) => purposeOf(p.kind) === purpose);
+  const lastUsed = purpose === 'image' ? list.lastUsedImageId : list.lastUsedId;
   return providers.find((p) => p.id === lastUsed)?.id ?? providers[0]?.id ?? null;
 }
 

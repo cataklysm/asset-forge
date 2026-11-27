@@ -237,6 +237,28 @@ it('Start enqueues in mode apply, then reports, closes and refreshes the jobs', 
   await waitFor(() => expect(callsOf(api, 'jobs:summary').length).toBeGreaterThan(polls));
 });
 
+it('an OpenAI-compatible entry used last is preselected, and its models of unknown vision let it start', async () => {
+  const vllm = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl' });
+  const unknown: ListModelsResult = { ok: true, models: [{ name: 'qwen-vl', vision: null }] };
+  const api = installFakeApi({
+    ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
+    ...fakeProviders({ providers: [CONFIGURED, vllm], lastUsedId: vllm.id }, { [CONFIGURED.id]: MODELS, [vllm.id]: unknown }).handlers,
+    'jobs:summary': () => IDLE,
+    'analysis:preview': () => PREVIEW,
+    'analysis:enqueue': () => ENQUEUED,
+  });
+  const { onClose } = renderDialog();
+  await previewShown();
+  expect((screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement).value).toBe(vllm.id);
+  expect(modelSelect().value).toBe('qwen-vl');
+  await waitFor(() => expect(startButton().disabled).toBe(false));
+  await userEvent.click(startButton());
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  expect(callsOf(api, 'analysis:enqueue')).toEqual([
+    { target: assetTarget(), model: 'qwen-vl', providerId: vllm.id, mode: 'apply', force: false, promptId: TAG_DEFAULT.id },
+  ]);
+});
+
 it('a rejected enqueue shows the message and keeps the dialog open', async () => {
   install({
     'analysis:enqueue': () => {

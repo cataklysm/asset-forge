@@ -1,17 +1,24 @@
 import { RefreshCw } from 'lucide-react';
 import { useRef, useState, type FormEvent } from 'react';
 import {
+  DEFAULT_PROVIDER_OPTIONS,
   JOB_ERROR_MESSAGES,
   MAX_PROVIDERS,
+  PROVIDER_EXTRA_MAX,
   PROVIDER_NAME_MAX,
   VENICE_DEFAULT_BASE_URL,
   VISION_TIMEOUT_DEFAULT_SECONDS,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
+  extraParametersMessage,
+  isVisionKind,
+  parseExtraParameters,
   type ProviderKind,
+  type ProviderOptions,
   type ProviderList,
   type ProviderView,
   type SaveProvider,
+  type Thinking,
 } from '@assetforge/contracts';
 import { ApiError, describeError } from '../api';
 import {
@@ -23,15 +30,21 @@ import {
   DELETE_PROVIDER_TITLE,
   EDIT_MODEL_LABEL,
   EDIT_MODEL_TITLE,
+  EXTRA_PARAMETERS_LABEL,
+  EXTRA_PARAMETERS_TITLE,
   ENTER_BASE_URL,
   ENTER_NAME,
   FROM_ENVIRONMENT,
   FROM_ENVIRONMENT_TITLE,
   KEY_STORED,
+  MAX_TOKENS_INVALID,
+  MAX_TOKENS_LABEL,
+  MAX_TOKENS_TITLE,
   MODEL_PURPOSE_LABELS,
   NEW_PROVIDER_LABEL,
   NEW_PROVIDER_TITLE,
   NO_KEY_STORE_TITLE,
+  OPENAI_BASE_URL_PLACEHOLDER,
   PROMPT_MODEL_TITLE,
   PROVIDER_KIND_LABEL,
   PROVIDER_KIND_LABELS,
@@ -49,6 +62,12 @@ import {
   SAVE_LABEL,
   SETTINGS_LOAD_FAILED,
   TAGGING_MODEL_TITLE,
+  TEMPERATURE_INVALID,
+  TEMPERATURE_LABEL,
+  TEMPERATURE_TITLE,
+  THINKING_LABEL,
+  THINKING_LABELS,
+  THINKING_TITLE,
   TIMEOUT_INVALID,
   TIMEOUT_LABEL,
   TIMEOUT_TITLE,
@@ -76,24 +95,39 @@ interface Draft {
   taggingModel: string | null;
   promptModel: string | null;
   editModel: string | null;
+  /** The request options of a vision entry, as typed; ignored for an image entry. */
+  temperature: string;
+  thinking: Thinking;
+  /** Empty means not sent. */
+  maxTokens: string;
+  extra: string;
 }
 
-const KINDS: readonly ProviderKind[] = ['ollama', 'venice'];
+const KINDS: readonly ProviderKind[] = ['ollama', 'openai', 'venice'];
+const THINKING: readonly Thinking[] = ['default', 'off', 'on'];
+const MAX_TOKENS_MAX = 100_000;
 
 /** The base URL a new entry of `kind` starts with. */
 const baseUrlOf = (kind: ProviderKind) => (kind === 'venice' ? VENICE_DEFAULT_BASE_URL : '');
 
-const draftOf = (view: ProviderView | null): Draft => ({
-  kind: view?.kind ?? 'ollama',
-  name: view?.name ?? '',
-  baseUrl: view?.baseUrl ?? '',
-  apiKey: '',
-  clearKey: false,
-  timeout: String(view?.timeoutSeconds ?? VISION_TIMEOUT_DEFAULT_SECONDS),
-  taggingModel: view?.taggingModel ?? null,
-  promptModel: view?.promptModel ?? null,
-  editModel: view?.editModel ?? null,
-});
+function draftOf(view: ProviderView | null): Draft {
+  const options = view?.options ?? DEFAULT_PROVIDER_OPTIONS;
+  return {
+    kind: view?.kind ?? 'ollama',
+    name: view?.name ?? '',
+    baseUrl: view?.baseUrl ?? '',
+    apiKey: '',
+    clearKey: false,
+    timeout: String(view?.timeoutSeconds ?? VISION_TIMEOUT_DEFAULT_SECONDS),
+    taggingModel: view?.taggingModel ?? null,
+    promptModel: view?.promptModel ?? null,
+    editModel: view?.editModel ?? null,
+    temperature: String(options.temperature),
+    thinking: options.thinking,
+    maxTokens: options.maxTokens === null ? '' : String(options.maxTokens),
+    extra: options.extra,
+  };
+}
 
 /** The timeout in seconds, or null when it is not a whole number in range. */
 function timeoutOf(text: string): number | null {
@@ -102,11 +136,48 @@ function timeoutOf(text: string): number | null {
   return value >= VISION_TIMEOUT_MIN_SECONDS && value <= VISION_TIMEOUT_MAX_SECONDS ? value : null;
 }
 
+/** The temperature, or null when the text is empty, not a number (`0,5`) or outside 0–2. */
+function temperatureOf(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value >= 0 && value <= 2 ? value : null;
+}
+
+/** The answer token limit: null for an empty text (not sent), undefined when it is not a whole number 1–100000. */
+function maxTokensOf(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const value = Number(trimmed);
+  return value >= 1 && value <= MAX_TOKENS_MAX ? value : undefined;
+}
+
+/** The message of extra parameters that cannot be sent with `kind`; null when they can or the kind takes none. */
+function extraMessageOf(draft: Draft): string | null {
+  if (!isVisionKind(draft.kind)) return null;
+  const parsed = parseExtraParameters(draft.extra, draft.kind);
+  return parsed.ok ? null : extraParametersMessage(parsed);
+}
+
+/** The request options of a valid vision draft as sent. */
+const optionsOf = (draft: Draft): ProviderOptions => ({
+  temperature: temperatureOf(draft.temperature)!,
+  thinking: draft.thinking,
+  maxTokens: maxTokensOf(draft.maxTokens)!,
+  extra: draft.extra,
+});
+
 /** Why the draft cannot be saved, or null when it can. */
 function invalidReason(draft: Draft): string | null {
   if (draft.name.trim() === '') return ENTER_NAME;
   if (draft.baseUrl.trim() === '') return ENTER_BASE_URL;
   if (timeoutOf(draft.timeout) === null) return TIMEOUT_INVALID;
+  if (isVisionKind(draft.kind)) {
+    if (temperatureOf(draft.temperature) === null) return TEMPERATURE_INVALID;
+    if (maxTokensOf(draft.maxTokens) === undefined) return MAX_TOKENS_INVALID;
+    return extraMessageOf(draft);
+  }
   return null;
 }
 
@@ -286,6 +357,7 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(entry));
   const locked = list.fromEnvironment;
   const reason = invalidReason(draft);
+  const extraMessage = extraMessageOf(draft);
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const keyTitle = list.canStoreKey ? API_KEY_TITLE : NO_KEY_STORE_TITLE;
   const status = entry === null ? null : providerStatus(providers, entry.id);
@@ -309,6 +381,7 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
       promptModel: venice ? null : sent.promptModel,
     };
     if (venice) input.editModel = sent.editModel;
+    if (isVisionKind(sent.kind)) input.options = optionsOf(sent);
     // The kind is sent only on create; an existing entry keeps its own.
     if (entry !== null) input.id = entry.id;
     else input.kind = sent.kind;
@@ -369,6 +442,7 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
           disabled={locked}
           spellCheck={false}
           autoComplete="off"
+          placeholder={draft.kind === 'openai' ? OPENAI_BASE_URL_PLACEHOLDER : undefined}
           onChange={(e) => update({ baseUrl: e.target.value })}
         />
       </label>
@@ -449,6 +523,73 @@ function Editor({ entry, list, busy, onSave, onDelete }: EditorProps) {
               disabled={locked}
               onChange={(promptModel) => update({ promptModel })}
             />
+          </div>
+
+          <label className="flex flex-col gap-1" title={TEMPERATURE_TITLE}>
+            <span className={LABEL}>{TEMPERATURE_LABEL}</span>
+            <input
+              type="number"
+              className={`w-32 ${INPUT}`}
+              min={0}
+              max={2}
+              step={0.1}
+              value={draft.temperature}
+              disabled={locked}
+              aria-invalid={temperatureOf(draft.temperature) === null || undefined}
+              onChange={(e) => update({ temperature: e.target.value })}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1" title={THINKING_TITLE}>
+            <span className={LABEL}>{THINKING_LABEL}</span>
+            <select
+              className={`w-48 ${SELECT}`}
+              value={draft.thinking}
+              disabled={locked}
+              onChange={(e) => update({ thinking: e.target.value as Thinking })}
+            >
+              {THINKING.map((thinking) => (
+                <option key={thinking} value={thinking}>
+                  {THINKING_LABELS[thinking]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1" title={MAX_TOKENS_TITLE}>
+            <span className={LABEL}>{MAX_TOKENS_LABEL}</span>
+            <input
+              type="number"
+              className={`w-32 ${INPUT}`}
+              min={1}
+              max={MAX_TOKENS_MAX}
+              step={1}
+              value={draft.maxTokens}
+              disabled={locked}
+              aria-invalid={maxTokensOf(draft.maxTokens) === undefined || undefined}
+              onChange={(e) => update({ maxTokens: e.target.value })}
+            />
+          </label>
+
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1" title={EXTRA_PARAMETERS_TITLE}>
+              <span className={LABEL}>{EXTRA_PARAMETERS_LABEL}</span>
+              <textarea
+                className={`font-mono ${INPUT}`}
+                rows={4}
+                maxLength={PROVIDER_EXTRA_MAX}
+                spellCheck={false}
+                value={draft.extra}
+                disabled={locked}
+                aria-invalid={extraMessage !== null || undefined}
+                onChange={(e) => update({ extra: e.target.value })}
+              />
+            </label>
+            {extraMessage !== null && (
+              <p role="alert" className={ALERT}>
+                {extraMessage}
+              </p>
+            )}
           </div>
         </>
       )}

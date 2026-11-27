@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, variableKey, type FileRecord, type TagAssignment, type UpscaleScale } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, purposeOf, variableKey, type FileRecord, type TagAssignment, type UpscaleScale } from '@assetforge/contracts';
 import { call } from './api';
 import { FileDetailDialog } from './components/FileDetailDialog';
 import { GenerationStudio } from './components/GenerationStudio';
@@ -79,7 +79,7 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
   };
 
   const { list } = providers;
-  const blocked = list !== null && !list.providers.some((p) => p.kind === 'venice') ? NO_IMAGE_PROVIDER_TITLE : null;
+  const blocked = list !== null && !list.providers.some((p) => purposeOf(p.kind) === 'image') ? NO_IMAGE_PROVIDER_TITLE : null;
 
   const open = useCallback(
     (file: FileRecord) => {

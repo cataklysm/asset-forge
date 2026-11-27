@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { JOB_ERROR_MESSAGES, type ProviderList, type WaitingByProvider } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, isVisionKind, purposeOf, type ProviderList, type WaitingByProvider } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import {
@@ -38,19 +38,19 @@ export function laneName(list: ProviderList | null, id: string | null, stored: s
 /** The value of a lane in the From select; the lane without a provider is the empty string. */
 const laneValue = (id: string | null) => id ?? '';
 
-/** Whether `id` names a listed `ollama` entry: only those take analysis jobs. */
+/** Whether `id` names a listed vision entry (Ollama or OpenAI-compatible): only those take analysis jobs. */
 const isTarget = (list: ProviderList | null, id: string | null) =>
-  id !== null && list?.providers.some((p) => p.id === id && p.kind === 'ollama') === true;
+  id !== null && list?.providers.some((p) => p.id === id && isVisionKind(p.kind)) === true;
 
 /** Whether `id` names a listed image entry: its generation jobs never move, so it is no source either. */
 const isImageLane = (list: ProviderList | null, id: string | null) =>
-  id !== null && list?.providers.some((p) => p.id === id && p.kind === 'venice') === true;
+  id !== null && list?.providers.some((p) => p.id === id && purposeOf(p.kind) === 'image') === true;
 
-/** The target a move preselects: the default `ollama` entry unless it is the source, else the first other one. */
+/** The target a move preselects: the default vision entry unless it is the source, else the first other one. */
 function pickTarget(state: Pick<ProvidersState, 'list'>, source: string | null | undefined): string | null {
-  const preferred = defaultProviderId(state, 'ollama');
+  const preferred = defaultProviderId(state, 'vision');
   if (preferred !== null && preferred !== source) return preferred;
-  return state.list?.providers.find((p) => p.kind === 'ollama' && p.id !== source)?.id ?? null;
+  return state.list?.providers.find((p) => isVisionKind(p.kind) && p.id !== source)?.id ?? null;
 }
 
 /**
@@ -185,7 +185,7 @@ export function MoveJobsDialog({ source, onClose }: Props) {
           <span className={LABEL}>{MOVE_TO}</span>
           <div className="col-span-2 flex min-w-0 flex-col gap-3">
             <ProviderSelect
-              kind="ollama"
+              purpose="vision"
               value={target}
               exclude={from ?? null}
               disabled={moving}

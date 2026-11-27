@@ -174,6 +174,40 @@ it('Move jobs offers no Venice target, even when it comes first or was used last
   expect(options).toEqual(['RunPod — ready', 'Spare — ready']);
 });
 
+it('an ollama source moves onto an OpenAI-compatible target', async () => {
+  const user = userEvent.setup();
+  const vllm = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl' });
+  const api = installFakeApi({
+    ...fakeProviders(
+      { providers: [LOCAL, vllm], lastUsedId: null },
+      { [LOCAL.id]: UNREACHABLE, [vllm.id]: { ok: true, models: [{ name: 'qwen-vl', vision: null }] } },
+    ).handlers,
+    'jobs:summary': () => IDLE,
+    'jobs:waitingByProvider': () => LANES,
+    'jobs:reroute': () => ({ moved: 312 }),
+  });
+  const { dialog } = renderDialog(LOCAL.id);
+  await within(dialog).findByText('312 waiting');
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(vllm.id));
+  expect(within(targetSelect(dialog)).getAllByRole('option').map((o) => o.textContent)).toEqual(['vLLM — ready']);
+  await waitFor(() => expect(moveButton(dialog).disabled).toBe(false));
+  await user.click(moveButton(dialog));
+  await waitFor(() => expect(reroutes(api)).toEqual([{ fromProviderId: LOCAL.id, toProviderId: vllm.id, model: 'qwen-vl' }]));
+});
+
+it('an OpenAI-compatible source is offered in the From select', async () => {
+  const vllm = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1' });
+  installFakeApi({
+    ...fakeProviders({ providers: [LOCAL, vllm] }).handlers,
+    'jobs:summary': () => IDLE,
+    'jobs:waitingByProvider': () => [{ providerId: vllm.id, providerName: 'vLLM', waiting: 5 }],
+  });
+  const { dialog } = renderDialog(undefined);
+  const from = (await within(dialog).findByRole('combobox', { name: 'From' })) as HTMLSelectElement;
+  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['vLLM']));
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(LOCAL.id));
+});
+
 it('Cancel closes without a request', async () => {
   const user = userEvent.setup();
   const api = install();

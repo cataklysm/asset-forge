@@ -1,4 +1,4 @@
-import { JOB_ERROR_MESSAGES, type ProviderKind } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, purposeOf, type ProviderPurpose } from '@assetforge/contracts';
 import type { AnalysisPromptsState } from './analysis-prompts-context';
 import {
   CHOOSE_MODEL,
@@ -47,18 +47,18 @@ interface Loaded {
 
 /**
  * The part both kinds share: a failed list load is its own state (not "no provider"), an entry not
- * listed with `kind` is not configured, an entry still being asked cannot start, and a model list
+ * listed with `purpose` is not configured, an entry still being asked cannot start, and a model list
  * that could not be loaded blocks with its code. Otherwise the loaded list of the entry.
  */
-function entryGate(state: GateState, kind: ProviderKind, providerId: string | null, model: string | null): ProviderGate | Loaded {
+function entryGate(state: GateState, purpose: ProviderPurpose, providerId: string | null, model: string | null): ProviderGate | Loaded {
   const { list, loading } = state;
   if (list === null) {
     const failed = state.failed && !loading;
     return { blocked: failed ? SETTINGS_LOAD_FAILED : START_LOADING, offerSettings: failed };
   }
-  if (providerId === null || !list.providers.some((p) => p.id === providerId && p.kind === kind))
+  if (providerId === null || !list.providers.some((p) => p.id === providerId && purposeOf(p.kind) === purpose))
     return { blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: !loading };
-  const answer = kind === 'venice' ? state.imageModels[providerId] : state.models[providerId];
+  const answer = purpose === 'image' ? state.imageModels[providerId] : state.models[providerId];
   if (answer === undefined || answer === 'checking') return { blocked: PROVIDER_CHECKING, offerSettings: false };
   if (!answer.ok) {
     // A list that cannot be used leaves nothing to choose from when no model is chosen.
@@ -70,11 +70,11 @@ function entryGate(state: GateState, kind: ProviderKind, providerId: string | nu
 
 /**
  * The provider side of the analysis and prompt dialogs, shared so all three agree, applied to the
- * selected `ollama` entry: on top of `entryGate`, an entry without vision models offers the
+ * selected vision entry (Ollama or OpenAI-compatible): on top of `entryGate`, an entry without vision models offers the
  * settings, and a model the entry's loaded list does not contain, or one without vision, cannot start.
  */
 export function providerGate(state: GateState, providerId: string | null, model: string | null): ProviderGate {
-  const gate = entryGate(state, 'ollama', providerId, model);
+  const gate = entryGate(state, 'vision', providerId, model);
   if (!('names' in gate)) return gate;
   const answer = state.models[providerId!];
   const models = answer !== undefined && answer.ok ? answer.models : [];
@@ -91,12 +91,12 @@ export function providerGate(state: GateState, providerId: string | null, model:
 }
 
 /**
- * The provider side of the studio, applied to the selected `venice` entry: on top of `entryGate`, an
+ * The provider side of the studio, applied to the selected image entry: on top of `entryGate`, an
  * entry without edit models offers the settings, and a model its loaded list does not contain
  * cannot start.
  */
 export function imageProviderGate(state: GateState, providerId: string | null, model: string | null): ProviderGate {
-  const gate = entryGate(state, 'venice', providerId, model);
+  const gate = entryGate(state, 'image', providerId, model);
   if (!('names' in gate)) return gate;
   if (gate.names.length === 0) return { blocked: PROVIDER_STATE_LABELS.no_edit_model, offerSettings: !state.loading };
   const blocked = model === null ? CHOOSE_MODEL : !gate.names.includes(model) ? MODEL_NOT_LISTED : null;

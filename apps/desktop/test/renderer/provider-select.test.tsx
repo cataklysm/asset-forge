@@ -358,12 +358,12 @@ it('image entries are asked through providers:listImageModels, vision entries th
   await waitFor(() => expect(state!.imageModels[VENICE.id]).toEqual({ ok: true, models: [] }));
 });
 
-it('the select of the analysis dialogs lists no Venice entry; kind venice lists only those', async () => {
+it('the select of the analysis dialogs lists no Venice entry; purpose image lists only those', async () => {
   installFakeApi(fakeProviders({ providers: [VENICE, LOCAL, VENICE_2] }).handlers);
   render(
     <ProviderSettingsProvider>
       <ProviderSelect value={LOCAL.id} onChange={() => {}} />
-      <ProviderSelect kind="venice" value={VENICE.id} onChange={() => {}} />
+      <ProviderSelect purpose="image" value={VENICE.id} onChange={() => {}} />
     </ProviderSettingsProvider>,
   );
   const [analysis, image] = screen.getAllByRole('combobox', { name: 'Provider' }) as HTMLSelectElement[];
@@ -375,7 +375,7 @@ it('a Venice entry with an empty edit model list shows no edit model', async () 
   installFakeApi(fakeProviders({ providers: [VENICE] }).handlers);
   render(
     <ProviderSettingsProvider>
-      <ProviderSelect kind="venice" value={VENICE.id} onChange={() => {}} />
+      <ProviderSelect purpose="image" value={VENICE.id} onChange={() => {}} />
     </ProviderSettingsProvider>,
   );
   await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Venice — no edit model']));
@@ -430,23 +430,23 @@ it('an older image list answer for the same entry is dropped, and one for a dele
   expect(VENICE_2.id in state!.imageModels).toBe(false);
 });
 
-function ChoiceProbe({ kind, opening }: { kind: 'ollama' | 'venice'; opening: string | null }) {
-  const image = useImageProviderChoice(kind === 'venice' ? opening : null);
-  const analysis = useProviderChoice('tagging', kind === 'ollama' ? opening : null);
-  const choice = kind === 'venice' ? image : analysis;
+function ChoiceProbe({ purpose, opening }: { purpose: 'vision' | 'image'; opening: string | null }) {
+  const image = useImageProviderChoice(purpose === 'image' ? opening : null);
+  const analysis = useProviderChoice('tagging', purpose === 'vision' ? opening : null);
+  const choice = purpose === 'image' ? image : analysis;
   return (
     <>
-      <ProviderSelect kind={kind} value={choice.providerId} onChange={choice.setProvider} />
+      <ProviderSelect purpose={purpose} value={choice.providerId} onChange={choice.setProvider} />
       <p>{`choice:${choice.providerId ?? 'none'}:${choice.model ?? 'none'}`}</p>
     </>
   );
 }
 
-it('the analysis choice offers only ollama entries, even when an image entry is first', async () => {
+it('the analysis choice offers only vision entries, even when an image entry is first', async () => {
   installFakeApi(fakeProviders({ providers: [VENICE, LOCAL, RUNPOD], lastUsedImageId: VENICE.id }).handlers);
   render(
     <ProviderSettingsProvider>
-      <ChoiceProbe kind="ollama" opening="open" />
+      <ChoiceProbe purpose="vision" opening="open" />
     </ProviderSettingsProvider>,
   );
   await waitFor(() => expect(screen.getByText(`choice:${LOCAL.id}:vision-a`)).toBeTruthy());
@@ -459,7 +459,7 @@ it('the image choice preselects the image entry used last with its edit model wh
   installFakeApi({ ...fake.handlers, 'providers:listImageModels': () => EDIT_MODELS });
   render(
     <ProviderSettingsProvider>
-      <ChoiceProbe kind="venice" opening="open" />
+      <ChoiceProbe purpose="image" opening="open" />
     </ProviderSettingsProvider>,
   );
   await waitFor(() => expect(screen.getByText(`choice:${VENICE.id}:edit-b`)).toBeTruthy());
@@ -485,7 +485,7 @@ it('a late image list answer for a deselected entry is ignored', async () => {
   });
   render(
     <ProviderSettingsProvider>
-      <ChoiceProbe kind="venice" opening="open" />
+      <ChoiceProbe purpose="image" opening="open" />
     </ProviderSettingsProvider>,
   );
   await waitFor(() => expect(askedVenice).toBe(2));
@@ -511,12 +511,12 @@ it('defaultProviderId and defaultEditModelOf follow the kind', () => {
     imageModels: { [VENICE.id]: EDIT_MODELS, [VENICE_2.id]: { ok: true, models: [] } },
   };
   expect(defaultProviderId(s)).toBe(RUNPOD.id);
-  expect(defaultProviderId(s, 'venice')).toBe(VENICE_2.id);
+  expect(defaultProviderId(s, 'image')).toBe(VENICE_2.id);
   // An image entry named as the vision one used last does not count, and the other way round.
   const crossed = { list: { ...s.list!, lastUsedId: VENICE.id, lastUsedImageId: LOCAL.id } };
   expect(defaultProviderId(crossed)).toBe(LOCAL.id);
-  expect(defaultProviderId(crossed, 'venice')).toBe(VENICE.id);
-  expect(defaultProviderId({ list: { ...s.list!, providers: [LOCAL] } }, 'venice')).toBeNull();
+  expect(defaultProviderId(crossed, 'image')).toBe(VENICE.id);
+  expect(defaultProviderId({ list: { ...s.list!, providers: [LOCAL] } }, 'image')).toBeNull();
 
   expect(defaultEditModelOf(s, VENICE.id)).toBe('edit-b');
   expect(defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: true, models: [imageModel('edit-z')] } } }, VENICE.id)).toBe('edit-z');
@@ -527,4 +527,33 @@ it('defaultProviderId and defaultEditModelOf follow the kind', () => {
   expect(defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: false, code: 'provider_unreachable' } } }, VENICE.id)).toBe('edit-b');
   expect(defaultEditModelOf(s, null)).toBeNull();
   expect(defaultEditModelOf(s, LOCAL.id)).toBeNull();
+});
+
+// --- OpenAI-compatible entries ---
+
+const VLLM = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl', promptModel: null });
+const UNKNOWN_VISION: ListModelsResult = { ok: true, models: [{ name: 'qwen-vl', vision: null }] };
+
+it('the analysis select lists the ollama and the openai entry and no venice one', async () => {
+  installFakeApi(fakeProviders({ providers: [LOCAL, VENICE, VLLM] }, { [VLLM.id]: UNKNOWN_VISION }).handlers);
+  renderHarness();
+  await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Local — ready', 'vLLM — ready']));
+});
+
+it('the analysis choice preselects the openai entry used last with its default model', async () => {
+  installFakeApi(fakeProviders({ providers: [LOCAL, VLLM], lastUsedId: VLLM.id }, { [VLLM.id]: UNKNOWN_VISION }).handlers);
+  render(
+    <ProviderSettingsProvider>
+      <ChoiceProbe purpose="vision" opening="open" />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(screen.getByText(`choice:${VLLM.id}:qwen-vl`)).toBeTruthy());
+  expect(providerSelect().value).toBe(VLLM.id);
+});
+
+it('defaultProviderId takes an openai entry used last for the vision purpose', () => {
+  const s = listOf({ providers: [VENICE, LOCAL, VLLM], lastUsedId: VLLM.id });
+  expect(defaultProviderId(s)).toBe(VLLM.id);
+  expect(defaultProviderId(s, 'vision')).toBe(VLLM.id);
+  expect(defaultProviderId(listOf({ providers: [VENICE, VLLM], lastUsedId: null }))).toBe(VLLM.id);
 });

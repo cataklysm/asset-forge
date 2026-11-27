@@ -118,7 +118,7 @@ export function StudioForm({
 
   return (
     <div className="flex flex-col gap-3">
-      <ProviderSelect kind="venice" value={form.providerId} onChange={onProvider} />
+      <ProviderSelect purpose="image" value={form.providerId} onChange={onProvider} />
       <EditModelSelect providerId={form.providerId} value={form.model} onChange={onModel} disabled={form.providerId === null} />
       <div className="flex items-center justify-between gap-2">
         <label htmlFor={promptId} className={LABEL}>

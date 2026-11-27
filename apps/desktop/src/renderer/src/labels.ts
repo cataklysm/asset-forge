@@ -7,6 +7,7 @@ import {
   type JobStatus,
   type ProviderKind,
   type RelationKind,
+  type Thinking,
   VISION_TIMEOUT_MAX_SECONDS,
   VISION_TIMEOUT_MIN_SECONDS,
 } from '@assetforge/contracts';
@@ -152,7 +153,8 @@ export const DELETE_PROVIDER_TITLE = 'Deletes the provider; asks first';
 export const PROVIDER_NAME_LABEL = 'Name';
 export const PROVIDER_NAME_TITLE = 'Shown in the analysis dialogs and the jobs; unique';
 export const BASE_URL_LABEL = 'Base URL';
-export const BASE_URL_TITLE = 'Address of the Ollama-compatible vision server (http or https)';
+export const BASE_URL_TITLE = 'Address of the provider server (http or https)';
+export const OPENAI_BASE_URL_PLACEHOLDER = 'http://localhost:8000/v1';
 export const API_KEY_LABEL = 'API key';
 export const API_KEY_TITLE = 'Sent as a bearer token to this server only; a stored key is never shown again';
 export const NO_KEY_STORE_TITLE = 'The system credential store is not available, so no key can be saved';
@@ -165,7 +167,19 @@ export const TIMEOUT_INVALID = `The timeout must be a whole number from ${VISION
 export const TAGGING_MODEL_TITLE = 'Model that tags images';
 export const PROMPT_MODEL_TITLE = 'Model that writes a prompt from an image';
 export const EDIT_MODEL_TITLE = 'Model that edits and generates images';
-export const PROVIDER_KIND_TITLE = 'Ollama-compatible providers analyse images, Venice generates them';
+export const PROVIDER_KIND_TITLE = 'Ollama and OpenAI-compatible providers analyse images, Venice generates them';
+export const TEMPERATURE_LABEL = 'Temperature';
+export const TEMPERATURE_TITLE = '0 gives the most repeatable answers';
+export const TEMPERATURE_INVALID = 'The temperature must be a number from 0 to 2';
+export const THINKING_LABEL = 'Thinking';
+export const THINKING_TITLE =
+  'Sent as think (Ollama) or chat_template_kwargs.enable_thinking (OpenAI-compatible). For other models leave Server default and use Extra parameters';
+export const THINKING_LABELS: Record<Thinking, string> = { default: 'Server default', off: 'Off', on: 'On' };
+export const MAX_TOKENS_LABEL = 'Max. answer tokens';
+export const MAX_TOKENS_TITLE = 'Empty: the server decides';
+export const MAX_TOKENS_INVALID = 'The answer tokens must be empty or a whole number from 1 to 100000';
+export const EXTRA_PARAMETERS_LABEL = 'Extra parameters';
+export const EXTRA_PARAMETERS_TITLE = 'A JSON object merged into every request of this provider';
 export const PROVIDER_STATE_LABEL = 'State';
 export const FROM_ENVIRONMENT = 'From environment';
 export const FROM_ENVIRONMENT_TITLE = 'The provider comes from the environment and cannot be changed here';
