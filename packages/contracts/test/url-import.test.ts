@@ -32,6 +32,7 @@ const DOWNLOAD_MESSAGES = {
   download_type_refused: 'This file type cannot be imported',
   download_no_space: 'There is not enough free disk space',
   download_profile_missing: 'The site profile of this download no longer exists',
+  download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
 } as const;
 
 const view = {
@@ -118,7 +119,9 @@ describe('download job contracts', () => {
     const { result: _r, ...withoutResult } = view;
     expect(JobViewSchema.safeParse(withoutResult).success).toBe(false);
     expect(JobViewSchema.safeParse({ ...view, status: 'succeeded', result: 'filtered' }).success).toBe(true);
-    expect(JobResultSchema.options).toEqual(['already_present', 'filtered']);
+    expect(JobViewSchema.safeParse({ ...view, status: 'succeeded', result: 'filtered_kind' }).success).toBe(true);
+    expect(JobViewSchema.safeParse({ ...view, status: 'succeeded', result: 'filtered_size' }).success).toBe(true);
+    expect(JobResultSchema.options).toEqual(['already_present', 'filtered', 'filtered_kind', 'filtered_size']);
   });
 
   test('the summary lists paused hosts', () => {

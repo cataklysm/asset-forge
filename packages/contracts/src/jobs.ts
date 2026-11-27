@@ -44,6 +44,7 @@ export const JobErrorCodeSchema = z.enum([
   'download_type_refused',
   'download_no_space',
   'download_profile_missing',
+  'download_login_not_sent',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -77,6 +78,7 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   download_type_refused: 'This file type cannot be imported',
   download_no_space: 'There is not enough free disk space',
   download_profile_missing: 'The site profile of this download no longer exists',
+  download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
@@ -98,10 +100,11 @@ export const IMAGE_GENERATE_JOB = 'image.generate';
 export const FILE_DOWNLOAD_JOB = 'file.download';
 
 /**
- * What a succeeded job produced besides its file; null on an ordinary result. `filtered`: a site download the
- * profile's kind or size filter left out; the job keeps no file.
+ * What a succeeded job produced besides its file; null on an ordinary result. `filtered_kind` / `filtered_size`: a
+ * site download the profile's kinds or minimum size left out; the job keeps no file. `filtered` is what older
+ * versions wrote for either; it still parses, and no new job writes it.
  */
-export const JobResultSchema = z.enum(['already_present', 'filtered']);
+export const JobResultSchema = z.enum(['already_present', 'filtered', 'filtered_kind', 'filtered_size']);
 export type JobResult = z.infer<typeof JobResultSchema>;
 
 const downloadFields = {

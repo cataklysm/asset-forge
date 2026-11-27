@@ -35,10 +35,13 @@ class FakeRemote implements RemoteFileSource {
   readonly options: (RemoteOpenOptions | undefined)[] = [];
   readonly streams: Readable[] = [];
   readonly answers = new Map<string, Answer | Error>();
+  /** The hops of a URL, asked through `headersFor` in this order before the answer, as the adapter does per hop. */
+  readonly hops = new Map<string, string[]>();
 
   async open(url: string, signal: AbortSignal, options?: RemoteOpenOptions): Promise<RemoteFile> {
     this.opened.push(url);
     this.options.push(options);
+    for (const hop of this.hops.get(url) ?? [url]) await options?.headersFor?.(hop);
     const answer = this.answers.get(url);
     if (answer === undefined) throw new RemoteFileError('not_found');
     if (answer instanceof Error) throw answer;
@@ -525,7 +528,7 @@ describe('site downloads (payload v2)', () => {
     filter,
   });
 
-  /** A site access that knows PROFILE and records every question. */
+  /** A site access that knows PROFILE on the site https://a.example and records every question. */
   function fakeSites(known = true) {
     const has: string[] = [];
     const asked: [string, string][] = [];
@@ -536,7 +539,7 @@ describe('site downloads (payload v2)', () => {
       },
       headersFor: async (id, url) => {
         asked.push([id, url]);
-        return { cookie: 'sid=1' };
+        return url.startsWith('https://a.example/') ? { cookie: 'sid=1' } : null;
       },
     };
     return { sites, has, asked };
@@ -570,7 +573,10 @@ describe('site downloads (payload v2)', () => {
     const headersFor = t.remote.options[0]?.headersFor;
     expect(headersFor).toBeTypeOf('function');
     await expect(headersFor!('https://a.example/hop')).resolves.toEqual({ cookie: 'sid=1' });
-    expect(f.asked).toEqual([[PROFILE, 'https://a.example/hop']]);
+    expect(f.asked).toEqual([
+      [PROFILE, 'https://a.example/x.png'],
+      [PROFILE, 'https://a.example/hop'],
+    ]);
     expect(t.files()).toHaveLength(1);
     expect(t.jobRow(job.id).fileId).toBe(t.files()[0]!.id);
   });
@@ -591,7 +597,7 @@ describe('site downloads (payload v2)', () => {
     t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: 3 });
     const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
     expect(await t.run(job)).toBeNull();
-    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.jobRow(job.id).fileId).toBeNull();
     expect(t.files()).toEqual([]);
     expect(t.remote.streams[0]!.destroyed).toBe(true);
@@ -605,7 +611,7 @@ describe('site downloads (payload v2)', () => {
     t.remote.answers.set('https://a.example/go', { finalUrl: 'https://a.example/clip.mp4', contentType: 'video/mp4' });
     const job = await t.claim('https://a.example/go', { payload: sitePayload('https://a.example/go', { kinds: ['image'], minBytes: 0 }) });
     expect(await t.run(job)).toBeNull();
-    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered_kind');
     expect(t.jobRow(job.id).fileId).toBeNull();
     expect(t.files()).toEqual([]);
     expect(t.remote.streams[0]!.destroyed).toBe(true);
@@ -628,7 +634,7 @@ describe('site downloads (payload v2)', () => {
     t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: null });
     const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
     expect(await t.run(job)).toBeNull();
-    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.jobRow(job.id).fileId).toBeNull();
     expect(t.files()).toEqual([]);
     expect(t.staged()).toEqual([]);
@@ -644,7 +650,53 @@ describe('site downloads (payload v2)', () => {
     await t.download('https://a.example/1.png');
     const job = await t.claim('https://a.example/2.png', { payload: sitePayload('https://a.example/2.png', { kinds: ['image'], minBytes: 4 }) });
     expect(await t.run(job)).toBeNull();
-    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.db.fileOrigins.rows.size).toBe(1);
+  });
+
+  it('a wrong kind wins over a small announced length', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    t.remote.answers.set('https://a.example/clip.mp4', { contentLength: 1, contentType: 'video/mp4' });
+    const job = await t.claim('https://a.example/clip.mp4', {
+      payload: sitePayload('https://a.example/clip.mp4', { kinds: ['image'], minBytes: 4 }),
+    });
+    expect(await t.run(job)).toBeNull();
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered_kind');
+  });
+
+  it('a refusal after a hop off the site is download_login_not_sent', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const url = 'https://a.example/x.png';
+    t.remote.hops.set(url, [url, 'https://cdn.other.example/x.png']);
+    t.remote.answers.set(url, new RemoteFileError('blocked'));
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    const error = await t.run(job);
+    expect(codeOf(error)).toBe('download_login_not_sent');
+    expect((error as JobError).message).not.toContain('example');
+    expect(t.files()).toEqual([]);
+  });
+
+  it('a refusal on the site itself stays download_blocked', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const url = 'https://a.example/x.png';
+    t.remote.hops.set(url, ['https://cdn.other.example/go', url]);
+    t.remote.answers.set(url, new RemoteFileError('blocked'));
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_blocked');
+  });
+
+  it('another failure after a hop off the site keeps its code', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const url = 'https://a.example/x.png';
+    t.remote.hops.set(url, [url, 'https://cdn.other.example/x.png']);
+    t.remote.answers.set(url, new RemoteFileError('not_found'));
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_not_found');
+  });
+
+  it('a v1 job refused off any site stays download_blocked', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    t.remote.answers.set('https://cdn.other.example/x.png', new RemoteFileError('blocked'));
+    expect(codeOf((await t.download('https://cdn.other.example/x.png')).error)).toBe('download_blocked');
   });
 });

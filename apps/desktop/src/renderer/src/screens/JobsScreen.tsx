@@ -27,8 +27,7 @@ import {
 import { useChanges, useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
-  ALREADY_PRESENT_LABEL,
-  FILTERED_LABEL,
+  JOB_RESULT_LABELS,
   JOB_STATUS_LABELS,
   JOB_TYPE_LABELS,
   JOBS_PROVIDER_HEADER,
@@ -448,11 +447,7 @@ function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex
   const fileText = job.fileName ?? (job.url === null ? '—' : shortUrl(job.url));
   const fileTitle = job.fileName ?? job.url ?? undefined;
   const statusText =
-    job.status === 'succeeded' && job.result === 'already_present'
-      ? ALREADY_PRESENT_LABEL
-      : job.status === 'succeeded' && job.result === 'filtered'
-        ? FILTERED_LABEL
-        : jobStatusLabel(job.status);
+    job.status === 'succeeded' && job.result !== null ? JOB_RESULT_LABELS[job.result] : jobStatusLabel(job.status);
   const waitTitle =
     job.status === 'retry_wait' && job.runAfter !== null ? `Next try at ${formatDateTime(job.runAfter)}` : undefined;
   return (

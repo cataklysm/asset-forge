@@ -223,4 +223,10 @@ describe('createPauseGate with download codes', () => {
     g.record('io', 'h', 'download_blocked');
     expect(g.reason('io', 'h')).toBe('download_blocked');
   });
+
+  it('never pauses on download_login_not_sent', () => {
+    const { g } = gate();
+    for (let i = 0; i < 5; i++) g.record('io', 'h', 'download_login_not_sent');
+    expect(g.reason('io', 'h')).toBeNull();
+  });
 });

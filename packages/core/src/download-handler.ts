@@ -85,11 +85,19 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     // A site download goes out with its profile's login and keeps only what passes the profile's filter.
     let openOptions: RemoteOpenOptions | undefined;
     const filter = payload.v === 2 ? payload.filter : null;
+    // Whether the hop asked last went out without the login because it left the profile's site.
+    let lastHopOffSite = false;
     if (payload.v === 2) {
       const sites = deps.sites;
       const profileId = payload.siteProfileId;
       if (sites === undefined || !(await sites.has(profileId))) throw new JobError('download_profile_missing');
-      openOptions = { headersFor: (hopUrl) => sites.headersFor(profileId, hopUrl) };
+      openOptions = {
+        headersFor: async (hopUrl) => {
+          const headers = await sites.headersFor(profileId, hopUrl);
+          lastHopOffSite = headers === null;
+          return headers;
+        },
+      };
     }
 
     const present = await s.database.fileOrigins.findCompleteFileByUrl(url);
@@ -104,7 +112,11 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     try {
       remote = openOptions === undefined ? await deps.remote.open(url, signal) : await deps.remote.open(url, signal, openOptions);
     } catch (error) {
-      if (error instanceof RemoteFileError) throw jobErrorOf(error);
+      if (error instanceof RemoteFileError) {
+        // A refusal of a hop that went out without the login: the login was the likely miss, not the address.
+        if (error.failure === 'blocked' && lastHopOffSite) throw new JobError('download_login_not_sent');
+        throw jobErrorOf(error);
+      }
       throw error;
     }
     // The stream is ours from here. Listen before any await: an adapter that destroys it with an error (cancel,
@@ -125,10 +137,15 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     const name = downloadFileName(remote);
     if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse('download_type_refused');
     if (filter !== null) {
-      const tooSmall = remote.contentLength !== null && remote.contentLength < filter.minBytes;
-      if (tooSmall || !filter.kinds.includes(fileKind(name))) {
+      // The kind wins over the size: it is known for certain, an announced length may be wrong.
+      const filtered: JobResult | null = !filter.kinds.includes(fileKind(name))
+        ? 'filtered_kind'
+        : remote.contentLength !== null && remote.contentLength < filter.minBytes
+          ? 'filtered_size'
+          : null;
+      if (filtered !== null) {
         remote.stream.destroy();
-        await setOutcome(job, null, 'filtered');
+        await setOutcome(job, null, filtered);
         return;
       }
     }
@@ -172,7 +189,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     // On a cancel or a stop the failed import has already discarded what it wrote; `run` turns the failure below
     // into the abort. A complete file is kept and recorded even then.
     if (filteredOut && imported.file === null && imported.error === null) {
-      await setOutcome(job, null, 'filtered');
+      await setOutcome(job, null, 'filtered_size');
       return;
     }
     const existing = imported.file === null && imported.error === null ? imported.duplicateOf[0] : undefined;

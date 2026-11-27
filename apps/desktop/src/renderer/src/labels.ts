@@ -5,6 +5,7 @@ import {
   type FileKind,
   type GenerationParameters,
   type GenerationStatus,
+  type JobResult,
   type JobStatus,
   PARALLEL_REQUESTS_MAX,
   PARALLEL_REQUESTS_MIN,
@@ -444,6 +445,14 @@ export const FILTERED_KIND_LABEL = 'Filtered: kind';
 export const FILTERED_SIZE_LABEL = 'Filtered: below minimum size';
 /** A download of an older version that was left out for either reason. */
 export const FILTERED_LABEL = 'Filtered';
+
+/** The status text of a succeeded job that names a result, in place of `Succeeded`. */
+export const JOB_RESULT_LABELS: Record<JobResult, string> = {
+  already_present: ALREADY_PRESENT_LABEL,
+  filtered: FILTERED_LABEL,
+  filtered_kind: FILTERED_KIND_LABEL,
+  filtered_size: FILTERED_SIZE_LABEL,
+};
 
 /** '2 archives'; the dialog names a single archive by its file name instead. */
 export function archiveCountLabel(count: number): string {

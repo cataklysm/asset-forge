@@ -188,7 +188,11 @@ it('a download job with a file shows the file name; an already present one says 
   expect(cells('moss.png').slice(0, 4)).toEqual(['Download', 'moss.png', 'example.com', 'Done']);
 });
 
-it('a download the site profile filtered out says Filtered in its status', async () => {
+it.each([
+  ['filtered_kind', 'Filtered: kind'],
+  ['filtered_size', 'Filtered: below minimum size'],
+  ['filtered', 'Filtered'],
+] as const)('a download the site profile left out (%s) says why in its status', async (result, text) => {
   install({
     'jobs:list': listOf([
       job({
@@ -199,14 +203,14 @@ it('a download the site profile filtered out says Filtered in its status', async
         fileName: null,
         url: 'https://example.com/small.png',
         host: 'example.com',
-        result: 'filtered',
+        result,
       }),
     ]),
   });
   renderScreen();
   const cell = await screen.findByText('example.com/small.png');
   const cells = within(cell.closest<HTMLElement>('[role="row"]')!).getAllByRole('gridcell').map((c) => c.textContent);
-  expect(cells.slice(0, 4)).toEqual(['Download', 'example.com/small.png', 'example.com', 'Filtered']);
+  expect(cells.slice(0, 4)).toEqual(['Download', 'example.com/small.png', 'example.com', text]);
 });
 
 it('the shortened URL is at most 60 characters, and an address that does not parse is cut to 60', async () => {
