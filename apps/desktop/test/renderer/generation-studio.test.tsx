@@ -908,3 +908,110 @@ describe('GenerationStudio with library prompts', () => {
     expect(textbox('who').value).toBe('a hero');
   });
 });
+
+describe('GenerationStudio raised over the linked file dialog', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  /** The real provider with buttons that open the studio and show the source in the linked dialog. */
+  function setupRaise(options: Options = {}) {
+    const file = fileRecord({ originalName: 'file.png' });
+    const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
+    const api = installFakeApi({
+      ...studioHandlers(file, options, state),
+      'tags:suggest': () => [],
+      'files:measure': () => file,
+      ...options.handlers,
+    });
+    function Opener() {
+      const studio = useStudio();
+      return (
+        <>
+          <button type="button" onClick={() => studio.open(file)}>
+            open studio
+          </button>
+          <button type="button" onClick={() => void studio.openFile(file.id)}>
+            open linked
+          </button>
+        </>
+      );
+    }
+    render(
+      <JobsProvider>
+        <ProviderSettingsProvider>
+          <TagsProvider>
+            <StudioProvider>
+              <Opener />
+            </StudioProvider>
+          </TagsProvider>
+        </ProviderSettingsProvider>
+      </JobsProvider>,
+    );
+    const studioName = `${STUDIO_TITLE} ${file.originalName}`;
+    const user = userEvent.setup();
+    return {
+      api,
+      file,
+      user,
+      async open() {
+        await user.click(button('open studio'));
+        await screen.findByRole('dialog', { name: studioName });
+        await modelsReady();
+      },
+      /** Shows the linked dialog over the studio, then raises the studio again (a remount). */
+      async raise() {
+        await user.click(button('open linked'));
+        await screen.findByRole('dialog', { name: file.originalName });
+        await user.click(button('open studio'));
+        await screen.findByRole('dialog', { name: studioName });
+        await modelsReady();
+      },
+      async close() {
+        await user.click(within(screen.getByRole('dialog', { name: studioName })).getByRole('button', { name: CLOSE_LABEL }));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: studioName })).toBeNull());
+      },
+    };
+  }
+
+  it('keeps Generate disabled and the typed prompt while a start is in flight across a raise', async () => {
+    const pending = deferred<{ ok: false; code: 'provider_rejected' }>();
+    const s = setupRaise({ handlers: { 'generations:start': () => pending.promise } });
+    await s.open();
+    await s.user.type(promptBox(), 'make it blue');
+    await s.user.click(button(GENERATE_BUTTON));
+    expect(button(GENERATE_BUTTON).disabled).toBe(true);
+
+    await s.raise();
+    expect(promptBox().value).toBe('make it blue');
+    expect(button(GENERATE_BUTTON).disabled).toBe(true);
+    await s.user.click(button(GENERATE_BUTTON));
+    expect(startRequests(s.api)).toHaveLength(1);
+
+    await act(async () => pending.resolve({ ok: false, code: 'provider_rejected' }));
+    await waitFor(() => expect(button(GENERATE_BUTTON).disabled).toBe(false));
+  });
+
+  it('keeps the attached library prompt with its values and the chosen model across a raise', async () => {
+    const s = setupRaise({ prompts: [hero()] });
+    await s.open();
+    await s.user.selectOptions(combobox(EDIT_MODEL_LABEL), 'mock-edit-basic');
+    await pickPrompt(s.user, 'Hero shot');
+    await s.user.type(textbox('who'), 'a hero');
+
+    await s.raise();
+    expect(screen.getByText(attachedPromptLabel('Hero shot', 1))).toBeTruthy();
+    expect(textbox('view').value).toBe('front');
+    expect(textbox('who').value).toBe('a hero');
+    expect(combobox(EDIT_MODEL_LABEL).value).toBe('mock-edit-basic');
+  });
+
+  it('starts from a fresh form after the studio was closed', async () => {
+    const s = setupRaise();
+    await s.open();
+    await s.user.type(promptBox(), 'make it blue');
+    await s.close();
+    await s.open();
+    expect(promptBox().value).toBe('');
+  });
+});

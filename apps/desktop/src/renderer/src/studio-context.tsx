@@ -6,6 +6,7 @@ import { GenerationStudio } from './components/GenerationStudio';
 import { useJobs } from './jobs-context';
 import { NO_IMAGE_PROVIDER_TITLE } from './labels';
 import { useProviders } from './provider-context';
+import type { StudioForm } from './studio-state';
 
 export interface StudioState {
   /** Opens the generation studio on `file`. */
@@ -46,6 +47,37 @@ const EMPTY: StudioState = {
 
 const StudioContext = createContext<StudioState>(EMPTY);
 
+/** What a generation start is for: an edit or an upscale of one source file. */
+export type StartKind = 'edit' | 'upscale';
+
+/**
+ * What outlives one instance of the studio dialog while the studio stays open (raising it mounts it
+ * anew): the starts in flight and the form of the shown source.
+ */
+export interface StudioSession {
+  /** A start of `kind` for the source `fileId` is in flight. */
+  starting(fileId: string, kind: StartKind): boolean;
+  /** Runs `start` unless a start of `kind` for `fileId` is in flight; resolves false when it did not run. */
+  guardStart(fileId: string, kind: StartKind, start: () => Promise<void>): Promise<boolean>;
+  /** The studio form kept for `fileId`; undefined for another file and after the studio was closed. */
+  draft(fileId: string): StudioForm | undefined;
+  /** Keeps the studio form of `fileId` until the studio closes or shows another file. */
+  keepDraft(fileId: string, form: StudioForm): void;
+}
+
+// Outside a provider nothing outlives the dialog: every start runs, and no form is kept.
+const NO_SESSION: StudioSession = {
+  starting: () => false,
+  guardStart: async (_fileId, _kind, start) => {
+    await start();
+    return true;
+  },
+  draft: () => undefined,
+  keepDraft: () => {},
+};
+
+const StudioSessionContext = createContext<StudioSession>(NO_SESSION);
+
 interface Linked {
   file: FileRecord;
   asset: { id: string; name: string; tags: readonly TagAssignment[] } | null;
@@ -65,7 +97,8 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
 
   // Which of the two dialogs is on top. A native dialog keeps its place in the top layer while it
   // stays open, so the one requested while the other is on top is mounted anew (a new key), which
-  // shows it again above the other.
+  // shows it again above the other. The studio's form and starts in flight outlive that remount
+  // (`StudioSession`).
   const top = useRef<'studio' | 'linked' | null>(null);
   const [studioKey, setStudioKey] = useState(0);
   const [linkedKey, setLinkedKey] = useState(0);
@@ -108,6 +141,7 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
         // An openFile still in flight must not show its dialog after the navigation.
         linkRequest.current += 1;
         top.current = null;
+        kept.current = null;
         setStudioFile(null);
         setLinked(null);
       });
@@ -115,23 +149,44 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
     [onOpenPrompt],
   );
 
-  // A paid start: while one for a file is in flight, a repeated click for that file sends nothing.
-  const starting = useRef(new Set<string>());
+  // A paid start: while one of a kind for a file is in flight, a repeated click for it sends nothing,
+  // also from a studio mounted anew. The ref answers at once; the state renders the buttons disabled.
+  const inFlight = useRef(new Set<string>());
+  const [startingKeys, setStartingKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const guardStart = useCallback(async (fileId: string, kind: StartKind, start: () => Promise<void>) => {
+    const key = `${kind}:${fileId}`;
+    if (inFlight.current.has(key)) return false;
+    inFlight.current.add(key);
+    setStartingKeys(new Set(inFlight.current));
+    try {
+      await start();
+      return true;
+    } finally {
+      inFlight.current.delete(key);
+      setStartingKeys(new Set(inFlight.current));
+    }
+  }, []);
+  const starting = useCallback((fileId: string, kind: StartKind) => startingKeys.has(`${kind}:${fileId}`), [startingKeys]);
+
   const upscale = useCallback(
     async (file: FileRecord, scale: UpscaleScale) => {
-      if (starting.current.has(file.id)) return;
-      starting.current.add(file.id);
-      try {
+      await guardStart(file.id, 'upscale', async () => {
         // No entry here: the renderer does not learn which image entry was used last.
         const result = await call('generations:start', { kind: 'upscale', fileId: file.id, scale });
         if (!result.ok) throw new Error(JOB_ERROR_MESSAGES[result.code]);
         refresh();
-      } finally {
-        starting.current.delete(file.id);
-      }
+      });
     },
-    [refresh],
+    [guardStart, refresh],
   );
+
+  // The form of the studio's source, so that a raise (a remount) shows it as it was; dropped on close.
+  const kept = useRef<{ fileId: string; form: StudioForm } | null>(null);
+  const draft = useCallback((fileId: string) => (kept.current?.fileId === fileId ? kept.current.form : undefined), []);
+  const keepDraft = useCallback((fileId: string, form: StudioForm) => {
+    kept.current = { fileId, form };
+  }, []);
+  const session = useMemo<StudioSession>(() => ({ starting, guardStart, draft, keepDraft }), [starting, guardStart, draft, keepDraft]);
 
   // Variable values typed in the studio, by `variableKey`; in memory only.
   const variables = useRef(new Map<string, string>());
@@ -153,37 +208,45 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
 
   return (
     <StudioContext.Provider value={value}>
-      {children}
-      {studioFile !== null && (
-        <GenerationStudio
-          key={`studio-${studioKey}`}
-          file={studioFile}
-          onClose={() => {
-            lower('studio', linked !== null);
-            setStudioFile(null);
-          }}
-          onOpenFile={(fileId) => void openFile(fileId).catch(() => {})}
-        />
-      )}
-      {linked !== null && (
-        <FileDetailDialog
-          key={`linked-${linkedKey}`}
-          file={linked.file}
-          asset={linked.asset}
-          actions={{ cover: null, onDetails: () => {}, studio: value }}
-          roleControl={null}
-          onFileChange={(next) => changeLinked(next.id, () => next)}
-          onMeasured={(id, size) => changeLinked(id, (file) => ({ ...file, ...size }))}
-          list={null}
-          onClose={() => {
-            linkRequest.current += 1;
-            lower('linked', studioFile !== null);
-            setLinked(null);
-          }}
-        />
-      )}
+      <StudioSessionContext.Provider value={session}>
+        {children}
+        {studioFile !== null && (
+          <GenerationStudio
+            key={`studio-${studioKey}`}
+            file={studioFile}
+            onClose={() => {
+              lower('studio', linked !== null);
+              kept.current = null;
+              setStudioFile(null);
+            }}
+            onOpenFile={(fileId) => void openFile(fileId).catch(() => {})}
+          />
+        )}
+        {linked !== null && (
+          <FileDetailDialog
+            key={`linked-${linkedKey}`}
+            file={linked.file}
+            asset={linked.asset}
+            actions={{ cover: null, onDetails: () => {}, studio: value }}
+            roleControl={null}
+            onFileChange={(next) => changeLinked(next.id, () => next)}
+            onMeasured={(id, size) => changeLinked(id, (file) => ({ ...file, ...size }))}
+            list={null}
+            onClose={() => {
+              linkRequest.current += 1;
+              lower('linked', studioFile !== null);
+              setLinked(null);
+            }}
+          />
+        )}
+      </StudioSessionContext.Provider>
     </StudioContext.Provider>
   );
+}
+
+/** The starts in flight and the kept form of the surrounding `StudioProvider`; outside one nothing is kept. */
+export function useStudioSession(): StudioSession {
+  return useContext(StudioSessionContext);
 }
 
 /** The studio of the surrounding `StudioProvider`; outside one nothing opens and nothing starts. */

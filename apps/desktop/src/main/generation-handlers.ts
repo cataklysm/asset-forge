@@ -3,6 +3,7 @@ import {
   recentGenerationPrompts,
   removeGeneration,
   retryGeneration,
+  InvalidOperationError,
   startGeneration,
   type ImageProviderDirectory,
   type WorkspaceManager,
@@ -16,6 +17,8 @@ import type { ProviderStore } from './provider-store.js';
 
 // Kept free of Electron imports. Every channel runs inside the workspace read, so without a workspace it answers
 // no_workspace_open whatever the ids; the provider entry is resolved inside it too.
+
+export const START_IN_FLIGHT_MESSAGE = 'A generation for this file is already being started';
 
 export type GenerationHandlers = Pick<
   IpcHandlers,
@@ -65,12 +68,22 @@ export function createGenerationHandlers(
   directory: ImageProviderDirectory,
 ): GenerationHandlers {
   const deps = { providers: directory, control: jobs };
+  // The (kind, source file) pairs a start is being handled for: a paid start is never sent twice by a
+  // repeated request while the first one is still in the call. Deliberate later variants stay possible.
+  const inFlight = new Set<string>();
   return {
     'generations:start': async (r) => {
-      const result = await manager.read((s) => startGeneration(s, deps, r));
-      // Core wakes the scheduler; the counter tells the renderer a job appeared.
-      if (result.ok) jobs.changed();
-      return result;
+      const key = `${r.kind}:${r.fileId}`;
+      if (inFlight.has(key)) throw new InvalidOperationError(START_IN_FLIGHT_MESSAGE);
+      inFlight.add(key);
+      try {
+        const result = await manager.read((s) => startGeneration(s, deps, r));
+        // Core wakes the scheduler; the counter tells the renderer a job appeared.
+        if (result.ok) jobs.changed();
+        return result;
+      } finally {
+        inFlight.delete(key);
+      }
     },
     'generations:forFile': (r) => manager.read((s) => listGenerationsForFile(s, r.fileId)),
     'generations:retry': async (r) => {

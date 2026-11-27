@@ -26,7 +26,7 @@ import { formatLabel } from '../media-url';
 import { useImageProviderChoice } from '../provider-choice';
 import { useProviders } from '../provider-context';
 import { imageProviderGate } from '../provider-gate';
-import { useStudio } from '../studio-context';
+import { useStudio, useStudioSession } from '../studio-context';
 import { attach, preview } from '../studio-prompt';
 import { constrain, formFromGeneration, readSafeMode, tileState, writeSafeMode, type StudioForm as Form } from '../studio-state';
 import { ALERT, BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
@@ -57,6 +57,15 @@ const freshFields = (safeMode: boolean): Fields => ({
   safeMode,
 });
 
+const fieldsOf = (form: Form): Fields => ({
+  prompt: form.prompt,
+  attached: form.attached,
+  origin: form.origin,
+  aspectRatio: form.aspectRatio,
+  resolution: form.resolution,
+  safeMode: form.safeMode,
+});
+
 /** A message of a failed call: fixed main-process messages as sent, anything else described. */
 function messageOf(error: unknown): string {
   return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
@@ -74,14 +83,25 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const providers = useProviders();
   const { changeToken, refresh } = useJobs();
   const { recallVariable, rememberVariables } = useStudio();
+  const session = useStudioSession();
   const choice = useImageProviderChoice(file.id);
   const { providerId, model } = choice;
 
-  const [fields, setFields] = useState<Fields>(() => freshFields(readSafeMode()));
+  // A studio mounted anew by a raise shows the form it had; a fresh opening starts empty.
+  const [restored] = useState(() => session.draft(file.id));
+  const [fields, setFields] = useState<Fields>(() => (restored !== undefined ? fieldsOf(restored) : freshFields(readSafeMode())));
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
-  // "Use settings" on another entry: its model is chosen once the entry is selected.
-  const [pendingModel, setPendingModel] = useState<{ providerId: string; model: string | null } | null>(null);
+  // "Use settings" on another entry: its model is chosen once the entry is selected. A restored form
+  // chooses its entry and model the same way.
+  const [pendingModel, setPendingModel] = useState<{ providerId: string; model: string | null } | null>(() =>
+    restored?.providerId != null ? { providerId: restored.providerId, model: restored.model } : null,
+  );
+  useEffect(() => {
+    if (restored?.providerId != null && restored.providerId !== providerId) choice.setProvider(restored.providerId);
+    // Only the first render's entry decides whether the restored one must be selected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (pendingModel !== null && providerId === pendingModel.providerId) {
     setPendingModel(null);
     if (model !== pendingModel.model) choice.setModel(pendingModel.model);
@@ -113,6 +133,17 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   }
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
+  // A start of this instance, or one sent from an instance before a raise.
+  const startBusy = starting || session.starting(file.id, 'edit');
+  const upscaleBusy = (fileId: string | null) => fileId !== null && session.starting(fileId, 'upscale');
+
+  // The form as typed (a "Use settings" entry and model still waiting count as chosen).
+  const { keepDraft } = session;
+  const keptProviderId = pendingModel?.providerId ?? providerId;
+  const keptModel = pendingModel !== null ? pendingModel.model : model;
+  useEffect(() => {
+    if (shownFileId === file.id) keepDraft(file.id, { ...fields, providerId: keptProviderId, model: keptModel });
+  }, [keepDraft, shownFileId, file.id, fields, keptProviderId, keptModel]);
 
   const disposed = useRef(false);
   useEffect(() => {
@@ -178,6 +209,17 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
     void loadRecent();
   }, [loadRecent]);
 
+  // A start sent before a raise ends after this instance read its results: they are read again.
+  const sessionStarting = session.starting(file.id, 'edit');
+  const wasStarting = useRef(sessionStarting);
+  useEffect(() => {
+    if (wasStarting.current && !sessionStarting) {
+      void loadResults();
+      void loadRecent();
+    }
+    wasStarting.current = sessionStarting;
+  }, [sessionStarting, loadResults, loadRecent]);
+
   const imageModels = providerId === null ? undefined : providers.imageModels[providerId];
   const imageModel: ImageModel | null =
     imageModels !== undefined && imageModels !== 'checking' && imageModels.ok
@@ -210,28 +252,32 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   }
 
   async function generate() {
-    if (blocked !== null || starting || providerId === null || model === null) return;
+    if (blocked !== null || startBusy || providerId === null || model === null) return;
     setStarting(true);
     setStartError(null);
     try {
-      const result = await call('generations:start', {
-        kind: 'edit',
-        fileId: file.id,
-        providerId,
-        model,
-        ...(form.attached !== null
-          ? { promptVersionId: form.attached.version.id, variables: form.attached.values }
-          : { prompt: form.prompt }),
-        ...(form.aspectRatio !== null ? { aspectRatio: form.aspectRatio } : {}),
-        ...(form.resolution !== null ? { resolution: form.resolution } : {}),
-        safeMode: form.safeMode,
+      await session.guardStart(file.id, 'edit', async () => {
+        const result = await call('generations:start', {
+          kind: 'edit',
+          fileId: file.id,
+          providerId,
+          model,
+          ...(form.attached !== null
+            ? { promptVersionId: form.attached.version.id, variables: form.attached.values }
+            : { prompt: form.prompt }),
+          ...(form.aspectRatio !== null ? { aspectRatio: form.aspectRatio } : {}),
+          ...(form.resolution !== null ? { resolution: form.resolution } : {}),
+          safeMode: form.safeMode,
+        });
+        // A studio mounted anew meanwhile reads its results when the jobs poll.
+        if (result.ok) refresh();
+        if (disposed.current) return;
+        if (!result.ok) setStartError(JOB_ERROR_MESSAGES[result.code]);
+        else {
+          changed();
+          void loadRecent();
+        }
       });
-      if (disposed.current) return;
-      if (!result.ok) setStartError(JOB_ERROR_MESSAGES[result.code]);
-      else {
-        changed();
-        void loadRecent();
-      }
     } catch (e) {
       if (!disposed.current) setStartError(messageOf(e));
     } finally {
@@ -256,10 +302,13 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const upscale = (fileId: string, scale: UpscaleScale) =>
     act(async () => {
       if (providerId === null) return;
-      const result = await call('generations:start', { kind: 'upscale', fileId, providerId, scale });
-      if (disposed.current) return;
-      if (!result.ok) setActionError(JOB_ERROR_MESSAGES[result.code]);
-      else changed();
+      await session.guardStart(fileId, 'upscale', async () => {
+        const result = await call('generations:start', { kind: 'upscale', fileId, providerId, scale });
+        if (result.ok) refresh();
+        if (disposed.current) return;
+        if (!result.ok) setActionError(JOB_ERROR_MESSAGES[result.code]);
+        else changed();
+      });
     });
 
   const retry = (g: Generation) =>
@@ -437,7 +486,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
               onSaveToLibrary={() => setSaving(true)}
               blocked={blocked}
               startError={startError}
-              busy={starting}
+              busy={startBusy}
               onGenerate={() => void generate()}
               promptRef={promptRef}
             />
@@ -460,7 +509,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
               onDelete={(fileId) => void trash(fileId)}
               onRetry={(g) => void retry(g)}
               onRemove={(g) => void remove(g)}
-              busy={busy}
+              busy={busy || upscaleBusy(selectedFileId)}
             />
           </section>
         </div>

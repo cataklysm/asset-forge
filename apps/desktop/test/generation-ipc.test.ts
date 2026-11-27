@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, IMAGE_INPUT_MAX_BYTES, type Generation, type IpcChannel, purposeOf, type ProviderView } from '@assetforge/contracts';
-import { NotFoundError, type ImageProvider } from '@assetforge/core';
+import { NotFoundError, type ImageProvider, type ImageProviderDirectory, type WorkspaceManager } from '@assetforge/core';
 import {
   MOCK_EDIT_MODEL,
   MOCK_MODEL,
@@ -15,7 +15,8 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createGenerationImageSource } from '../src/main/generation-image-source.js';
-import { createImageProviderDirectory } from '../src/main/generation-handlers.js';
+import { createGenerationHandlers, createImageProviderDirectory } from '../src/main/generation-handlers.js';
+import type { JobHost } from '../src/main/job-host.js';
 import type { ProviderGateway } from '../src/main/provider-gateway.js';
 import type { ProviderEntry, ProviderStore } from '../src/main/provider-store.js';
 import { createHarness, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
@@ -284,6 +285,62 @@ describe('generation IPC', () => {
     await h.ok('workspace:close', {});
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
     expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({ id: queued.id, status: 'cancelled' });
+  });
+});
+
+describe('generation start in flight', () => {
+  const FILE_A = randomUUID();
+  const FILE_B = randomUUID();
+  const BUSY = { code: 'invalid_operation', message: 'A generation for this file is already being started' };
+
+  /** The start handler over a manager whose every read waits until the test settles it. */
+  function handlers() {
+    const pending: { resolve(value: unknown): void; reject(error: unknown): void }[] = [];
+    const manager = {
+      read: () =>
+        new Promise((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }),
+    } as unknown as WorkspaceManager;
+    const jobs = { changed: vi.fn() } as unknown as JobHost;
+    const start = createGenerationHandlers(manager, jobs, {} as ImageProviderDirectory)['generations:start'];
+    return { start, pending };
+  }
+  const editOf = (fileId: string) => ({ kind: 'edit' as const, fileId, model: 'm', prompt: 'night', safeMode: true });
+  const upscaleOf = (fileId: string) => ({ kind: 'upscale' as const, fileId, scale: 2 as const });
+  const answer = { ok: false as const, code: 'provider_unreachable' as const };
+
+  it('refuses a second start for the same file and kind while the first is in the call', async () => {
+    const { start, pending } = handlers();
+    const first = start(editOf(FILE_A));
+    await expect(start(editOf(FILE_A))).rejects.toMatchObject(BUSY);
+    expect(pending).toHaveLength(1);
+    pending[0]!.resolve(answer);
+    await expect(first).resolves.toEqual(answer);
+  });
+
+  it('lets a start for another file or another kind through', async () => {
+    const { start, pending } = handlers();
+    const calls = [start(editOf(FILE_A)), start(editOf(FILE_B)), start(upscaleOf(FILE_A))];
+    expect(pending).toHaveLength(3);
+    for (const p of pending) p.resolve(answer);
+    expect(await Promise.all(calls)).toEqual([answer, answer, answer]);
+  });
+
+  it('lets the next start through once the first settled, also after a rejection', async () => {
+    const { start, pending } = handlers();
+    const first = start(upscaleOf(FILE_A));
+    pending[0]!.resolve(answer);
+    await first;
+    const second = start(upscaleOf(FILE_A));
+    expect(pending).toHaveLength(2);
+    await expect(start(upscaleOf(FILE_A))).rejects.toMatchObject(BUSY);
+    pending[1]!.reject(new NotFoundError('This file does not exist'));
+    await expect(second).rejects.toBeInstanceOf(NotFoundError);
+    const third = start(upscaleOf(FILE_A));
+    expect(pending).toHaveLength(3);
+    pending[2]!.resolve(answer);
+    await expect(third).resolves.toEqual(answer);
   });
 });
 
