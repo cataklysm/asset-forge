@@ -140,11 +140,11 @@ export const ipcContract = {
   },
   /**
    * Queues one download job per usable line; `skipDuplicates` defaults to true. A line over the length
-   * limit is reported as invalid, not refused by the schema.
+   * limit is reported as invalid, not refused by the schema; only a line over 10000 characters is refused.
    */
   'files:importUrls': {
     request: z.object({
-      urls: z.array(z.string()).min(1).max(MAX_IMPORT_URLS),
+      urls: z.array(z.string().max(10000)).min(1).max(MAX_IMPORT_URLS),
       target: FileTargetSchema.optional(),
       skipDuplicates: z.boolean().optional(),
     }),
@@ -155,7 +155,7 @@ export const ipcContract = {
     request: z.object({ fileId: IdSchema }),
     response: z.array(FileOriginSchema),
   },
-  // Opens a stored origin in the system browser; the renderer never passes the address itself.
+  /** Opens a stored origin in the system browser; the renderer never passes the address itself. */
   'files:openOrigin': {
     request: z.object({ fileId: IdSchema, originId: IdSchema }),
     response: z.object({}),

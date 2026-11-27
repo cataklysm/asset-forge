@@ -118,10 +118,12 @@ describe('download job contracts', () => {
 });
 
 describe('URL import channels', () => {
-  test('files:importUrls takes 1 to 5000 lines of any length', () => {
+  test('files:importUrls takes 1 to 5000 lines of at most 10000 characters', () => {
     const request = ipcContract['files:importUrls'].request;
     expect(request.safeParse({ urls: ['https://example.com/a.png'] }).success).toBe(true);
     expect(request.safeParse({ urls: ['x'.repeat(3000)], skipDuplicates: false }).success).toBe(true);
+    expect(request.safeParse({ urls: ['x'.repeat(10000)] }).success).toBe(true);
+    expect(request.safeParse({ urls: ['a', 'x'.repeat(10001)] }).success).toBe(false);
     expect(request.safeParse({ urls: ['a'], target: { assetId: uuid, role: 'reference' } }).success).toBe(true);
     expect(request.safeParse({ urls: [] }).success).toBe(false);
     expect(request.safeParse({ urls: Array.from({ length: 5000 }, () => 'a') }).success).toBe(true);

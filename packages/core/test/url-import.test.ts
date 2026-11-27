@@ -131,6 +131,15 @@ describe('enqueueUrlImport', () => {
     ]);
   });
 
+  it('measures a line after the trim, so trailing spaces never make it too long', async () => {
+    const { db, session } = await setup();
+    const url = `https://a.example/${'x'.repeat(1995 - 'https://a.example/'.length)}`;
+    expect(url.length).toBe(1995);
+    const result = await enqueueUrlImport(session, { urls: [`${url}          `], target: null, skipDuplicates: true });
+    expect(result).toEqual({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] });
+    expect(db.jobs.rows[0]).toMatchObject({ payload: { url } });
+  });
+
   it('an unknown target asset answers not_found and queues nothing', async () => {
     const { db, session } = await setup();
     await expect(

@@ -68,7 +68,8 @@ export async function enqueueUrlImport(
     if (text === '') return;
     let url: string;
     try {
-      if (line.length > IMPORT_URL_LINE_MAX) throw new Error('too long');
+      // Measured after the trim: surrounding spaces never make a line too long.
+      if (text.length > IMPORT_URL_LINE_MAX) throw new Error('too long');
       url = normalizeDownloadUrl(text);
     } catch {
       result.invalid.push({ line: index + 1, text: text.slice(0, INVALID_TEXT_MAX) });
