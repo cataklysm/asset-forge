@@ -111,7 +111,14 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const [upscales, setUpscales] = useState<Generation[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
+  // Also kept in the session, so that a start failing after a raise shows in the instance mounted anew
+  // (outside a provider the session keeps nothing and this instance's own copy shows it).
+  const [ownStartError, setOwnStartError] = useState<string | null>(null);
+  const startError = session.startError(file.id) ?? ownStartError;
+  const setStartError = (message: string | null) => {
+    setOwnStartError(message);
+    session.setStartError(file.id, message);
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -127,7 +134,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
     setResults(null);
     setUpscales([]);
     setSelectedId(null);
-    setStartError(null);
+    setOwnStartError(null);
     setActionError(null);
     setLoadError(null);
   }
@@ -269,17 +276,17 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
           ...(form.resolution !== null ? { resolution: form.resolution } : {}),
           safeMode: form.safeMode,
         });
-        // A studio mounted anew meanwhile reads its results when the jobs poll.
+        // A studio mounted anew meanwhile reads its results when the jobs poll and shows the error.
         if (result.ok) refresh();
+        else setStartError(JOB_ERROR_MESSAGES[result.code]);
         if (disposed.current) return;
-        if (!result.ok) setStartError(JOB_ERROR_MESSAGES[result.code]);
-        else {
+        if (result.ok) {
           changed();
           void loadRecent();
         }
       });
     } catch (e) {
-      if (!disposed.current) setStartError(messageOf(e));
+      setStartError(messageOf(e));
     } finally {
       if (!disposed.current) setStarting(false);
     }

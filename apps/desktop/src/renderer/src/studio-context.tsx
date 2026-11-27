@@ -13,7 +13,8 @@ export interface StudioState {
   open(file: FileRecord): void;
   /**
    * Starts an upscale of `file`. It names no entry: the main process runs the image provider used
-   * last (else the first). Rejects with the reason it did not start.
+   * last (else the first). Rejects with the reason a sent start failed. While an upscale of the file
+   * is in flight it sends nothing and resolves; the start in flight reports its own outcome.
    */
   upscale(file: FileRecord, scale: UpscaleScale): Promise<void>;
   /**
@@ -63,6 +64,10 @@ export interface StudioSession {
   draft(fileId: string): StudioForm | undefined;
   /** Keeps the studio form of `fileId` until the studio closes or shows another file. */
   keepDraft(fileId: string, form: StudioForm): void;
+  /** Why the last edit start for the source `fileId` failed; null when it did not or the studio was closed since. */
+  startError(fileId: string): string | null;
+  /** Sets (or with null clears) the start error of `fileId`; it outlives a raise and goes on close. */
+  setStartError(fileId: string, message: string | null): void;
 }
 
 // Outside a provider nothing outlives the dialog: every start runs, and no form is kept.
@@ -74,6 +79,8 @@ const NO_SESSION: StudioSession = {
   },
   draft: () => undefined,
   keepDraft: () => {},
+  startError: () => null,
+  setStartError: () => {},
 };
 
 const StudioSessionContext = createContext<StudioSession>(NO_SESSION);
@@ -100,6 +107,8 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
   // shows it again above the other. The studio's form and starts in flight outlive that remount
   // (`StudioSession`).
   const top = useRef<'studio' | 'linked' | null>(null);
+  // Whether the studio is open: a start answering after a close (which drops every start error) shows nothing later.
+  const studioOpen = useRef(false);
   const [studioKey, setStudioKey] = useState(0);
   const [linkedKey, setLinkedKey] = useState(0);
   const raise = useCallback((which: 'studio' | 'linked') => {
@@ -117,6 +126,7 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
   const open = useCallback(
     (file: FileRecord) => {
       raise('studio');
+      studioOpen.current = true;
       setStudioFile(file);
     },
     [raise],
@@ -142,6 +152,8 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
         linkRequest.current += 1;
         top.current = null;
         kept.current = null;
+        studioOpen.current = false;
+        setStartErrors(new Map());
         setStudioFile(null);
         setLinked(null);
       });
@@ -186,7 +198,23 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
   const keepDraft = useCallback((fileId: string, form: StudioForm) => {
     kept.current = { fileId, form };
   }, []);
-  const session = useMemo<StudioSession>(() => ({ starting, guardStart, draft, keepDraft }), [starting, guardStart, draft, keepDraft]);
+  // The last start error per source, so that a start failing after a raise shows in the new instance.
+  const [startErrors, setStartErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const startError = useCallback((fileId: string) => startErrors.get(fileId) ?? null, [startErrors]);
+  const setStartError = useCallback((fileId: string, message: string | null) => {
+    if (message !== null && !studioOpen.current) return;
+    setStartErrors((current) => {
+      if ((current.get(fileId) ?? null) === message) return current;
+      const next = new Map(current);
+      if (message === null) next.delete(fileId);
+      else next.set(fileId, message);
+      return next;
+    });
+  }, []);
+  const session = useMemo<StudioSession>(
+    () => ({ starting, guardStart, draft, keepDraft, startError, setStartError }),
+    [starting, guardStart, draft, keepDraft, startError, setStartError],
+  );
 
   // Variable values typed in the studio, by `variableKey`; in memory only.
   const variables = useRef(new Map<string, string>());
@@ -217,6 +245,8 @@ export function StudioProvider({ children, onOpenPrompt }: { children: ReactNode
             onClose={() => {
               lower('studio', linked !== null);
               kept.current = null;
+              studioOpen.current = false;
+              setStartErrors(new Map());
               setStudioFile(null);
             }}
             onOpenFile={(fileId) => void openFile(fileId).catch(() => {})}

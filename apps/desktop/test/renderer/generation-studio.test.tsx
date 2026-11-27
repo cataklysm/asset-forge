@@ -992,6 +992,47 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     await waitFor(() => expect(button(GENERATE_BUTTON).disabled).toBe(false));
   });
 
+  it('shows a start that fails after a raise in the new instance, and clears it on the next start and on close', async () => {
+    const message = JOB_ERROR_MESSAGES.provider_rejected;
+    const pending = deferred<{ ok: false; code: 'provider_rejected' }>();
+    let answer = () => pending.promise;
+    const s = setupRaise({ handlers: { 'generations:start': () => answer() } });
+    await s.open();
+    await s.user.type(promptBox(), 'make it blue');
+    await s.user.click(button(GENERATE_BUTTON));
+
+    await s.raise();
+    await act(async () => pending.resolve({ ok: false, code: 'provider_rejected' }));
+    await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe(message));
+
+    // The next start clears it while it runs.
+    const next = deferred<{ ok: false; code: 'provider_rejected' }>();
+    answer = () => next.promise;
+    await s.user.click(button(GENERATE_BUTTON));
+    expect(button(GENERATE_BUTTON).title).not.toBe(message);
+    await act(async () => next.resolve({ ok: false, code: 'provider_rejected' }));
+    await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe(message));
+
+    await s.close();
+    await s.open();
+    expect(button(GENERATE_BUTTON).title).not.toBe(message);
+  });
+
+  it('shows nothing on the next open for a start that failed after the studio was closed', async () => {
+    const message = JOB_ERROR_MESSAGES.provider_rejected;
+    const pending = deferred<{ ok: false; code: 'provider_rejected' }>();
+    const s = setupRaise({ handlers: { 'generations:start': () => pending.promise } });
+    await s.open();
+    await s.user.type(promptBox(), 'make it blue');
+    await s.user.click(button(GENERATE_BUTTON));
+    await s.close();
+    await act(async () => pending.resolve({ ok: false, code: 'provider_rejected' }));
+
+    await s.open();
+    await s.user.type(promptBox(), 'make it red');
+    expect(button(GENERATE_BUTTON).title).not.toBe(message);
+  });
+
   it('keeps the attached library prompt with its values and the chosen model across a raise', async () => {
     const s = setupRaise({ prompts: [hero()] });
     await s.open();
