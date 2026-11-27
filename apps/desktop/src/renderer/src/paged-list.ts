@@ -30,19 +30,21 @@ function countLoading<T>(state: PagedState<T>): number {
 /**
  * Pages from `wanted` that are neither loaded, loading nor failed, limited so the requests in
  * flight stay ≤ maxInFlight. `outstanding` counts every unsettled request, including those of an
- * earlier key or pages a shrunk total dropped, which the state itself no longer shows.
+ * earlier key or pages a shrunk total dropped, which the state itself no longer shows. A page in
+ * `again` is requested even though the state holds it (a refetch that keeps its old entry).
  */
 export function pagesToRequest<T>(
   state: PagedState<T>,
   wanted: readonly number[],
   maxInFlight: number = MAX_IN_FLIGHT,
   outstanding: number = 0,
+  again: ReadonlySet<number> = new Set(),
 ): number[] {
   let free = maxInFlight - Math.max(countLoading(state), outstanding);
   const result: number[] = [];
   for (const page of wanted) {
     if (free <= 0) break;
-    if (state.pages.has(page) || result.includes(page)) continue;
+    if ((state.pages.has(page) && !again.has(page)) || result.includes(page)) continue;
     result.push(page);
     free -= 1;
   }
@@ -121,6 +123,31 @@ export function slotAt<T>(state: PagedState<T>, index: number, pageSize: number 
  */
 export function retryIndex(page: number, firstVisibleIndex: number, pageSize: number = PAGE_SIZE): number {
   return Math.max(page * pageSize, firstVisibleIndex);
+}
+
+/** Replaces loaded items that have the id of one of `items`; returns `state` itself when nothing matched. */
+export function patchItems<T extends { id: string }>(state: PagedState<T>, items: readonly T[]): PagedState<T> {
+  if (items.length === 0) return state;
+  const byId = new Map<string, T>();
+  for (const item of items) byId.set(item.id, item);
+  let next: Map<number, PageEntry<T>> | null = null;
+  for (const [page, entry] of state.pages) {
+    if (entry.status !== 'loaded' || !entry.items.some((item) => byId.has(item.id))) continue;
+    next ??= new Map(state.pages);
+    next.set(page, { status: 'loaded', items: entry.items.map((item) => byId.get(item.id) ?? item) });
+  }
+  return next === null ? state : { ...state, pages: next };
+}
+
+/** Removes `pages` from the state; returns `state` itself when it held none of them. */
+export function dropPages<T>(state: PagedState<T>, pages: Iterable<number>): PagedState<T> {
+  let next: Map<number, PageEntry<T>> | null = null;
+  for (const page of pages) {
+    if (!state.pages.has(page)) continue;
+    next ??= new Map(state.pages);
+    next.delete(page);
+  }
+  return next === null ? state : { ...state, pages: next };
 }
 
 /** The loaded item with `id` and its index, or null when no loaded page holds it. */

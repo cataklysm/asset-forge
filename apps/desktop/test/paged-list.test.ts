@@ -5,6 +5,7 @@ import {
   emptyPaged,
   markLoading,
   pagesToRequest,
+  patchItems,
   rejectPage,
   retryIndex,
   retryPage,
@@ -147,5 +148,51 @@ describe('retryIndex', () => {
 
   it('moves to the first visible slot when the page starts above the viewport', () => {
     expect(retryIndex(1, 75)).toBe(75);
+  });
+});
+
+describe('patchItems', () => {
+  const record = (id: string, v = 0) => ({ id, v });
+  const base = () =>
+    acceptPage(
+      acceptPage(emptyPaged<{ id: string; v: number }>('k'), 'k', 0, [record('a'), record('b')], 200),
+      'k',
+      1,
+      [record('c')],
+      200,
+    );
+
+  it('replaces the loaded items with a matching id and keeps untouched pages identical', () => {
+    const state = base();
+    const next = patchItems(state, [record('b', 1)]);
+    expect(next).not.toBe(state);
+    expect(next.key).toBe('k');
+    expect(next.total).toBe(200);
+    expect(next.pages.get(0)).toEqual({ status: 'loaded', items: [record('a'), record('b', 1)] });
+    expect(next.pages.get(1)).toBe(state.pages.get(1));
+    // The input is not mutated.
+    expect(state.pages.get(0)).toEqual({ status: 'loaded', items: [record('a'), record('b')] });
+  });
+
+  it('returns the state itself when no id matches', () => {
+    const state = base();
+    expect(patchItems(state, [record('x', 1)])).toBe(state);
+    expect(patchItems(state, [])).toBe(state);
+  });
+
+  it('leaves loading and failed pages alone', () => {
+    const state = rejectPage(markLoading(base(), [2]), 'k', 3);
+    const next = patchItems(state, [record('c', 1)]);
+    expect(next.pages.get(2)).toEqual({ status: 'loading' });
+    expect(next.pages.get(3)).toEqual({ status: 'failed' });
+    expect(next.pages.get(1)).toEqual({ status: 'loaded', items: [record('c', 1)] });
+  });
+});
+
+describe('pagesToRequest with pages to fetch again', () => {
+  it('requests a present page listed in `again` within the cap', () => {
+    const loaded = stateWithLoaded([0, 1]);
+    expect(pagesToRequest(loaded, [0, 1, 2], 2, 0, new Set([1]))).toEqual([1, 2]);
+    expect(pagesToRequest(loaded, [0, 1], 2, 1, new Set([0, 1]))).toEqual([0]);
   });
 });

@@ -5,13 +5,21 @@ import { PagedLoader } from '../paged-loader';
 /**
  * Loads the pages of a list that are wanted right now, at most `MAX_IN_FLIGHT` at a time
  * (see `PagedLoader`). After a change of `key` the previous results stay in `state` while
- * `pending`, until page 0 of the new key has settled; earlier answers are ignored.
+ * `pending`, until page 0 of the new key has settled; earlier answers are ignored. `patch` and
+ * `refresh` update the current key in place, without a remount (see `PagedLoader`).
  */
-export function usePagedList<T>(
+export function usePagedList<T extends { id: string }>(
   key: string,
   fetchPage: (offset: number, limit: number) => Promise<{ items: T[]; total: number }>,
   wantedPages: readonly number[],
-): { state: PagedState<T>; pending: boolean; retry(page: number): void; loadThrough(count: number): Promise<void> } {
+): {
+  state: PagedState<T>;
+  pending: boolean;
+  retry(page: number): void;
+  loadThrough(count: number): Promise<void>;
+  patch(items: readonly T[]): void;
+  refresh(): void;
+} {
   const [version, setVersion] = useState(0);
   const fetchRef = useRef(fetchPage);
   fetchRef.current = fetchPage;
@@ -39,5 +47,7 @@ export function usePagedList<T>(
 
   const retry = useCallback((page: number) => loader.retry(page), [loader]);
   const loadThrough = useCallback((count: number) => loader.loadThrough(count), [loader]);
-  return { state: loader.displayed, pending: loader.pending, retry, loadThrough };
+  const patch = useCallback((items: readonly T[]) => loader.patch(items), [loader]);
+  const refresh = useCallback(() => loader.refresh(), [loader]);
+  return { state: loader.displayed, pending: loader.pending, retry, loadThrough, patch, refresh };
 }
