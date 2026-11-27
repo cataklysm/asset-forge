@@ -541,3 +541,37 @@ describe('trashed files in the handler', () => {
     expect(vision.calls).toEqual([]);
   });
 });
+
+describe('the effects of the analyze file handler', () => {
+  for (const mode of ['apply', 'propose'] as const) {
+    it(`reports the file once it stored the result (${mode})`, async () => {
+      const { file, handler, effects } = await setup();
+      await handler.run(jobFor(file.id, { version: 2, model: 'mock-vision', mode }), new AbortController().signal);
+      expect(effects.changed).toEqual([file.id]);
+      expect(effects.added).toEqual([]);
+    });
+  }
+
+  it('reports nothing when it failed or the file was trashed', async () => {
+    const failed = await setup();
+    failed.vision.answer = { tags: [] };
+    await rejectsWith(failed.handler.run(jobFor(failed.file.id), new AbortController().signal), 'invalid_response');
+    expect(failed.effects.changed).toEqual([]);
+
+    const trashed = await setup();
+    trashed.vision.respond = async () => {
+      await trashForTest(trashed.session, [trashed.file.id]);
+      return { tags: ['car'] };
+    };
+    await rejectsWith(trashed.handler.run(jobFor(trashed.file.id), new AbortController().signal), 'file_unavailable');
+    expect(trashed.effects.changed).toEqual([]);
+  });
+
+  it('still succeeds when the report throws', async () => {
+    const { db, file, handler, effects } = await setup();
+    effects.throwing = true;
+    await handler.run(jobFor(file.id), new AbortController().signal);
+    expect(effects.changed).toEqual([file.id]);
+    expect(await db.analyses.get(file.id)).not.toBeNull();
+  });
+});

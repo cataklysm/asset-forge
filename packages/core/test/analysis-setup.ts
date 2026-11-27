@@ -62,8 +62,20 @@ export async function setup() {
   const lanes: (string | null)[] = [];
   /** The lane of every fingerprint provider lookup of the handler. */
   const providerLanes: (string | null)[] = [];
+  /** What the handler reported through its effects; `throwing` makes every report throw. */
+  const effects = { changed: [] as string[], added: [] as (string | null)[], throwing: false };
   const handler = createAnalyzeFileHandler({
     session,
+    effects: {
+      fileChanged: (id) => {
+        effects.changed.push(id);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+      fileAdded: (assetId) => {
+        effects.added.push(assetId);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+    },
     vision: (lane) => {
       lanes.push(lane);
       return configured.vision;
@@ -78,7 +90,7 @@ export async function setup() {
   const configure = (c: { vision: FakeVisionProvider | null; provider?: string | null }) => {
     configured = c;
   };
-  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes, providerLanes };
+  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes, providerLanes, effects };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;

@@ -3,7 +3,7 @@ import { relocateFile } from './asset-files.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { SourceNotReadableError } from './errors.js';
 import { importStream, isRefusedImportName, type ImportContext } from './import-file.js';
-import { JobError, type Job, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
 import { RemoteFileError, type RemoteFile, type RemoteFileFailure, type RemoteFileSource } from './ports.js';
 import type { WorkspaceSession } from './session.js';
 import { clampRetryAfterMs, DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
@@ -11,6 +11,8 @@ import { clampRetryAfterMs, DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js'
 export interface FileDownloadHandlerDeps {
   session: WorkspaceSession;
   remote: RemoteFileSource;
+  /** Told where a downloaded file was added; never for one that was already present. */
+  effects?: JobEffects;
 }
 
 const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
@@ -143,12 +145,15 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
 
     // Nothing after this point fails the run: a later retry would keep a stale outcome.
     await setOutcome(job, file.id, null);
-    if (target === null) return;
-    try {
-      await relocateFile(s, file.id, target);
-    } catch {
-      // Best effort: the file stays in the inbox.
+    let placedIn: string | null = null;
+    if (target !== null) {
+      try {
+        placedIn = (await relocateFile(s, file.id, target)).assetId;
+      } catch {
+        // Best effort: the file stays in the inbox.
+      }
     }
+    reportEffect(deps.effects, (e) => e.fileAdded(placedIn));
   }
 
   return {

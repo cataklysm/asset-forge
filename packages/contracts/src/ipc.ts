@@ -47,7 +47,7 @@ import {
   WorkflowTemplateSchema,
 } from './workflows';
 import { WorkspaceSummarySchema } from './workspace';
-import { JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema, WaitingByProviderSchema } from './jobs';
+import { ChangesSchema, JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema, WaitingByProviderSchema } from './jobs';
 import { ProviderIdSchema } from './provider-ref';
 import {
   AnalysisModeSchema,
@@ -644,6 +644,14 @@ export const ipcContract = {
   'jobs:clearFinished': {
     request: EmptyRequestSchema,
     response: z.object({ removed: z.number().int().nonnegative() }),
+  },
+  /**
+   * What changed in the open workspace since `cursor`; `reset` for a null, foreign or too old cursor and without a
+   * workspace. Needs no workspace read and never waits for the queue.
+   */
+  'changes:since': {
+    request: z.object({ cursor: z.string().max(100).nullable() }),
+    response: ChangesSchema,
   },
   'dialog:pickDirectory': {
     request: EmptyRequestSchema,

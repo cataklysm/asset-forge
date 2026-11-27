@@ -60,7 +60,22 @@ async function setup() {
   fake.host.now = () => new Date((clock += 1000));
   const session: WorkspaceSession = await manager.read(async (s) => s);
   const remote = new FakeRemote();
-  const handler = createFileDownloadHandler({ session, remote });
+  /** What the handler reported through its effects; `throwing` makes every report throw. */
+  const effects = { changed: [] as string[], added: [] as (string | null)[], throwing: false };
+  const handler = createFileDownloadHandler({
+    session,
+    remote,
+    effects: {
+      fileChanged: (id) => {
+        effects.changed.push(id);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+      fileAdded: (assetId) => {
+        effects.added.push(assetId);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+    },
+  });
   const now = () => session.now().toISOString();
 
   /** Queues a download job and claims it, so it is running. */
@@ -101,7 +116,7 @@ async function setup() {
     const types = await db.assetTypes.list();
     return (await createAsset(session, { name, typeId: types[0]!.id })).id;
   };
-  return { fake, db, storage, session, remote, handler, claim, run, download, jobRow, files, staged, newAsset };
+  return { fake, db, storage, session, remote, handler, claim, run, download, jobRow, files, staged, newAsset, effects };
 }
 
 const codeOf = (error: unknown) => (error instanceof JobError ? error.code : error);
@@ -445,5 +460,51 @@ describe('createFileDownloadHandler', () => {
     await t.db.jobs.finish(job.id, { status: 'cancelled', errorCode: null, now: t.session.now().toISOString() });
     expect(await t.run(job)).toBeNull();
     expect(t.files()).toHaveLength(1);
+  });
+});
+
+describe('the effects of the download handler', () => {
+  it('reports the inbox for a file without a target and the asset for one placed in it', async () => {
+    const t = await setup();
+    const assetId = await t.newAsset('A');
+    t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('one') });
+    t.remote.answers.set('https://a.example/2.png', { body: Buffer.from('two') });
+    await t.download('https://a.example/1.png');
+    await t.download('https://a.example/2.png', { target: { assetId, role: 'concept' } });
+    expect(t.effects.added).toEqual([null, assetId]);
+    expect(t.effects.changed).toEqual([]);
+  });
+
+  it('reports the inbox when the target asset is gone', async () => {
+    const t = await setup();
+    const assetId = await t.newAsset('A');
+    t.remote.answers.set('https://a.example/x.png', {});
+    const job = await t.claim('https://a.example/x.png', { target: { assetId, role: 'concept' } });
+    t.db.assets.rows.delete(assetId);
+    expect(await t.run(job)).toBeNull();
+    expect(t.effects.added).toEqual([null]);
+  });
+
+  it('reports nothing for an already present file or a failure', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('same') });
+    t.remote.answers.set('https://b.example/2.png', { body: Buffer.from('same') });
+    t.remote.answers.set('https://c.example/page', { contentType: 'text/html' });
+    await t.download('https://a.example/1.png');
+    t.effects.added.length = 0;
+    await t.download('https://b.example/2.png', { skipDuplicates: true });
+    await t.download('https://a.example/1.png');
+    const { error } = await t.download('https://c.example/page');
+    expect(codeOf(error)).toBe('download_not_a_file');
+    expect(t.effects.added).toEqual([]);
+  });
+
+  it('still succeeds when the report throws', async () => {
+    const t = await setup();
+    t.effects.throwing = true;
+    t.remote.answers.set('https://a.example/x.png', {});
+    const { error } = await t.download('https://a.example/x.png');
+    expect(error).toBeNull();
+    expect(t.effects.added).toEqual([null]);
   });
 });

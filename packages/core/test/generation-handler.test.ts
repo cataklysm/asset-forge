@@ -292,3 +292,54 @@ describe('the image.generate handler', () => {
     expect(results(t)).toEqual([]);
   });
 });
+
+describe('the effects of the generation handler', () => {
+  it("reports the source's asset for a result placed in it", async () => {
+    const t = await setup();
+    const assetId = await newAsset(t, 'Hero');
+    await relocateFile(t.session, t.file.id, { assetId, role: 'reference' });
+    await started(t, edit(t.file.id));
+    await runNext(t);
+    expect(t.effects.added).toEqual([assetId]);
+    expect(t.effects.changed).toEqual([]);
+  });
+
+  it('reports the inbox for a source without an asset and when the move fails', async () => {
+    const inbox = await setup();
+    await started(inbox, edit(inbox.file.id));
+    await runNext(inbox);
+    expect(inbox.effects.added).toEqual([null]);
+
+    const t = await setup();
+    const assetId = await newAsset(t, 'Hero');
+    await relocateFile(t.session, t.file.id, { assetId, role: 'reference' });
+    await started(t, edit(t.file.id));
+    const move = t.storage.move.bind(t.storage);
+    let moves = 0;
+    t.storage.move = async (from, to) => {
+      if (++moves === 2) throw new Error('EBUSY');
+      return move(from, to);
+    };
+    expect((await runNext(t)).error).toBeNull();
+    expect(t.effects.added).toEqual([null]);
+  });
+
+  it('reports nothing when the provider refused the content', async () => {
+    const t = await setup();
+    await started(t, edit(t.file.id));
+    t.providers.provider.answer = async () => {
+      throw new JobError('provider_content_refused');
+    };
+    expectJobError((await runNext(t)).error, 'provider_content_refused');
+    expect(t.effects.added).toEqual([]);
+  });
+
+  it('still succeeds when the report throws', async () => {
+    const t = await setup();
+    t.effects.throwing = true;
+    const g = await started(t, edit(t.file.id));
+    expect((await runNext(t)).error).toBeNull();
+    expect(t.effects.added).toEqual([null]);
+    expect(await generation(t, g.id)).toMatchObject({ status: 'succeeded' });
+  });
+});

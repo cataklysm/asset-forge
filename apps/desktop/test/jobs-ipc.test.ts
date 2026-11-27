@@ -11,6 +11,7 @@ import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } fr
 import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analysis-prompts.js';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { createChangeFeed } from '../src/main/change-feed.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
 import type { ProviderStore } from '../src/main/provider-store.js';
 import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
@@ -56,6 +57,7 @@ async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Pr
   store = provider.store;
   pause = createPauseGate({});
   jobHost = createJobHost({
+    feed: createChangeFeed(),
     manager,
     vision: provider.vision,
     images: { jpeg: (path) => readFile(path) },
@@ -239,6 +241,29 @@ describe('job IPC', () => {
 
     const done = await until((s) => s.succeeded === 1);
     expect(done.changes).toBeGreaterThan(afterEnqueue);
+  });
+
+  it('answers changes:since with a reset without a workspace, and the changes after a cursor with one', async () => {
+    await setup();
+    expect(await ok('changes:since', { cursor: null })).toMatchObject({ reset: true, jobIds: [], fileIds: [], added: [] });
+    expect(await ok('changes:since', { cursor: 'unknown:3' })).toMatchObject({ reset: true });
+
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const [fileId] = await importImages(1);
+    const first = await ok('changes:since', { cursor: null });
+    expect(first.reset).toBe(true);
+    const before = (await ok('jobs:summary', {})).changes;
+
+    await ok('analysis:enqueue', filesRequest([fileId!]));
+    expect(await ok('changes:since', { cursor: first.cursor })).toMatchObject({ reset: false, jobs: true });
+    await until((s) => s.succeeded === 1);
+    expect((await ok('jobs:summary', {})).changes).toBeGreaterThan(before);
+
+    const [job] = (await ok('jobs:list', page)).items;
+    const after = await ok('changes:since', { cursor: first.cursor });
+    expect(after).toMatchObject({ reset: false, jobs: true, fileIds: [fileId] });
+    expect(after.jobIds).toContain(job!.id);
+    expect(await ok('changes:since', { cursor: after.cursor })).toMatchObject({ reset: false, jobs: false, jobIds: [], fileIds: [] });
   });
 
   it('refuses to retry a queued job and to cancel an unknown one', async () => {

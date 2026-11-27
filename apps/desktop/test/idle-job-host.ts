@@ -22,6 +22,7 @@ export const idleJobHost: JobHost = {
   workspaceClosing: async () => {},
   changes: () => 0,
   changed: () => {},
+  changesSince: () => ({ cursor: 'idle:0', reset: true, jobIds: [], jobs: false, fileIds: [], added: [] }),
   wake: () => {},
   cancel: async () => {},
   cancelAll: async () => 0,

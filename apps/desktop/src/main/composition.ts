@@ -22,6 +22,7 @@ import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
 import { createImageProviderDirectory } from './generation-handlers.js';
 import type { AppServices } from './ipc.js';
+import { createChangeFeed } from './change-feed.js';
 import { createJobHost, PROVIDER_CLASSES, type JobHost, type SchedulerClock } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
 import { createProviderGateway, type ProviderGateway } from './provider-gateway.js';
@@ -162,6 +163,7 @@ export function createAnalysisServices(o: {
   });
   const host = createJobHost({
     manager: o.manager,
+    feed: createChangeFeed(),
     vision: (lane) => gateway.vision(lane),
     images: o.images,
     // The fingerprint provider id is the kind of the lane's vision entry (OLLAMA_PROVIDER or OPENAI_PROVIDER).

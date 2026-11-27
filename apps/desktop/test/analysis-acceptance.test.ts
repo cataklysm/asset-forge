@@ -12,6 +12,7 @@ import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
+import { createChangeFeed } from '../src/main/change-feed.js';
 import { createJobHost } from '../src/main/job-host.js';
 import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
@@ -55,6 +56,7 @@ describe('phase 4a acceptance', () => {
   it('analyses a batch through cancel, retry and a close mid-batch without touching manual tags', async () => {
     const provider = mockProviderEntry(join(base, 'userData'), mock.url);
     const jobHost = createJobHost({
+      feed: createChangeFeed(),
       manager,
       vision: provider.vision,
       images: { jpeg: (path) => readFile(path) },

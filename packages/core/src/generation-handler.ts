@@ -4,7 +4,7 @@ import { relocateFile } from './asset-files.js';
 import { SourceNotReadableError } from './errors.js';
 import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generations.js';
 import { importStream, type ImportContext } from './import-file.js';
-import { JobError, type Job, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
 import type { GenerationImageSource, ImageInput, ImageProviderDirectory } from './ports.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -12,6 +12,8 @@ export interface ImageGenerateHandlerDeps {
   session: WorkspaceSession;
   providers: ImageProviderDirectory;
   images: GenerationImageSource;
+  /** Told where the linked result ended up: the source's asset, or the inbox. */
+  effects?: JobEffects;
 }
 
 /**
@@ -127,12 +129,16 @@ export function createImageGenerateHandler(deps: ImageGenerateHandlerDeps): JobH
       }
       if (!linked) throw new JobError('internal_error');
 
+      let placedIn: string | null = null;
       try {
         const current = await s.database.files.get(source.id);
-        if (current?.assetId != null) await relocateFile(s, file.id, { assetId: current.assetId, role: 'generated' });
+        if (current?.assetId != null) {
+          placedIn = (await relocateFile(s, file.id, { assetId: current.assetId, role: 'generated' })).assetId;
+        }
       } catch {
         // Best effort: the linked result stays in the inbox.
       }
+      reportEffect(deps.effects, (e) => e.fileAdded(placedIn));
     },
 
     settled(job: Job, outcome): void {

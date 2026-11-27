@@ -70,6 +70,7 @@ export type JobHandlers = Pick<
   | 'jobs:resumeHost'
   | 'jobs:reroute'
   | 'jobs:clearFinished'
+  | 'changes:since'
 >;
 
 export function createJobHandlers(
@@ -269,5 +270,8 @@ export function createJobHandlers(
       if (removed > 0) touched();
       return { removed };
     },
+    // Reads only the in-memory feed: no workspace read, so it never waits for the queue. Without a workspace every
+    // cursor answers `reset`.
+    'changes:since': async (r) => jobs.changesSince(manager.current() === null ? null : r.cursor),
   };
 }

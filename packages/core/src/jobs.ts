@@ -89,6 +89,23 @@ export interface JobControl {
   cancelAll(): Promise<number>;
 }
 
+/** What a job handler changed outside its own job row. Calls must not throw; a handler guards them anyway. */
+export interface JobEffects {
+  fileChanged(fileId: string): void;
+  /** A file was added to this asset; null is the inbox. */
+  fileAdded(assetId: string | null): void;
+}
+
+/** Reports one effect; a throwing listener never fails the job that reports it. */
+export function reportEffect(effects: JobEffects | undefined, report: (effects: JobEffects) => void): void {
+  if (effects === undefined) return;
+  try {
+    report(effects);
+  } catch {
+    // The effects only drive list updates; the job's own outcome stands.
+  }
+}
+
 const FINISHED: readonly JobStatus[] = FINISHED_JOB_STATUSES;
 
 async function requireJob(s: WorkspaceSession, jobId: string): Promise<Job> {

@@ -86,7 +86,7 @@ function setup(o: {
     },
   });
   const timers: { fn: () => void; ms: number }[] = [];
-  const changes = { n: 0 };
+  const changes = { n: 0, ids: [] as (string | null)[] };
   const logged: { message: string; cause: unknown }[] = [];
   const scheduler: Scheduler = createScheduler({
     jobs: counted,
@@ -105,7 +105,10 @@ function setup(o: {
       const i = timers.indexOf(handle as (typeof timers)[number]);
       if (i >= 0) timers.splice(i, 1);
     },
-    onChange: () => changes.n++,
+    onChange: (id) => {
+      changes.n++;
+      changes.ids.push(id);
+    },
     log: (message, cause) => logged.push({ message, cause }),
   });
   let seq = 0;
@@ -391,6 +394,47 @@ describe('createScheduler', () => {
     h.runOf(id).resolve();
     await flush();
     expect(s.changes.n).toBe(2);
+    expect(s.changes.ids).toEqual([id, id]);
+  });
+
+  it('passes the id of the recovered and of the cancelled job, and null for a cancel of several', async () => {
+    const h = controlled('cpu');
+    const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 1 } });
+    const [recovered, queued, other] = (await s.enqueue('t', 'cpu', 3)) as [string, string, string];
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso() });
+    await s.scheduler.start();
+    // Recovered to queued, then claimed again.
+    expect(s.changes.ids).toEqual([recovered, recovered]);
+    await s.scheduler.cancel(queued);
+    expect(s.changes.ids.at(-1)).toBe(queued);
+    s.changes.ids.length = 0;
+    await s.scheduler.cancelAll();
+    expect(s.changes.ids).toEqual([null]);
+    expect(s.row(other).status).toBe('cancelled');
+  });
+
+  it('logs a change listener that throws and still runs the job', async () => {
+    const h = controlled('cpu');
+    const logged: string[] = [];
+    const fake = new InMemoryJobRepository();
+    const scheduler = createScheduler({
+      jobs: fake,
+      handlers: { t: h.handler },
+      onChange: () => {
+        throw new Error('listener failed');
+      },
+      log: (message) => logged.push(message),
+    });
+    await fake.enqueue({
+      jobs: [{ id: 'job-x', type: 't', resourceClass: 'cpu', fileId: null, lane: null, payload: { version: 1 }, dedupeKey: null }],
+      now: new Date().toISOString(),
+    });
+    await scheduler.start();
+    h.runOf('job-x').resolve();
+    await flush();
+    expect(fake.rows.find((r) => r.id === 'job-x')!.status).toBe('succeeded');
+    expect(logged).toEqual(['Job change listener failed', 'Job change listener failed']);
+    await scheduler.stop();
   });
 
   it('does not lose a wake that arrives during a pass', async () => {

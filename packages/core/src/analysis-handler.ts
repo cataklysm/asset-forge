@@ -9,7 +9,7 @@ import {
   LEGACY_TAG_LIMIT,
   MAX_PROMPT_TEXT,
 } from './analysis.js';
-import { JobError, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type JobEffects, type JobHandler } from './jobs.js';
 import type { ModelImageSource, VisionProvider } from './ports.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -61,6 +61,8 @@ export function createAnalyzeFileHandler(deps: {
   images: ModelImageSource;
   /** The fingerprint provider id of the job's lane; null when the lane has no usable entry. */
   provider: (lane: string | null) => string | null;
+  /** Told about the file once its tags or proposal were stored. */
+  effects?: JobEffects;
 }): JobHandler {
   const { session: s, images } = deps;
 
@@ -100,6 +102,7 @@ export function createAnalyzeFileHandler(deps: {
           ? await s.database.analyses.apply({ fileId, sha256, tags: tags.map((t) => ({ ...t, newId: s.newId() })), ...fingerprint, promptName, now })
           : await s.database.analyses.propose({ fileId, sha256, tags, ...fingerprint, promptName, createdAt: now });
       if (!written) throw new JobError('file_unavailable');
+      reportEffect(deps.effects, (e) => e.fileChanged(fileId));
     },
   };
 }

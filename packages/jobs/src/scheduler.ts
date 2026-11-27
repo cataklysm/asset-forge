@@ -29,8 +29,11 @@ export interface SchedulerOptions {
   now?(): Date;
   setTimer?(fn: () => void, ms: number): unknown;
   clearTimer?(handle: unknown): void;
-  /** Called after every status change the scheduler made. Must not throw. */
-  onChange?(): void;
+  /**
+   * Called after every status change the scheduler made, with the id of the job whose row changed; null when a
+   * cancel changed several rows at once. Must not throw.
+   */
+  onChange?(jobId: string | null): void;
   log?(message: string, cause: unknown): void;
   /** Outlives the scheduler: a lane it reports paused claims nothing, and every run end is recorded in it. */
   pause?: PauseGate;
@@ -66,9 +69,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   const setTimer = options.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const log = options.log ?? ((message: string, cause: unknown) => console.error(message, cause));
-  const changed = () => {
+  const changed = (jobId: string | null) => {
     try {
-      options.onChange?.();
+      options.onChange?.(jobId);
     } catch (cause) {
       log('Job change listener failed', cause);
     }
@@ -192,7 +195,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           return;
         }
         launch(job);
-        changed();
+        changed(job.id);
       }
       if (stopping) return;
       if (full) continue;
@@ -265,7 +268,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         log('Job outcome could not be stored', cause);
       }
       active.delete(job.id);
-      changed();
+      changed(job.id);
       wake();
     })();
   }
@@ -320,16 +323,14 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   }
 
   async function recover(): Promise<void> {
-    let n = 0;
     for (const job of await jobs.listByStatus('running')) {
       if (stopping) break;
       const changedRow =
         handlers[job.type]?.onInterrupted === 'fail'
           ? await finishJob(job, { status: 'failed', errorCode: interruptedCodeOf(job) })
           : await jobs.release(job.id, iso());
-      if (changedRow) n++;
+      if (changedRow) changed(job.id);
     }
-    if (n > 0) changed();
   }
 
   return {
@@ -364,7 +365,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       }
       await tracked(
         (async () => {
-          if ((await jobs.cancelPending({ id: jobId, now: iso(), ...cancelHook })) > 0) changed();
+          if ((await jobs.cancelPending({ id: jobId, now: iso(), ...cancelHook })) > 0) changed(jobId);
         })(),
       );
     },
@@ -375,7 +376,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         (async () => {
           // Pending first: a job claimed meanwhile is running by then and is aborted below.
           const pending = await jobs.cancelPending({ now: iso(), ...cancelHook });
-          if (pending > 0) changed();
+          if (pending > 0) changed(null);
           // A stop that began meanwhile owns the running jobs.
           if (stopping) return pending;
           let running = 0;
@@ -395,7 +396,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
           if (ending.length === 0) return pending + running;
           await Promise.all(ending);
           const retried = await jobs.cancelPending({ now: iso(), ...cancelHook });
-          if (retried > 0) changed();
+          if (retried > 0) changed(null);
           return pending + running + retried;
         })(),
       );

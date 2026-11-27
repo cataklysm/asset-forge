@@ -135,10 +135,26 @@ export async function setup() {
   const file = await importOne('face.png');
   const providers = new FakeImageProviderDirectory();
   const images = new FakeGenerationImageSource();
-  const handler = createImageGenerateHandler({ session, providers, images });
+  /** What the handler reported through its effects; `throwing` makes every report throw. */
+  const effects = { changed: [] as string[], added: [] as (string | null)[], throwing: false };
+  const handler = createImageGenerateHandler({
+    session,
+    providers,
+    images,
+    effects: {
+      fileChanged: (id) => {
+        effects.changed.push(id);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+      fileAdded: (assetId) => {
+        effects.added.push(assetId);
+        if (effects.throwing) throw new Error('listener failed');
+      },
+    },
+  });
   const control = new SettlingControl(session, handler);
   const deps = { providers, control };
-  return { fake, manager, db, storage, session, importOne, file, providers, images, handler, control, deps };
+  return { fake, manager, db, storage, session, importOne, file, providers, images, handler, control, deps, effects };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;

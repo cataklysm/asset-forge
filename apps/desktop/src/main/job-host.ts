@@ -1,4 +1,11 @@
-import { ANALYZE_FILE_JOB, FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  FILE_DOWNLOAD_JOB,
+  IMAGE_GENERATE_JOB,
+  type Changes,
+  type JobErrorCode,
+  type ResourceClass,
+} from '@assetforge/contracts';
 import {
   assignUnroutedJobs,
   createAnalyzeFileHandler,
@@ -14,6 +21,7 @@ import {
   type WorkspaceManager,
 } from '@assetforge/core';
 import { createScheduler, DEFAULT_LIMITS, DEFAULT_TOTALS, type PauseGate, type Scheduler } from '@assetforge/jobs';
+import type { ChangeFeed } from './change-feed.js';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
@@ -27,9 +35,12 @@ export interface JobHost extends JobControl {
   workspaceOpened(): Promise<void>;
   /** Stops the scheduler and waits for its jobs; no-op without one. Never rejects. */
   workspaceClosing(): Promise<void>;
+  /** Every change written to the feed since the app started; never goes down. */
   changes(): number;
-  /** For the IPC handlers: a job changed outside the scheduler. */
+  /** For the IPC handlers: jobs changed outside the scheduler. */
   changed(): void;
+  /** What changed since `cursor` in the open workspace; see `ChangeFeed.since`. */
+  changesSince(cursor: string | null): Changes;
   /**
    * The paused lanes of the analysis, the generation and the download queue with their codes, in that order and
    * each in the order they paused; `null` is the analysis jobs without a provider, a download lane is a host.
@@ -51,6 +62,11 @@ export interface SchedulerClock {
 
 export interface JobHostDeps {
   manager: WorkspaceManager;
+  /**
+   * Takes every change: a job the scheduler changed, jobs changed in bulk, and what the handlers report. Cleared
+   * when a workspace opens and when it closes.
+   */
+  feed: ChangeFeed;
   /** The adapter of a lane (a provider entry id) when a job runs; null when no such entry exists. */
   vision: (lane: string | null) => VisionProvider | null;
   images: ModelImageSource;
@@ -91,12 +107,9 @@ export const PROVIDER_CLASSES: readonly ResourceClass[] = [ANALYSIS_CLASS, GENER
 export const DOWNLOAD_CLASSES: readonly ResourceClass[] = [DOWNLOAD_CLASS];
 
 export function createJobHost(deps: JobHostDeps): JobHost {
-  const { manager, pause, clock } = deps;
+  const { manager, pause, clock, feed } = deps;
   let scheduler: Scheduler | null = null;
-  let changes = 0;
-  const changed = () => {
-    changes += 1;
-  };
+  const changed = () => feed.jobs();
   // Opening and closing run one after the other, so a stop never overlaps the start of the next scheduler.
   let lifecycle: Promise<void> = Promise.resolve();
   const serial = (fn: () => Promise<void>): Promise<void> => {
@@ -108,6 +121,8 @@ export function createJobHost(deps: JobHostDeps): JobHost {
   return {
     workspaceOpened: () =>
       serial(async () => {
+        // A cursor of the workspace before must never answer changes of this one.
+        feed.clear();
         if (scheduler !== null || manager.current() === null) return;
         // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
         const session = await manager.read(async (s) => s);
@@ -134,17 +149,20 @@ export function createJobHost(deps: JobHostDeps): JobHost {
               vision: deps.vision,
               images: deps.images,
               provider: deps.provider,
+              effects: feed,
             }),
             [IMAGE_GENERATE_JOB]: createImageGenerateHandler({
               session,
               providers: deps.imageProviders,
               images: deps.generationImages,
+              effects: feed,
             }),
-            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({ session, remote: deps.remote }),
+            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({ session, remote: deps.remote, effects: feed }),
           },
           limits: deps.limits ?? DEFAULT_LIMITS,
           totals: deps.totals ?? DEFAULT_TOTALS,
-          onChange: changed,
+          // A cancel of several rows at once names no job.
+          onChange: (jobId) => (jobId === null ? feed.jobs() : feed.job(jobId)),
           pause,
           ...(deps.laneLimit === undefined ? {} : { laneLimit: deps.laneLimit }),
           ...(clock === undefined
@@ -157,10 +175,13 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 
     workspaceClosing: () =>
       serial(async () => {
+        feed.clear();
         const running = scheduler;
         if (running === null) return;
         scheduler = null;
         await running.stop();
+        // The stopped runs changed rows of the closing workspace.
+        feed.clear();
       }),
 
     wake() {
@@ -174,8 +195,9 @@ export function createJobHost(deps: JobHostDeps): JobHost {
     // Without a scheduler nothing runs; a generation left pending is closed by the reconcile on the next open.
     cancelAll: async () => (scheduler === null ? 0 : scheduler.cancelAll()),
 
-    changes: () => changes,
+    changes: () => feed.total(),
     changed,
+    changesSince: (cursor) => feed.since(cursor),
 
     paused: () =>
       PAUSABLE.flatMap((resourceClass) => pause.paused(resourceClass).map(({ lane, reason }) => ({ lane, reason, resourceClass }))),
