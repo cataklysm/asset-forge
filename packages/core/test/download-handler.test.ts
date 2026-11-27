@@ -727,4 +727,86 @@ describe('site downloads (payload v2)', () => {
     t.remote.answers.set('https://cdn.other.example/x.png', new RemoteFileError('blocked'));
     expect(codeOf((await t.download('https://cdn.other.example/x.png')).error)).toBe('download_blocked');
   });
+
+  it('a browser challenge is download_browser_check, also after a hop off the site', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const onSite = 'https://a.example/x.png';
+    t.remote.answers.set(onSite, new RemoteFileError('challenge', null, { status: 403 }));
+    const first = await t.claim(onSite, { payload: sitePayload(onSite, { kinds: ['image'], minBytes: 0 }) });
+    const error = await t.run(first);
+    expect(codeOf(error)).toBe('download_browser_check');
+    expect((error as JobError).message).not.toContain('example');
+
+    const offSite = 'https://a.example/y.png';
+    t.remote.hops.set(offSite, [offSite, 'https://cdn.other.example/y.png']);
+    t.remote.answers.set(offSite, new RemoteFileError('challenge', null, { status: 403 }));
+    const second = await t.claim(offSite, { payload: sitePayload(offSite, { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(second))).toBe('download_browser_check');
+  });
+
+  it('a v1 job meeting a challenge is download_browser_check', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', new RemoteFileError('challenge', null, { status: 503 }));
+    expect(codeOf((await t.download('https://a.example/x.png')).error)).toBe('download_browser_check');
+  });
+
+  /** A site access with a browser session that serves `remote`'s answers and records each call. */
+  function sessionSites(remote: FakeRemote) {
+    const f = fakeSites();
+    const calls: { profileId: string; url: string }[] = [];
+    const sites: SiteAccess = {
+      ...f.sites,
+      open: async (profileId, url, signal, options) => {
+        calls.push({ profileId, url });
+        return remote.open(url, signal, options);
+      },
+    };
+    return { ...f, sites, calls };
+  }
+
+  it('a v2 job opens through the session where the site access has one', async () => {
+    const sessionRemote = new FakeRemote();
+    const s = sessionSites(sessionRemote);
+    const t = await setup({ sites: s.sites });
+    const url = 'https://a.example/x.png';
+    sessionRemote.answers.set(url, { body: Buffer.from('png!') });
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(s.calls).toEqual([{ profileId: PROFILE, url }]);
+    expect(t.remote.opened).toEqual([]);
+    // The per-hop bookkeeping still runs through the handler's headersFor.
+    expect(s.asked).toEqual([[PROFILE, url]]);
+    expect(t.files()).toMatchObject([{ status: 'complete' }]);
+  });
+
+  it('a refusal off the site through the session is still download_login_not_sent', async () => {
+    const sessionRemote = new FakeRemote();
+    const s = sessionSites(sessionRemote);
+    const t = await setup({ sites: s.sites });
+    const url = 'https://a.example/x.png';
+    sessionRemote.hops.set(url, [url, 'https://cdn.other.example/x.png']);
+    sessionRemote.answers.set(url, new RemoteFileError('blocked', null, { status: 403 }));
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_login_not_sent');
+  });
+
+  it('a v2 job without a session opens through the remote source', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const url = 'https://a.example/x.png';
+    t.remote.answers.set(url, { body: Buffer.from('png!') });
+    const job = await t.claim(url, { payload: sitePayload(url, { kinds: ['image'], minBytes: 0 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(t.remote.opened).toEqual([url]);
+  });
+
+  it('a v1 job never opens through the session', async () => {
+    const sessionRemote = new FakeRemote();
+    const s = sessionSites(sessionRemote);
+    const t = await setup({ sites: s.sites });
+    const url = 'https://a.example/x.png';
+    t.remote.answers.set(url, { body: Buffer.from('png!') });
+    expect((await t.download(url)).error).toBeNull();
+    expect(s.calls).toEqual([]);
+    expect(t.remote.opened).toEqual([url]);
+  });
 });

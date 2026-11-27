@@ -72,8 +72,12 @@ export interface Storage {
   freeBytes(): Promise<number | null>;
 }
 
-/** Why a remote file could not be fetched; each maps to exactly one `download_<failure>` job error code. */
+/**
+ * Why a remote file could not be fetched; each maps to exactly one job error code (`download_<failure>`, and
+ * `challenge`, a browser check such as `cf-mitigated: challenge`, to `download_browser_check`).
+ */
 export type RemoteFileFailure =
+  | 'challenge'
   | 'unreachable'
   | 'unavailable'
   | 'throttled'
@@ -136,6 +140,13 @@ export interface SiteAccess {
   siteOf(profileId: string): Promise<string | null>;
   /** Null unless the URL belongs to the profile's site. */
   headersFor(profileId: string, url: string): Promise<RemoteRequestHeaders | null>;
+  /**
+   * Opens a site download through the profile's own browser session: every hop on the profile's site goes out with
+   * the session's cookies and network stack, the first hop off the site and the rest go through the plain
+   * `RemoteFileSource`. Asks `options.headersFor` once per hop like `RemoteFileSource.open`. Rejects with
+   * RemoteFileError, or with the abort reason once `signal` aborts. Absent where no browser session exists.
+   */
+  open?(profileId: string, url: string, signal: AbortSignal, options: RemoteOpenOptions): Promise<RemoteFile>;
 }
 
 export type PageLoadResult =

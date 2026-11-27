@@ -209,6 +209,28 @@ describe('createUrlSource: status mapping', () => {
     expect(error.message).not.toContain('127.0.0.1');
   });
 
+  it.each([403, 503, 302, 200])('maps %i with cf-mitigated: challenge to challenge and keeps the status', async (status) => {
+    handler = (_req, res) => {
+      res.writeHead(status, { 'cf-mitigated': ' Challenge ', Location: `${base}/elsewhere`, 'Retry-After': '120' });
+      res.end('<html>check</html>');
+    };
+    const error = await failureOf(open(`${base}/s`));
+    expect(error.failure).toBe('challenge');
+    expect(error.status).toBe(status);
+    expect(error.retryAfterMs).toBeNull();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('a 403 with another cf-mitigated value stays blocked', async () => {
+    handler = (_req, res) => {
+      res.writeHead(403, { 'cf-mitigated': 'block' });
+      res.end();
+    };
+    const error = await failureOf(open(`${base}/s`));
+    expect(error.failure).toBe('blocked');
+    expect(error.status).toBe(403);
+  });
+
   it.each([
     ['120', 120_000],
     ['1', 5_000],

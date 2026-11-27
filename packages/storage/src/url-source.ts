@@ -44,7 +44,8 @@ interface Config {
   maxRedirects: number;
 }
 
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** The statuses a hop follows as a redirect (to its `Location`). */
+export const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 const BLOCKED_STATUSES = new Set([401, 403, 407, 451]);
 const NOT_FOUND_STATUSES = new Set([404, 410]);
 
@@ -254,15 +255,17 @@ function fetchHop(
         return;
       }
       const status = res.statusCode ?? 0;
-      if (status !== 200) {
+      const mitigated = headerText(res.headers['cf-mitigated']);
+      // A browser challenge is a failure whatever the status, a redirect or a 200 included.
+      if (status !== 200 || isChallenge(mitigated)) {
         res.destroy();
-        if (REDIRECT_STATUSES.has(status)) {
+        if (REDIRECT_STATUSES.has(status) && !isChallenge(mitigated)) {
           settle(() => {
             req.destroy();
             resolve({ kind: 'redirect', location: res.headers.location });
           });
         } else {
-          fail(statusFailure(status, res.headers['retry-after']));
+          fail(statusFailure(status, { retryAfter: res.headers['retry-after'], mitigated }));
         }
         return;
       }
@@ -282,7 +285,14 @@ function fetchHop(
         resolve({
           kind: 'file',
           file: {
-            stream: bodyStream(req, res, config, signal, deadline, contentLength),
+            stream: limitedBody(
+              { destroy: () => req.destroy(), onError: (listener) => req.on('error', listener) },
+              res,
+              config,
+              signal,
+              deadline,
+              contentLength,
+            ),
             finalUrl: url.href,
             contentType: mediaType(res.headers['content-type']),
             contentLength,
@@ -295,15 +305,52 @@ function fetchHop(
   });
 }
 
+/** The request side of a body: what ends it and where its failure is reported. */
+export interface BodyRequest {
+  /** Ends the request and its connection; may be called more than once. */
+  destroy(): void;
+  /** Registers a listener for a failure of the request. */
+  onError(listener: () => void): void;
+}
+
+/**
+ * The response side of a body, as both Node's `http.IncomingMessage` and Electron's net `IncomingMessage` offer it.
+ * `complete` is Node's flag; a source without it counts as complete only once it ended.
+ */
+export interface BodySource {
+  on(event: 'data', listener: (chunk: Buffer) => void): unknown;
+  on(event: 'end' | 'close' | 'aborted', listener: () => void): unknown;
+  on(event: 'error', listener: (error: unknown) => void): unknown;
+  pause(): unknown;
+  resume(): unknown;
+  destroy(): unknown;
+  readonly complete?: boolean;
+}
+
+/** The limits a body is read under. */
+export interface BodyLimits {
+  maxBytes: number;
+  idleTimeoutMs: number;
+}
+
 /**
  * The body as a stream that counts bytes: past `maxBytes` it fails `too_large`; without data for the idle time
- * while it waits for some, past the total deadline, on a socket error or when shorter than `Content-Length` it
- * fails `unreachable`; an abort fails it with the abort reason. Destroying it destroys the request.
+ * while it waits for some, past the total deadline, on a connection error, when the source closes before its end or
+ * when it is shorter than `Content-Length` it fails `unreachable`; an abort fails it with the abort reason.
+ * Destroying it destroys the request.
+ *
+ * @param req the request the body belongs to
+ * @param res the response whose data is read
+ * @param config the size limit and the idle time
+ * @param signal aborts the body with its reason
+ * @param deadline the time (ms since the epoch) after which the body fails `unreachable`
+ * @param contentLength the announced length; null when unknown
+ * @returns a readable stream of the body that fails only with `RemoteFileError` or the abort reason
  */
-function bodyStream(
-  req: http.ClientRequest,
-  res: http.IncomingMessage,
-  config: Config,
+export function limitedBody(
+  req: BodyRequest,
+  res: BodySource,
+  config: BodyLimits,
   signal: AbortSignal,
   deadline: number,
   contentLength: number | null,
@@ -360,10 +407,12 @@ function bodyStream(
   else signal.addEventListener('abort', onAbort, { once: true });
   // A lost connection before the first read; the body itself is only consumed once the stream is read.
   res.on('error', () => fail(failure('unreachable')));
+  res.on('aborted', () => fail(failure('unreachable')));
+  // After a complete body `end` came first and the stream is done, so this changes nothing then.
   res.on('close', () => {
-    if (!res.complete) fail(failure('unreachable'));
+    if (res.complete !== true) fail(failure('unreachable'));
   });
-  req.on('error', () => fail(failure('unreachable')));
+  req.onError(() => fail(failure('unreachable')));
   return out;
 
   function attach(): void {
@@ -393,7 +442,37 @@ function bodyStream(
   }
 }
 
-function statusFailure(status: number, retryAfter: string | undefined): RemoteFileError {
+/**
+ * Whether a `cf-mitigated` header value marks a browser challenge.
+ *
+ * @param value the header's value; undefined when absent
+ * @returns true for `challenge`, trimmed and in any case
+ */
+export function isChallenge(value: string | undefined): boolean {
+  return value !== undefined && value.trim().toLowerCase() === 'challenge';
+}
+
+/**
+ * One header value as text: the first of several, undefined when absent.
+ *
+ * @param value a header value as Node or Electron hands it
+ * @returns the value, or the first one of a list
+ */
+export function headerText(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : value?.[0];
+}
+
+/**
+ * The failure of an answer that is no file and no redirect. A browser challenge (`cf-mitigated: challenge`) wins
+ * over the status, which it keeps.
+ *
+ * @param status the HTTP status
+ * @param headers `Retry-After` and `cf-mitigated` of the answer
+ * @returns the typed failure, without a cause
+ */
+export function statusFailure(status: number, headers: { retryAfter?: string | undefined; mitigated?: string | undefined }): RemoteFileError {
+  if (isChallenge(headers.mitigated)) return new RemoteFileError('challenge', null, { status });
+  const retryAfter = headers.retryAfter;
   if (status === 429 || status === 503) return failure('throttled', retryAfterMs(retryAfter));
   if (BLOCKED_STATUSES.has(status)) return new RemoteFileError('blocked', null, { status });
   if (NOT_FOUND_STATUSES.has(status)) return failure('not_found');
@@ -414,13 +493,24 @@ function retryAfterMs(value: string | undefined): number {
   return clampRetryAfterMs(Number.isNaN(at) ? null : Math.max(0, at - Date.now()));
 }
 
-function parseContentLength(value: string | undefined): number | null {
+/**
+ * An announced `Content-Length`.
+ *
+ * @param value the header's value
+ * @returns the length, or null when absent or not a plain number
+ */
+export function parseContentLength(value: string | undefined): number | null {
   if (value === undefined || !/^\d+$/.test(value.trim())) return null;
   return Number(value.trim());
 }
 
-/** The lower-cased media type without parameters; null when absent or empty. */
-function mediaType(value: string | undefined): string | null {
+/**
+ * The lower-cased media type without parameters.
+ *
+ * @param value the `Content-Type` header
+ * @returns the media type, or null when absent or empty
+ */
+export function mediaType(value: string | undefined): string | null {
   const type = value?.split(';')[0]?.trim().toLowerCase() ?? '';
   return type === '' ? null : type;
 }

@@ -224,6 +224,13 @@ describe('createPauseGate with download codes', () => {
     expect(g.reason('io', 'h')).toBe('download_blocked');
   });
 
+  it('pauses at once on download_browser_check', () => {
+    const { g } = gate();
+    g.record('io', 'example.com', 'download_browser_check');
+    expect(g.reason('io', 'example.com')).toBe('download_browser_check');
+    expect(g.reason('io', 'other.example')).toBeNull();
+  });
+
   it('never pauses on download_login_not_sent', () => {
     const { g } = gate();
     for (let i = 0; i < 5; i++) g.record('io', 'h', 'download_login_not_sent');

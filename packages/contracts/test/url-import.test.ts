@@ -35,6 +35,7 @@ const DOWNLOAD_MESSAGES = {
   download_no_space: 'There is not enough free disk space',
   download_profile_missing: 'The site profile of this download no longer exists',
   download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
+  download_browser_check: 'The site asks for a browser check',
 } as const;
 
 const view = {

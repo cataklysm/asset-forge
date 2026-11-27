@@ -26,6 +26,7 @@ export interface FileDownloadHandlerDeps {
 }
 
 const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
+  challenge: 'download_browser_check',
   unreachable: 'download_unreachable',
   unavailable: 'download_unavailable',
   throttled: 'download_throttled',
@@ -58,6 +59,30 @@ function jobErrorOf(error: RemoteFileError): JobError {
 /** The job error of whatever ended the source stream: a source failure keeps its code, anything else is internal. */
 function streamFailure(error: unknown): JobError {
   return error instanceof RemoteFileError ? jobErrorOf(error) : new JobError('internal_error');
+}
+
+/**
+ * Opens a site download: through the profile's browser session when `viaSession` names one, else through the
+ * plain remote source.
+ *
+ * @param remote the plain network source
+ * @param viaSession the site access with a session and the profile to use; null for the plain source
+ * @param url the address of the file
+ * @param signal aborts the request
+ * @param options the per-hop headers of the profile's login
+ * @returns the opened remote file
+ */
+function openWith(
+  remote: RemoteFileSource,
+  viaSession: { sites: SiteAccess; profileId: string } | null,
+  url: string,
+  signal: AbortSignal,
+  options: RemoteOpenOptions,
+): Promise<RemoteFile> {
+  const open = viaSession?.sites.open;
+  return viaSession !== null && open !== undefined
+    ? open.call(viaSession.sites, viaSession.profileId, url, signal, options)
+    : remote.open(url, signal, options);
 }
 
 /**
@@ -97,6 +122,8 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
 
     // A site download goes out with its profile's login and keeps only what passes the profile's filter.
     let openOptions: RemoteOpenOptions | undefined;
+    /** The profile whose browser session opens a v2 job's URL; null where no session exists, and for v1. */
+    let viaSession: { sites: SiteAccess; profileId: string } | null = null;
     const filter = payload.v === 2 ? payload.filter : null;
     // Whether the hop asked last went out without the login because it left the profile's site.
     let lastHopOffSite = false;
@@ -112,6 +139,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
           return headers;
         },
       };
+      if (sites.open !== undefined) viaSession = { sites, profileId };
     }
 
     const present = await s.database.fileOrigins.findCompleteFileByUrl(url);
@@ -124,7 +152,10 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     signal.throwIfAborted();
     let remote: RemoteFile;
     try {
-      remote = openOptions === undefined ? await deps.remote.open(url, signal) : await deps.remote.open(url, signal, openOptions);
+      remote =
+        openOptions === undefined
+          ? await deps.remote.open(url, signal)
+          : await openWith(deps.remote, viaSession, url, signal, openOptions);
     } catch (error) {
       if (error instanceof RemoteFileError) {
         // A refusal of a hop that went out without the login: the login was the likely miss, not the address.

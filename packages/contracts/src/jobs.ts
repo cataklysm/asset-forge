@@ -47,6 +47,7 @@ export const JobErrorCodeSchema = z.enum([
   'download_no_space',
   'download_profile_missing',
   'download_login_not_sent',
+  'download_browser_check',
 ]);
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
@@ -83,6 +84,7 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   download_no_space: 'There is not enough free disk space',
   download_profile_missing: 'The site profile of this download no longer exists',
   download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
+  download_browser_check: 'The site asks for a browser check',
 };
 
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([

@@ -15,8 +15,16 @@ const DOWN: ReadonlySet<JobErrorCode> = new Set([
   'download_unauthorized',
   'download_forbidden',
 ]);
-/** Codes that pause a lane at once: no later run can succeed until the settings or the account change. */
-const FATAL: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured', 'provider_insufficient_balance']);
+/**
+ * Codes that pause a lane at once: no later run can succeed until the settings or the account change, or (for
+ * `download_browser_check`) until the owner passed the site's check by hand in the profile's login window.
+ */
+const FATAL: ReadonlySet<JobErrorCode> = new Set([
+  'provider_unauthorized',
+  'provider_not_configured',
+  'provider_insufficient_balance',
+  'download_browser_check',
+]);
 
 /**
  * Pause state per resource class and lane. Jobs without a lane share the lane `null`, which pauses like any other.
