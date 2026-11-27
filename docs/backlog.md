@@ -527,7 +527,6 @@ Found in the final review and not fixed:
 
 Deferred by design:
 
-- No site adapters: a gallery page is not turned into a list of URLs, there is no HTML parsing and no browser worker. A later adapter is a discovery job that inserts the same `file.download` jobs.
 - No view that groups the jobs of one import and no import history (a nullable batch id on the job could carry one).
 - The URL of a purged file is forgotten, so it can be downloaded again.
 - No editing, removing, searching or filtering of origins; they are not carried on list rows.
@@ -535,7 +534,7 @@ Deferred by design:
 - Two downloads with identical content running at the same moment may both be stored.
 - A host pauses for the application session only; the pause is not persisted.
 - A full disk fails each download individually with `download_no_space` instead of pausing all hosts.
-- No cookies, logins, API keys, per-site headers or proxies, and no setting to relax the address check.
+- No API keys, per-site headers or proxies, and no setting to relax the address check; cookies and logins exist only through a site profile (see "Site import").
 - No automatic tagging or analysis after a download, and a downloaded ZIP is never unpacked.
 
 Known gaps:
@@ -576,6 +575,32 @@ Found while building:
 - `db:generate` for migration `0016` wanted to rebuild the `generation` table, because its CHECK on `provider_kind` in the Drizzle schema includes `openai` while no migration ever added it. Migration `0016` leaves the old CHECK in place; that is harmless since generations only store `venice`, but the schema and the database disagree until a migration rebuilds the table.
 
 Not covered by any automated check: real playback (decoding in Chromium), seeking through the `video/` route of the media protocol, the poster and the arrow, `Shift`+arrow and `Space` keys against the element's own key handling, fullscreen of the stage with a playing video, and volume and mute carried over between videos. The owner checks these by hand.
+
+## Site import
+
+Deferred by design:
+
+- The request filter of the site windows vets every host once but does not pin the socket to the vetted address, so a host that changes its address afterwards (DNS rebinding) can make a page window reach a private address. Files never take this path; the downloader pins. Direction: a proxy in front of the session that connects only to the vetted address.
+- A login that opens a popup talking to its opener does not work: the login window loads a popup's target in the same window, the crawl window refuses it.
+- No `Referer` and no per-site headers; a site that checks them refuses the file.
+- Login cookies go only to the profile's site. A file on another host (a CDN) is fetched without them.
+- No endless scrolling, no "load more" and no other interaction with a page.
+- The page a file was found on is not kept; the file's origin is its URL.
+- The number of detail pages of a crawl has no limit of its own (only the distinct thumbnail links of at most `maxPages` gallery pages).
+- `Crawl-delay` in a `robots.txt` is ignored; the gap between two pages is the fixed second.
+- No public-suffix list: a profile for `co.uk` covers every host below it. Single-label sites are refused; Chromium's own cookie matching bounds what would be sent.
+- The crawl cannot tell an expired login from an empty gallery.
+- No streamed video (HLS/DASH), no scheduled runs, no proxies, no minimum resolution.
+
+Known gaps:
+
+- Deleting a profile clears the partition's storage, cache and auth cache, but the partition directory stays on disk.
+- A profile left out of a damaged `site-profiles.json` keeps its partition's cookies, and nothing in the app can clear them.
+- A profile stored with a single-label site before the rule existed still loads; the rule applies on save.
+- The final URL of a redirected page is not added to the pages seen, so a pagination link back to it is loaded once more (bounded by `maxPages`).
+- A crawl and its kept answer live in memory only; nothing survives a restart, and one crawl runs at a time for the whole app.
+
+Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted.
 
 ## Not covered by any automated check
 

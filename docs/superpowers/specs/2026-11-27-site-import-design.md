@@ -57,7 +57,7 @@ read entry by entry like the provider settings). At most 50 profiles. A profile:
 | --- | --- |
 | `id` | UUID |
 | `name` | 1–60, unique regardless of case |
-| `site` | host taken from the URL typed at creation, lower case, a leading `www.` dropped; fixed afterwards |
+| `site` | host taken from the URL typed at creation, lower case, a leading `www.` dropped; a single label is refused; fixed afterwards |
 | `thumbnails` | XPath, 1–1000 characters; selects the gallery's links |
 | `pagination` | XPath, 0–1000; empty means one page |
 | `file` | XPath, 0–1000; empty means a thumbnail link is the file itself |
@@ -72,7 +72,7 @@ ends with `.` + `site`. This one rule decides where pages may be read and where 
 
 An XPath result is turned into URLs like this: an element with `href` gives its `href`, otherwise its
 `src`; an attribute or text node gives its value; anything else is ignored. Each value is resolved
-against the page URL and must pass `normalizeDownloadUrl`; what fails is dropped and counted.
+against the document's base URL (when it belongs to the site, otherwise the page URL) and must pass `normalizeDownloadUrl`; what fails is dropped and counted.
 
 ### Browser sessions
 
@@ -84,7 +84,9 @@ Both windows of a session: sandbox, context isolation, no preload, no Node integ
 permission request denied, every download cancelled, `setWindowOpenHandler` denies and loads the
 target in the same window instead, audio muted. The user agent is the Electron default (it names Chromium, Electron and the
 product token `AssetForge/<version>`); nothing is removed from it to look like another browser. A
-login that needs a popup talking to its opener does not work; that is a known limit.
+login that needs a popup talking to its opener does not work; that is a known limit. Neither window
+has DevTools, a menu or dialogs. Closing the main window ends a running crawl and closes the login
+window.
 
 A request filter on the session (`webRequest.onBeforeRequest`) lets through only `http`/`https`
 (plus `data:` and `blob:` sub-resources) and resolves every new host once: a host with any address
@@ -101,7 +103,8 @@ pages and stated in the backlog. Files never go through this path.
 
 ### The crawl
 
-`sites:crawl { profileId, url }` runs in the main process, one at a time (`busy`), in memory, with
+`sites:crawl { profileId, url }` runs in the main process, one at a time (`invalid_operation`, `A site import test is already
+running`), in memory, with
 progress (`sites:crawlProgress` → `{ pages, files, cancelling } | null`) and `sites:cancelCrawl`,
 after the pattern of the import progress. `url` must belong to the profile's site.
 
@@ -111,7 +114,8 @@ after the pattern of the import progress. `url` must belong to the profile's sit
    downloader's own user agent `AssetForge/<version>` (at most 512 KiB, redirects followed as the
    downloader does), and evaluated for the product token `AssetForge`, then `*`. 404 or 410:
    everything allowed. Any other failure: nothing of that origin is allowed (counted as
-   `disallowed`); when it is the origin of the gallery URL the crawl answers `robots_unavailable`.
+   `disallowed`); when it is the origin of the gallery URL the crawl answers `invalid_operation` (`The site's
+   robots.txt could not be read`).
 2. Pages are loaded one after another with at least 1 s between two loads. A page counts as loaded
    when `thumbnails` matches at least one node, checked every 250 ms after `did-finish-load` for at
    most 10 s; the whole page has 30 s. XPath runs in an isolated world
@@ -146,9 +150,9 @@ crawl found and robots allowed is queued. `files:importUrls` is unchanged. The j
 `siteProfileId` and `filter { kinds, minBytes }`; v1 payloads run unchanged, and every reader of the
 payload (Jobs screen fields, host lanes, host pause) reads both.
 
-- New core port `SiteCookies { headerFor(profileId, url): Promise<string | null> }`, implemented in
-  the main process from the profile's session (`cookies.get({ url })`). It answers `null` unless the
-  URL belongs to the profile's site. An unknown profile fails the job with `download_profile_missing`
+- New core port `SiteAccess { has(profileId), headersFor(profileId, url) }`, implemented in the
+  main process from the profile's session (`cookies.get({ url })`). `headersFor` answers `null`
+  unless the URL belongs to the profile's site. An unknown profile fails the job with `download_profile_missing`
   (`The site profile of this download no longer exists`, not retried).
 - `RemoteFileSource.open` takes an optional `headersFor(url)`; the adapter calls it for every hop, so
   a redirect off the site carries no cookie. For a URL that belongs to the site the callback also
@@ -164,7 +168,7 @@ payload (Jobs screen fields, host lanes, host pause) reads both.
 
 A profile cannot be deleted while it has active download jobs in the open workspace (`This profile
 still has active downloads`), and neither saved nor deleted while its login window is open or a
-crawl of it runs (`busy`).
+crawl of it runs (`This profile is in use`).
 
 ### Channels
 
