@@ -289,9 +289,16 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     if (wait !== null) await holdLane(job, runAfter);
   }
 
-  /** Makes the waiting jobs of the job's class and lane wait until `until`; their run counts stay. Not a pause. */
+  /**
+   * Makes the waiting jobs of the job's class and lane wait until `until`; their run counts stay. Not a pause.
+   * Runs after the outcome was stored, so a failure here is logged as what it is and never as a lost outcome.
+   */
   async function holdLane(job: Job, until: string): Promise<void> {
-    await jobs.holdLane({ types: typesOf.get(job.resourceClass) ?? [job.type], lane: job.lane, until, now: iso() });
+    try {
+      await jobs.holdLane({ types: typesOf.get(job.resourceClass) ?? [job.type], lane: job.lane, until, now: iso() });
+    } catch (cause) {
+      log('The lane hold could not be written', cause);
+    }
   }
 
   async function recover(): Promise<void> {

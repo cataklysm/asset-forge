@@ -1413,6 +1413,28 @@ describe('lane hold', () => {
     expect(s.row(a2).status).toBe('running');
   });
 
+  it('logs a hold that could not be written as such, after the retry was stored', async () => {
+    const h = controlled('io');
+    const failure = new Error('disk');
+    const s = setup({
+      handlers: { dl: h.handler },
+      limits: { ...DEFAULT_LIMITS, io: 1 },
+      repo: (fake) =>
+        new Proxy(fake, {
+          get(target, prop, receiver) {
+            if (prop === 'holdLane') return async () => Promise.reject(failure);
+            return Reflect.get(target, prop, receiver) as unknown;
+          },
+        }),
+    });
+    const [a1] = (await s.enqueue('dl', 'io', 2, 'a')) as [string, string];
+    await s.scheduler.start();
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 60_000 }));
+    await flush();
+    expect(s.row(a1)).toMatchObject({ status: 'retry_wait', errorCode: 'download_throttled' });
+    expect(s.logged).toEqual([{ message: 'The lane hold could not be written', cause: failure }]);
+  });
+
   it('still holds the lane when the throttled job has used its last run', async () => {
     const h = controlled('io');
     const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
