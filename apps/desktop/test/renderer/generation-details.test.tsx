@@ -73,12 +73,12 @@ function install(handlers: FakeHandlers = {}, providers = [VENICE]) {
   });
 }
 
-function Providers({ children }: { children: ReactNode }) {
+function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => void }) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
         <TagsProvider>
-          <StudioProvider>{children}</StudioProvider>
+          <StudioProvider onOpenPrompt={onOpenPrompt}>{children}</StudioProvider>
         </TagsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>
@@ -379,4 +379,36 @@ it('Open in the studio shows the result in the file detail dialog', async () => 
   await user.click(await screen.findByRole('button', { name: 'Open result' }));
   const dialog = await screen.findByRole('dialog', { name: 'oak edit 1.png' });
   expect(await within(dialog).findByRole('region', { name: 'Generated from' })).not.toBeNull();
+});
+
+const FROM_LIBRARY = { promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: { hero: 'Ana', mood: 'calm' } };
+
+async function showDetails(made: Generation, onOpenPrompt?: (id: string) => void) {
+  install({ 'generations:forFile': () => ({ madeBy: made, results: [] }) });
+  render(
+    <Providers onOpenPrompt={onOpenPrompt}>
+      <DialogHost file={RESULT} />
+    </Providers>,
+  );
+  return within(await screen.findByRole('region', { name: 'Generated from' }));
+}
+
+it('a library prompt shows as a link with its values as tooltip and opens through onOpenPrompt', async () => {
+  const onOpenPrompt = vi.fn();
+  const block = await showDetails(generation(FROM_LIBRARY), onOpenPrompt);
+  const link = block.getByRole('link', { name: 'Turnaround v3' });
+  expect(link.getAttribute('title')).toBe('hero: Ana\nmood: calm');
+  await userEvent.setup().click(link);
+  expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1');
+});
+
+it('a prompt deleted since is plain text, without a link', async () => {
+  const block = await showDetails(generation({ ...FROM_LIBRARY, promptId: null }));
+  expect(block.getByText('Turnaround v3')).toBeTruthy();
+  expect(block.queryByRole('link', { name: 'Turnaround v3' })).toBeNull();
+});
+
+it('a generation without a library prompt shows no such line', async () => {
+  const block = await showDetails(generation());
+  expect(block.queryByText(/ vd+$/)).toBeNull();
 });

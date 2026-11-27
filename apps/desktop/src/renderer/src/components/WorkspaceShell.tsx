@@ -153,6 +153,15 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
     setView({ name: section } as View);
   }
 
+  const openPrompt = useCallback(
+    async (id: string) => {
+      if (!(await confirmLeave())) return;
+      setError(null);
+      setView({ name: 'prompts', id });
+    },
+    [confirmLeave],
+  );
+
   const openSettings = useCallback(async () => {
     if (!(await confirmLeave())) return;
     setError(null);
@@ -176,7 +185,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
                 {/* The screens bring their own padding. */}
                 {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
                 <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
-                  <StudioProvider>
+                  <StudioProvider onOpenPrompt={(id) => void openPrompt(id)}>
                     {error !== null && (
                       <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
                         {error}

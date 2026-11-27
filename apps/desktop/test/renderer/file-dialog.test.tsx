@@ -142,6 +142,7 @@ it('More offers the studio entries the host passes; a failing upscale shows its 
       throw new Error('The provider could not be reached');
     }),
     blocked: null,
+    openPrompt: vi.fn(),
     recallVariable: () => undefined,
     rememberVariables: () => {},
   };

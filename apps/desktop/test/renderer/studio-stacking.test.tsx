@@ -76,12 +76,12 @@ afterEach(() => {
   showModal.mockRestore();
 });
 
-function Providers({ children }: { children: ReactNode }) {
+function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => void }) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
         <TagsProvider>
-          <StudioProvider>{children}</StudioProvider>
+          <StudioProvider onOpenPrompt={onOpenPrompt}>{children}</StudioProvider>
         </TagsProvider>
       </ProviderSettingsProvider>
     </JobsProvider>
@@ -178,4 +178,33 @@ it('Generate from image in the linked dialog raises the studio that was already 
   await user.click(within(raised).getByRole('button', { name: CLOSE_LABEL }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: `${STUDIO_TITLE} ${RESULT.originalName}` })).toBeNull());
   expect(screen.getByRole('dialog', { name: RESULT.originalName }).contains(document.activeElement)).toBe(true);
+});
+
+it('opening the library prompt closes the studio and the linked dialog and navigates', async () => {
+  const onOpenPrompt = vi.fn();
+  const made = { ...MADE, promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: {} };
+  installFakeApi({
+    ...fakeProviders({ providers: [VENICE], lastUsedImageId: VENICE.id }).handlers,
+    'providers:listImageModels': () => ({ ok: true, models: [MODEL] }),
+    'jobs:summary': () => IDLE,
+    'tags:suggest': () => [],
+    'generations:recentPrompts': () => ({ prompts: [] }),
+    'generations:forFile': ({ fileId }) => (fileId === RESULT.id ? { madeBy: made, results: [] } : { madeBy: null, results: [MADE] }),
+    'files:measure': ({ fileId }) => [SOURCE, RESULT].find((f) => f.id === fileId)!,
+  });
+  render(
+    <Providers onOpenPrompt={onOpenPrompt}>
+      <MenuHost file={SOURCE} />
+    </Providers>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'More' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Generate from image' }));
+  const studio = await waitFor(() => studioDialog(SOURCE));
+  await openResultFromStudio(user, studio);
+  const linked = await screen.findByRole('dialog', { name: RESULT.originalName });
+  const block = await within(linked).findByRole('region', { name: 'Generated from' });
+  await user.click(within(block).getByRole('link', { name: 'Turnaround v3' }));
+  expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });

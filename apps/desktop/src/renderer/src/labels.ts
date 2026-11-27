@@ -444,6 +444,15 @@ export function attachedPromptLabel(title: string, number: number): string {
   return `${title} v${number}`;
 }
 
+export const ATTACHED_PROMPT_LABEL = 'Library prompt';
+
+/** One 'name: value' per line, as the tooltip of an attached prompt; empty for no values. */
+export function promptValuesTitle(values: Readonly<Record<string, string>> | null): string {
+  return Object.entries(values ?? {})
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('\n');
+}
+
 /** 'New version of Hero shot'. */
 export function newVersionOfLabel(title: string): string {
   return `New version of ${title}`;

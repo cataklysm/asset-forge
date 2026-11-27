@@ -8,10 +8,13 @@ import {
   COPY_PROMPT_TITLE,
   DELETED_MARK,
   GENERATED_FROM_LABEL,
+  attachedPromptLabel,
   generationParametersText,
+  ATTACHED_PROMPT_LABEL,
   LINKED_FILE_FAILED,
   MODEL_LABEL,
   PARAMETERS_LABEL,
+  promptValuesTitle,
   PROMPT_LABEL,
   PROVIDER_LABEL,
   RESULTS_LABEL,
@@ -76,6 +79,7 @@ export function GenerationDetails({ fileId }: { fileId: string }) {
 function MadeBy({ generation }: { generation: Generation }) {
   const [copyFailed, setCopyFailed] = useState(false);
   const { prompt } = generation;
+  const studio = useStudio();
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -99,6 +103,22 @@ function MadeBy({ generation }: { generation: Generation }) {
         )}
         <dt className={LABEL}>{PARAMETERS_LABEL}</dt>
         <dd>{generationParametersText(generation.parameters)}</dd>
+        {generation.promptTitle !== null && generation.promptVersionNumber !== null && (
+          <>
+            <dt className={LABEL}>{ATTACHED_PROMPT_LABEL}</dt>
+            <dd className="break-words">
+              {generation.promptId === null ? (
+                <span title={promptValuesTitle(generation.promptVariables)}>
+                  {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
+                </span>
+              ) : (
+                <Link title={promptValuesTitle(generation.promptVariables)} onFollow={() => studio.openPrompt(generation.promptId!)}>
+                  {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
+                </Link>
+              )}
+            </dd>
+          </>
+        )}
       </dl>
       {prompt !== null && (
         <div className="space-y-1">
