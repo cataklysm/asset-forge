@@ -89,6 +89,11 @@ export interface ImportOptions {
    * without a file. Staging is removed, the pending row deleted, and `duplicateOf` lists those files oldest first.
    */
   skipDuplicate?: boolean;
+  /**
+   * After the checksum, before the duplicate check: false ends the import without a file, like a skipped duplicate
+   * but with an empty `duplicateOf`. Staging is removed and the pending row (with its origin) deleted.
+   */
+  keepStaged?(staged: { sizeBytes: number }): boolean;
   /** A failure removes staging and deletes the pending row instead of marking it failed; the result has no file. */
   discardOnFailure?: boolean;
   /** Called on a failed import with the error that ended the source stream, when the stream failed. */
@@ -152,14 +157,21 @@ export async function importStream(ctx: ImportContext, source: ImportSource, opt
     if (verified !== sha256) {
       throw new ChecksumMismatchError(`Checksum mismatch after staging: expected ${sha256}, got ${verified}`);
     }
-    const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
-    if (options.skipDuplicate === true && duplicateOf.length > 0) {
+    const discardStaged = async () => {
       await removeQuietly(ctx.storage, [staging]);
       try {
         await ctx.files.deletePending(id);
       } catch {
         // The row stays pending; recovery deletes a download row and fails any other on the next open.
       }
+    };
+    if (options.keepStaged !== undefined && !options.keepStaged({ sizeBytes })) {
+      await discardStaged();
+      return { sourcePath, entryName, file: null, error: null, duplicateOf: [] };
+    }
+    const duplicateOf = (await ctx.files.findCompleteBySha256(sha256)).map((f) => f.id);
+    if (options.skipDuplicate === true && duplicateOf.length > 0) {
+      await discardStaged();
       return { sourcePath, entryName, file: null, error: null, duplicateOf };
     }
     await ctx.storage.move(staging, finalPath);

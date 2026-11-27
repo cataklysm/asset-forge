@@ -531,8 +531,11 @@ export interface JobRepository {
   ): Promise<boolean>;
   /** running → retry_wait with run_after and the error. False when the row is not `running`. */
   scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean>;
-  /** Sets file_id and result of a running job. False when the row is not `running` or the file does not exist. */
-  setOutcome(id: string, r: { fileId: string; result: JobResult | null; now: string }): Promise<boolean>;
+  /**
+   * Sets file_id and result of a running job; `fileId` null clears it (a `filtered` download keeps no file).
+   * False when the row is not `running` or the file does not exist.
+   */
+  setOutcome(id: string, r: { fileId: string | null; result: JobResult | null; now: string }): Promise<boolean>;
   /**
    * queued | retry_wait jobs of these types in this lane (`null` is the jobs without one) whose run_after is null or
    * earlier than `until`: status retry_wait, run_after = until; attempt and error untouched. Returns how many.

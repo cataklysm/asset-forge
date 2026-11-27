@@ -103,6 +103,25 @@ describe('enqueueUrlImport', () => {
     });
   });
 
+  it('with a site writes payload v2 with the profile and the filter, same lane and dedupe key', async () => {
+    const { db, session } = await setup();
+    const site = { profileId: '11111111-1111-4111-8111-111111111111', filter: { kinds: ['image' as const], minBytes: 100 } };
+    const result = await enqueueUrlImport(session, { urls: ['https://a.example/1.png'], target: null, skipDuplicates: true, site });
+    expect(result.queued).toBe(1);
+    expect(db.jobs.rows[0]).toMatchObject({
+      lane: 'a.example',
+      dedupeKey: 'url:https://a.example/1.png',
+      payload: {
+        v: 2,
+        url: 'https://a.example/1.png',
+        target: null,
+        skipDuplicates: true,
+        siteProfileId: site.profileId,
+        filter: { kinds: ['image'], minBytes: 100 },
+      },
+    });
+  });
+
   it('a second identical call queues nothing', async () => {
     const { session, downloaded } = await setup();
     await downloaded('https://b.example/2.png');

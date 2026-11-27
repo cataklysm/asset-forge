@@ -12,6 +12,8 @@ import {
   type Job,
   type RemoteFile,
   type RemoteFileSource,
+  type RemoteOpenOptions,
+  type SiteAccess,
   type WorkspaceSession,
 } from '../src/index.js';
 import { createFakeHost } from './fakes.js';
@@ -30,11 +32,13 @@ type Answer = {
 /** Serves buffers by URL; an entry may be a failure to reject with. Records every URL opened and every stream destroyed. */
 class FakeRemote implements RemoteFileSource {
   readonly opened: string[] = [];
+  readonly options: (RemoteOpenOptions | undefined)[] = [];
   readonly streams: Readable[] = [];
   readonly answers = new Map<string, Answer | Error>();
 
-  async open(url: string, signal: AbortSignal): Promise<RemoteFile> {
+  async open(url: string, signal: AbortSignal, options?: RemoteOpenOptions): Promise<RemoteFile> {
     this.opened.push(url);
+    this.options.push(options);
     const answer = this.answers.get(url);
     if (answer === undefined) throw new RemoteFileError('not_found');
     if (answer instanceof Error) throw answer;
@@ -50,7 +54,7 @@ class FakeRemote implements RemoteFileSource {
   }
 }
 
-async function setup() {
+async function setup(o: { sites?: SiteAccess } = {}) {
   const fake = createFakeHost();
   const manager = new WorkspaceManager(fake.host);
   const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
@@ -65,6 +69,7 @@ async function setup() {
   const handler = createFileDownloadHandler({
     session,
     remote,
+    ...(o.sites === undefined ? {} : { sites: o.sites }),
     effects: {
       fileChanged: (id) => {
         effects.changed.push(id);
@@ -506,5 +511,140 @@ describe('the effects of the download handler', () => {
     const { error } = await t.download('https://a.example/x.png');
     expect(error).toBeNull();
     expect(t.effects.added).toEqual([null]);
+  });
+});
+
+describe('site downloads (payload v2)', () => {
+  const PROFILE = '11111111-1111-4111-8111-111111111111';
+  const sitePayload = (url: string, filter: { kinds: string[]; minBytes: number }, siteProfileId = PROFILE) => ({
+    v: 2,
+    url,
+    target: null,
+    skipDuplicates: true,
+    siteProfileId,
+    filter,
+  });
+
+  /** A site access that knows PROFILE and records every question. */
+  function fakeSites(known = true) {
+    const has: string[] = [];
+    const asked: [string, string][] = [];
+    const sites: SiteAccess = {
+      has: async (id) => {
+        has.push(id);
+        return known && id === PROFILE;
+      },
+      headersFor: async (id, url) => {
+        asked.push([id, url]);
+        return { cookie: 'sid=1' };
+      },
+    };
+    return { sites, has, asked };
+  }
+
+  it('fails download_profile_missing when the profile is unknown, without opening', async () => {
+    const f = fakeSites(false);
+    const t = await setup({ sites: f.sites });
+    t.remote.answers.set('https://a.example/x.png', {});
+    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_profile_missing');
+    expect(f.has).toEqual([PROFILE]);
+    expect(t.remote.opened).toEqual([]);
+    expect(t.files()).toEqual([]);
+  });
+
+  it('fails download_profile_missing when no site access is wired', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', {});
+    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    expect(codeOf(await t.run(job))).toBe('download_profile_missing');
+    expect(t.remote.opened).toEqual([]);
+  });
+
+  it('passes headersFor bound to its profile and stores the file', async () => {
+    const f = fakeSites();
+    const t = await setup({ sites: f.sites });
+    t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png') });
+    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    expect(await t.run(job)).toBeNull();
+    const headersFor = t.remote.options[0]?.headersFor;
+    expect(headersFor).toBeTypeOf('function');
+    await expect(headersFor!('https://a.example/hop')).resolves.toEqual({ cookie: 'sid=1' });
+    expect(f.asked).toEqual([[PROFILE, 'https://a.example/hop']]);
+    expect(t.files()).toHaveLength(1);
+    expect(t.jobRow(job.id).fileId).toBe(t.files()[0]!.id);
+  });
+
+  it('a v1 job never asks the site access and opens without options', async () => {
+    const f = fakeSites();
+    const t = await setup({ sites: f.sites });
+    t.remote.answers.set('https://a.example/x.png', {});
+    expect((await t.download('https://a.example/x.png')).error).toBeNull();
+    expect(f.has).toEqual([]);
+    expect(f.asked).toEqual([]);
+    expect(t.remote.options).toEqual([undefined]);
+  });
+
+  it('an announced length below minBytes ends filtered before anything is stored', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const before = [...t.storage.files.keys()];
+    t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: 3 });
+    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.jobRow(job.id).fileId).toBeNull();
+    expect(t.files()).toEqual([]);
+    expect(t.remote.streams[0]!.destroyed).toBe(true);
+    expect([...t.storage.files.keys()]).toEqual(before);
+    expect(t.db.fileOrigins.rows.size).toBe(0);
+    expect(t.effects.added).toEqual([]);
+  });
+
+  it('a final name whose kind is not wanted ends filtered before anything is stored', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    t.remote.answers.set('https://a.example/go', { finalUrl: 'https://a.example/clip.mp4', contentType: 'video/mp4' });
+    const job = await t.claim('https://a.example/go', { payload: sitePayload('https://a.example/go', { kinds: ['image'], minBytes: 0 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.jobRow(job.id).fileId).toBeNull();
+    expect(t.files()).toEqual([]);
+    expect(t.remote.streams[0]!.destroyed).toBe(true);
+  });
+
+  it('a wanted kind with an announced length at minBytes is stored', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    t.remote.answers.set('https://a.example/clip.mp4', { body: Buffer.from('mp4!'), contentLength: 4, contentType: 'video/mp4' });
+    const job = await t.claim('https://a.example/clip.mp4', {
+      payload: sitePayload('https://a.example/clip.mp4', { kinds: ['image', 'video'], minBytes: 4 }),
+    });
+    expect(await t.run(job)).toBeNull();
+    expect(t.files()).toMatchObject([{ kind: 'video', status: 'complete' }]);
+    expect(t.db.jobs.results.has(job.id)).toBe(false);
+  });
+
+  it('an unknown length below minBytes is discarded after staging', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    const before = [...t.storage.files.keys()];
+    t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: null });
+    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.jobRow(job.id).fileId).toBeNull();
+    expect(t.files()).toEqual([]);
+    expect(t.staged()).toEqual([]);
+    expect([...t.storage.files.keys()]).toEqual(before);
+    expect(t.db.fileOrigins.rows.size).toBe(0);
+    expect(t.effects.added).toEqual([]);
+  });
+
+  it('a small duplicate of a known file is filtered, not added as an origin', async () => {
+    const t = await setup({ sites: fakeSites().sites });
+    t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('png') });
+    t.remote.answers.set('https://a.example/2.png', { body: Buffer.from('png') });
+    await t.download('https://a.example/1.png');
+    const job = await t.claim('https://a.example/2.png', { payload: sitePayload('https://a.example/2.png', { kinds: ['image'], minBytes: 4 }) });
+    expect(await t.run(job)).toBeNull();
+    expect(t.db.jobs.results.get(job.id)).toBe('filtered');
+    expect(t.db.fileOrigins.rows.size).toBe(1);
   });
 });

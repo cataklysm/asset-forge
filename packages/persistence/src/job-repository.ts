@@ -219,7 +219,7 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
     },
     async setOutcome(id, { fileId, result, now }): Promise<boolean> {
       return db.transaction((tx) => {
-        if (tx.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined) return false;
+        if (fileId !== null && tx.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined) return false;
         return fromRunning(id, { fileId, result, updatedAt: now });
       });
     },

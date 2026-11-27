@@ -14,6 +14,8 @@ import {
   type RemoteFile,
   type RemoteFileFailure,
   type RemoteFileSource,
+  type RemoteOpenOptions,
+  type RemoteRequestHeaders,
 } from '@assetforge/core';
 import { isPublicAddress } from './public-address.js';
 
@@ -71,10 +73,53 @@ export function createUrlSource(options: UrlSourceOptions): RemoteFileSource {
     totalTimeoutMs: options.totalTimeoutMs ?? DOWNLOAD_TOTAL_TIMEOUT_MS,
     maxRedirects: options.maxRedirects ?? MAX_DOWNLOAD_REDIRECTS,
   };
-  return { open: (url, signal) => openUrl(url, signal, config) };
+  return { open: (url, signal, openOptions) => openUrl(url, signal, config, openOptions?.headersFor) };
 }
 
-async function openUrl(input: string, signal: AbortSignal, config: Config): Promise<RemoteFile> {
+/** The headers of one hop besides the fixed ones. */
+interface HopHeaders {
+  userAgent: string;
+  cookie: string | null;
+}
+
+/** Anything Node cannot send in a header value, control characters (tab included) among them. */
+const UNSENDABLE = /[^\x20-\x7e\x80-\xff]/;
+
+/** A non-empty string without control characters; anything else is dropped, never sent. */
+function sendable(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' && !UNSENDABLE.test(value) ? value : null;
+}
+
+/**
+ * The headers of a hop: the callback's answer for exactly this hop's URL, so a hop off the site carries no cookie.
+ * Only `Cookie` and a replaced `User-Agent` can come from it. A rejecting callback fails the hop `unreachable`.
+ */
+async function hopHeaders(
+  url: URL,
+  headersFor: RemoteOpenOptions['headersFor'],
+  config: Config,
+  signal: AbortSignal,
+  until: number,
+): Promise<HopHeaders> {
+  if (headersFor === undefined) return { userAgent: config.userAgent, cookie: null };
+  // `bounded` turns a rejection into `unreachable` without a cause and an abort into the abort reason.
+  const answer = await bounded(
+    Promise.resolve().then(() => headersFor(url.href)),
+    signal,
+    until,
+  );
+  return {
+    userAgent: sendable(answer?.userAgent) ?? config.userAgent,
+    cookie: sendable(answer?.cookie),
+  };
+}
+
+async function openUrl(
+  input: string,
+  signal: AbortSignal,
+  config: Config,
+  headersFor: RemoteOpenOptions['headersFor'],
+): Promise<RemoteFile> {
   signal.throwIfAborted();
   const deadline = Date.now() + config.totalTimeoutMs;
   let current = parseHop(input);
@@ -83,7 +128,8 @@ async function openUrl(input: string, signal: AbortSignal, config: Config): Prom
     signal.throwIfAborted();
     const hopDeadline = Math.min(deadline, Date.now() + config.headerTimeoutMs);
     const address = await vetHost(current, config, signal, hopDeadline);
-    const outcome = await fetchHop(current, address, config, signal, deadline, hopDeadline);
+    const headers = await hopHeaders(current, headersFor, config, signal, hopDeadline);
+    const outcome = await fetchHop(current, address, headers, config, signal, deadline, hopDeadline);
     if (outcome.kind === 'file') return outcome.file;
     if (hop >= config.maxRedirects || outcome.location === undefined) throw failure('rejected');
     current = parseHop(outcome.location, current);
@@ -151,6 +197,7 @@ type HopOutcome = { kind: 'file'; file: RemoteFile } | { kind: 'redirect'; locat
 function fetchHop(
   url: URL,
   address: string,
+  headers: HopHeaders,
   config: Config,
   signal: AbortSignal,
   deadline: number,
@@ -175,7 +222,12 @@ function fetchHop(
       method: 'GET',
       agent: false,
       lookup: pinnedLookup,
-      headers: { 'User-Agent': config.userAgent, Accept: '*/*', 'Accept-Encoding': 'identity' },
+      headers: {
+        'User-Agent': headers.userAgent,
+        Accept: '*/*',
+        'Accept-Encoding': 'identity',
+        ...(headers.cookie === null ? {} : { Cookie: headers.cookie }),
+      },
     });
 
     let settled = false;

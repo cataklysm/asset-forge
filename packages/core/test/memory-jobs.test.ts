@@ -314,6 +314,14 @@ describe('InMemoryJobRepository download jobs', () => {
     expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({ fileId: null, result: null });
   });
 
+  it('setOutcome with a null file records a filtered download without a file', async () => {
+    const repo = new InMemoryJobRepository(() => null, () => 'unknown');
+    await repo.enqueue({ jobs: [download('d1', 'https://example.org/a.png')], now: T0 });
+    await claimIo(repo, T1);
+    expect(await repo.setOutcome('d1', { fileId: null, result: 'filtered', now: T2 })).toBe(true);
+    expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: 'filtered' });
+  });
+
   it('holdLane moves the waiting jobs of a lane that would run earlier', async () => {
     const repo = await repoWith([
       download('a1', 'https://a/1'),

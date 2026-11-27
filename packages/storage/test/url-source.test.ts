@@ -461,3 +461,91 @@ describe('createUrlSource: the default address policy', () => {
     expect(requests.map((r) => r.url)).toEqual(['/start']);
   });
 });
+
+describe('createUrlSource: headers of a site login', () => {
+  const lookup = async () => ['127.0.0.1'];
+  const headerNames = (req: http.IncomingMessage) => {
+    const names = new Set<string>();
+    for (let i = 0; i < req.rawHeaders.length; i += 2) names.add(req.rawHeaders[i]!.toLowerCase());
+    return [...names].sort();
+  };
+
+  it('asks once per hop with that hop URL and sends a cookie only where it answers one', async () => {
+    handler = (req, res) => {
+      if (req.url === '/start') {
+        res.writeHead(302, { Location: `http://other.example.test:${port}/away` });
+        res.end();
+      } else if (req.url === '/away') {
+        res.writeHead(302, { Location: `http://site.example.test:${port}/back` });
+        res.end();
+      } else {
+        res.end('file');
+      }
+    };
+    const asked: string[] = [];
+    const file = await source({ lookup }).open(`http://site.example.test:${port}/start`, new AbortController().signal, {
+      headersFor: async (url) => {
+        asked.push(url);
+        return new URL(url).hostname === 'site.example.test' ? { cookie: 'sid=1', userAgent: 'Session/1.0' } : null;
+      },
+    });
+    expect((await collect(file.stream)).toString()).toBe('file');
+    expect(asked).toEqual([
+      `http://site.example.test:${port}/start`,
+      `http://other.example.test:${port}/away`,
+      `http://site.example.test:${port}/back`,
+    ]);
+    expect(requests.map((r) => [r.url, r.headers.cookie, r.headers['user-agent']])).toEqual([
+      ['/start', 'sid=1', 'Session/1.0'],
+      ['/away', undefined, UA],
+      ['/back', 'sid=1', 'Session/1.0'],
+    ]);
+  });
+
+  it('a hop answering cookie and agent sends exactly those two besides the fixed headers', async () => {
+    const file = await source().open(`${base}/h`, new AbortController().signal, {
+      headersFor: async () => ({ cookie: 'a=1; b=2', userAgent: 'Session/1.0' }),
+    });
+    await collect(file.stream);
+    const req = requests[0]!;
+    expect(headerNames(req)).toEqual(['accept', 'accept-encoding', 'connection', 'cookie', 'host', 'user-agent']);
+    expect(req.headers.cookie).toBe('a=1; b=2');
+    expect(req.headers['user-agent']).toBe('Session/1.0');
+  });
+
+  it('a hop answering null sends no cookie and the configured agent', async () => {
+    const file = await source().open(`${base}/h`, new AbortController().signal, { headersFor: async () => null });
+    await collect(file.stream);
+    expect(headerNames(requests[0]!)).toEqual(['accept', 'accept-encoding', 'connection', 'host', 'user-agent']);
+    expect(requests[0]!.headers['user-agent']).toBe(UA);
+  });
+
+  it.each([
+    ['a cookie with a line break', { cookie: 'a=1\r\nX-Evil: 1', userAgent: 'Session/1.0' }, undefined, 'Session/1.0'],
+    ['a cookie with a tab', { cookie: 'a=1\tb', userAgent: 'Session/1.0' }, undefined, 'Session/1.0'],
+    ['an agent with a NUL', { cookie: 'a=1', userAgent: 'Session\u0000' }, 'a=1', UA],
+    ['an agent with DEL', { cookie: 'a=1', userAgent: 'Session\u007f' }, 'a=1', UA],
+    ['an agent Node cannot send', { cookie: 'a=1', userAgent: 'Session ' }, 'a=1', UA],
+  ])('drops %s', async (_name, answer, cookie, agent) => {
+    const file = await source().open(`${base}/h`, new AbortController().signal, { headersFor: async () => answer });
+    await collect(file.stream);
+    const req = requests[0]!;
+    expect(req.headers.cookie).toBe(cookie);
+    expect(req.headers['user-agent']).toBe(agent);
+    expect(req.headers['x-evil']).toBeUndefined();
+  });
+
+  it('a rejecting headersFor fails the open as unreachable without a cause and sends nothing', async () => {
+    const error = await failureOf(
+      source().open(`${base}/h`, new AbortController().signal, {
+        headersFor: async () => {
+          throw new Error(`secret ${base}/h`);
+        },
+      }),
+    );
+    expect(error.failure).toBe('unreachable');
+    expect(error.cause).toBeUndefined();
+    expect(error.message).not.toContain('secret');
+    expect(requests).toEqual([]);
+  });
+});

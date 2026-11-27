@@ -4,7 +4,15 @@ import { downloadBaseName, downloadFileName, isWebPage } from './download-name.j
 import { SourceNotReadableError } from './errors.js';
 import { importStream, isRefusedImportName, type ImportContext } from './import-file.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
-import { RemoteFileError, type RemoteFile, type RemoteFileFailure, type RemoteFileSource } from './ports.js';
+import { fileKind } from './media-types.js';
+import {
+  RemoteFileError,
+  type RemoteFile,
+  type RemoteFileFailure,
+  type RemoteFileSource,
+  type RemoteOpenOptions,
+  type SiteAccess,
+} from './ports.js';
 import type { WorkspaceSession } from './session.js';
 import { clampRetryAfterMs, DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
 
@@ -13,6 +21,8 @@ export interface FileDownloadHandlerDeps {
   remote: RemoteFileSource;
   /** Told where a downloaded file was added; never for one that was already present. */
   effects?: JobEffects;
+  /** The logins of the site profiles; without it every site download (payload v2) fails `download_profile_missing`. */
+  sites?: SiteAccess;
 }
 
 const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
@@ -57,7 +67,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
   };
 
   /** Records what the job produced. False only when the job is no longer running, which is not a failure. */
-  const setOutcome = (job: Job, fileId: string, result: JobResult | null) =>
+  const setOutcome = (job: Job, fileId: string | null, result: JobResult | null) =>
     s.database.jobs.setOutcome(job.id, { fileId, result, now: s.now().toISOString() });
 
   /** Refuses when the storage reports too little free space for the reserve plus `length`. */
@@ -69,7 +79,18 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
   async function download(job: Job, signal: AbortSignal): Promise<void> {
     const parsed = FileDownloadPayloadSchema.safeParse(job.payload);
     if (!parsed.success) throw new JobError('internal_error');
-    const { url, target, skipDuplicates } = parsed.data;
+    const payload = parsed.data;
+    const { url, target, skipDuplicates } = payload;
+
+    // A site download goes out with its profile's login and keeps only what passes the profile's filter.
+    let openOptions: RemoteOpenOptions | undefined;
+    const filter = payload.v === 2 ? payload.filter : null;
+    if (payload.v === 2) {
+      const sites = deps.sites;
+      const profileId = payload.siteProfileId;
+      if (sites === undefined || !(await sites.has(profileId))) throw new JobError('download_profile_missing');
+      openOptions = { headersFor: (hopUrl) => sites.headersFor(profileId, hopUrl) };
+    }
 
     const present = await s.database.fileOrigins.findCompleteFileByUrl(url);
     if (present !== null) {
@@ -81,7 +102,7 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     signal.throwIfAborted();
     let remote: RemoteFile;
     try {
-      remote = await deps.remote.open(url, signal);
+      remote = openOptions === undefined ? await deps.remote.open(url, signal) : await deps.remote.open(url, signal, openOptions);
     } catch (error) {
       if (error instanceof RemoteFileError) throw jobErrorOf(error);
       throw error;
@@ -103,6 +124,14 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     if (isWebPage(remote.contentType)) refuse('download_not_a_file');
     const name = downloadFileName(remote);
     if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse('download_type_refused');
+    if (filter !== null) {
+      const tooSmall = remote.contentLength !== null && remote.contentLength < filter.minBytes;
+      if (tooSmall || !filter.kinds.includes(fileKind(name))) {
+        remote.stream.destroy();
+        await setOutcome(job, null, 'filtered');
+        return;
+      }
+    }
     try {
       await requireSpace(remote.contentLength ?? 0);
     } catch (error) {
@@ -117,6 +146,9 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
       throw streamFailure(early);
     }
 
+    // An unknown length is checked once the body is staged; the import then discards it and leaves no file row.
+    let filteredOut = false;
+    const minBytes = filter?.minBytes ?? 0;
     const imported = await importStream(
       ctx,
       { sourcePath: '', entryName: null, name, stream: remote.stream },
@@ -124,6 +156,14 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
         origin: { id: s.newId(), url },
         skipDuplicate: skipDuplicates,
         discardOnFailure: true,
+        ...(minBytes > 0
+          ? {
+              keepStaged: ({ sizeBytes }: { sizeBytes: number }) => {
+                filteredOut = sizeBytes < minBytes;
+                return !filteredOut;
+              },
+            }
+          : {}),
         onStreamError: (error) => {
           streamError ??= error;
         },
@@ -131,6 +171,10 @@ export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHan
     );
     // On a cancel or a stop the failed import has already discarded what it wrote; `run` turns the failure below
     // into the abort. A complete file is kept and recorded even then.
+    if (filteredOut && imported.file === null && imported.error === null) {
+      await setOutcome(job, null, 'filtered');
+      return;
+    }
     const existing = imported.file === null && imported.error === null ? imported.duplicateOf[0] : undefined;
     if (existing !== undefined) {
       // A file already carrying this URL or 50 origins answers false; the job still points at it.

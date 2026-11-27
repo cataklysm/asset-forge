@@ -864,6 +864,15 @@ describe('download jobs', () => {
     expect(items[0]).toMatchObject({ id: uuid(10), fileId: FILE_ID, fileName: 'Pump.png', result: 'already_present' });
   });
 
+  test('setOutcome with a null file records a filtered download without a file', async () => {
+    await enqueue(T0, download(10, 'https://example.org/a.png'));
+    expect(await db.jobs.setOutcome(uuid(10), { fileId: null, result: 'filtered', now: T1 })).toBe(false);
+    await claimIo(T1);
+    expect(await db.jobs.setOutcome(uuid(10), { fileId: null, result: 'filtered', now: T2 })).toBe(true);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'running', fileId: null, updatedAt: T2 });
+    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: 'filtered' });
+  });
+
   test('list answers host and url of a download job and no provider', async () => {
     await enqueue(T0, download(10, 'https://Example.org:8443/a.png'));
     await enqueue(T1, newJob(11, { lane: 'p1', payload: { version: 2, model: 'm2', mode: 'apply' } }));

@@ -4,6 +4,7 @@ import {
   type FileDownloadPayload,
   type FileOrigin,
   type FileTarget,
+  type SiteFilter,
   type UrlImportResult,
 } from '@assetforge/contracts';
 import { normalizeSourceUrl } from './asset-sources.js';
@@ -56,7 +57,13 @@ export function normalizeDownloadUrl(input: string): string {
  */
 export async function enqueueUrlImport(
   s: WorkspaceSession,
-  r: { urls: readonly string[]; target: FileTarget | null; skipDuplicates: boolean },
+  r: {
+    urls: readonly string[];
+    target: FileTarget | null;
+    skipDuplicates: boolean;
+    /** A site import: the jobs go out with this profile's login and keep only what passes `filter` (payload v2). */
+    site?: { profileId: string; filter: SiteFilter };
+  },
 ): Promise<UrlImportResult> {
   if (r.target !== null) await requireAsset(s, r.target.assetId);
   const result: UrlImportResult = { queued: 0, alreadyImported: 0, alreadyQueued: 0, invalid: [] };
@@ -91,7 +98,11 @@ export async function enqueueUrlImport(
       result.alreadyImported++;
       continue;
     }
-    const payload: FileDownloadPayload = { v: 1, url, target: r.target, skipDuplicates: r.skipDuplicates };
+    const fields = { url, target: r.target, skipDuplicates: r.skipDuplicates };
+    const payload: FileDownloadPayload =
+      r.site === undefined
+        ? { v: 1, ...fields }
+        : { v: 2, ...fields, siteProfileId: r.site.profileId, filter: { kinds: [...r.site.filter.kinds], minBytes: r.site.filter.minBytes } };
     jobs.push({
       id: s.newId(),
       type: FILE_DOWNLOAD_JOB,

@@ -176,8 +176,8 @@ export class InMemoryJobRepository implements JobRepository {
     return this.fromRunning(id, { status: 'retry_wait', ...errorOf(r.errorCode), runAfter: r.runAfter, updatedAt: r.now });
   }
 
-  async setOutcome(id: string, r: { fileId: string; result: JobResult | null; now: string }): Promise<boolean> {
-    if (this.fileState(r.fileId) === 'unknown') return false;
+  async setOutcome(id: string, r: { fileId: string | null; result: JobResult | null; now: string }): Promise<boolean> {
+    if (r.fileId !== null && this.fileState(r.fileId) === 'unknown') return false;
     if (!this.fromRunning(id, { fileId: r.fileId, updatedAt: r.now })) return false;
     if (r.result === null) this.results.delete(id);
     else this.results.set(id, r.result);
