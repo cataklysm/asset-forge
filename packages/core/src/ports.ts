@@ -219,6 +219,8 @@ export interface FileQuery extends Page {
   kind?: FileKind;
   /** Only files with (true) or without (false) a waiting tag proposal. */
   hasProposal?: boolean;
+  /** Only these files, within the scope and every other filter. */
+  ids?: readonly string[];
 }
 
 /** Where a file row points: its path and, unless it is in the inbox, its asset and role. */
@@ -525,9 +527,15 @@ export interface JobRepository {
    * Newest created_at first, then id descending; with `lane` only the jobs of that lane. `fileName` is the file's
    * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload,
    * `url` and `host` from `downloadJobFields`, `result` from the stored column. A `FILE_DOWNLOAD_JOB` answers
-   * `providerId`, `providerName` and `model` null.
+   * `providerId`, `providerName` and `model` null. `ids` narrows the list to those jobs within the other filters.
    */
-  list(q: { limit: number; offset: number; status?: JobStatus; lane?: string }): Promise<{ items: JobView[]; total: number }>;
+  list(q: {
+    limit: number;
+    offset: number;
+    status?: JobStatus;
+    lane?: string;
+    ids?: readonly string[];
+  }): Promise<{ items: JobView[]; total: number }>;
   /** Jobs of this type in `queued` or `retry_wait`, counted per lane; lanes without such a job are left out. */
   waitingByLane(type: string): Promise<{ lane: string | null; waiting: number }[]>;
   /** The payload of the newest job (created_at, then id) of this type and lane in any status; null when there is none. */

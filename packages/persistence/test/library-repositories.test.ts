@@ -781,6 +781,21 @@ describe('file repository filters', () => {
     await expect(names({ scope: inbox, kind: 'model' })).resolves.toEqual(['inbox.glb']);
     await expect(names({ scope: all, kind: 'model' })).resolves.toEqual(['inbox.glb', 'mesh.glb']);
   });
+
+  test('ids narrow the list within the scope and the other filters', async () => {
+    const { addFile, tagFile, names } = await setup();
+    const a = await addFile('a.png', 'image');
+    const b = await addFile('b.png', 'image');
+    await addFile('c.png', 'image');
+    const placed = await addFile('placed.png', 'image', { assetId: uuid(1), role: 'texture' });
+    await tagFile(b, 'red');
+
+    await expect(names({ scope: inbox, ids: [a, b] })).resolves.toEqual(['b.png', 'a.png']);
+    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [a, b] })).resolves.toMatchObject({ total: 2 });
+    await expect(names({ scope: inbox, ids: [a, b], tagNames: ['red'] })).resolves.toEqual(['b.png']);
+    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [placed] })).resolves.toEqual({ items: [], total: 0 });
+    await expect(names({ scope: tree, ids: [a, placed] })).resolves.toEqual(['placed.png']);
+  });
 });
 
 describe('project repository filters', () => {

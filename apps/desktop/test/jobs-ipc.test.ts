@@ -266,6 +266,27 @@ describe('job IPC', () => {
     expect(await ok('changes:since', { cursor: after.cursor })).toMatchObject({ reset: false, jobs: false, jobIds: [], fileIds: [] });
   });
 
+  it('lists only the chosen job ids that match the status', async () => {
+    await setup(['hang']);
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    await ok('analysis:enqueue', filesRequest(await importImages(3)));
+    await until((s) => s.running === 1 && s.queued === 2);
+    const all = (await ok('jobs:list', page)).items;
+    const running = all.find((j) => j.status === 'running')!;
+    const queued = all.filter((j) => j.status === 'queued');
+
+    const chosen = await ok('jobs:list', { ...page, ids: [running.id, queued[0]!.id] });
+    expect(chosen.total).toBe(2);
+    expect(chosen.items.map((j) => j.id).sort()).toEqual([running.id, queued[0]!.id].sort());
+    expect(await ok('jobs:list', { ...page, ids: [running.id, queued[0]!.id], status: 'queued' })).toMatchObject({
+      total: 1,
+      items: [{ id: queued[0]!.id }],
+    });
+    expect(await ok('jobs:list', { ...page, ids: [uuid] })).toEqual({ items: [], total: 0 });
+    const tooMany = Array.from({ length: 101 }, () => uuid);
+    expect(await call('jobs:list', { ...page, ids: tooMany })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
   it('refuses to retry a queued job and to cancel an unknown one', async () => {
     await setup(['hang']);
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });

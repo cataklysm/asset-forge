@@ -166,6 +166,7 @@ export function fileListWhere(tx: ListTx, q: Omit<FileQuery, 'limit' | 'offset'>
   const conditions: (SQL | undefined)[] = [scopeMatches(q.scope)];
   if (q.role !== undefined) conditions.push(eq(file.role, q.role));
   if (q.kind !== undefined) conditions.push(eq(file.kind, q.kind));
+  if (q.ids !== undefined) conditions.push(inArray(file.id, [...q.ids]));
   if (q.hasProposal !== undefined) {
     const proposed = sql`exists (select 1 from ${fileAnalysisProposal} where ${qualified(fileAnalysisProposal, fileAnalysisProposal.fileId)} = ${fileId})`;
     conditions.push(q.hasProposal ? proposed : sql`not ${proposed}`);

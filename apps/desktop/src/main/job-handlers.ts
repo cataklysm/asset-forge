@@ -168,13 +168,14 @@ export function createJobHandlers(
       return {};
     },
     'jobs:list': async (r) => {
-      const { limit, offset, status, providerId } = r;
+      const { limit, offset, status, providerId, ids } = r;
       const page = await manager.read((s) =>
         listJobs(s, {
           limit,
           offset,
           ...(status === undefined ? {} : { status }),
           ...(providerId === undefined ? {} : { lane: providerId }),
+          ...(ids === undefined ? {} : { ids }),
         }),
       );
       return {

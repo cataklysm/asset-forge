@@ -783,6 +783,17 @@ describe('job lanes', () => {
     expect((await db.jobs.list({ limit: 10, offset: 0, lane: 'b' })).items[0]?.createdAt).toBe(T1);
   });
 
+  test('list narrows to the given ids within the status and lane filters', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'a'), laned(12, 'b'));
+
+    const chosen = await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10), uuid(12)] });
+    expect(chosen.total).toBe(2);
+    expect(chosen.items.map((i) => i.id)).toEqual([uuid(12), uuid(10)]);
+    expect((await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10), uuid(12)], lane: 'a' })).items.map((i) => i.id)).toEqual([uuid(10)]);
+    expect(await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10)], status: 'failed' })).toEqual({ items: [], total: 0 });
+    expect(await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(99)] })).toEqual({ items: [], total: 0 });
+  });
+
   test('retry keeps the lane and the payload', async () => {
     await enqueue(T0, newJob(10, { lane: 'a', payload: { n: 1 }, resourceClass: 'remote_api' }));
     expect((await claim(T0, 'remote_api'))?.id).toBe(uuid(10));

@@ -89,6 +89,11 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError
 const EmptyRequestSchema = z.object({});
 const IdSchema = z.uuid();
 const IdRequestSchema = z.object({ id: IdSchema });
+/**
+ * Narrows a list to these rows, within its scope and every other filter: how a list fetches the rows the change feed
+ * named. A list filter only, never part of an analysis target.
+ */
+const ChosenIdsSchema = z.array(IdSchema).min(1).max(100);
 const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });
 const RelationKeySchema = z.object({
   fromAssetId: IdSchema,
@@ -172,8 +177,11 @@ export const ipcContract = {
     response: z.object({}),
   },
   'files:list': {
-    /** `hasProposal` is a list filter only; it is not part of `FileListFilter` in an analysis target. */
-    request: PageRequestSchema.extend(FileListFilterSchema.shape).extend({ hasProposal: z.boolean().optional() }),
+    /** `hasProposal` and `ids` are list filters only; they are not part of `FileListFilter` in an analysis target. */
+    request: PageRequestSchema.extend(FileListFilterSchema.shape).extend({
+      hasProposal: z.boolean().optional(),
+      ids: ChosenIdsSchema.optional(),
+    }),
     response: FileListSchema,
   },
   'files:assign': {
@@ -589,7 +597,11 @@ export const ipcContract = {
   },
   /** Newest first. */
   'jobs:list': {
-    request: PageRequestSchema.extend({ status: JobStatusSchema.optional(), providerId: ProviderIdSchema.optional() }),
+    request: PageRequestSchema.extend({
+      status: JobStatusSchema.optional(),
+      providerId: ProviderIdSchema.optional(),
+      ids: ChosenIdsSchema.optional(),
+    }),
     response: pageOf(JobViewSchema),
   },
   'jobs:summary': {

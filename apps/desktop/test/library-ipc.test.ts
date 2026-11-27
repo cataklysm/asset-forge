@@ -557,6 +557,23 @@ describe('library IPC', () => {
       expect(untagged.items.map((f: any) => f.tags)).toEqual([[], []]);
     });
 
+    it('files:list answers only the chosen ids that match the scope and the filters', async () => {
+      const { assetId, ids } = await inboxFiles(['a.png', 'b.png', 'c.png']);
+      const [a, b, c] = ids as [string, string, string];
+      await ok('files:addTag', { fileId: b, name: 'oak' });
+      await ok('files:assign', { fileId: c, assetId, role: 'reference' });
+      const inbox = { ...page, scope: { kind: 'inbox' } };
+
+      const chosen = await ok('files:list', { ...inbox, ids: [a, b] });
+      expect(chosen.total).toBe(2);
+      expect(chosen.items.map((f: any) => f.id).sort()).toEqual([a, b].sort());
+      expect(await ok('files:list', { ...inbox, ids: [a, b], tagNames: ['oak'] })).toMatchObject({ total: 1, items: [{ id: b }] });
+      expect(await ok('files:list', { ...inbox, ids: [c] })).toEqual({ items: [], total: 0 });
+      const tooMany = Array.from({ length: 101 }, () => a);
+      expect(await call('files:list', { ...inbox, ids: tooMany })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+      expect(await call('files:list', { ...inbox, ids: [] })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    });
+
     it('files:addTagMany with a pending file fails with validation_failed and tags nothing', async () => {
       const { ids } = await inboxFiles(['a.png']);
       const pending = await insertPending();

@@ -303,8 +303,12 @@ export function createJobRepository(db: BetterSQLite3Database): JobRepository {
       for (const { status, n } of rows) result[status] = n;
       return result;
     },
-    async list({ limit, offset, status, lane }): Promise<{ items: JobView[]; total: number }> {
-      const where = and(status === undefined ? undefined : eq(job.status, status), lane === undefined ? undefined : eq(job.providerId, lane));
+    async list({ limit, offset, status, lane, ids }): Promise<{ items: JobView[]; total: number }> {
+      const where = and(
+        status === undefined ? undefined : eq(job.status, status),
+        lane === undefined ? undefined : eq(job.providerId, lane),
+        ids === undefined ? undefined : inArray(job.id, [...ids]),
+      );
       return db.transaction(
         (tx) => {
           const rows = tx
