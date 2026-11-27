@@ -975,3 +975,32 @@ it('a merge rewrites the selection at once, also a selected file outside the loa
     ]),
   );
 });
+
+it('Import from URLs follows Import files, is disabled while importing and sends no target', async () => {
+  const user = userEvent.setup();
+  const picked = deferred<string[]>();
+  const api = install([], {
+    'dialog:pickFiles': () => picked.promise,
+    'files:importUrls': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+  });
+  render(<Harness />);
+  await screen.findByText('Inbox is empty');
+  const urlButton = screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement;
+  expect(urlButton.previousElementSibling?.textContent).toBe('Import files');
+  expect(urlButton.className).toBe(screen.getAllByRole('button', { name: 'Import files' })[0]!.className);
+
+  await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
+  expect(urlButton.disabled).toBe(true);
+  picked.resolve([]);
+  await waitFor(() => expect(urlButton.disabled).toBe(false));
+
+  await user.click(urlButton);
+  const dialog = await screen.findByRole('dialog', { name: 'Import from URLs' });
+  await user.click(within(dialog).getByRole('textbox', { name: 'URLs' }));
+  await user.paste('https://a.test/x.png');
+  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+  expect(await within(dialog).findByText('Queued 1')).toBeTruthy();
+  expect(callsOf(api, 'files:importUrls')).toEqual([{ urls: ['https://a.test/x.png'], skipDuplicates: true }]);
+  await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});

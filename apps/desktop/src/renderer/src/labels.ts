@@ -280,6 +280,27 @@ export const IMPORT_AS_FILE_LABEL = 'Import as file';
 export const IMPORT_AS_FILE_TITLE = 'Imports the archive itself as one file';
 export const ZIP_CANCEL_TITLE = 'Imports nothing';
 
+/** The import from a list of addresses (UrlImportDialog) and its entry buttons. */
+export const URL_IMPORT_LABEL = 'Import from URLs';
+export const URLS_LABEL = 'URLs';
+export const URLS_TITLE = 'One address per line';
+export const SKIP_DUPLICATES_LABEL = 'Skip duplicates';
+export const SKIP_DUPLICATES_TITLE = 'Identical content is not stored again';
+export const IMPORT_LABEL = 'Import';
+
+/** 'At most 5000 addresses at once'. */
+export function tooManyUrlsTitle(max: number): string {
+  return `At most ${max} addresses at once`;
+}
+
+/** The count lines of a started URL import, in their order: 'Queued 3'. */
+export const URL_IMPORT_COUNT_LABELS = {
+  queued: 'Queued',
+  alreadyImported: 'Already imported',
+  alreadyQueued: 'Already queued',
+  invalid: 'Not usable',
+} as const;
+
 /** '2 archives'; the dialog names a single archive by its file name instead. */
 export function archiveCountLabel(count: number): string {
   return `${count} archives`;

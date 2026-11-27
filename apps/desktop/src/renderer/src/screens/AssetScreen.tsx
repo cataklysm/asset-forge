@@ -5,6 +5,7 @@ import {
   RelationKindSchema,
   type AssetDetail,
   type FileRole,
+  type FileTarget,
   type RelationKind,
 } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
@@ -20,11 +21,12 @@ import { SourceList } from '../components/SourceList';
 import { TagRow } from '../components/TagRow';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
+import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
 import { useLoad } from '../hooks/useLoad';
 import { importTitle } from '../import-result';
 import { useJobs } from '../jobs-context';
-import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel } from '../labels';
+import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, URL_IMPORT_LABEL } from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
@@ -69,6 +71,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [error, setError] = useState<string | null>(null);
   const [importRole, setImportRole] = useState<FileRole>('reference');
   const [importing, setImporting] = useState(false);
+  // The target of the open URL import dialog: the role as chosen when the dialog opened.
+  const [urlImportTarget, setUrlImportTarget] = useState<FileTarget | null>(null);
   const [importResult, setImportResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [fileCount, setFileCount] = useState<number | null>(null);
@@ -224,6 +228,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             <button type="button" className={BUTTON} disabled={importing} onClick={() => void importFiles()}>
               Import files
             </button>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={importing}
+              onClick={() => setUrlImportTarget({ assetId: id, role: importRole })}
+            >
+              {URL_IMPORT_LABEL}
+            </button>
             {importing && <span className={`text-sm ${MUTED}`}>Importing…</span>}
             <button
               type="button"
@@ -329,6 +341,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       </Tabs>
       {analysis.dialogs}
       {zipChoice.dialog}
+      {urlImportTarget !== null && <UrlImportDialog target={urlImportTarget} onClose={() => setUrlImportTarget(null)} />}
     </div>
   );
 }

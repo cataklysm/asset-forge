@@ -13,6 +13,7 @@ import type {
   PromptSummary,
   ProviderList,
   ProviderView,
+  UrlImportResult,
 } from '@assetforge/contracts';
 import { buildPromptVariables, cleanTagText, normalizeTagName } from '@assetforge/contracts';
 import {
@@ -62,7 +63,12 @@ export function importResultOf(sourcePath: string, p: Partial<Omit<ImportResult,
   return { sourcePath, entryName: null, file: null, error: null, duplicateOf: [], ...p };
 }
 
-type PromptChannel = 'analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
+/** One answer of `files:importUrls`: nothing queued or skipped unless given. */
+export function urlImportResultOf(p: Partial<UrlImportResult> = {}): UrlImportResult {
+  return { queued: 0, alreadyImported: 0, alreadyQueued: 0, invalid: [], ...p };
+}
+
+type PromptChannel ='analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
 
 /**
  * In-memory handlers for the `analysisPrompts:*` channels, refusing what the main process refuses

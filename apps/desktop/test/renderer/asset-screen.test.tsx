@@ -1191,3 +1191,36 @@ it('during an import the Add URL input and the remove buttons are disabled, open
   picked.resolve([]);
   await waitFor(() => expect(field.disabled).toBe(false));
 });
+
+it('Import from URLs follows Import files and targets the asset with the selected role', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const api = install(asset, {
+    'files:importUrls': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+  });
+  render(<Harness id={asset.id} />);
+  await user.selectOptions(await screen.findByRole('combobox', { name: 'Role for imported files' }), 'concept');
+  const urlButton = screen.getByRole('button', { name: 'Import from URLs' });
+  expect(urlButton.previousElementSibling?.textContent).toBe('Import files');
+  await user.click(urlButton);
+  const dialog = await screen.findByRole('dialog', { name: 'Import from URLs' });
+  await user.click(within(dialog).getByRole('textbox', { name: 'URLs' }));
+  await user.paste('https://a.test/x.png');
+  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+  expect(await within(dialog).findByText('Queued 1')).toBeTruthy();
+  expect(callsOf(api, 'files:importUrls')).toEqual([
+    { urls: ['https://a.test/x.png'], target: { assetId: asset.id, role: 'concept' }, skipDuplicates: true },
+  ]);
+});
+
+it('Import from URLs is disabled while files are imported', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const picked = deferred<string[]>();
+  install(asset, { 'dialog:pickFiles': () => picked.promise });
+  render(<Harness id={asset.id} />);
+  await user.click(await screen.findByRole('button', { name: 'Import files' }));
+  expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(true);
+  picked.resolve([]);
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(false));
+});

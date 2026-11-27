@@ -1,0 +1,171 @@
+import { useEffect, useId, useRef, useState } from 'react';
+import { MAX_IMPORT_URLS, type FileTarget, type UrlImportResult } from '@assetforge/contracts';
+import { ApiError, call, describeError } from '../api';
+import { useJobs } from '../jobs-context';
+import {
+  CANCEL_LABEL,
+  CLOSE_LABEL,
+  IMPORT_LABEL,
+  SKIP_DUPLICATES_LABEL,
+  SKIP_DUPLICATES_TITLE,
+  tooManyUrlsTitle,
+  URL_IMPORT_COUNT_LABELS,
+  URL_IMPORT_LABEL,
+  URLS_LABEL,
+  URLS_TITLE,
+} from '../labels';
+import { ALERT, BORDER, BUTTON, FOCUS, LABEL, TEXTAREA } from '../ui';
+import { Dialog } from './Dialog';
+
+interface Props {
+  /** The asset and role the files go to; null for the inbox. */
+  target: FileTarget | null;
+  onClose(): void;
+}
+
+/** A message of a failed call: fixed main-process messages as sent, anything else described. */
+function messageOf(error: unknown): string {
+  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
+}
+
+const isBlank = (line: string) => line.trim() === '';
+
+/**
+ * The lines to send and whether there are too many addresses. Up to the limit the lines go as typed
+ * (trailing empty lines dropped), so the `line` numbers of the answer match the input; beyond it only
+ * the non-empty lines go.
+ */
+export function urlLines(text: string): { urls: string[]; addresses: number; tooMany: boolean } {
+  const lines = text.split(/\r?\n/);
+  while (lines.length > 0 && isBlank(lines[lines.length - 1]!)) lines.pop();
+  const filled = lines.filter((line) => !isBlank(line));
+  return {
+    urls: lines.length <= MAX_IMPORT_URLS ? lines : filled,
+    addresses: filled.length,
+    tooMany: filled.length > MAX_IMPORT_URLS,
+  };
+}
+
+/** Queues downloads for a list of addresses, one per line, and shows the answer as counts. */
+export function UrlImportDialog({ target, onClose }: Props) {
+  const fieldId = useId();
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const jobs = useJobs();
+  const [text, setText] = useState('');
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<UrlImportResult | null>(null);
+  // Synchronous guard: a second activation before the re-render must not send twice.
+  const sendingRef = useRef(false);
+
+  const disposed = useRef(false);
+  useEffect(() => {
+    disposed.current = false;
+    return () => {
+      disposed.current = true;
+    };
+  }, []);
+
+  const lines = urlLines(text);
+  const blocked = sending || lines.addresses === 0 || lines.tooMany;
+
+  async function start() {
+    if (blocked || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    setError(null);
+    try {
+      const answer = await call('files:importUrls', {
+        urls: lines.urls,
+        ...(target === null ? {} : { target }),
+        skipDuplicates,
+      });
+      jobs.refresh();
+      if (!disposed.current) setResult(answer);
+    } catch (e) {
+      if (!disposed.current) setError(messageOf(e));
+    } finally {
+      sendingRef.current = false;
+      if (!disposed.current) setSending(false);
+    }
+  }
+
+  return (
+    <Dialog open title={URL_IMPORT_LABEL} onClose={onClose} initialFocusRef={fieldRef}>
+      {result === null ? (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void start();
+          }}
+        >
+          <label htmlFor={fieldId} className={LABEL}>
+            {URLS_LABEL}
+          </label>
+          <textarea
+            id={fieldId}
+            ref={fieldRef}
+            className={TEXTAREA}
+            title={URLS_TITLE}
+            spellCheck={false}
+            wrap="off"
+            value={text}
+            readOnly={sending}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <label className="inline-flex items-center gap-2 text-sm text-text" title={SKIP_DUPLICATES_TITLE}>
+            <input
+              type="checkbox"
+              className={`accent-accent ${FOCUS}`}
+              checked={skipDuplicates}
+              disabled={sending}
+              onChange={(e) => setSkipDuplicates(e.target.checked)}
+            />
+            {SKIP_DUPLICATES_LABEL}
+          </label>
+          {error !== null && (
+            <p role="alert" className={ALERT}>
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button type="button" className={BUTTON} onClick={onClose}>
+              {CANCEL_LABEL}
+            </button>
+            <button
+              type="submit"
+              className={BUTTON}
+              disabled={blocked}
+              title={lines.tooMany ? tooManyUrlsTitle(MAX_IMPORT_URLS) : undefined}
+            >
+              {IMPORT_LABEL}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1 text-sm text-text">
+            <p>{`${URL_IMPORT_COUNT_LABELS.queued} ${result.queued}`}</p>
+            {result.alreadyImported > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyImported} ${result.alreadyImported}`}</p>}
+            {result.alreadyQueued > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.alreadyQueued} ${result.alreadyQueued}`}</p>}
+            {result.invalid.length > 0 && <p>{`${URL_IMPORT_COUNT_LABELS.invalid} ${result.invalid.length}`}</p>}
+          </div>
+          {result.invalid.length > 0 && (
+            <ul className={`max-h-48 overflow-y-auto rounded-control border p-2 text-sm text-muted ${BORDER}`}>
+              {result.invalid.map((entry) => (
+                <li key={entry.line} className="break-all">{`${entry.line}: ${entry.text}`}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex justify-end">
+            <button type="button" className={BUTTON} onClick={onClose}>
+              {CLOSE_LABEL}
+            </button>
+          </div>
+        </div>
+      )}
+    </Dialog>
+  );
+}
