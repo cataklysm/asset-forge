@@ -75,3 +75,24 @@ describe('resolvePromptText', () => {
     expect(resolvePromptText('no variables', [], {})).toEqual({ ok: true, text: 'no variables', values: {} });
   });
 });
+
+describe('names that collide with object properties', () => {
+  test('a variable named __proto__ is resolved and kept in values', () => {
+    const variables = buildPromptVariables('x {{__proto__}}', JSON.parse('{"__proto__":"d"}') as Record<string, string>);
+    expect(variables).toEqual([{ name: '__proto__', defaultValue: 'd' }]);
+    const result = resolvePromptText('x {{__proto__}}', variables, JSON.parse('{"__proto__":"v"}') as Record<string, string>);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toBe('x v');
+    expect(Object.keys(result.values)).toEqual(['__proto__']);
+    expect(JSON.stringify(result.values)).toBe('{"__proto__":"v"}');
+  });
+
+  test('an inherited property never counts as a given value', () => {
+    expect(resolvePromptText('{{constructor}}', [{ name: 'constructor', defaultValue: '' }], {})).toEqual({
+      ok: false,
+      reason: 'missing',
+    });
+    expect(buildPromptVariables('{{constructor}}', {})).toEqual([{ name: 'constructor', defaultValue: '' }]);
+  });
+});

@@ -6,8 +6,10 @@ export interface PromptVariable {
 }
 
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/gu;
-const VARIABLE_NAME = /^[\p{L}\p{N} _-]{1,40}$/u;
-const VALUE_MAX = 2000;
+export const PROMPT_VARIABLE_NAME_MAX = 40;
+export const PROMPT_VARIABLE_VALUE_MAX = 2000;
+
+const VARIABLE_NAME = new RegExp(`^[\\p{L}\\p{N} _-]{1,${PROMPT_VARIABLE_NAME_MAX}}$`, 'u');
 
 /** Variables are matched regardless of case. */
 export const variableKey = (name: string): string => name.toLowerCase();
@@ -58,17 +60,17 @@ export function resolvePromptText(
     if (!known.has(lower) || given.has(lower)) return { ok: false, reason: 'unknown' };
     given.set(lower, value.trim());
   }
-  const resolved: Record<string, string> = {};
+  const resolved: [string, string][] = [];
   for (const [lower, name] of known) {
     const value = given.get(lower);
     if (value === undefined || value === '') return { ok: false, reason: 'missing' };
-    if (value.length > VALUE_MAX) return { ok: false, reason: 'value_too_long' };
-    resolved[name] = value;
+    if (value.length > PROMPT_VARIABLE_VALUE_MAX) return { ok: false, reason: 'value_too_long' };
+    resolved.push([name, value]);
   }
   const text = content.replace(PLACEHOLDER, (whole, inside: string) => {
     const name = nameOf(inside);
     const value = name === null ? undefined : given.get(variableKey(name));
     return value ?? whole;
   });
-  return { ok: true, text, values: resolved };
+  return { ok: true, text, values: Object.fromEntries(resolved) };
 }

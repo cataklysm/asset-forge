@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { PROMPT_VARIABLE_NAME_MAX, PROMPT_VARIABLE_VALUE_MAX } from './prompt-template';
 import { TagAssignmentSchema } from './tags';
+
+export { PROMPT_VARIABLE_NAME_MAX, PROMPT_VARIABLE_VALUE_MAX };
 
 export const PROMPT_TITLE_MAX = 120;
 export const PROMPT_DESCRIPTION_MAX = 2000;
-export const PROMPT_VARIABLE_NAME_MAX = 40;
 export const MAX_PROMPT_VARIABLES = 20;
-export const PROMPT_VARIABLE_VALUE_MAX = 2000;
 export const MAX_PROMPT_TAGS = 50;
 
 // Transport bounds are deliberately wider than the rules, so core answers the fixed messages.
