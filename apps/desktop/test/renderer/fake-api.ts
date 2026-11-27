@@ -69,7 +69,7 @@ export function urlImportResultOf(p: Partial<UrlImportResult> = {}): UrlImportRe
   return { queued: 0, alreadyImported: 0, alreadyQueued: 0, invalid: [], ...p };
 }
 
-type PromptChannel ='analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
+type PromptChannel = 'analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
 
 /**
  * In-memory handlers for the `analysisPrompts:*` channels, refusing what the main process refuses
