@@ -5,6 +5,7 @@ import {
   IMAGE_INPUT_MIN_PIXELS,
   MAX_FILE_GENERATIONS,
   MAX_RECENT_PROMPTS,
+  resolvePromptText,
   UPSCALE_MAX_PIXELS,
   type FileRecord,
   type Generation,
@@ -17,7 +18,7 @@ import { InvalidOperationError, NotFoundError, ProviderNotConfiguredError, Valid
 import type { JobControl, NewJob } from './jobs.js';
 import { measureFile } from './measure-file.js';
 import { isPreviewable } from './media-types.js';
-import type { ImageProviderDirectory } from './ports.js';
+import type { GenerationPromptRef, ImageProviderDirectory } from './ports.js';
 import type { WorkspaceSession } from './session.js';
 
 /** What the generation use cases need beyond the session. */
@@ -28,6 +29,32 @@ export interface GenerationDeps {
 
 const NOT_USABLE = 'Only a complete image outside the trash can be used';
 const NOT_FOUND = 'This generation does not exist';
+
+const RESOLVE_REFUSALS = {
+  missing: 'Every variable needs a value',
+  unknown: 'This prompt has no such variable',
+  value_too_long: 'This text is too long',
+} as const;
+
+/**
+ * The text an edit sends and the library version it came from: a free prompt as it is with no reference,
+ * a version with its variables filled in (the values trimmed, keyed by the version's spelling).
+ */
+async function editPrompt(
+  s: WorkspaceSession,
+  input: Extract<StartGeneration, { kind: 'edit' }>,
+): Promise<{ text: string; promptRef: GenerationPromptRef | null }> {
+  if (input.promptVersionId === undefined) return { text: input.prompt ?? '', promptRef: null };
+  const found = await s.database.prompts.getVersion(input.promptVersionId);
+  if (found === null) throw new NotFoundError('This prompt version does not exist');
+  const { version } = found;
+  const result = resolvePromptText(version.content, version.variables, input.variables ?? {});
+  if (!result.ok) throw new ValidationFailedError(RESOLVE_REFUSALS[result.reason]);
+  return {
+    text: result.text,
+    promptRef: { versionId: version.id, title: found.title, versionNumber: version.number, variables: result.values },
+  };
+}
 
 /** True when a generation may read this file: complete, outside the trash and previewable (SVG excluded). */
 function isUsableInput(file: FileRecord): boolean {
@@ -47,8 +74,8 @@ async function requireGeneration(s: WorkspaceSession, id: string): Promise<Gener
 
 /**
  * Starts an edit or an upscale of one image. Checks in this order: the file, its pixel size, the provider,
- * then for an edit the prompt and the model's offer (the only step that asks the provider), for an upscale
- * the result size. A model list that cannot be loaded is answered as `{ ok: false, code }`; every other
+ * then for an edit the prompt (a library version is looked up and resolved here) and the model's offer (the
+ * only step that asks the provider), for an upscale the result size. A model list that cannot be loaded is answered as `{ ok: false, code }`; every other
  * refusal throws, and nothing is queued then.
  */
 export async function startGeneration(
@@ -70,9 +97,12 @@ export async function startGeneration(
 
   let model: string | null = null;
   let prompt: string | null = null;
+  let promptRef: GenerationPromptRef | null = null;
   let parameters: GenerationParameters;
   if (input.kind === 'edit') {
-    prompt = input.prompt.trim();
+    const resolved = await editPrompt(s, input);
+    promptRef = resolved.promptRef;
+    prompt = resolved.text.trim();
     if (prompt.length < 1 || prompt.length > GENERATION_PROMPT_MAX) {
       throw new ValidationFailedError(`The prompt must have 1 to ${GENERATION_PROMPT_MAX} characters`);
     }
@@ -109,7 +139,7 @@ export async function startGeneration(
       model,
       prompt,
       parameters,
-      promptRef: null,
+      promptRef,
       createdAt: s.now().toISOString(),
     },
     // A complete file always has a checksum.

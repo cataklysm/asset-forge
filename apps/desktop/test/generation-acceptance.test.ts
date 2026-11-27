@@ -106,6 +106,74 @@ describe('generation studio end to end', () => {
     for (const { text } of await filesBelow(h.base)) expect(text).not.toContain(TEST_KEY);
   });
 
+  it('edits from a prompt version, keeps its copies after the prompt is deleted and refuses the deleted version', async () => {
+    const { assetId } = await setup();
+    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const prompt = await h.ok('prompts:create', { title: 'Turnaround', description: '', content: 'A {{view}} view at night', defaults: {} });
+    const versionId = prompt.currentVersion.id;
+    const start = { kind: 'edit', fileId: sourceId, model: MOCK_EDIT_MODEL, promptVersionId: versionId, safeMode: true } as const;
+
+    const first = await started(h.ok('generations:start', { ...start, variables: { View: ' side ' } }));
+    await h.until((s) => s.succeeded === 1 && active(s) === 0);
+    expect(mock!.imageRequests).toHaveLength(1);
+    expect(mock!.imageRequests[0]).toMatchObject({ path: '/api/v1/image/edit', fields: { prompt: 'A side view at night' } });
+    expect(await generation(sourceId, first.id)).toMatchObject({
+      status: 'succeeded',
+      prompt: 'A side view at night',
+      promptId: prompt.id,
+      promptVersionId: versionId,
+      promptTitle: 'Turnaround',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side' },
+    });
+
+    expect(await h.ok('prompts:delete', { promptId: prompt.id })).toEqual({});
+    expect(await generation(sourceId, first.id)).toMatchObject({
+      prompt: 'A side view at night',
+      promptId: null,
+      promptVersionId: null,
+      promptTitle: 'Turnaround',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side' },
+    });
+    expect(await h.call('generations:start', { ...start, variables: { view: 'side' } })).toEqual({
+      ok: false,
+      error: { code: 'not_found', message: 'This prompt version does not exist' },
+    });
+    expect(mock!.imageRequests).toHaveLength(1);
+  });
+
+  it('retries a failed generation from a prompt version with its text and copies', async () => {
+    const { assetId } = await setup();
+    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const prompt = await h.ok('prompts:create', { title: 'Failing', description: '', content: 'mock:{{code}}', defaults: {} });
+    const copies = {
+      prompt: MOCK_PROMPT_FAIL,
+      promptId: prompt.id,
+      promptVersionId: prompt.currentVersion.id,
+      promptTitle: 'Failing',
+      promptVersionNumber: 1,
+      promptVariables: { code: '500' },
+    };
+    const failing = await started(
+      h.ok('generations:start', {
+        kind: 'edit',
+        fileId: sourceId,
+        model: MOCK_EDIT_MODEL,
+        promptVersionId: prompt.currentVersion.id,
+        variables: { code: '500' },
+        safeMode: true,
+      }),
+    );
+    await h.until((s) => s.failed === 1 && active(s) === 0);
+    expect(await generation(sourceId, failing.id)).toMatchObject({ status: 'failed', ...copies });
+
+    expect(await h.ok('generations:retry', { generationId: failing.id })).toMatchObject({ status: 'pending', ...copies });
+    await h.until((s) => s.failed === 2 && active(s) === 0);
+    expect(await generation(sourceId, failing.id)).toMatchObject({ status: 'failed', ...copies });
+    expect(mock!.imageRequests.map((r) => r.fields.prompt)).toEqual([MOCK_PROMPT_FAIL, MOCK_PROMPT_FAIL]);
+  });
+
   it('fails a 500 as provider_outcome_unknown after one request and never repeats it', async () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });

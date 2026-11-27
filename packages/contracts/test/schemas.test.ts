@@ -609,6 +609,23 @@ describe('generation studio', () => {
     expect(ipcContract['generations:start'].request.safeParse(edit).success).toBe(true);
   });
 
+  it('StartGenerationSchema takes exactly one of a free prompt and a prompt version with its variables', () => {
+    const base = { kind: 'edit', fileId: uuid, model: 'qwen-image', safeMode: true };
+    const valid = (input: object) => StartGenerationSchema.safeParse(input).success;
+    expect(valid({ ...base, prompt: 'Make it night' })).toBe(true);
+    expect(valid({ ...base, promptVersionId: uuid, variables: {} })).toBe(true);
+    expect(valid({ ...base, promptVersionId: uuid, variables: { view: 'side' } })).toBe(true);
+    expect(ipcContract['generations:start'].request.safeParse({ ...base, promptVersionId: uuid, variables: {} }).success).toBe(true);
+    expect(valid({ ...base, prompt: 'Make it night', promptVersionId: uuid, variables: {} })).toBe(false);
+    expect(valid(base)).toBe(false);
+    expect(valid({ ...base, promptVersionId: uuid })).toBe(false);
+    expect(valid({ ...base, prompt: 'Make it night', variables: {} })).toBe(false);
+    expect(valid({ ...base, promptVersionId: 'nope', variables: {} })).toBe(false);
+    const keys = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`v${i}`, 'x']));
+    expect(valid({ ...base, promptVersionId: uuid, variables: keys(40) })).toBe(true);
+    expect(valid({ ...base, promptVersionId: uuid, variables: keys(41) })).toBe(false);
+  });
+
   it('StartGenerationSchema refuses an edit without safe mode', () => {
     expect(StartGenerationSchema.safeParse({ kind: 'edit', fileId: uuid, model: 'm', prompt: 'p' }).success).toBe(false);
   });

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type Generation, type StartGeneration } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type Generation, type PromptDetail, type StartGeneration } from '@assetforge/contracts';
 import {
   cancelAllJobs,
   clearFinishedJobs,
+  createPrompt,
   InvalidOperationError,
   JobError,
   listGenerationsForFile,
@@ -13,6 +14,7 @@ import {
   removeGeneration,
   retryFailedJobs,
   retryGeneration,
+  savePromptVersion,
   startGeneration,
   trashFiles,
   ValidationFailedError,
@@ -213,6 +215,78 @@ describe('startGeneration', () => {
     t.providers.modelsResult = { ok: false, code: 'provider_unreachable' };
     await refused(t, edit(t.file.id, { prompt: '' }), ValidationFailedError);
     expect(t.providers.modelCalls).toEqual([]);
+  });
+});
+
+describe('startGeneration from a prompt version', () => {
+  async function libraryPrompt(t: Setup, content = 'A {{view}} view'): Promise<PromptDetail> {
+    return createPrompt(t.session, { title: 'Turnaround', description: '', content, defaults: {} });
+  }
+
+  const fromVersion = (fileId: string, promptVersionId: string, variables: Record<string, string>): StartGeneration =>
+    edit(fileId, { prompt: undefined, promptVersionId, variables });
+
+  it('stores the resolved text, the version reference and the trimmed values by the version spelling', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t);
+    const g = await started(t, fromVersion(t.file.id, prompt.currentVersion.id, { VIEW: ' side ' }));
+    expect(g).toMatchObject({
+      prompt: 'A side view',
+      promptId: prompt.id,
+      promptVersionId: prompt.currentVersion.id,
+      promptTitle: 'Turnaround',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side' },
+    });
+    expect(await recentGenerationPrompts(t.session)).toEqual(['A side view']);
+  });
+
+  it('stores a value that contains a placeholder verbatim', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t);
+    const g = await started(t, fromVersion(t.file.id, prompt.currentVersion.id, { view: '{{view}}' }));
+    expect(g.prompt).toBe('A {{view}} view');
+    expect(g.promptVariables).toEqual({ view: '{{view}}' });
+  });
+
+  it('refuses a missing value, an unknown name, a value over the limit and an unknown version before the model list', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t);
+    const versionId = prompt.currentVersion.id;
+    await refused(t, fromVersion(t.file.id, versionId, {}), ValidationFailedError, 'Every variable needs a value');
+    await refused(t, fromVersion(t.file.id, versionId, { view: '   ' }), ValidationFailedError, 'Every variable needs a value');
+    await refused(t, fromVersion(t.file.id, versionId, { view: 'side', angle: 'low' }), ValidationFailedError, 'This prompt has no such variable');
+    await refused(t, fromVersion(t.file.id, versionId, { view: 'x'.repeat(2001) }), ValidationFailedError, 'This text is too long');
+    await refused(t, fromVersion(t.file.id, UNKNOWN_ID, { view: 'side' }), NotFoundError, 'This prompt version does not exist');
+    expect(t.providers.modelCalls).toEqual([]);
+  });
+
+  it('applies the model limit to the resolved text', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t, `${'x'.repeat(1490)} {{view}}`);
+    const versionId = prompt.currentVersion.id;
+    await refused(t, fromVersion(t.file.id, versionId, { view: 'y'.repeat(10) }), ValidationFailedError, 'The prompt is longer than this model allows');
+    expect((await started(t, fromVersion(t.file.id, versionId, { view: 'y'.repeat(9) }))).prompt).toHaveLength(1500);
+  });
+
+  it('starts from an older version and records its number', async () => {
+    const t = await setup();
+    const first = await libraryPrompt(t);
+    await savePromptVersion(t.session, {
+      promptId: first.id,
+      baseVersionId: first.currentVersion.id,
+      content: 'A {{view}} view at night',
+      defaults: {},
+    });
+    const g = await started(t, fromVersion(t.file.id, first.currentVersion.id, { view: 'front' }));
+    expect(g).toMatchObject({ prompt: 'A front view', promptVersionId: first.currentVersion.id, promptVersionNumber: 1 });
+  });
+
+  it('records no prompt reference for a free prompt', async () => {
+    const t = await setup();
+    await libraryPrompt(t);
+    const g = await started(t, edit(t.file.id));
+    expect(g).toMatchObject({ promptId: null, promptVersionId: null, promptTitle: null, promptVersionNumber: null, promptVariables: null });
   });
 });
 

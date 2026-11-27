@@ -84,21 +84,37 @@ export const GenerationSchema = z.object({
 });
 export type Generation = z.infer<typeof GenerationSchema>;
 
+/** The most variable values a start carries; core refuses names the version does not hold. */
+const START_VARIABLES_TRANSPORT_KEYS = 40;
+
 /**
- * Without `providerId` the image provider used last runs, otherwise the first one. The prompt is only
- * bounded here; the host applies its rule (1 to 8000 characters after trim, and the model's limit).
+ * Without `providerId` the image provider used last runs, otherwise the first one. An edit carries either a
+ * free `prompt` or a library `promptVersionId` with the `variables` to fill in, never both. The prompt is only
+ * bounded here; the host resolves a version and applies its rule (1 to 8000 characters after trim, and the
+ * model's limit).
  */
 export const StartGenerationSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('edit'),
-    fileId: IdSchema,
-    providerId: ProviderIdSchema.optional(),
-    model: ModelNameSchema,
-    prompt: z.string().max(20000),
-    aspectRatio: z.string().min(1).max(20).optional(),
-    resolution: z.string().min(1).max(20).optional(),
-    safeMode: z.boolean(),
-  }),
+  z
+    .object({
+      kind: z.literal('edit'),
+      fileId: IdSchema,
+      providerId: ProviderIdSchema.optional(),
+      model: ModelNameSchema,
+      prompt: z.string().max(20000).optional(),
+      promptVersionId: z.uuid().optional(),
+      variables: z
+        .record(z.string().max(200), z.string().max(20000))
+        .refine((values) => Object.keys(values).length <= START_VARIABLES_TRANSPORT_KEYS)
+        .optional(),
+      aspectRatio: z.string().min(1).max(20).optional(),
+      resolution: z.string().min(1).max(20).optional(),
+      safeMode: z.boolean(),
+    })
+    .refine(
+      (edit) =>
+        (edit.prompt === undefined) !== (edit.promptVersionId === undefined) &&
+        (edit.variables === undefined) === (edit.promptVersionId === undefined),
+    ),
   z.object({
     kind: z.literal('upscale'),
     fileId: IdSchema,
