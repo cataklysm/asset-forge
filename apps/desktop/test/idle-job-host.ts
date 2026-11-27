@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { ProviderView } from '@assetforge/contracts';
-import { builtInAnalysisPrompt, type GenerationImageSource, type ImageProviderDirectory, type VisionProvider } from '@assetforge/core';
+import {
+  builtInAnalysisPrompt,
+  type GenerationImageSource,
+  type ImageProviderDirectory,
+  type RemoteFileSource,
+  type VisionProvider,
+} from '@assetforge/core';
 import { createOllamaVision, createVeniceImage } from '@assetforge/providers';
 import { createAnalysisPromptHandlers } from '../src/main/analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from '../src/main/analysis-prompts.js';
@@ -119,4 +125,16 @@ export function noImageProviders(): ImageProviderDirectory {
 export const noGenerations: { imageProviders: ImageProviderDirectory; generationImages: GenerationImageSource } = {
   imageProviders: noImageProviders(),
   generationImages: { read: async () => null },
+};
+
+/** A remote source for tests that never fetch: every open waits until its job is aborted. */
+export const hangingRemote: RemoteFileSource = {
+  open: (_url, signal) =>
+    new Promise((_resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }),
 };

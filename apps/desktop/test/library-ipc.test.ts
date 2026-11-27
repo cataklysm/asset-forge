@@ -844,3 +844,85 @@ describe('workflow IPC', () => {
     ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 });
+
+describe('URL import channels', () => {
+  /** One imported file carrying `url` as its origin. */
+  async function fileWithOrigin(url: string): Promise<{ fileId: string; originId: string }> {
+    await openWorkspace();
+    const path = join(base, 'origin.png');
+    await writeFile(path, 'origin content');
+    const [result] = await ok<{ file: { id: string } }[]>('files:import', { sourcePaths: [path] });
+    const fileId = result!.file.id;
+    const originId = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+    await manager.exclusive((s) =>
+      s.database.fileOrigins.insert({ id: originId, fileId, url, createdAt: new Date().toISOString() }),
+    );
+    return { fileId, originId };
+  }
+
+  it('answers no_workspace_open without a workspace', async () => {
+    const requests: [IpcChannel, unknown][] = [
+      ['files:importUrls', { urls: ['https://example.org/a.png'] }],
+      ['files:origins', { fileId: uuid }],
+      ['files:openOrigin', { fileId: uuid, originId: uuid }],
+    ];
+    for (const [channel, request] of requests) {
+      expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
+    }
+  });
+
+  it('refuses 5001 lines and no line as an invalid request', async () => {
+    await openWorkspace();
+    const lines = Array.from({ length: 5001 }, (_, i) => `https://example.org/${i}.png`);
+    expect(await call('files:importUrls', { urls: lines })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await call('files:importUrls', { urls: [] })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
+  it('queues the usable lines and reports the invalid ones', async () => {
+    await openWorkspace();
+    const result = await ok('files:importUrls', {
+      urls: ['https://example.org/a.png', '', 'not a url', 'https://example.org/a.png#x', 'https://example.org/b.png'],
+    });
+    expect(result).toEqual({ queued: 2, alreadyImported: 0, alreadyQueued: 1, invalid: [{ line: 3, text: 'not a url' }] });
+  });
+
+  it('answers not_found for the origins of an unknown file and for an unknown origin', async () => {
+    const { fileId } = await fileWithOrigin('https://example.org/a.png');
+    expect(await call('files:origins', { fileId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await call('files:openOrigin', { fileId: uuid, originId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await call('files:openOrigin', { fileId, originId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('lists the origins and opens exactly the stored address, never one the renderer sends', async () => {
+    const { fileId, originId } = await fileWithOrigin('https://example.org/a.png?x=1');
+    const origins = await ok('files:origins', { fileId });
+    expect(ipcContract['files:origins'].response.safeParse(origins).success).toBe(true);
+    expect(origins).toMatchObject([{ id: originId, url: 'https://example.org/a.png?x=1' }]);
+
+    expect(await ok('files:openOrigin', { fileId, originId, url: 'https://evil.example/' })).toEqual({});
+    expect(openExternal).toHaveBeenCalledTimes(1);
+    expect(openExternal).toHaveBeenCalledWith('https://example.org/a.png?x=1');
+  });
+
+  it('refuses to open the origin of another file', async () => {
+    const { originId } = await fileWithOrigin('https://example.org/a.png');
+    const path = join(base, 'other.png');
+    await writeFile(path, 'other content');
+    const [other] = await ok<{ file: { id: string } }[]>('files:import', { sourcePaths: [path] });
+    expect(await call('files:openOrigin', { fileId: other!.file.id, originId })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('answers a fixed message when the browser cannot be started', async () => {
+    const { fileId, originId } = await fileWithOrigin('https://example.org/a.png');
+    openExternal.mockRejectedValue(new Error('C:\secret https://example.org/a.png'));
+    expect(await call('files:openOrigin', { fileId, originId })).toEqual({
+      ok: false,
+      error: { code: 'invalid_operation', message: 'This source could not be opened' },
+    });
+  });
+});

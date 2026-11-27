@@ -62,6 +62,7 @@ export type JobHandlers = Pick<
   | 'jobs:retryFailed'
   | 'jobs:waitingByProvider'
   | 'jobs:resume'
+  | 'jobs:resumeHost'
   | 'jobs:reroute'
   | 'jobs:clearFinished'
 >;
@@ -175,13 +176,19 @@ export function createJobHandlers(
       manager.read(async (s) => {
         const counts = await countJobs(s);
         const paused = [];
+        const pausedHosts = [];
         for (const { lane, reason, resourceClass } of jobs.paused()) {
+          // A download lane is the host of its URLs; a download job always has one.
+          if (resourceClass === 'io') {
+            if (lane !== null) pausedHosts.push({ host: lane, reason });
+            continue;
+          }
           // A generation lane pauses only for a venice entry; an analysis lane only for an ollama one.
           const kind: ProviderKind = resourceClass === 'remote_api' ? 'venice' : 'ollama';
           const providerName = nameOf(lane, null) ?? (kind === 'ollama' ? await laneName(s, lane) : await generationLaneName(s, lane));
           paused.push({ providerId: lane, providerName, kind, reason });
         }
-        return { ...counts, changes: jobs.changes(), paused, pausedHosts: [] };
+        return { ...counts, changes: jobs.changes(), paused, pausedHosts };
       }),
     'jobs:cancel': async (r) => {
       await manager.read((s) => cancelJob(s, jobs, r.jobId));
@@ -225,6 +232,11 @@ export function createJobHandlers(
     // The pause belongs to the app session, so this works without an open workspace.
     'jobs:resume': async (r) => {
       jobs.resume(r.providerId);
+      return {};
+    },
+    // Like `jobs:resume`: a paused download host belongs to the app session, not to a workspace.
+    'jobs:resumeHost': async (r) => {
+      jobs.resume(r.host);
       return {};
     },
     // The target's pause is not lifted: the moved jobs wait in its lane until it is resumed. The source lane

@@ -127,6 +127,7 @@ function start(): void {
     images: { jpeg: (path) => pool.jpeg(path) },
     generationImages: createGenerationImageSource(previews),
     log: (line) => console.warn(line),
+    appVersion: app.getVersion(),
   });
 
   const handlers = createWorkspaceHandlers(

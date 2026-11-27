@@ -116,11 +116,6 @@ export function createWorkspaceHandlers(
     ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders),
     ...createGenerationHandlers(manager, jobs, services.imageProviders),
     ...createPromptHandlers(manager),
-    // URL import channels are not wired yet; a plain error reaches the renderer as `internal_error`.
-    'files:importUrls': () => Promise.reject(new Error('files:importUrls is not implemented')),
-    'files:origins': () => Promise.reject(new Error('files:origins is not implemented')),
-    'files:openOrigin': () => Promise.reject(new Error('files:openOrigin is not implemented')),
-    'jobs:resumeHost': () => Promise.reject(new Error('jobs:resumeHost is not implemented')),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
     'dialog:pickFiles': () => dialogs.pickFiles(),
     // App-level provider entries and analysis prompts: not behind the workspace guard.

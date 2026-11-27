@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary } from '@assetforge/contracts';
+import { ipcContract, type IpcChannel, type IpcRequest, type IpcResponse, type IpcResult, type JobSummary } from '@assetforge/contracts';
 import { composeTaggingRequest, type WorkspaceManager } from '@assetforge/core';
-import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
+import { createPauseGate, DEFAULT_LIMITS, type PauseGate } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
 import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
@@ -13,13 +13,14 @@ import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analy
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
-import { mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
+import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
 let sources: string;
 let manager: WorkspaceManager;
 let mock: MockProvider | undefined;
 let jobHost: JobHost;
+let pause: PauseGate;
 let handlers: IpcHandlers;
 let logs: string[];
 /** The id of the mock's provider entry. */
@@ -50,14 +51,16 @@ async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Pr
   mock = await startMockProvider({ port: 0, failures });
   const provider = mockProviderEntry(join(base, 'userData'), mock.url);
   entryId = provider.entry.id;
+  pause = createPauseGate({});
   jobHost = createJobHost({
     manager,
     vision: provider.vision,
     images: { jpeg: (path) => readFile(path) },
     provider: OLLAMA_PROVIDER,
-    pause: createPauseGate({}),
+    pause,
     firstEntry: firstEntry ?? (() => provider.store.first()),
     ...noGenerations,
+    remote: hangingRemote,
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
   });
   handlers = createWorkspaceHandlers(
@@ -156,6 +159,7 @@ describe('job IPC', () => {
     await setup();
     expect(await ok('jobs:resume', { providerId: null })).toEqual({});
     expect(await ok('jobs:resume', { providerId: uuid })).toEqual({});
+    expect(await ok('jobs:resumeHost', { host: 'example.org' })).toEqual({});
   });
 
   it('refuses an accept with an empty tag name', async () => {
@@ -419,4 +423,40 @@ describe('analysis:enqueue with an analysis prompt', () => {
       expect(chatContents()[1]).toBe(composeTaggingRequest({ text: 'Only armour.', maxTags: 3 }));
     });
   }
+
+  it('lists a paused download host apart from the providers and resumes it through jobs:resumeHost', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    for (let i = 0; i < 3; i++) pause.record('io', 'example.org', 'download_blocked');
+    pause.record('local_gpu', entryId, 'provider_unauthorized');
+
+    const summary = await ok('jobs:summary', {});
+    expect(summary.pausedHosts).toEqual([{ host: 'example.org', reason: 'download_blocked' }]);
+    expect(summary.paused).toMatchObject([{ providerId: entryId, reason: 'provider_unauthorized' }]);
+
+    const before = jobHost.changes();
+    expect(await ok('jobs:resumeHost', { host: 'example.org' })).toEqual({});
+    expect(jobHost.changes()).toBeGreaterThan(before);
+    const after = await ok('jobs:summary', {});
+    expect(after.pausedHosts).toEqual([]);
+    expect(after.paused).toHaveLength(1);
+    expect(await call('jobs:resumeHost', { host: '' })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
+  it('never offers or moves download jobs through jobs:waitingByProvider and jobs:reroute', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    const urls = ['a', 'b', 'c'].map((n) => `https://example.org/${n}.png`);
+    expect(await ok('files:importUrls', { urls })).toMatchObject({ queued: 3 });
+    // Two run per host and hang until aborted; the third waits.
+    await until((s) => s.running === 2 && s.queued === 1);
+
+    expect(await ok('jobs:waitingByProvider', {})).toEqual([]);
+    // A host is no provider id, so the contract alone keeps a host lane out; the lane without a provider holds none either.
+    expect(ipcContract['jobs:reroute'].request.safeParse({ fromProviderId: 'example.org', toProviderId: entryId, model: MOCK_MODEL }).success).toBe(false);
+    expect(await ok('jobs:reroute', { fromProviderId: null, toProviderId: entryId, model: MOCK_MODEL })).toEqual({ moved: 0 });
+    const { items } = await ok('jobs:list', page);
+    expect(items).toHaveLength(3);
+    for (const job of items) expect(job).toMatchObject({ type: 'file.download', host: 'example.org', providerId: null });
+  });
 });

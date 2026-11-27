@@ -1,23 +1,26 @@
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
 import {
   assignUnroutedJobs,
   createAnalyzeFileHandler,
+  createFileDownloadHandler,
   createImageGenerateHandler,
   reconcileGenerations,
   type GenerationImageSource,
   type ImageProviderDirectory,
   type JobControl,
   type ModelImageSource,
+  type RemoteFileSource,
   type VisionProvider,
   type WorkspaceManager,
 } from '@assetforge/core';
-import { createScheduler, DEFAULT_LIMITS, type PauseGate, type Scheduler } from '@assetforge/jobs';
+import { createScheduler, DEFAULT_LIMITS, DEFAULT_TOTALS, type PauseGate, type Scheduler } from '@assetforge/jobs';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
 // The pause gate belongs to the app session and is handed to every scheduler, so a pause outlives
 // closing and reopening a workspace. An analysis job (local_gpu) and a generation job (remote_api) run in the
-// lane of their provider entry (the entry id); limit, claim and pause work per resource class and lane.
+// lane of their provider entry (the entry id), a download job (io) in the lane of its URL's host; limit, claim
+// and pause work per resource class and lane.
 
 export interface JobHost extends JobControl {
   /** Starts a scheduler for the open workspace; no-op without one or when one runs. Never rejects. */
@@ -28,11 +31,11 @@ export interface JobHost extends JobControl {
   /** For the IPC handlers: a job changed outside the scheduler. */
   changed(): void;
   /**
-   * The paused lanes of the analysis and the generation queue with their codes: analysis first, each in the
-   * order they paused; `null` is the analysis jobs without a provider.
+   * The paused lanes of the analysis, the generation and the download queue with their codes, in that order and
+   * each in the order they paused; `null` is the analysis jobs without a provider, a download lane is a host.
    */
   paused(): { lane: string | null; reason: JobErrorCode; resourceClass: ResourceClass }[];
-  /** Ends the pause of one lane in both queues and lets the scheduler claim again. Never throws. */
+  /** Ends the pause of one lane in every queue and lets the scheduler claim again. Never throws. */
   resume(lane: string | null): void;
 }
 
@@ -57,7 +60,11 @@ export interface JobHostDeps {
   imageProviders: ImageProviderDirectory;
   /** Reads the image a generation sends. */
   generationImages: GenerationImageSource;
+  /** The network side of the URL import's download jobs. */
+  remote: RemoteFileSource;
   limits?: Record<ResourceClass, number>;
+  /** Running jobs per class across all its lanes; `DEFAULT_TOTALS` without it. */
+  totals?: Partial<Record<ResourceClass, number>>;
   /** Real time without it. */
   clock?: SchedulerClock;
 }
@@ -66,8 +73,10 @@ export interface JobHostDeps {
 const ANALYSIS_CLASS: ResourceClass = 'local_gpu';
 /** The resource class of the generation queue. */
 const GENERATION_CLASS: ResourceClass = 'remote_api';
+/** The resource class of the download queue. */
+const DOWNLOAD_CLASS: ResourceClass = 'io';
 /** The queues whose lanes pause, in the order `paused` lists them. */
-const PAUSABLE: readonly ResourceClass[] = [ANALYSIS_CLASS, GENERATION_CLASS];
+const PAUSABLE: readonly ResourceClass[] = [ANALYSIS_CLASS, GENERATION_CLASS, DOWNLOAD_CLASS];
 
 export function createJobHost(deps: JobHostDeps): JobHost {
   const { manager, pause, clock } = deps;
@@ -119,8 +128,10 @@ export function createJobHost(deps: JobHostDeps): JobHost {
               providers: deps.imageProviders,
               images: deps.generationImages,
             }),
+            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({ session, remote: deps.remote }),
           },
           limits: deps.limits ?? DEFAULT_LIMITS,
+          totals: deps.totals ?? DEFAULT_TOTALS,
           onChange: changed,
           pause,
           ...(clock === undefined

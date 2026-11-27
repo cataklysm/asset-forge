@@ -8,13 +8,14 @@ import {
   type GenerationImageSource,
   type ImageProbe,
   type ModelImageSource,
+  type RemoteFileSource,
   type WorkspaceHost,
 } from '@assetforge/core';
 import { IMAGE_GENERATE_JOB, WorkspaceSummarySchema, type ResourceClass } from '@assetforge/contracts';
 import { createPauseGate, type PauseGate } from '@assetforge/jobs';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { createOllamaVision, createVeniceImage, OLLAMA_PROVIDER } from '@assetforge/providers';
-import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
+import { createUrlSource, LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
 import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
@@ -110,7 +111,15 @@ export function createAnalysisServices(o: {
   generationImages: GenerationImageSource;
   /** One main-console line per provider failure: code and HTTP status only. */
   log: (line: string) => void;
+  /** The app's version, sent in the download user agent `AssetForge/<version>`. */
+  appVersion: string;
+  /**
+   * Tests only: the network side of the URL import. Without it (always in the app) downloads go through the URL
+   * source with its default policy, which reaches public addresses only.
+   */
+  remote?: RemoteFileSource;
   limits?: Record<ResourceClass, number>;
+  totals?: Partial<Record<ResourceClass, number>>;
   /** The scheduler's clock; real time without it. */
   clock?: SchedulerClock;
 }): AnalysisServices {
@@ -138,7 +147,10 @@ export function createAnalysisServices(o: {
     firstEntry: () => store.first(),
     imageProviders,
     generationImages: o.generationImages,
+    // No address policy is passed: the default one admits public addresses only, and nothing in the app weakens it.
+    remote: o.remote ?? createUrlSource({ userAgent: `AssetForge/${o.appVersion}` }),
     ...(o.limits === undefined ? {} : { limits: o.limits }),
+    ...(o.totals === undefined ? {} : { totals: o.totals }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
   });
   jobHost = host;

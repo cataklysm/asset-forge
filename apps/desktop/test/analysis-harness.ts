@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
 import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderView } from '@assetforge/contracts';
-import type { GenerationImageSource, ImageProbe, ModelImageSource, WorkspaceManager } from '@assetforge/core';
+import type { GenerationImageSource, ImageProbe, ModelImageSource, RemoteFileSource, WorkspaceManager } from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createAnalysisServices, createWorkspaceManager, type AnalysisServices } from '../src/main/composition.js';
 import { createGenerationImageSource } from '../src/main/generation-image-source.js';
-import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
 import type { SchedulerClock } from '../src/main/job-host.js';
 import { FakeCodec } from './fake-codec.js';
 import { pngOf, pngProbe } from './png-fixture.js';
@@ -72,6 +72,12 @@ export async function createHarness(
     generationImages?: GenerationImageSource;
     /** With it, every retry delay of the scheduler passes at once (the scheduler's clock jumps ahead). */
     fastRetries?: boolean;
+    /** The scheduler's clock; wins over `fastRetries`. */
+    clock?: SchedulerClock;
+    /** The network side of the URL import; without it the app's own (public addresses only). */
+    remote?: RemoteFileSource;
+    /** Replaces single host actions; the defaults open nothing and start and stop the jobs. */
+    host?: Partial<HostActions>;
   } = {},
 ): Promise<Harness> {
   const base = await mkdtemp(join(tmpdir(), 'af-analysis-'));
@@ -101,7 +107,9 @@ export async function createHarness(
     generationImages: o.generationImages ?? createGenerationImageSource({ get: async () => null }),
     log: (line) => logs.push(line),
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
-    ...(o.fastRetries === true ? { clock: jumpingClock() } : {}),
+    appVersion: 'test',
+    ...(o.remote === undefined ? {} : { remote: o.remote }),
+    ...(o.clock !== undefined ? { clock: o.clock } : o.fastRetries === true ? { clock: jumpingClock() } : {}),
   });
   const handlers = createWorkspaceHandlers(
     manager,
@@ -117,6 +125,7 @@ export async function createHarness(
       openExternal: async () => {},
       workspaceOpened: () => services.workspaceOpened(),
       workspaceClosing: () => services.workspaceClosing(),
+      ...o.host,
     },
     services.jobHost,
     services,

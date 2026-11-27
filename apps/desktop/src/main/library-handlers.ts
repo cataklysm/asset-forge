@@ -9,6 +9,7 @@ import {
   createAsset,
   createProject,
   emptyTrash,
+  enqueueUrlImport,
   getAsset,
   getAssetDetail,
   getProject,
@@ -17,6 +18,7 @@ import {
   listAssets,
   listAssetTypes,
   listAssignmentsOfAsset,
+  listFileOrigins,
   listMembersOfProject,
   listProjects,
   listRelations,
@@ -31,6 +33,7 @@ import {
   removeWorkflow,
   renameTag,
   resolveAssetSourceUrl,
+  resolveFileOriginUrl,
   measureFile,
   purgeFiles,
   resolveFilePath,
@@ -58,6 +61,9 @@ import type { JobHost } from './job-host.js';
 export type LibraryHandlers = Pick<
   IpcHandlers,
   | 'files:import'
+  | 'files:importUrls'
+  | 'files:origins'
+  | 'files:openOrigin'
   | 'files:list'
   | 'files:assign'
   | 'files:unassign'
@@ -125,6 +131,27 @@ export function createLibraryHandlers(
 
   return {
     'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null, { unpackArchives: r.unpackArchives }),
+    // Only the enqueue runs in the serial queue; the downloads are jobs and never hold it.
+    'files:importUrls': async (r) => {
+      const result = await manager.exclusive((s) =>
+        enqueueUrlImport(s, { urls: r.urls, target: r.target ?? null, skipDuplicates: r.skipDuplicates ?? true }),
+      );
+      jobs.changed();
+      jobs.wake();
+      return result;
+    },
+    'files:origins': (r) => manager.read((s) => listFileOrigins(s, r.fileId)),
+    // Only a stored origin of the file is opened, checked by the URL rule again; the renderer never sends an address.
+    'files:openOrigin': async (r) => {
+      const url = await manager.read((s) => resolveFileOriginUrl(s, r));
+      try {
+        await host.openExternal(url);
+      } catch {
+        // The shell's error may carry paths or the address; it is never forwarded.
+        throw new InvalidOperationError('This source could not be opened');
+      }
+      return {};
+    },
     'files:list': (r) => manager.listFiles(r),
     'files:assign': (r) =>
       manager.exclusive((s) => relocateFile(s, r.fileId, { assetId: r.assetId, role: r.role })),

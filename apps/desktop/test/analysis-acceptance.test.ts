@@ -14,7 +14,7 @@ import { createWorkspaceManager } from '../src/main/composition.js';
 import { createWorkspaceHandlers, dispatch } from '../src/main/ipc.js';
 import { createJobHost } from '../src/main/job-host.js';
 import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
-import { mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
+import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 /** The tags the mock answers for these image bytes. */
 async function mockTagsOf(mock: MockProvider, bytes: Uint8Array, headers: Record<string, string> = {}): Promise<string[]> {
@@ -62,6 +62,7 @@ describe('phase 4a acceptance', () => {
       pause: createPauseGate({}),
       firstEntry: () => provider.store.first(),
       ...noGenerations,
+      remote: hangingRemote,
       limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
     });
     // While held, opening a workspace does not start its scheduler.
