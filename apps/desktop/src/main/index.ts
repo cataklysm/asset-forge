@@ -74,6 +74,7 @@ function start(): void {
     platform: process.platform,
     arch: process.arch,
     warn: (line) => console.warn(line),
+    runDir: join(app.getPath('userData'), 'bin'),
   });
   const frames = createVideoFrames({ binaryPath: ffmpegBinary });
   const previews = createPreviewService({ cacheDir: join(app.getPath('userData'), 'cache'), pool, frames });

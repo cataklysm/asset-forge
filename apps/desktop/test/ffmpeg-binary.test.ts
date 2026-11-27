@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FFMPEG_CHECKSUMS,
+  FFMPEG_RUN_NAME,
   FFMPEG_UNAVAILABLE_WARNING,
   hashFile,
   resolveFfmpegBinary,
@@ -101,6 +103,46 @@ describe('resolveFfmpegBinary', () => {
       throw new Error('console gone');
     };
     await expect(resolveFfmpegBinary(deps({ packagePath: null, warn: throwing }))).resolves.toBeNull();
+  });
+});
+
+describe('resolveFfmpegBinary with a run directory', () => {
+  const runDir = () => join(base, 'bin');
+  const copy = () => join(runDir(), `${FFMPEG_RUN_NAME}.exe`);
+
+  it('answers a verified copy under the neutral name', async () => {
+    await expect(resolveFfmpegBinary(deps({ runDir: runDir() }))).resolves.toBe(copy());
+    await expect(hashFile(copy())).resolves.toBe(SHA);
+    expect(readdirSync(runDir())).toEqual([`${FFMPEG_RUN_NAME}.exe`]);
+    expect(FFMPEG_RUN_NAME).not.toMatch(/ffmpeg/i);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('reuses a matching copy without reading the package file again', async () => {
+    await resolveFfmpegBinary(deps({ runDir: runDir() }));
+    const hash = vi.fn(hashFile);
+    await expect(resolveFfmpegBinary(deps({ runDir: runDir(), hash }))).resolves.toBe(copy());
+    expect(hash.mock.calls.map(([path]) => path)).toEqual([copy()]);
+  });
+
+  it('replaces a copy that does not match', async () => {
+    await mkdir(runDir());
+    await writeFile(copy(), 'tampered');
+    await expect(resolveFfmpegBinary(deps({ runDir: runDir() }))).resolves.toBe(copy());
+    await expect(hashFile(copy())).resolves.toBe(SHA);
+  });
+
+  it('answers null and makes no copy when the package file does not match', async () => {
+    await writeFile(binary, 'something else');
+    await expect(resolveFfmpegBinary(deps({ runDir: runDir() }))).resolves.toBeNull();
+    expect(existsSync(copy())).toBe(false);
+    expectOneFixedWarning();
+  });
+
+  it('falls back to the package path when the copy cannot be made', async () => {
+    await writeFile(runDir(), 'a file where the directory should be');
+    await expect(resolveFfmpegBinary(deps({ runDir: runDir() }))).resolves.toBe(binary);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
