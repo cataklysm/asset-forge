@@ -237,6 +237,7 @@ describe('prompt repository', () => {
     expect(item!.tags.map((t) => t.name)).toEqual(['birch', 'oak']);
   });
 
+  // The words arrive folded with `foldSearchWord`; the fields are folded with `af_fold`.
   test('a word matches title, description, current content and tag display name regardless of case', async () => {
     await create(1, 'Night Sky', { now: T3 });
     await create(2, 'B', { description: 'Rolling HILLS', now: T2 });
@@ -245,7 +246,7 @@ describe('prompt repository', () => {
     await create(4, 'D', { now: T0 });
     await addTag(uuid(4), 'forest', { displayName: 'Dark Forest', now: T0 });
     expect(await ids({ words: ['night'] })).toEqual([uuid(1)]);
-    expect(await ids({ words: ['SKY'] })).toEqual([uuid(1)]);
+    expect(await ids({ words: ['sky'] })).toEqual([uuid(1)]);
     expect(await ids({ words: ['hill'] })).toEqual([uuid(2)]);
     expect(await ids({ words: ['sun'] })).toEqual([uuid(3)]);
     expect(await ids({ words: ['moon'] })).toEqual([]);
@@ -273,7 +274,20 @@ describe('prompt repository', () => {
     expect(await ids({ tagNames: ['pine'], words: ['b'] })).toEqual([]);
   });
 
-  test('LIKE wildcards and the escape character in a word match literally', async () => {
+  test('a folded word matches text with diacritics and any case', async () => {
+    await create(1, 'Über Kopf', { content: 'x', now: T3 });
+    await create(2, 'B', { content: 'A CAFÉ at night', now: T2 });
+    await create(3, 'C', { content: 'x', now: T1 });
+    await addTag(uuid(3), 'straße', { displayName: 'STRASSE Ärger' });
+    await create(4, 'Uber', { content: 'x', now: T0 });
+    expect(await ids({ words: ['uber'] })).toEqual([uuid(1), uuid(4)]);
+    expect(await ids({ words: ['ub', 'kopf'] })).toEqual([uuid(1)]);
+    expect(await ids({ words: ['cafe'] })).toEqual([uuid(2)]);
+    expect(await ids({ words: ['arger'] })).toEqual([uuid(3)]);
+    expect(await ids({ words: ['strasse'] })).toEqual([uuid(3)]);
+  });
+
+  test('% and _ and a backslash in a word match literally', async () => {
     await create(1, '100% wool', { content: 'x', now: T3 });
     await create(2, 'plain', { content: 'x', now: T2 });
     await create(3, '1000 sheep', { content: 'x', now: T1 });

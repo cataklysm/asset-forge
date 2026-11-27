@@ -669,9 +669,9 @@ export interface PromptRepository {
   /** Deletes the prompt with versions and tag links; generations keep their copies and lose the version id. */
   remove(id: string): Promise<boolean>;
   /**
-   * `words` and `tagNames` are already normalised. Every word is a substring, regardless of case, of the title, the
-   * description, the current content or a tag's display name; every tag name is on the prompt. Order updated_at desc,
-   * then id asc.
+   * `words` are already folded with `foldSearchWord`, `tagNames` already normalised. Every word is a literal substring of
+   * the folded title, description, current content or a tag's display name; every tag name is on the prompt. Order
+   * updated_at desc, then id asc.
    */
   list(q: { words: readonly string[]; tagNames: readonly string[]; offset: number; limit: number }): Promise<{ items: PromptSummary[]; total: number }>;
   /**

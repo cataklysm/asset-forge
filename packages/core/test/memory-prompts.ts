@@ -1,5 +1,6 @@
 import type { PromptDetail, PromptSummary, PromptVersion, TagAssignment } from '@assetforge/contracts';
 import type { NewPromptVersion, PromptRepository } from '../src/ports.js';
+import { foldSearchWord } from '../src/search.js';
 
 /** A prompt tag link; the tag fake renames and merges these with its other links. */
 export interface PromptTagLink {
@@ -122,12 +123,10 @@ export class InMemoryPromptRepository implements PromptRepository {
     return true;
   }
 
-  /** Mirrors the database's ASCII-only `lower` on both sides. */
+  /** The word arrives folded; the fields are folded like the database's `af_fold`. */
   private matches(p: StoredPrompt, word: string): boolean {
-    const fold = (s: string) => s.replace(/[A-Z]/gu, (c) => c.toLowerCase());
-    const w = fold(word);
     const fields = [p.title, p.description, p.versions.at(-1)!.content, ...this.tagsOf(p.id).map((t) => t.displayName)];
-    return fields.some((f) => fold(f).includes(w));
+    return fields.some((f) => foldSearchWord(f).includes(word));
   }
 
   async list(q: { words: readonly string[]; tagNames: readonly string[]; offset: number; limit: number }): Promise<{ items: PromptSummary[]; total: number }> {

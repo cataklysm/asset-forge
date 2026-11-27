@@ -49,7 +49,9 @@ describe('InMemoryPromptRepository', () => {
     const all = await db.prompts.list({ words: [], tagNames: [], offset: 0, limit: 10 });
     expect(all.items.map((p) => p.id)).toEqual([id(3), id(1), id(2)]);
     expect(all.total).toBe(3);
-    expect((await db.prompts.list({ words: ['WEATH'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(2)]);
+    expect((await db.prompts.list({ words: ['weath'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(2)]);
+    await create(4, 'Über Kopf', T0);
+    expect((await db.prompts.list({ words: ['uber'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(4)]);
     expect((await db.prompts.list({ words: [], tagNames: ['weather'], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(2)]);
     expect(await db.tags.usage('weather')).toMatchObject({ prompts: 1 });
   });

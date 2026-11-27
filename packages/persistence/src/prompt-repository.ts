@@ -82,22 +82,18 @@ function summaries(tx: Tx, rows: readonly PromptRow[]): PromptSummary[] {
   }));
 }
 
-/** `%`, `_` and the escape character itself taken literally in a LIKE pattern with `escape '\'`. */
-const containsPattern = (word: string): string => `%${word.toLowerCase().replace(/[\\%_]/gu, (c) => `\\${c}`)}%`;
-
 /**
- * The word as a substring of title, description, current content or a tag display name. SQLite's `lower` and LIKE
- * fold ASCII only.
+ * The folded word as a literal substring of the folded title, description, current content or a tag display name,
+ * like the project and file lists (`af_fold` is `foldSearchWord`).
  */
 function matchesWord(word: string): SQL {
-  const p = containsPattern(word);
   return sql`(
-    lower(${prompt.title}) like ${p} escape '\\'
-    or lower(${prompt.description}) like ${p} escape '\\'
-    or lower((select v.content from prompt_version as v where v.prompt_id = ${prompt.id} order by v.number desc limit 1)) like ${p} escape '\\'
+    instr(af_fold(${prompt.title}), ${word}) > 0
+    or instr(af_fold(${prompt.description}), ${word}) > 0
+    or instr(af_fold((select v.content from prompt_version as v where v.prompt_id = ${prompt.id} order by v.number desc limit 1)), ${word}) > 0
     or exists (
       select 1 from prompt_tag as pt join tag as t on t.id = pt.tag_id
-      where pt.prompt_id = ${prompt.id} and lower(t.display_name) like ${p} escape '\\'))`;
+      where pt.prompt_id = ${prompt.id} and instr(af_fold(t.display_name), ${word}) > 0))`;
 }
 
 const carriesTag = (name: string): SQL =>
