@@ -477,6 +477,7 @@ Found in the final review and not fixed:
 - No desktop test with a JPEG or WebP provider answer; a job found `running` after a crash is tested only in `packages/jobs`.
 - An upscale of an upscale is reachable only through that file's own studio.
 - A failed Generate start is visible only in the button tooltip.
+- Raising the studio above the linked file dialog remounts it. A Generate start still in flight at that moment no longer disables the button of the new instance, so a second click in that short window queues a second paid run.
 - There is no workspace-wide generations screen and no marker or filter for generated files in the file lists.
 
 ## Not covered by any automated check
