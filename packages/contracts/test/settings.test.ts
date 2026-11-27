@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  API_KEY_CHARACTERS,
   DEFAULT_PROVIDER_OPTIONS,
   ENVIRONMENT_PROVIDER_ID,
   ErrorCodeSchema,
@@ -60,6 +61,15 @@ describe('provider entries', () => {
     expect(SaveProviderSchema.safeParse({ ...save, apiKey: 'k'.repeat(500) }).success).toBe(true);
     expect(SaveProviderSchema.safeParse({ ...save, apiKey: '' }).success).toBe(false);
     expect(SaveProviderSchema.safeParse({ ...save, apiKey: 'k'.repeat(501) }).success).toBe(false);
+  });
+
+  test('the API key refuses control characters with a fixed message', () => {
+    for (const apiKey of ['test-key-not-real\n', 'test\rkey', 'test\tkey', 'test\u0000key', 'test\u007fkey', 'test\u0085key', 'test key']) {
+      const parsed = SaveProviderSchema.safeParse({ ...save, apiKey });
+      expect(parsed.success, JSON.stringify(apiKey)).toBe(false);
+      expect(parsed.error?.issues[0]?.message).toBe(API_KEY_CHARACTERS);
+    }
+    expect(SaveProviderSchema.safeParse({ ...save, apiKey: 'test-key-not-real-2 with spaces ~!' }).success).toBe(true);
   });
 
   test('name and base URL are length-bounded; the host applies their rules', () => {

@@ -196,10 +196,10 @@ describe('provider store: upgrade and start', () => {
     expect(existsSync(legacyKeyFile())).toBe(false);
   });
 
-  it('deletes a legacy key file when there is no settings file', () => {
+  it('keeps a legacy key file when there is no settings file', () => {
     writeLegacyKey();
     store().list();
-    expect(readdirSync(credentials())).toEqual([]);
+    expect(readdirSync(credentials())).toEqual(['vision-api-key']);
   });
 
   it('deletes orphaned key files and temporary key files, and nothing else', () => {
@@ -1385,5 +1385,116 @@ describe('provider store: key bound to its origin', () => {
     expect(s.save(input({ id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.21:11434' })).hasApiKey).toBe(false);
     expect(existsSync(keyFile(PREPARED))).toBe(false);
     expect(s.apiKeyFor(PREPARED, 'http://192.168.1.21:11434')).toBeNull();
+  });
+});
+
+describe('provider store: a later start', () => {
+  const ORPHAN = '88888888-9999-4aaa-8bbb-cccccccccccc';
+  const entry = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    kind: 'ollama',
+    name,
+    baseUrl: 'http://192.168.1.20:11434',
+    timeoutSeconds: 120,
+    taggingModel: null,
+    promptModel: null,
+    editModel: null,
+    options: DEFAULT_PROVIDER_OPTIONS,
+    ...extra,
+  });
+  const writeV4 = (providers: unknown[]) =>
+    writeFileSync(settingsFile(), JSON.stringify({ version: 4, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }));
+  const writeKeys = (...ids: string[]) => {
+    mkdirSync(credentials(), { recursive: true });
+    for (const id of ids) writeFileSync(keyFile(id), codec.encrypt(encodeKeyPayload('http://192.168.1.20:11434', KEY)));
+  };
+  const copies = () => readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'));
+
+  it('keeps every key file on a second start after a wholly unreadable file was set aside', () => {
+    writeFileSync(settingsFile(), 'not json');
+    writeKeys(PREPARED, ORPHAN);
+    expect(store().list().providers).toEqual([]);
+    expect(existsSync(settingsFile())).toBe(false);
+    expect(store().list().providers).toEqual([]);
+    for (const id of [PREPARED, ORPHAN]) expect(existsSync(keyFile(id)), id).toBe(true);
+  });
+
+  it('keeps the old key files on a second start after a provider was saved in the session that set the file aside', () => {
+    writeFileSync(settingsFile(), 'not json');
+    writeKeys(PREPARED, ORPHAN);
+    const a = store().save(input({ name: 'New', apiKey: OTHER_KEY }));
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual([a.id]);
+    for (const id of [PREPARED, ORPHAN, a.id]) expect(existsSync(keyFile(id)), id).toBe(true);
+    expect(s.apiKeyFor(a.id, a.baseUrl)).toBe(OTHER_KEY);
+  });
+
+  it('keeps the key file of a left-out entry on a second start after the file was rewritten', () => {
+    writeV4([entry(PREPARED, 'O'), entry(ORPHAN, 'B', { timeoutSeconds: 5 })]);
+    writeKeys(PREPARED, ORPHAN);
+    const s = store();
+    expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    s.markUsed(PREPARED);
+    expect(readSettings().providers).toHaveLength(1);
+    expect(store().list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    expect(existsSync(keyFile(ORPHAN))).toBe(true);
+  });
+
+  it('still sweeps an orphan on a clean file without a damaged copy beside it', () => {
+    writeV4([entry(PREPARED, 'O')]);
+    writeKeys(PREPARED, ORPHAN);
+    store().list();
+    expect(readdirSync(credentials())).toEqual([`vision-api-key-${PREPARED}`]);
+  });
+
+  it('keeps key files while there is no settings file', () => {
+    writeKeys(ORPHAN);
+    writeLegacyKey();
+    store().list();
+    expect(readdirSync(credentials()).sort()).toEqual(['vision-api-key', `vision-api-key-${ORPHAN}`].sort());
+  });
+
+  it('does not pile up copies of a damaged file that stays unchanged', () => {
+    writeV4([entry(PREPARED, 'O'), entry(ORPHAN, 'B', { timeoutSeconds: 5 })]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-11-27T10:00:00Z'));
+      store().list();
+      vi.setSystemTime(new Date('2026-11-27T11:00:00Z'));
+      store().list();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(copies()).toHaveLength(1);
+  });
+
+  it('loads a damaged file when the copy cannot be written, and sweeps nothing', () => {
+    writeV4([entry(PREPARED, 'O'), entry(ORPHAN, 'B', { timeoutSeconds: 5 })]);
+    writeKeys(PREPARED, ORPHAN, UNKNOWN);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-11-27T10:00:00Z'));
+      // A non-empty directory where the copy belongs makes the copy fail.
+      const blocked = join(dir, 'provider-settings.json.corrupt-2026-11-27T10-00-00-000Z');
+      mkdirSync(blocked);
+      writeFileSync(join(blocked, 'blocker'), 'x');
+      const s = store();
+      expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    } finally {
+      vi.useRealTimers();
+    }
+    for (const id of [PREPARED, ORPHAN, UNKNOWN]) expect(existsSync(keyFile(id)), id).toBe(true);
+  });
+
+  it('keeps the key when the settings write of a save fails', () => {
+    const s = store();
+    const a = s.save(input({ apiKey: KEY }));
+    rmSync(settingsFile());
+    mkdirSync(settingsFile());
+    writeFileSync(join(settingsFile(), 'blocker'), 'x');
+    expect(() => s.save(input({ id: a.id, apiKey: null }))).toThrow();
+    expect(() => s.save(input({ id: a.id, baseUrl: 'http://192.168.1.21:11434' }))).toThrow();
+    expect(existsSync(keyFile(a.id))).toBe(true);
+    expect(s.apiKeyFor(a.id, a.baseUrl)).toBe(KEY);
   });
 });

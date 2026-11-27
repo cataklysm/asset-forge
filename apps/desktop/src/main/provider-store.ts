@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
   DEFAULT_PROVIDER_OPTIONS,
@@ -46,8 +46,9 @@ import { usableBaseUrl } from './vision-config.js';
 // entered for, so a hand-edited settings file cannot redirect a stored key to another origin. A file written before
 // the payload existed holds the bare key; it is bound to the entry's origin when the settings are loaded.
 //
-// A settings file is read entry by entry: a broken entry is left out and the others load. Whenever anything was left
-// out or the file could not be read at all, no key file is deleted by the sweep for the rest of the app session.
+// A settings file is read entry by entry: a broken entry is left out and the others load. Whatever was left out is kept
+// in a `.corrupt-<stamp>` copy beside the file. No key file is deleted while no settings file exists or such a copy lies
+// beside it, on this start and every later one: a key of an entry that was left out stays until the copy is removed.
 
 export const PROVIDER_SETTINGS_FILE = 'provider-settings.json';
 const CREDENTIALS_DIR = 'credentials';
@@ -221,7 +222,7 @@ const EnvelopeSchema = z.object({ providers: z.array(z.unknown()) });
 
 /**
  * `degraded`: something was left out (a broken entry or field, an entry over the limit, a repeated id) or the file was
- * unreadable. A degraded load deletes no key file for the rest of the app session.
+ * unreadable. A degraded load deletes no key file.
  */
 type ReadResult =
   | { kind: 'v1'; vision: z.infer<typeof V1FileSchema>['vision'] }
@@ -243,8 +244,6 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   let environmentLastUsed: string | null = null;
 
   let state: Stored | null = null;
-  /** Set by a degraded load: no key file is swept for the rest of this app session. */
-  let keepKeyFiles = false;
   /**
    * Entries whose key file still holds a bare key because binding it at load failed, with the origin the entry had
    * then. Such a key is used for this app session while the entry keeps that origin.
@@ -297,11 +296,14 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     return next;
   };
 
-  /** Version 1 → 4. Every step is written before the next one, so a crash in between resumes on the next start. */
-  const upgrade = (vision: z.infer<typeof V1FileSchema>['vision']): Stored => {
+  /**
+   * Version 1 → 4. Every step is written before the next one, so a crash in between resumes on the next start.
+   * With `keepKeys` no key file is deleted.
+   */
+  const upgrade = (vision: z.infer<typeof V1FileSchema>['vision'], keepKeys: boolean): Stored => {
     if (vision.baseUrl === null) {
       write(EMPTY);
-      rmSync(legacyKeyPath, { force: true });
+      if (!keepKeys) rmSync(legacyKeyPath, { force: true });
       return EMPTY;
     }
     const id = randomUUID();
@@ -318,7 +320,7 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
     };
     const marked: Stored = { ...EMPTY, providers: [entry], adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
     write(marked);
-    return adoptLegacyKey(marked, false);
+    return adoptLegacyKey(marked, keepKeys);
   };
 
   /**
@@ -365,13 +367,16 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
   const load = (): Stored => {
     if (state !== null) return state;
     const read = readStored(settingsPath);
-    if (read.kind !== 'v1' && read.degraded) keepKeyFiles = true;
+    // No settings file (a fresh install, or one set aside) or a damaged copy beside it: the list may lack entries
+    // whose keys are still wanted, so no key file is deleted.
+    const keepKeys =
+      read.kind === 'none' || (read.kind === 'stored' && read.degraded) || corruptCopies(settingsPath).length > 0;
     let stored: Stored;
-    if (read.kind === 'v1') stored = upgrade(read.vision);
-    else if (read.kind === 'stored') stored = adoptLegacyKey(read.stored, read.degraded);
+    if (read.kind === 'v1') stored = upgrade(read.vision, keepKeys);
+    else if (read.kind === 'stored') stored = adoptLegacyKey(read.stored, keepKeys);
     else stored = EMPTY;
     bindBareKeys(stored);
-    if (!keepKeyFiles) sweepKeyFiles(stored);
+    if (!keepKeys) sweepKeyFiles(stored);
     state = stored;
     return stored;
   };
@@ -516,15 +521,15 @@ export function createProviderStore(o: { userData: string; secrets: SecretCodec;
         options,
       };
       const providers = previous === null ? [...current.providers, entry] : current.providers.map((p) => (p.id === entry.id ? entry : p));
-      // The key is bound to the origin it was entered for. The old key goes first, so a failure
-      // half-way leaves no key rather than a key bound to the wrong origin.
-      if (previous === null || apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl)) {
-        unboundOrigins.delete(entry.id);
-        rmSync(keyPath(entry.id), { force: true });
-      }
+      // The settings go first, so a failed write loses no key. A key is bound to the origin it was entered for, so an
+      // old key left behind by a failed removal is never sent to a new origin.
       commit({ ...current, providers });
-      // The entry changed once it is written, so listeners hear of it even if the key write fails.
+      // The entry changed once it is written, so listeners hear of it even if a key file operation fails.
       try {
+        if (previous === null || apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl)) {
+          unboundOrigins.delete(entry.id);
+          rmSync(keyPath(entry.id), { force: true });
+        }
         if (encrypted !== null) writeAtomic(keyPath(entry.id), encrypted);
       } finally {
         notify(entry.id);
@@ -606,6 +611,19 @@ function originOf(baseUrl: string): string | null {
   }
 }
 
+/** The paths of the `.corrupt-<stamp>` copies beside the settings file. */
+function corruptCopies(path: string): string[] {
+  const dir = dirname(path);
+  const prefix = `${basename(path)}.corrupt-`;
+  try {
+    return readdirSync(dir)
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
 function readStored(path: string): ReadResult {
   let text: string;
   try {
@@ -621,9 +639,19 @@ function readStored(path: string): ReadResult {
     json = undefined;
   }
   const corruptPath = () => `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  /** A copy with the same content already lies beside the file. */
+  const alreadyKept = (): boolean =>
+    corruptCopies(path).some((copy) => {
+      try {
+        return readFileSync(copy, 'utf8') === text;
+      } catch {
+        return false;
+      }
+    });
   /** Same pattern as the workspace registry: keep the unreadable file aside, start empty. */
   const setAside = (): ReadResult => {
-    renameSync(path, corruptPath());
+    if (alreadyKept()) rmSync(path, { force: true });
+    else renameSync(path, corruptPath());
     return { kind: 'none', degraded: true };
   };
 
@@ -657,8 +685,15 @@ function readStored(path: string): ReadResult {
   const marker = MarkerSchema.safeParse(raw.adoptLegacyKey);
   if (!marker.success) degraded = true;
   const stored: Stored = { providers: read.providers, lastUsed, adoptLegacyKey: marker.success ? marker.data : null };
-  // The original stays in place and is only rewritten by the next save; the copy keeps what was left out.
-  if (degraded) copyFileSync(path, corruptPath());
+  // The original stays in place and is only rewritten by the next save; the copy keeps what was left out. A failed
+  // copy leaves the load degraded all the same, and the next start tries again.
+  if (degraded && !alreadyKept()) {
+    try {
+      copyFileSync(path, corruptPath());
+    } catch {
+      // Nothing is swept in this session either way.
+    }
+  }
   return { kind: 'stored', stored, degraded };
 }
 

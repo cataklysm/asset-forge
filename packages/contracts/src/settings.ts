@@ -119,6 +119,9 @@ export const ProviderListSchema = z.object({
 });
 export type ProviderList = z.infer<typeof ProviderListSchema>;
 
+/** The refusal of an API key that holds a control character or another character a request header cannot carry. */
+export const API_KEY_CHARACTERS = 'The API key contains characters that cannot be sent';
+
 /**
  * Without `id` a new entry is created; with `id` the entry is replaced. Name and base URL are only
  * bounded here; the host applies their rules (name 1 to 60 after trim, unique regardless of case;
@@ -137,7 +140,14 @@ export const SaveProviderSchema = z.object({
   taggingModel: ModelNameSchema.nullable(),
   promptModel: ModelNameSchema.nullable(),
   editModel: ModelNameSchema.nullable().optional(),
-  apiKey: z.string().min(1).max(500).nullable().optional(),
+  apiKey: z
+    .string()
+    .min(1)
+    .max(500)
+    // A key is sent in an HTTP header: printable Latin-1 only, so no control character and no line break.
+    .regex(/^[\x20-\x7e\xa0-\xff]*$/, API_KEY_CHARACTERS)
+    .nullable()
+    .optional(),
   options: ProviderOptionsSchema.optional(),
 });
 export type SaveProvider = z.infer<typeof SaveProviderSchema>;
