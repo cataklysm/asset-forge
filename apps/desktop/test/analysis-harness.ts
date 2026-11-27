@@ -12,6 +12,7 @@ import { createAnalysisServices, createWorkspaceManager, type AnalysisServices }
 import { createGenerationImageSource } from '../src/main/generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
 import type { SchedulerClock } from '../src/main/job-host.js';
+import type { SiteSessions } from '../src/main/site-sessions.js';
 import { FakeCodec } from './fake-codec.js';
 import { pngOf, pngProbe } from './png-fixture.js';
 
@@ -80,6 +81,10 @@ export async function createHarness(
     remote?: RemoteFileSource;
     /** Replaces single host actions; the defaults open nothing and start and stop the jobs. */
     host?: Partial<HostActions>;
+    /** The site windows and sessions; without them none can open. */
+    siteSessions?: SiteSessions;
+    /** The pause between two crawl page loads. */
+    siteWait?: (ms: number, signal: AbortSignal) => Promise<void>;
   } = {},
 ): Promise<Harness> {
   const base = await mkdtemp(join(tmpdir(), 'af-analysis-'));
@@ -111,6 +116,8 @@ export async function createHarness(
     limits: { ...DEFAULT_LIMITS, local_gpu: 1 },
     appVersion: 'test',
     ...(o.remote === undefined ? {} : { remote: o.remote }),
+    ...(o.siteSessions === undefined ? {} : { siteSessions: o.siteSessions }),
+    ...(o.siteWait === undefined ? {} : { siteWait: o.siteWait }),
     ...(o.clock !== undefined ? { clock: o.clock } : o.fastRetries === true ? { clock: jumpingClock() } : {}),
   });
   const handlers = createWorkspaceHandlers(

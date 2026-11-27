@@ -18,6 +18,7 @@ import {
   type JobControl,
   type ModelImageSource,
   type RemoteFileSource,
+  type SiteAccess,
   type VisionProvider,
   type WorkspaceManager,
 } from '@assetforge/core';
@@ -82,6 +83,8 @@ export interface JobHostDeps {
   generationImages: GenerationImageSource;
   /** The network side of the URL import's download jobs. */
   remote: RemoteFileSource;
+  /** The logins of the site profiles for site downloads; without it a site download fails as its profile missing. */
+  sites?: SiteAccess;
   limits?: Record<ResourceClass, number>;
   /** Running jobs per class across all its lanes; `DEFAULT_TOTALS` without it. */
   totals?: Partial<Record<ResourceClass, number>>;
@@ -178,7 +181,12 @@ export function createJobHost(deps: JobHostDeps): JobHost {
               images: deps.generationImages,
               effects: feed,
             }),
-            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({ session, remote: deps.remote, effects: feed }),
+            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({
+              session,
+              remote: deps.remote,
+              effects: feed,
+              ...(deps.sites === undefined ? {} : { sites: deps.sites }),
+            }),
           },
           limits: deps.limits ?? DEFAULT_LIMITS,
           totals: deps.totals ?? DEFAULT_TOTALS,

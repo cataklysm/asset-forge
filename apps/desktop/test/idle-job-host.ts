@@ -76,6 +76,16 @@ export const idleServices: AppServices = {
     block: () => {},
     unblock: () => {},
   },
+  sites: {
+    'sites:list': async () => ({ profiles: [] }),
+    'sites:save': notUsed,
+    'sites:delete': notUsed,
+    'sites:openLogin': notUsed,
+    'sites:crawl': notUsed,
+    'sites:crawlProgress': async () => null,
+    'sites:cancelCrawl': async () => ({ cancelling: false }),
+    'sites:import': notUsed,
+  },
 };
 
 /**

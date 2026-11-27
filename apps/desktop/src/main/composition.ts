@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import {
   builtInAnalysisPrompt,
   countActiveAnalysisJobs,
+  createRobotsReader,
+  InvalidOperationError,
   WorkspaceManager,
+  type SiteCrawlDeps,
   type GenerationImageSource,
   type ImageProbe,
   type VideoProbe,
@@ -29,6 +32,9 @@ import { createProviderGateway, type ProviderGateway } from './provider-gateway.
 import { createProviderHandlers } from './provider-handlers.js';
 import { createProviderStore, type ProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
+import { createSiteHandlers } from './site-handlers.js';
+import { createSiteProfileStore } from './site-profile-store.js';
+import { createSiteAccess, type SiteSessions } from './site-sessions.js';
 
 export interface CompositionOptions {
   userDataPath: string;
@@ -104,6 +110,23 @@ export function providerLaneLimit(store: Pick<ProviderStore, 'get'>) {
   };
 }
 
+const NO_WINDOWS = 'Site logins are not available';
+
+/** The site sessions without Electron: no window opens, no login is sent. */
+const noSiteSessions: SiteSessions = {
+  openLogin: () => {
+    throw new InvalidOperationError(NO_WINDOWS);
+  },
+  loginProfileId: () => null,
+  focusLogin: () => {},
+  openPage: () => {
+    throw new InvalidOperationError(NO_WINDOWS);
+  },
+  cookies: async () => [],
+  userAgent: () => '',
+  clear: async () => {},
+};
+
 export interface AnalysisServices extends AppServices {
   gateway: ProviderGateway;
   /** One per app session: a pause outlives closing and reopening a workspace. */
@@ -140,6 +163,13 @@ export function createAnalysisServices(o: {
   totals?: Partial<Record<ResourceClass, number>>;
   /** The scheduler's clock; real time without it. */
   clock?: SchedulerClock;
+  /**
+   * The login windows, hidden crawl windows and browser sessions of the site profiles (Electron's in the app).
+   * Without it no window can open: a login or crawl answers `invalid_operation` and a site download sends no login.
+   */
+  siteSessions?: SiteSessions;
+  /** Tests only: the pause between two page loads of a crawl; a real, abortable timer without it. */
+  siteWait?: SiteCrawlDeps['wait'];
 }): AnalysisServices {
   const store = createProviderStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
   // Registers its change listener first, so the entry's adapter is dropped before its lane resumes.
@@ -150,6 +180,11 @@ export function createAnalysisServices(o: {
     log: o.log,
   });
   const imageProviders = createImageProviderDirectory(store, gateway);
+  // No address policy is passed: the default one admits public addresses only, and nothing in the app weakens it.
+  // The robots.txt of a crawl is read through the same source, without options (no login, the downloader's agent).
+  const remote = o.remote ?? createUrlSource({ userAgent: `AssetForge/${o.appVersion}` });
+  const siteStore = createSiteProfileStore({ userData: o.userDataPath });
+  const siteSessions = o.siteSessions ?? noSiteSessions;
   let jobHost: JobHost | null = null;
   const pause = createPauseGate({
     // A pause or resume changes the summary; the listener must not throw.
@@ -175,8 +210,8 @@ export function createAnalysisServices(o: {
     firstEntry: () => store.first(),
     imageProviders,
     generationImages: o.generationImages,
-    // No address policy is passed: the default one admits public addresses only, and nothing in the app weakens it.
-    remote: o.remote ?? createUrlSource({ userAgent: `AssetForge/${o.appVersion}` }),
+    remote,
+    sites: createSiteAccess(siteStore, siteSessions),
     ...(o.limits === undefined ? {} : { limits: o.limits }),
     ...(o.totals === undefined ? {} : { totals: o.totals }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
@@ -213,6 +248,15 @@ export function createAnalysisServices(o: {
     analysisPrompts: createAnalysisPromptHandlers(prompts),
     prompts,
     describe,
+    sites: createSiteHandlers({
+      store: siteStore,
+      sessions: siteSessions,
+      manager: o.manager,
+      jobs: host,
+      robots: createRobotsReader(remote),
+      ...(o.siteWait === undefined ? {} : { wait: o.siteWait }),
+      log: o.log,
+    }),
     workspaceOpened: async () => {
       describe.unblock();
       await host.workspaceOpened();

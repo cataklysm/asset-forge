@@ -3,10 +3,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   app,
+  BrowserWindow,
   dialog,
   ipcMain,
   protocol,
-  type BrowserWindow,
+  session,
   shell,
   type MessageBoxOptions,
   type OpenDialogOptions,
@@ -26,6 +27,7 @@ import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-dir
 import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
+import { createElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
 import {
   findOriginalIn,
@@ -161,6 +163,12 @@ function start(): void {
     generationImages: createGenerationImageSource(previews),
     log: (line) => console.warn(line),
     appVersion: app.getVersion(),
+    // One persistent browser session per site profile; its windows never get a preload or Node.
+    siteSessions: createElectronSiteSessions({
+      fromPartition: (partition) => session.fromPartition(partition),
+      createWindow: (options) => new BrowserWindow(options),
+      log: (line) => console.warn(line),
+    }),
   });
 
   const handlers = createWorkspaceHandlers(

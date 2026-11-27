@@ -9,7 +9,6 @@ import {
 import { join } from 'node:path';
 import {
   AssetForgeError,
-  InvalidOperationError,
   SerialQueue,
   workspaceFolderName,
   type ImageProviderDirectory,
@@ -26,6 +25,7 @@ import { createLibraryHandlers } from './library-handlers.js';
 import { createPromptHandlers } from './prompt-handlers.js';
 import type { ProviderHandlers } from './provider-handlers.js';
 import type { ProviderStore } from './provider-store.js';
+import type { SiteHandlers } from './site-handlers.js';
 
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
 
@@ -69,6 +69,8 @@ export interface AppServices {
   analysisPrompts: AnalysisPromptHandlers;
   prompts: AnalysisPromptStore;
   describe: DescribeController;
+  /** The `sites:*` channels. */
+  sites: SiteHandlers;
 }
 
 export function createWorkspaceHandlers(
@@ -124,34 +126,10 @@ export function createWorkspaceHandlers(
     // App-level provider entries and analysis prompts: not behind the workspace guard.
     ...services.providers,
     ...services.analysisPrompts,
-    ...siteHandlersPending,
+    // Site profiles and their crawl: app level too; only `sites:import` needs an open workspace.
+    ...services.sites,
   };
 }
-
-/** Placeholder until the site import handlers are wired; every site channel answers `invalid_operation`. */
-const siteNotAvailable = async (): Promise<never> => {
-  throw new InvalidOperationError('The site import is not available yet');
-};
-const siteHandlersPending: Pick<
-  IpcHandlers,
-  | 'sites:list'
-  | 'sites:save'
-  | 'sites:delete'
-  | 'sites:openLogin'
-  | 'sites:crawl'
-  | 'sites:crawlProgress'
-  | 'sites:cancelCrawl'
-  | 'sites:import'
-> = {
-  'sites:list': siteNotAvailable,
-  'sites:save': siteNotAvailable,
-  'sites:delete': siteNotAvailable,
-  'sites:openLogin': siteNotAvailable,
-  'sites:crawl': siteNotAvailable,
-  'sites:crawlProgress': siteNotAvailable,
-  'sites:cancelCrawl': siteNotAvailable,
-  'sites:import': siteNotAvailable,
-};
 
 /** The hooks never reject by contract; a broken one must not fail the channel either. */
 async function notify(host: HostActions, hook: 'workspaceOpened' | 'workspaceClosing'): Promise<void> {
