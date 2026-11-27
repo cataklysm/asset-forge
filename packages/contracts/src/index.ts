@@ -12,3 +12,5 @@ export * from './jobs';
 export * from './analysis';
 export * from './settings';
 export * from './generations';
+export * from './prompt-template';
+export * from './prompts';
