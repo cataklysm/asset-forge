@@ -213,7 +213,7 @@ export const START_COUNTS: readonly {
 ];
 
 /** The Prompts section of the settings (PromptSettings). */
-export const PROMPTS_TITLE = 'Prompts';
+export const PROMPTS_TITLE = 'Analysis prompts';
 export const PROMPT_PURPOSE_LABELS: Record<AnalysisPromptPurpose, string> = {
   tagging: 'Tagging',
   image_prompt: 'Image to prompt',

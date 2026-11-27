@@ -111,6 +111,8 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
     setError(null);
     const content = draft.content.trim();
     const defaults = defaultsOf({ ...draft, content });
+    // The detail answered by a stored title or description update, kept for the case that the new version then fails.
+    let updated: PromptDetail | null = null;
     try {
       if (detail === null) {
         const created = await call('prompts:create', {
@@ -127,6 +129,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
       if (metaDirty(draft, next)) {
         next = await call('prompts:update', { promptId: next.id, title: draft.title.trim(), description: draft.description.trim() });
         setDetail(next);
+        updated = next;
       }
       if (versionDirty(draft, next)) {
         next = await call('prompts:saveVersion', { promptId: next.id, baseVersionId: base, content, defaults });
@@ -135,6 +138,8 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
       setDraft(draftOf(next));
       onSaved(next, false);
     } catch (e) {
+      // The title is stored already: the list learns it, the text draft stays.
+      if (updated !== null) onSaved(updated, false);
       setError(messageOf(e));
     } finally {
       setSaving(false);

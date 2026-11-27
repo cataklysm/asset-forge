@@ -28,6 +28,7 @@ import {
   PROMPT_TAG_FILTER_TITLE,
   promptCountLabel,
   PROMPTS_LABEL,
+  RETRY_LABEL,
   SEARCH_PROMPTS_LABEL,
   UNSAVED_PROMPT_TITLE,
 } from '../labels';
@@ -185,7 +186,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
             {failedPage !== null ? (
               <div>
                 <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-                  Retry
+                  {RETRY_LABEL}
                 </button>
               </div>
             ) : total === null ? (
@@ -318,7 +319,7 @@ function ListRows(props: ListProps & { scrollRef: RefObject<HTMLDivElement | nul
                 onKeyDown={(e) => rows.onItemKeyDown(index, e)}
                 onFocus={() => rows.onItemFocus(index)}
               >
-                Retry
+                {RETRY_LABEL}
               </button>
             </div>
           );

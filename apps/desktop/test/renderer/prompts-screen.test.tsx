@@ -265,6 +265,24 @@ it('a failed saveVersion shows the message and keeps the draft', async () => {
   expect(saveButton().disabled).toBe(false);
 });
 
+it('a failed saveVersion after a stored title update still shows the new title in the list and keeps the text draft', async () => {
+  const user = userEvent.setup();
+  install([promptDetail({ title: 'Hero', content: 'A {{view}}' })], {
+    'prompts:saveVersion': () => {
+      throw fakeError('invalid_operation', 'This prompt was changed in the meantime');
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Title' }), ' shot');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Text' }), ' again');
+  await user.click(saveButton());
+  expect((await within(editor()).findByRole('alert')).textContent).toBe('This prompt was changed in the meantime');
+  expect(within(editor()).getByRole<HTMLTextAreaElement>('textbox', { name: 'Text' }).value).toBe('A {{view}} again');
+  expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Hero shot');
+  await option('Hero shot');
+});
+
 it('an older version is read-only; Use this version loads it into the draft and enables Save', async () => {
   const user = userEvent.setup();
   const old = { id: nextId(), number: 1, content: 'Old {{light}}', variables: [{ name: 'light', defaultValue: 'soft' }], createdAt: '2026-11-26T10:00:00.000Z' };

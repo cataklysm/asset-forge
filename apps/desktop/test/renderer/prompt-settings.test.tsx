@@ -37,7 +37,7 @@ const button = (name: string) => screen.getByRole('button', { name }) as HTMLBut
 const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement | HTMLTextAreaElement;
 
 async function loaded() {
-  await screen.findByRole('heading', { name: 'Prompts' });
+  await screen.findByRole('heading', { name: 'Analysis prompts' });
   await waitFor(() => expect(entry('Tagging', 'Detailed')).toBeTruthy());
 }
 
@@ -243,7 +243,7 @@ it('the section is editable in the environment mode of the provider settings', a
   await screen.findByText('From environment');
   await loaded();
   expect((within(section('Vision providers')).getByLabelText('Name') as HTMLInputElement).disabled).toBe(true);
-  expect((within(section('Prompts')).getByLabelText('Name') as HTMLInputElement).disabled).toBe(false);
+  expect((within(section('Analysis prompts')).getByLabelText('Name') as HTMLInputElement).disabled).toBe(false);
 });
 
 it('the section is there when the provider settings cannot be read', async () => {
@@ -255,5 +255,5 @@ it('the section is there when the provider settings cannot be read', async () =>
   renderSettings();
   await waitFor(() => expect(within(section('Vision providers')).getByRole('button', { name: 'Retry' })).toBeTruthy());
   await loaded();
-  expect(within(section('Prompts')).queryByRole('button', { name: 'Retry' })).toBeNull();
+  expect(within(section('Analysis prompts')).queryByRole('button', { name: 'Retry' })).toBeNull();
 });

@@ -111,7 +111,7 @@ it('the screen shows the provider section and the prompts section', async () => 
   await loaded();
   expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Vision providers' })).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Prompts' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Analysis prompts' })).toBeTruthy();
 });
 
 it('the editor shows the stored values and an always empty, write-only key field', async () => {
