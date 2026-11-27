@@ -490,6 +490,7 @@ Found in the final review and not fixed:
 - There is no trash for prompts: `prompts:delete` removes the prompt and all its versions at once (generations keep the copies).
 - Prompts cannot be exported or imported, and not shared between workspaces.
 - Variable names compare with `toLowerCase`, which is not full Unicode case folding (for example `İ`, `ß`). The comparison must stay in JavaScript, never in SQL `lower()`.
+- `promptTitleKey` (`packages/core/src/prompts.ts`) and `variableKey` (`packages/contracts/src/prompt-template.ts`) do not NFC-normalise, unlike tags (`cleanTagText`): a title or variable typed once composed and once decomposed counts as two.
 - `PromptDefaultsSchema` (`packages/contracts/src/prompts.ts`) has a `.refine` without a message; it is a transport bound only. Tests are missing for a defaults record of 40 keys, for a value of exactly 2000 characters and for a key that differs only by whitespace.
 - The list search (`prompts:list`) does not cap the number of query words: a query of 200 characters can produce about 100 `instr` terms. A cap (for example 20 words) would bound the query.
 - The correlated subqueries in `packages/persistence/src/prompt-repository.ts` (`isCurrent`, `matchesWord`, `carriesTag`) use plain Drizzle column references instead of `qualified()`; this works but departs from the convention.
@@ -498,8 +499,13 @@ Found in the final review and not fixed:
 - `generations:start` with a library version reads the version, then loads the model list, then writes the record. A prompt deleted in between fails the foreign key and answers `internal_error` instead of `not_found`; nothing is written. `startGeneration` has an overlong doc comment line, and core has no test for two value keys that name one variable.
 - `prompts-ipc.test.ts` types list items as `PromptDetail` instead of the summary type.
 - Prompts screen: a late answer of a `create` can still run its `onSaved` and replace a later selection; navigating to Prompts itself asks about unsaved changes and Discard then does nothing; a second guard question overwrites the resolver of the first.
-- `Retry` and some `aria-label` strings in the new components are literals outside `labels.ts` (the existing pattern); the Settings heading `PROMPTS_TITLE` is still `Prompts` beside the library's own label, and the analysis label constants carry an `ANALYSIS_` prefix while the library's do not. The screen's list code is copied from `ProjectsScreen`. No test asserts that the screen has no explanatory paragraph.
+- Some `aria-label` strings in the new components are literals outside `labels.ts` (the existing pattern); the analysis label constants carry an `ANALYSIS_` prefix while the library's do not. The screen's list code is copied from `ProjectsScreen`. No test asserts that the screen has no explanatory paragraph.
 - Studio: `promptSeq` is bumped only in a passive effect on a file change, so a late `prompts:get` could attach to the new file (compare `file.id` or bump in the render reset). A rejection of `loadCurrent` is unguarded and visible only as a tooltip. `value_too_long` maps to `VARIABLE_MISSING_TITLE`, which is unreachable by typing. `SavePromptDialog` loses focus when the title input becomes disabled in version mode. `messageOf` exists in three files and `pickPrompt` wraps errors only to unwrap them. `GenerationStudio` grew a prompt state machine (a `useStudioPrompt` hook is a candidate).
+- A tag change made while a prompt is being saved can be overwritten in the editor's local detail by `setDetail(next)` in `PromptEditor.tsx` (tag editing is disabled only by `busy`; the tag is stored, the display is stale until reload).
+- `onOpenPrompt` is optional on `StudioProvider` (`studio-context.tsx`); without a handler the dialogs close and nothing is navigated to. Make it required.
+- `GenerationDetails.tsx` uses the non-null assertion `generation.promptId!`.
+- `openPrompt` in `studio-context.tsx` has no catch on the guard promise; a rejected guard is an unhandled rejection.
+- No test follows the details link with a dirty Prompts draft; the `WorkspaceShell` `openPrompt` callback is untested.
 - Missing renderer tests: `Use settings` falling back to the resolved text, a stale picker answer, a stale `Use settings` from one library prompt to another, and Space on a list row.
 
 ## Not covered by any automated check
