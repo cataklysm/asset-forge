@@ -62,7 +62,9 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 ## Renderer
 
-- Reported by the owner on 2026-11-27: when a job finishes, the whole table on the Jobs screen appears to be reloaded, which interrupts scrolling; the asset screen does the same. Open question: is this full refresh needed at all, or can the lists update in place (keep scroll position and loaded pages, patch only the changed rows)? Find the cause first (the 2 s jobs poll and the reload it triggers are the obvious suspects).
+- In-place list updates (`docs/superpowers/specs/2026-11-27-in-place-list-updates-design.md`), known limits: a patch replaces loaded rows and never adds or removes one, so with a status filter on the Jobs screen a job that left the filter keeps its row, a job that entered it does not appear, and pages loaded afterwards are shifted, until the filter is set again or a `jobs` change refreshes the list; the same holds for a file list with a filter the analysis moves a file into or out of (for example Proposals). The asset gallery, the projects list, the prompts list and the asset header (cover, tags) do not react to background jobs. More than 100 changed loaded records in one poll fall back to a refresh of the visible pages. An action on the Jobs screen reloads through its key and is followed by one redundant in-place refresh from the feed.
+- In-place list updates, not checked in the running app: whether the virtualised grid keeps its visual position when a refresh changes the total above the visible area, and how a large analysis batch feels on the asset Files tab and the Jobs screen.
+- `resultToken` of the jobs context has no reader left; `changeToken` is still read by `AnalysisResultDialog`, `GenerationDetails` and `GenerationStudio`. Remove the former or move the three dialogs to `useChanges`.
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
 - The project member table still uses a pager of 50 that resets on navigation.
 - `CommitInput`: Enter followed by blur can save twice before the reload; the draft reset can overwrite typing while a reload is in flight.
@@ -174,7 +176,7 @@ Found during the build:
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
-- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts` with the next job type); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx` (share it); a status filter change can lose its reset to the top when a poll moves the reload key in the same render (skip the capture when the status changed); the remount after a moved `changes` returns the focus to the row rather than the action button, and a newly queued job shifts the restored index; the count tooltip "Jobs in this workspace" shows the filtered total.
+- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts` with the next job type); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx` (share it); the count tooltip "Jobs in this workspace" shows the filtered total.
 
 Tests:
 
@@ -259,7 +261,6 @@ Renderer tests:
 
 - The settings route of `AssetFilesTab` (closing the file detail dialog before Settings opens) has no dedicated test, only the inbox's; the result dialog's disabled Settings during an import is covered only by a shell test.
 - Not tested: the proposal toggle on the Files tab, the debounced query reaching "Analyse all", and Image to prompt from the detail dialog menu. Of the gallery filters only status and tags are asserted in the `assetFilter` target (`assets.test.tsx`); query, type, project, role and kind are not.
-- No test proves that the asset Files tab and its count reload when the jobs `resultToken` advances (`AssetScreen.tsx:93,272` use `reloadToken + resultToken`; the asset screen tests use a static `jobs:summary`).
 - Settings: the reload race and a superseded model request that fails are tested; a superseded model request that succeeds after the newer one is not.
 - Start dialog: no test for Settings clicked while a start is in flight (the `startingRef` guard in `openSettings`), and none for a preview answer of a previous target arriving after the target changed (only a model change is tested).
 
