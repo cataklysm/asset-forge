@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type IpcRequest, type JobSummary, type JobView } from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB, type IpcRequest, type JobSummary, type JobView } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
@@ -132,6 +132,69 @@ it('a generation job is labelled Generation', async () => {
   renderScreen();
   await screen.findByText('oak.png');
   expect(within(rowOf('oak.png')).getAllByRole('gridcell')[0]!.textContent).toBe('Generation');
+});
+
+it('a download job without a file shows the shortened URL, the full one in the tooltip, and the host', async () => {
+  const url = 'https://cdn.example.com:8443/packs/2026/rock%20moss.png?sig=abc';
+  install({
+    'jobs:list': listOf([
+      job({ type: FILE_DOWNLOAD_JOB, fileId: null, fileName: null, url, host: 'cdn.example.com:8443' }),
+    ]),
+  });
+  renderScreen();
+  const cell = await screen.findByText('cdn.example.com:8443/rock moss.png');
+  expect(cell.getAttribute('title')).toBe(url);
+  const cells = within(cell.closest<HTMLElement>('[role="row"]')!).getAllByRole('gridcell');
+  expect(cells[0]!.textContent).toBe('Download');
+  expect(cells[2]!.textContent).toBe('cdn.example.com:8443');
+  expect(cells[3]!.textContent).toBe('Queued');
+});
+
+it('a download job with a file shows the file name; an already present one says so in its status', async () => {
+  install({
+    'jobs:list': listOf([
+      job({
+        type: FILE_DOWNLOAD_JOB,
+        status: 'succeeded',
+        attempt: 1,
+        fileName: 'rock.png',
+        url: 'https://example.com/rock.png',
+        host: 'example.com',
+        result: 'already_present',
+      }),
+      job({
+        type: FILE_DOWNLOAD_JOB,
+        status: 'succeeded',
+        attempt: 1,
+        fileName: 'moss.png',
+        url: 'https://example.com/moss.png',
+        host: 'example.com',
+      }),
+    ]),
+  });
+  renderScreen();
+  await screen.findByText('rock.png');
+  const cells = (name: string) => within(rowOf(name)).getAllByRole('gridcell').map((c) => c.textContent);
+  expect(cells('rock.png').slice(0, 4)).toEqual(['Download', 'rock.png', 'example.com', 'Already present']);
+  expect(cells('moss.png').slice(0, 4)).toEqual(['Download', 'moss.png', 'example.com', 'Done']);
+});
+
+it('the shortened URL is at most 60 characters, and an address that does not parse is cut to 60', async () => {
+  const long = `https://example.com/${'a'.repeat(80)}.png`;
+  const broken = `not a url ${'b'.repeat(80)}`;
+  install({
+    'jobs:list': listOf([
+      job({ type: FILE_DOWNLOAD_JOB, fileName: null, url: long, host: 'example.com' }),
+      job({ type: FILE_DOWNLOAD_JOB, fileName: null, url: broken, host: null }),
+    ]),
+  });
+  renderScreen();
+  const shortLong = `example.com/${'a'.repeat(80)}.png`.slice(0, 60);
+  const longCell = await screen.findByText(shortLong);
+  expect(longCell.getAttribute('title')).toBe(long);
+  const brokenCell = screen.getByText(broken.slice(0, 60));
+  expect(brokenCell.getAttribute('title')).toBe(broken);
+  expect(within(brokenCell.closest<HTMLElement>('[role="row"]')!).getAllByRole('gridcell')[2]!.textContent).toBe('—');
 });
 
 it('the status filter asks for that status and offers All plus the seven labels', async () => {

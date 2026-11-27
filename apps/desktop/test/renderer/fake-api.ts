@@ -3,6 +3,7 @@ import type {
   AnalysisPromptList,
   AssetDetail,
   ErrorCode,
+  FileOrigin,
   ImportResult,
   IpcChannel,
   IpcRequest,
@@ -275,6 +276,28 @@ export function fakeAssetSources(asset: AssetDetail): {
   return { state, handlers };
 }
 
+type OriginChannel = 'files:origins' | 'files:openOrigin';
+
+/**
+ * In-memory handlers for the origin channels, keyed by file ID; a file not given has no origins.
+ * `opened` records the `{ fileId, originId }` pairs asked to be opened.
+ */
+export function fakeFileOrigins(origins: Record<string, FileOrigin[]>): {
+  state: { opened: { fileId: string; originId: string }[] };
+  handlers: { [C in OriginChannel]: NonNullable<FakeHandlers[C]> };
+} {
+  const state = { opened: [] as { fileId: string; originId: string }[] };
+  const handlers: { [C in OriginChannel]: NonNullable<FakeHandlers[C]> } = {
+    'files:origins': ({ fileId }) => structuredClone(origins[fileId] ?? []),
+    'files:openOrigin': ({ fileId, originId }) => {
+      if (!(origins[fileId] ?? []).some((o) => o.id === originId)) throw fakeError('not_found', 'The source does not exist');
+      state.opened.push({ fileId, originId });
+      return {};
+    },
+  };
+  return { state, handlers };
+}
+
 type LibraryChannel =
   | 'prompts:list'
   | 'prompts:get'
@@ -421,8 +444,9 @@ export function fakeGenerationDefaults(): { [C in GenerationChannel]: NonNullabl
 
 /**
  * Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see
- * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`) and the
- * `generations:*` ones (see `fakeGenerationDefaults`).
+ * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`), the
+ * `generations:*` ones (see `fakeGenerationDefaults`) and the origin channels of files without
+ * origins (see `fakeFileOrigins`).
  */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
@@ -432,6 +456,7 @@ export function installFakeApi(handlers: FakeHandlers): {
     ...fakeAnalysisPrompts().handlers,
     ...fakeProviders().handlers,
     ...fakeGenerationDefaults(),
+    ...fakeFileOrigins({}).handlers,
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

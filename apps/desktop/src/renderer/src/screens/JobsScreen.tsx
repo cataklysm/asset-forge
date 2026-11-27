@@ -1,11 +1,16 @@
 import { RotateCcw, X } from 'lucide-react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
+import {
+  ACTIVE_JOB_STATUSES,
+  ANALYZE_FILE_JOB,
+  FILE_DOWNLOAD_JOB,
+  IMAGE_GENERATE_JOB,
+  type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { laneName, MoveJobsDialog } from '../components/MoveJobsDialog';
 import { Page } from '../components/Page';
-import { formatDateTime } from '../format';
+import { formatDateTime, shortUrl } from '../format';
 import { pagesForRows, rowCount } from '../gallery';
 import { usePagedList } from '../hooks/usePagedList';
 import {
@@ -18,6 +23,7 @@ import {
 import { useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
+  ALREADY_PRESENT_LABEL,
   JOB_STATUS_LABELS,
   JOB_TYPE_LABELS,
   JOBS_PROVIDER_HEADER,
@@ -389,9 +395,10 @@ function JobRows(props: JobTableProps & { scrollRef: RefObject<HTMLDivElement | 
 
 /**
  * The provider of an analysis or generation job: the current entry name (or the stored one) and the
- * model when there is one (an upscale has none); '—' for other jobs.
+ * model when there is one (an upscale has none); the host of a download; '—' for other jobs.
  */
 function providerText(list: ProviderList | null, job: JobView): string {
+  if (job.type === FILE_DOWNLOAD_JOB) return job.host ?? '—';
   if (job.type !== ANALYZE_FILE_JOB && job.type !== IMAGE_GENERATE_JOB) return '—';
   const name = laneName(list, job.providerId, job.providerName);
   return job.model === null ? name : `${name} · ${job.model}`;
@@ -400,6 +407,10 @@ function providerText(list: ProviderList | null, job: JobView): string {
 function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex: number; onCancel(): void; onRetry(): void }) {
   const { list } = useProviders();
   const provider = providerText(list, job);
+  // A download names its address until it has a file; the full address is in the tooltip.
+  const fileText = job.fileName ?? (job.url === null ? '—' : shortUrl(job.url));
+  const fileTitle = job.fileName ?? job.url ?? undefined;
+  const statusText = job.status === 'succeeded' && job.result === 'already_present' ? ALREADY_PRESENT_LABEL : jobStatusLabel(job.status);
   const waitTitle =
     job.status === 'retry_wait' && job.runAfter !== null ? `Next try at ${formatDateTime(job.runAfter)}` : undefined;
   return (
@@ -407,14 +418,14 @@ function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex
       <span role="gridcell" className="truncate">
         {jobLabel(job.type)}
       </span>
-      <span role="gridcell" className="truncate font-medium" title={job.fileName ?? undefined}>
-        {job.fileName ?? '—'}
+      <span role="gridcell" className="truncate font-medium" title={fileTitle}>
+        {fileText}
       </span>
       <span role="gridcell" className="truncate" title={provider}>
         {provider}
       </span>
       <span role="gridcell" className={`truncate ${job.status === 'failed' ? 'text-danger' : ''}`} title={waitTitle}>
-        {jobStatusLabel(job.status)}
+        {statusText}
       </span>
       <span role="gridcell" className="truncate tabular-nums">
         {`${job.attempt} / ${MAX_ATTEMPTS}`}

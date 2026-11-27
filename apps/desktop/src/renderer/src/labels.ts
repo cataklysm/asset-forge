@@ -272,6 +272,12 @@ export const COPY_SOURCE_TITLE = 'Copy URL';
 export const REMOVE_SOURCE_TITLE = 'Remove source';
 export const COPY_SOURCE_FAILED = 'The URL could not be copied';
 
+/** The addresses a file was downloaded from, in the file details column (FileOrigins). */
+export const FILE_ORIGINS_LABEL = 'Source';
+
+/** The status text of a succeeded download whose content was already in the workspace. */
+export const ALREADY_PRESENT_LABEL = 'Already present';
+
 /** The choice before importing picked ZIP archives (ZipChoiceDialog). */
 export const ZIP_ARCHIVE_TITLE = 'ZIP archive';
 export const UNPACK_LABEL = 'Unpack';
@@ -419,6 +425,7 @@ export function generationParametersText(parameters: GenerationParameters): stri
 export const JOB_TYPE_LABELS: Record<string, string> = {
   'vision.analyze_file': 'Analysis',
   'image.generate': 'Generation',
+  'file.download': 'Download',
 };
 
 /** The prompt library (Prompts screen); the analysis prompts of the settings keep their own labels above. */

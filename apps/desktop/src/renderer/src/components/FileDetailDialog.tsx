@@ -10,6 +10,7 @@ import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED, PANEL_TITLE, SECTION_TITLE } 
 import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
 import { FilmStrip } from './FilmStrip';
+import { FileOrigins } from './FileOrigins';
 import { fileOrigin } from './FileTile';
 import { GenerationDetails } from './GenerationDetails';
 import type { ViewerList } from './FileBrowser';
@@ -280,6 +281,8 @@ export function FileDetailDialog({
                 onRemove={(name) => changeTag('files:removeTag', name)}
               />
             )}
+            {/* Keyed by file: stepping on loads the next file's addresses afresh. */}
+            <FileOrigins key={`origins-${file.id}`} fileId={file.id} />
             {complete && <GenerationDetails key={`generation-${file.id}`} fileId={file.id} />}
             {asset !== null && (
               <>

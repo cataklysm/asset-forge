@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState, type ReactNode } from 'react';
-import type { FileRecord, IpcResponse } from '@assetforge/contracts';
+import type { FileRecord, Generation, IpcResponse } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import type { ViewerList } from '../../src/renderer/src/components/FileBrowser';
 import { FileDetailDialog } from '../../src/renderer/src/components/FileDetailDialog';
@@ -10,7 +10,7 @@ import { useFileDialog } from '../../src/renderer/src/hooks/useFileDialog';
 import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/list-state';
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
-import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, fakeFileOrigins, installFakeApi, type FakeHandlers } from './fake-api';
 import { formatDateTime } from '../../src/renderer/src/format';
 import { fileRecord, nextId, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
@@ -646,6 +646,64 @@ it('a measured file keeps its dimensions when the viewer steps away and back', a
   expect(screen.queryByRole('img', { name: 'Preview only' })).toBeNull();
   expect((screen.getByRole('button', { name: '100%' }) as HTMLButtonElement).disabled).toBe(false);
   expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: a.id }]);
+});
+
+/** A succeeded upscale of `source` with one output, as `generations:forFile` lists it among the results. */
+function resultGeneration(source: FileRecord): Generation {
+  return {
+    id: nextId(),
+    kind: 'upscale',
+    status: 'succeeded',
+    errorCode: null,
+    providerId: nextId(),
+    providerName: 'Venice',
+    providerKind: 'venice',
+    model: null,
+    prompt: null,
+    parameters: { v: 1, scale: 2 },
+    jobId: nextId(),
+    jobStatus: 'succeeded',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    finishedAt: '2026-01-01T00:01:00.000Z',
+    inputs: [{ fileId: source.id, name: source.originalName, sha256: 'a'.repeat(64), trashed: false }],
+    outputs: [{ fileId: nextId(), name: 'a 2x.png', sha256: 'b'.repeat(64), trashed: false }],
+    promptId: null,
+    promptVersionId: null,
+    promptTitle: null,
+    promptVersionNumber: null,
+    promptVariables: null,
+  };
+}
+
+it('the details column shows the sources of the shown file above the generation blocks and loads them again after Next', async () => {
+  const a = fileRecord({ originalName: 'a.png', width: 10, height: 10 });
+  const b = fileRecord({ originalName: 'b.png', width: 10, height: 10 });
+  const api = install({
+    ...fakeFileOrigins({
+      [a.id]: [{ id: nextId(), url: 'https://example.org/a.png', createdAt: '2026-11-27T08:00:00.000Z' }],
+      [b.id]: [{ id: nextId(), url: 'https://example.org/b.png', createdAt: '2026-11-27T08:00:00.000Z' }],
+    }).handlers,
+    'generations:forFile': ({ fileId }) => ({ madeBy: null, results: fileId === a.id ? [resultGeneration(a)] : [] }),
+  });
+  render(<Browsing files={[a, b]} />);
+  const user = await openDialog();
+  expect(await screen.findByRole('link', { name: 'https://example.org/a.png' })).toBeTruthy();
+  await screen.findByRole('heading', { level: 3, name: 'Results' });
+  const order = headings(3);
+  expect(order.indexOf('Source')).toBeGreaterThan(order.indexOf('Image tags'));
+  expect(order.indexOf('Source')).toBe(order.indexOf('Results') - 1);
+  await user.click(screen.getByRole('button', { name: 'Next file (→)' }));
+  expect(await screen.findByRole('link', { name: 'https://example.org/b.png' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'https://example.org/a.png' })).toBeNull();
+  expect(api.calls.filter((c) => c.channel === 'files:origins').map((c) => c.request)).toEqual([{ fileId: a.id }, { fileId: b.id }]);
+});
+
+it('a trashed file shows its sources too', async () => {
+  const file = trashedRecord({ originalName: 'gone.png' });
+  install(fakeFileOrigins({ [file.id]: [{ id: nextId(), url: 'https://example.org/gone.png', createdAt: '2026-11-27T08:00:00.000Z' }] }).handlers);
+  render(<Harness file={file} asset={null} roleControl={null} />);
+  await openDialog();
+  expect(await screen.findByRole('link', { name: 'https://example.org/gone.png' })).toBeTruthy();
 });
 
 it('a change made while the measurement is in flight is kept and gains the dimensions', async () => {

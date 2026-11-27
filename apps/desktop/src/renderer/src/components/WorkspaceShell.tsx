@@ -1,5 +1,5 @@
 import { useCallback, useState, type ComponentProps } from 'react';
-import type { PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
+import type { PausedHost, PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { JobsProvider, useJobs } from '../jobs-context';
 import { LeaveGuardProvider, useConfirmLeave } from '../leave-guard';
@@ -62,13 +62,14 @@ function sectionOf(view: View): Section {
 }
 
 const NOTHING_PAUSED: PausedProvider[] = [];
+const NO_PAUSED_HOSTS: PausedHost[] = [];
 
 /**
- * The app frame with the active jobs and the paused providers of the surrounding `JobsProvider` and
+ * The app frame with the active jobs, the paused providers and hosts of the surrounding `JobsProvider` and
  * the trash count of the `TrashProvider`; `Move jobs` in the pause banner opens the move dialog.
  */
 export function JobsAppShell(
-  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove'>,
+  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove' | 'pausedHosts' | 'onResumeHost'>,
 ) {
   const { active, summary, refresh } = useJobs();
   const trash = useTrash();
@@ -86,6 +87,11 @@ export function JobsAppShell(
           refresh();
         }}
         onMove={(source) => setMoving({ source })}
+        pausedHosts={summary?.pausedHosts ?? NO_PAUSED_HOSTS}
+        onResumeHost={async (host) => {
+          await call('jobs:resumeHost', { host });
+          refresh();
+        }}
       />
       {moving !== null && <MoveJobsDialog source={moving.source} onClose={() => setMoving(null)} />}
     </>

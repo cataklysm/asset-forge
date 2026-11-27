@@ -1,6 +1,6 @@
 import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, ScrollText, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, type JobErrorCode, type PausedProvider } from '@assetforge/contracts';
+import { JOB_ERROR_MESSAGES, type JobErrorCode, type PausedHost, type PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import {
   laneLabel,
@@ -34,6 +34,10 @@ interface Props {
   onResume?(providerId: string | null): Promise<void>;
   /** Opens the move dialog for one provider's waiting jobs. */
   onMove?(providerId: string | null): void;
+  /** Every download host that stopped claiming work; each gets a line after the provider lines. */
+  pausedHosts?: readonly PausedHost[];
+  /** Resumes one host (`jobs:resumeHost`); a rejection shows in its line. */
+  onResumeHost?(host: string): Promise<void>;
   onNavigate(section: Section): void;
   onClose(): void;
   children: ReactNode;
@@ -55,6 +59,7 @@ export const BUSY_TITLE = 'Import in progress';
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 
 const NOTHING_PAUSED: readonly PausedProvider[] = [];
+const NO_PAUSED_HOSTS: readonly PausedHost[] = [];
 
 /** The application frame: header, navigation, the alert region and the page slot. */
 export function AppShell({
@@ -67,6 +72,8 @@ export function AppShell({
   paused = NOTHING_PAUSED,
   onResume = async () => {},
   onMove = () => {},
+  pausedHosts = NO_PAUSED_HOSTS,
+  onResumeHost = async () => {},
   onNavigate,
   onClose,
   children,
@@ -164,7 +171,7 @@ export function AppShell({
               </button>
             </div>
           )}
-          {paused.length > 0 && (
+          {(paused.length > 0 || pausedHosts.length > 0) && (
             <div role="alert" className={`m-6 mb-0 flex flex-col gap-3 ${WARNING}`}>
               {paused.map((entry) => (
                 <PauseLine
@@ -175,6 +182,9 @@ export function AppShell({
                   onMove={() => onMove(entry.providerId)}
                   onSettings={() => onNavigate('settings')}
                 />
+              ))}
+              {pausedHosts.map((entry) => (
+                <HostPauseLine key={`host:${entry.host}`} entry={entry} onResume={() => onResumeHost(entry.host)} />
               ))}
             </div>
           )}
@@ -195,14 +205,13 @@ interface PauseLineProps {
   onSettings(): void;
 }
 
-/** One paused provider in the banner: its name, the reason, Resume, Move jobs and, for the settings reasons, Settings. */
-function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps) {
-  const name = laneLabel(entry.providerId, entry.providerName);
+/** Resume of one banner line: one call at a time; a rejection is kept until the next try or a new reason. */
+function useResume(reason: JobErrorCode, onResume: () => Promise<void>) {
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const resumingRef = useRef(false);
   // A new pause reason drops the error of an earlier resume.
-  useEffect(() => setResumeError(null), [entry.reason]);
+  useEffect(() => setResumeError(null), [reason]);
 
   async function resume() {
     if (resumingRef.current) return;
@@ -218,6 +227,31 @@ function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps
       setResuming(false);
     }
   }
+
+  return { resuming, resumeError, resume };
+}
+
+/** One paused download host in the banner: the host, the reason and Resume. */
+function HostPauseLine({ entry, onResume }: { entry: PausedHost; onResume(): Promise<void> }) {
+  const { resuming, resumeError, resume } = useResume(entry.reason, onResume);
+  return (
+    <div role="group" aria-label={entry.host} className="flex items-center justify-between gap-4">
+      <span className="min-w-0 break-words">
+        <span className="font-semibold">{entry.host}</span> {resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
+          {RESUME_LABEL}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One paused provider in the banner: its name, the reason, Resume, Move jobs and, for the settings reasons, Settings. */
+function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps) {
+  const name = laneLabel(entry.providerId, entry.providerName);
+  const { resuming, resumeError, resume } = useResume(entry.reason, onResume);
 
   return (
     <div role="group" aria-label={name} className="flex items-center justify-between gap-4">

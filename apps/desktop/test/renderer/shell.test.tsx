@@ -302,6 +302,66 @@ it('the banner shows a failed resume in its line and keeps the pause', async () 
   expect(onMove).toHaveBeenCalledWith(LOCAL_ID);
 });
 
+it('after the provider lines one line per paused host; Resume resumes that host and refreshes the jobs', async () => {
+  const user = userEvent.setup();
+  let summary: JobSummary = {
+    ...IDLE,
+    paused: [PAUSED_LOCAL],
+    pausedHosts: [
+      { host: 'cdn.example.com', reason: 'download_blocked' },
+      { host: 'img.example.org:8443', reason: 'download_throttled' },
+    ],
+  };
+  const { api } = jobsShell(() => summary, {
+    'jobs:resumeHost': ({ host }) => {
+      summary = { ...summary, pausedHosts: summary.pausedHosts.filter((h) => h.host !== host), changes: summary.changes + 1 };
+      return {};
+    },
+  });
+  const banner = await screen.findByRole('alert');
+  const groups = within(banner).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+  expect(groups).toEqual(['Local Ollama', 'cdn.example.com', 'img.example.org:8443']);
+  const blocked = within(banner).getByRole('group', { name: 'cdn.example.com' });
+  const throttled = within(banner).getByRole('group', { name: 'img.example.org:8443' });
+  expect(blocked.textContent).toContain(JOB_ERROR_MESSAGES.download_blocked);
+  expect(throttled.textContent).toContain(JOB_ERROR_MESSAGES.download_throttled);
+  expect(within(throttled).getAllByRole('button').map((b) => b.textContent)).toEqual(['Resume']);
+  await user.click(within(throttled).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(within(screen.getByRole('alert')).queryByRole('group', { name: 'img.example.org:8443' })).toBeNull());
+  expect(api.calls.filter((c) => c.channel === 'jobs:resumeHost').map((c) => c.request)).toEqual([{ host: 'img.example.org:8443' }]);
+  expect(api.calls.some((c) => c.channel === 'jobs:resume')).toBe(false);
+  expect(within(screen.getByRole('alert')).getByRole('group', { name: 'cdn.example.com' })).toBeTruthy();
+});
+
+it('a paused host alone shows the banner, and a failed resume shows in its line and keeps it', async () => {
+  const user = userEvent.setup();
+  const onResumeHost = vi.fn((_host: string) => {
+    throw fakeError('internal_error');
+  });
+  render(
+    <AppShell
+      workspaceName="Studio"
+      rootPath="D:/work/studio"
+      section="assets"
+      busy={false}
+      activeJobs={0}
+      pausedHosts={[{ host: 'cdn.example.com', reason: 'download_unreachable' }]}
+      onResumeHost={async (host) => onResumeHost(host)}
+      onNavigate={() => {}}
+      onClose={() => {}}
+    >
+      <p>content</p>
+    </AppShell>,
+  );
+  const line = within(screen.getByRole('alert')).getByRole('group', { name: 'cdn.example.com' });
+  expect(line.textContent).toContain(JOB_ERROR_MESSAGES.download_unreachable);
+  await user.click(within(line).getByRole('button', { name: 'Resume' }));
+  await waitFor(() => expect(line.textContent).not.toContain(JOB_ERROR_MESSAGES.download_unreachable));
+  expect(onResumeHost).toHaveBeenCalledWith('cdn.example.com');
+  expect(line.textContent).toContain('cdn.example.com');
+  expect(within(line).getByRole('button', { name: 'Resume' })).toBeTruthy();
+});
+
 it('sameSummary compares the pause list entry by entry', () => {
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL }] })).toBe(true);
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, reason: 'provider_unauthorized' }] })).toBe(false);
