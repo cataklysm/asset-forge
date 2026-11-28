@@ -1,5 +1,19 @@
-export type { ImageSize, PreviewJob, PreviewResult, WorkerJob, WorkerRequest, WorkerResponse } from './messages.js';
-export { createWorkerPool, JOB_TIMEOUT_MS, POOL_SIZE } from './worker-pool.js';
+export type {
+  ImageSize,
+  PreviewJob,
+  PreviewResult,
+  WorkerJob,
+  WorkerReady,
+  WorkerRequest,
+  WorkerResponse,
+} from './messages.js';
+export {
+  createWorkerPool,
+  JOB_TIMEOUT_MS,
+  POOL_SIZE,
+  WORKER_START_BACKOFF_MAX_MS,
+  WORKER_START_BACKOFF_MS,
+} from './worker-pool.js';
 export type { WorkerPool, WorkerPoolOptions } from './worker-pool.js';
 export {
   CACHE_LIMIT_BYTES,

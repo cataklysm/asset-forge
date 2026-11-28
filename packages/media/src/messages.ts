@@ -33,6 +33,12 @@ export interface WorkerRequest {
   work: WorkerJob;
 }
 
+/** The first message of a worker, sent once its module has loaded; the pool sends no work before it. */
+export interface WorkerReady {
+  /** Always true. */
+  ready: true;
+}
+
 /** A render answers `PreviewResult`; a measurement answers `ImageSize` or `null`; a jpeg answers bytes or `null`. */
 export interface WorkerResponse {
   /** The id of the request answered. */

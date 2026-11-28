@@ -1,5 +1,13 @@
 import { Worker } from 'node:worker_threads';
-import type { ImageSize, PreviewJob, PreviewResult, WorkerJob, WorkerRequest, WorkerResponse } from './messages.js';
+import type {
+  ImageSize,
+  PreviewJob,
+  PreviewResult,
+  WorkerJob,
+  WorkerReady,
+  WorkerRequest,
+  WorkerResponse,
+} from './messages.js';
 
 /** What `createWorkerPool` is configured with. */
 export interface WorkerPoolOptions {
@@ -11,6 +19,12 @@ export interface WorkerPoolOptions {
   timeoutMs: number;
   /** Receives one line per worker failure, never a path or an error message. Default: console.error. */
   log?: (line: string) => void;
+  /**
+   * The clock of the start back-off; default `Date.now`.
+   *
+   * @returns the current time in milliseconds
+   */
+  now?: () => number;
 }
 
 /** Sharp work in bounded worker threads. */
@@ -56,6 +70,10 @@ export interface WorkerPool {
 export const POOL_SIZE = 2;
 /** Time limit of one job in the app's pool. */
 export const JOB_TIMEOUT_MS = 30_000;
+/** The wait after a worker failed to start before the next start; it doubles with every further failed start. */
+export const WORKER_START_BACKOFF_MS = 2_000;
+/** The longest wait between two worker starts after failed ones. */
+export const WORKER_START_BACKOFF_MAX_MS = 60_000;
 
 /** What a task resolves to: the answer of its kind or its failure value. */
 type TaskResult = PreviewResult | ImageSize | Uint8Array | null;
@@ -74,6 +92,12 @@ interface Task {
 interface Slot {
   /** The worker. */
   worker: Worker;
+  /** The worker reported that its module loaded; before that it gets no work. */
+  ready: boolean;
+  /** Ends a start that takes longer than the job time limit; cleared once the worker is ready. */
+  startTimer?: NodeJS.Timeout;
+  /** The task the worker was started for, sent to it once it is ready. */
+  reserved?: Task;
   /** The running job with its request id and timeout. */
   current?: { id: number; task: Task; timer: NodeJS.Timeout };
 }
@@ -99,6 +123,26 @@ function failureKind(error: unknown): string {
  */
 function isResponse(message: unknown): message is WorkerResponse {
   return typeof message === 'object' && message !== null && typeof (message as WorkerResponse).id === 'number';
+}
+
+/**
+ * Whether a message from a worker says that its module loaded.
+ *
+ * @param message the message as received
+ * @returns true for `{ ready: true }`
+ */
+function isReady(message: unknown): message is WorkerReady {
+  return typeof message === 'object' && message !== null && (message as WorkerReady).ready === true;
+}
+
+/**
+ * The wait before the next worker start after a run of failed ones.
+ *
+ * @param failedStarts the failed starts in a row, at least 1
+ * @returns the back-off, doubled per further failure and capped
+ */
+function startBackOffMs(failedStarts: number): number {
+  return Math.min(WORKER_START_BACKOFF_MS * 2 ** Math.min(failedStarts - 1, 30), WORKER_START_BACKOFF_MAX_MS);
 }
 
 /**
@@ -131,7 +175,10 @@ function validResult(task: Task, result: unknown): TaskResult {
  * ones in view after a fast scroll) are generated before those scrolled past. A worker that
  * fails, crashes or exceeds `timeoutMs` fails its job (`none` or `null`) and is dropped, so the next job
  * gets a fresh worker; a worker error or a failed start is logged as one line, and the same line again only after a
- * worker answered in between.
+ * worker answered in between. A worker gets work only once it reported that its module loaded; one that fails
+ * before (or not within `timeoutMs`) fails the whole queue, and the next start waits out a back-off
+ * (`WORKER_START_BACKOFF_MS`, doubled per further failed start up to `WORKER_START_BACKOFF_MAX_MS`) during which
+ * every request fails at once.
  *
  * @param options the worker entry, the size, the time limit and the log
  * @returns the pool, with no worker started yet
@@ -165,15 +212,23 @@ class PreviewWorkers {
   private isClosed = false;
   /** The failure line logged last since a worker last answered; null when none was. */
   private lastReported: string | null = null;
+  /** Worker starts that failed in a row; reset once a worker is ready. */
+  private failedStarts = 0;
+  /** No worker is started before this time, in milliseconds. */
+  private startAllowedAt = 0;
+  /** The clock of the back-off. */
+  private readonly now: () => number;
 
   /**
-   * @param options the worker entry, the size and the time limit
+   * @param options the worker entry, the size, the time limit and the clock
    * @param log receives one line per worker failure
    */
   constructor(
     private readonly options: WorkerPoolOptions,
     private readonly log: (line: string) => void,
-  ) {}
+  ) {
+    this.now = options.now ?? (() => Date.now());
+  }
 
   /**
    * Queues one task and serves the queue.
@@ -183,7 +238,7 @@ class PreviewWorkers {
    * @returns the worker's valid answer or the failure value
    */
   submit(work: WorkerJob, failure: 'none' | null): Promise<TaskResult> {
-    if (this.isClosed) return Promise.resolve(failure);
+    if (this.isClosed || this.isBackingOff()) return Promise.resolve(failure);
     return new Promise<TaskResult>((resolve) => {
       this.queue.push({ work, failure, resolve });
       this.pump();
@@ -216,46 +271,111 @@ class PreviewWorkers {
     await Promise.all([...this.terminations]);
   }
 
-  /** Hands waiting tasks to idle workers, starting workers up to the size; a failed start fails the newest task. */
+  /**
+   * Hands waiting tasks to idle ready workers and starts workers up to the size; a worker started takes the newest
+   * task with it and runs it once ready.
+   */
   private pump(): void {
     while (!this.isClosed && this.queue.length > 0) {
-      let slot = [...this.slots].find((candidate) => !candidate.current);
-      if (!slot) {
-        if (this.slots.size >= this.options.size) return;
-        slot = this.startWorker();
-        if (!slot) {
-          const failed = this.queue.pop();
-          failed?.resolve(failed.failure);
-          continue;
-        }
+      const slot = [...this.slots].find((candidate) => candidate.ready && !candidate.current);
+      if (slot) {
+        this.dispatch(slot, this.queue.pop() as Task);
+        continue;
       }
-      this.dispatch(slot, this.queue.pop() as Task);
+      if (this.slots.size >= this.options.size || this.isBackingOff()) return;
+      this.startWorker(this.queue.pop() as Task);
     }
   }
 
   /**
-   * Starts one worker and listens to it.
+   * Whether worker starts wait out a back-off after failed ones.
    *
-   * @returns the worker's slot; undefined when it could not be started
+   * @returns true until the back-off has passed
    */
-  private startWorker(): Slot | undefined {
+  private isBackingOff(): boolean {
+    return this.failedStarts > 0 && this.now() < this.startAllowedAt;
+  }
+
+  /**
+   * Starts one worker and listens to it; a start that throws counts as a failed start.
+   *
+   * @param task the task the worker is started for
+   */
+  private startWorker(task: Task): void {
     let worker: Worker;
     try {
       worker = new Worker(this.options.workerUrl);
     } catch (error) {
-      this.report(`Preview worker failed to start (${failureKind(error)})`);
-      return undefined;
+      task.resolve(task.failure);
+      this.startFailed(failureKind(error));
+      return;
     }
-    const slot: Slot = { worker };
+    const slot: Slot = { worker, ready: false, reserved: task };
+    slot.startTimer = setTimeout(() => this.dropStarting(slot, 'timeout'), this.options.timeoutMs);
     worker.on('message', (message: unknown) => this.answer(slot, message));
-    worker.on('error', (error: unknown) => {
-      // A failed start arrives here as well; only the first failure of a slot is logged.
-      if (this.slots.has(slot)) this.report(`Preview worker failed (${failureKind(error)})`);
-      this.dropAndTerminate(slot);
-    });
-    worker.on('exit', () => this.dropExited(slot));
+    worker.on('error', (error: unknown) => this.workerFailed(slot, error));
+    worker.on('exit', () => (slot.ready ? this.dropExited(slot) : this.dropStarting(slot, 'exit')));
     this.slots.add(slot);
-    return slot;
+  }
+
+  /**
+   * Handles an error of a worker: before it was ready a failed start, afterwards the failure of its job.
+   *
+   * @param slot the worker's slot
+   * @param error what the worker threw
+   */
+  private workerFailed(slot: Slot, error: unknown): void {
+    if (!slot.ready) {
+      this.dropStarting(slot, failureKind(error));
+      return;
+    }
+    // Only the first failure of a slot is logged.
+    if (this.slots.has(slot)) this.report(`Preview worker failed (${failureKind(error)})`);
+    this.dropAndTerminate(slot);
+  }
+
+  /**
+   * Drops a worker that failed before it was ready and treats it as a failed start.
+   *
+   * @param slot the worker's slot
+   * @param kind the failure kind for the log line
+   */
+  private dropStarting(slot: Slot, kind: string): void {
+    if (!this.removeSlot(slot)) return;
+    this.terminate(slot.worker);
+    this.startFailed(kind);
+  }
+
+  /**
+   * A worker could not start: logs the line, fails every waiting task at once and begins or extends the back-off.
+   * A start that fails while a back-off runs (a second worker started with the first) does not extend it.
+   *
+   * @param kind the failure kind for the log line
+   */
+  private startFailed(kind: string): void {
+    this.report(`Preview worker failed to start (${kind})`);
+    if (!this.isBackingOff()) {
+      this.failedStarts++;
+      this.startAllowedAt = this.now() + startBackOffMs(this.failedStarts);
+    }
+    for (const task of this.queue.splice(0)) task.resolve(task.failure);
+  }
+
+  /**
+   * Marks a worker ready, ends the back-off and serves the queue.
+   *
+   * @param slot the worker's slot
+   */
+  private markReady(slot: Slot): void {
+    if (slot.ready || !this.slots.has(slot)) return;
+    clearTimeout(slot.startTimer);
+    slot.ready = true;
+    this.failedStarts = 0;
+    this.startAllowedAt = 0;
+    const task = slot.reserved;
+    slot.reserved = undefined;
+    if (task) this.dispatch(slot, task);
+    else this.pump();
   }
 
   /**
@@ -277,6 +397,10 @@ class PreviewWorkers {
    * @param message the message as received
    */
   private answer(slot: Slot, message: unknown): void {
+    if (isReady(message)) {
+      this.markReady(slot);
+      return;
+    }
     if (!isResponse(message) || !this.slots.has(slot) || slot.current?.id !== message.id) return;
     // A worker answered, so the module loads again: the next failure is news and is logged.
     this.lastReported = null;
@@ -346,6 +470,10 @@ class PreviewWorkers {
    */
   private removeSlot(slot: Slot): boolean {
     if (!this.slots.delete(slot)) return false;
+    clearTimeout(slot.startTimer);
+    const reserved = slot.reserved;
+    slot.reserved = undefined;
+    reserved?.resolve(reserved.failure);
     this.finish(slot, undefined);
     return true;
   }

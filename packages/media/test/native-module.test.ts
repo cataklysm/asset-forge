@@ -37,11 +37,14 @@ it('sharp resizes inside a worker thread', async () => {
 
   const worker = new Worker(TEST_WORKER_URL);
   try {
+    const messages: unknown[] = [];
     const response = await new Promise<WorkerResponse>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('worker did not answer')), 4000);
-      worker.once('message', (message: WorkerResponse) => {
+      worker.on('message', (message: unknown) => {
+        messages.push(message);
+        if (messages.length < 2) return;
         clearTimeout(timer);
-        resolve(message);
+        resolve(message as WorkerResponse);
       });
       worker.once('error', (error) => {
         clearTimeout(timer);
@@ -53,6 +56,7 @@ it('sharp resizes inside a worker thread', async () => {
       };
       worker.postMessage(request);
     });
+    expect(messages[0]).toEqual({ ready: true });
     expect(response).toEqual({ id: 1, result: 'ok' });
     // Read through a buffer: libvips caches opened files, which keeps them locked on Windows.
     expect(await sharp(await readFile(targetPath)).metadata()).toMatchObject({

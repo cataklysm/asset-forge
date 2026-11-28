@@ -1,7 +1,7 @@
 // worker_threads entry: answers each WorkerRequest from the parent port with a WorkerResponse.
 import { parentPort } from 'node:worker_threads';
 import { generatePreview, measureImage, modelJpeg } from './generate.js';
-import type { ImageSize, PreviewResult, WorkerJob, WorkerRequest, WorkerResponse } from './messages.js';
+import type { ImageSize, PreviewResult, WorkerJob, WorkerReady, WorkerRequest, WorkerResponse } from './messages.js';
 
 const port = parentPort;
 if (!port) throw new Error('preview-worker must run in a worker thread');
@@ -24,3 +24,7 @@ port.on('message', (request: WorkerRequest) => {
     port.postMessage(response);
   });
 });
+
+// The module and its imports have loaded: the pool may send work now.
+const ready: WorkerReady = { ready: true };
+port.postMessage(ready);

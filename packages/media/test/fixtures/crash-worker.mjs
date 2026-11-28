@@ -1,4 +1,4 @@
-// Test worker: exits the whole worker on a job whose source path ends with `crash`, throws an
+// Test worker: reports ready once loaded, exits the whole worker on a job whose source path ends with `crash`, throws an
 // uncaught error (naming the path) on one ending with `throw`, sends stray 'ok'-looking messages and
 // then answers 'none' on one ending with `noise`, otherwise answers 'ok' (a measurement: 1 x 1).
 import { parentPort } from 'node:worker_threads';
@@ -17,3 +17,4 @@ parentPort.on('message', (request) => {
   }
   parentPort.postMessage({ id: request.id, result: measure ? { width: 1, height: 1 } : 'ok' });
 });
+parentPort.postMessage({ ready: true });
