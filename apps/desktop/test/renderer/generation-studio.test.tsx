@@ -1159,7 +1159,7 @@ describe('GenerationStudio with library prompts', () => {
       prompts: [first, second],
       results: [fromFirst, fromSecond],
       handlers: {
-        'prompts:get': ({ id }) => (id === first.id ? pendingFirst.promise : structuredClone(second)),
+        'prompts:get': ({ promptId }) => (promptId === first.id ? pendingFirst.promise : structuredClone(second)),
       },
     });
     await modelsReady();
