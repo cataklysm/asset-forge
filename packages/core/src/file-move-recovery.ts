@@ -1,4 +1,5 @@
 import { InvalidOperationError } from './errors.js';
+import type { FileRecord } from '@assetforge/contracts';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
 import { requireReachableStorage } from './storage-reachability.js';
@@ -44,21 +45,30 @@ export async function recoverFileMoves(
 }
 
 /**
- * Commits a move whose binary already moved; a commit the repository refuses because the kind no longer fits the
+ * Commits a move whose binary already moved. A commit the repository refuses because the kind no longer fits the
  * file (a relocate or trash of a file in the trash, a restore of one outside it) would be refused on every open and
- * block restore and purge, so its row is discarded instead.
+ * block restore and purge, so the binary is moved back to the path the file row still holds and the row is then
+ * discarded. The move back never overwrites a binary at that path; when it fails the row stays for the next open.
  *
  * @param dependencies the storage, the files and the move rows of the workspace
- * @param fileId the file of the open move row
+ * @param move the open move row
+ * @param file the file row of the move
  * @returns how the row was resolved
+ * @throws when the commit fails otherwise or the binary cannot be moved back; the row then stays
  */
-async function commitOrDiscard(dependencies: MoveRecoveryDependencies, fileId: string): Promise<MoveResolution> {
+async function commitOrDiscard(
+  dependencies: MoveRecoveryDependencies,
+  move: FileMove,
+  file: FileRecord,
+): Promise<MoveResolution> {
   try {
-    await dependencies.fileMoves.commit(fileId);
+    await dependencies.fileMoves.commit(move.fileId);
     return 'completed';
   } catch (error) {
     if (!(error instanceof InvalidOperationError)) throw error;
-    await dependencies.fileMoves.abort(fileId);
+    // `move` rejects when the old path exists, so a binary there is never overwritten.
+    await dependencies.storage.move(move.targetRelativePath, file.relativePath);
+    await dependencies.fileMoves.abort(move.fileId);
     return 'discarded';
   }
 }
@@ -80,7 +90,7 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
     !(await dependencies.storage.exists(file.relativePath));
   // The move is one atomic rename, so an existing target means it happened; a source that only looked missing
   // because the share dropped can at most leave an orphan behind, never a row that points at nothing.
-  if (isMoved) return commitOrDiscard(dependencies, move.fileId);
+  if (isMoved) return commitOrDiscard(dependencies, move, file);
   // A share that dropped during the checks answers "missing"; never take that for a move that did not happen.
   await requireReachableStorage(dependencies.storage);
   await dependencies.fileMoves.abort(move.fileId);

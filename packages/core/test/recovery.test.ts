@@ -120,17 +120,37 @@ describe('recoverFileMoves for the trash', () => {
     expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
   });
 
-  it('discards a moved row whose commit no longer fits the file instead of failing on every open', async () => {
+  /** A trashed file with a relocate row whose binary already moved to `assets/x/a.png`. */
+  const misfitRelocate = async () => {
     const { storage, db } = await trashed();
     await db.fileMoves.abort(ID1);
     const relocate = { ...trashMove(ID1, 'a.png'), kind: 'relocate' as const, targetRelativePath: 'assets/x/a.png' };
     await db.fileMoves.begin(relocate);
     storage.files.set('assets/x/a.png', Buffer.from('a'));
+    return { storage, db };
+  };
+
+  it('moves the binary back and discards a moved row whose commit no longer fits the file', async () => {
+    const { storage, db } = await misfitRelocate();
 
     const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
 
     expect(result).toEqual({ completed: [], discarded: [ID1] });
     await expect(db.fileMoves.list()).resolves.toEqual([]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
+    expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
+    expect(storage.files.has('assets/x/a.png')).toBe(false);
+  });
+
+  it('keeps a misfit row and the binary at its target when the move back fails', async () => {
+    const { storage, db } = await misfitRelocate();
+    storage.failNext('move', new Error('EBUSY'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result).toEqual({ completed: [], discarded: [] });
+    expect(await db.fileMoves.list()).toMatchObject([{ fileId: ID1, kind: 'relocate' }]);
+    expect(storage.files.has('assets/x/a.png')).toBe(true);
     expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
   });
 

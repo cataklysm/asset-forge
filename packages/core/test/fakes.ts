@@ -991,10 +991,11 @@ class InMemoryFileMoves implements FileMoveRepository {
   async commit(fileId: string): Promise<FileRecord> {
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
-    // Mirrors the database: a kind that does not fit the file is refused and writes nothing.
-    if (this.files.isTrashed(fileId) !== (move.kind === 'restore')) {
-      throw new InvalidOperationError(`A ${move.kind} move does not fit file ${fileId}`);
-    }
+    // Mirrors `refuseAgainstTrash` of the database: a kind that does not fit the file is refused and writes nothing.
+    const trashed = this.files.isTrashed(fileId);
+    if (move.kind === 'relocate' && trashed) throw new InvalidOperationError('The file is in the trash');
+    if (move.kind === 'trash' && trashed) throw new InvalidOperationError('The file is already in the trash');
+    if (move.kind === 'restore' && !trashed) throw new InvalidOperationError('The file is not in the trash');
     const placement = { relativePath: move.targetRelativePath, assetId: move.targetAssetId, role: move.targetRole };
     let next: FileRecord;
     switch (move.kind) {
