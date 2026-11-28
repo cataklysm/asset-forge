@@ -64,7 +64,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `resultToken` of the jobs context has no reader left; `changeToken` is still read by `AnalysisResultDialog`, `GenerationDetails` and `GenerationStudio`. Remove the former or move the three dialogs to `useChanges`.
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
 - The project member table still uses a pager of 50 that resets on navigation.
-- The load-error list of `ProjectsScreen` is keyed by its message, so two identical errors share a React key.
 - The type select on the asset form is empty when loading the asset types fails.
 - No settings for the cache size and location; the preview worker timeout (30 s) is a constant.
 - The preview failure memory is per session and is not invalidated when a file changes.
@@ -94,9 +93,8 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 - Readability for a human developer (owner's request, 2026-11-27): the code is hard to follow and to extend by hand. Wanted as a rule for new code and as a pass over the existing code, without behaviour changes: every function documented with a description, its parameters and its return value; no promise-returning functions defined inside other functions where a named module-level function or a small state machine does the job; large files split by responsibility (`site-sessions.ts` done in the readability pilot, `provider-store.ts`, `FileBrowser.tsx`, `start()` in `index.ts`); descriptive names instead of one-letter ones, also in tests; a developer guide (`docs/architecture.md`) with one request traced from click to database and recipes for common extensions; Prettier and ESLint to hold the rule.
 - Readability pilot leftovers (2026-11-28): `download-handler.ts` is close to 400 lines, most of it doc comments; `sessionHop` and `fetchHop` stay promise executors with small closures; `PageLoad.poll` sets `isPolling` once and never resets it, so the poll started by `dom-ready` is the only one of a load (behaviour kept); the session hop is not pinned to the vetted address (the session's request filter vets the host a second time, by design).
-- Renderer AI readability leftovers (2026-11-28): The `messageOf` rule (fixed message unless `internal_error`) exists three times (`PromptEditor`, `SavePromptDialog`, `studio-actions.ts`). `MAX_ATTEMPTS` in `JobTable.tsx` copies the scheduler's constant from `packages/jobs` and can drift. `JobsScreen`, `GenerationStudio` and `StudioForm` keep component bodies over 40 lines, almost all of it JSX.
+- Renderer AI readability leftovers (2026-11-28): `JobsScreen`, `GenerationStudio` and `StudioForm` keep component bodies over 40 lines, almost all of it JSX.
 - The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
-- `ROLES = FileRoleSchema.options` with its option list is still declared in several renderer files; one shared role select is missing.
 - `ipc.ts` and `library-handlers.ts` import each other.
 - `AssetsScreen`, `AssetScreen` and `FileBrowser` are large and want splitting.
 - `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
@@ -113,7 +111,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Renderer shell readability pass (2026-11-28): UI texts still written in place: `Loading…` in `App`, `ProjectDetails`, `WorkflowSection` and `ProjectScreen`; `AppShell` and `PauseBanner` (Workspaces, Retry, Settings, the navigation names, Main); `TagChip` (AI tag, Remove …), `TagList` (Image/Asset/Prompt tags), `TagRow` (+ Add tag), `TagFilter` (Tags, At most 10 tags); `NewProjectDialog`, `ProjectDetails`, `ProjectScreen`, `ProjectMembers`, `AssignmentFields` and `WorkflowSection`; `INVALID_TAG` in `hooks/useTagRowEdit.ts` and `BUSY_TITLE` in `components/busy-title.ts`.
 - Renderer shell readability pass: `ProjectsScreen` (114 lines), the `TableRow` of `ProjectTable` (71) and `ProjectsToolbar` (42) are over the 40-line guide, and `ProjectsScreen` writes refs during render (`restore`, `lastSelected`, `lastToken`).
 - Desktop main readability pass (2026-11-28): Several site channels whose work is synchronous (for example `sites:list`, `sites:crawlProgress`, `sites:cancelCrawl`) are still wrapped in `async` handlers. `provider-store.ts` stays one file of about 300 code lines because load, save, delete and the key handling share one serial write order. The provider store and its gateway still take an `env` option (short form kept, it mirrors `process.env`).
-- Renderer files lane readability pass (2026-11-28): the component bodies of `FileBrowser`, `FileDetailDialog`, `AssetScreen`, `AssetsScreen`, `InboxScreen` and `SiteImportDialog` and the `Stage` of `ImageStage` stay over 40 lines, because they are hook wiring in a fixed order plus flat JSX; `useVirtualRows` is about 95 lines for the same reason. The nested JSX ternaries in `FileListBody`, the stage of `FileDetailDialog` and the body of `AssetsScreen` stay. `ROLES = FileRoleSchema.options` with its option list is still declared per file (`FileRoleControls` now has one `roleOptions()` for its two selects, `InboxSelection` keeps its own); one shared role select needs a component outside this lane. `messageOf` lives in `UrlImportDialog.tsx` although the site import, the studio, the prompt editor, `SavePromptDialog` and the provider settings import it from there (it belongs beside `describeError` in `api.ts`, which is outside this lane). The `disposed` ref of `UrlImportDialog` and the `live`/`active` flags of `FileOrigins` and `AssetSelection` could become one small hook. Splitting a hook body into smaller hooks moved `useState` slots (React state order inside the same component), which is invisible but not literally the same fiber layout; the `useId` strings of the inputs moved into `SiteProfileForm` differ from before.
+- Renderer files lane readability pass (2026-11-28): the component bodies of `FileBrowser`, `FileDetailDialog`, `AssetScreen`, `AssetsScreen`, `InboxScreen` and `SiteImportDialog` and the `Stage` of `ImageStage` stay over 40 lines, because they are hook wiring in a fixed order plus flat JSX; `useVirtualRows` is about 95 lines for the same reason. The nested JSX ternaries in `FileListBody`, the stage of `FileDetailDialog` and the body of `AssetsScreen` stay. The `disposed` ref of `UrlImportDialog` and the `live`/`active` flags of `FileOrigins` and `AssetSelection` could become one small hook. Splitting a hook body into smaller hooks moved `useState` slots (React state order inside the same component), which is invisible but not literally the same fiber layout; the `useId` strings of the inputs moved into `SiteProfileForm` differ from before.
 
 ## Tooling and tests
 
@@ -161,7 +159,7 @@ Found during the build:
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
-- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): `MAX_ATTEMPTS` is duplicated as a renderer constant (move it to `packages/contracts` with the next job type); an action reloads the list twice (its own reload token, then the poll that sees `changes` move); `focusedIndex` is a copy of the one in `FileBrowser.tsx` (share it); the count tooltip "Jobs in this workspace" shows the filtered total.
+- Jobs screen (`apps/desktop/src/renderer/src/screens/JobsScreen.tsx`): an action reloads the list twice (its own reload token, then the poll that sees `changes` move); the count tooltip "Jobs in this workspace" shows the filtered total.
 
 Tests:
 
@@ -388,7 +386,6 @@ Deferred by design:
 - Options are not part of the fingerprint: a file analysed before a change counts as analysed until `force`.
 - A request in flight keeps the options it was built with; a save applies from the next request.
 - The `openai` adapter and its request options were tested only against the mock provider, never against a real vLLM server.
-- The renderer form repeats the vision option limits as literals (`MAX_TOKENS_MAX` in `apps/desktop/src/renderer/src/provider-draft.ts`, used by `ProviderFields.tsx`, and the temperature bounds); it should import `TEMPERATURE_MIN`, `TEMPERATURE_MAX`, `MAX_TOKENS_MIN` and `MAX_TOKENS_MAX` from `packages/contracts/src/provider-settings.ts`.
 
 Found in the final review and not fixed:
 
@@ -553,9 +550,6 @@ Not covered by any automated check: the real windows. The hidden page window, th
 - `emptyTrash` in `packages/core/src/file-trash.ts` drops the per-item errors, so `trash:empty` cannot log their codes, and it counts a lost purge race (`not_found`) as failed.
 - A timed-out `stat` of the remembered import directory keeps a libuv thread busy on a hung share; keep one check in flight per directory.
 - Renaming a provider that is not paused no longer raises the change counter (invisible today, since no list shows the provider name from the feed).
-- The in-memory job fake (`packages/core/test/memory-jobs.ts`): `cancelPending` and `cancelPendingOfFile` should also clear `runAfter`, `errorCode` and `errorMessage`, as the SQLite repository now does.
-- The port `JobRepository.list` declares `lane?: string` while the SQLite repository also matches `null` (the test casts); widen it to `string | null`.
-- The in-memory analysis target reader in `packages/core/test` should reject a filter tag that does not normalise with `validation_failed`, as the SQLite reader now does.
 - Contracts: local count and id schema copies remain in `files.ts`, `tags.ts`, `ipc-jobs.ts`, `jobs.ts`, `prompts.ts`, `library.ts` and `workflows.ts`.
 - `recoverFileMoves` keeps open move rows when the storage is unreachable (intended); no test at that level pins it.
 - The literal `'The storage of this workspace is not reachable'` is duplicated in `file-move-recovery.ts` and `file-trash.ts`.
