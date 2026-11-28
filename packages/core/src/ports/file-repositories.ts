@@ -270,7 +270,8 @@ export interface FileOriginRepository {
    * Adds an origin to a file.
    *
    * @param origin the new row
-   * @returns false, writing nothing, when the file already has this URL or already carries MAX_FILE_ORIGINS
+   * @returns false, writing nothing, when the file already has this URL or already carries MAX_FILE_ORIGINS; rejects
+   *   with NotFoundError, writing nothing, when the file does not exist (purged in the meantime)
    */
   insert(origin: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean>;
 }

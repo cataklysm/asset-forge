@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MAX_FILE_ORIGINS } from '@assetforge/contracts';
-import type { WorkspaceDatabase } from '@assetforge/core';
+import { NotFoundError, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T1 = '2026-01-01T00:00:00.000Z';
@@ -86,6 +86,11 @@ describe('file origin repository', () => {
     expect(await db.fileOrigins.insert(origin(101, f, URL_A, T2))).toBe(false);
     expect(await db.fileOrigins.listByFile(f)).toEqual([{ id: uuid(100), url: URL_A, createdAt: T1 }]);
     expect(await db.fileOrigins.insert(origin(102, g, URL_A))).toBe(true);
+  });
+
+  test('rejects with NotFoundError, writing nothing, for a file that does not exist', async () => {
+    await expect(db.fileOrigins.insert(origin(100, uuid(9), URL_A))).rejects.toBeInstanceOf(NotFoundError);
+    expect(await db.fileOrigins.get(uuid(100))).toBeNull();
   });
 
   test(`a file takes at most ${MAX_FILE_ORIGINS} origins`, async () => {

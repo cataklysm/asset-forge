@@ -8,6 +8,7 @@ import {
   type SiteFilter,
 } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
+import { NotFoundError } from './errors.js';
 import { streamFailure } from './download-errors.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { openRemote, siteLoginOf } from './download-open.js';
@@ -335,13 +336,7 @@ async function recordImport(
   }
   const existing = isWithoutFile ? imported.duplicateOf[0] : undefined;
   if (existing !== undefined) {
-    // A file already carrying this URL or 50 origins answers false; the job still points at it.
-    await session.database.fileOrigins.insert({
-      id: session.newId(),
-      fileId: existing,
-      url: payload.url,
-      createdAt: session.now().toISOString(),
-    });
+    await addOriginToDuplicate(session, existing, payload.url);
     await setOutcome(session, job, existing, 'already_present');
     return;
   }
@@ -353,6 +348,30 @@ async function recordImport(
   // Nothing after this point fails the run: a later retry would keep a stale outcome.
   await setOutcome(session, job, file.id, null);
   await placeNewFile(dependencies, file.id, payload.target);
+}
+
+/**
+ * Adds the URL as a further origin of the duplicate; a file already carrying this URL or MAX_FILE_ORIGINS keeps
+ * its origins, and the job still points at it.
+ *
+ * @param session the open workspace
+ * @param fileId the duplicate
+ * @param url the downloaded address
+ * @returns resolves once the origin is written or refused; throws `download_duplicate_gone` when the duplicate was
+ *   purged since the import step named it
+ */
+async function addOriginToDuplicate(session: WorkspaceSession, fileId: string, url: string): Promise<void> {
+  try {
+    await session.database.fileOrigins.insert({
+      id: session.newId(),
+      fileId,
+      url,
+      createdAt: session.now().toISOString(),
+    });
+  } catch (error) {
+    if (error instanceof NotFoundError) throw new JobError('download_duplicate_gone');
+    throw error;
+  }
 }
 
 /**

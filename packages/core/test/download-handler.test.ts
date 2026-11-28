@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { FILE_DOWNLOAD_JOB, type FileTarget } from '@assetforge/contracts';
+import { FILE_DOWNLOAD_JOB, isRetryableJobError, JOB_ERROR_MESSAGES, type FileTarget } from '@assetforge/contracts';
 import {
   createAsset,
   createFileDownloadHandler,
@@ -233,6 +233,25 @@ describe('createFileDownloadHandler', () => {
     expect(t.staged()).toEqual([]);
     // The discarded pending row took its origin with it; only the two of the kept file remain.
     expect(t.db.fileOrigins.rows.size).toBe(2);
+  });
+
+  it('fails download_duplicate_gone, a retryable code, when the duplicate is purged before its origin is written', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('same') });
+    t.remote.answers.set('https://b.example/2.png', { body: Buffer.from('same') });
+    await t.download('https://a.example/1.png');
+    const existing = t.files()[0]!.id;
+    const insert = t.db.fileOrigins.insert.bind(t.db.fileOrigins);
+    // The purge lands between the import step, which named the duplicate, and the origin write.
+    t.db.fileOrigins.insert = async (row) => {
+      t.db.files.records.delete(existing);
+      t.db.fileOrigins.removeOfFile(existing);
+      return insert(row);
+    };
+    const { error } = await t.download('https://b.example/2.png', { skipDuplicates: true });
+    expect(codeOf(error)).toBe('download_duplicate_gone');
+    expect(isRetryableJobError('download_duplicate_gone')).toBe(true);
+    expect(JOB_ERROR_MESSAGES.download_duplicate_gone).toBe('The file with the same content was deleted meanwhile');
   });
 
   it('with skipDuplicates never moves the existing file into the target', async () => {

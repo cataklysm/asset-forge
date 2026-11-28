@@ -36,6 +36,7 @@ const DOWNLOAD_MESSAGES = {
   download_profile_missing: 'The site profile of this download no longer exists',
   download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
   download_browser_check: 'The site asks for a browser check',
+  download_duplicate_gone: 'The file with the same content was deleted meanwhile',
 } as const;
 
 const view = {
@@ -71,11 +72,16 @@ describe('download job contracts', () => {
     expect(JOB_ERROR_MESSAGES[code as keyof typeof DOWNLOAD_MESSAGES]).toBe(message);
   });
 
-  test('exactly three download codes are retryable', () => {
+  test('exactly four download codes are retryable', () => {
     const retryable = Object.keys(DOWNLOAD_MESSAGES).filter((c) =>
       isRetryableJobError(c as keyof typeof DOWNLOAD_MESSAGES),
     );
-    expect(retryable).toEqual(['download_unreachable', 'download_unavailable', 'download_throttled']);
+    expect(retryable).toEqual([
+      'download_unreachable',
+      'download_unavailable',
+      'download_throttled',
+      'download_duplicate_gone',
+    ]);
   });
 
   test('the download payload is v1 or v2', () => {

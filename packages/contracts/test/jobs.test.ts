@@ -82,6 +82,7 @@ describe('job contracts', () => {
       download_profile_missing: 'The site profile of this download no longer exists',
       download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
       download_browser_check: 'The site asks for a browser check',
+      download_duplicate_gone: 'The file with the same content was deleted meanwhile',
     });
   });
 
@@ -128,6 +129,7 @@ describe('job contracts', () => {
       'download_unreachable',
       'download_unavailable',
       'download_throttled',
+      'download_duplicate_gone',
     ]);
   });
 

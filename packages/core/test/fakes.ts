@@ -1701,9 +1701,9 @@ class InMemoryFileOrigins implements FileOriginRepository {
   }
 
   async insert(row: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean> {
+    if (!this.records.has(row.fileId)) throw new NotFoundError(`File ${row.fileId} does not exist`);
     const existing = this.ofFile(row.fileId);
     if (existing.length >= MAX_FILE_ORIGINS || existing.some((r) => r.url === row.url)) return false;
-    if (!this.records.has(row.fileId)) throw new Error('FOREIGN KEY constraint failed');
     if (this.rows.has(row.id)) throw new Error('UNIQUE constraint failed: file_origin.id');
     this.rows.set(row.id, { ...row });
     return true;
