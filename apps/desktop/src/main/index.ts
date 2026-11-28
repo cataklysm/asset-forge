@@ -28,7 +28,7 @@ import { getAppUrl, isAppUrl } from './app-url.js';
 import { findOriginalIn, findSourceIn, findVideoIn, handleMediaRequest } from './media-protocol.js';
 import { openFile } from './media-file.js';
 import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from './media-routes.js';
-import { isTrustedSender } from './sender.js';
+import { ipcRefusal } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 
 declare const __ASSETFORGE_DEV_MIGRATIONS_FOLDER__: string | null;
@@ -182,7 +182,7 @@ async function workspaceOpened(parts: AppParts): Promise<void> {
 }
 
 /**
- * Answers one IPC request, refusing it while quitting and from any sender but the main window.
+ * Answers one IPC request, refusing it from any sender but the main window and while quitting.
  *
  * @param state the shared state
  * @param handlers the IPC handlers
@@ -200,18 +200,8 @@ function handleIpc(
   event: IpcMainInvokeEvent,
   request: unknown,
 ): Promise<IpcResult<unknown>> {
-  if (state.shutdown !== 'running') {
-    return Promise.resolve({
-      ok: false,
-      error: { code: 'shutting_down', message: 'The application is shutting down' },
-    });
-  }
-  if (!isTrustedSender(event, state.mainWindow, (url) => isAppUrl(url, appUrl))) {
-    return Promise.resolve({
-      ok: false,
-      error: { code: 'forbidden_sender', message: 'IPC sender is not the main window' },
-    });
-  }
+  const refusal = ipcRefusal(event, state.mainWindow, (url) => isAppUrl(url, appUrl), state.shutdown !== 'running');
+  if (refusal !== null) return Promise.resolve(refusal);
   return dispatch(handlers, channel, request);
 }
 

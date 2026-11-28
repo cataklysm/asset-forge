@@ -37,7 +37,7 @@ export class ElectronDialogs implements Dialogs {
    * @returns their paths; none when cancelled
    */
   async pickFiles(): Promise<string[]> {
-    const defaultPath = this.importDirectory.current();
+    const defaultPath = await this.importDirectory.current();
     const result = await this.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       ...(defaultPath === undefined ? {} : { defaultPath }),

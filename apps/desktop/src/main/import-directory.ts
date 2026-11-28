@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
 import { writeAtomic } from './atomic-file.js';
 
@@ -7,8 +8,11 @@ export const IMPORT_DIRECTORY_FILE = 'import-directory.json';
 
 /** The directory the file picker of the import opens in. */
 export interface ImportDirectoryMemory {
-  /** @returns the remembered directory when it is stored well-formed and still exists as a directory. Never throws. */
-  current(): string | undefined;
+  /**
+   * @returns the remembered directory when it is stored well-formed and still exists as a directory, checked
+   *   within a short limit. Never rejects.
+   */
+  current(): Promise<string | undefined>;
   /**
    * Stores the directory of the first path. Best effort, never throws.
    *
@@ -36,32 +40,93 @@ function readStored(filePath: string): string | undefined {
 }
 
 /**
+ * How long the picker waits for the remembered directory to be checked. A disconnected mapped drive or an
+ * unreachable share can hold a check for seconds; the picker then opens where it would have anyway.
+ */
+export const DIRECTORY_CHECK_TIMEOUT_MS = 1000;
+
+/** What the memory needs besides its file; the defaults check the real file system. */
+export interface ImportDirectoryOptions {
+  /** Whether a path is an existing directory; may reject. */
+  isDirectory?: (path: string) => Promise<boolean>;
+  /** How long a check may take before the directory counts as gone. */
+  timeoutMs?: number;
+}
+
+/**
  * App-level memory of the directory the last import came from; the path never leaves the main process.
  *
  * @param filePath the file it is kept in
+ * @param options the directory check and its limit
  * @returns the memory
  */
-export function createImportDirectoryMemory(filePath: string): ImportDirectoryMemory {
+export function createImportDirectoryMemory(
+  filePath: string,
+  options: ImportDirectoryOptions = {},
+): ImportDirectoryMemory {
+  const check: DirectoryCheck = {
+    isDirectory: options.isDirectory ?? isDirectoryOnDisk,
+    timeoutMs: options.timeoutMs ?? DIRECTORY_CHECK_TIMEOUT_MS,
+  };
   return {
-    current: () => currentDirectory(filePath),
+    current: () => currentDirectory(filePath, check),
     remember: (filePaths) => rememberDirectory(filePath, filePaths),
   };
 }
 
+/** The directory check with its limit, options resolved. */
+interface DirectoryCheck {
+  /** Whether a path is an existing directory; may reject. */
+  isDirectory: (path: string) => Promise<boolean>;
+  /** How long a check may take. */
+  timeoutMs: number;
+}
+
 /**
- * The stored directory when it still exists as a directory. Never throws.
+ * Whether a path is an existing directory on disk, checked without blocking the event loop.
+ *
+ * @param path the path
+ * @returns true for a directory, false for anything else or a failed check
+ */
+async function isDirectoryOnDisk(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The stored directory when it still exists as a directory and the check answers in time. Never rejects.
  *
  * @param filePath the file it is kept in
+ * @param check the directory check and its limit
  * @returns the directory, or undefined
  */
-function currentDirectory(filePath: string): string | undefined {
+async function currentDirectory(filePath: string, check: DirectoryCheck): Promise<string | undefined> {
   const directory = readStored(filePath);
   if (directory === undefined) return undefined;
-  try {
-    return statSync(directory).isDirectory() ? directory : undefined;
-  } catch {
-    return undefined;
-  }
+  return (await withinLimit(check, directory)) ? directory : undefined;
+}
+
+/**
+ * Runs the directory check, counting a rejection or an answer later than the limit as false.
+ *
+ * @param check the directory check and its limit
+ * @param directory the directory to check
+ * @returns whether the directory exists, as far as the check could tell in time
+ */
+function withinLimit(check: DirectoryCheck, directory: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), check.timeoutMs);
+    const settle = (isDirectory: boolean) => {
+      clearTimeout(timer);
+      resolve(isDirectory);
+    };
+    Promise.resolve()
+      .then(() => check.isDirectory(directory))
+      .then(settle, () => settle(false));
+  });
 }
 
 /**
