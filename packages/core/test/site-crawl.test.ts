@@ -40,8 +40,16 @@ function profile(over: Partial<SiteProfile> = {}): SiteProfile {
 type Page = PageLoadResult | ((signal: AbortSignal) => PageLoadResult | Promise<PageLoadResult>);
 type Load = { url: string; queries: Record<string, string>; waitFor: string };
 
-/** A loaded page; without `baseUrl` the double answers the requested URL as the base, like a page without redirect. */
-const ok = (results: Record<string, string[]>, baseUrl = ''): PageLoadResult => ({ ok: true, results, baseUrl });
+/**
+ * A loaded page; without `baseUrl` or `finalUrl` the double answers the requested URL for it, like a page without
+ * redirect.
+ */
+const ok = (results: Record<string, string[]>, baseUrl = '', finalUrl = ''): PageLoadResult => ({
+  ok: true,
+  results,
+  baseUrl,
+  finalUrl,
+});
 
 function deps(
   pages: Record<string, Page>,
@@ -63,7 +71,8 @@ function deps(
         const page = pages[url];
         if (page === undefined) return { ok: false, reason: 'failed' };
         const result = typeof page === 'function' ? await page(r.signal) : page;
-        return result.ok && result.baseUrl === '' ? { ...result, baseUrl: url } : result;
+        if (!result.ok) return result;
+        return { ...result, baseUrl: result.baseUrl || url, finalUrl: result.finalUrl || url };
       },
     },
     async robots(origin) {
@@ -174,6 +183,38 @@ describe('crawlSite', () => {
       pageFailures: 0,
     });
     expect(d.loads.map((l) => l.url)).toEqual([`${G}/gallery`, `${G}/gallery/page2`]);
+  });
+
+  it('counts the final URL of an in-site redirect as seen, so a link back to it is not loaded again', async () => {
+    const d = deps({
+      [`${G}/gallery`]: ok({ thumbnails: ['/1.jpg'], pagination: ['/gallery/p2'] }, `${G}/gallery/`, `${G}/gallery/`),
+      [`${G}/gallery/p2`]: ok({ thumbnails: ['/2.jpg'], pagination: ['/gallery/', '/gallery'] }),
+    });
+    const result = await run(d, profile({ pagination: '//a[@rel="next"]', maxPages: 2 }), `${G}/gallery`);
+    expect(d.loads.map((l) => l.url)).toEqual([`${G}/gallery`, `${G}/gallery/p2`]);
+    // The final URL is no page of its own: it neither counts toward maxPages nor truncates the crawl.
+    expect(result).toMatchObject({ pages: 2, truncated: null });
+  });
+
+  it('ignores a final URL off the site or that is no URL', async () => {
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: [], pagination: ['/g?p=2'] }, '', 'https://other.test/g?p=2'),
+      [`${G}/g?p=2`]: ok({ thumbnails: [], pagination: ['/g?p=3'] }, '', 'not a url'),
+      [`${G}/g?p=3`]: ok({ thumbnails: [], pagination: [] }),
+    });
+    await run(d, profile({ pagination: '//p' }));
+    expect(d.loads.map((l) => l.url)).toEqual([`${G}/g`, `${G}/g?p=2`, `${G}/g?p=3`]);
+  });
+
+  it('loads a detail page once when a thumbnail links to the final URL of another', async () => {
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['/d/1', '/d/1/'] }),
+      [`${G}/d/1`]: ok({ file: ['/f/1.jpg'] }, '', `${G}/d/1/`),
+      [`${G}/d/1/`]: ok({ file: ['/f/1.jpg'] }),
+    });
+    const result = await run(d, profile({ file: '//img' }));
+    expect(d.loads.map((l) => l.url)).toEqual([`${G}/g`, `${G}/d/1`]);
+    expect(result.files).toEqual([`${G}/f/1.jpg`]);
   });
 
   it('resolves detail file links against the final URL of the detail page', async () => {

@@ -16,12 +16,12 @@ import { pngOf } from './png-fixture.js';
 // the profile's login. A real hidden window cannot run under ELECTRON_RUN_AS_NODE, so the page view is jsdom fed by
 // plain HTTP, and the extraction script runs in the jsdom window as it would in the page's isolated world.
 
+/** A jsdom document as the page view uses it. */
+type JsdomPage = { window: { eval(code: string): unknown; close(): void; location: { href: string } } };
+
 // jsdom ships no types here; only the constructor is used.
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
-  JSDOM: new (
-    html: string,
-    options: { url: string; runScripts: 'outside-only' },
-  ) => { window: { eval(code: string): unknown; close(): void } };
+  JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => JsdomPage;
 };
 
 const COOKIE_VALUE = 'secret-session-value';
@@ -71,7 +71,7 @@ function get(url: string): Promise<{ status: number; location: string | null; bo
 
 /** A page view on jsdom; a redirect off the site is refused as the window's navigation guard refuses it. */
 function jsdomView(site: string): PageView {
-  let page: { window: { eval(code: string): unknown; close(): void } } | null = null;
+  let page: JsdomPage | null = null;
   const left: ((url: string) => void)[] = [];
   const responses: ((status: number) => void)[] = [];
   return {
@@ -96,6 +96,7 @@ function jsdomView(site: string): PageView {
       return 'failed';
     },
     evaluate: async (code) => page?.window.eval(code),
+    currentUrl: () => page?.window.location.href ?? '',
     stop() {},
     onLeftSite: (listener) => left.push(listener),
     onResponse: (listener) => responses.push(listener),

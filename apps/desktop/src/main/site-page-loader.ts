@@ -33,6 +33,8 @@ export interface PageView {
   navigate(url: string, onParsed?: () => void): Promise<'loaded' | 'aborted' | 'failed'>;
   /** Runs `code` in the isolated world and answers its value. */
   evaluate(code: string): Promise<unknown>;
+  /** The main frame's URL now, after any redirect; empty when the window is gone. */
+  currentUrl(): string;
   stop(): void;
   /** Called with the target whenever a main-frame navigation or redirect off the site was refused. */
   onLeftSite(listener: (url: string) => void): void;
@@ -301,7 +303,12 @@ class PageLoad {
     if (extraction !== null && (extraction.counts[this.request.waitFor] ?? 0) > 0) {
       const counts = JSON.stringify(extraction.counts);
       if (this.settledAt !== null || counts === seen) {
-        this.finish({ ok: true, results: extraction.results, baseUrl: extraction.baseUrl });
+        this.finish({
+          ok: true,
+          results: extraction.results,
+          baseUrl: extraction.baseUrl,
+          finalUrl: this.view.currentUrl(),
+        });
         return null;
       }
       remembered = counts;
