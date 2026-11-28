@@ -204,11 +204,11 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
   const shownError = error ?? tasks.error ?? selected.error;
   return (
     <>
-      <Dialog open title={SITE_IMPORT_LABEL} size="wide" onClose={onClose} initialFocusRef={selectRef}>
-        <div className="flex flex-col gap-4">
-          <p className={`text-sm ${MUTED}`}>{SITE_BACKGROUND_HINT}</p>
-          <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
-            <div className={`rounded-control border p-3 ${BORDER}`}>
+      <Dialog open title={SITE_IMPORT_LABEL} size="workspace" onClose={onClose} initialFocusRef={selectRef}>
+        <div className="flex h-full min-h-0 flex-col gap-4">
+          <p className={`shrink-0 text-sm ${MUTED}`}>{SITE_BACKGROUND_HINT}</p>
+          <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:overflow-hidden">
+            <div className={`min-h-0 overflow-y-auto overscroll-contain rounded-control border p-3 ${BORDER}`}>
               <SiteProfileForm
                 selectId={selectId}
                 selectRef={selectRef}
@@ -226,7 +226,7 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
                 onLogIn={() => void logIn()}
               />
             </div>
-            <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto overscroll-contain">
               <SiteExtractionQueue
                 urls={urls}
                 target={target}
@@ -273,11 +273,11 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
             </div>
           </div>
           {shownError !== null && (
-            <p role="alert" className={ALERT}>
+            <p role="alert" className={`shrink-0 ${ALERT}`}>
               {shownError}
             </p>
           )}
-          <div className={`flex justify-end border-t pt-3 ${BORDER}`}>
+          <div className={`flex shrink-0 justify-end border-t pt-3 ${BORDER}`}>
             <button type="button" className={BUTTON} onClick={onClose}>
               {CLOSE_LABEL}
             </button>

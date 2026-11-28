@@ -175,9 +175,14 @@ export function SiteCrawlReview({ task, busy, onImport, onCancel, onLogIn, onRet
               {SITE_CLEAR_SELECTION_LABEL}
             </button>
           </div>
-          <div className={`overflow-x-auto rounded-control border ${BORDER}`}>
+          <div
+            role="region"
+            aria-label={FOUND_FILES_LABEL}
+            tabIndex={0}
+            className={`max-h-[min(40dvh,20rem)] overflow-auto overscroll-contain rounded-control border ${BORDER} ${FOCUS}`}
+          >
             <table className="w-full text-left text-sm" aria-label={FOUND_FILES_LABEL}>
-              <thead className={`border-b ${BORDER}`}>
+              <thead className={`sticky top-0 z-10 border-b bg-surface ${BORDER}`}>
                 <tr>
                   <th className="p-2">Import</th>
                   <th className="p-2">File / source page</th>

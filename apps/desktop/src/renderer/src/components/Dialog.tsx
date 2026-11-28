@@ -12,19 +12,21 @@ interface Props {
   onClose(): void;
   /** Focused when the dialog opens; otherwise the browser focuses the first focusable element. */
   initialFocusRef?: RefObject<HTMLElement | null>;
-  /** `detail` renders its content edge to edge; the content brings its own header. */
-  size?: 'form' | 'wide' | 'detail';
+  /** `workspace` bounds a working surface to the viewport; `detail` also brings its own header. */
+  size?: 'form' | 'wide' | 'workspace' | 'detail';
   /** A counter; every change while open brings the mounted dialog to the top again. */
   raise?: number;
   /** The content, rendered only while open. */
   children: ReactNode;
 }
 
-/** The width (and for `detail` the height) of each size. */
+/** Dialog widths; workspace and detail surfaces also have a fixed viewport-relative height. */
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
   /** A form with two columns. */
   wide: 'w-[min(94vw,64rem)]',
+  /** A working surface with independently scrolling content and a visible footer. */
+  workspace: 'w-[min(94vw,76rem)] h-[calc(100dvh-3rem)] max-h-none overflow-hidden',
   // The window size minus an even margin; the UA's max-width/max-height would cap it otherwise.
   detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none overflow-hidden',
 } as const;
@@ -49,7 +51,7 @@ function DialogBody({
   if (detail) return <div className="h-full">{children}</div>;
   return (
     <div className="flex h-full flex-col gap-4 p-5">
-      <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate`}>
+      <h2 id={titleId} title={title} className={`${SECTION_TITLE} shrink-0 truncate`}>
         {title}
       </h2>
       <div className="min-h-0 flex-1">{children}</div>

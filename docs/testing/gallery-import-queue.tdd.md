@@ -113,3 +113,7 @@ The merge history and remote `main` identify the final integration commits; no f
 The owner reported that eligible-file results expand the dialog indefinitely. A native layout check reproduced this at a 1280 × 800 content viewport with 70 candidates: the file-list wrapper measured 2671 px high, dialog scroll content reached 3857 px, and the Close button began at y=3820, outside the viewport. The check failed the requirement that the file list leave room for controls and scroll internally.
 
 This visual regression is verified with real browser geometry, not jsdom class-name assertions. The isolated fixture and screenshots stay outside the repository and reuse the committed native smoke runner.
+
+The fix uses a viewport-height workspace dialog with independently scrolling profile/content columns and a non-shrinking Close footer. The candidate table has its own keyboard-focusable scroll region, capped at the smaller of 40 dvh and 20 rem, with a sticky header. Existing form/wide dialog sizing is unchanged.
+
+Native GREEN measurements: at 1280 × 800, both 70 and 5,000 candidates keep the dialog at 752 px and the file viewport at 320 px. At 1024 × 640, they measure 592 px and 256 px. The dialog has no outer overflow, Close stays inside the viewport, and Import selected remains reachable after scrolling the content pane. All 1,059 renderer tests across 55 files passed, as did workspace typechecking and lint (zero errors).
