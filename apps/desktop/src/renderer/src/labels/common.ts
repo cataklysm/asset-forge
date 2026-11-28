@@ -13,3 +13,13 @@ export function label(value: string): string {
 export const RETRY_LABEL = 'Retry';
 export const SAVE_LABEL = 'Save';
 export const CANCEL_LABEL = 'Cancel';
+
+/**
+ * The count line below the shown failure lines of a result strip: '4900 more failed'.
+ *
+ * @param count the number of failures not shown
+ * @returns the count text
+ */
+export function moreFailedText(count: number): string {
+  return `${count} more failed`;
+}

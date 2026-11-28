@@ -2,6 +2,7 @@ import { X } from 'lucide-react';
 import type { FileBatchResult, ImportResult } from '@assetforge/contracts';
 import { ApiError, describeError } from '../api';
 import { baseName } from '../import-result';
+import { moreFailedText } from '../labels';
 import { ALERT, BORDER, ICON_BUTTON_INLINE } from '../ui';
 
 // The outcome of a batch above a list, and the failures and titles that feed it.
@@ -73,6 +74,9 @@ export function batchResult(done: number, verb: string, failures: ResultFailure[
   return failures.length === 0 ? null : { title: `${done} ${verb}, ${failures.length} failed`, failures };
 }
 
+/** The most failure lines a strip shows; a count line stands for the rest. */
+export const MAX_FAILURE_LINES = 100;
+
 /** The props of the strip. */
 interface Props {
   /** The title, such as "3 imported, 1 failed". */
@@ -84,7 +88,8 @@ interface Props {
 }
 
 /**
- * The outcome of a batch: a title such as "3 imported, 1 failed" and one row per failure.
+ * The outcome of a batch: a title such as "3 imported, 1 failed" and one row per failure, at most
+ * `MAX_FAILURE_LINES` in a scroll box of bounded height and a count line for the rest.
  *
  * @param props the title, the failures and the dismiss action
  * @returns the strip
@@ -99,13 +104,16 @@ export function ResultStrip({ title, failures, onDismiss }: Props) {
       <div className="min-w-0 flex-1 space-y-1">
         <p>{title}</p>
         {failed && (
-          <ul className="space-y-0.5 text-sm">
-            {failures.map((failure) => (
+          <ul className="max-h-48 space-y-0.5 overflow-y-auto text-sm">
+            {failures.slice(0, MAX_FAILURE_LINES).map((failure) => (
               <li key={failure.key} className="break-words">
                 <span className="font-semibold">{failure.name}</span>: {failure.message}
               </li>
             ))}
           </ul>
+        )}
+        {failures.length > MAX_FAILURE_LINES && (
+          <p className="text-sm">{moreFailedText(failures.length - MAX_FAILURE_LINES)}</p>
         )}
       </div>
       <button type="button" className={ICON_BUTTON_INLINE} aria-label="Dismiss" title="Dismiss" onClick={onDismiss}>
