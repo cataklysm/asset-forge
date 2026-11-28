@@ -33,6 +33,8 @@ export const MOVE_JOBS_TITLE = 'Moves the waiting jobs of a provider to another 
 export const MOVE_LABEL = 'Move';
 export const MOVE_FROM = 'From';
 export const MOVE_TO = 'To';
+/** The tooltip of a target entry whose job queue is paused: moved jobs wait there until it is resumed. */
+export const PAUSED_TITLE = 'paused';
 /**
  * '3 waiting'.
  *

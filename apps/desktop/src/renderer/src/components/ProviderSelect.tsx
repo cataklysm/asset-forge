@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from 'react';
 import { purposeOf, type ProviderPurpose } from '@assetforge/contracts';
-import { NO_PROVIDER, PROVIDER_LABEL, PROVIDER_STATE_LABELS, providerOptionLabel } from '../labels';
+import { NO_PROVIDER, PAUSED_TITLE, PROVIDER_LABEL, PROVIDER_STATE_LABELS, providerOptionLabel } from '../labels';
 import { providerStatus, useProviders } from '../provider-context';
 import { SELECT } from '../ui';
 
@@ -13,7 +13,12 @@ interface Props {
   exclude?: string | null;
   /** The purpose of the entries offered; `vision` (image analysis) unless given. */
   purpose?: ProviderPurpose;
+  /** Entries whose job queue is paused: their option, and the select while one is chosen, say so in the tooltip. */
+  pausedIds?: ReadonlySet<string>;
 }
+
+/** No entry is paused. */
+const NONE_PAUSED: ReadonlySet<string> = new Set();
 
 /** The keys that open a native select. */
 const OPENING_KEYS: ReadonlySet<string> = new Set([' ', 'Enter', 'F4']);
@@ -24,7 +29,14 @@ const OPENING_KEYS: ReadonlySet<string> = new Set([' ', 'Enter', 'F4']);
  *
  * @param props the selected entry, its setter and which entries are offered
  */
-export function ProviderSelect({ value, onChange, disabled = false, exclude = null, purpose = 'vision' }: Props) {
+export function ProviderSelect({
+  value,
+  onChange,
+  disabled = false,
+  exclude = null,
+  purpose = 'vision',
+  pausedIds = NONE_PAUSED,
+}: Props) {
   const state = useProviders();
   const providers = (state.list?.providers ?? []).filter(
     (entry) => purposeOf(entry.kind) === purpose && entry.id !== exclude,
@@ -45,6 +57,7 @@ export function ProviderSelect({ value, onChange, disabled = false, exclude = nu
       className={`min-w-0 ${SELECT}`}
       aria-label={PROVIDER_LABEL}
       value={listed ? value : ''}
+      title={listed && pausedIds.has(value) ? PAUSED_TITLE : undefined}
       disabled={disabled}
       aria-busy={state.loading || undefined}
       onMouseDown={() => state.checkAll()}
@@ -53,7 +66,7 @@ export function ProviderSelect({ value, onChange, disabled = false, exclude = nu
     >
       {!listed && <option value="">{NO_PROVIDER}</option>}
       {providers.map((entry) => (
-        <option key={entry.id} value={entry.id}>
+        <option key={entry.id} value={entry.id} title={pausedIds.has(entry.id) ? PAUSED_TITLE : undefined}>
           {providerOptionLabel(entry.name, PROVIDER_STATE_LABELS[providerStatus(state, entry.id)])}
         </option>
       ))}
