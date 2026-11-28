@@ -8,7 +8,7 @@ import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@asset
 export interface TagRepository {
   /**
    * Tags with at least one assignment whose name starts with `prefix` (already normalised); most used first, then by
-   * name.
+   * name. Assignments of files in the trash do not count.
    *
    * @param request the normalised prefix and the most tags to answer
    * @returns the suggestions
@@ -55,8 +55,9 @@ export interface TagRepository {
    */
   removeFromFile(assignment: { fileId: string; name: string }): Promise<void>;
   /**
-   * One transaction over a batch: throws `NotFoundError` for any unknown file and
-   * `ValidationFailedError` for any file that is not complete before it writes anything; then
+   * One transaction over a batch: throws `NotFoundError` for any unknown file, then
+   * `ValidationFailedError` for any file that is not complete, then `InvalidOperationError` for any file in the
+   * trash, before it writes anything; then
    * adds the assignment to every file by the rule above, reindexes each distinct
    * asset once and returns the records in request order.
    *
