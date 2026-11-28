@@ -2,7 +2,7 @@ import type { FileRole } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, type FileMove, type FileMoveRepository } from '@assetforge/core';
 import { asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { clearCoverOutside, toRecordWithTags } from './file-repository.js';
+import { clearCoverOutside, toRecordWithTags } from './file-records.js';
 import { file, fileMove } from './schema.js';
 import { reindexAssets } from './search-index.js';
 

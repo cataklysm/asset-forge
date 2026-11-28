@@ -2,7 +2,7 @@ import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@asset
 import { InvalidOperationError, NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { toRecords } from './file-repository.js';
+import { toRecords } from './file-records.js';
 import { parseTags } from './proposal-tags.js';
 import { assetTag, file, fileAnalysisProposal, fileTag, promptTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';

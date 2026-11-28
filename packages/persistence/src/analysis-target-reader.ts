@@ -2,7 +2,7 @@ import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, normalizeTagName, type AnalysisP
 import type { AnalysisFingerprint, AnalysisTargetEntry, AnalysisTargetReader } from '@assetforge/core';
 import { and, asc, eq, gt, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { fileListWhere } from './file-repository.js';
+import { fileListWhere } from './file-list.js';
 import { qualified } from './qualified.js';
 import { file, fileAnalysis, fileAnalysisProposal, job } from './schema.js';
 import { matchingAssetIds, type Tx } from './search-index.js';
