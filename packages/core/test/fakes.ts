@@ -365,12 +365,15 @@ class InMemoryTags implements TagRepository {
 
   /** Throws for an unknown or incomplete file before anything is written, like one transaction. */
   private async requireCompleteFiles(fileIds: readonly string[]): Promise<void> {
-    for (const id of fileIds) {
+    // Mirrors the database: every id is looked up first, then completeness, then the trash.
+    const records = fileIds.map((id) => {
       const rec = this.files!.records.get(id);
       if (!rec) throw new NotFoundError(`File ${id} does not exist`);
-      if (rec.status !== 'complete') throw new ValidationFailedError(`File ${id} is not completely imported`);
-      if (rec.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
-    }
+      return rec;
+    });
+    const incomplete = records.find((rec) => rec.status !== 'complete');
+    if (incomplete) throw new ValidationFailedError(`File ${incomplete.id} is not completely imported`);
+    if (records.some((rec) => rec.deletedAt !== null)) throw new InvalidOperationError('The file is in the trash');
   }
 
   private async recordsOf(fileIds: readonly string[]): Promise<FileRecord[]> {
@@ -827,7 +830,9 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   async getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
     const proposal = this.proposals.get(fileId);
     if (!proposal) return null;
-    return { ...structuredClone(proposal), stale: this.files.records.get(fileId)?.sha256 !== proposal.sha256 };
+    const record = this.files.records.get(fileId);
+    const stale = record?.status !== 'complete' || record.sha256 !== proposal.sha256;
+    return { ...structuredClone(proposal), stale };
   }
 
   async acceptProposal(r: {
@@ -986,6 +991,11 @@ class InMemoryFileMoves implements FileMoveRepository {
   async commit(fileId: string): Promise<FileRecord> {
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
+    // Mirrors `refuseAgainstTrash` of the database: a kind that does not fit the file is refused and writes nothing.
+    const trashed = this.files.isTrashed(fileId);
+    if (move.kind === 'relocate' && trashed) throw new InvalidOperationError('The file is in the trash');
+    if (move.kind === 'trash' && trashed) throw new InvalidOperationError('The file is already in the trash');
+    if (move.kind === 'restore' && !trashed) throw new InvalidOperationError('The file is not in the trash');
     const placement = { relativePath: move.targetRelativePath, assetId: move.targetAssetId, role: move.targetRole };
     let next: FileRecord;
     switch (move.kind) {
@@ -1020,7 +1030,7 @@ class InMemoryAssetTypes implements AssetTypeRepository {
   readonly rows = new Map<string, AssetType>();
 
   async list(): Promise<AssetType[]> {
-    return [...this.rows.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    return [...this.rows.values()].sort((a, b) => a.sortOrder - b.sortOrder || compareBinary(a.name, b.name));
   }
 
   async get(id: string): Promise<AssetType | null> {
@@ -1140,10 +1150,18 @@ class InMemoryAssetWorkflows implements AssetWorkflowRepository {
   readonly workflows = new Map<string, WorkflowRow>(); // by assetId
   readonly steps = new Map<string, StepRow>();
 
+  /** Wired by the database: whether an asset row exists, for the foreign key of `asset_id`. */
+  assetExists: (assetId: string) => boolean = () => true;
+
   constructor(private readonly templates: InMemoryWorkflowTemplates) {}
 
   async insert(w: WorkflowRow, steps: NewWorkflowStep[]): Promise<void> {
     if (this.workflows.has(w.assetId)) throw new Error('UNIQUE constraint failed: asset_workflow.asset_id');
+    if (!this.assetExists(w.assetId)) throw new Error('FOREIGN KEY constraint failed');
+    if (!this.templates.versions.has(w.templateVersionId)) throw new Error('FOREIGN KEY constraint failed');
+    if ([...this.steps.keys()].some((id) => steps.some((s) => s.id === id))) {
+      throw new Error('UNIQUE constraint failed: asset_workflow_step.id');
+    }
     for (const s of steps) {
       if (this.templates.definition(s.stepDefinitionId) === null) throw new Error('FOREIGN KEY constraint failed');
     }
@@ -1243,8 +1261,33 @@ function progressOf(steps: readonly { mandatory: boolean; state: WorkflowStepSta
   return { done: mandatory.filter((s) => s.state === 'done').length, total: mandatory.length };
 }
 
+/**
+ * SQLite's built-in `lower()`: only the ASCII letters A to Z are folded.
+ *
+ * @param text the text
+ * @returns the text with A to Z in lower case
+ */
+export const sqliteLower = (text: string): string => text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+
+/**
+ * SQLite's default BINARY collation on UTF-8 text: code point order.
+ *
+ * @param a the first text
+ * @param b the second text
+ * @returns negative, zero or positive like a comparator
+ */
+export function compareBinary(a: string, b: string): number {
+  const left = [...a].map((c) => c.codePointAt(0)!);
+  const right = [...b].map((c) => c.codePointAt(0)!);
+  for (let index = 0; index < Math.min(left.length, right.length); index++) {
+    if (left[index] !== right[index]) return left[index]! - right[index]!;
+  }
+  return left.length - right.length;
+}
+
+/** `order by lower(name), id` as the SQLite repositories sort. */
 const byNameThenId = <T extends { name: string; id: string }>(a: T, b: T) =>
-  a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  compareBinary(sqliteLower(a.name), sqliteLower(b.name)) || compareBinary(a.id, b.id);
 
 function definedOnly<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
@@ -1674,6 +1717,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     this.tags.proposals = this.proposals;
     this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
+    this.assetWorkflows.assetExists = (assetId) => this.assets.rows.has(assetId);
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     this.files.hasRunningGeneration = (fileId) =>
       this.jobs.rows.some((j) => j.fileId === fileId && j.type === IMAGE_GENERATE_JOB && j.status === 'running');
@@ -1685,6 +1729,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
       this.proposals.delete(fileId);
       const jobs = this.jobs.rows;
       jobs.splice(0, jobs.length, ...jobs.filter((j) => j.fileId !== fileId));
+      // `asset.cover_file_id` is `set null` in SQLite.
+      for (const [assetId, coverId] of this.covers) if (coverId === fileId) this.covers.delete(assetId);
     };
   }
 

@@ -457,6 +457,15 @@ describe('purgeFiles', () => {
     expect(unknown!.error).toBeInstanceOf(NotFoundError);
   });
 
+  it('purging a failed file that is a chosen cover clears the cover like the set null rule', async () => {
+    const { db, asset, importOne } = await setup();
+    const cover = await importOne('a.png', { assetId: asset.id, role: 'reference' });
+    await db.assets.setCover(asset.id, cover.id, 'x');
+    await db.files.markFailed(cover.id, 'Import was interrupted');
+    expect(await db.files.purge(cover.id)).toBe(true);
+    expect(await db.assets.getCover(asset.id)).toEqual({ coverFileId: null, coverIsChosen: false });
+  });
+
   it('restore of a live file is refused and of an unknown id is not_found', async () => {
     const { session, importOne } = await setup();
     const file = await importOne('a.png');

@@ -27,6 +27,21 @@ async function completeFile(session: WorkspaceSession, fileId: string): Promise<
 }
 
 /**
+ * The absolute path of an original the media protocol serves, refused while the storage cannot be reached, so a
+ * dropped share answers "unreachable" instead of a path that then reads as missing. Previews (served from the cache
+ * while a share is down) and videos (resolved on every range request) skip this check.
+ *
+ * @param session the open workspace
+ * @param relativePath the file's relative path
+ * @returns the absolute path
+ * @throws StorageUnreachableError while the storage cannot be reached
+ */
+async function reachablePath(session: WorkspaceSession, relativePath: string): Promise<string> {
+  await requireReachableStorage(session.storage);
+  return session.storage.absolutePath(relativePath);
+}
+
+/**
  * null unless the file exists, is complete, has a checksum and is previewable or a video. Storage errors
  * propagate.
  *
@@ -82,7 +97,7 @@ export async function resolveOriginalSource(session: WorkspaceSession, fileId: s
   if (file === null || viewSource(file.mimeType, file.width, file.height) !== 'original') return null;
   const mimeType = ORIGINAL_MIME_TYPES.find((type) => type === file.mimeType);
   if (mimeType === undefined) return null;
-  return { absolutePath: await session.storage.absolutePath(file.relativePath), mimeType };
+  return { absolutePath: await reachablePath(session, file.relativePath), mimeType };
 }
 
 /**
