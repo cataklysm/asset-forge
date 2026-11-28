@@ -10,6 +10,8 @@ export const workspace = sqliteTable('workspace', {
   name: text('name').notNull(),
   createdAt: text('created_at').notNull(),
   derivedDataVersion: integer('derived_data_version'),
+  // Nullable in SQL so the migration can add it; every row gets one (migration 0021, else drawn by `init`).
+  lineageId: text('lineage_id'),
 });
 
 /** A storage the files of the workspace live on; every file row names one. */

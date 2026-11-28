@@ -1,6 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { InvalidOperationError, type WorkspaceMeta, type WorkspaceMetaRepository } from '@assetforge/core';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { workspace } from './schema.js';
+
+/** The number of random bytes of a lineage id (32 hex characters). */
+const LINEAGE_BYTES = 16;
 
 /**
  * The workspace row over the workspace database.
@@ -16,6 +20,15 @@ export function createMetaRepository(database: BetterSQLite3Database): Workspace
 }
 
 /**
+ * A new random lineage id.
+ *
+ * @returns 32 lower-case hex characters
+ */
+export function newLineageId(): string {
+  return randomBytes(LINEAGE_BYTES).toString('hex');
+}
+
+/**
  * The workspace row.
  *
  * @param database the workspace database
@@ -28,16 +41,18 @@ async function getMeta(database: BetterSQLite3Database): Promise<WorkspaceMeta |
       formatVersion: workspace.formatVersion,
       name: workspace.name,
       createdAt: workspace.createdAt,
+      lineageId: workspace.lineageId,
     })
     .from(workspace)
     .limit(1)
     .get();
-  // The lineage column comes with the next migration; until then every row answers an empty lineage.
-  return row === undefined ? null : { ...row, lineageId: '' };
+  if (row === undefined) return null;
+  // Migration 0021 gives every row a lineage, so a null cannot occur; it reads as empty and is never written back.
+  return { ...row, lineageId: row.lineageId ?? '' };
 }
 
 /**
- * Writes the workspace row; refused when it exists.
+ * Writes the workspace row with a new lineage; refused when it exists.
  *
  * @param database the workspace database
  * @param meta the row without the lineage
@@ -50,7 +65,13 @@ async function initMeta(database: BetterSQLite3Database, meta: Omit<WorkspaceMet
     }
     transaction
       .insert(workspace)
-      .values({ id: meta.id, formatVersion: meta.formatVersion, name: meta.name, createdAt: meta.createdAt })
+      .values({
+        id: meta.id,
+        formatVersion: meta.formatVersion,
+        name: meta.name,
+        createdAt: meta.createdAt,
+        lineageId: newLineageId(),
+      })
       .run();
   });
 }

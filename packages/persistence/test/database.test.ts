@@ -188,6 +188,17 @@ describe('workspace database', () => {
     ).rejects.toThrow(/FOREIGN KEY/);
   });
 
+  test('changeCount grows with a write and not with a read', async () => {
+    const d = await open();
+    const start = d.changeCount();
+    await d.files.insertPending(pending(1));
+    const afterWrite = d.changeCount();
+    expect(afterWrite).toBeGreaterThan(start);
+    await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } });
+    await d.meta.get();
+    expect(d.changeCount()).toBe(afterWrite);
+  });
+
   test('the primary storage is created once', async () => {
     const d = await open();
     expect(await d.storages.ensurePrimary({ id: uuid(9), createdAt: '2026-02-01T00:00:00.000Z' })).toEqual({
