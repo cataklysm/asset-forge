@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { AnalysisPrompt, AnalysisPromptPurpose, SaveAnalysisPrompt } from '@assetforge/contracts';
-import { ApiError, call } from './api';
+import { ApiError, call, describeError } from './api';
 
 /** The prompt used last per purpose. */
 type LastUsed = { tagging: string | null; imagePrompt: string | null };
@@ -238,6 +238,25 @@ export function defaultPromptId(
 
 /** The forwarded message of a start that names a provider entry deleted meanwhile. */
 const PROVIDER_MISSING = 'This provider does not exist';
+
+/** The forwarded message of a start that names an analysis prompt deleted meanwhile. */
+const PROMPT_MISSING = 'The analysis prompt does not exist';
+
+/**
+ * The text an analysis start shows for what it threw: a provider entry or a prompt deleted meanwhile
+ * keeps the fixed message the main process forwards, so the owner sees which choice is gone; anything
+ * else gets the text of its code.
+ *
+ * @param error what the start threw
+ * @returns the text
+ */
+export function startErrorMessage(error: unknown): string {
+  const missingChoice =
+    error instanceof ApiError &&
+    error.code === 'not_found' &&
+    (error.message === PROVIDER_MISSING || error.message === PROMPT_MISSING);
+  return missingChoice ? error.message : describeError(error);
+}
 
 /**
  * After a start refused with `not_found`: the provider entry or the prompt may have been deleted

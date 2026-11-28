@@ -670,7 +670,7 @@ it('a start refused with not_found shows the error and falls back to an existing
   await userEvent.selectOptions(promptSelect(), TAG_DETAIL.id);
   const lists = callsOf(api, 'analysisPrompts:list').length;
   await userEvent.click(startButton());
-  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  expect((await screen.findByRole('alert')).textContent).toBe('The analysis prompt does not exist');
   await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
   expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
   expect(

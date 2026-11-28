@@ -1,7 +1,7 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { ApiError, call, describeError } from './api';
 import { namesOn, proposalKey, type Shown } from './analysis-result';
-import { recoverMissingChoice, type AnalysisPromptsState } from './analysis-prompts-context';
+import { recoverMissingChoice, startErrorMessage, type AnalysisPromptsState } from './analysis-prompts-context';
 import type { ProposalReader } from './hooks/useResultOpening';
 import { NOT_ANALYSABLE, PROPOSAL_CHANGED } from './labels';
 import type { ProvidersState } from './provider-context';
@@ -69,7 +69,7 @@ export async function analyseFile(
     recoverMissingChoice(error, records.prompts, records.providers, () => {
       if (action.live()) records.dropChosenPrompt();
     });
-    if (action.live()) action.setError(describeError(error));
+    if (action.live()) action.setError(startErrorMessage(error));
   }
 }
 
