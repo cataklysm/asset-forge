@@ -9,16 +9,24 @@ import { label } from '../labels';
 import { ALERT, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 
+/** The fields `assignments:update` takes. */
 type Patch = Parameters<typeof call<'assignments:update'>>[1]['patch'];
 
+/** The props of `AssignmentFields`. */
 interface Props {
   assignment: ProjectAssignment;
+  /** Called with the assignment a save answered. */
   onChanged(next: ProjectAssignment): void;
   /** `main` leaves the notes out, `notes` shows only them (e.g. in an expandable table row). */
   fields?: 'all' | 'main' | 'notes';
 }
 
-/** Priority, approval status, intended use and notes of one assignment; saves each change through assignments:update. */
+/**
+ * Priority, approval status, intended use and notes of one assignment; saves each change through assignments:update.
+ *
+ * @param props the assignment, the change callback and which fields show
+ * @returns the fields with their error line
+ */
 export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Props) {
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +40,8 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
       });
       onChanged(next);
       return true;
-    } catch (e) {
-      setError(describeError(e));
+    } catch (failure) {
+      setError(describeError(failure));
       return false;
     }
   }
@@ -46,11 +54,11 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
             className={SELECT}
             aria-label="Priority"
             value={assignment.priority}
-            onChange={(e) => void save({ priority: AssignmentPrioritySchema.parse(e.target.value) })}
+            onChange={(event) => void save({ priority: AssignmentPrioritySchema.parse(event.target.value) })}
           >
-            {AssignmentPrioritySchema.options.map((p) => (
-              <option key={p} value={p}>
-                {label(p)}
+            {AssignmentPrioritySchema.options.map((priority) => (
+              <option key={priority} value={priority}>
+                {label(priority)}
               </option>
             ))}
           </select>
@@ -58,11 +66,11 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
             className={SELECT}
             aria-label="Approval"
             value={assignment.approvalStatus}
-            onChange={(e) => void save({ approvalStatus: ApprovalStatusSchema.parse(e.target.value) })}
+            onChange={(event) => void save({ approvalStatus: ApprovalStatusSchema.parse(event.target.value) })}
           >
-            {ApprovalStatusSchema.options.map((p) => (
-              <option key={p} value={p}>
-                {label(p)}
+            {ApprovalStatusSchema.options.map((status) => (
+              <option key={status} value={status}>
+                {label(status)}
               </option>
             ))}
           </select>

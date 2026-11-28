@@ -1,18 +1,24 @@
-import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
+import { useId, useRef, type ReactNode, type RefObject } from 'react';
+import { useModalDialog } from '../hooks/useModalDialog';
 import { BORDER, SECTION_TITLE } from '../ui';
 
+/** The props of `Dialog`. */
 interface Props {
+  /** Whether the dialog is shown. */
   open: boolean;
   /** The accessible name; the `form` dialog also shows it as its heading. */
   title: string;
+  /** Called on Esc and when the browser closes the dialog while it is held open. */
   onClose(): void;
   /** Focused when the dialog opens; otherwise the browser focuses the first focusable element. */
   initialFocusRef?: RefObject<HTMLElement | null>;
   /** `detail` renders its content edge to edge; the content brings its own header. */
   size?: 'form' | 'wide' | 'detail';
+  /** The content, rendered only while open. */
   children: ReactNode;
 }
 
+/** The width (and for `detail` the height) of each size. */
 const SIZE = {
   form: 'w-[min(92vw,32rem)]',
   /** A form with two columns. */
@@ -21,52 +27,38 @@ const SIZE = {
   detail: 'w-[calc(100vw-3rem)] h-[calc(100vh-3rem)] max-w-none max-h-none overflow-hidden',
 } as const;
 
-/** A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening. */
+/**
+ * The content of an open dialog: edge to edge for `detail`, otherwise under the title as heading.
+ *
+ * @param props the title, its id, whether the dialog is a detail dialog and the content
+ * @returns the content
+ */
+function DialogBody({ title, titleId, detail, children }: { title: string; titleId: string; detail: boolean; children: ReactNode }) {
+  if (detail) return <div className="h-full">{children}</div>;
+  return (
+    <div className="flex h-full flex-col gap-4 p-5">
+      <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate`}>
+        {title}
+      </h2>
+      <div className="min-h-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening.
+ *
+ * @param props the open flag, the title, the close callback, the initial focus, the size and the content
+ * @returns the dialog element
+ */
 export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', children }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const opener = useRef<HTMLElement | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-
-  function restoreFocus() {
-    const element = opener.current;
-    opener.current = null;
-    if (element?.isConnected) element.focus();
-  }
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (dialog === null) return;
-    if (open) {
-      if (!dialog.open) {
-        opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        dialog.showModal();
-      }
-      initialFocusRef?.current?.focus();
-    } else {
-      if (dialog.open) dialog.close();
-      restoreFocus();
-    }
-    // initialFocusRef is read when the dialog opens only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  // Unmounted while open: the element is gone and focus would fall back to the body. The
-  // connectivity check skips StrictMode's simulated unmount, which leaves the element in place.
-  // Focus that is still on an element elsewhere stays there: the dialog is then mounted anew from
-  // another dialog, and the new one takes that element as its opener.
-  useEffect(() => {
-    const dialog = ref.current;
-    return () => {
-      if (dialog === null || dialog.isConnected) return;
-      const active = document.activeElement;
-      if (active === null || active === document.body || !active.isConnected) restoreFocus();
-      else opener.current = null;
-    };
-  }, []);
+  useModalDialog(ref, open, initialFocusRef);
 
   const detail = size === 'detail';
   return (
@@ -84,17 +76,11 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
       }}
       className={`m-auto rounded-dialog border bg-surface p-0 text-text backdrop:bg-bg/70 ${BORDER} ${SIZE[size]}`}
     >
-      {open &&
-        (detail ? (
-          <div className="h-full">{children}</div>
-        ) : (
-          <div className="flex h-full flex-col gap-4 p-5">
-            <h2 id={titleId} title={title} className={`${SECTION_TITLE} truncate`}>
-              {title}
-            </h2>
-            <div className="min-h-0 flex-1">{children}</div>
-          </div>
-        ))}
+      {open && (
+        <DialogBody title={title} titleId={titleId} detail={detail}>
+          {children}
+        </DialogBody>
+      )}
     </dialog>
   );
 }

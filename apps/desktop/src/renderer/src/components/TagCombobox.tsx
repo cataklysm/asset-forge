@@ -1,30 +1,51 @@
-import { normalizeTagPrefix, type TagSuggestion } from '@assetforge/contracts';
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
-import { call } from '../api';
-import { latestOnly } from '../hooks/useLoad';
+import { normalizeTagPrefix } from '@assetforge/contracts';
+import { useId, useState, type KeyboardEvent, type Ref } from 'react';
+import { useTagSuggestions } from '../hooks/useTagSuggestions';
 import { BORDER, INLINE_INPUT, INPUT } from '../ui';
 
+/** The props of `TagCombobox`. */
 interface Props {
+  /** The typed text. */
   value: string;
-  onValueChange(v: string): void;
+  /** Called with every change of the text. */
+  onValueChange(value: string): void;
+  /** Called with the text to add: the active suggestion's display name, or the typed text. */
   onCommit(text: string): void;
+  /** The placeholder. */
   placeholder: string;
+  /** The accessible name of the input and the list. */
   label: string;
+  /** The tooltip. */
   title?: string;
+  /** Receives the input element. */
   inputRef?: Ref<HTMLInputElement>;
   /** Receives every key the combobox does not handle itself (including Esc while the list is closed). */
-  onKeyDown?(e: KeyboardEvent<HTMLInputElement>): void;
+  onKeyDown?(event: KeyboardEvent<HTMLInputElement>): void;
+  /** Disables the input. */
   disabled?: boolean;
   /** `box` (the default) is a bordered input; `inline` reads as an action in a row of chips. */
   look?: 'box' | 'inline';
 }
 
-const SUGGESTION_LIMIT = 8;
-const NONE: TagSuggestion[] = [];
+/**
+ * The active index after ↑/↓, wrapping; from none ↓ starts at the first and ↑ at the last.
+ *
+ * @param current the active index, or -1
+ * @param step the direction
+ * @param count the number of suggestions
+ * @returns the new active index
+ */
+function stepActive(current: number, step: 1 | -1, count: number): number {
+  if (current < 0) return step === 1 ? 0 : count - 1;
+  return (current + step + count) % count;
+}
 
 /**
  * A tag input with suggestions (ARIA 1.2 combobox with a listbox popup). Enter commits the active
  * suggestion's display name, or the typed text when no suggestion is active.
+ *
+ * @param props the text, its callbacks, the label, the look and the input ref
+ * @returns the input and, while there are suggestions, the list
  */
 export function TagCombobox({
   value,
@@ -40,31 +61,7 @@ export function TagCombobox({
 }: Props) {
   const listId = useId();
   const [open, setOpen] = useState(false);
-  const [suggestions, setSuggestions] = useState<TagSuggestion[]>(NONE);
-  const [active, setActive] = useState(-1);
-  const track = useRef<ReturnType<typeof latestOnly<TagSuggestion[]>> | null>(null);
-  track.current ??= latestOnly<TagSuggestion[]>();
-  const prefix = normalizeTagPrefix(value);
-
-  useEffect(() => {
-    let mounted = true;
-    if (!open || prefix === '') {
-      // Supersedes a request still in flight.
-      void track.current!(Promise.resolve(NONE));
-      setSuggestions(NONE);
-      setActive(-1);
-      return;
-    }
-    void track.current!(call('tags:suggest', { prefix, limit: SUGGESTION_LIMIT })).then((result) => {
-      if (!mounted || result.stale) return;
-      // Suggestions are a convenience: a failed request just shows none.
-      setSuggestions(result.value ?? NONE);
-      setActive(-1);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [open, prefix]);
+  const { suggestions, active, setActive } = useTagSuggestions(open, normalizeTagPrefix(value));
 
   const expanded = open && suggestions.length > 0;
   const optionId = (index: number) => `${listId}-option-${index}`;
@@ -81,9 +78,8 @@ export function TagCombobox({
         setOpen(true);
         return;
       }
-      const n = suggestions.length;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setActive((current) => (current < 0 ? (step === 1 ? 0 : n - 1) : (current + step + n) % n));
+      setActive((current) => stepActive(current, step, suggestions.length));
       return;
     }
     if (event.key === 'Enter') {

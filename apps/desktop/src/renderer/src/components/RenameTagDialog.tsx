@@ -1,7 +1,7 @@
-import { cleanTagText, normalizeTagName, type TagUsage } from '@assetforge/contracts';
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { cleanTagText, normalizeTagName } from '@assetforge/contracts';
+import { useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { ApiError, call, describeError } from '../api';
-import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useSourceUsage, useTargetLookup } from '../hooks/useTagLookup';
 import {
   CANCEL_LABEL,
   MERGE_LABEL,
@@ -15,18 +15,25 @@ import type { TagRename } from '../tag-rename';
 import { ALERT, BUTTON, INPUT, LABEL } from '../ui';
 import { Dialog } from './Dialog';
 
+/** A tag by its normalised name and its display name. */
 type Tag = { name: string; displayName: string };
 
+/** The props of `RenameTagDialog`. */
 interface Props {
   /** The tag to rename; null keeps the dialog closed. */
   tag: Tag | null;
+  /** Closes the dialog; ignored while a rename runs. */
   onClose(): void;
+  /** Called once a rename or merge succeeded. */
   onRenamed(change: TagRename): void;
 }
 
 /**
  * Renames a tag workspace-wide, or merges it into the tag the typed name belongs to. The typed
  * name is looked up debounced; the merge line and the `Merge` label are the confirmation.
+ *
+ * @param props the tag, the close and the rename callback
+ * @returns the dialog
  */
 export function RenameTagDialog({ tag, onClose, onRenamed }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,73 +47,36 @@ export function RenameTagDialog({ tag, onClose, onRenamed }: Props) {
   );
 }
 
-/** A lookup answer for one normalised name, or the message of a failed lookup. */
-type Lookup = { name: string; usage: TagUsage } | { name: string; failure: string };
-
-function RenameTagForm({
-  tag,
-  inputRef,
-  busyRef,
-  onClose,
-  onRenamed,
-}: {
+/** The props of `RenameTagForm`. */
+interface FormProps {
   tag: Tag;
+  /** The name input; the dialog focuses it. */
   inputRef: RefObject<HTMLInputElement | null>;
+  /** Shared with the dialog so closing is ignored while a rename runs. */
   busyRef: { current: boolean };
   onClose(): void;
   onRenamed(change: TagRename): void;
-}) {
+}
+
+/**
+ * The name input, the usage and merge lines and the buttons of the rename dialog.
+ *
+ * @param props the tag, the input and busy refs and the callbacks
+ * @returns the form
+ */
+function RenameTagForm({ tag, inputRef, busyRef, onClose, onRenamed }: FormProps) {
   const [text, setText] = useState(tag.displayName);
-  const [source, setSource] = useState<TagUsage | null>(null);
-  const [target, setTarget] = useState<Lookup | null>(null);
-  /** Raised to look the same name up again (after a refused rename). */
-  const [lookupRun, setLookupRun] = useState(0);
-  const [busy, setBusy] = useState(false);
-  /** The tag no longer exists: only closing is left. */
-  const [gone, setGone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    inputRef.current?.select();
-    let current = true;
-    call('tags:usage', { name: tag.name }).then(
-      (usage) => {
-        if (current && usage.exists) setSource(usage);
-      },
-      // The line keeps the display name alone.
-      () => {},
-    );
-    return () => {
-      current = false;
-    };
-    // Once per tag; the form is keyed by the tag name.
-  }, []);
-
+  const source = useSourceUsage(tag.name, inputRef);
   const cleaned = cleanTagText(text);
   const normalized = normalizeTagName(text);
   const unchanged = cleaned === tag.displayName;
   // Another spelling of the same tag needs no lookup: it can never be a merge.
   const lookupName = normalized !== null && normalized !== tag.name ? normalized : '';
-  const debounced = useDebouncedValue(lookupName, SEARCH_DEBOUNCE_MS);
-
-  useEffect(() => {
-    // A name still settling is looked up once the debounce has run out.
-    if (debounced === '' || debounced !== lookupName) return;
-    // Superseded: a later name (or unmounting) drops this answer.
-    let current = true;
-    call('tags:usage', { name: debounced }).then(
-      (usage) => {
-        if (current) setTarget({ name: debounced, usage });
-      },
-      // A failed lookup is no answer: confirm stays disabled until one for the current text succeeds.
-      (e: unknown) => {
-        if (current) setTarget({ name: debounced, failure: describeError(e) });
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [debounced, lookupName, lookupRun]);
+  const { target, retryLookup } = useTargetLookup(lookupName);
+  const [busy, setBusy] = useState(false);
+  /** The tag no longer exists: only closing is left. */
+  const [gone, setGone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const answer = lookupName !== '' && target?.name === lookupName ? target : null;
   const outstanding = lookupName !== '' && answer === null;
@@ -127,13 +97,10 @@ function RenameTagForm({
       onRenamed({ from: tag.name, name: result.name, displayName: result.displayName });
       onClose();
       return;
-    } catch (e) {
-      setError(describeError(e));
-      if (e instanceof ApiError && e.code === 'not_found') setGone(true);
-      if (e instanceof ApiError && e.code === 'invalid_operation') {
-        setTarget(null);
-        setLookupRun((run) => run + 1);
-      }
+    } catch (failure) {
+      setError(describeError(failure));
+      if (failure instanceof ApiError && failure.code === 'not_found') setGone(true);
+      if (failure instanceof ApiError && failure.code === 'invalid_operation') retryLookup();
     }
     busyRef.current = false;
     setBusy(false);
@@ -158,10 +125,7 @@ function RenameTagForm({
             setText(event.target.value);
             if (!gone) setError(null);
             // Typing again retries a failed lookup, also when the name stays the same.
-            if (target !== null && 'failure' in target) {
-              setTarget(null);
-              setLookupRun((run) => run + 1);
-            }
+            if (target !== null && 'failure' in target) retryLookup();
           }}
           onKeyDown={onKeyDown}
           className={`${INPUT} min-w-0 flex-1`}

@@ -4,6 +4,12 @@ import { call, describeError } from './api';
 import { WorkspaceShell } from './components/WorkspaceShell';
 import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
+/**
+ * The application root: asks for the open workspace once, then shows the workspace shell or the
+ * screen that opens or creates one.
+ *
+ * @returns the loading line, the load error, the workspace screen or the shell
+ */
 export function App() {
   // `undefined` while the current workspace is still being queried.
   const [current, setCurrent] = useState<WorkspaceSummary | null | undefined>(undefined);

@@ -1,3 +1,4 @@
+/** The screen the workspace shell shows, with the id of the item it shows where it has one. */
 export type View =
   | { name: 'assets' }
   | { name: 'asset'; id: string }

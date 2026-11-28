@@ -1,30 +1,27 @@
 import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, ScrollText, Settings, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, purposeOf, type JobErrorCode, type PausedHost, type PausedProvider } from '@assetforge/contracts';
+import type { PausedHost, PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
-import {
-  laneLabel,
-  PROMPTS_LABEL,
-  MOVE_JOBS_LABEL,
-  MOVE_JOBS_TITLE,
-  OPEN_SITE_LABEL,
-  OPEN_SITE_TITLE,
-  RESUME_LABEL,
-  RESUME_TITLE,
-  TRASH_LABEL,
-  trashNavLabel,
-} from '../labels';
+import { useSearchShortcut } from '../hooks/useSearchShortcut';
+import { PROMPTS_LABEL, TRASH_LABEL, trashNavLabel } from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
+import { BUSY_TITLE } from './busy-title';
+import { PauseBanner } from './PauseBanner';
 
-/** Pause reasons the user fixes on the settings screen: the banner offers the way there. */
-const SETTINGS_REASONS: ReadonlySet<JobErrorCode> = new Set(['provider_unauthorized', 'provider_not_configured']);
+export { BUSY_TITLE } from './busy-title';
 
+/** A screen of the main navigation. */
 export type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
+/** The props of `AppShell`. */
 interface Props {
+  /** The name of the open workspace, shown as the title. */
   workspaceName: string;
+  /** The workspace root, shown under the title. */
   rootPath: string;
+  /** The section to mark as current; null for none. */
   section: Section | null;
+  /** True while an import runs: navigation and Workspaces are then disabled. */
   busy: boolean;
   /** Queued, running and waiting jobs; shown beside the Jobs entry when above zero. */
   activeJobs: number;
@@ -44,11 +41,15 @@ interface Props {
   checkHosts?: ReadonlySet<string>;
   /** Opens the site check of one host (`sites:openCheck`); a rejection shows in its line. */
   onOpenCheck?(host: string): Promise<void>;
+  /** Opens one section. */
   onNavigate(section: Section): void;
+  /** Closes the workspace. */
   onClose(): void;
+  /** The page. */
   children: ReactNode;
 }
 
+/** The entries of the main navigation, in order. */
 const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'assets', label: 'Assets', icon: Package },
   { section: 'projects', label: 'Projects', icon: FolderOpen },
@@ -59,16 +60,135 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'settings', label: 'Settings', icon: Settings },
 ];
 
-/** Tooltip of the navigation (and of the dialogs' Settings) while an import runs. */
-export const BUSY_TITLE = 'Import in progress';
-
+/** The banner text while the storage cannot be reached. */
 const UNREACHABLE_MESSAGE = describeError(new ApiError('storage_unreachable', ''));
 
+/** The defaults of the optional props. */
 const NOTHING_PAUSED: readonly PausedProvider[] = [];
 const NO_PAUSED_HOSTS: readonly PausedHost[] = [];
 const NO_CHECK_HOSTS: ReadonlySet<string> = new Set();
+const RESOLVED = async () => {};
+const IGNORED = () => {};
 
-/** The application frame: header, navigation, the alert region and the page slot. */
+/**
+ * The count shown beside a navigation entry: active jobs for Jobs, trashed files for Trash.
+ *
+ * @param target the entry
+ * @param activeJobs the active jobs
+ * @param trashCount the trashed files, or null while unknown
+ * @returns the count, or null when nothing is shown
+ */
+function navCount(target: Section, activeJobs: number, trashCount: number | null): number | null {
+  if (target === 'jobs' && activeJobs > 0) return activeJobs;
+  if (target === 'trash' && trashCount !== null && trashCount > 0) return trashCount;
+  return null;
+}
+
+/**
+ * The accessible name of a navigation entry that shows a count.
+ *
+ * @param target the entry
+ * @param label its visible label
+ * @param count its count, or null
+ * @returns the name, or undefined to use the visible label
+ */
+function navName(target: Section, label: string, count: number | null): string | undefined {
+  if (count === null) return undefined;
+  return target === 'trash' ? trashNavLabel(count) : `${label}, ${count} active`;
+}
+
+/** The props of `NavLinks`. */
+interface NavLinksProps {
+  section: Section | null;
+  busy: boolean;
+  activeJobs: number;
+  trashCount: number | null;
+  onNavigate(section: Section): void;
+}
+
+/**
+ * The main navigation: one link per section, with a count beside Jobs and Trash.
+ *
+ * @param props the current section, the busy flag, the counts and the navigation callback
+ * @returns the navigation
+ */
+function NavLinks({ section, busy, activeJobs, trashCount, onNavigate }: NavLinksProps) {
+  return (
+    <nav aria-label="Main" className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
+      {NAV.map(({ section: target, label, icon: Icon }) => {
+        const count = navCount(target, activeJobs, trashCount);
+        const name = navName(target, label, count);
+        return (
+          <a
+            key={target}
+            href="#"
+            aria-label={name}
+            aria-current={section === target ? 'page' : undefined}
+            aria-disabled={busy || undefined}
+            title={busy ? BUSY_TITLE : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              if (!busy) onNavigate(target);
+            }}
+            className={`flex h-10 items-center gap-2.5 rounded-control px-3 text-text aria-[current=page]:bg-nav-active aria-disabled:opacity-50 ${
+              busy ? '' : 'hover:bg-raised'
+            } ${FOCUS}`}
+          >
+            <Icon size={18} aria-hidden />
+            {label}
+            {count !== null && <span className={`ml-auto text-sm tabular-nums ${MUTED}`}>{count}</span>}
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** The props of `ShellHeader`. */
+interface ShellHeaderProps {
+  workspaceName: string;
+  rootPath: string;
+  busy: boolean;
+  onClose(): void;
+}
+
+/**
+ * The header: the workspace name and root, and the way back to the workspaces.
+ *
+ * @param props the workspace, the busy flag and the close callback
+ * @returns the header
+ */
+function ShellHeader({ workspaceName, rootPath, busy, onClose }: ShellHeaderProps) {
+  return (
+    <header className={`flex h-[76px] shrink-0 items-center justify-between gap-4 border-b px-6 ${BORDER}`}>
+      <div className="min-w-0">
+        <h1 className={`truncate ${WORKSPACE_TITLE}`}>{workspaceName}</h1>
+        <p title={rootPath} className="truncate text-sm text-accent">
+          {rootPath}
+        </p>
+      </div>
+      <button
+        type="button"
+        className={BUTTON}
+        aria-disabled={busy || undefined}
+        title={busy ? BUSY_TITLE : undefined}
+        onClick={() => {
+          if (!busy) onClose();
+        }}
+      >
+        <ArrowLeft size={16} aria-hidden />
+        Workspaces
+      </button>
+    </header>
+  );
+}
+
+/**
+ * The application frame: header, navigation, the alert region and the page slot.
+ *
+ * @param props the workspace, the navigation state, the paused lanes and their actions, and the page
+ * @returns the frame
+ */
 export function AppShell({
   workspaceName,
   rootPath,
@@ -77,12 +197,12 @@ export function AppShell({
   activeJobs,
   trashCount = null,
   paused = NOTHING_PAUSED,
-  onResume = async () => {},
-  onMove = () => {},
+  onResume = RESOLVED,
+  onMove = IGNORED,
   pausedHosts = NO_PAUSED_HOSTS,
-  onResumeHost = async () => {},
+  onResumeHost = RESOLVED,
   checkHosts = NO_CHECK_HOSTS,
-  onOpenCheck = async () => {},
+  onOpenCheck = RESOLVED,
   onNavigate,
   onClose,
   children,
@@ -93,76 +213,14 @@ export function AppShell({
   const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => onStorageUnreachable(() => setUnreachable(true)), []);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!event.ctrlKey || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'f') return;
-      const field = mainRef.current?.querySelector<HTMLElement>('[data-search-field]');
-      if (field === null || field === undefined) return;
-      event.preventDefault();
-      field.focus();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
+  useSearchShortcut(mainRef);
 
   return (
     <div className="flex h-screen flex-col bg-bg text-text">
-      <header className={`flex h-[76px] shrink-0 items-center justify-between gap-4 border-b px-6 ${BORDER}`}>
-        <div className="min-w-0">
-          <h1 className={`truncate ${WORKSPACE_TITLE}`}>{workspaceName}</h1>
-          <p title={rootPath} className="truncate text-sm text-accent">
-            {rootPath}
-          </p>
-        </div>
-        <button
-          type="button"
-          className={BUTTON}
-          aria-disabled={busy || undefined}
-          title={busy ? BUSY_TITLE : undefined}
-          onClick={() => {
-            if (!busy) onClose();
-          }}
-        >
-          <ArrowLeft size={16} aria-hidden />
-          Workspaces
-        </button>
-      </header>
+      <ShellHeader workspaceName={workspaceName} rootPath={rootPath} busy={busy} onClose={onClose} />
 
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="Main" className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
-          {NAV.map(({ section: target, label, icon: Icon }) => {
-            const count =
-              target === 'jobs' && activeJobs > 0
-                ? activeJobs
-                : target === 'trash' && trashCount !== null && trashCount > 0
-                  ? trashCount
-                  : null;
-            const name =
-              count === null ? undefined : target === 'trash' ? trashNavLabel(count) : `${label}, ${count} active`;
-            return (
-              <a
-                key={target}
-                href="#"
-                aria-label={name}
-                aria-current={section === target ? 'page' : undefined}
-                aria-disabled={busy || undefined}
-                title={busy ? BUSY_TITLE : undefined}
-                onClick={(event) => {
-                  event.preventDefault();
-                  if (!busy) onNavigate(target);
-                }}
-                className={`flex h-10 items-center gap-2.5 rounded-control px-3 text-text aria-[current=page]:bg-nav-active aria-disabled:opacity-50 ${
-                  busy ? '' : 'hover:bg-raised'
-                } ${FOCUS}`}
-              >
-                <Icon size={18} aria-hidden />
-                {label}
-                {count !== null && <span className={`ml-auto text-sm tabular-nums ${MUTED}`}>{count}</span>}
-              </a>
-            );
-          })}
-        </nav>
+        <NavLinks section={section} busy={busy} activeJobs={activeJobs} trashCount={trashCount} onNavigate={onNavigate} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {unreachable && (
@@ -181,137 +239,22 @@ export function AppShell({
             </div>
           )}
           {(paused.length > 0 || pausedHosts.length > 0) && (
-            <div role="alert" className={`m-6 mb-0 flex flex-col gap-3 ${WARNING}`}>
-              {paused.map((entry) => (
-                <PauseLine
-                  key={entry.providerId ?? ''}
-                  entry={entry}
-                  busy={busy}
-                  onResume={() => onResume(entry.providerId)}
-                  onMove={() => onMove(entry.providerId)}
-                  onSettings={() => onNavigate('settings')}
-                />
-              ))}
-              {pausedHosts.map((entry) => (
-                <HostPauseLine
-                  key={`host:${entry.host}`}
-                  entry={entry}
-                  onResume={() => onResumeHost(entry.host)}
-                  onOpenCheck={
-                    entry.reason === 'download_browser_check' && checkHosts.has(entry.host) ? () => onOpenCheck(entry.host) : null
-                  }
-                />
-              ))}
-            </div>
+            <PauseBanner
+              paused={paused}
+              pausedHosts={pausedHosts}
+              busy={busy}
+              checkHosts={checkHosts}
+              onResume={onResume}
+              onMove={onMove}
+              onResumeHost={onResumeHost}
+              onOpenCheck={onOpenCheck}
+              onSettings={() => onNavigate('settings')}
+            />
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
             {children}
           </main>
         </div>
-      </div>
-    </div>
-  );
-}
-
-interface PauseLineProps {
-  entry: PausedProvider;
-  busy: boolean;
-  onResume(): Promise<void>;
-  onMove(): void;
-  onSettings(): void;
-}
-
-/** One action of a banner line (Resume, Open site): one call at a time; a rejection is kept until the next try or a new reason. */
-function useResume(reason: JobErrorCode, onResume: () => Promise<void>) {
-  const [resuming, setResuming] = useState(false);
-  const [resumeError, setResumeError] = useState<string | null>(null);
-  const resumingRef = useRef(false);
-  // A new pause reason drops the error of an earlier resume.
-  useEffect(() => setResumeError(null), [reason]);
-
-  async function resume() {
-    if (resumingRef.current) return;
-    resumingRef.current = true;
-    setResuming(true);
-    setResumeError(null);
-    try {
-      await onResume();
-    } catch (e) {
-      setResumeError(describeError(e));
-    } finally {
-      resumingRef.current = false;
-      setResuming(false);
-    }
-  }
-
-  return { resuming, resumeError, resume };
-}
-
-interface HostPauseLineProps {
-  entry: PausedHost;
-  onResume(): Promise<void>;
-  /** Opens the site check; null hides Open site. */
-  onOpenCheck: (() => Promise<void>) | null;
-}
-
-const NO_CHECK = async () => {};
-
-/** One paused download host in the banner: the host, the reason, Open site for a browser check and Resume. */
-function HostPauseLine({ entry, onResume, onOpenCheck }: HostPauseLineProps) {
-  const { resuming, resumeError, resume } = useResume(entry.reason, onResume);
-  const check = useResume(entry.reason, onOpenCheck ?? NO_CHECK);
-  return (
-    <div role="group" aria-label={entry.host} className="flex items-center justify-between gap-4">
-      <span className="min-w-0 break-words">
-        <span className="font-semibold">{entry.host}</span> {resumeError ?? check.resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
-      </span>
-      <div className="flex shrink-0 items-center gap-2">
-        {onOpenCheck !== null && (
-          <button type="button" className={BUTTON} title={OPEN_SITE_TITLE} disabled={check.resuming} onClick={() => void check.resume()}>
-            {OPEN_SITE_LABEL}
-          </button>
-        )}
-        <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
-          {RESUME_LABEL}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** One paused provider in the banner: its name, the reason, Resume, Move jobs and, for the settings reasons, Settings. */
-function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps) {
-  const name = laneLabel(entry.providerId, entry.providerName);
-  const { resuming, resumeError, resume } = useResume(entry.reason, onResume);
-
-  return (
-    <div role="group" aria-label={name} className="flex items-center justify-between gap-4">
-      <span className="min-w-0">
-        <span className="font-semibold">{name}</span> {resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
-      </span>
-      <div className="flex shrink-0 items-center gap-2">
-        {SETTINGS_REASONS.has(entry.reason) && (
-          <button
-            type="button"
-            className={BUTTON}
-            aria-disabled={busy || undefined}
-            title={busy ? BUSY_TITLE : undefined}
-            onClick={() => {
-              if (!busy) onSettings();
-            }}
-          >
-            Settings
-          </button>
-        )}
-        {/* Only analysis jobs move; an image provider's generation jobs stay on it. */}
-        {purposeOf(entry.kind) === 'vision' && (
-          <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
-            {MOVE_JOBS_LABEL}
-          </button>
-        )}
-        <button type="button" className={BUTTON} title={RESUME_TITLE} disabled={resuming} onClick={() => void resume()}>
-          {RESUME_LABEL}
-        </button>
       </div>
     </div>
   );

@@ -3,18 +3,28 @@ import { CANCEL_LABEL } from '../labels';
 import { BUTTON } from '../ui';
 import { Dialog } from './Dialog';
 
+/** The props of `ConfirmDialog`. */
 interface Props {
+  /** Whether the dialog is shown. */
   open: boolean;
   /** The question, and the only text of the dialog (e.g. "Delete 2 files permanently?"). */
   title: string;
+  /** The label of the confirm button. */
   confirmLabel: string;
   /** While the confirmed action runs: both buttons are disabled. */
   busy: boolean;
+  /** Called by the confirm button. */
   onConfirm(): void;
+  /** Called by Cancel and Esc. */
   onCancel(): void;
 }
 
-/** Asks before an irreversible action. Cancel has the initial focus; Esc cancels, except while busy. */
+/**
+ * Asks before an irreversible action. Cancel has the initial focus; Esc cancels, except while busy.
+ *
+ * @param props the question, the confirm label, the busy flag and the two callbacks
+ * @returns the dialog
+ */
 export function ConfirmDialog({ open, title, confirmLabel, busy, onConfirm, onCancel }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   return (
