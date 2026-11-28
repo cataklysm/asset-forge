@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RemoteFileError, type PageLoadResult, type RemoteFileSource } from '@assetforge/core';
+import { RemoteFileError, type PageLoader, type PageLoadResult, type RemoteFileSource } from '@assetforge/core';
 import type { SiteSessions } from '../src/main/site-sessions';
 import { createHarness, type Harness } from './analysis-harness';
 
@@ -11,21 +11,21 @@ const profile = { url: URL, name: 'Example', thumbnails: '//a/@href', pagination
 const remote: RemoteFileSource = { open: async () => { throw new RemoteFileError('not_found'); } };
 
 /** Browser sessions are mocked; requests and durable jobs use the real application wiring and SQLite. */
-function sessions(): SiteSessions {
+function sessions(load?: PageLoader['load']): SiteSessions {
   return {
     openLogin: () => {}, loginProfileId: () => null, focusLogin: () => {}, clear: async () => {},
     cookies: async () => [], userAgent: () => 'test',
-    openPage: () => ({ loader: { load: async (url): Promise<PageLoadResult> => ({
+    openPage: () => ({ loader: { load: load ?? (async (url): Promise<PageLoadResult> => ({
       ok: true, results: { thumbnails: ['/photo.jpg', '/download?id=53'], pagination: [] }, baseUrl: url, finalUrl: url,
-    }) }, close: () => {} }),
+    })) }, close: () => {} }),
   };
 }
 
 describe('durable gallery discovery', () => {
   let h: Harness | undefined;
   afterEach(async () => { await h?.close(); h = undefined; });
-  async function open() {
-    h = await createHarness({ remote, siteSessions: sessions(), siteWait: async () => {} });
+  async function open(load?: PageLoader['load']) {
+    h = await createHarness({ remote, siteSessions: sessions(load), siteWait: async () => {} });
     const rootPath = join(h.base, 'workspace');
     await mkdir(rootPath, { recursive: true });
     await h.ok('workspace:create', { name: 'Test', rootPath });
@@ -63,7 +63,25 @@ describe('durable gallery discovery', () => {
     const result = await ready(crawlId);
     const summary = h!.manager.current()!;
     await h!.ok('workspace:close', {});
-    await h!.ok('workspace:open', { id: summary.id });
+    await h!.ok('workspace:open', { rootPath: summary.rootPath });
     expect((await h!.ok('sites:getCrawl', { crawlId })).result).toEqual(result.result);
+  });
+
+  it('does not turn a login-blocked partial crawl into a ready result when job history is cleared', async () => {
+    const saved = await open(async () => ({ ok: false, reason: 'http_error', status: 401 }));
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await h!.until((summary) => summary.failed === 1);
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('failed');
+    await h!.ok('jobs:clearFinished', {});
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('failed');
+  });
+
+  it('holds a throttled site for at least the shared fallback delay', async () => {
+    const saved = await open(async () => ({ ok: false, reason: 'http_error', status: 429 }));
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await h!.until((summary) => summary.waiting === 1);
+    const job = await h!.manager.read((session) => session.database.jobs.get(crawlId));
+    expect(job?.errorCode).toBe('download_throttled');
+    expect(Date.parse(job!.runAfter!) - Date.parse(job!.updatedAt)).toBeGreaterThanOrEqual(60_000);
   });
 });

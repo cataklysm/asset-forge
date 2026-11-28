@@ -12,16 +12,22 @@ function viewFor(values: (call: number) => string[], unsettled = false) {
       if (unsettled) return new Promise(() => {});
       return 'loaded';
     },
-    evaluate: async () => ({ results: { file: values(++calls) }, counts: { file: 1 }, baseUrl: 'https://gallery.test/d/1' }),
+    evaluate: async () => ({
+      results: { file: values(++calls) },
+      counts: { file: 1 },
+      baseUrl: 'https://gallery.test/d/1',
+    }),
     currentUrl: () => 'https://gallery.test/d/1',
-    stop: () => {}, onLeftSite: () => {}, onResponse: () => {},
+    stop: () => {},
+    onLeftSite: () => {},
+    onResponse: () => {},
   };
   return { view, calls: () => calls };
 }
 
 describe('usable extraction readiness', () => {
   it('waits for URL values even when the selected DOM node already exists', async () => {
-    const { view, calls } = viewFor((call) => call < 3 ? [] : ['/original.jpg']);
+    const { view, calls } = viewFor((call) => (call < 3 ? [] : ['/original.jpg']));
     const result = await createPageLoader(view, 'gallery.test', timing).load('https://gallery.test/d/1', request);
     expect(result).toMatchObject({ ok: true, results: { file: ['/original.jpg'] } });
     expect(calls()).toBeGreaterThanOrEqual(3);
@@ -31,6 +37,13 @@ describe('usable extraction readiness', () => {
     const { view, calls } = viewFor((call) => [call === 1 ? '/placeholder.jpg' : '/original.jpg'], true);
     const result = await createPageLoader(view, 'gallery.test', timing).load('https://gallery.test/d/1', request);
     expect(result).toMatchObject({ ok: true, results: { file: ['/original.jpg'] } });
+    expect(calls()).toBeGreaterThanOrEqual(3);
+  });
+
+  it('waits for stable URL results when scripts append links after the document loaded', async () => {
+    const { view, calls } = viewFor((call) => call === 1 ? ['/first.jpg'] : ['/first.jpg', '/second.jpg']);
+    const result = await createPageLoader(view, 'gallery.test', timing).load('https://gallery.test/d/1', request);
+    expect(result).toMatchObject({ ok: true, results: { file: ['/first.jpg', '/second.jpg'] } });
     expect(calls()).toBeGreaterThanOrEqual(3);
   });
 });
