@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
+import { showsProposal } from '../file-actions';
 import { columnsForWidth, rowItems } from '../gallery';
 import { useElementSize, useVirtualRows } from '../hooks/useVirtualRows';
 import { retryIndex, slotAt, type PagedState } from '../paged-list';
@@ -201,7 +202,7 @@ function GridItem(props: GridItemProps) {
           <div className="px-3 py-3">
             <div className="flex min-w-0 items-center gap-1.5">
               <p className={`min-w-0 flex-1 leading-6 ${TILE_TITLE}`}>{file.originalName}</p>
-              {file.hasProposal && <ProposalMarker />}
+              {showsProposal(file) && <ProposalMarker />}
             </div>
             <p className={`truncate text-sm leading-5 ${MUTED}`}>{fileMeta(file, showRole, showOrigin)}</p>
             <div className="mt-2">

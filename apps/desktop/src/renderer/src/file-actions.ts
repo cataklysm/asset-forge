@@ -24,6 +24,16 @@ import {
 
 // The "…" menu of one file: which actions a file offers where, in a fixed order.
 
+/**
+ * Whether a file shows the proposal marker: only outside the trash, where Review tags is offered.
+ *
+ * @param file the file
+ * @returns true when the file has a proposal and is not in the trash
+ */
+export function showsProposal(file: FileRecord): boolean {
+  return file.hasProposal && file.deletedAt === null;
+}
+
 /** What the host of a file menu offers. */
 export interface FileActionContext {
   /** The file's cover state within its asset; null where there is no asset (the inbox). */

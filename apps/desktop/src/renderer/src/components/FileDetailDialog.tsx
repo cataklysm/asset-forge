@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { fileMenuItems, type FileActionContext } from '../file-actions';
+import { fileMenuItems, showsProposal, type FileActionContext } from '../file-actions';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
 import { BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
@@ -295,7 +295,7 @@ function DetailHeader({ file, assetName, title, list, closeRef, stageRef, onClos
     <div className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
       <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
         <span className="truncate">{file.originalName}</span>
-        {file.hasProposal && <ProposalMarker />}
+        {showsProposal(file) && <ProposalMarker />}
         {assetName !== null && (
           <>
             <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />
