@@ -105,6 +105,25 @@ it('Ctrl+F focuses the page search field', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
 });
 
+it('Ctrl+F leaves the page search field alone while a dialog is open', async () => {
+  const user = userEvent.setup();
+  render(
+    shell(
+      {},
+      <>
+        <input aria-label="Search" data-search-field="" />
+        <dialog open>
+          <input aria-label="Dialog field" />
+        </dialog>
+      </>,
+    ),
+  );
+  const inside = screen.getByLabelText('Dialog field');
+  inside.focus();
+  await user.keyboard('{Control>}f{/Control}');
+  expect(document.activeElement).toBe(inside);
+});
+
 const IDLE: JobSummary = {
   queued: 0,
   running: 0,

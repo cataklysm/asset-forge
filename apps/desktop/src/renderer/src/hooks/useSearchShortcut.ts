@@ -10,8 +10,21 @@ function focusSearchField(event: KeyboardEvent, scope: HTMLElement | null): void
   if (!event.ctrlKey || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'f') return;
   const field = scope?.querySelector<HTMLElement>('[data-search-field]');
   if (field === null || field === undefined) return;
+  // An open dialog is modal: the field behind it must not take the focus.
+  const dialog = topmostOpenDialog();
+  if (dialog !== null && !dialog.contains(field)) return;
   event.preventDefault();
   field.focus();
+}
+
+/**
+ * The open dialog shown last, which is the one on top.
+ *
+ * @returns the dialog, or null when none is open
+ */
+function topmostOpenDialog(): HTMLDialogElement | null {
+  const open = [...document.querySelectorAll('dialog')].filter((dialog) => dialog.open);
+  return open.at(-1) ?? null;
 }
 
 /**
