@@ -2,7 +2,9 @@
 
 /**
  * The base URL rule: http or https, no user info, no query, no fragment (not even a bare `?`/`#`).
- * Returns the URL without trailing slashes, or null when it is not usable.
+ *
+ * @param raw the URL as typed or set
+ * @returns the URL without trailing slashes, or null when it is not usable
  */
 export function usableBaseUrl(raw: string): string | null {
   // A bare `?` or `#` leaves search and hash empty but stays in `href`.
