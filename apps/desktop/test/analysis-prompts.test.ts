@@ -90,7 +90,7 @@ describe('analysis prompt store', () => {
 
   it('throws other read errors', () => {
     mkdirSync(filePath());
-    expect(() => open().list()).toThrow();
+    expect(() => open().list()).toThrow(expect.objectContaining({ code: 'EISDIR' }));
   });
 
   it('appends without id and replaces in place with id', () => {
@@ -235,6 +235,17 @@ describe('analysis prompt store', () => {
     const tagging = store.list().prompts[0]!;
     expect(() => store.markUsed(tagging)).not.toThrow();
     expect(logs).toEqual([LAST_USED_WRITE_FAILED]);
+  });
+
+  it('keeps the prompt used last for the session when its write fails', () => {
+    const store = open();
+    const second = store.save({ purpose: 'tagging', name: 'Second', text: 't', maxTags: 4 });
+    rmSync(filePath());
+    mkdirSync(join(filePath(), 'blocker'), { recursive: true });
+    store.markUsed(second);
+    expect(logs).toEqual([LAST_USED_WRITE_FAILED]);
+    expect(store.list().lastUsed.tagging).toBe(second.id);
+    expect(store.resolve('tagging', undefined)).toEqual(second);
   });
 
   it('does not write when the prompt is already the one used last', () => {
