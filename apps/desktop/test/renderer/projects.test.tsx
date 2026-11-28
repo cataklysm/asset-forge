@@ -1,7 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { AssetList, AssetType, IpcRequest, Project, ProjectMember, ProjectSummary } from '@assetforge/contracts';
+import type {
+  AssetList,
+  AssetType,
+  IpcRequest,
+  Project,
+  ProjectList,
+  ProjectMember,
+  ProjectSummary,
+} from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import {
@@ -125,6 +133,26 @@ it('search, status and tags go into projects:list after the debounce', async () 
   expect(listRequests(api).filter((r) => r.query !== undefined)).toEqual([
     { limit: 60, offset: 0, query: 'oak', status: 'archived', tagNames: ['bark'] },
   ]);
+});
+
+it('a tag added while the unfiltered list loads supersedes it; its late answer never shows', async () => {
+  const user = userEvent.setup();
+  const unfiltered = deferred<ProjectList>();
+  const api = install({
+    'projects:list': (request) => {
+      if (request.limit === 1) return pageOf([], 2);
+      if (request.tagNames === undefined) return unfiltered.promise;
+      return pageOf([projectSummary({ name: 'Tagged' })]);
+    },
+  });
+  render(<Harness />);
+  await waitFor(() => expect(listRequests(api)).toContainEqual({ limit: 60, offset: 0 }));
+
+  await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Bark{Enter}');
+  expect(await screen.findByText('Tagged')).toBeTruthy();
+  await act(async () => unfiltered.resolve(pageOf([projectSummary({ name: 'Untagged' })])));
+  expect(screen.queryByText('Untagged')).toBeNull();
+  expect(screen.getByText('Tagged')).toBeTruthy();
 });
 
 it('Matching tags shows file-matched tags after an image icon', async () => {
@@ -388,6 +416,26 @@ it('opening a project keeps the scroll offset and the selection', async () => {
   await waitFor(() => expect(document.activeElement).toBe(rowOf('Project 7')));
 });
 
+it('back from a project that moved in the list, its own row takes the focus, not the one at its position', async () => {
+  const items = many(20);
+  const opened = items[7]!;
+  // The project was renamed while open and now sorts third.
+  const reordered = [...items.slice(0, 2), opened, ...items.slice(2, 7), ...items.slice(8)];
+  install({ 'projects:list': listOf(reordered) });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: opened.id }} />);
+  await waitFor(() => expect(document.activeElement).toBe(rowOf('Project 7')));
+});
+
+it('back from a project that left the loaded rows, no other row takes the focus', async () => {
+  const items = many(20);
+  const opened = items[7]!;
+  install({ 'projects:list': listOf(items.filter((item) => item !== opened)) });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: opened.id }} />);
+  await waitFor(() => rowOf('Project 8'));
+  expect(document.activeElement).toBe(document.body);
+  expect(rowOf('Project 8').getAttribute('aria-selected')).toBe('false');
+});
+
 it('empty and no-result states', async () => {
   const user = userEvent.setup();
   const api = install({ 'projects:list': listOf([]) });
@@ -408,16 +456,99 @@ it('a failed first page shows Retry', async () => {
   let fail = true;
   install({
     'projects:list': (request) => {
-      if (fail && request.limit === 60) throw fakeError('internal_error');
+      if (fail && request.limit === 60) throw fakeError('storage_full');
       return listOf([projectSummary({ name: 'Back' })])(request);
     },
   });
   render(<Harness />);
   const retry = await screen.findByRole('button', { name: 'Retry' });
+  // The failure is named beside Retry.
+  expect(screen.getByRole('alert').textContent).toBe('There is not enough free space in this folder.');
   fail = false;
   await user.click(retry);
   expect(await screen.findByText('Back')).toBeTruthy();
 });
+
+it('a focused placeholder row that turns into Retry hands the focus to the Retry button', async () => {
+  const items = many(61);
+  const second = deferred<ProjectList>();
+  install({
+    'projects:list': (request) => (request.offset === 60 ? second.promise : listOf(items)(request)),
+  });
+  render(<Harness />);
+  await screen.findByText('Project 0');
+  const grid = screen.getByRole('grid', { name: 'Projects' });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 59 * 48 });
+  fireEvent.scroll(grid);
+  const placeholder = await waitFor(() => {
+    const row = grid.querySelector<HTMLElement>('[data-index="60"]');
+    expect(row?.getAttribute('aria-busy')).toBe('true');
+    return row!;
+  });
+  act(() => placeholder.focus());
+  expect(document.activeElement).toBe(placeholder);
+
+  await act(async () => second.reject(fakeError('internal_error')));
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  await waitFor(() => expect(document.activeElement).toBe(retry));
+  // The row names the failure beside Retry.
+  expect(within(retry.closest<HTMLElement>('[role=gridcell]')!).getByText('internal_error')).toBeTruthy();
+});
+
+it('the focus of a row coming back from its project does not take the focus from the search field', async () => {
+  const user = userEvent.setup();
+  const items = many(20);
+  const first = deferred<ProjectList>();
+  install({
+    'projects:list': (request) => (request.limit === 60 ? first.promise : listOf(items)(request)),
+  });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: items[7]!.id }} />);
+  const search = screen.getByRole('searchbox', { name: 'Search projects' });
+  await user.click(search);
+  await act(async () => first.resolve(pageOf(items.slice(0, 20), 20)));
+  await waitFor(() => rowOf('Project 7'));
+  expect(document.activeElement).toBe(search);
+});
+
+it.each([
+  ['a key press', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+  ['a wheel turn', () => fireEvent.wheel(document.body, { deltaY: 120 })],
+])(
+  'after %s while the list loads, the row coming back from its project never takes the focus late',
+  async (_, input) => {
+    const items = many(20);
+    const first = deferred<ProjectList>();
+    install({
+      'projects:list': (request) => (request.limit === 60 ? first.promise : listOf(items)(request)),
+    });
+    render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: items[7]!.id }} />);
+    input();
+    await act(async () => first.resolve(pageOf(items.slice(0, 20), 20)));
+    await waitFor(() => rowOf('Project 7'));
+    expect(document.activeElement).toBe(document.body);
+  },
+);
+
+it.each([
+  ['a key press', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+  ['a wheel turn', () => fireEvent.wheel(screen.getByRole('grid', { name: 'Projects' }), { deltaY: 120 })],
+])(
+  'after %s while its page loads in the shown table, the row coming back never takes the focus late',
+  async (_, input) => {
+    const items = many(80);
+    const second = deferred<ProjectList>();
+    install({
+      'projects:list': (request) => (request.offset === 60 ? second.promise : listOf(items)(request)),
+    });
+    render(<Harness initial={{ ...INITIAL, scrollOffset: 60 * 48, openedIndex: 70, selectedId: items[70]!.id }} />);
+    await screen.findByRole('grid', { name: 'Projects' });
+    await waitFor(() => expect(screen.getByRole('grid').querySelector('[data-index="70"]')).not.toBeNull());
+    input();
+    await act(async () => second.resolve(pageOf(items.slice(60, 80), 80)));
+    await waitFor(() => rowOf('Project 70'));
+    expect(document.activeElement).toBe(document.body);
+  },
+);
 
 it('New project creates a project with a description and opens it', async () => {
   const user = userEvent.setup();
@@ -592,6 +723,133 @@ it('the project screen keeps the member pager and member editing', async () => {
     offset: 0,
   });
   expect(screen.getByRole('combobox', { name: 'Search assets' })).toBeTruthy();
+});
+
+/**
+ * A project and a fake API whose members can be removed.
+ *
+ * @param count the number of members
+ * @returns the project, the members and the fake API
+ */
+function projectWithMembers(count: number) {
+  const project: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: '',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  const members = Array.from({ length: count }, (_, i) => member(project.id, `Member ${i}`));
+  const api = installFakeApi({
+    'projects:get': () => project,
+    'assetTypes:list': () => [TYPE],
+    'assignments:listByProject': ({ limit, offset }) => pageOf(members.slice(offset, offset + limit), members.length),
+    'assignments:remove': ({ assetId }) => {
+      members.splice(
+        members.findIndex((entry) => entry.assetId === assetId),
+        1,
+      );
+      return null;
+    },
+    'assets:list': () => pageOf([]),
+  });
+  return { project, members, api };
+}
+
+it('the project screen starts on the member page it is given and reports every page change', async () => {
+  const user = userEvent.setup();
+  const { project, api } = projectWithMembers(120);
+  const onMemberOffsetChange = vi.fn();
+  render(
+    <ProjectScreen
+      id={project.id}
+      onNavigate={() => {}}
+      initialMemberOffset={50}
+      onMemberOffsetChange={onMemberOffsetChange}
+    />,
+  );
+
+  expect(await screen.findByText('Member 50')).toBeTruthy();
+  expect(screen.queryByText('Member 0')).toBeNull();
+  expect(api.calls.filter((c) => c.channel === 'assignments:listByProject').map((c) => c.request)).not.toContainEqual({
+    projectId: project.id,
+    limit: 50,
+    offset: 0,
+  });
+  const pager = screen.getByRole('navigation', { name: 'Pagination' });
+  await user.click(within(pager).getByRole('button', { name: 'Next' }));
+  expect(await screen.findByText('Member 100')).toBeTruthy();
+  expect(onMemberOffsetChange).toHaveBeenLastCalledWith(100);
+});
+
+it('removing the only member of the last page shows the page before it', async () => {
+  const user = userEvent.setup();
+  const { project } = projectWithMembers(51);
+  const onMemberOffsetChange = vi.fn();
+  render(
+    <ProjectScreen
+      id={project.id}
+      onNavigate={() => {}}
+      initialMemberOffset={50}
+      onMemberOffsetChange={onMemberOffsetChange}
+    />,
+  );
+
+  const row = (await screen.findByText('Member 50')).closest('tr')!;
+  await user.click(within(row).getByRole('button', { name: 'Remove Member 50 from Forest' }));
+  expect(await screen.findByText('Member 0')).toBeTruthy();
+  expect(onMemberOffsetChange).toHaveBeenLastCalledWith(0);
+});
+
+it('a member page kept from an earlier visit that is past the end moves to the last page', async () => {
+  // Thirty members need no pager, so only the screen itself can step back.
+  const { project } = projectWithMembers(30);
+  render(<ProjectScreen id={project.id} onNavigate={() => {}} initialMemberOffset={150} />);
+
+  expect(await screen.findByText('Member 0')).toBeTruthy();
+  expect(screen.queryByRole('navigation', { name: 'Pagination' })).toBeNull();
+});
+
+it('the shell keeps the member page of the project left last, and starts another project on its first page', async () => {
+  const user = userEvent.setup();
+  const [forest, desert] = [projectSummary({ name: 'Forest' }), projectSummary({ name: 'Desert' })];
+  const members = new Map(
+    [forest!, desert!].map((entry) => [
+      entry.id,
+      Array.from({ length: 120 }, (_, i) => member(entry.id, `${entry.name} member ${i}`)),
+    ]),
+  );
+  install({
+    'projects:list': listOf([forest!, desert!]),
+    'projects:get': ({ id }) => {
+      const found = [forest!, desert!].find((entry) => entry.id === id)!;
+      return { id, name: found.name, description: '', status: 'active', createdAt: NOW, updatedAt: NOW };
+    },
+    'assignments:listByProject': ({ projectId, limit, offset }) =>
+      pageOf(members.get(projectId)!.slice(offset, offset + limit), 120),
+    'assignments:listByAsset': () => [],
+  });
+  render(
+    <WorkspaceShell workspace={{ id: nextId(), name: 'W', rootPath: 'root', lastOpenedAt: NOW }} onClosed={() => {}} />,
+  );
+  /** Opens a project from the projects list and waits for the given member. */
+  const open = async (name: string, shown: string) => {
+    await user.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: /Projects/ }));
+    await within(await screen.findByRole('grid', { name: 'Projects' })).findByText(name);
+    await user.dblClick(rowOf(name));
+    expect(await screen.findByText(shown)).toBeTruthy();
+  };
+
+  await open('Forest', 'Forest member 0');
+  await user.click(
+    within(screen.getByRole('navigation', { name: 'Pagination' })).getByRole('button', { name: 'Next' }),
+  );
+  expect(await screen.findByText('Forest member 50')).toBeTruthy();
+
+  await open('Forest', 'Forest member 50');
+  expect(screen.queryByText('Forest member 0')).toBeNull();
+  await open('Desert', 'Desert member 0');
 });
 
 /** The projects list inside a `TagsProvider` whose renames rewrite the filters, as the workspace shell does. */

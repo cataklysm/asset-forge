@@ -1,3 +1,4 @@
+import { describeError } from './api';
 import {
   acceptPage,
   dropPages,
@@ -142,7 +143,8 @@ export class PagedLoader<T> {
   }
 
   /**
-   * Requests a failed page again.
+   * Requests a failed page again. While a key change loads there is none: page 0 of the new key is
+   * the only page in its state, and a failure of it ends the change.
    *
    * @param page the page
    */
@@ -196,15 +198,16 @@ export class PagedLoader<T> {
   /**
    * Requests every missing page below `ceil(min(count, total) / PAGE_SIZE)`, within the
    * in-flight cap. Resolves once they have settled (failed pages included); rejects when the
-   * key changes or the loader turns inactive first.
+   * key changes or the loader turns inactive first, and at once while a key change loads: the
+   * caller asked about the displayed list, which the new key has already superseded.
    *
    * @param count the items that must have settled
    * @returns the wait
    */
   loadThrough(count: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      if (!this.active) {
-        reject(new Error('The list is not active.'));
+      if (!this.active || this.pending) {
+        reject(new Error('The list is not active or about to change.'));
         return;
       }
       this.throughs.push({ count, resolve, reject });
@@ -283,7 +286,8 @@ export class PagedLoader<T> {
       promise.then(
         (result) =>
           this.settle(round, counted, () => acceptPage(this.state, requestKey, page, result.items, result.total)),
-        () => this.settle(round, counted, () => rejectPage(this.state, requestKey, page)),
+        (error: unknown) =>
+          this.settle(round, counted, () => rejectPage(this.state, requestKey, page, PAGE_SIZE, describeError(error))),
       );
     }
   }

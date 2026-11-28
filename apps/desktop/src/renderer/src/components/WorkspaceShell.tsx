@@ -158,20 +158,41 @@ export function WorkspaceShell(props: Props) {
 }
 
 /** What the navigation of the frame changes after the leave guard agreed. */
-interface LeaveTarget {
+export interface LeaveTarget {
+  /** The view shown now. */
+  current: View;
   confirmLeave(): Promise<boolean>;
   setError(error: string | null): void;
   setView(view: View): void;
 }
 
 /**
- * Shows another view once the leave guard agreed, dropping the shown error.
+ * Whether a navigation leaves the shown screen alone: it names no item and goes to the screen shown already.
+ * A navigation with an item always goes through, since the screen may have moved to another item itself
+ * (the Prompts screen keeps its selection to itself).
  *
- * @param target the guard and the setters of the frame
+ * @param current the view shown now
  * @param view the view to show
- * @returns true when the view was shown, false when the guard held it back
+ * @returns true when nothing is to change
  */
-async function leaveTo(target: LeaveTarget, view: View): Promise<boolean> {
+function staysOnView(current: View, view: View): boolean {
+  const id = 'id' in view ? view.id : undefined;
+  return id === undefined && current.name === view.name;
+}
+
+/**
+ * Shows another view once the leave guard agreed, dropping the shown error. The screen shown already stays
+ * without asking when the navigation names no item, since nothing would be left.
+ *
+ * @param target the current view, the guard and the setters of the frame
+ * @param view the view to show
+ * @returns true when the view is shown, false when the guard held it back
+ */
+export async function leaveTo(target: LeaveTarget, view: View): Promise<boolean> {
+  if (staysOnView(target.current, view)) {
+    target.setError(null);
+    return true;
+  }
   if (!(await target.confirmLeave())) return false;
   target.setError(null);
   target.setView(view);
@@ -185,7 +206,7 @@ async function leaveTo(target: LeaveTarget, view: View): Promise<boolean> {
  * @param onClosed called after the workspace was closed
  * @returns resolves when done; never rejects
  */
-async function closeWorkspace(target: Omit<LeaveTarget, 'setView'>, onClosed: () => void): Promise<void> {
+async function closeWorkspace(target: Omit<LeaveTarget, 'current' | 'setView'>, onClosed: () => void): Promise<void> {
   if (!(await target.confirmLeave())) return;
   try {
     await call('workspace:close', {});
@@ -222,6 +243,8 @@ interface ScreenDependencies {
   setBusy(busy: boolean): void;
   setView(view: View): void;
   showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>): void;
+  /** Counts the views shown, so a navigation to the view shown already mounts its screen afresh. */
+  visit: number;
 }
 
 /**
@@ -231,7 +254,10 @@ interface ScreenDependencies {
  * @param deps the list state, the busy flag and the navigation of the frame
  * @returns the screen element
  */
-function screenFor(view: View, { shell: state, busy, setBusy, setView, showAssets }: ScreenDependencies): ReactNode {
+function screenFor(
+  view: View,
+  { shell: state, busy, setBusy, setView, showAssets, visit }: ScreenDependencies,
+): ReactNode {
   const { shell } = state;
   switch (view.name) {
     case 'assets':
@@ -256,13 +282,22 @@ function screenFor(view: View, { shell: state, busy, setBusy, setView, showAsset
         />
       );
     case 'project':
-      return <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />;
+      return (
+        <ProjectScreen
+          key={view.id}
+          id={view.id}
+          onNavigate={setView}
+          initialMemberOffset={shell.memberPage.projectId === view.id ? shell.memberPage.offset : 0}
+          onMemberOffsetChange={(offset) => state.setMemberPage({ projectId: view.id, offset })}
+        />
+      );
     case 'inbox':
       return <InboxScreen state={shell.inboxList} onStateChange={state.setInboxList} onBusyChange={setBusy} />;
     case 'trash':
       return <TrashScreen state={shell.trashList} onStateChange={state.setTrashList} />;
     case 'prompts':
-      return <PromptsScreen key={view.id ?? ''} busy={busy} initialId={view.id ?? null} />;
+      // A prompt opened again after the screen moved to another one starts afresh on it.
+      return <PromptsScreen key={`${view.id ?? ''}:${visit}`} busy={busy} initialId={view.id ?? null} />;
     case 'jobs':
       return <JobsScreen />;
     case 'settings':
@@ -288,7 +323,9 @@ function screenFor(view: View, { shell: state, busy, setBusy, setView, showAsset
  */
 function WorkspaceFrame({ workspace, onClosed }: Props) {
   const confirmLeave = useConfirmLeave();
-  const [view, setView] = useState<View>({ name: 'assets' });
+  const [shown, setShown] = useState<{ view: View; visit: number }>({ view: { name: 'assets' }, visit: 0 });
+  const view = shown.view;
+  const setView = useCallback((next: View) => setShown((previous) => ({ view: next, visit: previous.visit + 1 })), []);
   const [error, setError] = useState<string | null>(null);
   // The inbox reports a running import so closing cannot interrupt the batch.
   const [busy, setBusy] = useState(false);
@@ -305,12 +342,12 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   }
 
   const openPrompt = useCallback(
-    (id: string) => leaveTo({ confirmLeave, setError, setView }, { name: 'prompts', id }),
-    [confirmLeave],
+    (id: string) => leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'prompts', id }),
+    [confirmLeave, view, setView],
   );
   const openSettings = useCallback(
-    () => void leaveTo({ confirmLeave, setError, setView }, { name: 'settings' }),
-    [confirmLeave],
+    () => void leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'settings' }),
+    [confirmLeave, view, setView],
   );
 
   return (
@@ -320,7 +357,9 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         rootPath={workspace.rootPath}
         section={sectionOf(view)}
         busy={busy}
-        onNavigate={(section) => void leaveTo({ confirmLeave, setError, setView }, viewOfSection(section))}
+        onNavigate={(section) =>
+          void leaveTo({ current: view, confirmLeave, setError, setView }, viewOfSection(section))
+        }
         onClose={() => void closeWorkspace({ confirmLeave, setError }, onClosed)}
       >
         {/* The screens bring their own padding. */}
@@ -332,7 +371,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
                 {error}
               </p>
             )}
-            {screenFor(view, { shell, busy, setBusy, setView, showAssets })}
+            {screenFor(view, { shell, busy, setBusy, setView, showAssets, visit: shown.visit })}
           </StudioProvider>
         </OpenSettingsProvider>
       </JobsAppShell>

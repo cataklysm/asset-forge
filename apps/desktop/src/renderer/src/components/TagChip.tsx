@@ -1,6 +1,6 @@
 import type { TagOrigin } from '@assetforge/contracts';
 import { Pencil, X } from 'lucide-react';
-import { RENAME_LABEL, renameTagLabel } from '../labels';
+import { AI_TAG_TITLE, RENAME_LABEL, removeTagLabel, renameTagLabel } from '../labels';
 import { AI_CHIP, CHIP, FILTER_CHIP, FOCUS, MATCHED_CHIP } from '../ui';
 
 /** The props of `TagChip`. */
@@ -47,7 +47,7 @@ export function TagChip({ tag, onRemove, onRename, filter = false, matched = fal
     <span
       data-origin={tag.origin}
       data-matched={matched || undefined}
-      title={ai ? 'AI tag' : undefined}
+      title={ai ? AI_TAG_TITLE : undefined}
       className={`${look} max-w-full`}
     >
       <span className="truncate">{tag.displayName}</span>
@@ -67,7 +67,7 @@ export function TagChip({ tag, onRemove, onRename, filter = false, matched = fal
         <button
           type="button"
           data-remove=""
-          aria-label={ai ? `Remove AI tag ${tag.displayName}` : `Remove ${tag.displayName}`}
+          aria-label={removeTagLabel(tag.displayName, ai)}
           onClick={onRemove}
           className={`-mr-1 ${CHIP_BUTTON}`}
         >

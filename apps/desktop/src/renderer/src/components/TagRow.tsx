@@ -3,6 +3,7 @@ import { Image as ImageIcon } from 'lucide-react';
 import { useCallback, useId, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react';
 import { useTagRowEdit } from '../hooks/useTagRowEdit';
 import { chipRemoveButtons, useTagRowFocus } from '../hooks/useTagRowFocus';
+import { ADD_ASSET_TAG_LABEL, ADD_IMAGE_TAG_LABEL, ADD_PROMPT_TAG_LABEL, ADD_TAG_PLACEHOLDER } from '../labels';
 import type { TagRename } from '../tag-rename';
 import { useTags, type TagsState } from '../tags-context';
 import { ALERT, LABEL, PANEL_TITLE } from '../ui';
@@ -52,8 +53,8 @@ function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
  * @returns the name
  */
 function addLabel(kind: Props['kind']): string {
-  if (kind === 'asset') return 'Add asset tag';
-  return kind === 'prompt' ? 'Add prompt tag' : 'Add image tag';
+  if (kind === 'asset') return ADD_ASSET_TAG_LABEL;
+  return kind === 'prompt' ? ADD_PROMPT_TAG_LABEL : ADD_IMAGE_TAG_LABEL;
 }
 
 /** The props of `TagRowChip`. */
@@ -173,7 +174,7 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
             setError(null);
           }}
           onCommit={(value) => void add(value)}
-          placeholder="+ Add tag"
+          placeholder={ADD_TAG_PLACEHOLDER}
           label={addLabel(kind)}
           inputRef={setInput}
           onKeyDown={onInputKeyDown}

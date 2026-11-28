@@ -176,6 +176,70 @@ it('Ctrl+A loads the missing pages and selects at most 1000', async () => {
   expect(itemOf('File 3.png').getAttribute('aria-selected')).toBe('true');
 });
 
+it('a failed first page names the failure beside Retry', async () => {
+  const user = userEvent.setup();
+  let fail = true;
+  install({
+    'files:list': (request: ListRequest) => {
+      if (fail) throw fakeError('storage_full');
+      return listOf(many(1))(request);
+    },
+  });
+  render(<Harness />);
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  expect(screen.getByRole('alert').textContent).toBe('There is not enough free space in this folder.');
+  fail = false;
+  await user.click(retry);
+  expect(await screen.findByText('File 0.png')).toBeTruthy();
+});
+
+it.each(['grid', 'table'] as const)('a failed later page names the failure beside Retry (%s)', async (view) => {
+  const files = many(130);
+  install({
+    'files:list': (request: ListRequest) => {
+      if (request.offset === 60) throw fakeError('storage_full');
+      return listOf(files)(request);
+    },
+  });
+  render(<Harness initialView={view} />);
+  await screen.findByText('File 0.png');
+  const container = screen.queryByRole('listbox', { name: 'Files' }) ?? screen.getByRole('grid', { name: 'Files' });
+  Object.defineProperty(container, 'scrollTop', { configurable: true, value: view === 'grid' ? 20 * 300 : 60 * 48 });
+  fireEvent.scroll(container);
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  expect(within(retry.parentElement!).getByText('There is not enough free space in this folder.')).toBeTruthy();
+});
+
+it('Ctrl+A after a failed page asks for it again and selects nothing while it still fails', async () => {
+  const user = userEvent.setup();
+  const onSelection = vi.fn();
+  const files = many(130);
+  let fail = true;
+  const api = install({
+    'files:list': (request: ListRequest) => {
+      if (fail && request.offset === 60) throw fakeError('storage_full');
+      return listOf(files)(request);
+    },
+  });
+  render(<Harness onSelection={onSelection} />);
+  await screen.findByText('File 0.png');
+  await user.click(itemOf('File 0.png'));
+  await user.keyboard('{Control>}a{/Control}');
+  await waitFor(() => expect(listRequests(api).filter((r) => r.offset === 120)).toHaveLength(1));
+  await settleQueued();
+  // Page 1 failed: the selection is still the one clicked file.
+  expect((onSelection.mock.lastCall![0] as FileSelection).selected.size).toBe(1);
+
+  await user.keyboard('{Control>}a{/Control}');
+  await waitFor(() => expect(listRequests(api).filter((r) => r.offset === 60)).toHaveLength(2));
+  await settleQueued();
+  expect((onSelection.mock.lastCall![0] as FileSelection).selected.size).toBe(1);
+
+  fail = false;
+  await user.keyboard('{Control>}a{/Control}');
+  await waitFor(() => expect((onSelection.mock.lastCall![0] as FileSelection).selected.size).toBe(130));
+});
+
 it('Enter and the magnifier open the detail; the tile menu offers only allowed actions', async () => {
   const user = userEvent.setup();
   const onOpen = vi.fn();

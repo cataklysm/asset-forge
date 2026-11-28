@@ -16,7 +16,7 @@ import {
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
-import { ANALYSE_ASSET_TITLE } from '../../src/renderer/src/labels';
+import { ANALYSE_ASSET_TITLE, FILE_COUNT_FAILED_TITLE } from '../../src/renderer/src/labels';
 import type { AssetTab } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
@@ -265,6 +265,14 @@ it('the breadcrumb is a link back to the gallery', async () => {
   await screen.findByRole('textbox', { name: 'Name' });
   await user.click(screen.getByRole('link', { name: 'Assets' }));
   expect(onBack).toHaveBeenCalledTimes(1);
+});
+
+it('the breadcrumb names the asset like the project breadcrumb names the project', async () => {
+  const asset = assetDetail({ name: 'Oak' });
+  install(asset);
+  render(<Harness id={asset.id} onBack={vi.fn()} />);
+  await screen.findByRole('textbox', { name: 'Name' });
+  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('Assets / Oak');
 });
 
 it('import shows the result strip with failed names and errors, and reports busy', async () => {
@@ -690,7 +698,7 @@ it('each tab panel shows its own load error and empty status', async () => {
   expect(await screen.findByText('Not assigned to any project')).toBeTruthy();
   unmount();
 
-  install(asset, {
+  const { calls } = install(asset, {
     'files:list': () => {
       throw fakeError('storage_unreachable');
     },
@@ -701,6 +709,14 @@ it('each tab panel shows its own load error and empty status', async () => {
   render(<Harness id={asset.id} />);
   const files = await screen.findByRole('tabpanel');
   expect(await within(files).findByRole('alert')).toBeTruthy();
+  // The count read fails as well; its failure is not repeated beside the list's own.
+  await waitFor(() => expect(calls.filter((entry) => entry.channel === 'files:list').length).toBeGreaterThan(1));
+  await act(async () => {});
+  expect(
+    within(files)
+      .getAllByRole('alert')
+      .map((alert) => alert.textContent),
+  ).toEqual(['The folder cannot be reached. Check that the drive or network share is available.']);
   expect(within(files).getByRole('button', { name: 'Retry' })).toBeTruthy();
   await user.click(screen.getByRole('tab', { name: /Relations/ }));
   const panel = screen.getByRole('tabpanel');
@@ -924,6 +940,80 @@ it('a file a job added to this asset refreshes the files and the tab count in pl
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('a failed count read under a filtered list marks the Files tab count until a later read succeeds', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const asset = assetDetail();
+    const files = Array.from({ length: 3 }, (_, i) =>
+      fileRecord({ originalName: `f${i}.png`, assetId: asset.id, role: 'reference' }),
+    );
+    let summary = {
+      queued: 1,
+      running: 0,
+      waiting: 0,
+      failed: 0,
+      cancelled: 0,
+      succeeded: 0,
+      changes: 1,
+      paused: [],
+      pausedHosts: [],
+    };
+    let changes = noChanges();
+    let countFails = false;
+    install(asset, {
+      ...analysisHandlers(),
+      'jobs:summary': () => summary,
+      'changes:since': () => changes,
+      'files:list': (request) => {
+        if (request.kind === 'model') return pageOf([]);
+        if (request.limit === 1 && countFails) throw fakeError('internal_error');
+        return listOf(files)(request);
+      },
+    });
+    const change = async (p: Partial<Changes>) => {
+      summary = { ...summary, changes: summary.changes + 1 };
+      changes = noChanges(p);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+      });
+      changes = noChanges();
+    };
+    renderWithProvider(asset.id);
+    await screen.findByText('f0.png');
+    const countOf = () => within(screen.getByRole('tab', { name: /^Files/ })).getByText(/^(\d+|\?)$/);
+    expect(countOf().textContent).toBe('3');
+    expect(countOf().title).toBe('');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'File type' }), { target: { value: 'model' } });
+    await screen.findByText('No matching files');
+    countFails = true;
+    await change({ added: [{ assetId: asset.id }] });
+    await waitFor(() => expect(countOf().title).toBe(FILE_COUNT_FAILED_TITLE));
+    expect(countOf().textContent).toBe('3');
+    expect(screen.queryAllByRole('alert')).toEqual([]);
+
+    countFails = false;
+    await change({ added: [{ assetId: asset.id }] });
+    await waitFor(() => expect(countOf().title).toBe(''));
+    expect(countOf().textContent).toBe('3');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('a first count read that fails before any count is known shows ? on the Files tab and one alert', async () => {
+  const asset = assetDetail();
+  install(asset, {
+    'files:list': () => {
+      throw fakeError('internal_error');
+    },
+  });
+  render(<Harness id={asset.id} />);
+  const tab = await screen.findByRole('tab', { name: 'Files ?' });
+  expect(within(tab).getByText('?').title).toBe(FILE_COUNT_FAILED_TITLE);
+  await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
 });
 
 /** The Analyse button of the selection bar (the header has one for the whole asset). */

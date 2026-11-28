@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { ApprovalStatusSchema, AssignmentPrioritySchema, type ProjectAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { label } from '../labels';
+import {
+  ASSIGNMENT_APPROVAL_LABEL,
+  ASSIGNMENT_INTENDED_USE_LABEL,
+  ASSIGNMENT_PRIORITY_LABEL,
+  label,
+  NOTES_LABEL,
+} from '../labels';
 import { ALERT, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 
@@ -48,7 +54,7 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
         <>
           <select
             className={SELECT}
-            aria-label="Priority"
+            aria-label={ASSIGNMENT_PRIORITY_LABEL}
             value={assignment.priority}
             onChange={(event) => void save({ priority: AssignmentPrioritySchema.parse(event.target.value) })}
           >
@@ -60,7 +66,7 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
           </select>
           <select
             className={SELECT}
-            aria-label="Approval"
+            aria-label={ASSIGNMENT_APPROVAL_LABEL}
             value={assignment.approvalStatus}
             onChange={(event) => void save({ approvalStatus: ApprovalStatusSchema.parse(event.target.value) })}
           >
@@ -71,9 +77,9 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
             ))}
           </select>
           <CommitInput
-            label="Intended use"
+            label={ASSIGNMENT_INTENDED_USE_LABEL}
             variant="inline"
-            placeholder="Intended use"
+            placeholder={ASSIGNMENT_INTENDED_USE_LABEL}
             className="h-9"
             value={assignment.intendedUse}
             maxLength={500}
@@ -83,10 +89,10 @@ export function AssignmentFields({ assignment, onChanged, fields = 'all' }: Prop
       )}
       {fields !== 'main' && (
         <CommitInput
-          label="Notes"
+          label={NOTES_LABEL}
           multiline
           variant="inline"
-          placeholder="Notes"
+          placeholder={NOTES_LABEL}
           className="min-w-64 flex-1"
           value={assignment.notes}
           maxLength={5000}

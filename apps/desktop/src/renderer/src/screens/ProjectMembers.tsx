@@ -3,7 +3,21 @@ import { Fragment } from 'react';
 import type { ProjectMember } from '@assetforge/contracts';
 import { AssignmentFields } from '../components/AssignmentFields';
 import { Link } from '../components/Link';
-import { label } from '../labels';
+import {
+  label,
+  MEMBER_ACTIONS_COLUMN,
+  MEMBER_ASSET_COLUMN,
+  MEMBER_ASSIGNMENT_COLUMN,
+  MEMBER_NOTES_COLUMN,
+  MEMBER_NOTES_TITLE,
+  MEMBER_STATUS_COLUMN,
+  MEMBER_TYPE_COLUMN,
+  MEMBERS_TABLE_LABEL,
+  notesForLabel,
+  REMOVE_MEMBER_LABEL,
+  REMOVE_MEMBER_TITLE,
+  removeMemberLabel,
+} from '../labels';
 import { BORDER, BUTTON_INLINE, ICON_BUTTON_INLINE, MUTED } from '../ui';
 
 /** The props of `MembersTable`. */
@@ -31,16 +45,16 @@ interface MembersTableProps {
 export function MembersTable(props: MembersTableProps) {
   const { items, projectName, typeName, expanded, onToggleNotes, onOpenAsset, onChanged, onRemove } = props;
   return (
-    <table aria-label="Members" className="w-full text-left text-sm">
+    <table aria-label={MEMBERS_TABLE_LABEL} className="w-full text-left text-sm">
       <thead className={`border-b ${BORDER} ${MUTED}`}>
         <tr>
-          <th className="py-2 pr-3 font-normal">Asset</th>
-          <th className="py-2 pr-3 font-normal">Type</th>
-          <th className="py-2 pr-3 font-normal">Status</th>
-          <th className="py-2 pr-3 font-normal">Assignment</th>
-          <th className="py-2 pr-3 font-normal">Notes</th>
+          <th className="py-2 pr-3 font-normal">{MEMBER_ASSET_COLUMN}</th>
+          <th className="py-2 pr-3 font-normal">{MEMBER_TYPE_COLUMN}</th>
+          <th className="py-2 pr-3 font-normal">{MEMBER_STATUS_COLUMN}</th>
+          <th className="py-2 pr-3 font-normal">{MEMBER_ASSIGNMENT_COLUMN}</th>
+          <th className="py-2 pr-3 font-normal">{MEMBER_NOTES_COLUMN}</th>
           <th className="py-2 font-normal">
-            <span className="sr-only">Actions</span>
+            <span className="sr-only">{MEMBER_ACTIONS_COLUMN}</span>
           </th>
         </tr>
       </thead>
@@ -82,52 +96,20 @@ interface MemberRowsProps {
  * @param props the member, its names, whether the notes show, and the callbacks
  * @returns one or two table rows
  */
-function MemberRows({
-  member,
-  projectName,
-  typeName,
-  notesOpen,
-  onToggleNotes,
-  onOpenAsset,
-  onChanged,
-  onRemove,
-}: MemberRowsProps) {
-  const name = member.asset.name;
-  const Chevron = notesOpen ? ChevronDown : ChevronRight;
+function MemberRows(props: MemberRowsProps) {
+  const { member, typeName, notesOpen, onOpenAsset, onChanged } = props;
   return (
     <Fragment>
       <tr className={notesOpen ? '' : `border-b ${BORDER}`}>
         <td className="py-2 pr-3">
-          <Link onFollow={onOpenAsset}>{name}</Link>
+          <Link onFollow={onOpenAsset}>{member.asset.name}</Link>
         </td>
         <td className="py-2 pr-3">{typeName}</td>
         <td className="py-2 pr-3">{label(member.asset.status)}</td>
         <td className="py-2 pr-3">
           <AssignmentFields assignment={member} fields="main" onChanged={onChanged} />
         </td>
-        <td className="py-2 pr-3">
-          <button
-            type="button"
-            className={ICON_BUTTON_INLINE}
-            aria-label={`Notes for ${name}`}
-            aria-expanded={notesOpen}
-            title={member.notes === '' ? 'Notes' : member.notes}
-            onClick={onToggleNotes}
-          >
-            <Chevron size={16} aria-hidden />
-          </button>
-        </td>
-        <td className="py-2 text-right">
-          <button
-            type="button"
-            className={BUTTON_INLINE}
-            aria-label={`Remove ${name} from ${projectName}`}
-            title="Removes the assignment only; the asset and its files are kept"
-            onClick={onRemove}
-          >
-            Remove
-          </button>
-        </td>
+        <MemberActionCells {...props} />
       </tr>
       {notesOpen && (
         <tr className={`border-b ${BORDER}`}>
@@ -137,5 +119,43 @@ function MemberRows({
         </tr>
       )}
     </Fragment>
+  );
+}
+
+/**
+ * The last two cells of a member's main row: the notes toggle and Remove.
+ *
+ * @param props the member, the project name, whether the notes show, and the callbacks
+ * @returns two table cells
+ */
+function MemberActionCells({ member, projectName, notesOpen, onToggleNotes, onRemove }: MemberRowsProps) {
+  const name = member.asset.name;
+  const Chevron = notesOpen ? ChevronDown : ChevronRight;
+  return (
+    <>
+      <td className="py-2 pr-3">
+        <button
+          type="button"
+          className={ICON_BUTTON_INLINE}
+          aria-label={notesForLabel(name)}
+          aria-expanded={notesOpen}
+          title={member.notes === '' ? MEMBER_NOTES_TITLE : member.notes}
+          onClick={onToggleNotes}
+        >
+          <Chevron size={16} aria-hidden />
+        </button>
+      </td>
+      <td className="py-2 text-right">
+        <button
+          type="button"
+          className={BUTTON_INLINE}
+          aria-label={removeMemberLabel(name, projectName)}
+          title={REMOVE_MEMBER_TITLE}
+          onClick={onRemove}
+        >
+          {REMOVE_MEMBER_LABEL}
+        </button>
+      </td>
+    </>
   );
 }

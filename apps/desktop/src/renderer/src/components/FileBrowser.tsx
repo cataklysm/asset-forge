@@ -18,6 +18,7 @@ import { usePagedList, type PagedList } from '../hooks/usePagedList';
 import type { ViewHandle, ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
 import { PAGE_SIZE, slotAt, type Slot } from '../paged-list';
+import { failedFirstEntry } from '../paged-view';
 import { clickSelect, NO_SELECTION, toggleSelect, type FileSelection, type ItemAt } from '../selection';
 import { nextRows, reloadRestore, TOP, viewerPages, type BrowserLatest, type KeyedRows } from './file-browser-state';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
@@ -213,8 +214,7 @@ export function FileBrowser(props: FileBrowserProps) {
     [viewKey],
   );
 
-  const failedPage =
-    total === null ? ([...paged.state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
+  const failedPage = failedFirstEntry(paged.state);
   const viewProps =
     total === null || total === 0
       ? null

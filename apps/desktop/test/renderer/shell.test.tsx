@@ -1,11 +1,23 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { JOB_ERROR_MESSAGES, type JobSummary, type PausedProvider } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  type FileRecord,
+  type Generation,
+  type JobSummary,
+  type PausedProvider,
+} from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
-import { JobsAppShell, WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
+import {
+  JobsAppShell,
+  leaveTo,
+  WorkspaceShell,
+  type LeaveTarget,
+} from '../../src/renderer/src/components/WorkspaceShell';
+import type { View } from '../../src/renderer/src/nav';
 import { JOB_POLL_MS, JobsProvider, sameSummary } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakePrompts, installFakeApi, promptDetail, type FakeHandlers } from './fake-api';
@@ -96,6 +108,31 @@ it('a storage_unreachable failure shows the banner and Retry remounts the page',
   await user.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(mounts).toBe(2));
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('while an import runs Retry on the storage banner is disabled and keeps the page', async () => {
+  const user = userEvent.setup();
+  installFakeApi({
+    'assets:list': () => {
+      throw fakeError('storage_unreachable');
+    },
+  });
+  let mounts = 0;
+  function Child() {
+    useEffect(() => {
+      mounts += 1;
+      void call('assets:list', { limit: 1, offset: 0 }).catch(() => {});
+    }, []);
+    return <p>child</p>;
+  }
+  render(shell({ busy: true }, <Child />));
+  await screen.findByRole('alert');
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  expect(retry.getAttribute('aria-disabled')).toBe('true');
+  expect(retry.getAttribute('title')).toBe('Import in progress');
+  await user.click(retry);
+  expect(mounts).toBe(1);
+  expect(screen.getByRole('alert')).toBeTruthy();
 });
 
 it('Ctrl+F focuses the page search field', async () => {
@@ -659,6 +696,71 @@ it('while an import runs Settings in a dialog is disabled like the navigation an
   await act(async () => pick.resolve([]));
 });
 
+/** A generation file entry for a record. */
+function generationFile(record: FileRecord): Generation['inputs'][number] {
+  return { fileId: record.id, name: record.originalName, sha256: 'a'.repeat(64), trashed: false };
+}
+
+/** A succeeded edit of `source` into `result`, started from version 3 of the library prompt `promptId`. */
+function libraryEdit(source: FileRecord, result: FileRecord, promptId: string): Generation {
+  return {
+    id: '00000000-0000-4000-8000-00000000e001',
+    kind: 'edit',
+    status: 'succeeded',
+    errorCode: null,
+    providerId: '00000000-0000-4000-8000-00000000e002',
+    providerName: 'Venice',
+    providerKind: 'venice',
+    model: 'mock-edit',
+    prompt: 'Turn the tree',
+    parameters: { v: 1, aspectRatio: null, resolution: null, safeMode: true },
+    jobId: null,
+    jobStatus: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    finishedAt: '2026-01-01T00:01:00.000Z',
+    inputs: [generationFile(source)],
+    outputs: [generationFile(result)],
+    promptId,
+    promptVersionId: '00000000-0000-4000-8000-00000000e003',
+    promptTitle: 'Turnaround',
+    promptVersionNumber: 3,
+    promptVariables: {},
+  };
+}
+
+it('the library prompt link of a generated file closes the dialogs and shows that prompt on the Prompts page', async () => {
+  const prompt = promptDetail({ title: 'Turnaround' });
+  const source = fileRecord({ originalName: 'oak.png' });
+  const result = fileRecord({ originalName: 'oak edit 1.png' });
+  const made = libraryEdit(source, result, prompt.id);
+  const user = userEvent.setup();
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'files:list': () => pageOf([result]),
+      'tags:suggest': () => [],
+      'generations:forFile': ({ fileId }) => ({ madeBy: fileId === result.id ? made : null, results: [] }),
+      'files:measure': () => result,
+      ...fakePrompts([prompt]).handlers,
+    },
+  );
+  await user.click(screen.getByRole('link', { name: /Inbox/ }));
+  const listbox = await screen.findByRole('listbox', { name: 'Files' });
+  await user.click(within(listbox).getByText('oak edit 1.png').closest<HTMLElement>('[data-index]')!);
+  await user.keyboard('{Enter}');
+  const detail = await screen.findByRole('dialog', { name: 'oak edit 1.png' });
+  const block = await within(detail).findByRole('region', { name: 'Generated from' });
+  await user.click(within(block).getByRole('link', { name: 'Turnaround v3' }));
+  expect(await screen.findByRole('heading', { level: 2, name: 'Prompts' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Prompts' }).getAttribute('aria-current')).toBe('page');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(await screen.findByDisplayValue('Turnaround')).toBeTruthy();
+  expect(api.calls.filter((c) => c.channel === 'prompts:get').map((c) => c.request)).toContainEqual({
+    promptId: prompt.id,
+  });
+});
+
 it('choosing Jobs shows the Jobs page', async () => {
   const user = userEvent.setup();
   workspaceShell(() => IDLE);
@@ -674,6 +776,17 @@ it('choosing Settings shows the Settings page, also without a configured provide
   expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
   expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('');
+});
+
+it('Settings on a line paused as not configured shows the Settings page of the workspace shell', async () => {
+  const user = userEvent.setup();
+  const notConfigured: PausedProvider = { ...PAUSED_LOCAL, reason: 'provider_not_configured' };
+  workspaceShell(() => ({ ...IDLE, queued: 1, paused: [notConfigured] }));
+  const line = within(await screen.findByRole('alert')).getByRole('group', { name: 'Local Ollama' });
+  expect(line.textContent).toContain(JOB_ERROR_MESSAGES.provider_not_configured);
+  await user.click(within(line).getByRole('button', { name: 'Settings' }));
+  expect(await screen.findByRole('heading', { level: 2, name: 'Settings' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('Prompts follows Projects and Trash follows Inbox in the navigation', () => {
@@ -848,4 +961,56 @@ it('a dirty prompt draft asks before the main navigation leaves; cancel stays, d
     }),
   );
   await waitFor(() => expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-current')).toBe('page'));
+});
+
+/** A leave target on `current` whose guard answers `agree`, recording what it was asked. */
+function leaveTarget(current: View, agree = true) {
+  const target = {
+    current,
+    confirmLeave: vi.fn(async () => agree),
+    setError: vi.fn(),
+    setView: vi.fn(),
+  } satisfies LeaveTarget;
+  return target;
+}
+
+it('opening prompt A again after the Prompts screen moved from A to B by itself asks the guard and shows A', async () => {
+  // The shell still holds A: the screen switched to B internally.
+  const target = leaveTarget({ name: 'prompts', id: 'A' });
+  expect(await leaveTo(target, { name: 'prompts', id: 'A' })).toBe(true);
+  expect(target.confirmLeave).toHaveBeenCalledTimes(1);
+  expect(target.setView).toHaveBeenCalledWith({ name: 'prompts', id: 'A' });
+
+  const held = leaveTarget({ name: 'prompts', id: 'A' }, false);
+  expect(await leaveTo(held, { name: 'prompts', id: 'A' })).toBe(false);
+  expect(held.setView).not.toHaveBeenCalled();
+});
+
+it('a navigation without an item to the screen shown already changes nothing and asks nothing', async () => {
+  for (const current of [{ name: 'prompts' }, { name: 'prompts', id: 'A' }, { name: 'jobs' }] as View[]) {
+    const target = leaveTarget(current);
+    const view = { name: current.name } as View;
+    expect(await leaveTo(target, view)).toBe(true);
+    expect(target.confirmLeave).not.toHaveBeenCalled();
+    expect(target.setView).not.toHaveBeenCalled();
+    expect(target.setError).toHaveBeenCalledWith(null);
+  }
+});
+
+it('choosing Prompts while the prompts screen shows asks nothing and keeps the draft', async () => {
+  const user = userEvent.setup();
+  workspaceShell(
+    () => IDLE,
+    () => {},
+    { 'tags:suggest': () => [], ...fakePrompts([promptDetail({ title: 'Hero' })]).handlers },
+  );
+  await user.click(screen.getByRole('link', { name: 'Prompts' }));
+  const listbox = await screen.findByRole('listbox', { name: 'Prompts' });
+  await user.click(await within(listbox).findByText('Hero'));
+  const editor = screen.getByRole('region', { name: 'Prompt' });
+  await user.type(await within(editor).findByDisplayValue('Hero'), ' shot');
+
+  await user.click(screen.getByRole('link', { name: 'Prompts' }));
+  expect(screen.queryByRole('dialog', { name: 'Discard the unsaved changes?' })).toBeNull();
+  expect(within(editor).getByDisplayValue('Hero shot')).toBeTruthy();
 });

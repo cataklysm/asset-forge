@@ -1,12 +1,22 @@
-import { useState } from 'react';
-import { ProjectStatusSchema, type Project } from '@assetforge/contracts';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ProjectStatusSchema, type Project, type ProjectMember } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { AssetPicker } from '../components/AssetPicker';
+import { Breadcrumb } from '../components/Breadcrumb';
 import { CommitInput } from '../components/CommitInput';
-import { Link } from '../components/Link';
 import { Pager } from '../components/Pager';
 import { useLoad } from '../hooks/useLoad';
-import { label } from '../labels';
+import {
+  ADD_ASSET_LABEL,
+  label,
+  LOADING_LABEL,
+  NO_ASSETS_ASSIGNED,
+  PROJECT_DESCRIPTION_LABEL,
+  PROJECT_MEMBERS_SECTION,
+  PROJECT_NAME_FIELD,
+  PROJECT_STATUS_SELECT,
+  PROJECTS_BREADCRUMB_LINK,
+} from '../labels';
 import type { View } from '../nav';
 import { useTags } from '../tags-context';
 import { ALERT, LABEL, MUTED, PAGE_TITLE, SECTION_TITLE, SELECT } from '../ui';
@@ -32,48 +42,176 @@ function toggled(old: ReadonlySet<string>, assetId: string): ReadonlySet<string>
 }
 
 /**
- * One project: name, status and description edited in place, its members and Add asset.
+ * The offset of the last member page that still shows a member.
  *
- * @param props the project id and the navigation
- * @returns the screen
+ * @param total the number of members
+ * @returns the offset, 0 for no members
  */
-export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view: View): void }) {
-  const [offset, setOffset] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const { renameToken } = useTags();
+function lastMemberPageOffset(total: number): number {
+  return total <= 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+}
 
-  const project = useLoad(() => call('projects:get', { id }), [id]);
+/**
+ * The offset of the member page, reported on every change.
+ *
+ * @param initial the offset to start on
+ * @param onChange called with every new offset
+ * @returns the offset and its setter, which is stable
+ */
+function useMemberOffset(
+  initial: number,
+  onChange: ((offset: number) => void) | undefined,
+): [number, (offset: number) => void] {
+  const [offset, setOffset] = useState(initial);
+  const onChangeRef = useRef(onChange);
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  const change = useCallback((next: number) => {
+    setOffset(next);
+    onChangeRef.current?.(next);
+  }, []);
+  return [offset, change];
+}
+
+/**
+ * Moves the member page back to the last page once the members end before it: a page kept from an
+ * earlier visit, or the last member of the last page removed.
+ *
+ * @param total the number of members once loaded, else null
+ * @param offset the shown offset
+ * @param setOffset the setter of the offset
+ */
+function useLastPageClamp(total: number | null, offset: number, setOffset: (offset: number) => void): void {
+  useEffect(() => {
+    if (total !== null && offset > 0 && offset >= total) setOffset(lastMemberPageOffset(total));
+  }, [total, offset, setOffset]);
+}
+
+/**
+ * The loads of the project screen: the project, the asset types, the shown member page and every member.
+ *
+ * @param projectId the project
+ * @param offset the offset of the shown member page
+ * @returns the four loads
+ */
+function useProjectLoads(projectId: string, offset: number) {
+  const { renameToken } = useTags();
+  const project = useLoad(() => call('projects:get', { id: projectId }), [projectId]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const members = useLoad(
-    () => call('assignments:listByProject', { projectId: id, limit: PAGE_SIZE, offset }),
+    () => call('assignments:listByProject', { projectId, limit: PAGE_SIZE, offset }),
     // A tag rename reloads the members page, as it does every list.
-    [id, offset, renameToken],
+    [projectId, offset, renameToken],
   );
   // The picker must exclude every member, not only those on the visible page.
-  const allMembers = useLoad(() => call('assignments:listByProject', { projectId: id, limit: 200, offset: 0 }), [id]);
+  const allMembers = useLoad(
+    () => call('assignments:listByProject', { projectId, limit: 200, offset: 0 }),
+    [projectId],
+  );
+  return { project, types, members, allMembers };
+}
 
-  function reloadMembers() {
-    members.reload();
-    allMembers.reload();
+/** What the actions of the project screen act on. */
+interface ActionDependencies {
+  projectId: string;
+  /** Shows the failure of an action, or clears it with null. */
+  setError(message: string | null): void;
+  reloadProject(): void;
+  /** Reads the shown member page and the full member list again. */
+  reloadMembers(): void;
+}
+
+/**
+ * Sends one request, clearing the last failure first and showing a new one; reloads after a success.
+ *
+ * @param dependencies where the failure goes
+ * @param request the request
+ * @param reload what to read again after a success
+ * @returns true when the request succeeded
+ */
+async function runAction(
+  dependencies: ActionDependencies,
+  request: () => Promise<unknown>,
+  reload: () => void,
+): Promise<boolean> {
+  dependencies.setError(null);
+  try {
+    await request();
+    reload();
+    return true;
+  } catch (failure) {
+    dependencies.setError(describeError(failure));
+    return false;
   }
+}
 
-  async function run(action: () => Promise<unknown>): Promise<boolean> {
-    setError(null);
-    try {
-      await action();
-      return true;
-    } catch (failure) {
-      setError(describeError(failure));
-      return false;
-    }
-  }
+/**
+ * Saves fields of the project and reads it again.
+ *
+ * @param dependencies the project and its reload
+ * @param patch the changed fields
+ * @returns true when saved
+ */
+function saveProject(dependencies: ActionDependencies, patch: ProjectPatch): Promise<boolean> {
+  const id = dependencies.projectId;
+  return runAction(dependencies, () => call('projects:update', { id, patch }), dependencies.reloadProject);
+}
 
-  const saveProject = (patch: ProjectPatch) =>
-    run(async () => {
-      await call('projects:update', { id, patch });
-      project.reload();
-    });
+/**
+ * Removes one member from the project; the asset and its files are kept.
+ *
+ * @param dependencies the project and the member reload
+ * @param assetId the member asset
+ * @returns true when removed
+ */
+function removeMember(dependencies: ActionDependencies, assetId: string): Promise<boolean> {
+  const projectId = dependencies.projectId;
+  return runAction(dependencies, () => call('assignments:remove', { projectId, assetId }), dependencies.reloadMembers);
+}
+
+/**
+ * Assigns one asset to the project.
+ *
+ * @param dependencies the project and the member reload
+ * @param assetId the asset to add
+ */
+async function assignMember(dependencies: ActionDependencies, assetId: string): Promise<void> {
+  const projectId = dependencies.projectId;
+  await runAction(dependencies, () => call('assignments:assign', { projectId, assetId }), dependencies.reloadMembers);
+}
+
+/** The props of `ProjectScreen`. */
+interface ProjectScreenProps {
+  id: string;
+  onNavigate(view: View): void;
+  /** The member page to start on, e.g. the one shown when the user left this project. */
+  initialMemberOffset?: number;
+  /** Called with every new member page offset. */
+  onMemberOffsetChange?(offset: number): void;
+}
+
+/**
+ * One project: name, status and description edited in place, its members and Add asset.
+ *
+ * @param props the project id, the navigation and the member page kept by the shell
+ * @returns the screen
+ */
+export function ProjectScreen({ id, onNavigate, initialMemberOffset = 0, onMemberOffsetChange }: ProjectScreenProps) {
+  const [offset, setOffset] = useMemberOffset(initialMemberOffset, onMemberOffsetChange);
+  const [error, setError] = useState<string | null>(null);
+  const { project, types, members, allMembers } = useProjectLoads(id, offset);
+  useLastPageClamp(members.data?.total ?? null, offset, setOffset);
+
+  const actions: ActionDependencies = {
+    projectId: id,
+    setError,
+    reloadProject: project.reload,
+    reloadMembers: () => {
+      members.reload();
+      allMembers.reload();
+    },
+  };
 
   const data = project.data;
   const typeName = (typeId: string) => (types.data ?? []).find((type) => type.id === typeId)?.name ?? '–';
@@ -81,7 +219,11 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
     (message): message is string => message !== null,
   );
   const breadcrumb = (
-    <Breadcrumb projectName={data?.name ?? null} onProjects={() => onNavigate({ name: 'projects' })} />
+    <Breadcrumb
+      listLabel={PROJECTS_BREADCRUMB_LINK}
+      current={data?.name ?? null}
+      onList={() => onNavigate({ name: 'projects' })}
+    />
   );
 
   if (data === null) {
@@ -89,7 +231,7 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {breadcrumb}
         <ErrorLines messages={loadErrors} />
-        {project.error === null && <p className={MUTED}>Loading…</p>}
+        {project.error === null && <p className={MUTED}>{LOADING_LABEL}</p>}
       </div>
     );
   }
@@ -97,66 +239,67 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto p-6">
       {breadcrumb}
-      <ProjectHeader project={data} errors={loadErrors} save={saveProject} />
+      <ProjectHeader project={data} errors={loadErrors} save={(patch) => saveProject(actions, patch)} />
 
-      <section className="space-y-3" aria-label="Assets">
-        <h2 className={SECTION_TITLE}>Assets</h2>
-        {members.data !== null && members.data.total === 0 ? (
-          <p className={MUTED}>No assets assigned</p>
-        ) : (
-          <MembersTable
-            items={members.data?.items ?? []}
-            projectName={data.name}
-            typeName={typeName}
-            expanded={expanded}
-            onToggleNotes={(assetId) => setExpanded((old) => toggled(old, assetId))}
-            onOpenAsset={(assetId) => onNavigate({ name: 'asset', id: assetId })}
-            onChanged={reloadMembers}
-            onRemove={(assetId) =>
-              void run(async () => {
-                await call('assignments:remove', { projectId: id, assetId });
-                reloadMembers();
-              })
-            }
-          />
-        )}
-        {members.data !== null && members.data.total > PAGE_SIZE && (
-          <Pager offset={offset} limit={PAGE_SIZE} total={members.data.total} onChange={setOffset} />
-        )}
-        <div className="flex flex-col gap-2">
-          <h3 className={LABEL}>Add asset</h3>
-          <AssetPicker
-            excludeIds={(allMembers.data?.items ?? []).map((member) => member.assetId)}
-            onPick={async (asset) => {
-              await run(async () => {
-                await call('assignments:assign', { projectId: id, assetId: asset.id });
-                reloadMembers();
-              });
-            }}
-          />
-        </div>
-      </section>
+      <MembersSection
+        page={members.data}
+        memberIds={(allMembers.data?.items ?? []).map((member) => member.assetId)}
+        projectName={data.name}
+        typeName={typeName}
+        offset={offset}
+        onOffsetChange={setOffset}
+        onOpenAsset={(assetId) => onNavigate({ name: 'asset', id: assetId })}
+        actions={actions}
+      />
     </div>
   );
 }
 
+/** The props of `MembersSection`. */
+interface MembersSectionProps {
+  /** The shown member page once loaded. */
+  page: { items: readonly ProjectMember[]; total: number } | null;
+  /** Every member's asset id, left out of the picker. */
+  memberIds: readonly string[];
+  projectName: string;
+  typeName(typeId: string): string;
+  offset: number;
+  onOffsetChange(offset: number): void;
+  onOpenAsset(assetId: string): void;
+  actions: ActionDependencies;
+}
+
 /**
- * The breadcrumb back to the projects list.
+ * The members of the project: the table or the empty line, the pager and Add asset.
  *
- * @param props the project name once loaded, and the navigation to the list
- * @returns the breadcrumb navigation
+ * @param props the member page, the member ids, the page offset and the actions
+ * @returns the section
  */
-function Breadcrumb({ projectName, onProjects }: { projectName: string | null; onProjects(): void }) {
+function MembersSection({ page, memberIds, offset, onOffsetChange, actions, ...table }: MembersSectionProps) {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   return (
-    <nav aria-label="Breadcrumb" className={`text-sm ${MUTED}`}>
-      <Link onFollow={onProjects}>Projects</Link>
-      {projectName !== null && (
-        <>
-          <span> / </span>
-          <span className="text-text">{projectName}</span>
-        </>
+    <section className="space-y-3" aria-label={PROJECT_MEMBERS_SECTION}>
+      <h2 className={SECTION_TITLE}>{PROJECT_MEMBERS_SECTION}</h2>
+      {page !== null && page.total === 0 ? (
+        <p className={MUTED}>{NO_ASSETS_ASSIGNED}</p>
+      ) : (
+        <MembersTable
+          items={page?.items ?? []}
+          {...table}
+          expanded={expanded}
+          onToggleNotes={(assetId) => setExpanded((old) => toggled(old, assetId))}
+          onChanged={actions.reloadMembers}
+          onRemove={(assetId) => void removeMember(actions, assetId)}
+        />
       )}
-    </nav>
+      {page !== null && page.total > PAGE_SIZE && (
+        <Pager offset={offset} limit={PAGE_SIZE} total={page.total} onChange={onOffsetChange} />
+      )}
+      <div className="flex flex-col gap-2">
+        <h3 className={LABEL}>{ADD_ASSET_LABEL}</h3>
+        <AssetPicker excludeIds={memberIds} onPick={(asset) => assignMember(actions, asset.id)} />
+      </div>
+    </section>
   );
 }
 
@@ -199,7 +342,7 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
       <h1 className="sr-only">{project.name}</h1>
       <div className="flex flex-wrap items-center gap-2">
         <CommitInput
-          label="Name"
+          label={PROJECT_NAME_FIELD}
           variant="inline"
           className={`h-12 min-w-64 flex-1 ${PAGE_TITLE}`}
           value={project.name}
@@ -208,7 +351,7 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
         />
         <select
           className={SELECT}
-          aria-label="Status"
+          aria-label={PROJECT_STATUS_SELECT}
           value={project.status}
           onChange={(event) => void save({ status: ProjectStatusSchema.parse(event.target.value) })}
         >
@@ -220,10 +363,10 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
         </select>
       </div>
       <CommitInput
-        label="Description"
+        label={PROJECT_DESCRIPTION_LABEL}
         multiline
         variant="inline"
-        placeholder="Description"
+        placeholder={PROJECT_DESCRIPTION_LABEL}
         className="w-full"
         value={project.description}
         maxLength={5000}

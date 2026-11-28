@@ -13,7 +13,20 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import { useSearchShortcut } from '../hooks/useSearchShortcut';
-import { PROMPTS_LABEL, TRASH_LABEL, trashNavLabel, RETRY_LABEL } from '../labels';
+import {
+  activeNavLabel,
+  ASSETS_NAV_LABEL,
+  INBOX_NAV_LABEL,
+  JOBS_NAV_LABEL,
+  MAIN_NAV_LABEL,
+  PROJECTS_NAV_LABEL,
+  PROMPTS_LABEL,
+  RETRY_LABEL,
+  SETTINGS_LABEL,
+  TRASH_LABEL,
+  trashNavLabel,
+  WORKSPACES_BUTTON,
+} from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 import { BUSY_TITLE } from './busy-title';
 import { PauseBanner } from './PauseBanner';
@@ -61,13 +74,13 @@ interface Props {
 
 /** The entries of the main navigation, in order. */
 const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
-  { section: 'assets', label: 'Assets', icon: Package },
-  { section: 'projects', label: 'Projects', icon: FolderOpen },
+  { section: 'assets', label: ASSETS_NAV_LABEL, icon: Package },
+  { section: 'projects', label: PROJECTS_NAV_LABEL, icon: FolderOpen },
   { section: 'prompts', label: PROMPTS_LABEL, icon: ScrollText },
-  { section: 'inbox', label: 'Inbox', icon: Inbox },
+  { section: 'inbox', label: INBOX_NAV_LABEL, icon: Inbox },
   { section: 'trash', label: TRASH_LABEL, icon: Trash2 },
-  { section: 'jobs', label: 'Jobs', icon: ListChecks },
-  { section: 'settings', label: 'Settings', icon: Settings },
+  { section: 'jobs', label: JOBS_NAV_LABEL, icon: ListChecks },
+  { section: 'settings', label: SETTINGS_LABEL, icon: Settings },
 ];
 
 /** The banner text while the storage cannot be reached. */
@@ -104,7 +117,7 @@ function navCount(target: Section, activeJobs: number, trashCount: number | null
  */
 function navName(target: Section, label: string, count: number | null): string | undefined {
   if (count === null) return undefined;
-  return target === 'trash' ? trashNavLabel(count) : `${label}, ${count} active`;
+  return target === 'trash' ? trashNavLabel(count) : activeNavLabel(label, count);
 }
 
 /** The props of `NavLinks`. */
@@ -124,7 +137,7 @@ interface NavLinksProps {
  */
 function NavLinks({ section, busy, activeJobs, trashCount, onNavigate }: NavLinksProps) {
   return (
-    <nav aria-label="Main" className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
+    <nav aria-label={MAIN_NAV_LABEL} className={`flex w-[200px] shrink-0 flex-col gap-1 border-r p-3 ${BORDER}`}>
       {NAV.map(({ section: target, label, icon: Icon }) => {
         const count = navCount(target, activeJobs, trashCount);
         const name = navName(target, label, count);
@@ -187,9 +200,35 @@ function ShellHeader({ workspaceName, rootPath, busy, onClose }: ShellHeaderProp
         }}
       >
         <ArrowLeft size={16} aria-hidden />
-        Workspaces
+        {WORKSPACES_BUTTON}
       </button>
     </header>
+  );
+}
+
+/**
+ * The banner while the storage cannot be reached. Retry remounts the page, so it waits while an import runs:
+ * the remount would drop the page's busy block while the main process still imports.
+ *
+ * @param props the busy flag and the retry
+ * @returns the banner
+ */
+function StorageBanner({ busy, onRetry }: { busy: boolean; onRetry(): void }) {
+  return (
+    <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
+      <span>{UNREACHABLE_MESSAGE}</span>
+      <button
+        type="button"
+        className={BUTTON}
+        aria-disabled={busy || undefined}
+        title={busy ? BUSY_TITLE : undefined}
+        onClick={() => {
+          if (!busy) onRetry();
+        }}
+      >
+        {RETRY_LABEL}
+      </button>
+    </div>
   );
 }
 
@@ -240,19 +279,13 @@ export function AppShell({
 
         <div className="flex min-w-0 flex-1 flex-col">
           {unreachable && (
-            <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
-              <span>{UNREACHABLE_MESSAGE}</span>
-              <button
-                type="button"
-                className={BUTTON}
-                onClick={() => {
-                  setUnreachable(false);
-                  setReloadKey((key) => key + 1);
-                }}
-              >
-                {RETRY_LABEL}
-              </button>
-            </div>
+            <StorageBanner
+              busy={busy}
+              onRetry={() => {
+                setUnreachable(false);
+                setReloadKey((key) => key + 1);
+              }}
+            />
           )}
           {(paused.length > 0 || pausedHosts.length > 0) && (
             <PauseBanner

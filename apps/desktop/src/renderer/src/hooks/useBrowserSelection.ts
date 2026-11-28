@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
-import { freshSelected, selectableFiles, type BrowserLatest } from '../components/file-browser-state';
+import {
+  failedSelectablePages,
+  freshSelected,
+  selectableFiles,
+  type BrowserLatest,
+} from '../components/file-browser-state';
 import type { PagedState } from '../paged-list';
 import { MAX_SELECTION, refreshSelected, selectAll, type FileSelection } from '../selection';
 
@@ -43,11 +48,15 @@ export function useBrowserSelection(
     if (selectAllRequest === 0) return;
     const { paged: current, props: currentProps } = latest.current;
     if (current.pending || current.state.total === null) return;
+    // A page that failed again keeps its Retry slot, and the selection stays as it was.
+    if (failedSelectablePages(current.state).length > 0) return;
     currentProps.onSelectionChange(selectAll(selectableFiles(current.state, current.state.total)));
   }, [selectAllRequest]);
 
   return () => {
-    latest.current.paged.loadThrough(MAX_SELECTION).then(
+    const { paged } = latest.current;
+    for (const page of failedSelectablePages(paged.state)) paged.retry(page);
+    paged.loadThrough(MAX_SELECTION).then(
       () => setSelectAllRequest((count) => count + 1),
       // The list changed or unmounted first; nothing is selected.
       () => {},

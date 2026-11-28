@@ -1,4 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { RenameTagDialog } from './components/RenameTagDialog';
 import type { TagRename } from './tag-rename';
 
@@ -39,7 +49,10 @@ export function TagsProvider({ children, onRenamed }: TagsProviderProps) {
   const [tag, setTag] = useState<{ name: string; displayName: string } | null>(null);
   const [renamed, setRenamed] = useState<{ token: number; last: TagRename | null }>({ token: 0, last: null });
   const onRenamedRef = useRef(onRenamed);
-  onRenamedRef.current = onRenamed;
+  // Taken over once the render is committed: a render that is thrown away leaves the callback alone.
+  useLayoutEffect(() => {
+    onRenamedRef.current = onRenamed;
+  });
 
   /** The callback of the current opening of the dialog. */
   const openerRef = useRef<((change: TagRename) => void) | null>(null);
@@ -94,7 +107,10 @@ export function useRenamed(apply: (change: TagRename) => void): void {
   const { lastRename } = useTags();
   const applied = useRef(lastRename);
   const applyRef = useRef(apply);
-  applyRef.current = apply;
+  // Runs before the effect below in the same commit, so the rename reaches the latest committed function.
+  useLayoutEffect(() => {
+    applyRef.current = apply;
+  });
   useEffect(() => {
     if (lastRename === null || lastRename === applied.current) return;
     applied.current = lastRename;

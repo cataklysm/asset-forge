@@ -9,6 +9,7 @@ import { RETRY_LABEL } from '../labels';
 import { BUTTON, FOCUS, ICON_BUTTON, ITEM_HOVER, MUTED, TILE_TITLE } from '../ui';
 import { FileFrame, fileItemHandlers, fileMeta, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { Menu } from './Menu';
+import { PageFailureText } from './PageFailure';
 import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 
@@ -125,7 +126,7 @@ function GridItem(props: GridItemProps) {
     return (
       <div
         role="presentation"
-        className="flex items-center justify-center"
+        className="flex flex-col items-center justify-center gap-2 px-2"
         style={{ width: TILE_WIDTH, height: TILE_HEIGHT }}
       >
         <button
@@ -142,6 +143,7 @@ function GridItem(props: GridItemProps) {
         >
           {RETRY_LABEL}
         </button>
+        <PageFailureText message={slot.message} />
       </div>
     );
   }

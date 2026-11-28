@@ -7,7 +7,11 @@ export const PAGE_SIZE = 60;
 export const MAX_IN_FLIGHT = 2;
 
 /** One page of the list. */
-export type PageEntry<T> = { status: 'loading' } | { status: 'loaded'; items: readonly T[] } | { status: 'failed' };
+export type PageEntry<T> =
+  | { status: 'loading' }
+  | { status: 'loaded'; items: readonly T[] }
+  /** `message` is the fixed text of the failure, shown beside Retry; absent when none was given. */
+  | { status: 'failed'; message?: string };
 
 /** The loaded part of a list. */
 export interface PagedState<T> {
@@ -20,7 +24,11 @@ export interface PagedState<T> {
 }
 
 /** What is shown at one index. */
-export type Slot<T> = { kind: 'placeholder' } | { kind: 'loaded'; item: T } | { kind: 'failed'; page: number };
+export type Slot<T> =
+  | { kind: 'placeholder' }
+  | { kind: 'loaded'; item: T }
+  /** `message` is the failure text of the page, when it has one. */
+  | { kind: 'failed'; page: number; message?: string };
 
 /**
  * A list with nothing loaded.
@@ -129,6 +137,7 @@ export function acceptPage<T>(
  * @param key the list the failure belongs to
  * @param page the page
  * @param pageSize the items per page
+ * @param message the fixed text of the failure; left out for none
  * @returns the new state; `state` itself for a stale key or a loaded page
  */
 export function rejectPage<T>(
@@ -136,6 +145,7 @@ export function rejectPage<T>(
   key: string,
   page: number,
   pageSize: number = PAGE_SIZE,
+  message?: string,
 ): PagedState<T> {
   if (key !== state.key) return state;
   if (state.pages.get(page)?.status === 'loaded') return state;
@@ -143,7 +153,7 @@ export function rejectPage<T>(
   if (state.total !== null && page * pageSize >= state.total) {
     if (!next.delete(page)) return state;
   } else {
-    next.set(page, { status: 'failed' });
+    next.set(page, message === undefined ? { status: 'failed' } : { status: 'failed', message });
   }
   return { ...state, pages: next };
 }
@@ -176,7 +186,9 @@ export function slotAt<T>(state: PagedState<T>, index: number, pageSize: number 
   const page = Math.floor(index / pageSize);
   const entry = state.pages.get(page);
   if (!entry || entry.status === 'loading') return { kind: 'placeholder' };
-  if (entry.status === 'failed') return { kind: 'failed', page };
+  if (entry.status === 'failed') {
+    return entry.message === undefined ? { kind: 'failed', page } : { kind: 'failed', page, message: entry.message };
+  }
   const item = entry.items[index - page * pageSize];
   return item === undefined ? { kind: 'placeholder' } : { kind: 'loaded', item };
 }

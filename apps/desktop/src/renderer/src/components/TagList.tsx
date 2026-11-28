@@ -1,4 +1,5 @@
 import { Image as ImageIcon } from 'lucide-react';
+import { ASSET_TAGS_LABEL, IMAGE_TAGS_LABEL, PROMPT_TAGS_LABEL } from '../labels';
 import { CHIP } from '../ui';
 import { TagChip } from './TagChip';
 
@@ -8,8 +9,8 @@ interface Props {
   tags: readonly { name: string; displayName: string }[];
   /** Whose tags these are; file tags get the image icon. */
   kind: 'asset' | 'file' | 'prompt';
-  /** The most chips shown; the rest is one `+n` chip with every name as tooltip. */
-  max: number;
+  /** The most chips shown; the rest is one `+n` chip with every name as tooltip. Without it all are shown. */
+  max?: number;
   /** The names shown in the matched look. */
   matched?: ReadonlySet<string>;
   /** Wraps onto further lines instead of clipping at the end of one line. */
@@ -23,8 +24,8 @@ interface Props {
  * @returns the name, or undefined for file tags
  */
 function listLabel(kind: Props['kind']): string | undefined {
-  if (kind === 'asset') return 'Asset tags';
-  return kind === 'prompt' ? 'Prompt tags' : undefined;
+  if (kind === 'asset') return ASSET_TAGS_LABEL;
+  return kind === 'prompt' ? PROMPT_TAGS_LABEL : undefined;
 }
 
 /**
@@ -35,11 +36,13 @@ function listLabel(kind: Props['kind']): string | undefined {
  */
 export function TagList({ tags, kind, max, matched, wrap = false }: Props) {
   if (tags.length === 0) return null;
-  const shown = tags.length > max ? tags.slice(0, max) : tags;
+  const shown = max !== undefined && tags.length > max ? tags.slice(0, max) : tags;
   const hidden = tags.length - shown.length;
   return (
     <div className={`flex min-w-0 items-center gap-1.5 ${wrap ? '' : 'overflow-hidden whitespace-nowrap'}`}>
-      {kind === 'file' && <ImageIcon size={16} role="img" aria-label="Image tags" className="shrink-0 text-muted" />}
+      {kind === 'file' && (
+        <ImageIcon size={16} role="img" aria-label={IMAGE_TAGS_LABEL} className="shrink-0 text-muted" />
+      )}
       <ul aria-label={listLabel(kind)} className={`flex min-w-0 items-center gap-1.5 ${wrap ? 'flex-wrap' : ''}`}>
         {shown.map((tag) => (
           <li key={tag.name} className="min-w-0">

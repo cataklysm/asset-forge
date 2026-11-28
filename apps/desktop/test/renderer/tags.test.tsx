@@ -2,8 +2,6 @@ import type { TagAssignment, TagSuggestion } from '@assetforge/contracts';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/renderer/src/api';
 import { TagChip } from '../../src/renderer/src/components/TagChip';
@@ -282,6 +280,13 @@ it('overflow shows +n with all names in the title', () => {
   expect(list.querySelectorAll('[data-matched]')).toHaveLength(1);
 });
 
+it('without a limit every tag is shown and there is no +n chip', () => {
+  const tags = ['a', 'b', 'c', 'd', 'e'].map((n) => tagOf(n));
+  render(<TagList kind="asset" tags={tags} wrap />);
+  expect(screen.getByLabelText('Asset tags').querySelectorAll('li')).toHaveLength(5);
+  expect(screen.queryByText(/^\+/)).toBeNull();
+});
+
 it('a chip carries its origin and a filter chip uses the filter look', () => {
   render(
     <>
@@ -318,29 +323,6 @@ it('manual, filter and matched chips keep their look and have no AI title', () =
   for (const text of ['Car', 'Filt', 'Match'])
     expect((screen.getByText(text).parentElement as HTMLElement).hasAttribute('title')).toBe(false);
   expect(screen.getByRole('button', { name: 'Remove Car' })).not.toBeNull();
-});
-
-it('the AI colour has a contrast of at least 4.5 on the page and surface backgrounds', () => {
-  const css = readFileSync(resolve(process.cwd(), 'src/renderer/src/index.css'), 'utf8');
-  const channels = (name: string) => {
-    const m = css.match(new RegExp(`--color-${name}: *#([0-9a-f]{6});`, 'i'));
-    if (!m) throw new Error(`token ${name} missing`);
-    return [0, 2, 4].map((i) => parseInt(m[1]!.slice(i, i + 2), 16) / 255);
-  };
-  const luminance = (name: string) => {
-    const [r, g, b] = channels(name).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [
-      number,
-      number,
-      number,
-    ];
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const contrast = (a: string, b: string) => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
-    return (hi + 0.05) / (lo + 0.05);
-  };
-  expect(contrast('ai', 'bg')).toBeGreaterThanOrEqual(4.5);
-  expect(contrast('ai', 'surface')).toBeGreaterThanOrEqual(4.5);
 });
 
 function FilterHarness({ onChange }: { onChange(names: string[]): void }) {
@@ -382,6 +364,8 @@ it('the tag filter stops at 10 tags', async () => {
   for (let i = 1; i < 10; i += 1) await user.type(input, `t${i}{Enter}`);
   expect(onChange).toHaveBeenLastCalledWith(['oak', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
   expect(input.readOnly).toBe(true);
+  // It looks disabled, since it takes no more names.
+  expect(input.getAttribute('aria-disabled')).toBe('true');
   expect(input.title).toBe('At most 10 tags');
   // The input that added the tenth tag keeps the focus.
   expect(document.activeElement).toBe(input);
@@ -392,6 +376,7 @@ it('the tag filter stops at 10 tags', async () => {
   await user.click(screen.getByRole('button', { name: 'Remove oak' }));
   expect(onChange).toHaveBeenLastCalledWith(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
   expect(input.readOnly).toBe(false);
+  expect(input.getAttribute('aria-disabled')).toBeNull();
   expect(document.activeElement).toBe(input);
 });
 

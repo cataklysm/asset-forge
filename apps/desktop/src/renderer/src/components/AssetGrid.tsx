@@ -14,6 +14,7 @@ import { retryIndex, slotAt, type PagedState } from '../paged-list';
 import { formatProgress } from '../progress';
 import { BUTTON, FOCUS, ITEM_HOVER, MUTED, TILE_TITLE } from '../ui';
 import { CoverImage } from './CoverImage';
+import { PageFailureText } from './PageFailure';
 import { TagList } from './TagList';
 
 // The grid view of the asset gallery, and what it shares with the table view.
@@ -200,7 +201,7 @@ function gridCell(props: GridRowsProps, rows: VirtualRows, index: number) {
       <div
         key={index}
         role="gridcell"
-        className="flex items-center justify-center"
+        className="flex flex-col items-center justify-center gap-2 px-2"
         style={{ width: TILE_WIDTH, height: TILE_HEIGHT }}
       >
         <button
@@ -217,6 +218,7 @@ function gridCell(props: GridRowsProps, rows: VirtualRows, index: number) {
         >
           {RETRY_LABEL}
         </button>
+        <PageFailureText message={slot.message} />
       </div>
     );
   }

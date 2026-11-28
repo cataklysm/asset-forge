@@ -32,6 +32,20 @@ export function failedFirstPage<T>(state: PagedState<T>): number | null {
 }
 
 /**
+ * The failed page that takes the place of the whole list while the total is unknown, with its failure text.
+ *
+ * @param state the paged list
+ * @returns the first failed page with its failure text (null without one), or null
+ */
+export function failedFirstEntry<T>(state: PagedState<T>): { page: number; message: string | null } | null {
+  if (state.total !== null) return null;
+  for (const [page, entry] of state.pages) {
+    if (entry.status === 'failed') return { page, message: entry.message ?? null };
+  }
+  return null;
+}
+
+/**
  * The `data-index` of the item that holds the focus inside an element.
  *
  * @param root the element to look in; null finds nothing

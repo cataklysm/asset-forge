@@ -3,7 +3,20 @@ import type { AssetSummary, ProjectSummary } from '@assetforge/contracts';
 import { call } from '../api';
 import { useLoad } from '../hooks/useLoad';
 import { MATCHING_LIMIT, useMatchingAssets, type Matching } from '../hooks/useMatchingAssets';
-import { label } from '../labels';
+import {
+  label,
+  LOADING_LABEL,
+  MATCHING_CONTENT_LABEL,
+  MATCHING_STATUS_TERM,
+  MATCHING_TYPE_TERM,
+  matchingAssetsTitle,
+  PROJECT_DESCRIPTION_LABEL,
+  PROJECT_DETAILS_ASSETS,
+  PROJECT_DETAILS_IMAGES,
+  PROJECT_DETAILS_STATUS,
+  PROJECT_DETAILS_TITLE,
+  SHOW_ALL_MATCHING_LABEL,
+} from '../labels';
 import { ALERT, BORDER, BUTTON, LABEL, MUTED, SECTION_TITLE } from '../ui';
 import { matchedNames } from './AssetGrid';
 import { CoverImage } from './CoverImage';
@@ -36,7 +49,7 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className={SECTION_TITLE}>Project details</h2>
+      <h2 className={SECTION_TITLE}>{PROJECT_DETAILS_TITLE}</h2>
       {types.error !== null && (
         <p role="alert" className={`text-sm ${ALERT}`}>
           {types.error}
@@ -46,12 +59,12 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
         <>
           <p className="text-[17px] font-semibold break-words">{project.name}</p>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-            <Field name="Status">{label(project.status)}</Field>
-            <Field name="Assets">{project.assetCount}</Field>
-            <Field name="Images">{project.imageCount}</Field>
+            <Field name={PROJECT_DETAILS_STATUS}>{label(project.status)}</Field>
+            <Field name={PROJECT_DETAILS_ASSETS}>{project.assetCount}</Field>
+            <Field name={PROJECT_DETAILS_IMAGES}>{project.imageCount}</Field>
           </dl>
           <section className="flex flex-col gap-1">
-            <h3 className={LABEL}>Description</h3>
+            <h3 className={LABEL}>{PROJECT_DESCRIPTION_LABEL}</h3>
             <p className="text-sm break-words whitespace-pre-wrap">
               {project.description === '' ? '–' : project.description}
             </p>
@@ -83,14 +96,14 @@ interface MatchingSectionProps {
  */
 function MatchingSection({ current, typeName, onOpenAsset, onShowAll }: MatchingSectionProps) {
   return (
-    <section aria-label="Matching content" className="flex flex-col gap-3">
-      <h3 className={LABEL}>Matching content</h3>
+    <section aria-label={MATCHING_CONTENT_LABEL} className="flex flex-col gap-3">
+      <h3 className={LABEL}>{MATCHING_CONTENT_LABEL}</h3>
       {current !== null && 'error' in current && (
         <p role="alert" className={`text-sm ${ALERT}`}>
           {current.error}
         </p>
       )}
-      {current === null && <p className={`text-sm ${MUTED}`}>Loading…</p>}
+      {current === null && <p className={`text-sm ${MUTED}`}>{LOADING_LABEL}</p>}
       {current !== null && 'list' in current && (
         <>
           {current.list.items.length === 0 && <p className="text-sm">–</p>}
@@ -109,10 +122,10 @@ function MatchingSection({ current, typeName, onOpenAsset, onShowAll }: Matching
               <button
                 type="button"
                 className={BUTTON}
-                title={`${current.list.total} matching assets`}
+                title={matchingAssetsTitle(current.list.total)}
                 onClick={onShowAll}
               >
-                Show all
+                {SHOW_ALL_MATCHING_LABEL}
               </button>
             </div>
           )}
@@ -145,10 +158,10 @@ function MatchingEntry({ asset, typeName, onOpen }: { asset: AssetSummary; typeN
         </Link>
         <p className={`flex gap-3 ${MUTED}`}>
           <span className="truncate">
-            Type <span className="text-text">{typeName}</span>
+            {MATCHING_TYPE_TERM} <span className="text-text">{typeName}</span>
           </span>
           <span className="truncate">
-            Status <span className="text-text">{label(asset.status)}</span>
+            {MATCHING_STATUS_TERM} <span className="text-text">{label(asset.status)}</span>
           </span>
         </p>
         <TagList tags={asset.tags} kind="asset" max={3} matched={matchedNames(asset, 'asset')} />

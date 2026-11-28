@@ -1,6 +1,13 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { call, describeError } from '../api';
 import { Dialog } from '../components/Dialog';
+import {
+  CANCEL_LABEL,
+  CREATE_PROJECT_LABEL,
+  NEW_PROJECT_LABEL,
+  PROJECT_DESCRIPTION_LABEL,
+  PROJECT_NAME_LABEL,
+} from '../labels';
 import { ALERT, BUTTON, INPUT } from '../ui';
 
 /** The props of `NewProjectDialog`. */
@@ -52,7 +59,7 @@ export function NewProjectDialog({ open, onClose, onCreated }: Props) {
   }
 
   return (
-    <Dialog open={open} title="New project" initialFocusRef={nameRef} onClose={close}>
+    <Dialog open={open} title={NEW_PROJECT_LABEL} initialFocusRef={nameRef} onClose={close}>
       <form className="space-y-3" onSubmit={(event) => void create(event)}>
         {error !== null && (
           <p role="alert" className={ALERT}>
@@ -61,16 +68,16 @@ export function NewProjectDialog({ open, onClose, onCreated }: Props) {
         )}
         <input
           ref={nameRef}
-          aria-label="Project name"
-          placeholder="Project name"
+          aria-label={PROJECT_NAME_LABEL}
+          placeholder={PROJECT_NAME_LABEL}
           maxLength={200}
           className={`w-full ${INPUT}`}
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
         <textarea
-          aria-label="Description"
-          placeholder="Description"
+          aria-label={PROJECT_DESCRIPTION_LABEL}
+          placeholder={PROJECT_DESCRIPTION_LABEL}
           maxLength={5000}
           rows={3}
           className={`h-auto w-full py-1.5 ${INPUT}`}
@@ -79,10 +86,10 @@ export function NewProjectDialog({ open, onClose, onCreated }: Props) {
         />
         <div className="flex justify-end gap-2">
           <button type="button" className={BUTTON} onClick={close}>
-            Cancel
+            {CANCEL_LABEL}
           </button>
           <button type="submit" className={BUTTON} disabled={creating || trimmed === ''}>
-            Create
+            {CREATE_PROJECT_LABEL}
           </button>
         </div>
       </form>

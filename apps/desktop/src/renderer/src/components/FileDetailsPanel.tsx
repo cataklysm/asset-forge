@@ -88,7 +88,7 @@ export function FileDetailsPanel({
       {trashed && file.tags.length > 0 && (
         <section aria-label={tagsLabel} className="space-y-2">
           <h3 className={PANEL_TITLE}>{tagsLabel}</h3>
-          <TagList tags={file.tags} kind="file" max={Number.MAX_SAFE_INTEGER} wrap />
+          <TagList tags={file.tags} kind="file" wrap />
         </section>
       )}
       {!trashed && complete && (
@@ -121,7 +121,7 @@ export function FileDetailsPanel({
           {asset.tags.length > 0 && (
             <section className="space-y-2">
               <h3 className={PANEL_TITLE}>Asset tags</h3>
-              <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} wrap />
+              <TagList tags={asset.tags} kind="asset" wrap />
             </section>
           )}
         </>

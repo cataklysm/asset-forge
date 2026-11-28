@@ -107,6 +107,29 @@ it('Open opens the workspace by its path', async () => {
   expect(onOpened).toHaveBeenCalledWith(OLD);
 });
 
+it('while an open runs every action is disabled; a failure frees them again', async () => {
+  const user = userEvent.setup();
+  const opening = deferred<WorkspaceSummary>();
+  installFakeApi({ 'workspace:list': () => [OLD, NEW], 'workspace:open': () => opening.promise });
+  render(<WorkspaceScreen onOpened={() => {}} />);
+  await user.click(await screen.findByRole('button', { name: 'Open workspace Old' }));
+
+  const actions = () => [
+    screen.getByRole('button', { name: 'Open folder' }),
+    screen.getByRole('button', { name: 'New workspace' }),
+    screen.getByRole('button', { name: 'Open workspace Old' }),
+    screen.getByRole('button', { name: 'Open workspace Newer' }),
+  ];
+  await waitFor(() => expect(actions().every((button) => button.hasAttribute('disabled'))).toBe(true));
+  await user.click(screen.getByRole('button', { name: 'Actions for Newer' }));
+  expect(screen.getByRole('menuitem', { name: 'Remove' }).getAttribute('aria-disabled')).toBe('true');
+  await user.keyboard('{Escape}');
+
+  opening.reject(fakeError('storage_unreachable'));
+  expect((await screen.findByRole('alert')).textContent).toContain('cannot be reached');
+  expect(actions().some((button) => button.hasAttribute('disabled'))).toBe(false);
+});
+
 it('New workspace opens a dialog; Enter without a location opens the folder picker', async () => {
   const user = userEvent.setup();
   const api = installFakeApi({ 'workspace:list': () => [], 'dialog:pickDirectory': () => 'D:/parent' });

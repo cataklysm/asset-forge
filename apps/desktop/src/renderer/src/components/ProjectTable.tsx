@@ -24,6 +24,7 @@ import {
 } from '../labels';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
+import { PageFailureText } from './PageFailure';
 import { TagList } from './TagList';
 
 /** The props of `ProjectTable`. */
@@ -163,6 +164,18 @@ function HeaderRow({ tagged, columns }: { tagged: boolean; columns: string }) {
   );
 }
 
+/**
+ * The classes of a project row.
+ *
+ * @param selected whether the row is the selected project
+ * @param columns the grid classes
+ * @returns the class list
+ */
+function rowClass(selected: boolean, columns: string): string {
+  const look = selected ? 'bg-accent-soft ring-2 ring-accent ring-inset' : ITEM_HOVER;
+  return `absolute inset-x-0 cursor-default border-b ${BORDER} ${look} ${ROW_FOCUS} ${columns}`;
+}
+
 /** The props of `TableRow`. */
 type TableRowProps = TableRowsProps & {
   index: number;
@@ -182,74 +195,89 @@ type TableRowProps = TableRowsProps & {
  */
 function TableRow(props: TableRowProps) {
   const { index, top, slot, rows, columns, tagged, selectedId, onSelect, onOpen, onRetry } = props;
-  const style = { top, height: ROW_HEIGHT };
   if (slot.kind === 'failed' && index === retryIndex(slot.page, rows.firstVisibleIndex)) {
-    return (
-      <div
-        role="row"
-        aria-rowindex={index + 2}
-        className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
-        style={style}
-      >
-        <span role="gridcell">
-          <button
-            type="button"
-            data-index={index}
-            className={BUTTON_INLINE}
-            tabIndex={index === rows.tabbableIndex ? 0 : -1}
-            onClick={() => {
-              rows.refocus(index);
-              onRetry(slot.page);
-            }}
-            onKeyDown={(event) => rows.onItemKeyDown(index, event)}
-            onFocus={() => rows.onItemFocus(index)}
-          >
-            {RETRY_LABEL}
-          </button>
-        </span>
-      </div>
-    );
+    // Called, not mounted: the row stays the same `div` element when it changes between the two kinds.
+    return retryRow({ index, top, page: slot.page, message: slot.message, rows, onRetry });
   }
   const project = slot.kind === 'loaded' ? slot.item : null;
   const selected = project !== null && project.id === selectedId;
-
-  function onKeyDown(event: KeyboardEvent) {
-    if (isPlainEnter(event)) {
-      event.preventDefault();
-      if (project) onOpen(project, rows.scrollOffset(), index);
-      return;
-    }
-    rows.onItemKeyDown(index, event);
-  }
-
+  const open = () => {
+    if (project) onOpen(project, rows.scrollOffset(), index);
+  };
   return (
     <div
       role="row"
       aria-rowindex={index + 2}
       data-index={index}
+      data-item-id={project?.id}
       tabIndex={index === rows.tabbableIndex ? 0 : -1}
       aria-selected={selected}
       aria-disabled={project === null ? true : undefined}
       aria-busy={slot.kind === 'placeholder' ? true : undefined}
-      className={`absolute inset-x-0 cursor-default border-b ${BORDER} ${
-        selected ? 'bg-accent-soft ring-2 ring-accent ring-inset' : ITEM_HOVER
-      } ${ROW_FOCUS} ${columns}`}
-      style={style}
-      onClick={() => {
-        if (project) onSelect(project);
+      className={rowClass(selected, columns)}
+      style={{ top, height: ROW_HEIGHT }}
+      onClick={() => project && onSelect(project)}
+      onDoubleClick={open}
+      onKeyDown={(event) => {
+        // Enter opens the project; every other key goes to the virtual rows.
+        if (!isPlainEnter(event)) return rows.onItemKeyDown(index, event);
+        event.preventDefault();
+        open();
       }}
-      onDoubleClick={() => {
-        if (project) onOpen(project, rows.scrollOffset(), index);
-      }}
-      onKeyDown={onKeyDown}
       onFocus={() => {
         rows.onItemFocus(index);
         if (project) onSelect(project);
       }}
     >
-      {project !== null && (
-        <ProjectCells project={project} tagged={tagged} onOpen={() => onOpen(project, rows.scrollOffset(), index)} />
-      )}
+      {project !== null && <ProjectCells project={project} tagged={tagged} onOpen={open} />}
+    </div>
+  );
+}
+
+/** The arguments of `retryRow`. */
+interface RetryRowProps {
+  index: number;
+  /** The offset of the row from the top of the list. */
+  top: number;
+  /** The failed page. */
+  page: number;
+  /** The failure text of the page. */
+  message: string | undefined;
+  rows: VirtualRows;
+  onRetry(page: number): void;
+}
+
+/**
+ * The Retry row of a failed page, with its failure text. Without hooks, so `TableRow` can call it.
+ *
+ * @param props the row position, the failed page and the retry
+ * @returns the row
+ */
+function retryRow({ index, top, page, message, rows, onRetry }: RetryRowProps) {
+  return (
+    <div
+      role="row"
+      aria-rowindex={index + 2}
+      className={`absolute inset-x-0 flex items-center gap-3 border-b px-2 ${BORDER}`}
+      style={{ top, height: ROW_HEIGHT }}
+    >
+      <span role="gridcell" className="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          data-index={index}
+          className={BUTTON_INLINE}
+          tabIndex={index === rows.tabbableIndex ? 0 : -1}
+          onClick={() => {
+            rows.refocus(index);
+            onRetry(page);
+          }}
+          onKeyDown={(event) => rows.onItemKeyDown(index, event)}
+          onFocus={() => rows.onItemFocus(index)}
+        >
+          {RETRY_LABEL}
+        </button>
+        <PageFailureText message={message} />
+      </span>
     </div>
   );
 }
