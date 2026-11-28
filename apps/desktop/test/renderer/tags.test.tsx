@@ -282,6 +282,13 @@ it('overflow shows +n with all names in the title', () => {
   expect(list.querySelectorAll('[data-matched]')).toHaveLength(1);
 });
 
+it('without a limit every tag is shown and there is no +n chip', () => {
+  const tags = ['a', 'b', 'c', 'd', 'e'].map((n) => tagOf(n));
+  render(<TagList kind="asset" tags={tags} wrap />);
+  expect(screen.getByLabelText('Asset tags').querySelectorAll('li')).toHaveLength(5);
+  expect(screen.queryByText(/^\+/)).toBeNull();
+});
+
 it('a chip carries its origin and a filter chip uses the filter look', () => {
   render(
     <>
