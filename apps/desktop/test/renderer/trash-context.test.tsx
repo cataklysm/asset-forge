@@ -1,8 +1,13 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { TrashSummary } from '@assetforge/contracts';
-import { expect, it } from 'vitest';
-import { TrashProvider, useTrash } from '../../src/renderer/src/trash-context';
+import { expect, it, vi } from 'vitest';
+import {
+  TRASH_SUMMARY_RETRIES,
+  TRASH_SUMMARY_RETRY_MS,
+  TrashProvider,
+  useTrash,
+} from '../../src/renderer/src/trash-context';
 import { deferred, fakeError, installFakeApi } from './fake-api';
 
 function Probe() {
@@ -90,6 +95,55 @@ it('a failing request keeps the last count', async () => {
   await user.click(screen.getByRole('button', { name: 'Refresh' }));
   await waitFor(() => expect(summaryCalls(api)).toHaveLength(2));
   expect(countText()).toBe('5');
+});
+
+it('a failing first request is tried again a few times', async () => {
+  vi.useFakeTimers();
+  try {
+    let attempts = 0;
+    const api = installFakeApi({
+      'trash:summary': () => {
+        attempts += 1;
+        if (attempts <= 2) throw fakeError('internal_error');
+        return { count: 6 };
+      },
+    });
+    render(
+      <TrashProvider>
+        <Probe />
+      </TrashProvider>,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(summaryCalls(api)).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(TRASH_SUMMARY_RETRY_MS));
+    expect(summaryCalls(api)).toHaveLength(2);
+    await act(async () => vi.advanceTimersByTimeAsync(TRASH_SUMMARY_RETRY_MS));
+    expect(summaryCalls(api)).toHaveLength(3);
+    expect(countText()).toBe('6');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('a lasting failure stops trying after the retries', async () => {
+  vi.useFakeTimers();
+  try {
+    const api = installFakeApi({
+      'trash:summary': () => {
+        throw fakeError('internal_error');
+      },
+    });
+    render(
+      <TrashProvider>
+        <Probe />
+      </TrashProvider>,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(TRASH_SUMMARY_RETRY_MS * (TRASH_SUMMARY_RETRIES + 3)));
+    expect(summaryCalls(api)).toHaveLength(1 + TRASH_SUMMARY_RETRIES);
+    expect(countText()).toBe('none');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('useTrash outside a provider is inert', async () => {
