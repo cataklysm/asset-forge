@@ -53,7 +53,11 @@ async function createDatabaseUpTo0012(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare('INSERT INTO storage (id, kind, created_at) VALUES (?, ?, ?)').run(uuid(2), 'workspace_root', TS);
     s.prepare(
       `INSERT INTO file (id, storage_id, original_name, relative_path, mime_type, size_bytes, sha256, kind, status, imported_at)
@@ -89,8 +93,17 @@ describe('migration 0013', () => {
 
     const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
     try {
-      expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', lane: 'p1', fileId: uuid(3), payload: { version: 1 } });
-      expect(await db.files.get(uuid(3))).toMatchObject({ status: 'complete', originalName: 'oak.png', sha256: 'a'.repeat(64) });
+      expect(await db.jobs.get(uuid(10))).toMatchObject({
+        status: 'queued',
+        lane: 'p1',
+        fileId: uuid(3),
+        payload: { version: 1 },
+      });
+      expect(await db.files.get(uuid(3))).toMatchObject({
+        status: 'complete',
+        originalName: 'oak.png',
+        sha256: 'a'.repeat(64),
+      });
       expect(await db.generations.resultsOf(uuid(3), 10)).toEqual([]);
     } finally {
       await db.close();

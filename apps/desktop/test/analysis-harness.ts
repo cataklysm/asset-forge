@@ -3,8 +3,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { format } from 'node:util';
 import { vi } from 'vitest';
-import type { IpcChannel, IpcRequest, IpcResponse, IpcResult, JobSummary, ProviderOptions, ProviderView } from '@assetforge/contracts';
-import type { GenerationImageSource, ImageProbe, ModelImageSource, RemoteFileSource, WorkspaceManager } from '@assetforge/core';
+import type {
+  IpcChannel,
+  IpcRequest,
+  IpcResponse,
+  IpcResult,
+  JobSummary,
+  ProviderOptions,
+  ProviderView,
+} from '@assetforge/contracts';
+import type {
+  GenerationImageSource,
+  ImageProbe,
+  ModelImageSource,
+  RemoteFileSource,
+  WorkspaceManager,
+} from '@assetforge/core';
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
@@ -204,7 +218,10 @@ export async function createHarness(
     async importPng(p) {
       const path = join(sources, p.name);
       await writeFile(path, pngOf(p.width, p.height, p.shade ?? 0));
-      const [result] = await ok('files:import', { sourcePaths: [path], ...(p.target === undefined ? {} : { target: p.target }) });
+      const [result] = await ok('files:import', {
+        sourcePaths: [path],
+        ...(p.target === undefined ? {} : { target: p.target }),
+      });
       if (result?.file == null || result.error !== null) throw new Error('The PNG could not be imported');
       return result.file.id;
     },

@@ -56,8 +56,12 @@ export function constrain(form: StudioForm, model: ImageModel | null): StudioFor
       : null;
   return {
     ...form,
-    aspectRatio: form.aspectRatio !== null && ratios !== null && ratios.includes(form.aspectRatio) ? form.aspectRatio : null,
-    resolution: form.resolution !== null && resolutions !== null && resolutions.includes(form.resolution) ? form.resolution : fallback,
+    aspectRatio:
+      form.aspectRatio !== null && ratios !== null && ratios.includes(form.aspectRatio) ? form.aspectRatio : null,
+    resolution:
+      form.resolution !== null && resolutions !== null && resolutions.includes(form.resolution)
+        ? form.resolution
+        : fallback,
   };
 }
 

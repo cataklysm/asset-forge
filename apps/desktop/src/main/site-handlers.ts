@@ -378,7 +378,10 @@ class SiteHandlerState {
    * @param target the inbox (null) or an asset and role
    * @returns the queued, duplicate and invalid entries
    */
-  async importCrawl(crawlId: string, target: IpcRequest<'sites:import'>['target']): Promise<IpcResponse<'sites:import'>> {
+  async importCrawl(
+    crawlId: string,
+    target: IpcRequest<'sites:import'>['target'],
+  ): Promise<IpcResponse<'sites:import'>> {
     const answer = this.kept;
     if (answer === null || answer.crawlId !== crawlId) throw new InvalidOperationError(RUN_AGAIN);
     const result = await this.manager.exclusive((session) => this.queueImport(session, answer, target));

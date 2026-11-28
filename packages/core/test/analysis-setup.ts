@@ -90,7 +90,22 @@ export async function setup() {
   const configure = (c: { vision: FakeVisionProvider | null; provider?: string | null }) => {
     configured = c;
   };
-  return { manager, db, storage, session, importOne, seedFile, file, vision, images, handler, configure, lanes, providerLanes, effects };
+  return {
+    manager,
+    db,
+    storage,
+    session,
+    importOne,
+    seedFile,
+    file,
+    vision,
+    images,
+    handler,
+    configure,
+    lanes,
+    providerLanes,
+    effects,
+  };
 }
 
 export type Setup = Awaited<ReturnType<typeof setup>>;
@@ -98,7 +113,13 @@ export type Setup = Awaited<ReturnType<typeof setup>>;
 export const LANE = 'lane-a';
 
 /** A v4 payload without a prompt: the legacy request with the model `mock-vision`. */
-export const LEGACY_V4 = { version: 4, model: 'mock-vision', mode: 'apply', prompt: null, providerName: 'Local' } as const;
+export const LEGACY_V4 = {
+  version: 4,
+  model: 'mock-vision',
+  mode: 'apply',
+  prompt: null,
+  providerName: 'Local',
+} as const;
 
 export function jobFor(fileId: string | null, payload: unknown = LEGACY_V4, lane: string | null = LANE): Job {
   return {

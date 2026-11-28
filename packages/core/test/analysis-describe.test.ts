@@ -5,7 +5,10 @@ import { rejectsWith, setup, UNKNOWN_ID, type Setup } from './analysis-setup.js'
 const MODEL = 'llava:13b';
 
 function describeWith(c: Setup, fileId: string, signal = new AbortController().signal, prompt = IMAGE_PROMPT) {
-  return describeImage({ session: c.session, vision: () => c.vision, images: c.images }, { fileId, model: MODEL, prompt, signal });
+  return describeImage(
+    { session: c.session, vision: () => c.vision, images: c.images },
+    { fileId, model: MODEL, prompt, signal },
+  );
 }
 
 /** Nothing was written: no job, analysis, proposal or tag. */
@@ -21,7 +24,9 @@ describe('describeImage', () => {
     const c = await setup();
     expect(await describeWith(c, c.file.id)).toBe('A red sports car seen from the front.');
     expect(c.images.calls).toEqual([`/memory/${c.file.relativePath}`]);
-    expect(c.vision.describeCalls).toEqual([{ image: new Uint8Array([0xff, 0xd8, 0xff]), prompt: IMAGE_PROMPT, model: MODEL }]);
+    expect(c.vision.describeCalls).toEqual([
+      { image: new Uint8Array([0xff, 0xd8, 0xff]), prompt: IMAGE_PROMPT, model: MODEL },
+    ]);
     expectNoWrites(c);
   });
 
@@ -59,7 +64,10 @@ describe('describeImage', () => {
 
   it('fails provider_not_configured without a provider', async () => {
     const c = await setup();
-    const result = describeImage({ session: c.session, vision: () => null, images: c.images }, { fileId: c.file.id, model: MODEL, prompt: IMAGE_PROMPT, signal: new AbortController().signal });
+    const result = describeImage(
+      { session: c.session, vision: () => null, images: c.images },
+      { fileId: c.file.id, model: MODEL, prompt: IMAGE_PROMPT, signal: new AbortController().signal },
+    );
     await rejectsWith(result, 'provider_not_configured');
     expect(c.images.calls).toEqual([]);
   });
@@ -83,6 +91,7 @@ describe('describeImage', () => {
 
   it('describes the image prompt as one English paragraph', () => {
     expect(IMAGE_PROMPT).not.toContain('\n');
-    for (const word of ['subject', 'materials', 'colours', 'lighting', 'view', 'style']) expect(IMAGE_PROMPT).toContain(word);
+    for (const word of ['subject', 'materials', 'colours', 'lighting', 'view', 'style'])
+      expect(IMAGE_PROMPT).toContain(word);
   });
 });

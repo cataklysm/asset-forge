@@ -43,16 +43,64 @@ describe('media types', () => {
     expect(FILE_KIND_EXTENSIONS).toEqual({
       image: ['png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff', 'gif', 'avif', 'bmp', 'exr', 'hdr', 'tga', 'psd', 'svg'],
       model: [
-        'blend', 'glb', 'gltf', 'fbx', 'obj', 'stl', 'ply', 'usd', 'usda', 'usdc', 'usdz', 'dae', 'abc', 'ztl',
-        'spp', 'sbs', 'sbsar',
+        'blend',
+        'glb',
+        'gltf',
+        'fbx',
+        'obj',
+        'stl',
+        'ply',
+        'usd',
+        'usda',
+        'usdc',
+        'usdz',
+        'dae',
+        'abc',
+        'ztl',
+        'spp',
+        'sbs',
+        'sbsar',
       ],
       document: ['pdf', 'txt', 'md', 'doc', 'docx', 'odt', 'rtf'],
       video: ['mp4', 'm4v', 'webm'],
     });
     expect(REFUSED_IMPORT_EXTENSIONS).toEqual([
-      'exe', 'com', 'scr', 'msi', 'msp', 'msix', 'appx', 'appinstaller', 'bat', 'cmd', 'ps1', 'psm1', 'psd1',
-      'vbs', 'vbe', 'jse', 'wsf', 'wsh', 'ws', 'wsc', 'sct', 'hta', 'cpl', 'dll', 'sys', 'lnk', 'url', 'pif',
-      'reg', 'jar', 'app', 'dmg', 'pkg', 'appimage', 'iso', 'vhd',
+      'exe',
+      'com',
+      'scr',
+      'msi',
+      'msp',
+      'msix',
+      'appx',
+      'appinstaller',
+      'bat',
+      'cmd',
+      'ps1',
+      'psm1',
+      'psd1',
+      'vbs',
+      'vbe',
+      'jse',
+      'wsf',
+      'wsh',
+      'ws',
+      'wsc',
+      'sct',
+      'hta',
+      'cpl',
+      'dll',
+      'sys',
+      'lnk',
+      'url',
+      'pif',
+      'reg',
+      'jar',
+      'app',
+      'dmg',
+      'pkg',
+      'appimage',
+      'iso',
+      'vhd',
     ]);
   });
 
@@ -105,7 +153,8 @@ describe('media types', () => {
 
   it('isRefusedImport', () => {
     for (const name of ['Setup.EXE.', 'a.txt.exe', '.bat', 'x.appimage']) expect(isRefusedImport(name)).toBe(true);
-    for (const name of ['a.py', 'a.js', 'a.sh', 'a.html', 'a.svg', 'a.exe.txt']) expect(isRefusedImport(name)).toBe(false);
+    for (const name of ['a.py', 'a.js', 'a.sh', 'a.html', 'a.svg', 'a.exe.txt'])
+      expect(isRefusedImport(name)).toBe(false);
   });
 
   it('isZipArchive by import extension', () => {
@@ -114,7 +163,8 @@ describe('media types', () => {
   });
 
   it('isRefusedImport sees through alternate data streams', () => {
-    for (const name of ['a.exe::$DATA', 'a.exe:stream', 'evil.txt:payload.exe']) expect(isRefusedImport(name)).toBe(true);
+    for (const name of ['a.exe::$DATA', 'a.exe:stream', 'evil.txt:payload.exe'])
+      expect(isRefusedImport(name)).toBe(true);
     expect(isRefusedImport('a.png:stream')).toBe(false);
   });
 

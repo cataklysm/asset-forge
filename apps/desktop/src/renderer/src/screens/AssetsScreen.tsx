@@ -160,7 +160,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
     if (asset === null) return;
     const tags = renameInTags(asset.tags, change);
     const coverTags = renameInTags(asset.coverTags, change);
-    if (tags !== asset.tags || coverTags !== asset.coverTags) lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
+    if (tags !== asset.tags || coverTags !== asset.coverTags)
+      lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
   });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   const selectedAsset =
@@ -215,7 +216,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   /** Opens the selected asset from the Selection column. */
   function openSelected() {
     if (selectedAsset === null) return;
-    const scrollOffset = position.current?.viewKey === viewKey ? position.current.get().scrollOffset : state.scrollOffset;
+    const scrollOffset =
+      position.current?.viewKey === viewKey ? position.current.get().scrollOffset : state.scrollOffset;
     openAsset(loadedSelection?.index ?? null, selectedAsset, scrollOffset);
   }
 

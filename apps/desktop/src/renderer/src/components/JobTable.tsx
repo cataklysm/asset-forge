@@ -11,7 +11,13 @@ import {
 } from '@assetforge/contracts';
 import { formatDateTime, shortUrl } from '../format';
 import { rowCount } from '../gallery';
-import { useElementSize, useVirtualRows, type ViewHandle, type ViewRestore, type VisibleRows } from '../hooks/useVirtualRows';
+import {
+  useElementSize,
+  useVirtualRows,
+  type ViewHandle,
+  type ViewRestore,
+  type VisibleRows,
+} from '../hooks/useVirtualRows';
 import { JOB_RESULT_LABELS, JOB_TYPE_LABELS, JOBS_PROVIDER_HEADER, jobStatusLabel } from '../labels';
 import { useProviders } from '../provider-context';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
@@ -236,7 +242,12 @@ function jobRow({ index, slot, style, tabbable, rows, onCancel, onRetryJob }: Jo
       onFocus={() => rows.onItemFocus(index)}
     >
       {job !== null && (
-        <JobCells job={job} tabIndex={tabbable ? 0 : -1} onCancel={() => onCancel(job)} onRetry={() => onRetryJob(job)} />
+        <JobCells
+          job={job}
+          tabIndex={tabbable ? 0 : -1}
+          onCancel={() => onCancel(job)}
+          onRetry={() => onRetryJob(job)}
+        />
       )}
     </div>
   );
@@ -320,12 +331,26 @@ function JobActions({ job, tabIndex, onCancel, onRetry }: JobCellsProps) {
   return (
     <span role="gridcell" className="flex justify-end">
       {CANCELLABLE.has(job.status) && (
-        <button type="button" className={ICON_BUTTON} tabIndex={tabIndex} title="Cancel job" aria-label="Cancel job" onClick={onCancel}>
+        <button
+          type="button"
+          className={ICON_BUTTON}
+          tabIndex={tabIndex}
+          title="Cancel job"
+          aria-label="Cancel job"
+          onClick={onCancel}
+        >
           <X size={16} aria-hidden />
         </button>
       )}
       {RETRYABLE.has(job.status) && (
-        <button type="button" className={ICON_BUTTON} tabIndex={tabIndex} title="Retry job" aria-label="Retry job" onClick={onRetry}>
+        <button
+          type="button"
+          className={ICON_BUTTON}
+          tabIndex={tabIndex}
+          title="Retry job"
+          aria-label="Retry job"
+          onClick={onRetry}
+        >
           <RotateCcw size={16} aria-hidden />
         </button>
       )}

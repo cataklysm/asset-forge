@@ -88,7 +88,11 @@ describe('mock provider', () => {
       const response = await fetch(`${url}/api/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MOCK_MODEL, stream: false, messages: [{ role: 'user', content: 'x', images: [image] }] }),
+        body: JSON.stringify({
+          model: MOCK_MODEL,
+          stream: false,
+          messages: [{ role: 'user', content: 'x', images: [image] }],
+        }),
       });
       return ((await response.json()) as { message: { content: string } }).message.content;
     };
@@ -111,7 +115,11 @@ describe('mock provider', () => {
     const authorized = await fetch(`${url}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...auth },
-      body: JSON.stringify({ model: MOCK_MODEL, format: {}, messages: [{ role: 'user', content: 'x', images: [imageA] }] }),
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        format: {},
+        messages: [{ role: 'user', content: 'x', images: [imageA] }],
+      }),
     });
     expect(authorized.status).toBe(200);
     expect(lines.length).toBeGreaterThanOrEqual(6);
@@ -282,16 +290,24 @@ describe('mock provider, OpenAI endpoints', () => {
     const json = await ollamaContent(url, true);
     const text = await ollamaContent(url, false);
     const think = '<think>\nmock reasoning\n</think>\n\n';
-    expect(await contentOf(await completions(url, { model: MOCK_THINKING_MODEL, responseFormat: tagSchema }))).toBe(think + json);
+    expect(await contentOf(await completions(url, { model: MOCK_THINKING_MODEL, responseFormat: tagSchema }))).toBe(
+      think + json,
+    );
     expect(await contentOf(await completions(url, { model: MOCK_THINKING_MODEL }))).toBe(think + text);
     expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL, responseFormat: tagSchema }))).toBe(
       '```json\n' + json + '\n```',
     );
     expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL }))).toBe(text);
-    const reasoning = (await (await completions(url, { model: MOCK_REASONING_ONLY_MODEL, responseFormat: tagSchema })).json()) as {
+    const reasoning = (await (
+      await completions(url, { model: MOCK_REASONING_ONLY_MODEL, responseFormat: tagSchema })
+    ).json()) as {
       choices: { message: Record<string, unknown> }[];
     };
-    expect(reasoning.choices[0]?.message).toEqual({ role: 'assistant', content: null, reasoning_content: 'mock reasoning' });
+    expect(reasoning.choices[0]?.message).toEqual({
+      role: 'assistant',
+      content: null,
+      reasoning_content: 'mock reasoning',
+    });
   });
 
   it('refuses an unknown model and a request without an image', async () => {
@@ -310,7 +326,12 @@ describe('mock provider, OpenAI endpoints', () => {
     expect((await completions(url, { headers: { authorization: 'Bearer test-key-not-real-2' } })).status).toBe(401);
     expect((await fetch(`${url}/v1/models`, { headers: auth })).status).toBe(200);
     expect((await completions(url, { headers: auth })).status).toBe(200);
-    expect(lines).toEqual(['GET /v1/models 401', 'POST /v1/chat/completions 401', 'GET /v1/models 200', 'POST /v1/chat/completions 200']);
+    expect(lines).toEqual([
+      'GET /v1/models 401',
+      'POST /v1/chat/completions 401',
+      'GET /v1/models 200',
+      'POST /v1/chat/completions 200',
+    ]);
     expect(lines.join('\n')).not.toContain(KEY);
   });
 
@@ -320,7 +341,9 @@ describe('mock provider, OpenAI endpoints', () => {
     expect(refused.status).toBe(400);
     expect(await refused.json()).toHaveProperty('error');
     expect(await contentOf(await completions(url))).toBe(await ollamaContent(url, true));
-    expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL }))).toBe('```json\n' + (await ollamaContent(url, true)) + '\n```');
+    expect(await contentOf(await completions(url, { model: MOCK_FENCED_MODEL }))).toBe(
+      '```json\n' + (await ollamaContent(url, true)) + '\n```',
+    );
   });
 
   it('shares the failure queue with the Ollama chat', async () => {
@@ -408,7 +431,11 @@ function form(fields: Record<string, string>, image: Buffer | null = png(32, 32)
 describe('mock provider, Venice endpoints', () => {
   const auth = { authorization: `Bearer ${KEY}` };
 
-  function edit(url: string, fields: Record<string, string>, headers: Record<string, string> = auth): Promise<Response> {
+  function edit(
+    url: string,
+    fields: Record<string, string>,
+    headers: Record<string, string> = auth,
+  ): Promise<Response> {
     return fetch(`${url}/api/v1/image/edit`, { method: 'POST', headers, body: form(fields) });
   }
 
@@ -433,7 +460,14 @@ describe('mock provider, Venice endpoints', () => {
 
   it('answers an edit at 16:9 and 2K with a PNG of 128 x 72', async () => {
     const { url, imageRequests } = await start({ apiKey: KEY });
-    const fields = { prompt: 'a red chair', model: MOCK_EDIT_MODEL, aspect_ratio: '16:9', resolution: '2K', output_format: 'png', safe_mode: 'true' };
+    const fields = {
+      prompt: 'a red chair',
+      model: MOCK_EDIT_MODEL,
+      aspect_ratio: '16:9',
+      resolution: '2K',
+      output_format: 'png',
+      safe_mode: 'true',
+    };
     const response = await edit(url, fields);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/png');
@@ -451,7 +485,8 @@ describe('mock provider, Venice endpoints', () => {
     };
     expect(await size({})).toEqual({ width: 64, height: 64 });
     expect(await size({ resolution: '4K', aspect_ratio: '9:16' })).toEqual({ width: 144, height: 256 });
-    const bytes = async () => Buffer.from(await (await edit(url, { prompt: 'p', model: MOCK_EDIT_MODEL }, {})).arrayBuffer());
+    const bytes = async () =>
+      Buffer.from(await (await edit(url, { prompt: 'p', model: MOCK_EDIT_MODEL }, {})).arrayBuffer());
     expect(await bytes()).toEqual(await bytes());
   });
 
@@ -460,25 +495,42 @@ describe('mock provider, Venice endpoints', () => {
     expect((await edit(url, { prompt: 'p', model: 'other' }, {})).status).toBe(400);
     expect((await edit(url, { prompt: 'p', model: MOCK_EDIT_MODEL, aspect_ratio: '4:3' }, {})).status).toBe(400);
     expect((await edit(url, { prompt: 'p', model: MOCK_EDIT_BASIC_MODEL, aspect_ratio: '4:3' }, {})).status).toBe(200);
-    const noImage = await fetch(`${url}/api/v1/image/edit`, { method: 'POST', body: form({ prompt: 'p', model: MOCK_EDIT_MODEL }, null) });
+    const noImage = await fetch(`${url}/api/v1/image/edit`, {
+      method: 'POST',
+      body: form({ prompt: 'p', model: MOCK_EDIT_MODEL }, null),
+    });
     expect(noImage.status).toBe(400);
   });
 
   it('answers an upscale x4 of a 64 x 64 PNG with 256 x 256', async () => {
     const { url, imageRequests } = await start({ apiKey: KEY });
-    const response = await fetch(`${url}/api/v1/image/upscale`, { method: 'POST', headers: auth, body: form({ scale: '4' }, png(64, 64)) });
+    const response = await fetch(`${url}/api/v1/image/upscale`, {
+      method: 'POST',
+      headers: auth,
+      body: form({ scale: '4' }, png(64, 64)),
+    });
     expect(response.status).toBe(200);
     expect(pngSize(Buffer.from(await response.arrayBuffer()))).toEqual({ width: 256, height: 256 });
     expect(imageRequests).toEqual([
-      { path: '/api/v1/image/upscale', authorization: `Bearer ${KEY}`, fields: { scale: '4' }, fileBytes: png(64, 64).length },
+      {
+        path: '/api/v1/image/upscale',
+        authorization: `Bearer ${KEY}`,
+        fields: { scale: '4' },
+        fileBytes: png(64, 64).length,
+      },
     ]);
   });
 
   it('upscales another format from a 32 x 32 base and refuses another scale', async () => {
     const { url } = await start();
-    const response = await fetch(`${url}/api/v1/image/upscale`, { method: 'POST', body: form({ scale: '2' }, Buffer.from('not a png')) });
+    const response = await fetch(`${url}/api/v1/image/upscale`, {
+      method: 'POST',
+      body: form({ scale: '2' }, Buffer.from('not a png')),
+    });
     expect(pngSize(Buffer.from(await response.arrayBuffer()))).toEqual({ width: 64, height: 64 });
-    expect((await fetch(`${url}/api/v1/image/upscale`, { method: 'POST', body: form({ scale: '3' }) })).status).toBe(400);
+    expect((await fetch(`${url}/api/v1/image/upscale`, { method: 'POST', body: form({ scale: '3' }) })).status).toBe(
+      400,
+    );
   });
 
   it('answers each trigger prompt with its status', async () => {
@@ -501,7 +553,10 @@ describe('mock provider, Venice endpoints', () => {
       (response) => String(response.status),
       () => 'aborted',
     );
-    const outcome = await Promise.race([pending, new Promise<string>((resolve) => setTimeout(() => resolve('waiting'), 100))]);
+    const outcome = await Promise.race([
+      pending,
+      new Promise<string>((resolve) => setTimeout(() => resolve('waiting'), 100)),
+    ]);
     expect(outcome).toBe('waiting');
     await close();
     expect(await pending).not.toBe('waiting');
@@ -512,8 +567,15 @@ describe('mock provider, Venice endpoints', () => {
     const wrong = { authorization: 'Bearer test-key-not-real-2' };
     expect((await edit(url, { prompt: 'p', model: MOCK_EDIT_MODEL }, wrong)).status).toBe(401);
     expect((await fetch(`${url}/api/v1/models?type=inpaint`, { headers: wrong })).status).toBe(401);
-    const upscale = await fetch(`${url}/api/v1/image/upscale`, { method: 'POST', headers: wrong, body: form({ scale: '2' }) });
+    const upscale = await fetch(`${url}/api/v1/image/upscale`, {
+      method: 'POST',
+      headers: wrong,
+      body: form({ scale: '2' }),
+    });
     expect(upscale.status).toBe(401);
-    expect(imageRequests.map((request) => request.authorization)).toEqual(['Bearer test-key-not-real-2', 'Bearer test-key-not-real-2']);
+    expect(imageRequests.map((request) => request.authorization)).toEqual([
+      'Bearer test-key-not-real-2',
+      'Bearer test-key-not-real-2',
+    ]);
   });
 });

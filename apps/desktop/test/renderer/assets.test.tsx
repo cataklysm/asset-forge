@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { JOB_ERROR_MESSAGES, type AssetAssignment, type AssetSummary, type AssetType, type IpcRequest } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  type AssetAssignment,
+  type AssetSummary,
+  type AssetType,
+  type IpcRequest,
+} from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { NO_FILTERS, renameInFilters, type AssetListState } from '../../src/renderer/src/list-state';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
@@ -73,11 +79,7 @@ function install(handlers: FakeHandlers) {
   });
 }
 
-function Harness(props: {
-  initial?: AssetListState;
-  onState?(s: AssetListState): void;
-  onOpen?(id: string): void;
-}) {
+function Harness(props: { initial?: AssetListState; onState?(s: AssetListState): void; onOpen?(id: string): void }) {
   const [state, setState] = useState(props.initial ?? INITIAL);
   return (
     <AssetsScreen
@@ -97,7 +99,9 @@ function listRequests(api: ReturnType<typeof install>): ListRequest[] {
 
 /** The tile (or table row) that shows `name`. */
 function itemOf(name: string): HTMLElement {
-  const element = within(screen.getByRole('grid', { name: 'Assets' })).getByText(name).closest<HTMLElement>('[data-index]');
+  const element = within(screen.getByRole('grid', { name: 'Assets' }))
+    .getByText(name)
+    .closest<HTMLElement>('[data-index]');
   if (element === null) throw new Error(`no item for ${name}`);
   return element;
 }
@@ -142,17 +146,28 @@ it('typing searches after 250 ms and old tiles stay until the new page arrives',
   await act(async () => later.resolve(pageOf([pine])));
   expect(screen.getByText('Pine')).toBeTruthy();
   expect(screen.queryByText('Oak tree')).toBeNull();
-  expect(listRequests(api).filter((r) => r.query !== undefined).map((r) => r.query)).toEqual(['pine']);
+  expect(
+    listRequests(api)
+      .filter((r) => r.query !== undefined)
+      .map((r) => r.query),
+  ).toEqual(['pine']);
 });
 
 it('a single click selects and fills the Selection column; double-click and Enter open', async () => {
   const user = userEvent.setup();
-  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id, status: 'in_review', fileCount: 4, tags: [tagOf('Oak')] });
+  const oak = assetSummary({
+    name: 'Oak tree',
+    typeId: TYPE.id,
+    status: 'in_review',
+    fileCount: 4,
+    tags: [tagOf('Oak')],
+  });
   const pine = assetSummary({ name: 'Pine', typeId: TYPE.id });
   const onOpen = vi.fn();
   const api = install({
     'assets:list': listOf([oak, pine]),
-    'assignments:listByAsset': ({ assetId }) => (assetId === oak.id ? [assignment(oak.id, 'P1'), assignment(oak.id, 'P2')] : []),
+    'assignments:listByAsset': ({ assetId }) =>
+      assetId === oak.id ? [assignment(oak.id, 'P1'), assignment(oak.id, 'P2')] : [],
   });
   render(<Harness onOpen={onOpen} />);
   await screen.findByText('Oak tree');
@@ -216,10 +231,15 @@ it('arrow keys move focus and selection together', async () => {
 
 const PROVIDER = providerView({ promptModel: null });
 const ANALYSIS: FakeHandlers = {
-  ...fakeProviders({ providers: [PROVIDER], lastUsedId: PROVIDER.id }, { [PROVIDER.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
-    .handlers,
+  ...fakeProviders(
+    { providers: [PROVIDER], lastUsedId: PROVIDER.id },
+    { [PROVIDER.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } },
+  ).handlers,
   'analysis:preview': () => ({ analysable: 3, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
-  'analysis:enqueue': () => ({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } }),
+  'analysis:enqueue': () => ({
+    enqueued: 3,
+    skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 },
+  }),
 };
 
 function renderWithProvider(initial: AssetListState = INITIAL) {
@@ -239,7 +259,9 @@ it('Analyse all starts the current asset filter and shows the outcome', async ()
   await screen.findByText('Asset 0');
   await user.click(screen.getByRole('button', { name: 'Analyse all' }));
   await screen.findByRole('dialog', { name: 'Analyse' });
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false),
+  );
   expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
     target: { kind: 'assetFilter', filter: { status: 'in_review', tagNames: ['oak'] } },
     model: 'vision-a',
@@ -596,14 +618,11 @@ it('the file type filter offers Video and asks for assets with a video', async (
   render(<Harness />);
   await screen.findByText('Asset 0');
   const select = screen.getByRole('combobox', { name: 'File type' });
-  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
-    'All file types',
-    'Image',
-    'Video',
-    '3D model',
-    'Document',
-    'Other',
-  ]);
+  expect(
+    within(select)
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['All file types', 'Image', 'Video', '3D model', 'Document', 'Other']);
   await userEvent.setup().selectOptions(select, 'Video');
   await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, fileKind: 'video' }));
 });

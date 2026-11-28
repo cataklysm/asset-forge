@@ -3,17 +3,28 @@ import userEvent from '@testing-library/user-event';
 import type { IpcRequest } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PromptPicker } from '../../src/renderer/src/components/PromptPicker';
-import { NO_MATCHING_PROMPTS_TEXT, NO_PROMPTS_TEXT, PROMPTS_LABEL, SEARCH_PROMPTS_LABEL } from '../../src/renderer/src/labels';
+import {
+  NO_MATCHING_PROMPTS_TEXT,
+  NO_PROMPTS_TEXT,
+  PROMPTS_LABEL,
+  SEARCH_PROMPTS_LABEL,
+} from '../../src/renderer/src/labels';
 import { fakePrompts, installFakeApi, promptDetail } from './fake-api';
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-function install(seed = [promptDetail({ title: 'Hero shot' }), promptDetail({ title: 'Close-up', content: 'Close-up of the {{View}}' })]) {
+function install(
+  seed = [
+    promptDetail({ title: 'Hero shot' }),
+    promptDetail({ title: 'Close-up', content: 'Close-up of the {{View}}' }),
+  ],
+) {
   const store = fakePrompts(seed);
   const api = installFakeApi(store.handlers);
-  const lists = () => api.calls.filter((c) => c.channel === 'prompts:list').map((c) => c.request as IpcRequest<'prompts:list'>);
+  const lists = () =>
+    api.calls.filter((c) => c.channel === 'prompts:list').map((c) => c.request as IpcRequest<'prompts:list'>);
   return { api, seed, lists };
 }
 
@@ -53,7 +64,9 @@ it('choosing a row hands its id over, by click and by Enter', async () => {
   const user = userEvent.setup();
   await user.click(await within(picker()).findByText('Close-up'));
   expect(onPick).toHaveBeenCalledWith(seed[1]!.id);
-  within(picker()).getByRole('option', { name: /Hero shot/ }).focus();
+  within(picker())
+    .getByRole('option', { name: /Hero shot/ })
+    .focus();
   await user.keyboard('{Enter}');
   expect(onPick).toHaveBeenLastCalledWith(seed[0]!.id);
 });

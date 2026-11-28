@@ -1,17 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type {
-  AssetList,
-  AssetType,
-  IpcRequest,
-  Project,
-  ProjectMember,
-  ProjectSummary,
-} from '@assetforge/contracts';
+import type { AssetList, AssetType, IpcRequest, Project, ProjectMember, ProjectSummary } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
-import { NO_PROJECT_FILTERS, renameInFilters, type AssetFilters, type ProjectListState } from '../../src/renderer/src/list-state';
+import {
+  NO_PROJECT_FILTERS,
+  renameInFilters,
+  type AssetFilters,
+  type ProjectListState,
+} from '../../src/renderer/src/list-state';
 import { ProjectScreen } from '../../src/renderer/src/screens/ProjectScreen';
 import { ProjectsScreen } from '../../src/renderer/src/screens/ProjectsScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
@@ -88,7 +86,9 @@ function listRequests(api: ReturnType<typeof install>): ListRequest[] {
 }
 
 function rowOf(name: string): HTMLElement {
-  const row = within(screen.getByRole('grid', { name: 'Projects' })).getByText(name).closest<HTMLElement>('[data-index]');
+  const row = within(screen.getByRole('grid', { name: 'Projects' }))
+    .getByText(name)
+    .closest<HTMLElement>('[data-index]');
   if (row === null) throw new Error(`no row for ${name}`);
   return row;
 }
@@ -102,7 +102,9 @@ it('search, status and tags go into projects:list after the debounce', async () 
   const api = install({ 'projects:list': listOf(many(3), 9) });
   render(<Harness />);
   await screen.findByText('Project 0');
-  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Projects/ }).textContent).toBe('Projects9'));
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { level: 2, name: /Projects/ }).textContent).toBe('Projects9'),
+  );
   expect(listRequests(api)).toContainEqual({ limit: 1, offset: 0 });
   expect(listRequests(api)).toContainEqual({ limit: 60, offset: 0 });
   expect(screen.getByText('3 projects')).toBeTruthy();
@@ -212,7 +214,10 @@ it('selecting a project fills Project details with Images and Matching content',
     'assets:list': () => pageOf([asset]),
   });
   render(
-    <Harness onOpenAsset={onOpenAsset} initial={{ ...INITIAL, filters: { ...NO_PROJECT_FILTERS, tagNames: ['oak'] } }} />,
+    <Harness
+      onOpenAsset={onOpenAsset}
+      initial={{ ...INITIAL, filters: { ...NO_PROJECT_FILTERS, tagNames: ['oak'] } }}
+    />,
   );
   await screen.findByText('Forest');
   const column = details();
@@ -292,10 +297,7 @@ it('Show all in the shell switches to the assets gallery with the project and ta
     'assignments:listByAsset': () => [],
   });
   render(
-    <WorkspaceShell
-      workspace={{ id: nextId(), name: 'W', rootPath: 'root', lastOpenedAt: NOW }}
-      onClosed={() => {}}
-    />,
+    <WorkspaceShell workspace={{ id: nextId(), name: 'W', rootPath: 'root', lastOpenedAt: NOW }} onClosed={() => {}} />,
   );
   await user.click(screen.getByRole('link', { name: /Projects/ }));
   await user.click(await screen.findByText('Forest'));
@@ -303,7 +305,12 @@ it('Show all in the shell switches to the assets gallery with the project and ta
   api.calls.length = 0;
   await user.click(await within(details()).findByRole('button', { name: 'Show all' }));
   await waitFor(() =>
-    expect(api.calls.map((c) => c.request)).toContainEqual({ limit: 60, offset: 0, projectId: project.id, tagNames: ['oak'] }),
+    expect(api.calls.map((c) => c.request)).toContainEqual({
+      limit: 60,
+      offset: 0,
+      projectId: project.id,
+      tagNames: ['oak'],
+    }),
   );
   expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe(project.id);
 });
@@ -398,7 +405,14 @@ it('a failed first page shows Retry', async () => {
 it('New project creates a project with a description and opens it', async () => {
   const user = userEvent.setup();
   const onOpen = vi.fn();
-  const created: Project = { id: nextId(), name: 'Forest', description: 'North', status: 'active', createdAt: NOW, updatedAt: NOW };
+  const created: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: 'North',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
   const api = install({ 'projects:list': listOf([]), 'projects:create': () => created });
   render(<Harness onOpen={onOpen} />);
   await screen.findByText('No projects');
@@ -412,7 +426,10 @@ it('New project creates a project with a description and opens it', async () => 
   await user.type(within(dialog).getByRole('textbox', { name: 'Description' }), 'North');
   await user.click(within(dialog).getByRole('button', { name: 'Create' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith(created.id));
-  expect(api.calls.find((c) => c.channel === 'projects:create')?.request).toEqual({ name: 'Forest', description: 'North' });
+  expect(api.calls.find((c) => c.channel === 'projects:create')?.request).toEqual({
+    name: 'Forest',
+    description: 'North',
+  });
 });
 
 it('a failed create shows the error in the dialog and Cancel returns focus', async () => {
@@ -438,7 +455,15 @@ it('a failed create shows the error in the dialog and Cancel returns focus', asy
 // The project screen
 
 function member(projectId: string, name: string): ProjectMember {
-  const asset = { id: nextId(), name, typeId: TYPE.id, description: '', status: 'in_review' as const, createdAt: NOW, updatedAt: NOW };
+  const asset = {
+    id: nextId(),
+    name,
+    typeId: TYPE.id,
+    description: '',
+    status: 'in_review' as const,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
   return {
     projectId,
     assetId: asset.id,
@@ -455,7 +480,14 @@ function member(projectId: string, name: string): ProjectMember {
 it('the project screen keeps the member pager and member editing', async () => {
   const user = userEvent.setup();
   const onNavigate = vi.fn();
-  const project: Project = { id: nextId(), name: 'Forest', description: 'North', status: 'active', createdAt: NOW, updatedAt: NOW };
+  const project: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: 'North',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
   const members = Array.from({ length: 120 }, (_, i) => member(project.id, `Member ${i}`));
   const api = installFakeApi({
     'projects:get': () => project,
@@ -477,7 +509,10 @@ it('the project screen keeps the member pager and member editing', async () => {
   await user.clear(nameField);
   await user.type(nameField, 'Woods{Enter}');
   await waitFor(() =>
-    expect(api.calls.find((c) => c.channel === 'projects:update')?.request).toEqual({ id: project.id, patch: { name: 'Woods' } }),
+    expect(api.calls.find((c) => c.channel === 'projects:update')?.request).toEqual({
+      id: project.id,
+      patch: { name: 'Woods' },
+    }),
   );
   await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'archived');
   expect(api.calls.filter((c) => c.channel === 'projects:update').at(-1)?.request).toEqual({
@@ -548,7 +583,13 @@ function RenamingHarness(props: { initial: ProjectListState; tag: { name: string
   return (
     <TagsProvider onRenamed={(change) => setState((s) => ({ ...s, filters: renameInFilters(s.filters, change) }))}>
       <RenameTrigger tag={props.tag} />
-      <ProjectsScreen state={state} onStateChange={setState} onOpen={() => {}} onOpenAsset={() => {}} onShowAssets={() => {}} />
+      <ProjectsScreen
+        state={state}
+        onStateChange={setState}
+        onOpen={() => {}}
+        onOpenAsset={() => {}}
+        onShowAssets={() => {}}
+      />
     </TagsProvider>
   );
 }
@@ -577,7 +618,12 @@ it('a rename switches the projects tag filter and the matching content to the ne
   await renameThroughDialog(user, 'Oak', 'Quercus');
   await waitFor(() => expect(listRequests(api).some((r) => r.tagNames?.join() === 'quercus')).toBe(true));
   await waitFor(() =>
-    expect(matchingRequests(api).at(-1)).toEqual({ projectId: project.id, tagNames: ['quercus'], limit: 20, offset: 0 }),
+    expect(matchingRequests(api).at(-1)).toEqual({
+      projectId: project.id,
+      tagNames: ['quercus'],
+      limit: 20,
+      offset: 0,
+    }),
   );
   expect(screen.getByRole('button', { name: 'Remove quercus' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Remove oak' })).toBeNull();

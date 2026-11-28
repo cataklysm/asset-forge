@@ -108,7 +108,9 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
       const { items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role });
       const failures = assignFailures(items, nameOf);
       const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
-      setResult(failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures });
+      setResult(
+        failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
+      );
       onAssigned(moved);
     } catch (caught) {
       setError(describeError(caught));
@@ -175,7 +177,9 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
             {error}
           </p>
         )}
-        {result !== null && <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />}
+        {result !== null && (
+          <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
+        )}
       </section>
 
       <ul aria-label="Selected files" className="flex flex-col gap-1 text-sm">
@@ -187,10 +191,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
                 {file.originalName}
               </span>
               {marker !== null && (
-                <span
-                  className={`shrink-0 text-[13px] ${marker.failed ? 'text-danger' : MUTED}`}
-                  title={marker.title}
-                >
+                <span className={`shrink-0 text-[13px] ${marker.failed ? 'text-danger' : MUTED}`} title={marker.title}>
                   {marker.text}
                 </span>
               )}

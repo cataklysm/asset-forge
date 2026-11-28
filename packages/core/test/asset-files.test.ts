@@ -84,7 +84,10 @@ describe('relocateFile', () => {
     const { session, storage, asset, other, file } = await setup();
     await relocateFile(session, file.id, { assetId: asset.id, role: 'reference' });
     const moved = await relocateFile(session, file.id, { assetId: other.id, role: 'reference' });
-    expect(moved).toMatchObject({ relativePath: assetFilePath(other.id, 'reference', file.id, 'pump.png'), assetId: other.id });
+    expect(moved).toMatchObject({
+      relativePath: assetFilePath(other.id, 'reference', file.id, 'pump.png'),
+      assetId: other.id,
+    });
     expect(storage.files.has(moved.relativePath)).toBe(true);
   });
 
@@ -307,7 +310,10 @@ describe('recoverFileMoves', () => {
 describe('importing into an asset', () => {
   it('importing into an asset places the files and reports the placed records', async () => {
     const { manager, storage, db, asset } = await setup();
-    const results = await manager.importFiles(['/src/motel.png', '/src/missing.png'], { assetId: asset.id, role: 'texture' });
+    const results = await manager.importFiles(['/src/motel.png', '/src/missing.png'], {
+      assetId: asset.id,
+      role: 'texture',
+    });
 
     expect(results).toHaveLength(2);
     const placed = results[0]!;
@@ -399,7 +405,15 @@ describe('file list filters', () => {
     const addFile = async (originalName: string, kind: FileKind, placement?: { assetId: string; role: FileRole }) => {
       const id = `f0000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
       const relativePath = `inbox/${id}/${originalName}`;
-      await db.files.insertPending({ id, storageId: 's', originalName, relativePath, mimeType: 'image/png', importedAt: TS, kind });
+      await db.files.insertPending({
+        id,
+        storageId: 's',
+        originalName,
+        relativePath,
+        mimeType: 'image/png',
+        importedAt: TS,
+        kind,
+      });
       await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
       return id;
@@ -479,7 +493,11 @@ describe('trashed files', () => {
     const { session, manager, asset, file } = await setup();
     const [second] = await manager.importFiles(['/src/motel.png']);
     await trashForTest(session, [file.id]);
-    const items = await assignFiles(session, { fileIds: [file.id, second!.file!.id], assetId: asset.id, role: 'reference' });
+    const items = await assignFiles(session, {
+      fileIds: [file.id, second!.file!.id],
+      assetId: asset.id,
+      role: 'reference',
+    });
     expect(items[0]!.error).toBeInstanceOf(InvalidOperationError);
     expect(items[0]!.error!.message).toBe('The file is in the trash');
     expect(items[1]).toMatchObject({ error: null, file: { assetId: asset.id } });

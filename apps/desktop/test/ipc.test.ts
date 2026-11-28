@@ -77,12 +77,18 @@ describe('dispatch', () => {
   });
 
   it('routes dialog channels to the injected dialogs', async () => {
-    const picked = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => 'D:\\picked',
-      pickFiles: async () => ['D:\\a.png'],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const picked = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => 'D:\\picked',
+        pickFiles: async () => ['D:\\a.png'],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     expect(await dispatch(picked, 'dialog:pickDirectory', {})).toEqual({ ok: true, value: 'D:\\picked' });
     expect(await dispatch(picked, 'dialog:pickFiles', {})).toEqual({ ok: true, value: ['D:\\a.png'] });
   });

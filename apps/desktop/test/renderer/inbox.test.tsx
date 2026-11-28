@@ -1,7 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { JOB_ERROR_MESSAGES, type Changes, type FileRecord, type IpcRequest, type IpcResponse, type JobSummary, type ProviderView } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  type Changes,
+  type FileRecord,
+  type IpcRequest,
+  type IpcResponse,
+  type JobSummary,
+  type ProviderView,
+} from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
 import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
@@ -13,7 +21,16 @@ import { NO_FILE_FILTERS, type InboxListState } from '../../src/renderer/src/lis
 import { InboxScreen } from '../../src/renderer/src/screens/InboxScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { deferred, fakeError, fakeProviders, importResultOf, installFakeApi, noChanges, providerView, type FakeHandlers } from './fake-api';
+import {
+  deferred,
+  fakeError,
+  fakeProviders,
+  importResultOf,
+  installFakeApi,
+  noChanges,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -74,7 +91,9 @@ function Harness(props: HarnessProps) {
 }
 
 function tile(name: string): HTMLElement {
-  const element = within(screen.getByRole('listbox', { name: 'Files' })).getByText(name).closest<HTMLElement>('[data-index]');
+  const element = within(screen.getByRole('listbox', { name: 'Files' }))
+    .getByText(name)
+    .closest<HTMLElement>('[data-index]');
   if (element === null) throw new Error(`no tile for ${name}`);
   return element;
 }
@@ -94,7 +113,12 @@ async function pickAsset(user: ReturnType<typeof userEvent.setup>) {
 function files() {
   const c1 = fileRecord({ originalName: 'c1.png' });
   const c2 = fileRecord({ originalName: 'c2.png' });
-  const f1 = fileRecord({ originalName: 'f1.png', status: 'failed', sha256: null, error: 'The checksum did not match' });
+  const f1 = fileRecord({
+    originalName: 'f1.png',
+    status: 'failed',
+    sha256: null,
+    error: 'The checksum did not match',
+  });
   return { c1, c2, f1 };
 }
 
@@ -111,7 +135,11 @@ it('failed files are excluded from the assign request and the count', async () =
   const { c1, c2, f1 } = files();
   const api = install([c1, c2, f1], {
     'files:assignMany': (r) => ({
-      items: r.fileIds.map((fileId) => ({ fileId, file: { ...(fileId === c1.id ? c1 : c2), assetId: OAK.id, role: r.role }, error: null })),
+      items: r.fileIds.map((fileId) => ({
+        fileId,
+        file: { ...(fileId === c1.id ? c1 : c2), assetId: OAK.id, role: r.role },
+        error: null,
+      })),
     }),
   });
   render(<Harness />);
@@ -300,7 +328,13 @@ it('import results list imported, failed and duplicates', async () => {
       return [
         { sourcePath: 'C:\\in\\a.png', entryName: null, file: a, error: null, duplicateOf: [] },
         { sourcePath: 'C:\\in\\b.png', entryName: null, file: b, error: null, duplicateOf: [a.id] },
-        { sourcePath: 'C:\\in\\c.exe', entryName: null, file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+        {
+          sourcePath: 'C:\\in\\c.exe',
+          entryName: null,
+          file: null,
+          error: 'This file type cannot be imported',
+          duplicateOf: [],
+        },
       ];
     },
   });
@@ -351,7 +385,9 @@ it('a picked ZIP asks first; Unpack sends unpackArchives true and the strip coun
   expect(within(strip).getByText('2 imported, 1 failed, 1 duplicates')).toBeTruthy();
   expect(strip.textContent).toContain('a.exe (pack.zip)');
   expect(strip.textContent).not.toContain('C:\\in');
-  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\pack.zip', 'C:\\in\\f.png'], unpackArchives: true }]);
+  expect(callsOf(api, 'files:import')).toEqual([
+    { sourcePaths: ['C:\\in\\pack.zip', 'C:\\in\\f.png'], unpackArchives: true },
+  ]);
 });
 
 it('Import as file sends unpackArchives false; an archive-level failure is named by the archive', async () => {
@@ -373,12 +409,17 @@ it('Import as file sends unpackArchives false; an archive-level failure is named
   const strip = await screen.findByRole('alert');
   expect(within(strip).getByText('1 imported, 1 failed, 0 duplicates')).toBeTruthy();
   expect(within(strip).getByText('pack.zip')).toBeTruthy();
-  expect(callsOf(api, 'files:import')).toEqual([{ sourcePaths: ['C:\\in\\a.zip', 'C:\\in\\pack.zip'], unpackArchives: false }]);
+  expect(callsOf(api, 'files:import')).toEqual([
+    { sourcePaths: ['C:\\in\\a.zip', 'C:\\in\\pack.zip'], unpackArchives: false },
+  ]);
 });
 
 it.each([
-  ['Cancel', async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) =>
-    user.click(within(dialog).getByRole('button', { name: 'Cancel' }))],
+  [
+    'Cancel',
+    async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) =>
+      user.click(within(dialog).getByRole('button', { name: 'Cancel' })),
+  ],
   ['Esc', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
 ])('%s in the ZIP dialog imports nothing and enables the import button again', async (_name, dismiss) => {
   const user = userEvent.setup();
@@ -393,7 +434,9 @@ it.each([
   await dismiss(user, dialog);
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  await waitFor(() => expect((screen.getAllByRole('button', { name: 'Import files' })[0] as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getAllByRole('button', { name: 'Import files' })[0] as HTMLButtonElement).disabled).toBe(false),
+  );
   expect(screen.queryByText('Importing…')).toBeNull();
   expect(onBusyChange).toHaveBeenLastCalledWith(false);
   expect(callsOf(api, 'files:import')).toEqual([]);
@@ -445,15 +488,27 @@ it('assigning in the detail dialog moves on to the following file; assigning the
 });
 
 const VISION: ProviderView = providerView();
-const NO_JOBS: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const NO_JOBS: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 /** The provider, job and analysis channels the dialogs use; `entry` null means no provider is configured. */
 function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
   return {
     ...(entry === null
       ? fakeProviders().handlers
-      : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
-          .handlers),
+      : fakeProviders(
+          { providers: [entry], lastUsedId: entry.id },
+          { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } },
+        ).handlers),
     'jobs:summary': () => NO_JOBS,
     'analysis:getProposal': () => ({ proposal: null, job: null }),
     'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }),
@@ -553,7 +608,9 @@ it('Analyse on several selected files opens the start dialog for all of them; St
   expect(analyse.title).toBe(ANALYSE_SELECTION_TITLE);
   await user.click(analyse);
   await screen.findByRole('dialog', { name: 'Analyse' });
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false),
+  );
   const target = { kind: 'files', fileIds: [c1.id, c2.id, doc.id] };
   expect(callsOf(api, 'analysis:preview')).toEqual([{ target, model: 'vision-a', providerId: VISION.id }]);
   await user.click(screen.getByRole('button', { name: 'Start' }));
@@ -576,7 +633,11 @@ it('one image among several selected files opens the start dialog, not the singl
   await screen.findByRole('dialog', { name: 'Analyse' });
   expect(screen.queryByRole('dialog', { name: 'c1.png' })).toBeNull();
   await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
-  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'files', fileIds: [c1.id, doc.id] }, model: 'vision-a', providerId: VISION.id });
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({
+    target: { kind: 'files', fileIds: [c1.id, doc.id] },
+    model: 'vision-a',
+    providerId: VISION.id,
+  });
   expect(callsOf(api, 'analysis:getProposal')).toEqual([]);
 });
 
@@ -663,13 +724,17 @@ it('the proposal filter lists only files with a proposal, marks them and blocks 
   });
   renderWithProvider();
   await screen.findByText('plain.png');
-  expect(within(tile('proposed.png')).getByRole('img', { name: 'Tag proposal' }).title).toBe('Tag proposal waiting for review');
+  expect(within(tile('proposed.png')).getByRole('img', { name: 'Tag proposal' }).title).toBe(
+    'Tag proposal waiting for review',
+  );
   expect(within(tile('plain.png')).queryByRole('img', { name: 'Tag proposal' })).toBeNull();
 
   const toggle = screen.getByRole('button', { name: 'Proposals' });
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   await user.click(toggle);
-  await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('plain.png')).toBeNull());
+  await waitFor(() =>
+    expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('plain.png')).toBeNull(),
+  );
   expect(toggle.getAttribute('aria-pressed')).toBe('true');
   expect(callsOf(api, 'files:list').some((r) => (r as ListRequest).hasProposal === true)).toBe(true);
   const all = screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement;
@@ -705,7 +770,13 @@ it('Review tags in the menu opens the proposal; accepting it reloads the list', 
   const api = install([proposed], {
     ...analysisHandlers(),
     'analysis:getProposal': () => ({
-      proposal: { model: 'vision-a', promptName: null, createdAt: '2026-01-01T00:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] },
+      proposal: {
+        model: 'vision-a',
+        promptName: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        stale: false,
+        tags: [{ name: 'oak', displayName: 'Oak' }],
+      },
       job: null,
     }),
     'analysis:acceptProposal': () => ({}),
@@ -728,7 +799,9 @@ it('without a configured provider the analysis entries are disabled with the rea
   renderWithProvider();
   await screen.findByText('c1.png');
   const reason = JOB_ERROR_MESSAGES.provider_not_configured;
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement).title).toBe(reason));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement).title).toBe(reason),
+  );
   expect((screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(tile('c1.png'));
   const analyse = screen.getByRole('button', { name: 'Analyse' }) as HTMLButtonElement;
@@ -739,7 +812,17 @@ it('without a configured provider the analysis entries are disabled with the rea
   expect(item.title).toBe(reason);
 });
 
-const JOBS_IDLE: JobSummary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [], pausedHosts: [] };
+const JOBS_IDLE: JobSummary = {
+  queued: 1,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 1,
+  paused: [],
+  pausedHosts: [],
+};
 
 /** The inbox under a job provider; `change(p)` makes the next poll move and answer `p` from `changes:since`. */
 function withJobs(files: FileRecord[]) {
@@ -773,7 +856,9 @@ it('a file a job added to the inbox refreshes the list and the count in place, k
     const grid = screen.getByRole('listbox', { name: 'Files' });
     Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
     fireEvent.scroll(grid);
-    await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    await waitFor(() =>
+      expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }),
+    );
 
     // A poll without a change reloads nothing.
     await act(async () => {
@@ -790,7 +875,9 @@ it('a file a job added to the inbox refreshes the list and the count in place, k
     expect(callsOf(jobs.api, 'files:list')).toEqual([]);
 
     await jobs.change({ added: [{ assetId: null }] });
-    await waitFor(() => expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    await waitFor(() =>
+      expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }),
+    );
     // The title count reloads as well.
     expect(callsOf(jobs.api, 'files:list')).toContainEqual({ limit: 1, offset: 0, scope: { kind: 'inbox' } });
     // Refreshed in place: the same view, still where it was, without placeholders.
@@ -822,7 +909,10 @@ it('a changed record of the feed reaches the open detail dialog', async () => {
     const dialog = await screen.findByRole('dialog', { name: 'c1.png' });
     expect(within(dialog).queryByText('Moss')).toBeNull();
 
-    jobs.api.set('files:list', listOf(() => [{ ...c1, tags: [tagOf('Moss', 'ai')] }, c2]));
+    jobs.api.set(
+      'files:list',
+      listOf(() => [{ ...c1, tags: [tagOf('Moss', 'ai')] }, c2]),
+    );
     jobs.api.calls.length = 0;
     await jobs.change({ fileIds: [c1.id] });
     expect(await within(dialog).findByText('Moss')).toBeTruthy();
@@ -973,9 +1063,11 @@ it('a merge rewrites the selection at once, also a selected file outside the loa
   await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('f2.png')).toBeNull());
   expect(screen.getByText('2 selected')).toBeTruthy();
   const row = within(column()).getByRole('group', { name: 'Shared image tags' });
-  expect(within(row).getAllByRole('button', { name: /^Remove/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
-    'Remove AI tag Front View',
-  ]);
+  expect(
+    within(row)
+      .getAllByRole('button', { name: /^Remove/ })
+      .map((b) => b.getAttribute('aria-label')),
+  ).toEqual(['Remove AI tag Front View']);
 
   const before = callsOf(api, 'files:list').length;
   await renameThroughDialog(user, 'Front View', 'front');
@@ -983,9 +1075,11 @@ it('a merge rewrites the selection at once, also a selected file outside the loa
   // The list reload is requested and still unanswered; the selection already shows the merge.
   await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(before));
   await waitFor(() =>
-    expect(within(row).getAllByRole('button', { name: /^Remove/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Remove Front',
-    ]),
+    expect(
+      within(row)
+        .getAllByRole('button', { name: /^Remove/ })
+        .map((b) => b.getAttribute('aria-label')),
+    ).toEqual(['Remove Front']),
   );
 });
 
@@ -1068,7 +1162,9 @@ it('Import from site follows Import from URLs, is disabled while importing and i
 
   await user.click(siteButton);
   const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
-  await waitFor(() => expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'));
+  await waitFor(() =>
+    expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'),
+  );
   await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URL' }), 'https://example.com/g');
   await user.click(within(dialog).getByRole('button', { name: 'Test' }));
   await within(dialog).findByRole('list', { name: 'Found files' });
@@ -1102,7 +1198,9 @@ it('a running import shows its progress, reloads the list while done changes and
     const grid = screen.getByRole('listbox', { name: 'Files' });
     Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
     fireEvent.scroll(grid);
-    await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    await waitFor(() =>
+      expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }),
+    );
 
     await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
     // No progress known yet: the plain busy text.
@@ -1122,7 +1220,9 @@ it('a running import shows its progress, reloads the list while done changes and
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    await waitFor(() => expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }));
+    await waitFor(() =>
+      expect(callsOf(api, 'files:list')).toContainEqual({ limit: 60, offset: 60, scope: { kind: 'inbox' } }),
+    );
     await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
     const list = within(screen.getByRole('listbox', { name: 'Files' }));
     expect(list.queryByText('File 0.png')).toBeNull();
@@ -1139,7 +1239,9 @@ it('a running import shows its progress, reloads the list while done changes and
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(callsOf(api, 'files:cancelImport')).toEqual([{}]);
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true),
+    );
 
     progress = null;
     running.resolve([importResultOf('C:\\in\\a.png', { file: a })]);

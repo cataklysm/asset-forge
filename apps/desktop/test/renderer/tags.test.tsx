@@ -114,11 +114,7 @@ it('a rejected add or remove shows the error inline', async () => {
   const user = userEvent.setup();
   const gone = new ApiError('not_found', 'Asset x does not exist');
   render(
-    <RowHarness
-      initial={[tagOf('oak')]}
-      onAdd={() => Promise.reject(gone)}
-      onRemove={() => Promise.reject(gone)}
-    />,
+    <RowHarness initial={[tagOf('oak')]} onAdd={() => Promise.reject(gone)} onRemove={() => Promise.reject(gone)} />,
   );
   const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Add asset tag' });
   await user.type(input, 'Bark{Enter}');
@@ -133,9 +129,7 @@ it('a rejected add or remove shows the error inline', async () => {
 
 function ComboHarness({ onCommit }: { onCommit(text: string): void }) {
   const [value, setValue] = useState('');
-  return (
-    <TagCombobox value={value} onValueChange={setValue} onCommit={onCommit} placeholder="Tags" label="Tags" />
-  );
+  return <TagCombobox value={value} onValueChange={setValue} onCommit={onCommit} placeholder="Tags" label="Tags" />;
 }
 
 it('the combobox shows suggestions and a superseded answer is dropped', async () => {
@@ -275,7 +269,8 @@ it('manual, filter and matched chips keep their look and have no AI title', () =
   expect(classesOf('Car')).toContain(CHIP);
   expect(classesOf('Filt')).toContain(FILTER_CHIP);
   expect(classesOf('Match')).toContain(MATCHED_CHIP);
-  for (const text of ['Car', 'Filt', 'Match']) expect((screen.getByText(text).parentElement as HTMLElement).hasAttribute('title')).toBe(false);
+  for (const text of ['Car', 'Filt', 'Match'])
+    expect((screen.getByText(text).parentElement as HTMLElement).hasAttribute('title')).toBe(false);
   expect(screen.getByRole('button', { name: 'Remove Car' })).not.toBeNull();
 });
 
@@ -287,7 +282,11 @@ it('the AI colour has a contrast of at least 4.5 on the page and surface backgro
     return [0, 2, 4].map((i) => parseInt(m[1]!.slice(i, i + 2), 16) / 255);
   };
   const luminance = (name: string) => {
-    const [r, g, b] = channels(name).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+    const [r, g, b] = channels(name).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [
+      number,
+      number,
+      number,
+    ];
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
   const contrast = (a: string, b: string) => {
@@ -346,7 +345,14 @@ it('the tag filter stops at 10 tags', async () => {
 });
 
 const TAG_USAGE = {
-  'tags:usage': ({ name }: { name: string }) => ({ exists: true, name, displayName: name, files: 1, assets: 0, prompts: 0 }),
+  'tags:usage': ({ name }: { name: string }) => ({
+    exists: true,
+    name,
+    displayName: name,
+    files: 1,
+    assets: 0,
+    prompts: 0,
+  }),
 };
 
 it('a chip with onRename shows the pencil before the remove button; without it none', () => {
@@ -369,7 +375,14 @@ it('a row inside a TagsProvider has a pencil per chip, none when disabled and no
   installFakeApi({ 'tags:suggest': () => [], ...TAG_USAGE });
   const tags = [tagOf('oak'), tagOf('Car', 'ai')];
   const row = (disabled: boolean) => (
-    <TagRow label="Asset tags" kind="asset" tags={tags} onAdd={async () => {}} onRemove={async () => {}} disabled={disabled} />
+    <TagRow
+      label="Asset tags"
+      kind="asset"
+      tags={tags}
+      onAdd={async () => {}}
+      onRemove={async () => {}}
+      disabled={disabled}
+    />
   );
   const { rerender, unmount } = render(<TagsProvider>{row(false)}</TagsProvider>);
   expect(screen.getByRole('button', { name: 'Rename oak' })).not.toBeNull();
@@ -438,12 +451,21 @@ it('with pencils, Backspace in the empty input and a removal still focus remove 
 });
 
 /** A row whose tags follow every rename, at once or only when `release` is called (like a list reload). */
-function RenamingRowHarness({ initial, later = false, drop = false }: { initial: TagAssignment[]; later?: boolean; drop?: boolean }) {
+function RenamingRowHarness({
+  initial,
+  later = false,
+  drop = false,
+}: {
+  initial: TagAssignment[];
+  later?: boolean;
+  drop?: boolean;
+}) {
   const [tags, setTags] = useState(initial);
   const [held, setHeld] = useState<TagRename | null>(null);
   useRenamed((change) => {
     if (later) setHeld(change);
-    else setTags((current) => (drop ? current.filter((t) => t.name !== change.from) : [...renameInTags(current, change)]));
+    else
+      setTags((current) => (drop ? current.filter((t) => t.name !== change.from) : [...renameInTags(current, change)]));
   });
   return (
     <>

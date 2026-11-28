@@ -208,7 +208,9 @@ it('the header shows the file name and the asset name; the dialog keeps its comb
 
 it('the details column shows its sections in order with one heading style', async () => {
   install();
-  const { unmount } = render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} onOpenAsset={() => {}} />);
+  const { unmount } = render(
+    <Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} onOpenAsset={() => {}} />,
+  );
   await openDialog();
   expect(headings(3)).toEqual(['Image details', 'Role', 'Image tags', 'Asset', 'Asset tags']);
   const styles = new Set(screen.getAllByRole('heading', { level: 3 }).map((h) => h.className));
@@ -337,7 +339,9 @@ it('Dimensions follow Format and show the stored size, or a dash while unknown',
   const { unmount } = render(<Harness file={fileRecord({ width: 1600, height: 2000 })} asset={null} />);
   await openDialog();
   expect(detailValue('Dimensions')).toBe('1600 × 2000 px');
-  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map((dt) => dt.textContent);
+  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map(
+    (dt) => dt.textContent,
+  );
   expect(labels).toEqual(['Filename', 'Format', 'Dimensions', 'Size', 'Imported']);
   expect(detailValue('Format')).toBe('PNG');
   const format = within(screen.getByRole('region', { name: 'Details' })).getByText('Format').nextElementSibling!;
@@ -393,7 +397,13 @@ it('files with dimensions and non-image files are not measured; a non-image keep
 
   render(
     <Harness
-      file={fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' })}
+      file={fileRecord({
+        originalName: 'notes.txt',
+        mimeType: 'text/plain',
+        previewable: false,
+        openable: true,
+        kind: 'document',
+      })}
       asset={null}
     />,
   );
@@ -416,7 +426,8 @@ function listOf(files: FileRecord[], index: number): ViewerList {
   };
 }
 
-const fileList = (count: number) => Array.from({ length: count }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
+const fileList = (count: number) =>
+  Array.from({ length: count }, (_, i) => fileRecord({ originalName: `File ${i}.png` }));
 
 it('the header counts the position in the list and Next shows the following file', async () => {
   install();
@@ -454,7 +465,13 @@ it('Previous is disabled on the first file and Next on the last', async () => {
 
 it('a text file in the list is shown with its placeholder', async () => {
   install();
-  const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, openable: true, kind: 'document' });
+  const text = fileRecord({
+    originalName: 'notes.txt',
+    mimeType: 'text/plain',
+    previewable: false,
+    openable: true,
+    kind: 'document',
+  });
   const files = [fileRecord({ originalName: 'File 0.png' }), text];
   render(<Harness file={text} asset={null} list={listOf(files, 1)} />);
   await openDialog();
@@ -695,12 +712,19 @@ it('the details column shows the sources of the shown file above the generation 
   await user.click(screen.getByRole('button', { name: 'Next file (→)' }));
   expect(await screen.findByRole('link', { name: 'https://example.org/b.png' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: 'https://example.org/a.png' })).toBeNull();
-  expect(api.calls.filter((c) => c.channel === 'files:origins').map((c) => c.request)).toEqual([{ fileId: a.id }, { fileId: b.id }]);
+  expect(api.calls.filter((c) => c.channel === 'files:origins').map((c) => c.request)).toEqual([
+    { fileId: a.id },
+    { fileId: b.id },
+  ]);
 });
 
 it('a trashed file shows its sources too', async () => {
   const file = trashedRecord({ originalName: 'gone.png' });
-  install(fakeFileOrigins({ [file.id]: [{ id: nextId(), url: 'https://example.org/gone.png', createdAt: '2026-11-27T08:00:00.000Z' }] }).handlers);
+  install(
+    fakeFileOrigins({
+      [file.id]: [{ id: nextId(), url: 'https://example.org/gone.png', createdAt: '2026-11-27T08:00:00.000Z' }],
+    }).handlers,
+  );
   render(<Harness file={file} asset={null} roleControl={null} />);
   await openDialog();
   expect(await screen.findByRole('link', { name: 'https://example.org/gone.png' })).toBeTruthy();
@@ -750,9 +774,9 @@ function installInbox(initial: FileRecord[], trash?: FakeHandlers['files:trashMa
 
 async function openInInbox(name: string) {
   const user = userEvent.setup();
-  const tile = (await within(await screen.findByRole('listbox', { name: 'Files' })).findByText(name)).closest<HTMLElement>(
-    '[data-index]',
-  )!;
+  const tile = (
+    await within(await screen.findByRole('listbox', { name: 'Files' })).findByText(name)
+  ).closest<HTMLElement>('[data-index]')!;
   await user.click(tile);
   await user.keyboard('{Enter}');
   return { user, dialog: await screen.findByRole('dialog', { name }) };

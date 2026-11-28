@@ -7,8 +7,7 @@ type ErrorClass = new (message: string) => core.AssetForgeError;
 describe('ErrorCodeSchema', () => {
   it('covers every code the application produces', () => {
     const subclasses = (Object.values(core) as unknown[]).filter(
-      (value): value is ErrorClass =>
-        typeof value === 'function' && value.prototype instanceof core.AssetForgeError,
+      (value): value is ErrorClass => typeof value === 'function' && value.prototype instanceof core.AssetForgeError,
     );
     expect(subclasses.length).toBeGreaterThan(10);
     for (const Cls of subclasses) {

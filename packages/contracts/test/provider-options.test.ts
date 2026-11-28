@@ -16,8 +16,21 @@ import {
 } from '../src/index';
 
 const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
-const save = { name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', timeoutSeconds: 120, taggingModel: 'qwen', promptModel: null };
-const view = { ...save, id: uuid, kind: 'openai', editModel: null, hasApiKey: false, options: DEFAULT_PROVIDER_OPTIONS };
+const save = {
+  name: 'vLLM',
+  baseUrl: 'http://127.0.0.1:11500/v1',
+  timeoutSeconds: 120,
+  taggingModel: 'qwen',
+  promptModel: null,
+};
+const view = {
+  ...save,
+  id: uuid,
+  kind: 'openai',
+  editModel: null,
+  hasApiKey: false,
+  options: DEFAULT_PROVIDER_OPTIONS,
+};
 
 describe('kinds and purposes', () => {
   test('ollama and openai analyse, venice makes images', () => {
@@ -35,7 +48,13 @@ describe('kinds and purposes', () => {
 
 describe('request options', () => {
   test('the defaults', () => {
-    expect(DEFAULT_PROVIDER_OPTIONS).toEqual({ temperature: 0, thinking: 'default', maxTokens: null, extra: '', parallelRequests: 1 });
+    expect(DEFAULT_PROVIDER_OPTIONS).toEqual({
+      temperature: 0,
+      thinking: 'default',
+      maxTokens: null,
+      extra: '',
+      parallelRequests: 1,
+    });
     expect(ProviderOptionsSchema.safeParse(DEFAULT_PROVIDER_OPTIONS).success).toBe(true);
     expect(PROVIDER_EXTRA_MAX).toBe(4000);
   });
@@ -54,7 +73,8 @@ describe('request options', () => {
     expect(PARALLEL_REQUESTS_MIN).toBe(1);
     expect(PARALLEL_REQUESTS_MAX).toBe(64);
     expect(PARALLEL_REQUESTS_DEFAULT).toBe(1);
-    const ok = (parallelRequests: unknown) => ProviderOptionsSchema.safeParse({ ...DEFAULT_PROVIDER_OPTIONS, parallelRequests }).success;
+    const ok = (parallelRequests: unknown) =>
+      ProviderOptionsSchema.safeParse({ ...DEFAULT_PROVIDER_OPTIONS, parallelRequests }).success;
     for (const value of [1, 8, 64]) expect(ok(value), String(value)).toBe(true);
     for (const value of [0, 65, 1.5, -1, Number.NaN, '4', null]) expect(ok(value), String(value)).toBe(false);
     const { parallelRequests: _p, ...without } = DEFAULT_PROVIDER_OPTIONS;
@@ -78,28 +98,56 @@ describe('extra parameters', () => {
 
   test('every reserved key is refused for its kind', () => {
     expect(RESERVED_EXTRA_KEYS.ollama).toEqual(['model', 'messages', 'stream', 'format']);
-    expect(RESERVED_EXTRA_KEYS.openai).toEqual(['model', 'messages', 'stream', 'response_format', 'n', 'tools', 'tool_choice']);
+    expect(RESERVED_EXTRA_KEYS.openai).toEqual([
+      'model',
+      'messages',
+      'stream',
+      'response_format',
+      'n',
+      'tools',
+      'tool_choice',
+    ]);
     for (const kind of ['ollama', 'openai'] as const) {
       for (const key of RESERVED_EXTRA_KEYS[kind]) {
-        expect(parseExtraParameters(JSON.stringify({ [key]: 1 }), kind), `${kind} ${key}`).toEqual({ ok: false, reason: 'reserved', key });
+        expect(parseExtraParameters(JSON.stringify({ [key]: 1 }), kind), `${kind} ${key}`).toEqual({
+          ok: false,
+          reason: 'reserved',
+          key,
+        });
       }
     }
   });
 
   test('the first reserved key in list order is named', () => {
-    expect(parseExtraParameters('{"stream":true,"model":"x"}', 'ollama')).toEqual({ ok: false, reason: 'reserved', key: 'model' });
+    expect(parseExtraParameters('{"stream":true,"model":"x"}', 'ollama')).toEqual({
+      ok: false,
+      reason: 'reserved',
+      key: 'model',
+    });
   });
 
   test('keys reserved only for the other kind and nested keys are allowed', () => {
     expect(parseExtraParameters('{"format":1}', 'openai')).toEqual({ ok: true, value: { format: 1 } });
-    expect(parseExtraParameters('{"response_format":1}', 'ollama')).toEqual({ ok: true, value: { response_format: 1 } });
-    expect(parseExtraParameters('{"options":{"model":"x"}}', 'ollama')).toEqual({ ok: true, value: { options: { model: 'x' } } });
+    expect(parseExtraParameters('{"response_format":1}', 'ollama')).toEqual({
+      ok: true,
+      value: { response_format: 1 },
+    });
+    expect(parseExtraParameters('{"options":{"model":"x"}}', 'ollama')).toEqual({
+      ok: true,
+      value: { options: { model: 'x' } },
+    });
   });
 
   test('the fixed messages', () => {
-    expect(extraParametersMessage({ ok: false, reason: 'not_json' })).toBe('The extra parameters are not a JSON object');
-    expect(extraParametersMessage({ ok: false, reason: 'not_object' })).toBe('The extra parameters are not a JSON object');
-    expect(extraParametersMessage({ ok: false, reason: 'reserved', key: 'tool_choice' })).toBe('The extra parameters must not set tool_choice');
+    expect(extraParametersMessage({ ok: false, reason: 'not_json' })).toBe(
+      'The extra parameters are not a JSON object',
+    );
+    expect(extraParametersMessage({ ok: false, reason: 'not_object' })).toBe(
+      'The extra parameters are not a JSON object',
+    );
+    expect(extraParametersMessage({ ok: false, reason: 'reserved', key: 'tool_choice' })).toBe(
+      'The extra parameters must not set tool_choice',
+    );
   });
 });
 
@@ -113,7 +161,11 @@ describe('options on the view and the save request', () => {
 
   test('a save request may leave options out', () => {
     expect(SaveProviderSchema.safeParse(save).success).toBe(true);
-    expect(SaveProviderSchema.safeParse({ ...save, kind: 'openai', options: DEFAULT_PROVIDER_OPTIONS }).success).toBe(true);
-    expect(SaveProviderSchema.safeParse({ ...save, options: { ...DEFAULT_PROVIDER_OPTIONS, temperature: 3 } }).success).toBe(false);
+    expect(SaveProviderSchema.safeParse({ ...save, kind: 'openai', options: DEFAULT_PROVIDER_OPTIONS }).success).toBe(
+      true,
+    );
+    expect(
+      SaveProviderSchema.safeParse({ ...save, options: { ...DEFAULT_PROVIDER_OPTIONS, temperature: 3 } }).success,
+    ).toBe(false);
   });
 });

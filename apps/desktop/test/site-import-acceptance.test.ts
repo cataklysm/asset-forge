@@ -18,7 +18,10 @@ import { pngOf } from './png-fixture.js';
 
 // jsdom ships no types here; only the constructor is used.
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
-  JSDOM: new (html: string, options: { url: string; runScripts: 'outside-only' }) => { window: { eval(code: string): unknown; close(): void } };
+  JSDOM: new (
+    html: string,
+    options: { url: string; runScripts: 'outside-only' },
+  ) => { window: { eval(code: string): unknown; close(): void } };
 };
 
 const COOKIE_VALUE = 'secret-session-value';
@@ -30,7 +33,10 @@ interface Server {
 }
 
 /** An HTTP server on a loopback address (`127.0.0.1` or `::1`) with an ephemeral port. */
-async function serve(route: (req: http.IncomingMessage, res: http.ServerResponse) => void, address = '127.0.0.1'): Promise<Server> {
+async function serve(
+  route: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  address = '127.0.0.1',
+): Promise<Server> {
   const requests: Server['requests'] = [];
   const server = http.createServer((req, res) => {
     requests.push({ path: req.url ?? '', headers: req.headers });
@@ -117,11 +123,18 @@ describe('site import', () => {
     servers.push(cdn);
     const site = await serve((req, res) => {
       const url = req.url ?? '';
-      const html = (body: string) => res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<!doctype html><html><body>${body}</body></html>`);
-      if (url === '/robots.txt') res.writeHead(200, { 'Content-Type': 'text/plain' }).end('User-agent: *\nDisallow: /private/\n');
+      const html = (body: string) =>
+        res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<!doctype html><html><body>${body}</body></html>`);
+      if (url === '/robots.txt')
+        res.writeHead(200, { 'Content-Type': 'text/plain' }).end('User-agent: *\nDisallow: /private/\n');
       else if (url === '/gallery')
-        html('<a class="thumb" href="/detail/1">1</a><a class="thumb" href="/detail/2">2</a><a class="next" href="/gallery?page=2">next</a>');
-      else if (url === '/gallery?page=2') html(`<a class="thumb" href="/detail/3">3</a><a class="thumb" href="/private/4">4</a><a class="thumb" href="/away">5</a>`);
+        html(
+          '<a class="thumb" href="/detail/1">1</a><a class="thumb" href="/detail/2">2</a><a class="next" href="/gallery?page=2">next</a>',
+        );
+      else if (url === '/gallery?page=2')
+        html(
+          `<a class="thumb" href="/detail/3">3</a><a class="thumb" href="/private/4">4</a><a class="thumb" href="/away">5</a>`,
+        );
       else if (url === '/detail/1') html('<img id="full" src="/files/1.png">');
       else if (url === '/detail/2') html('<img id="full" src="/files/2.png">');
       else if (url === '/detail/3') html(`<img id="full" src="${cdn.origin}/files/3.png">`);
@@ -144,7 +157,10 @@ describe('site import', () => {
       focusLogin: () => {},
       openPage(profile) {
         pagesOpened.push(profile.id);
-        return { loader: createPageLoader(jsdomView(profile.site), profile.site, { pollMs: 5, settleMs: 1000, totalMs: 5000 }), close: () => void pagesClosed++ };
+        return {
+          loader: createPageLoader(jsdomView(profile.site), profile.site, { pollMs: 5, settleMs: 1000, totalMs: 5000 }),
+          close: () => void pagesClosed++,
+        };
       },
       cookies: async () => [{ name: 'sid', value: COOKIE_VALUE }],
       userAgent: () => 'Browser agent/1.0',

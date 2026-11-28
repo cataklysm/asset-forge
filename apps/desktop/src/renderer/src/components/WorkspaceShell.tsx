@@ -95,7 +95,18 @@ async function openSiteCheck(host: string): Promise<void> {
  * @returns the frame and, while open, the move dialog
  */
 export function JobsAppShell(
-  props: Omit<ComponentProps<typeof AppShell>, 'activeJobs' | 'trashCount' | 'paused' | 'onResume' | 'onMove' | 'pausedHosts' | 'onResumeHost' | 'checkHosts' | 'onOpenCheck'>,
+  props: Omit<
+    ComponentProps<typeof AppShell>,
+    | 'activeJobs'
+    | 'trashCount'
+    | 'paused'
+    | 'onResume'
+    | 'onMove'
+    | 'pausedHosts'
+    | 'onResumeHost'
+    | 'checkHosts'
+    | 'onOpenCheck'
+  >,
 ) {
   const { active, summary, refresh } = useJobs();
   const trash = useTrash();
@@ -214,7 +225,13 @@ function screenFor(view: View, { shell: state, busy, setBusy, setView, showAsset
   const { shell } = state;
   switch (view.name) {
     case 'assets':
-      return <AssetsScreen state={shell.assetList} onStateChange={state.setAssetList} onOpen={(id) => setView({ name: 'asset', id })} />;
+      return (
+        <AssetsScreen
+          state={shell.assetList}
+          onStateChange={state.setAssetList}
+          onOpen={(id) => setView({ name: 'asset', id })}
+        />
+      );
     case 'asset':
       return (
         <AssetScreen
@@ -268,12 +285,23 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   const shell = useShellState();
 
   function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>) {
-    shell.setAssetList({ filters: { ...NO_FILTERS, ...filters }, scrollOffset: 0, openedIndex: null, selectedId: null });
+    shell.setAssetList({
+      filters: { ...NO_FILTERS, ...filters },
+      scrollOffset: 0,
+      openedIndex: null,
+      selectedId: null,
+    });
     setView({ name: 'assets' });
   }
 
-  const openPrompt = useCallback((id: string) => leaveTo({ confirmLeave, setError, setView }, { name: 'prompts', id }), [confirmLeave]);
-  const openSettings = useCallback(() => void leaveTo({ confirmLeave, setError, setView }, { name: 'settings' }), [confirmLeave]);
+  const openPrompt = useCallback(
+    (id: string) => leaveTo({ confirmLeave, setError, setView }, { name: 'prompts', id }),
+    [confirmLeave],
+  );
+  const openSettings = useCallback(
+    () => void leaveTo({ confirmLeave, setError, setView }, { name: 'settings' }),
+    [confirmLeave],
+  );
 
   return (
     <WorkspaceProviders onRenamed={shell.renameInShell}>

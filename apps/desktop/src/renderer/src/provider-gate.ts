@@ -62,13 +62,21 @@ interface Loaded {
  * @param model the chosen model; null when none is chosen
  * @returns the gate when it already decides, else the names of the entry's models
  */
-function entryGate(state: GateState, purpose: ProviderPurpose, providerId: string | null, model: string | null): ProviderGate | Loaded {
+function entryGate(
+  state: GateState,
+  purpose: ProviderPurpose,
+  providerId: string | null,
+  model: string | null,
+): ProviderGate | Loaded {
   const { list, loading } = state;
   if (list === null) {
     const failed = state.failed && !loading;
     return { blocked: failed ? SETTINGS_LOAD_FAILED : START_LOADING, offerSettings: failed };
   }
-  if (providerId === null || !list.providers.some((entry) => entry.id === providerId && purposeOf(entry.kind) === purpose))
+  if (
+    providerId === null ||
+    !list.providers.some((entry) => entry.id === providerId && purposeOf(entry.kind) === purpose)
+  )
     return { blocked: JOB_ERROR_MESSAGES.provider_not_configured, offerSettings: !loading };
   const answer = purpose === 'image' ? state.imageModels[providerId] : state.models[providerId];
   if (answer === undefined || answer === 'checking') return { blocked: PROVIDER_CHECKING, offerSettings: false };
@@ -95,7 +103,8 @@ export function providerGate(state: GateState, providerId: string | null, model:
   if (!('names' in gate)) return gate;
   const answer = state.models[providerId!];
   const models = answer !== undefined && answer.ok ? answer.models : [];
-  if (!models.some((entry) => entry.vision !== false)) return { blocked: NO_VISION_MODEL, offerSettings: !state.loading };
+  if (!models.some((entry) => entry.vision !== false))
+    return { blocked: NO_VISION_MODEL, offerSettings: !state.loading };
   return { blocked: visionModelBlocked(gate.names, models, model), offerSettings: false };
 }
 
@@ -107,7 +116,11 @@ export function providerGate(state: GateState, providerId: string | null, model:
  * @param model the chosen model; null when none is chosen
  * @returns the reason, null when it can start
  */
-function visionModelBlocked(names: readonly string[], models: readonly VisionModel[], model: string | null): string | null {
+function visionModelBlocked(
+  names: readonly string[],
+  models: readonly VisionModel[],
+  model: string | null,
+): string | null {
   if (model === null) return CHOOSE_MODEL;
   if (!names.includes(model)) return MODEL_NOT_LISTED;
   if (models.some((entry) => entry.name === model && entry.vision === false)) return MODEL_NOT_VISION;

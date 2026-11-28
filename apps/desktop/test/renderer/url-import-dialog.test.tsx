@@ -52,7 +52,10 @@ it('sends the lines as typed without a target, skipDuplicates true, trailing emp
   await paste(user, ' https://a.test/x.png\n\nhttps://b.test/y.png \n\n  \n');
   await user.click(importButton());
   await waitFor(() => expect(requests(api)).toHaveLength(1));
-  expect(requests(api)[0]).toEqual({ urls: [' https://a.test/x.png', '', 'https://b.test/y.png '], skipDuplicates: true });
+  expect(requests(api)[0]).toEqual({
+    urls: [' https://a.test/x.png', '', 'https://b.test/y.png '],
+    skipDuplicates: true,
+  });
 });
 
 it('unchecking Skip duplicates sends false; the target is passed through', async () => {
@@ -161,7 +164,8 @@ it(`numbers the invalid lines as typed when more than ${MAX_IMPORT_URLS} lines w
   const lines = ['', '', ...Array.from({ length: MAX_IMPORT_URLS - 1 }, (_, i) => `https://a.test/${i}`), '', 'nope'];
   const { api, user } = setup({
     // The answer numbers the lines as sent: `nope` is the 5000th non-empty line.
-    'files:importUrls': () => urlImportResultOf({ queued: MAX_IMPORT_URLS - 1, invalid: [{ line: MAX_IMPORT_URLS, text: 'nope' }] }),
+    'files:importUrls': () =>
+      urlImportResultOf({ queued: MAX_IMPORT_URLS - 1, invalid: [{ line: MAX_IMPORT_URLS, text: 'nope' }] }),
   });
   await paste(user, lines.join('\n'));
   await user.click(importButton());

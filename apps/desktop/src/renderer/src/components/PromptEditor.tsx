@@ -129,7 +129,15 @@ interface SaveContext {
  * @param context the prompt, the draft, the setters and the save callback
  * @returns when the save ended
  */
-async function savePrompt({ detail, draft, setDetail, setDraft, setSaving, setError, onSaved }: SaveContext): Promise<void> {
+async function savePrompt({
+  detail,
+  draft,
+  setDetail,
+  setDraft,
+  setSaving,
+  setError,
+  onSaved,
+}: SaveContext): Promise<void> {
   setSaving(true);
   setError(null);
   const content = draft.content.trim();
@@ -150,7 +158,11 @@ async function savePrompt({ detail, draft, setDetail, setDraft, setSaving, setEr
     const base = detail.currentVersion.id;
     let next = detail;
     if (metaDirty(draft, next)) {
-      next = await call('prompts:update', { promptId: next.id, title: draft.title.trim(), description: draft.description.trim() });
+      next = await call('prompts:update', {
+        promptId: next.id,
+        title: draft.title.trim(),
+        description: draft.description.trim(),
+      });
       setDetail(next);
       updated = next;
     }
@@ -184,7 +196,13 @@ interface RemoveContext {
  * @param context the prompt, the setters and the delete callback
  * @returns when the delete ended
  */
-async function removePrompt({ detail, setSaving, setError, setConfirmingDelete, onDeleted }: RemoveContext): Promise<void> {
+async function removePrompt({
+  detail,
+  setSaving,
+  setError,
+  setConfirmingDelete,
+  onDeleted,
+}: RemoveContext): Promise<void> {
   if (detail === null) return;
   setSaving(true);
   setError(null);

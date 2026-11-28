@@ -128,7 +128,8 @@ function wordsMatch(query: string | undefined): SQL[] {
  * @returns the statement
  */
 export function pageQuery(reader: ListTransaction, query: FileQuery, where: SQL | undefined) {
-  const order = query.scope.kind === 'trash' ? [desc(file.deletedAt), desc(file.id)] : [desc(file.importedAt), desc(file.id)];
+  const order =
+    query.scope.kind === 'trash' ? [desc(file.deletedAt), desc(file.id)] : [desc(file.importedAt), desc(file.id)];
   return reader
     .select()
     .from(file)

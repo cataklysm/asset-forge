@@ -1,10 +1,36 @@
 import { FILE_DOWNLOAD_JOB, FINISHED_JOB_STATUSES, JobStatusSchema, type JobStatus } from '@assetforge/contracts';
 import type { Job, JobRepository, NewJob } from '@assetforge/core';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, min, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  min,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import { listJobs } from './job-list.js';
-import { errorOf, inLane, isActive, isWaiting, keyHeld, liveFile, notInLanes, notOfTrashedFile, toJob } from './job-rows.js';
+import {
+  errorOf,
+  inLane,
+  isActive,
+  isWaiting,
+  keyHeld,
+  liveFile,
+  notInLanes,
+  notOfTrashedFile,
+  toJob,
+} from './job-rows.js';
 import { file, job } from './schema.js';
 
 /** A handle that can read and insert: the database or a transaction on it. */
@@ -187,7 +213,13 @@ async function getJob(database: BetterSQLite3Database, id: string): Promise<Job 
  * @returns the jobs
  */
 async function listByStatus(database: BetterSQLite3Database, status: JobStatus): Promise<Job[]> {
-  return database.select().from(job).where(eq(job.status, status)).orderBy(asc(job.createdAt), asc(job.id)).all().map(toJob);
+  return database
+    .select()
+    .from(job)
+    .where(eq(job.status, status))
+    .orderBy(asc(job.createdAt), asc(job.id))
+    .all()
+    .map(toJob);
 }
 
 /**
@@ -253,7 +285,14 @@ async function nextRunAfter(
   const row = database
     .select({ at: min(job.runAfter) })
     .from(job)
-    .where(and(eq(job.status, 'retry_wait'), inArray(job.type, [...types]), isNotNull(job.runAfter), notInLanes(excludeLanes)))
+    .where(
+      and(
+        eq(job.status, 'retry_wait'),
+        inArray(job.type, [...types]),
+        isNotNull(job.runAfter),
+        notInLanes(excludeLanes),
+      ),
+    )
     .get();
   return row?.at ?? null;
 }
@@ -309,7 +348,11 @@ async function setOutcome(
   { fileId, result, now }: Parameters<JobRepository['setOutcome']>[1],
 ): Promise<boolean> {
   return database.transaction((transaction) => {
-    if (fileId !== null && transaction.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined) return false;
+    if (
+      fileId !== null &&
+      transaction.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined
+    )
+      return false;
     return fromRunning(database, id, { fileId, result, updatedAt: now });
   });
 }
@@ -329,7 +372,9 @@ async function holdLane(
   return database
     .update(job)
     .set({ status: 'retry_wait', runAfter: until, updatedAt: now })
-    .where(and(inArray(job.type, [...types]), inLane(lane), isWaiting, or(isNull(job.runAfter), lt(job.runAfter, until))))
+    .where(
+      and(inArray(job.type, [...types]), inLane(lane), isWaiting, or(isNull(job.runAfter), lt(job.runAfter, until))),
+    )
     .run().changes;
 }
 
@@ -569,7 +614,15 @@ async function rerouteWaiting(
       const payload = JSON.stringify(rewrite(JSON.parse(row.payload) as unknown));
       moved += transaction
         .update(job)
-        .set({ providerId: toLane, payload, status: 'queued', attempt: 0, runAfter: null, ...errorOf(null), updatedAt: now })
+        .set({
+          providerId: toLane,
+          payload,
+          status: 'queued',
+          attempt: 0,
+          runAfter: null,
+          ...errorOf(null),
+          updatedAt: now,
+        })
         .where(and(eq(job.id, row.id), isWaiting))
         .run().changes;
     }

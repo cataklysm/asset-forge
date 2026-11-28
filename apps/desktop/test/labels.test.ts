@@ -80,9 +80,15 @@ describe('archiveCountLabel', () => {
 
 describe('tagUsageLine', () => {
   it('names files, assets and prompts with singular and plural', () => {
-    expect(tagUsageLine({ displayName: 'Oak', files: 2, assets: 1, prompts: 1 })).toBe('Oak · 2 files · 1 asset · 1 prompt');
-    expect(tagUsageLine({ displayName: 'Oak', files: 1, assets: 0, prompts: 3 })).toBe('Oak · 1 file · 0 assets · 3 prompts');
-    expect(tagMergeLine({ displayName: 'Oak', files: 0, assets: 2, prompts: 0 })).toBe('Merges with Oak · 0 files · 2 assets · 0 prompts');
+    expect(tagUsageLine({ displayName: 'Oak', files: 2, assets: 1, prompts: 1 })).toBe(
+      'Oak · 2 files · 1 asset · 1 prompt',
+    );
+    expect(tagUsageLine({ displayName: 'Oak', files: 1, assets: 0, prompts: 3 })).toBe(
+      'Oak · 1 file · 0 assets · 3 prompts',
+    );
+    expect(tagMergeLine({ displayName: 'Oak', files: 0, assets: 2, prompts: 0 })).toBe(
+      'Merges with Oak · 0 files · 2 assets · 0 prompts',
+    );
   });
 });
 

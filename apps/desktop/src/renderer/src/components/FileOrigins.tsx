@@ -63,7 +63,11 @@ export function FileOrigins({ fileId }: { fileId: string }) {
       <ul className="max-h-46 min-w-0 space-y-1 overflow-y-auto p-1">
         {loaded.origins.map((origin) => (
           <li key={origin.id} className="flex min-w-0 items-center gap-1">
-            <Link onFollow={() => void open(origin.id)} title={origin.url} className="block min-w-0 flex-1 truncate text-sm">
+            <Link
+              onFollow={() => void open(origin.id)}
+              title={origin.url}
+              className="block min-w-0 flex-1 truncate text-sm"
+            >
               {origin.url}
             </Link>
             <button

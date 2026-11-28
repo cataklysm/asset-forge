@@ -38,7 +38,13 @@ export function ensureTag(
  * @param now the time of a new link
  * @returns nothing
  */
-export function linkAssetTag(transaction: LinkWriter, assetId: string, tagId: string, origin: TagOrigin, now: string): void {
+export function linkAssetTag(
+  transaction: LinkWriter,
+  assetId: string,
+  tagId: string,
+  origin: TagOrigin,
+  now: string,
+): void {
   if (origin === 'manual') {
     transaction
       .delete(assetTag)

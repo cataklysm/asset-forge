@@ -25,9 +25,7 @@ export function durationFromLine(line: string): number | null | undefined {
   const match = /^ {2}Duration: (?:(N\/A)|(\d+):(\d{2}):(\d{2}(?:\.\d+)?)),/.exec(line);
   if (!match) return undefined;
   if (match[1]) return null;
-  const durationMs = Math.round(
-    (Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4])) * 1000,
-  );
+  const durationMs = Math.round((Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4])) * 1000);
   return Number.isSafeInteger(durationMs) && durationMs > 0 ? durationMs : null;
 }
 

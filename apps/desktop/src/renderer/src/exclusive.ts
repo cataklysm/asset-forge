@@ -23,7 +23,11 @@ export interface ExclusiveLifecycle {
  * @param lifecycle what happens before and after it
  * @returns settles when the action has; rejects with its failure
  */
-export async function runExclusive(guard: Guard, action: () => Promise<void>, lifecycle: ExclusiveLifecycle = {}): Promise<void> {
+export async function runExclusive(
+  guard: Guard,
+  action: () => Promise<void>,
+  lifecycle: ExclusiveLifecycle = {},
+): Promise<void> {
   if (guard.current) return;
   guard.current = true;
   lifecycle.onStart?.();

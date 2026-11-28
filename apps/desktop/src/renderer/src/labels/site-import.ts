@@ -98,7 +98,8 @@ export const CRAWL_PROBLEM_TEXTS: Record<SiteCrawlProblemReason, (detail: string
   http_error: (status) => `The site answered HTTP ${status}`,
   load_failed: () => 'The page could not be loaded',
   robots_disallowed: () => 'Disallowed by robots.txt',
-  robots_unavailable: (host) => (host === '' ? 'robots.txt could not be read' : `robots.txt of ${host} could not be read`),
+  robots_unavailable: (host) =>
+    host === '' ? 'robots.txt could not be read' : `robots.txt of ${host} could not be read`,
   invalid_link: (value) => `Not a usable link: ${value}`,
   off_site: () => 'Link leaves the site',
   filtered_kind: () => 'Left out by the kinds filter',
@@ -107,7 +108,8 @@ export const CRAWL_PROBLEM_TEXTS: Record<SiteCrawlProblemReason, (detail: string
 
 /** The headline of a test that found no file. */
 export const NO_FILES_FOUND_LABEL = 'No files found';
-export const NO_THUMBNAILS_HEADLINE = 'No thumbnail matched. The login may have expired, or the expression does not fit';
+export const NO_THUMBNAILS_HEADLINE =
+  'No thumbnail matched. The login may have expired, or the expression does not fit';
 
 /**
  * 'The site redirected to login.example.com. Log in again'.

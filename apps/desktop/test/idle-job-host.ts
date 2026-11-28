@@ -38,7 +38,13 @@ function notUsed(): never {
 /** App services without a provider, for tests that do not exercise settings, analysis prompts or describe. */
 export const idleServices: AppServices = {
   providers: {
-    'providers:list': async () => ({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: false }),
+    'providers:list': async () => ({
+      providers: [],
+      lastUsedId: null,
+      lastUsedImageId: null,
+      fromEnvironment: false,
+      canStoreKey: false,
+    }),
     'providers:save': notUsed,
     'providers:delete': notUsed,
     'providers:listModels': notUsed,
@@ -46,7 +52,13 @@ export const idleServices: AppServices = {
   },
   imageProviders: noImageProviders(),
   providerStore: {
-    list: () => ({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: false }),
+    list: () => ({
+      providers: [],
+      lastUsedId: null,
+      lastUsedImageId: null,
+      fromEnvironment: false,
+      canStoreKey: false,
+    }),
     get: () => null,
     first: () => null,
     resolve: () => null,
@@ -109,7 +121,12 @@ export function mockProviderEntry(
   url: string,
 ): { store: ProviderStore; entry: ProviderView; vision: (lane: string | null) => VisionProvider | null } {
   const store = createProviderStore({ userData, secrets: new FakeCodec(), env: {} });
-  const gateway = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: createVeniceImage, log: () => {} });
+  const gateway = createProviderGateway({
+    store,
+    createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+    createImage: createVeniceImage,
+    log: () => {},
+  });
   const entry = store.save({ name: 'Mock', baseUrl: url, timeoutSeconds: 30, taggingModel: null, promptModel: null });
   return { store, entry, vision: (lane) => gateway.vision(lane) };
 }

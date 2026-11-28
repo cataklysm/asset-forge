@@ -28,7 +28,10 @@ it('shows each origin under Source; following one asks files:openOrigin and no a
   expect(within(section).getByRole('heading', { level: 3 }).textContent).toBe('Source');
   const links = within(section).getAllByRole('link');
   expect(links.map((l) => l.textContent)).toEqual(['https://example.org/a.png', 'https://cdn.example.com/b.png']);
-  expect(links.map((l) => l.getAttribute('title'))).toEqual(['https://example.org/a.png', 'https://cdn.example.com/b.png']);
+  expect(links.map((l) => l.getAttribute('title'))).toEqual([
+    'https://example.org/a.png',
+    'https://cdn.example.com/b.png',
+  ]);
   const anchors = [...section.querySelectorAll('a')];
   expect(anchors).toHaveLength(2);
   for (const anchor of anchors) expect(anchor.getAttribute('href')).toBe('#');
@@ -41,7 +44,9 @@ it('shows each origin under Source; following one asks files:openOrigin and no a
 it('copy writes the URL to the clipboard; a failed copy shows the message', async () => {
   const user = userEvent.setup();
   const fileId = nextId();
-  installFakeApi(fakeFileOrigins({ [fileId]: [origin('https://example.org/a.png'), origin('https://example.org/b.png')] }).handlers);
+  installFakeApi(
+    fakeFileOrigins({ [fileId]: [origin('https://example.org/a.png'), origin('https://example.org/b.png')] }).handlers,
+  );
   render(<FileOrigins fileId={fileId} />);
   await screen.findByText('https://example.org/b.png');
 

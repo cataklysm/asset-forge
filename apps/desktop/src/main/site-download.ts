@@ -60,7 +60,12 @@ export interface SessionDownloadDependencies {
 }
 
 /** What `SiteAccess.open` is. */
-export type SessionDownload = (profileId: string, url: string, signal: AbortSignal, options: RemoteOpenOptions) => Promise<RemoteFile>;
+export type SessionDownload = (
+  profileId: string,
+  url: string,
+  signal: AbortSignal,
+  options: RemoteOpenOptions,
+) => Promise<RemoteFile>;
 
 /** The dependencies with every default applied. */
 interface SessionDownloadConfig {
@@ -97,7 +102,6 @@ export function createSessionDownload(dependencies: SessionDownloadDependencies)
   };
   return (profileId, url, signal, options) => openThroughSession(config, profileId, url, signal, options);
 }
-
 
 /**
  * The hop loop: every hop on the site is vetted and sent through the session; the first hop off the site is handed
@@ -172,9 +176,17 @@ function parseHop(text: string, base?: URL): URL {
 async function vetHost(url: URL, config: SessionDownloadConfig, signal: AbortSignal, until: number): Promise<void> {
   let host = url.hostname;
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-  const addresses = isIP(host) !== 0 ? [host] : await bounded(Promise.resolve().then(() => config.lookup(host)), signal, until);
+  const addresses =
+    isIP(host) !== 0
+      ? [host]
+      : await bounded(
+          Promise.resolve().then(() => config.lookup(host)),
+          signal,
+          until,
+        );
   if (addresses.length === 0) throw failure('unreachable');
-  if (!addresses.every((address) => typeof address === 'string' && isPublicAddress(address))) throw failure('address_refused');
+  if (!addresses.every((address) => typeof address === 'string' && isPublicAddress(address)))
+    throw failure('address_refused');
 }
 
 /**
@@ -196,4 +208,3 @@ async function askHeaders(url: URL, options: RemoteOpenOptions, signal: AbortSig
     until,
   );
 }
-

@@ -25,7 +25,14 @@ import type { ViewPosition } from '../hooks/useVirtualRows';
 import { useChanges } from '../jobs-context';
 import type { AssetView, FileFilters, InboxListState } from '../list-state';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
-import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
+import {
+  dropSelected,
+  eligibleFiles,
+  NO_SELECTION,
+  NONE_ELIGIBLE,
+  refreshSelected,
+  type FileSelection,
+} from '../selection';
 import { useStudio } from '../studio-context';
 import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
@@ -138,7 +145,10 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           setRunning(true);
           const results = await call('files:import', { sourcePaths, unpackArchives });
           const cancelled = cancelRequested.current;
-          setImportResult({ title: importTitle(results, { duplicates: true, cancelled }), failures: importFailures(results) });
+          setImportResult({
+            title: importTitle(results, { duplicates: true, cancelled }),
+            failures: importFailures(results),
+          });
           reload();
         } catch (caught) {
           setError(describeError(caught));
@@ -268,7 +278,11 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
             ),
         )}
         {importResult !== null && (
-          <ResultStrip title={importResult.title} failures={importResult.failures} onDismiss={() => setImportResult(null)} />
+          <ResultStrip
+            title={importResult.title}
+            failures={importResult.failures}
+            onDismiss={() => setImportResult(null)}
+          />
         )}
         <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>
           <button

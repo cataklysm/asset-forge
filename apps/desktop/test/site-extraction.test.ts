@@ -5,7 +5,8 @@ import { EXTRACT_LIMITS, extractionCode, readExtraction } from '../src/main/site
 // The extraction script runs here against jsdom's XPath, the closest stand-in for the page's isolated world that
 // the test Electron (ELECTRON_RUN_AS_NODE) allows.
 
-const run = (queries: Record<string, string>, limits = EXTRACT_LIMITS): unknown => (0, eval)(extractionCode(queries, limits));
+const run = (queries: Record<string, string>, limits = EXTRACT_LIMITS): unknown =>
+  (0, eval)(extractionCode(queries, limits));
 
 // jsdom's XPath throws plain `Error`s or its own `XPathException` where Chromium throws a `SyntaxError` DOMException
 // for an expression it cannot parse and a `TypeError` for one that does not give nodes. The stand-in maps them, so
@@ -69,7 +70,10 @@ describe('extraction script', () => {
     try {
       const raw = run({ thumbnails: '//a' });
       expect(raw).toMatchObject({ baseUrl: 'https://example.com/gallery/' });
-      expect(readExtraction(raw, ['thumbnails'])).toMatchObject({ kind: 'results', baseUrl: 'https://example.com/gallery/' });
+      expect(readExtraction(raw, ['thumbnails'])).toMatchObject({
+        kind: 'results',
+        baseUrl: 'https://example.com/gallery/',
+      });
     } finally {
       base.remove();
     }
@@ -101,7 +105,10 @@ describe('extraction script', () => {
       return original.call(this, name);
     };
     try {
-      expect(run({ thumbnails: '//a' })).toMatchObject({ results: { thumbnails: ['/2.jpg'] }, counts: { thumbnails: 2 } });
+      expect(run({ thumbnails: '//a' })).toMatchObject({
+        results: { thumbnails: ['/2.jpg'] },
+        counts: { thumbnails: 2 },
+      });
     } finally {
       Element.prototype.getAttribute = original;
     }
@@ -125,7 +132,12 @@ describe('extraction script', () => {
 
   it('never runs an expression as code', () => {
     const globals = globalThis as { pwned?: number };
-    for (const query of [`'); globalThis.pwned = 1; ('`, `"); globalThis.pwned = 1; ("`, '</script><script>globalThis.pwned=1</script>', '${globalThis.pwned = 1}']) {
+    for (const query of [
+      `'); globalThis.pwned = 1; ('`,
+      `"); globalThis.pwned = 1; ("`,
+      '</script><script>globalThis.pwned=1</script>',
+      '${globalThis.pwned = 1}',
+    ]) {
       expect(run({ thumbnails: query })).toEqual({ invalid: 'thumbnails' });
     }
     expect(globals.pwned).toBeUndefined();
@@ -133,7 +145,9 @@ describe('extraction script', () => {
 
   it('caps the values per query and the length of each', () => {
     expect(EXTRACT_LIMITS).toEqual({ maxResults: 20_000, maxLength: 10_000 });
-    document.body.innerHTML = Array.from({ length: 5 }, (_, i) => `<a href="/${i}-${'x'.repeat(20)}">${i}</a>`).join('');
+    document.body.innerHTML = Array.from({ length: 5 }, (_, i) => `<a href="/${i}-${'x'.repeat(20)}">${i}</a>`).join(
+      '',
+    );
     const limits = { maxResults: 3, maxLength: 4 };
     const raw = run({ thumbnails: '//a' }, limits);
     expect(raw).toMatchObject({ results: { thumbnails: ['/0-x', '/1-x', '/2-x'] }, counts: { thumbnails: 5 } });

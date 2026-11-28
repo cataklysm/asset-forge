@@ -109,14 +109,25 @@ export function PromptPicker({ onPick, onClose }: Props) {
   return (
     <Dialog open title={PROMPTS_LABEL} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <SearchField value={queryText} onChange={setQueryText} placeholder={SEARCH_PROMPTS_LABEL} label={SEARCH_PROMPTS_LABEL} />
+        <SearchField
+          value={queryText}
+          onChange={setQueryText}
+          placeholder={SEARCH_PROMPTS_LABEL}
+          label={SEARCH_PROMPTS_LABEL}
+        />
         {error !== null && (
           <p role="alert" className={ALERT}>
             {error}
           </p>
         )}
-        <div className={`h-80 overflow-y-auto rounded-control border ${BORDER}`} onScroll={onScroll} aria-busy={pending || undefined}>
-          {total === 0 && <p className={`p-3 text-sm ${MUTED}`}>{query === '' ? NO_PROMPTS_TEXT : NO_MATCHING_PROMPTS_TEXT}</p>}
+        <div
+          className={`h-80 overflow-y-auto rounded-control border ${BORDER}`}
+          onScroll={onScroll}
+          aria-busy={pending || undefined}
+        >
+          {total === 0 && (
+            <p className={`p-3 text-sm ${MUTED}`}>{query === '' ? NO_PROMPTS_TEXT : NO_MATCHING_PROMPTS_TEXT}</p>
+          )}
           <div role="listbox" aria-label={PROMPTS_LABEL} className="text-sm">
             {items.map((prompt) => (
               <div

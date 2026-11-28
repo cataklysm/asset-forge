@@ -82,7 +82,9 @@ export function useWorkflow(assetId: string, assetTypeId: string): WorkflowState
     workflow: workflow ?? null,
     resolved,
     loadError: loaded.error,
-    loadErrors: [loaded, templates, types].map((load) => load.error).filter((message): message is string => message !== null),
+    loadErrors: [loaded, templates, types]
+      .map((load) => load.error)
+      .filter((message): message is string => message !== null),
     error,
     templates: templateItems,
     ready,

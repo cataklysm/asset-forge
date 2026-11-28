@@ -105,10 +105,22 @@ describe('getProposal', () => {
       dedupeKey: null,
     });
     await c.db.jobs.enqueue({ jobs: [newJob('job-a')], now: '2026-03-01T00:00:00.000Z' });
-    await c.db.jobs.claimNext({ resourceClass: 'remote_api', types: [ANALYZE_FILE_JOB], now: '2026-03-01T00:00:01.000Z' });
-    await c.db.jobs.finish('job-a', { status: 'failed', errorCode: 'provider_unavailable', now: '2026-03-01T00:00:02.000Z' });
+    await c.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [ANALYZE_FILE_JOB],
+      now: '2026-03-01T00:00:01.000Z',
+    });
+    await c.db.jobs.finish('job-a', {
+      status: 'failed',
+      errorCode: 'provider_unavailable',
+      now: '2026-03-01T00:00:02.000Z',
+    });
     await c.db.jobs.enqueue({ jobs: [newJob('job-b')], now: '2026-03-02T00:00:00.000Z' });
-    await c.db.jobs.claimNext({ resourceClass: 'remote_api', types: [ANALYZE_FILE_JOB], now: '2026-03-02T00:00:01.000Z' });
+    await c.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [ANALYZE_FILE_JOB],
+      now: '2026-03-02T00:00:01.000Z',
+    });
     await c.db.jobs.finish('job-b', { status: 'succeeded', errorCode: null, now: '2026-03-02T00:00:02.000Z' });
     expect((await getProposal(c.session, c.file.id)).job?.id).toBe('job-b');
 
@@ -136,14 +148,21 @@ describe('acceptProposal', () => {
       { name: 'metal', displayName: 'metal', origin: 'manual' },
       { name: 'red car', displayName: 'Red Car', origin: 'ai' },
     ]);
-    expect(await c.db.analyses.get(c.file.id)).toMatchObject({ sha256: c.file.sha256, provider: PROVIDER, model: MODEL, promptVersion: ANALYSIS_PROMPT_VERSION });
+    expect(await c.db.analyses.get(c.file.id)).toMatchObject({
+      sha256: c.file.sha256,
+      provider: PROVIDER,
+      model: MODEL,
+      promptVersion: ANALYSIS_PROMPT_VERSION,
+    });
     expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
     expect((await c.db.files.get(c.file.id))!.hasProposal).toBe(false);
   });
 
   it('answers not_found without a proposal', async () => {
     const c = await setup();
-    await expect(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it('refuses with no names or with a name not in the proposal', async () => {

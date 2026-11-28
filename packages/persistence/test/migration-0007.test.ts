@@ -46,7 +46,11 @@ async function createDatabaseUpTo0006(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
     s.prepare(
       `INSERT INTO file (id, storage_id, original_name, relative_path, mime_type, sha256, status, kind, imported_at)

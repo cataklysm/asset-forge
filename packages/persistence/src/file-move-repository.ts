@@ -36,9 +36,21 @@ function placementOf(
 ): Partial<typeof file.$inferInsert> {
   switch (move.kind) {
     case 'trash':
-      return { assetId: null, role: null, deletedAt: move.createdAt, trashedAssetId: current.assetId, trashedRole: current.role };
+      return {
+        assetId: null,
+        role: null,
+        deletedAt: move.createdAt,
+        trashedAssetId: current.assetId,
+        trashedRole: current.role,
+      };
     case 'restore':
-      return { assetId: move.targetAssetId, role: move.targetRole, deletedAt: null, trashedAssetId: null, trashedRole: null };
+      return {
+        assetId: move.targetAssetId,
+        role: move.targetRole,
+        deletedAt: null,
+        trashedAssetId: null,
+        trashedRole: null,
+      };
     case 'relocate':
       return { assetId: move.targetAssetId, role: move.targetRole };
   }

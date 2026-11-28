@@ -126,7 +126,9 @@ it('without the video actions Shift+arrows step on and Space is left alone', () 
   const actions = actionsMock();
   render(<SeekProbe actions={actions} />);
   const stage = screen.getByTestId('stage');
-  stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true }));
+  stage.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true }),
+  );
   expect(actions.next).toHaveBeenCalledTimes(1);
   const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
   stage.dispatchEvent(space);
@@ -185,6 +187,8 @@ it('Space is left to checkboxes, switches, tabs, radios, options, selects and su
   screen.getByText('summary').dispatchEvent(summary);
   expect(summary.defaultPrevented).toBe(false);
   expect(togglePlayback).not.toHaveBeenCalled();
-  container.querySelector('[aria-label="plain"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+  container
+    .querySelector('[aria-label="plain"]')!
+    .dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
   expect(togglePlayback).toHaveBeenCalledTimes(1);
 });

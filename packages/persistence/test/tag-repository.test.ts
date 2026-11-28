@@ -29,7 +29,14 @@ beforeEach(async () => {
   }
   await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T1 });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
 });
 
@@ -39,7 +46,15 @@ afterEach(async () => {
 });
 
 async function addAsset(n: number): Promise<Asset> {
-  const a: Asset = { id: uuid(n), name: `A${n}`, typeId: TYPE_ID, description: '', status: 'draft', createdAt: T1, updatedAt: T1 };
+  const a: Asset = {
+    id: uuid(n),
+    name: `A${n}`,
+    typeId: TYPE_ID,
+    description: '',
+    status: 'draft',
+    createdAt: T1,
+    updatedAt: T1,
+  };
   await db.assets.insert(a);
   return a;
 }
@@ -139,7 +154,11 @@ describe('tag repository', () => {
     ]);
     expect(await db.tags.suggest({ prefix: 'go', limit: 10 })).toEqual([]);
     expect(await db.tags.suggest({ prefix: 'sc', limit: 1 })).toHaveLength(1);
-    expect((await db.tags.suggest({ prefix: '', limit: 10 })).map((t) => t.name)).toEqual(['sci fi', 'other', 'scenic']);
+    expect((await db.tags.suggest({ prefix: '', limit: 10 })).map((t) => t.name)).toEqual([
+      'sci fi',
+      'other',
+      'scenic',
+    ]);
   });
 
   test('suggest treats LIKE wildcards and multi-byte prefixes literally', async () => {
@@ -191,8 +210,15 @@ describe('tag repository', () => {
 });
 
 describe('file tag batches', () => {
-  const batch = (fileIds: string[], name = 'oak') => ({ fileIds, name, displayName: 'Oak', origin: 'manual' as const, now: T1 });
-  const addMany = (fileIds: string[], name?: string) => db.tags.addToFiles({ ...batch(fileIds, name), newId: uuid(nextTagId++) });
+  const batch = (fileIds: string[], name = 'oak') => ({
+    fileIds,
+    name,
+    displayName: 'Oak',
+    origin: 'manual' as const,
+    now: T1,
+  });
+  const addMany = (fileIds: string[], name?: string) =>
+    db.tags.addToFiles({ ...batch(fileIds, name), newId: uuid(nextTagId++) });
   const removeMany = (fileIds: string[], name = 'oak') => db.tags.removeFromFiles({ fileIds, name });
 
   async function addPendingFile(n: number): Promise<string> {
@@ -210,7 +236,11 @@ describe('file tag batches', () => {
   }
 
   const place = (fileId: string, assetId: string) =>
-    db.files.setPlacement(fileId, { relativePath: `assets/${assetId}/reference/${fileId}.png`, assetId, role: 'reference' });
+    db.files.setPlacement(fileId, {
+      relativePath: `assets/${assetId}/reference/${fileId}.png`,
+      assetId,
+      role: 'reference',
+    });
   const counts = () => ({
     tags: handle.prepare('select count(*) as n from tag').get(),
     fileTags: handle.prepare('select count(*) as n from file_tag').get(),
@@ -277,7 +307,8 @@ describe('file tag batches', () => {
     }
     const inbox = await addFile(500);
     const prepare = vi.spyOn(Database.prototype, 'prepare');
-    const indexWrites = () => prepare.mock.calls.filter(([source]) => /^\s*insert into asset_search\b/i.test(String(source))).length;
+    const indexWrites = () =>
+      prepare.mock.calls.filter(([source]) => /^\s*insert into asset_search\b/i.test(String(source))).length;
 
     try {
       await addMany([...ids, inbox]);
@@ -352,7 +383,14 @@ describe('tags of trashed files', () => {
     });
     const snapshot = before();
 
-    const add = db.tags.addToFiles({ fileIds: [live, gone], name: 'pine', displayName: 'pine', origin: 'manual', newId: uuid(nextTagId++), now: T1 });
+    const add = db.tags.addToFiles({
+      fileIds: [live, gone],
+      name: 'pine',
+      displayName: 'pine',
+      origin: 'manual',
+      newId: uuid(nextTagId++),
+      now: T1,
+    });
     await expect(add).rejects.toMatchObject({ code: 'invalid_operation', message: 'The file is in the trash' });
     await expect(db.tags.removeFromFiles({ fileIds: [gone, live], name: 'oak' })).rejects.toMatchObject({
       code: 'invalid_operation',
@@ -370,7 +408,8 @@ describe('tag usage and rename', () => {
     db.tags.addToAsset({ assetId, name, displayName, origin, newId: uuid(nextTagId++), now });
   const tagFileAt = (fileId: string, name: string, origin: TagOrigin, now: string, displayName = name) =>
     db.tags.addToFile({ fileId, name, displayName, origin, newId: uuid(nextTagId++), now });
-  const tagRow = (name: string) => handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
+  const tagRow = (name: string) =>
+    handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
   const assetLinks = () => handle.prepare('select * from asset_tag order by asset_id, tag_id, origin').all();
   const fileLinks = () => handle.prepare('select * from file_tag order by file_id, tag_id, origin').all();
   const dump = () => ({
@@ -436,7 +475,9 @@ describe('tag usage and rename', () => {
     const before = tagRow('front view')!;
     const links = { asset: assetLinks(), file: fileLinks() };
 
-    expect(await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: false })).toEqual({ merged: false });
+    expect(await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: false })).toEqual(
+      { merged: false },
+    );
     expect(tagRow('front view')).toBeUndefined();
     expect(tagRow('frontal')).toEqual({ ...before, name: 'frontal', display_name: 'Frontal' });
     expect({ asset: assetLinks(), file: fileLinks() }).toEqual(links);
@@ -449,7 +490,9 @@ describe('tag usage and rename', () => {
     await tagAsset(a.id, 'front', 'manual', 'front');
     const before = dump();
     const row = tagRow('front')!;
-    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({ merged: false });
+    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({
+      merged: false,
+    });
     expect(tagRow('front')).toEqual({ ...row, display_name: 'FRONT' });
     expect({ ...dump(), tag: before.tag }).toEqual(before);
 
@@ -457,7 +500,9 @@ describe('tag usage and rename', () => {
     const changes = () => (handle.prepare('select total_changes() as n').get() as { n: number }).n;
     const written = changes();
     const same = dump();
-    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({ merged: false });
+    expect(await db.tags.rename({ from: 'front', name: 'front', displayName: 'FRONT', merge })).toEqual({
+      merged: false,
+    });
     expect(dump()).toEqual(same);
     expect(changes()).toBe(written);
   });
@@ -487,7 +532,9 @@ describe('tag usage and rename', () => {
       if (target) await tagFileAt(f, 'front', target, targetAt(i), 'Front');
     }
     const target = tagRow('front')!;
-    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({ merged: true });
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({
+      merged: true,
+    });
     expect(tagRow('front view')).toBeUndefined();
     expect(tagRow('front')).toEqual({ ...target, display_name: 'FRONT' });
     expect(fileLinks()).toEqual(
@@ -509,7 +556,9 @@ describe('tag usage and rename', () => {
       if (target) await tagAssetAt(a.id, 'front', target, targetAt(i), 'Front');
     }
     const target = tagRow('front')!;
-    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({ merged: true });
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'FRONT', merge: true })).toEqual({
+      merged: true,
+    });
     expect(tagRow('front view')).toBeUndefined();
     expect(tagRow('front')).toEqual({ ...target, display_name: 'FRONT' });
     expect(assetLinks()).toEqual(
@@ -529,7 +578,9 @@ describe('tag usage and rename', () => {
     await tagFile(f, 'front view', 'manual');
     await tagAsset(a.id, 'front', 'ai');
     await trash(f);
-    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({ merged: true });
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({
+      merged: true,
+    });
     await db.fileMoves.begin({
       fileId: f,
       kind: 'restore',
@@ -562,7 +613,9 @@ describe('tag usage and rename', () => {
       createdAt: T1,
     });
     const before = dump();
-    await expect(db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: false })).rejects.toMatchObject({
+    await expect(
+      db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: false }),
+    ).rejects.toMatchObject({
       code: 'invalid_operation',
       message: 'A tag with this name already exists',
     });
@@ -574,15 +627,21 @@ describe('tag usage and rename', () => {
     await tagAsset(a.id, 'empty source');
     await db.tags.removeFromAsset({ assetId: a.id, name: 'empty source' });
     await tagAsset(a.id, 'front');
-    expect(await db.tags.rename({ from: 'empty source', name: 'front', displayName: 'front', merge: true })).toEqual({ merged: true });
+    expect(await db.tags.rename({ from: 'empty source', name: 'front', displayName: 'front', merge: true })).toEqual({
+      merged: true,
+    });
     expect(tagRow('empty source')).toBeUndefined();
     expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'front', displayName: 'front', origin: 'manual' }]);
 
     await tagAsset(a.id, 'empty target');
     await db.tags.removeFromAsset({ assetId: a.id, name: 'empty target' });
-    expect(await db.tags.rename({ from: 'front', name: 'empty target', displayName: 'Empty Target', merge: true })).toEqual({ merged: true });
+    expect(
+      await db.tags.rename({ from: 'front', name: 'empty target', displayName: 'Empty Target', merge: true }),
+    ).toEqual({ merged: true });
     expect(tagRow('front')).toBeUndefined();
-    expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'empty target', displayName: 'Empty Target', origin: 'manual' }]);
+    expect(await db.tags.listForAsset(a.id)).toEqual([
+      { name: 'empty target', displayName: 'Empty Target', origin: 'manual' },
+    ]);
   });
 
   test('a merge over 3000 files, 1500 of them carrying both tags, succeeds', async () => {
@@ -594,7 +653,9 @@ describe('tag usage and rename', () => {
     const target = tagRow('front')!.id as string;
     const row = handle.prepare('select * from file where id = ?').get(template) as Record<string, unknown>;
     const columns = Object.keys(row);
-    const insertFile = handle.prepare(`insert into file (${columns.join(', ')}) values (${columns.map((c) => `@${c}`).join(', ')})`);
+    const insertFile = handle.prepare(
+      `insert into file (${columns.join(', ')}) values (${columns.map((c) => `@${c}`).join(', ')})`,
+    );
     const insertLink = handle.prepare('insert into file_tag (file_id, tag_id, origin, created_at) values (?, ?, ?, ?)');
     handle.transaction(() => {
       for (let i = 1; i < 3000; i++) {
@@ -605,8 +666,14 @@ describe('tag usage and rename', () => {
       }
     })();
 
-    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'front', merge: true })).toEqual({ merged: true });
-    expect(handle.prepare('select count(*) as n, count(distinct file_id) as files from file_tag where tag_id = ?').get(target)).toEqual({
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'front', merge: true })).toEqual({
+      merged: true,
+    });
+    expect(
+      handle
+        .prepare('select count(*) as n, count(distinct file_id) as files from file_tag where tag_id = ?')
+        .get(target),
+    ).toEqual({
       n: 3000,
       files: 3000,
     });
@@ -634,7 +701,8 @@ describe('prompt tags', () => {
   }
   const tagPrompt = (promptId: string, name: string, now: string, displayName = name) =>
     db.prompts.addTag({ promptId, name, displayName, newId: uuid(nextTagId++), now, max: 50 });
-  const tagRow = (name: string) => handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
+  const tagRow = (name: string) =>
+    handle.prepare('select * from tag where name = ?').get(name) as Record<string, unknown> | undefined;
   const promptLinks = () => handle.prepare('select * from prompt_tag order by prompt_id, tag_id').all();
   const promptUpdatedAt = () => handle.prepare('select id, updated_at from prompt order by id').all();
 
@@ -663,7 +731,9 @@ describe('prompt tags', () => {
     await tagPrompt(p, 'storm', T1);
     handle.prepare('update prompt set updated_at = ?').run(PROMPT_UPDATED);
     const links = promptLinks();
-    expect(await db.tags.rename({ from: 'storm', name: 'tempest', displayName: 'Tempest', merge: false })).toEqual({ merged: false });
+    expect(await db.tags.rename({ from: 'storm', name: 'tempest', displayName: 'Tempest', merge: false })).toEqual({
+      merged: false,
+    });
     expect(promptLinks()).toEqual(links);
     expect((await db.prompts.get(p))!.tags).toEqual([{ name: 'tempest', displayName: 'Tempest', origin: 'manual' }]);
     expect(promptUpdatedAt()).toEqual([{ id: p, updated_at: PROMPT_UPDATED }]);
@@ -681,13 +751,17 @@ describe('prompt tags', () => {
     handle.prepare('update prompt set updated_at = ?').run(PROMPT_UPDATED);
     const target = tagRow('front')!;
 
-    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({ merged: true });
+    expect(await db.tags.rename({ from: 'front view', name: 'front', displayName: 'Front', merge: true })).toEqual({
+      merged: true,
+    });
     expect(tagRow('front view')).toBeUndefined();
     expect(promptLinks()).toEqual([
       { prompt_id: both, tag_id: target.id, created_at: T0 },
       { prompt_id: sourceOnly, tag_id: target.id, created_at: T2 },
       { prompt_id: bothTargetOlder, tag_id: target.id, created_at: T0 },
     ]);
-    expect(promptUpdatedAt()).toEqual([both, sourceOnly, bothTargetOlder].map((id) => ({ id, updated_at: PROMPT_UPDATED })));
+    expect(promptUpdatedAt()).toEqual(
+      [both, sourceOnly, bothTargetOlder].map((id) => ({ id, updated_at: PROMPT_UPDATED })),
+    );
   });
 });

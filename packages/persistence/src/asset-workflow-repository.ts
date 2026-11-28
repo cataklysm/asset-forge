@@ -56,7 +56,12 @@ async function insertWorkflow(
   database.transaction((transaction) => {
     transaction
       .insert(assetWorkflow)
-      .values({ id: workflow.id, assetId: workflow.assetId, templateVersionId: workflow.templateVersionId, createdAt: workflow.createdAt })
+      .values({
+        id: workflow.id,
+        assetId: workflow.assetId,
+        templateVersionId: workflow.templateVersionId,
+        createdAt: workflow.createdAt,
+      })
       .run();
     for (const step of steps) {
       transaction

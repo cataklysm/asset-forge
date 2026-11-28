@@ -156,7 +156,15 @@ export function TagRow({ label, kind, layout = 'inline', tags, onAdd, onRemove, 
           </>
         )}
         {tags.map((tag, index) => (
-          <TagRowChip key={tag.name} tag={tag} index={index} disabled={disabled} openRename={openRename} renamedFocus={renamedFocus} remove={remove} />
+          <TagRowChip
+            key={tag.name}
+            tag={tag}
+            index={index}
+            disabled={disabled}
+            openRename={openRename}
+            renamedFocus={renamedFocus}
+            remove={remove}
+          />
         ))}
         <TagCombobox
           value={text}

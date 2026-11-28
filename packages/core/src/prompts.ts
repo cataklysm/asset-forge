@@ -127,7 +127,14 @@ export async function getPrompt(session: WorkspaceSession, promptId: string): Pr
  * @returns the words
  */
 function queryWords(query: string): string[] {
-  return [...new Set(query.split(/\s+/u).filter((word) => word !== '').map(foldSearchWord))];
+  return [
+    ...new Set(
+      query
+        .split(/\s+/u)
+        .filter((word) => word !== '')
+        .map(foldSearchWord),
+    ),
+  ];
 }
 
 /**

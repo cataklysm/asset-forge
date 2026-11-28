@@ -118,7 +118,12 @@ it('an empty list shows the table header and both page actions, no prose', async
   await screen.findByRole('button', { name: 'New workspace' });
   await waitFor(() => expect(document.querySelectorAll('[data-skeleton]')).toHaveLength(0));
   expect(screen.getByRole('button', { name: 'Open folder' })).toBeTruthy();
-  expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Name', 'Location', 'Last opened', '']);
+  expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+    'Name',
+    'Location',
+    'Last opened',
+    '',
+  ]);
   expect(screen.queryByText(/No workspaces/)).toBeNull();
 });
 

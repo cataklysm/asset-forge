@@ -19,12 +19,18 @@ const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-prompts-ipc-'));
   manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER });
-  handlers = createWorkspaceHandlers(manager, {
-    pickDirectory: async () => null,
-    pickFiles: async () => [],
-    confirmRemoveWorkspace: async () => 'cancel',
-    confirmRemoveWorkflow: async () => false,
-  }, noopHost, idleJobHost, idleServices);
+  handlers = createWorkspaceHandlers(
+    manager,
+    {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    },
+    noopHost,
+    idleJobHost,
+    idleServices,
+  );
 });
 afterEach(async () => {
   await manager.close();
@@ -70,13 +76,18 @@ describe('prompts IPC', () => {
   it('creates, lists, saves a version, reads and deletes a prompt', async () => {
     await openWorkspace();
     const hero = await create(' Hero shot ');
-    expect(hero).toMatchObject({ title: 'Hero shot', currentVersion: { number: 1, variables: [{ name: 'subject', defaultValue: 'fox' }] } });
+    expect(hero).toMatchObject({
+      title: 'Hero shot',
+      currentVersion: { number: 1, variables: [{ name: 'subject', defaultValue: 'fox' }] },
+    });
     await create('Plain', 'An empty field');
     await ok('prompts:addTag', { promptId: hero.id, name: 'Night' });
 
     const listed = await ok('prompts:list', { ...page, query: 'DUSK' });
     expect(listed).toMatchObject({ total: 1, items: [{ id: hero.id }] });
-    expect((await ok('prompts:list', { ...page, tagNames: ['night'] })).items.map((p: PromptDetail) => p.id)).toEqual([hero.id]);
+    expect((await ok('prompts:list', { ...page, tagNames: ['night'] })).items.map((p: PromptDetail) => p.id)).toEqual([
+      hero.id,
+    ]);
     expect((await ok('prompts:list', page)).total).toBe(2);
 
     const saved = await ok<PromptDetail>('prompts:saveVersion', {
@@ -86,12 +97,14 @@ describe('prompts IPC', () => {
       defaults: {},
     });
     expect(saved.currentVersion.number).toBe(2);
-    expect(await call('prompts:saveVersion', {
-      promptId: hero.id,
-      baseVersionId: hero.currentVersion.id,
-      content: 'Again',
-      defaults: {},
-    })).toEqual({ ok: false, error: { code: 'invalid_operation', message: 'This prompt was changed in the meantime' } });
+    expect(
+      await call('prompts:saveVersion', {
+        promptId: hero.id,
+        baseVersionId: hero.currentVersion.id,
+        content: 'Again',
+        defaults: {},
+      }),
+    ).toEqual({ ok: false, error: { code: 'invalid_operation', message: 'This prompt was changed in the meantime' } });
 
     const read = await ok<PromptDetail>('prompts:get', { promptId: hero.id });
     expect(read.versions.map((v) => [v.number, v.content])).toEqual([
@@ -130,7 +143,12 @@ describe('prompts IPC', () => {
     await ok('prompts:addTag', { promptId: hero.id, name: 'Front view' });
     await ok('prompts:addTag', { promptId: hero.id, name: 'Frontal' });
 
-    expect(await ok('tags:usage', { name: 'front view' })).toMatchObject({ exists: true, prompts: 1, assets: 0, files: 0 });
+    expect(await ok('tags:usage', { name: 'front view' })).toMatchObject({
+      exists: true,
+      prompts: 1,
+      assets: 0,
+      files: 0,
+    });
     expect(await ok('tags:suggest', { prefix: 'fro', limit: 10 })).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'front view' })]),
     );

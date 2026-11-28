@@ -126,7 +126,11 @@ describe('formFromGeneration', () => {
       promptVariables: { view: 'side' },
     });
     const form = { ...FORM, origin: { promptId: '00000000-0000-4000-8000-0000000000c3', title: 'Other' } };
-    expect(formFromGeneration(fromLibrary, form)).toMatchObject({ prompt: 'A side of a hero', attached: null, origin: null });
+    expect(formFromGeneration(fromLibrary, form)).toMatchObject({
+      prompt: 'A side of a hero',
+      attached: null,
+      origin: null,
+    });
   });
 
   it('copies nothing but the provider of an upscale', () => {

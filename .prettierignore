@@ -1,0 +1,9 @@
+# Formatted by hand or generated
+*.md
+pnpm-lock.yaml
+packages/persistence/migrations/
+**/out/
+**/dist/
+.claude/
+.worktrees/
+.superpowers/

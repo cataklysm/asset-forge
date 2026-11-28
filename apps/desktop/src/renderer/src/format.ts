@@ -61,7 +61,12 @@ export function shortUrl(text: string): string {
   let short = text;
   try {
     const url = new URL(text);
-    const segment = readableSegment(url.pathname.split('/').filter((part) => part !== '').pop() ?? '');
+    const segment = readableSegment(
+      url.pathname
+        .split('/')
+        .filter((part) => part !== '')
+        .pop() ?? '',
+    );
     short = segment === '' ? url.host : `${url.host}/${segment}`;
   } catch {
     // Not an address: shown cut as it is.

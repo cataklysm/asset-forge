@@ -44,7 +44,9 @@ async function createDatabaseUpTo0005(): Promise<void> {
 function seedAssetWithFile(): void {
   const seed = new Database(dbPath);
   try {
-    seed.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    seed
+      .prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)')
+      .run(uuid(1), 'ws', TS);
     seed.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
     seed
       .prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)")
@@ -92,7 +94,9 @@ describe('migration 0006', () => {
     const check = new Database(dbPath);
     try {
       const tables = check
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('job', 'file_analysis') ORDER BY name")
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('job', 'file_analysis') ORDER BY name",
+        )
         .all();
       expect(tables).toEqual([{ name: 'file_analysis' }, { name: 'job' }]);
       const insertJob = (id: string, status: string, resourceClass = 'local_gpu') =>

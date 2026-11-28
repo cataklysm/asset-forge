@@ -282,17 +282,24 @@ class InMemoryTags implements TagRepository {
   /** Written by the prompt fake. */
   readonly promptAssignments: PromptTagLink[] = [];
 
-  private static sorted(rows: { name: string; origin: TagOrigin }[], tags: Map<string, { displayName: string }>): TagAssignment[] {
+  private static sorted(
+    rows: { name: string; origin: TagOrigin }[],
+    tags: Map<string, { displayName: string }>,
+  ): TagAssignment[] {
     return rows
       .map((r) => ({ name: r.name, displayName: tags.get(r.name)!.displayName, origin: r.origin }))
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0));
+      .sort(
+        (a, b) =>
+          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0),
+      );
   }
 
   async suggest(q: { prefix: string; limit: number }): Promise<TagSuggestion[]> {
     const used = new Map<string, number>();
     // Mirrors the database: a file in the trash does not count.
     const liveFileAssignments = this.fileAssignments.filter((a) => !(this.files?.isTrashed(a.fileId) ?? false));
-    for (const a of [...this.assetAssignments, ...liveFileAssignments, ...this.promptAssignments]) used.set(a.name, (used.get(a.name) ?? 0) + 1);
+    for (const a of [...this.assetAssignments, ...liveFileAssignments, ...this.promptAssignments])
+      used.set(a.name, (used.get(a.name) ?? 0) + 1);
     return [...used]
       .filter(([name]) => name.startsWith(q.prefix))
       .sort(([an, ac], [bn, bc]) => bc - ac || (an < bn ? -1 : an > bn ? 1 : 0))
@@ -304,14 +311,22 @@ class InMemoryTags implements TagRepository {
     if (!this.tags.has(r.name)) this.tags.set(r.name, { id: r.newId, displayName: r.displayName });
   }
 
-  async addToAsset(r: { assetId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+  async addToAsset(r: {
+    assetId: string;
+    name: string;
+    displayName: string;
+    origin: TagOrigin;
+    newId: string;
+    now: string;
+  }): Promise<void> {
     this.ensureTag(r);
     const list = this.assetAssignments;
     if (r.origin === 'manual') {
       const kept = list.filter((a) => !(a.assetId === r.assetId && a.name === r.name && a.origin === 'ai'));
       list.splice(0, list.length, ...kept);
     }
-    if (!list.some((a) => a.assetId === r.assetId && a.name === r.name)) list.push({ assetId: r.assetId, name: r.name, origin: r.origin });
+    if (!list.some((a) => a.assetId === r.assetId && a.name === r.name))
+      list.push({ assetId: r.assetId, name: r.name, origin: r.origin });
   }
 
   async removeFromAsset(r: { assetId: string; name: string }): Promise<void> {
@@ -320,14 +335,22 @@ class InMemoryTags implements TagRepository {
     list.splice(0, list.length, ...kept);
   }
 
-  async addToFile(r: { fileId: string; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<void> {
+  async addToFile(r: {
+    fileId: string;
+    name: string;
+    displayName: string;
+    origin: TagOrigin;
+    newId: string;
+    now: string;
+  }): Promise<void> {
     this.ensureTag(r);
     const list = this.fileAssignments;
     if (r.origin === 'manual') {
       const kept = list.filter((a) => !(a.fileId === r.fileId && a.name === r.name && a.origin === 'ai'));
       list.splice(0, list.length, ...kept);
     }
-    if (!list.some((a) => a.fileId === r.fileId && a.name === r.name)) list.push({ fileId: r.fileId, name: r.name, origin: r.origin });
+    if (!list.some((a) => a.fileId === r.fileId && a.name === r.name))
+      list.push({ fileId: r.fileId, name: r.name, origin: r.origin });
   }
 
   async removeFromFile(r: { fileId: string; name: string }): Promise<void> {
@@ -353,7 +376,14 @@ class InMemoryTags implements TagRepository {
     return Promise.all(fileIds.map(async (id) => (await this.files!.get(id))!));
   }
 
-  async addToFiles(r: { fileIds: readonly string[]; name: string; displayName: string; origin: TagOrigin; newId: string; now: string }): Promise<FileRecord[]> {
+  async addToFiles(r: {
+    fileIds: readonly string[];
+    name: string;
+    displayName: string;
+    origin: TagOrigin;
+    newId: string;
+    now: string;
+  }): Promise<FileRecord[]> {
     await this.requireCompleteFiles(r.fileIds);
     for (const fileId of r.fileIds) await this.addToFile({ ...r, fileId });
     return this.recordsOf(r.fileIds);
@@ -397,7 +427,10 @@ class InMemoryTags implements TagRepository {
     const target = this.tags.get(r.name);
     if (target && !r.merge) throw new InvalidOperationError('A tag with this name already exists');
     // Moves each source link to the target; an owner carrying both keeps one link, manual when either was.
-    const move = <T extends { name: string; origin: TagOrigin }>(list: T[], sameOwner: (a: T, b: T) => boolean): void => {
+    const move = <T extends { name: string; origin: TagOrigin }>(
+      list: T[],
+      sameOwner: (a: T, b: T) => boolean,
+    ): void => {
       const kept: T[] = [];
       for (const link of list) {
         if (link.name !== r.from) {
@@ -446,11 +479,17 @@ class InMemoryTags implements TagRepository {
   }
 
   forAsset(assetId: string): TagAssignment[] {
-    return InMemoryTags.sorted(this.assetAssignments.filter((a) => a.assetId === assetId), this.tags);
+    return InMemoryTags.sorted(
+      this.assetAssignments.filter((a) => a.assetId === assetId),
+      this.tags,
+    );
   }
 
   forFile(fileId: string): TagAssignment[] {
-    return InMemoryTags.sorted(this.fileAssignments.filter((a) => a.fileId === fileId), this.tags);
+    return InMemoryTags.sorted(
+      this.fileAssignments.filter((a) => a.fileId === fileId),
+      this.tags,
+    );
   }
 }
 
@@ -538,8 +577,10 @@ class InMemoryFiles implements FileRepository {
     origin?: { id: string; url: string };
   }): Promise<void> {
     // Checked before anything is written, as the rolled-back transaction would leave nothing.
-    if (r.origin !== undefined && this.origins.rows.has(r.origin.id)) throw new Error('UNIQUE constraint failed: file_origin.id');
-    if (r.origin !== undefined) this.origins.rows.set(r.origin.id, { id: r.origin.id, fileId: r.id, url: r.origin.url, createdAt: r.importedAt });
+    if (r.origin !== undefined && this.origins.rows.has(r.origin.id))
+      throw new Error('UNIQUE constraint failed: file_origin.id');
+    if (r.origin !== undefined)
+      this.origins.rows.set(r.origin.id, { id: r.origin.id, fileId: r.id, url: r.origin.url, createdAt: r.importedAt });
     this.records.set(r.id, {
       id: r.id,
       storageId: r.storageId,
@@ -584,14 +625,33 @@ class InMemoryFiles implements FileRepository {
       .sort();
   }
 
-  async markComplete(id: string, r: { sizeBytes: number; sha256: string; width: number | null; height: number | null }): Promise<void> {
+  async markComplete(
+    id: string,
+    r: { sizeBytes: number; sha256: string; width: number | null; height: number | null },
+  ): Promise<void> {
     const rec = this.require(id);
-    this.records.set(id, { ...rec, status: 'complete', sizeBytes: r.sizeBytes, sha256: r.sha256, width: r.width, height: r.height, error: null });
+    this.records.set(id, {
+      ...rec,
+      status: 'complete',
+      sizeBytes: r.sizeBytes,
+      sha256: r.sha256,
+      width: r.width,
+      height: r.height,
+      error: null,
+    });
   }
 
-  async setDimensions(id: string, size: { width: number; height: number; durationMs?: number | null }): Promise<FileRecord> {
+  async setDimensions(
+    id: string,
+    size: { width: number; height: number; durationMs?: number | null },
+  ): Promise<FileRecord> {
     const current = this.require(id);
-    const rec = { ...current, width: size.width, height: size.height, durationMs: size.durationMs === undefined ? current.durationMs : size.durationMs };
+    const rec = {
+      ...current,
+      width: size.width,
+      height: size.height,
+      durationMs: size.durationMs === undefined ? current.durationMs : size.durationMs,
+    };
     this.records.set(id, rec);
     return this.withTags(rec);
   }
@@ -602,11 +662,15 @@ class InMemoryFiles implements FileRepository {
   }
 
   async findCompleteBySha256(sha256: string): Promise<FileRecord[]> {
-    return [...this.records.values()]
-      .filter((r) => r.status === 'complete' && r.deletedAt === null && r.sha256 === sha256)
-      // Mirrors the database: oldest import first, then id.
-      .sort((a, b) => (a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((r) => this.withTags(r));
+    return (
+      [...this.records.values()]
+        .filter((r) => r.status === 'complete' && r.deletedAt === null && r.sha256 === sha256)
+        // Mirrors the database: oldest import first, then id.
+        .sort((a, b) =>
+          a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        )
+        .map((r) => this.withTags(r))
+    );
   }
 
   async listByStatus(status: ImportStatus): Promise<FileRecord[]> {
@@ -633,10 +697,13 @@ class InMemoryFiles implements FileRepository {
     const inScope = (r: FileRecord) =>
       scope.kind === 'trash'
         ? r.deletedAt !== null
-        : r.deletedAt === null && (scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null));
+        : r.deletedAt === null &&
+          (scope.kind === 'all' || r.assetId === (scope.kind === 'asset' ? scope.assetId : null));
     // Newest import first; the trash lists the newest deletion first.
     const order = (a: FileRecord, b: FileRecord) =>
-      scope.kind === 'trash' ? desc(a.deletedAt!, b.deletedAt!) || desc(a.id, b.id) : desc(a.importedAt, b.importedAt) || desc(a.id, b.id);
+      scope.kind === 'trash'
+        ? desc(a.deletedAt!, b.deletedAt!) || desc(a.id, b.id)
+        : desc(a.importedAt, b.importedAt) || desc(a.id, b.id);
     const words = (q.query === undefined ? [] : searchWords(q.query)).map(foldSearchWord);
     const tagsOf = (fileId: string) => this.tags.fileAssignments.filter((a) => a.fileId === fileId).map((a) => a.name);
     // Plan decision 1/2: a word is a substring of the folded name or a word prefix of a tag name.
@@ -835,17 +902,24 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
         const assetIds = new Set((await this.assets.list({ ...target.filter, ...all })).items.map((a) => a.id));
         return [...this.files.records.values()]
           .filter((f) => f.assetId !== null && assetIds.has(f.assetId))
-          .filter((f) => (fileRole === undefined || f.role === fileRole) && (fileKind === undefined || f.kind === fileKind))
+          .filter(
+            (f) => (fileRole === undefined || f.role === fileRole) && (fileKind === undefined || f.kind === fileKind),
+          )
           .map((f) => f.id);
       }
     }
   }
 
-  private async entries(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisTargetEntry[]> {
+  private async entries(r: {
+    target: AnalysisTarget;
+    fingerprint: AnalysisFingerprint;
+    mimeTypes: readonly string[];
+  }): Promise<AnalysisTargetEntry[]> {
     const ids = [...new Set(await this.fileIdsOf(r.target))].sort();
     return ids.map((fileId) => {
       const f = this.files.records.get(fileId)!;
-      const analysable = f.status === 'complete' && f.deletedAt === null && r.mimeTypes.includes(f.mimeType) && f.sha256 !== null;
+      const analysable =
+        f.status === 'complete' && f.deletedAt === null && r.mimeTypes.includes(f.mimeType) && f.sha256 !== null;
       return { fileId, analysable, analysed: analysable && this.analyses.analysedWith(fileId, r.fingerprint) };
     });
   }
@@ -862,11 +936,20 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
     return entries.filter((e) => r.afterId === null || e.fileId > r.afterId).slice(0, r.limit);
   }
 
-  async count(r: { target: AnalysisTarget; fingerprint: AnalysisFingerprint; mimeTypes: readonly string[] }): Promise<AnalysisPreview> {
+  async count(r: {
+    target: AnalysisTarget;
+    fingerprint: AnalysisFingerprint;
+    mimeTypes: readonly string[];
+  }): Promise<AnalysisPreview> {
     const result: AnalysisPreview = { analysable: 0, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 };
     const queued = new Set(
       this.jobs.rows
-        .filter((j) => j.type === ANALYZE_FILE_JOB && j.fileId !== null && (ACTIVE_JOB_STATUSES as readonly string[]).includes(j.status))
+        .filter(
+          (j) =>
+            j.type === ANALYZE_FILE_JOB &&
+            j.fileId !== null &&
+            (ACTIVE_JOB_STATUSES as readonly string[]).includes(j.status),
+        )
         .map((j) => j.fileId),
     );
     for (const e of await this.entries(r)) {
@@ -915,7 +998,9 @@ class InMemoryFileMoves implements FileMoveRepository {
 
   async list(): Promise<FileMove[]> {
     return [...this.rows.values()].sort(
-      (a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) || (a.fileId < b.fileId ? -1 : a.fileId > b.fileId ? 1 : 0),
+      (a, b) =>
+        (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) ||
+        (a.fileId < b.fileId ? -1 : a.fileId > b.fileId ? 1 : 0),
     );
   }
 }
@@ -939,7 +1024,8 @@ class InMemoryAssetTypes implements AssetTypeRepository {
 
   async setDefaultWorkflowTemplateIfUnset(typeKey: string, templateId: string): Promise<void> {
     const row = [...this.rows.values()].find((r) => r.key === typeKey);
-    if (row && row.defaultWorkflowTemplateId === null) this.rows.set(row.id, { ...row, defaultWorkflowTemplateId: templateId });
+    if (row && row.defaultWorkflowTemplateId === null)
+      this.rows.set(row.id, { ...row, defaultWorkflowTemplateId: templateId });
   }
 
   /** Test-only: sets or clears the default template of the type with `typeKey`, replacing any existing one. */
@@ -1017,7 +1103,14 @@ class InMemoryWorkflowTemplates implements WorkflowTemplateRepository {
 
   async latestVersion(templateId: string): Promise<TemplateVersion | null> {
     const latest = this.versionsOf(templateId)[0];
-    return latest ? { id: latest.id, templateId: latest.templateId, version: latest.version, steps: latest.steps.map((s) => ({ ...s })) } : null;
+    return latest
+      ? {
+          id: latest.id,
+          templateId: latest.templateId,
+          version: latest.version,
+          steps: latest.steps.map((s) => ({ ...s })),
+        }
+      : null;
   }
 }
 
@@ -1325,7 +1418,9 @@ class InMemoryAssets implements AssetRepository {
     const matching = [...this.rows.values()]
       .filter((a) => q.typeId === undefined || a.typeId === q.typeId)
       .filter((a) => q.status === undefined || a.status === q.status)
-      .filter((a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })))
+      .filter(
+        (a) => q.projectId === undefined || this.links.has(assignmentKey({ projectId: q.projectId, assetId: a.id })),
+      )
       .filter((a) => carriesTags(this.tags, this.files, a.id, q.tagNames ?? []))
       .filter((a) => q.fileRole === undefined || this.completeFiles(a.id).some((f) => f.role === q.fileRole))
       .filter((a) => q.fileKind === undefined || this.completeFiles(a.id).some((f) => f.kind === q.fileKind))
@@ -1341,7 +1436,8 @@ class InMemoryAssets implements AssetRepository {
         coverFileId,
         tags: this.tags.forAsset(a.id),
         coverTags: coverFileId === null ? [] : this.tags.forFile(coverFileId),
-        ...(q.tagNames !== undefined && q.tagNames.length > 0 && { matchedTags: matchedTagsOver(this.tags, this.files, [a.id], q.tagNames) }),
+        ...(q.tagNames !== undefined &&
+          q.tagNames.length > 0 && { matchedTags: matchedTagsOver(this.tags, this.files, [a.id], q.tagNames) }),
       };
     });
     return { items, total: matching.length };
@@ -1442,7 +1538,9 @@ class InMemoryAssetSources implements AssetSourceRepository {
   async listByAsset(assetId: string): Promise<AssetSource[]> {
     return [...this.rows.values()]
       .filter((r) => r.assetId === assetId)
-      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .sort((a, b) =>
+        a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+      )
       .map(({ id, url, createdAt }) => ({ id, url, createdAt }));
   }
 
@@ -1486,12 +1584,16 @@ class InMemoryFileOrigins implements FileOriginRepository {
       .filter((o) => o.url === url)
       .map((o) => this.records.get(o.fileId))
       .filter((f): f is FileRecord => f !== undefined && f.status === 'complete')
-      .sort((a, b) => (a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      .sort((a, b) =>
+        a.importedAt < b.importedAt ? -1 : a.importedAt > b.importedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+      );
   }
 
   async listByFile(fileId: string): Promise<FileOrigin[]> {
     return this.ofFile(fileId)
-      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .sort((a, b) =>
+        a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+      )
       .map(({ id, url, createdAt }) => ({ id, url, createdAt }));
   }
 
@@ -1734,7 +1836,9 @@ export class FakeVideoProbe implements VideoProbe {
 export class FakeModelImageSource implements ModelImageSource {
   readonly calls: string[] = [];
   /** Per call: bytes or null to return, an error to throw, or a function of the path. */
-  script: (Uint8Array | null | Error | ((absolutePath: string) => Uint8Array | null))[] = [new Uint8Array([0xff, 0xd8, 0xff])];
+  script: (Uint8Array | null | Error | ((absolutePath: string) => Uint8Array | null))[] = [
+    new Uint8Array([0xff, 0xd8, 0xff]),
+  ];
 
   async jpeg(absolutePath: string): Promise<Uint8Array | null> {
     const call = this.calls.push(absolutePath) - 1;
@@ -1777,7 +1881,17 @@ export class FakeVisionProvider implements VisionProvider {
 
 /** Trashes files through `trashFiles` with a control that cancels nothing; throws the first item error. */
 export async function trashForTest(s: WorkspaceSession, fileIds: readonly string[]): Promise<void> {
-  const items = await trashFiles(s, { wake() {}, async cancel() {}, async cancelAll() { return 0; } }, fileIds);
+  const items = await trashFiles(
+    s,
+    {
+      wake() {},
+      async cancel() {},
+      async cancelAll() {
+        return 0;
+      },
+    },
+    fileIds,
+  );
   for (const item of items) if (item.error) throw item.error;
 }
 

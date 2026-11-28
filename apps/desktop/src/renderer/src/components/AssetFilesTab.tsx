@@ -9,7 +9,14 @@ import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValu
 import { useFileDialog } from '../hooks/useFileDialog';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, renameInFilters, type AssetView, type FileFilters } from '../list-state';
-import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
+import {
+  dropSelected,
+  eligibleFiles,
+  NO_SELECTION,
+  NONE_ELIGIBLE,
+  refreshSelected,
+  type FileSelection,
+} from '../selection';
 import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
@@ -244,7 +251,9 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
           {error}
         </p>
       )}
-      {result !== null && <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />}
+      {result !== null && (
+        <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
+      )}
       <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>
         <button
           type="button"
@@ -346,7 +355,12 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       />
       {analysis.dialogs}
 
-      <AddTagsDialog open={dialog === 'tags'} files={eligible} onChangeTag={changeTags} onClose={() => setDialog(null)} />
+      <AddTagsDialog
+        open={dialog === 'tags'}
+        files={eligible}
+        onChangeTag={changeTags}
+        onClose={() => setDialog(null)}
+      />
 
       <SetRoleDialog
         open={dialog === 'role'}

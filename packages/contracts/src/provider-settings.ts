@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { PROVIDER_EXTRA_MAX } from './extra-parameters';
-import { MAX_PROVIDERS, ModelNameSchema, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
+import {
+  MAX_PROVIDERS,
+  ModelNameSchema,
+  ProviderIdSchema,
+  ProviderKindSchema,
+  ProviderNameSchema,
+} from './provider-ref';
 
 /** Shortest request timeout of a provider entry, in seconds. */
 export const VISION_TIMEOUT_MIN_SECONDS = 10;

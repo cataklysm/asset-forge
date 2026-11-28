@@ -38,7 +38,8 @@ export function useDialogStack(): DialogStack {
   const [studioKey, setStudioKey] = useState(0);
   const [linkedKey, setLinkedKey] = useState(0);
   const raise = useCallback((which: StackedDialog) => {
-    if (top.current !== null && top.current !== which) (which === 'studio' ? setStudioKey : setLinkedKey)((key) => key + 1);
+    if (top.current !== null && top.current !== which)
+      (which === 'studio' ? setStudioKey : setLinkedKey)((key) => key + 1);
     top.current = which;
   }, []);
   // The one closed was on top; the other one, if still open, is now.

@@ -65,8 +65,7 @@ afterEach(async () => {
 });
 
 type Item =
-  | { kind: 'file'; name: string; data: Buffer; compress?: boolean; mode?: number }
-  | { kind: 'dir'; name: string };
+  { kind: 'file'; name: string; data: Buffer; compress?: boolean; mode?: number } | { kind: 'dir'; name: string };
 
 async function buildZip(file: string, items: Item[], options: { forceZip64Format?: boolean } = {}): Promise<void> {
   const zip = new yazl.ZipFile();
@@ -163,11 +162,29 @@ describe('ZipArchiveReader', () => {
 
     const entries = await withArchive(file, async (archive) => archive.entries);
     expect(entries).toEqual([
-      { name: 'stored.txt', uncompressedSize: stored.length, isDirectory: false, isSymlink: false, isUnsupported: false },
-      { name: 'sub/deflated.txt', uncompressedSize: deflated.length, isDirectory: false, isSymlink: false, isUnsupported: false },
+      {
+        name: 'stored.txt',
+        uncompressedSize: stored.length,
+        isDirectory: false,
+        isSymlink: false,
+        isUnsupported: false,
+      },
+      {
+        name: 'sub/deflated.txt',
+        uncompressedSize: deflated.length,
+        isDirectory: false,
+        isSymlink: false,
+        isUnsupported: false,
+      },
       { name: 'folder/', uncompressedSize: 0, isDirectory: true, isSymlink: false, isUnsupported: false },
       { name: 'link', uncompressedSize: 10, isDirectory: false, isSymlink: true, isUnsupported: false },
-      { name: 'secret.png', uncompressedSize: deflated.length, isDirectory: false, isSymlink: false, isUnsupported: true },
+      {
+        name: 'secret.png',
+        uncompressedSize: deflated.length,
+        isDirectory: false,
+        isSymlink: false,
+        isUnsupported: true,
+      },
     ]);
   });
 

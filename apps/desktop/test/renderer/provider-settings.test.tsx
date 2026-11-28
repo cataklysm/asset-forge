@@ -18,8 +18,19 @@ import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type 
 const TEST_KEY = 'test-key-not-real';
 const ACTIVE_JOBS = 'This provider still has active jobs; move or cancel them first';
 
-const LOCAL = providerView({ name: 'Local', timeoutSeconds: 90, taggingModel: 'vision-b', promptModel: 'vision-a', hasApiKey: true });
-const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: null, promptModel: null });
+const LOCAL = providerView({
+  name: 'Local',
+  timeoutSeconds: 90,
+  taggingModel: 'vision-b',
+  promptModel: 'vision-a',
+  hasApiKey: true,
+});
+const RUNPOD = providerView({
+  name: 'RunPod',
+  baseUrl: 'https://pod.example.test',
+  taggingModel: null,
+  promptModel: null,
+});
 
 const MODELS: ListModelsResult = {
   ok: true,
@@ -37,12 +48,16 @@ function install(seed: Partial<ProviderList> = { providers: [LOCAL, RUNPOD] }, h
   return { api, fake };
 }
 
-const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) => api.calls.filter((c) => c.channel === channel);
+const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
+  api.calls.filter((c) => c.channel === channel);
 const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const select = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const list = () => screen.getByRole('list', { name: 'Providers' });
-const entryNames = () => within(list()).getAllByRole('button').map((b) => b.textContent);
+const entryNames = () =>
+  within(list())
+    .getAllByRole('button')
+    .map((b) => b.textContent);
 
 function renderSection() {
   return render(
@@ -249,7 +264,15 @@ it('environment mode shows the entry with every control disabled', async () => {
   await loaded();
   expect(screen.getByText('From environment')).toBeTruthy();
   expect(entryNames()).toEqual(['Environment']);
-  for (const name of ['Name', 'Base URL', 'API key', 'Timeout (s)', 'Temperature', 'Max. answer tokens', 'Extra parameters'])
+  for (const name of [
+    'Name',
+    'Base URL',
+    'API key',
+    'Timeout (s)',
+    'Temperature',
+    'Max. answer tokens',
+    'Extra parameters',
+  ])
     expect(field(name).disabled).toBe(true);
   for (const name of ['Tagging model', 'Prompt model', 'Thinking']) expect(select(name).disabled).toBe(true);
   expect(field('Temperature').value).toBe('0');
@@ -287,7 +310,11 @@ it('creating a Venice entry sends kind venice and the prefilled URL', async () =
   await loaded();
   await user.click(button('New'));
   expect(select('Kind').value).toBe('ollama');
-  expect(within(select('Kind')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Ollama', 'OpenAI-compatible', 'Venice']);
+  expect(
+    within(select('Kind'))
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['Ollama', 'OpenAI-compatible', 'Venice']);
   expect(field('Base URL').value).toBe('');
   await user.selectOptions(select('Kind'), 'venice');
   expect(field('Base URL').value).toBe(VENICE_DEFAULT_BASE_URL);
@@ -346,7 +373,13 @@ it('editing does not offer the kind and shows it read-only', async () => {
   expect(screen.getByText('Venice', { selector: '[data-kind]' })).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: 'Tagging model' })).toBeNull();
   expect(screen.queryByRole('combobox', { name: 'Prompt model' })).toBeNull();
-  await waitFor(() => expect(within(select('Edit model')).getAllByRole('option').map((o) => o.textContent)).toEqual(['No model', 'edit-a', 'edit-b']));
+  await waitFor(() =>
+    expect(
+      within(select('Edit model'))
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['No model', 'edit-a', 'edit-b']),
+  );
   expect(select('Edit model').value).toBe('edit-b');
   expect(within(select('Edit model')).getByRole('option', { name: 'edit-a' }).getAttribute('title')).toBe('0.04 USD');
   expect(screen.getByText('ready')).toBeTruthy();
@@ -364,7 +397,11 @@ it('editing does not offer the kind and shows it read-only', async () => {
   });
   const before = callsOf(api, 'providers:listImageModels').length;
   await user.click(button('Refresh models'));
-  expect(callsOf(api, 'providers:listImageModels').slice(before).map((c) => c.request)).toEqual([{ providerId: VENICE.id, refresh: true }]);
+  expect(
+    callsOf(api, 'providers:listImageModels')
+      .slice(before)
+      .map((c) => c.request),
+  ).toEqual([{ providerId: VENICE.id, refresh: true }]);
 });
 
 it('an empty list opens the editor for a new entry', async () => {
@@ -398,7 +435,13 @@ const TUNED = providerView({
   name: 'Tuned',
   options: { temperature: 0.7, thinking: 'on', maxTokens: 512, extra: '{"top_k":40}', parallelRequests: 6 },
 });
-const VLLM = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: null, promptModel: null });
+const VLLM = providerView({
+  kind: 'openai',
+  name: 'vLLM',
+  baseUrl: 'http://127.0.0.1:11500/v1',
+  taggingModel: null,
+  promptModel: null,
+});
 
 /** Replaces the text of a field; `paste` so braces are not read as key names. */
 async function retype(user: ReturnType<typeof userEvent.setup>, name: string, text: string) {
@@ -424,7 +467,11 @@ it('choosing OpenAI-compatible shows the placeholder and the option fields, Veni
   for (const name of OPTION_FIELDS) expect(screen.getByLabelText(name)).toBeTruthy();
   expect(field('Temperature').value).toBe('0');
   expect(select('Thinking').value).toBe('default');
-  expect(within(select('Thinking')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Server default', 'Off', 'On']);
+  expect(
+    within(select('Thinking'))
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['Server default', 'Off', 'On']);
   await user.selectOptions(select('Kind'), 'venice');
   for (const name of OPTION_FIELDS) expect(screen.queryByLabelText(name)).toBeNull();
 });
@@ -445,7 +492,13 @@ it('the option fields carry their explanation only as tooltips', async () => {
   expect([temperature.type, temperature.min, temperature.max, temperature.step]).toEqual(['number', '0', '2', '0.1']);
   expect(field('Max. answer tokens').type).toBe('number');
   const parallel = field('Parallel requests');
-  expect([parallel.type, parallel.min, parallel.max, parallel.step, parallel.value]).toEqual(['number', '1', '64', '1', '1']);
+  expect([parallel.type, parallel.min, parallel.max, parallel.step, parallel.value]).toEqual([
+    'number',
+    '1',
+    '64',
+    '1',
+    '1',
+  ]);
   const extra = screen.getByLabelText('Extra parameters') as HTMLTextAreaElement;
   expect(extra.tagName).toBe('TEXTAREA');
   expect(extra.rows).toBe(4);
@@ -487,7 +540,14 @@ it('Save sends a changed parallel requests value and keeps it after the save', a
 
 it('a Venice entry shows no parallel requests field', async () => {
   const user = userEvent.setup();
-  const venice = providerView({ kind: 'venice', name: 'Venice', baseUrl: VENICE_DEFAULT_BASE_URL, taggingModel: null, promptModel: null, options: null });
+  const venice = providerView({
+    kind: 'venice',
+    name: 'Venice',
+    baseUrl: VENICE_DEFAULT_BASE_URL,
+    taggingModel: null,
+    promptModel: null,
+    options: null,
+  });
   install({ providers: [LOCAL, venice] });
   renderSection();
   await loaded();

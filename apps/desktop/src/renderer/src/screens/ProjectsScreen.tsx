@@ -186,7 +186,8 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
           tagNames={filters.tagNames}
           onOpenAsset={onOpenAsset}
           onShowAll={() => {
-            if (selectedProject !== null) onShowAssets({ projectId: selectedProject.id, tagNames: [...filters.tagNames] });
+            if (selectedProject !== null)
+              onShowAssets({ projectId: selectedProject.id, tagNames: [...filters.tagNames] });
           }}
         />
       }

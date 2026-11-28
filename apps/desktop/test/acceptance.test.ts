@@ -205,12 +205,18 @@ describe('phase 2a acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -416,12 +422,18 @@ describe('phase 2a acceptance', () => {
 
 describe('phase 2b acceptance', () => {
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -483,7 +495,10 @@ describe('phase 2b acceptance', () => {
   async function downgradeToPhase2a(workspaceId: string, assetId: string): Promise<void> {
     const dbPath = join(userDataPath, 'workspaces', workspaceId, 'assetforge.sqlite');
     const current = new WritableDatabase(dbPath);
-    const workspace = current.prepare('SELECT id, format_version, name, created_at FROM workspace').all() as Record<string, unknown>[];
+    const workspace = current.prepare('SELECT id, format_version, name, created_at FROM workspace').all() as Record<
+      string,
+      unknown
+    >[];
     const storage = current.prepare('SELECT * FROM storage').all() as Record<string, unknown>[];
     current.close();
     for (const suffix of ['', '-wal', '-shm']) await rm(`${dbPath}${suffix}`, { force: true });
@@ -555,12 +570,18 @@ describe('phase 3b acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -635,12 +656,18 @@ describe('file trash acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -678,7 +705,9 @@ describe('file trash acceptance', () => {
       await call('files:addTag', { fileId: doomed!.id, name: 'brass' });
       const chosen = await call('assets:setCover', { assetId: asset.id, fileId: doomed!.id });
       expect(chosen).toMatchObject({ coverFileId: doomed!.id, coverIsChosen: true });
-      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([{ name: 'brass', displayName: 'brass' }]);
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([
+        { name: 'brass', displayName: 'brass' },
+      ]);
 
       const trashed = await call('files:trashMany', { fileIds: [doomed!.id] });
       expect(trashed.items).toMatchObject([{ fileId: doomed!.id, error: null }]);
@@ -727,9 +756,14 @@ describe('file trash acceptance', () => {
       expect(await readFile(join(workspaceRoot, back.relativePath), 'utf8')).toBe('content of zephyr.png');
       const files = await call('files:list', { ...page, scope: { kind: 'asset', assetId: ids.assetId } });
       expect(files.items.map((f) => f.id).sort()).toEqual([ids.keptId, ids.doomedId].sort());
-      expect(await call('assets:get', { id: ids.assetId })).toMatchObject({ coverFileId: ids.keptId, coverIsChosen: false });
+      expect(await call('assets:get', { id: ids.assetId })).toMatchObject({
+        coverFileId: ids.keptId,
+        coverIsChosen: false,
+      });
       expect((await call('assets:list', { ...page, query: 'zephyr' })).items.map((a) => a.id)).toEqual([ids.assetId]);
-      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([{ name: 'brass', displayName: 'brass' }]);
+      expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([
+        { name: 'brass', displayName: 'brass' },
+      ]);
       expect(await call('trash:summary', {})).toEqual({ count: 0 });
 
       const again = await call('files:trashMany', { fileIds: [ids.doomedId] });
@@ -739,7 +773,9 @@ describe('file trash acceptance', () => {
       expect(purged.items).toEqual([{ fileId: ids.doomedId, file: null, error: null }]);
       expect(existsSync(join(workspaceRoot, trashPath))).toBe(false);
       expect(await second.read((s) => s.database.files.get(ids.doomedId))).toBeNull();
-      expect((await call('files:list', { ...page, scope: { kind: 'all' } })).items.map((f) => f.id)).toEqual([ids.keptId]);
+      expect((await call('files:list', { ...page, scope: { kind: 'all' } })).items.map((f) => f.id)).toEqual([
+        ids.keptId,
+      ]);
       expect(await call('trash:summary', {})).toEqual({ count: 0 });
       expect(await call('tags:suggest', { prefix: 'bra', limit: 10 })).toEqual([]);
     } finally {
@@ -791,12 +827,18 @@ describe('tag rename and merge acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
     const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await raw(channel, request);
@@ -877,7 +919,9 @@ describe('tag rename and merge acceptance', () => {
       ]);
       expect((await call('assets:list', { ...page, query: 'view' })).items).toEqual([]);
       expect((await call('assets:list', { ...page, tagNames: ['front'] })).items.map((a) => a.id)).toEqual([asset.id]);
-      expect(await call('tags:suggest', { prefix: 'front', limit: 10 })).toEqual([{ name: 'front', displayName: 'front' }]);
+      expect(await call('tags:suggest', { prefix: 'front', limit: 10 })).toEqual([
+        { name: 'front', displayName: 'front' },
+      ]);
       const { proposal } = await call('analysis:getProposal', { fileId: proposed!.id });
       expect(proposal!.tags).toEqual([{ name: 'front', displayName: 'front' }]);
 
@@ -895,12 +939,18 @@ describe('ZIP import acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
   function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(manager, {
-      pickDirectory: async () => null,
-      pickFiles: async () => [],
-      confirmRemoveWorkspace: async () => 'cancel',
-      confirmRemoveWorkflow: async () => false,
-    }, noopHost, idleJobHost, idleServices);
+    const handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      noopHost,
+      idleJobHost,
+      idleServices,
+    );
     return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
       const result = await dispatch(handlers, channel, request);
       if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
@@ -941,8 +991,20 @@ describe('ZIP import acceptance', () => {
         [archivePath, 'tools/setup.exe', 'This file type cannot be imported'],
       ]);
       const [wood, stone] = unpacked.map((r) => r.file);
-      expect(wood).toMatchObject({ status: 'complete', originalName: 'wood.png', assetId: asset.id, role: 'texture', kind: 'image' });
-      expect(stone).toMatchObject({ status: 'complete', originalName: 'stone.png', assetId: asset.id, role: 'texture', kind: 'image' });
+      expect(wood).toMatchObject({
+        status: 'complete',
+        originalName: 'wood.png',
+        assetId: asset.id,
+        role: 'texture',
+        kind: 'image',
+      });
+      expect(stone).toMatchObject({
+        status: 'complete',
+        originalName: 'stone.png',
+        assetId: asset.id,
+        role: 'texture',
+        kind: 'image',
+      });
       expect(unpacked[2]!.file).toBeNull();
       expect(unpacked.map((r) => r.duplicateOf)).toEqual([[], [], []]);
       expect(wood!.relativePath).toBe(assetFilePath(asset.id, 'texture', wood!.id, 'wood.png'));
@@ -952,8 +1014,12 @@ describe('ZIP import acceptance', () => {
 
       const inAsset = await call('files:list', { ...page, scope: { kind: 'asset', assetId: asset.id } });
       expect(inAsset.items.map((f) => f.id).sort()).toEqual([wood!.id, stone!.id].sort());
-      expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'wood' })).items.map((f) => f.id)).toEqual([wood!.id]);
-      expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'stone' })).items.map((f) => f.id)).toEqual([stone!.id]);
+      expect(
+        (await call('files:list', { ...page, scope: { kind: 'all' }, query: 'wood' })).items.map((f) => f.id),
+      ).toEqual([wood!.id]);
+      expect(
+        (await call('files:list', { ...page, scope: { kind: 'all' }, query: 'stone' })).items.map((f) => f.id),
+      ).toEqual([stone!.id]);
       expect((await call('files:list', { ...page, scope: { kind: 'all' }, query: 'setup' })).items).toEqual([]);
       expect(await readdir(join(workspaceRoot, '.assetforge', 'staging'))).toEqual([]);
 
@@ -1037,12 +1103,18 @@ describe('Asset sources acceptance', () => {
     const host: HostActions = { ...noopHost, openExternal: async (url) => void opened.push(url) };
     const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
-      const handlers = createWorkspaceHandlers(manager, {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      }, host, idleJobHost, idleServices);
+      const handlers = createWorkspaceHandlers(
+        manager,
+        {
+          pickDirectory: async () => null,
+          pickFiles: async () => [],
+          confirmRemoveWorkspace: async () => 'cancel',
+          confirmRemoveWorkflow: async () => false,
+        },
+        host,
+        idleJobHost,
+        idleServices,
+      );
       const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
       const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
         const result = await raw(channel, request);

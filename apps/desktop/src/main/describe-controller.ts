@@ -1,5 +1,11 @@
 import type { DescribeResult } from '@assetforge/contracts';
-import { describeImage, JobError, type ModelImageSource, type VisionProvider, type WorkspaceManager } from '@assetforge/core';
+import {
+  describeImage,
+  JobError,
+  type ModelImageSource,
+  type VisionProvider,
+  type WorkspaceManager,
+} from '@assetforge/core';
 
 // Image2Prompt requests: one at a time, cancellable by id, all cancelled when the workspace closes.
 // Kept free of Electron imports. A provider failure answers its code; it is never logged here.
@@ -109,7 +115,14 @@ class DescribeRequests {
         { fileId: input.fileId, model: input.model, prompt: input.prompt, signal },
       ),
     );
-    const request: ActiveRequest = { requestId: input.requestId, controller, done: run.then(() => {}, () => {}) };
+    const request: ActiveRequest = {
+      requestId: input.requestId,
+      controller,
+      done: run.then(
+        () => {},
+        () => {},
+      ),
+    };
     this.active = request;
     try {
       const text = await run;

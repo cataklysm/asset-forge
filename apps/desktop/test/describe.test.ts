@@ -92,7 +92,10 @@ describe('analysis:describe', () => {
     // A hangs; B is refused while A runs; cancelling A answers cancelled.
     const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
     await chats(1);
-    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL })).toEqual({ ok: false, code: 'busy' });
+    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL })).toEqual({
+      ok: false,
+      code: 'busy',
+    });
     expect(await h.ok('analysis:cancelDescribe', { requestId: ids.b })).toEqual({});
     expect(await h.ok('analysis:cancelDescribe', { requestId: ids.a })).toEqual({});
     expect(await first).toEqual({ ok: false, code: 'cancelled' });
@@ -137,7 +140,9 @@ describe('analysis:describe', () => {
     // The cancelled run stops before the provider; nothing else reaches it.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(1);
-    expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
+    expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({
+      ok: true,
+    });
   });
 
   it('refuses new requests while the workspace closes', async () => {
@@ -168,7 +173,9 @@ describe('analysis:describe', () => {
     expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(0);
 
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
-    expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
+    expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({
+      ok: true,
+    });
   });
 
   it('maps a provider failure to its code without logging it', async () => {
@@ -191,7 +198,9 @@ describe('analysis:describe', () => {
     const [fileId] = await h.importImages(1);
     const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
 
-    expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id })).toMatchObject({ ok: true });
+    expect(
+      await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id }),
+    ).toMatchObject({ ok: true });
     expect(chatContents().at(-1)).toBe('Paint it.');
     expect((await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt).toBe(paint.id);
 
@@ -201,7 +210,9 @@ describe('analysis:describe', () => {
 
     const sketch = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Sketch', text: 'Sketch it.' });
     await h.provider({ url: mock.url, apiKey: TEST_KEY_2 });
-    expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, promptId: sketch.id })).toEqual({
+    expect(
+      await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, promptId: sketch.id }),
+    ).toEqual({
       ok: false,
       code: 'provider_unauthorized',
     });
@@ -216,7 +227,9 @@ describe('analysis:describe', () => {
     const lastUsed = async () => (await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt;
 
     for (const promptId of [paint.id, ids.d]) {
-      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: ids.b, model: MOCK_MODEL, promptId })).toMatchObject({
+      expect(
+        await h.call('analysis:describe', { requestId: ids.a, fileId: ids.b, model: MOCK_MODEL, promptId }),
+      ).toMatchObject({
         ok: false,
         error: { code: 'no_workspace_open' },
       });
@@ -226,7 +239,9 @@ describe('analysis:describe', () => {
     await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
     const [fileId] = await h.importImages(1);
     for (const promptId of [ids.d, tagging.id]) {
-      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId })).toEqual({
+      expect(
+        await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId }),
+      ).toEqual({
         ok: false,
         error: { code: 'not_found', message: 'The analysis prompt does not exist' },
       });
@@ -235,7 +250,9 @@ describe('analysis:describe', () => {
 
     const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
     await chats(1);
-    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id })).toEqual({
+    expect(
+      await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id }),
+    ).toEqual({
       ok: false,
       code: 'busy',
     });
@@ -272,20 +289,29 @@ describe('analysis:describe with several providers', () => {
       const lastUsed = async () => (await h.ok('providers:list', {})).lastUsedId;
       const chatsOf = (m: MockProvider) => m.requests.filter((r) => r.path === '/api/chat');
 
-      expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: a.id })).toMatchObject({ ok: true });
+      expect(
+        await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: a.id }),
+      ).toMatchObject({ ok: true });
       expect(chatsOf(pair.a)).toHaveLength(1);
       expect(chatsOf(pair.b)).toHaveLength(0);
       expect(await lastUsed()).toBe(a.id);
 
       // B hangs; a second request for A answers busy and leaves B as the entry used last.
-      const hanging = h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL, providerId: b.id });
+      const hanging = h.ok('analysis:describe', {
+        requestId: ids.b,
+        fileId: fileId!,
+        model: MOCK_MODEL,
+        providerId: b.id,
+      });
       const deadline = Date.now() + 5_000;
       while (chatsOf(pair.b).length === 0) {
         if (Date.now() > deadline) throw new Error('B never got the request');
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       expect(await lastUsed()).toBe(a.id);
-      expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, providerId: a.id })).toEqual({
+      expect(
+        await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL, providerId: a.id }),
+      ).toEqual({
         ok: false,
         code: 'busy',
       });
@@ -294,9 +320,13 @@ describe('analysis:describe with several providers', () => {
       expect(await lastUsed()).toBe(b.id);
 
       // Without an id the entry used last runs.
-      expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({ ok: true });
+      expect(await h.ok('analysis:describe', { requestId: ids.d, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({
+        ok: true,
+      });
       expect(chatsOf(pair.b)).toHaveLength(2);
-      expect(await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: ids.c })).toEqual({
+      expect(
+        await h.call('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, providerId: ids.c }),
+      ).toEqual({
         ok: false,
         error: { code: 'not_found', message: 'This provider does not exist' },
       });

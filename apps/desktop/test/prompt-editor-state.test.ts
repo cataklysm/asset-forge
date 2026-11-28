@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { PromptDetail, PromptVersion } from '@assetforge/contracts';
-import { draftOf, metaDirty, variablesOf, versionDirty, type EditorDraft } from '../src/renderer/src/prompt-editor-state.js';
+import {
+  draftOf,
+  metaDirty,
+  variablesOf,
+  versionDirty,
+  type EditorDraft,
+} from '../src/renderer/src/prompt-editor-state.js';
 
 const VERSION_ID = '00000000-0000-4000-8000-000000000001';
 const OLD_VERSION_ID = '00000000-0000-4000-8000-000000000002';
@@ -29,7 +35,10 @@ function detail(p: Partial<PromptDetail> = {}): PromptDetail {
     currentVersion: current,
     updatedAt: current.createdAt,
     createdAt: '2026-11-26T10:00:00.000Z',
-    versions: [current, version({ id: OLD_VERSION_ID, number: 1, content: 'Old {{x}}', variables: [{ name: 'x', defaultValue: 'y' }] })],
+    versions: [
+      current,
+      version({ id: OLD_VERSION_ID, number: 1, content: 'Old {{x}}', variables: [{ name: 'x', defaultValue: 'y' }] }),
+    ],
     ...p,
   };
 }

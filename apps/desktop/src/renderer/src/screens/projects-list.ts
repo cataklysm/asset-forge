@@ -57,5 +57,7 @@ export function failedFirstPage(state: PagedState<ProjectSummary>): number | nul
  * @returns true when a loaded page has matched tags
  */
 export function hasMatchedTags(state: PagedState<ProjectSummary>): boolean {
-  return [...state.pages.values()].some((entry) => entry.status === 'loaded' && entry.items[0]?.matchedTags !== undefined);
+  return [...state.pages.values()].some(
+    (entry) => entry.status === 'loaded' && entry.items[0]?.matchedTags !== undefined,
+  );
 }

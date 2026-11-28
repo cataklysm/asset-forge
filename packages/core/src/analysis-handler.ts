@@ -81,7 +81,11 @@ async function loadAnalysable(session: WorkspaceSession, fileId: string): Promis
  * @returns the JPEG; null when none could be made from that path
  * @throws `JobError('file_unavailable')` when the path cannot be resolved or the read fails
  */
-async function jpegOf(session: WorkspaceSession, images: ModelImageSource, file: FileRecord): Promise<Uint8Array | null> {
+async function jpegOf(
+  session: WorkspaceSession,
+  images: ModelImageSource,
+  file: FileRecord,
+): Promise<Uint8Array | null> {
   try {
     return await images.jpeg(await session.storage.absolutePath(file.relativePath));
   } catch (cause) {
@@ -98,7 +102,11 @@ async function jpegOf(session: WorkspaceSession, images: ModelImageSource, file:
  * @returns the JPEG and the checksum
  * @throws `JobError('file_unavailable')` when the file is unknown, not analysable or no image can be produced
  */
-async function readModelImage(session: WorkspaceSession, images: ModelImageSource, fileId: string): Promise<ModelImage> {
+async function readModelImage(
+  session: WorkspaceSession,
+  images: ModelImageSource,
+  fileId: string,
+): Promise<ModelImage> {
   let file = await loadAnalysable(session, fileId);
   let image = await jpegOf(session, images, file);
   if (image === null) {

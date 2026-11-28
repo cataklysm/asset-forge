@@ -2,7 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { belongsToSite, type FileTarget, type SiteProfile, type UrlImportResult } from '@assetforge/contracts';
 import { call } from '../api';
 import { useJobs } from '../jobs-context';
-import { CLOSE_LABEL, DELETE_LABEL, deleteSiteProfileTitle, IMPORT_LABEL, SITE_IMPORT_LABEL, SITE_IMPORT_TITLE } from '../labels';
+import {
+  CLOSE_LABEL,
+  DELETE_LABEL,
+  deleteSiteProfileTitle,
+  IMPORT_LABEL,
+  SITE_IMPORT_LABEL,
+  SITE_IMPORT_TITLE,
+} from '../labels';
 import { ALERT, BUTTON } from '../ui';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Dialog } from './Dialog';

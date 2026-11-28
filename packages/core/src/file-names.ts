@@ -51,7 +51,12 @@ function truncateKeepingExtension(cleaned: string): string {
     extensionDot > 0 && [...cleaned.slice(extensionDot + 1)].length <= MAX_EXTENSION_LENGTH
       ? cleaned.slice(extensionDot)
       : '';
-  return characters.slice(0, MAX_LENGTH - [...extension].length).join('').replace(/\.+$/, '') + extension;
+  return (
+    characters
+      .slice(0, MAX_LENGTH - [...extension].length)
+      .join('')
+      .replace(/\.+$/, '') + extension
+  );
 }
 
 const PLACEHOLDER_FOLDER = 'workspace';

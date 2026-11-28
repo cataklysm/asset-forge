@@ -39,7 +39,12 @@ const NO_OFF: ReadonlySet<string> = new Set();
  */
 export function proposalKey(proposal: ProposalView | null): string | null {
   if (proposal === null) return null;
-  return JSON.stringify([proposal.model, proposal.promptName, proposal.createdAt, proposal.tags.map((tag) => tag.name)]);
+  return JSON.stringify([
+    proposal.model,
+    proposal.promptName,
+    proposal.createdAt,
+    proposal.tags.map((tag) => tag.name),
+  ]);
 }
 
 /**
@@ -69,7 +74,8 @@ const newer = (time: string, other: string) => Date.parse(time) > Date.parse(oth
  */
 export function takeStored(setShown: Dispatch<SetStateAction<Shown | null>>, id: string, stored: Stored): void {
   setShown((previous) => {
-    const same = previous !== null && previous.fileId === id && proposalKey(previous.proposal) === proposalKey(stored.proposal);
+    const same =
+      previous !== null && previous.fileId === id && proposalKey(previous.proposal) === proposalKey(stored.proposal);
     return { fileId: id, proposal: stored.proposal, job: stored.job, off: same ? previous.off : NO_OFF };
   });
 }

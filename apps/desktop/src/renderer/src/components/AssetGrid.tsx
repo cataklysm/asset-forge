@@ -257,12 +257,7 @@ function AssetTile({ asset, typeName }: { asset: AssetSummary; typeName: string 
   return (
     <>
       <div className="relative" style={{ height: FRAME_HEIGHT }}>
-        <CoverImage
-          fileId={asset.coverFileId}
-          size="thumb"
-          fallback={typeName}
-          className="h-full w-full"
-        />
+        <CoverImage fileId={asset.coverFileId} size="thumb" fallback={typeName} className="h-full w-full" />
         {asset.coverTags.length > 0 && (
           <div
             className="absolute inset-x-0 bottom-0 flex items-center bg-surface/85 px-2"

@@ -42,13 +42,19 @@ export function createFileAnalysisRepository(database: BetterSQLite3Database): F
  * @param sha256 the expected checksum
  * @returns the file's asset; undefined otherwise
  */
-function matchingFile(transaction: WriteTransaction, fileId: string, sha256: string): { assetId: string | null } | undefined {
+function matchingFile(
+  transaction: WriteTransaction,
+  fileId: string,
+  sha256: string,
+): { assetId: string | null } | undefined {
   const row = transaction
     .select({ assetId: file.assetId, status: file.status, sha256: file.sha256, deletedAt: file.deletedAt })
     .from(file)
     .where(eq(file.id, fileId))
     .get();
-  return row && row.status === 'complete' && row.deletedAt === null && row.sha256 === sha256 ? { assetId: row.assetId } : undefined;
+  return row && row.status === 'complete' && row.deletedAt === null && row.sha256 === sha256
+    ? { assetId: row.assetId }
+    : undefined;
 }
 
 /**
@@ -59,7 +65,9 @@ function matchingFile(transaction: WriteTransaction, fileId: string, sha256: str
  * @returns true when it is in the trash
  */
 function inTrash(transaction: WriteTransaction, fileId: string): boolean {
-  return transaction.select({ deletedAt: file.deletedAt }).from(file).where(eq(file.id, fileId)).get()?.deletedAt != null;
+  return (
+    transaction.select({ deletedAt: file.deletedAt }).from(file).where(eq(file.id, fileId)).get()?.deletedAt != null
+  );
 }
 
 /**
@@ -177,7 +185,9 @@ async function proposeTags(
       provider: request.provider,
       model: request.model,
       promptVersion: request.promptVersion,
-      tags: JSON.stringify(request.tags.map((proposed) => ({ name: proposed.name, displayName: proposed.displayName }))),
+      tags: JSON.stringify(
+        request.tags.map((proposed) => ({ name: proposed.name, displayName: proposed.displayName })),
+      ),
       promptName: request.promptName,
       createdAt: request.createdAt,
     };
@@ -197,7 +207,10 @@ async function proposeTags(
  * @param fileId the file
  * @returns the proposal; null when none waits
  */
-async function getProposal(database: BetterSQLite3Database, fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
+async function getProposal(
+  database: BetterSQLite3Database,
+  fileId: string,
+): Promise<(Proposal & { stale: boolean }) | null> {
   const row = database
     .select({ proposal: fileAnalysisProposal, status: file.status, sha256: file.sha256 })
     .from(fileAnalysisProposal)
@@ -221,7 +234,11 @@ async function acceptProposal(
   request: Parameters<FileAnalysisRepository['acceptProposal']>[0],
 ): Promise<boolean> {
   return database.transaction((transaction) => {
-    const row = transaction.select().from(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, request.fileId)).get();
+    const row = transaction
+      .select()
+      .from(fileAnalysisProposal)
+      .where(eq(fileAnalysisProposal.fileId, request.fileId))
+      .get();
     if (!row) return false;
     // A trashed file keeps its proposal for a restore; nothing is written meanwhile.
     if (inTrash(transaction, request.fileId)) return false;

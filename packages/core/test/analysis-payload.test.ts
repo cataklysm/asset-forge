@@ -36,14 +36,18 @@ describe('rewriteForProvider', () => {
   });
 
   it('replaces name and model of a v4 payload and keeps its prompt', () => {
-    expect(rewriteForProvider({ version: 4, model: 'old', mode: 'apply', prompt: PROMPT, providerName: 'Local' }, TO)).toEqual({
+    expect(
+      rewriteForProvider({ version: 4, model: 'old', mode: 'apply', prompt: PROMPT, providerName: 'Local' }, TO),
+    ).toEqual({
       version: 4,
       model: 'qwen:9b',
       mode: 'apply',
       prompt: PROMPT,
       providerName: 'RunPod',
     });
-    expect(rewriteForProvider({ version: 4, model: 'old', mode: 'apply', prompt: null, providerName: 'Local' }, TO)).toMatchObject({ prompt: null });
+    expect(
+      rewriteForProvider({ version: 4, model: 'old', mode: 'apply', prompt: null, providerName: 'Local' }, TO),
+    ).toMatchObject({ prompt: null });
   });
 });
 
@@ -74,7 +78,9 @@ describe('adoptForProvider', () => {
   });
 
   it('keeps the model and mode of a v2 payload, with prompt null', () => {
-    expect(adoptForProvider({ version: 2, model: 'own', mode: 'propose' }, { name: 'Ollama', taggingModel: null })).toEqual({
+    expect(
+      adoptForProvider({ version: 2, model: 'own', mode: 'propose' }, { name: 'Ollama', taggingModel: null }),
+    ).toEqual({
       version: 4,
       model: 'own',
       mode: 'propose',

@@ -47,7 +47,10 @@ it('sharp resizes inside a worker thread', async () => {
         clearTimeout(timer);
         reject(error);
       });
-      const request: WorkerRequest = { id: 1, work: { kind: 'render', job: { sourcePath, targetPath, longestEdge: 10, format: 'webp' } } };
+      const request: WorkerRequest = {
+        id: 1,
+        work: { kind: 'render', job: { sourcePath, targetPath, longestEdge: 10, format: 'webp' } },
+      };
       worker.postMessage(request);
     });
     expect(response).toEqual({ id: 1, result: 'ok' });

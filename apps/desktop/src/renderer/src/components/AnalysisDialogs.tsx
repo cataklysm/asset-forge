@@ -54,7 +54,13 @@ export function AnalyseAllButton({ blocked, title = ANALYSE_ALL_TITLE, onClick }
  * @param props.analysis the analysis dialogs of the screen
  * @param props.selection the file selection
  */
-export function SelectionAnalysisButtons({ analysis, selection }: { analysis: AnalysisDialogs; selection: FileSelection }) {
+export function SelectionAnalysisButtons({
+  analysis,
+  selection,
+}: {
+  analysis: AnalysisDialogs;
+  selection: FileSelection;
+}) {
   const none = analysableFiles(selection).length === 0;
   const single = singleAnalysable(selection);
   const title = selection.selected.size > 1 ? ANALYSE_SELECTION_TITLE : ANALYSE_TITLE;

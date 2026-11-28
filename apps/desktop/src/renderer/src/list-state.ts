@@ -1,11 +1,4 @@
-import type {
-  AssetStatus,
-  FileKind,
-  FileRole,
-  FileScope,
-  IpcRequest,
-  ProjectStatus,
-} from '@assetforge/contracts';
+import type { AssetStatus, FileKind, FileRole, FileScope, IpcRequest, ProjectStatus } from '@assetforge/contracts';
 import { renameInNames, type TagRename } from './tag-rename';
 
 // The list states the shell keeps across navigation: filters, scroll offsets and selections, their keys and
@@ -191,7 +184,10 @@ export function toAssetQuery(filters: AssetFilters): Omit<IpcRequest<'assets:lis
  * @param filters the filters
  * @returns the request without paging
  */
-export function toFileQuery(scope: FileScope, filters: FileFilters): Omit<IpcRequest<'files:list'>, 'limit' | 'offset'> {
+export function toFileQuery(
+  scope: FileScope,
+  filters: FileFilters,
+): Omit<IpcRequest<'files:list'>, 'limit' | 'offset'> {
   return { scope, ...setValues(filters) };
 }
 

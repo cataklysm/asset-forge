@@ -36,7 +36,8 @@ export function requestDecision(url: string, resourceType: string): RequestDecis
   } catch {
     return 'refuse';
   }
-  if (parsed.protocol === 'data:' || parsed.protocol === 'blob:') return FRAME_TYPES.has(resourceType) ? 'refuse' : 'allow';
+  if (parsed.protocol === 'data:' || parsed.protocol === 'blob:')
+    return FRAME_TYPES.has(resourceType) ? 'refuse' : 'allow';
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return 'refuse';
   if (parsed.username !== '' || parsed.password !== '') return 'refuse';
   let host = parsed.hostname.toLowerCase();

@@ -25,7 +25,8 @@ const newId = () => {
   counter++;
   return `00000000-0000-4000-8000-${counter.toString(16).padStart(12, '0')}`;
 };
-const open = (): AnalysisPromptStore => createAnalysisPromptStore({ userData: dir, newId, builtIn, log: (line) => logs.push(line) });
+const open = (): AnalysisPromptStore =>
+  createAnalysisPromptStore({ userData: dir, newId, builtIn, log: (line) => logs.push(line) });
 const filePath = () => join(dir, ANALYSIS_PROMPTS_FILE);
 const UNKNOWN = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 
@@ -64,7 +65,10 @@ describe('analysis prompt store', () => {
 
   it('adds a missing purpose and keeps the existing entry', () => {
     const existing = { id: UNKNOWN, purpose: 'image_prompt', name: 'Mine', text: 'My text' };
-    writeFileSync(filePath(), JSON.stringify({ version: 1, prompts: [existing], lastUsed: { tagging: null, imagePrompt: UNKNOWN } }));
+    writeFileSync(
+      filePath(),
+      JSON.stringify({ version: 1, prompts: [existing], lastUsed: { tagging: null, imagePrompt: UNKNOWN } }),
+    );
     const list = open().list();
     expect(list.prompts).toEqual([
       existing,
@@ -92,14 +96,29 @@ describe('analysis prompt store', () => {
   it('appends without id and replaces in place with id', () => {
     const store = open();
     const general = store.save({ purpose: 'tagging', name: ' General ', text: ' Some text ', maxTags: 10 });
-    expect(general).toEqual({ id: expect.any(String), purpose: 'tagging', name: 'General', text: 'Some text', maxTags: 10 });
+    expect(general).toEqual({
+      id: expect.any(String),
+      purpose: 'tagging',
+      name: 'General',
+      text: 'Some text',
+      maxTags: 10,
+    });
     const scenes = store.save({ purpose: 'image_prompt', name: 'Scenes', text: 'Describe' });
     const tagDefault = store.list().prompts[0]!;
     if (tagDefault.purpose !== 'tagging') throw new Error('Expected the tagging Default first');
     const replaced = store.save({ ...tagDefault, name: 'Renamed', maxTags: 3 });
     expect(replaced).toEqual({ ...tagDefault, name: 'Renamed', maxTags: 3 });
-    expect(store.list().prompts.map((p) => p.id)).toEqual([tagDefault.id, store.list().prompts[1]!.id, general.id, scenes.id]);
-    expect(open().list().prompts.map((p) => p.name)).toEqual(['Renamed', DEFAULT_PROMPT_NAME, 'General', 'Scenes']);
+    expect(store.list().prompts.map((p) => p.id)).toEqual([
+      tagDefault.id,
+      store.list().prompts[1]!.id,
+      general.id,
+      scenes.id,
+    ]);
+    expect(
+      open()
+        .list()
+        .prompts.map((p) => p.name),
+    ).toEqual(['Renamed', DEFAULT_PROMPT_NAME, 'General', 'Scenes']);
   });
 
   it('refuses a duplicate name within a purpose, compared without case and outer spaces', () => {
@@ -155,14 +174,22 @@ describe('analysis prompt store', () => {
   it('removes prompts, but never the last one of a purpose', () => {
     const store = open();
     const [tagging, image] = store.list().prompts;
-    expectError(() => store.remove(tagging!.id), InvalidOperationError, 'The last analysis prompt of a purpose cannot be deleted');
+    expectError(
+      () => store.remove(tagging!.id),
+      InvalidOperationError,
+      'The last analysis prompt of a purpose cannot be deleted',
+    );
     expectError(() => store.remove(UNKNOWN), NotFoundError, 'The analysis prompt does not exist');
     const second = store.save({ purpose: 'image_prompt', name: 'Second', text: 't' });
     store.markUsed(second);
     expect(store.list().lastUsed.imagePrompt).toBe(second.id);
     store.remove(second.id);
     expect(store.list().lastUsed.imagePrompt).toBeNull();
-    expect(open().list().prompts.map((p) => p.id)).toEqual([tagging!.id, image!.id]);
+    expect(
+      open()
+        .list()
+        .prompts.map((p) => p.id),
+    ).toEqual([tagging!.id, image!.id]);
     expect(JSON.parse(readFileSync(filePath(), 'utf8')).lastUsed.imagePrompt).toBeNull();
   });
 
@@ -172,7 +199,11 @@ describe('analysis prompt store', () => {
     expect(store.reset(edited.id)).toEqual({ ...edited, text: TAGGING_TEXT, maxTags: 15 });
     const image = store.save({ purpose: 'image_prompt', name: 'Img', text: 'Mine' });
     expect(store.reset(image.id)).toEqual({ ...image, text: IMAGE_TEXT });
-    expect(open().list().prompts.find((p) => p.id === edited.id)).toEqual({ ...edited, text: TAGGING_TEXT, maxTags: 15 });
+    expect(
+      open()
+        .list()
+        .prompts.find((p) => p.id === edited.id),
+    ).toEqual({ ...edited, text: TAGGING_TEXT, maxTags: 15 });
     expectError(() => store.reset(UNKNOWN), NotFoundError, 'The analysis prompt does not exist');
   });
 

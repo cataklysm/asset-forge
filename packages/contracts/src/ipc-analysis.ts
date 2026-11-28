@@ -15,7 +15,11 @@ import { type ChannelContracts, IdSchema } from './ipc-shared';
 export const analysisChannels = {
   /** What `analysis:enqueue` of this target with this model would do, as counts. */
   'analysis:preview': {
-    request: z.object({ target: AnalysisTargetSchema, model: ModelNameSchema, providerId: ProviderIdSchema.optional() }),
+    request: z.object({
+      target: AnalysisTargetSchema,
+      model: ModelNameSchema,
+      providerId: ProviderIdSchema.optional(),
+    }),
     response: AnalysisPreviewSchema,
   },
   /**

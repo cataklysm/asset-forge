@@ -40,7 +40,11 @@ export function PromptSelect({ purpose, value, onChange, disabled = false }: Pro
         </option>
       )}
       {own.map((prompt) => (
-        <option key={prompt.id} value={prompt.id} title={prompt.purpose === 'tagging' ? tagLimitTitle(prompt.maxTags) : undefined}>
+        <option
+          key={prompt.id}
+          value={prompt.id}
+          title={prompt.purpose === 'tagging' ? tagLimitTitle(prompt.maxTags) : undefined}
+        >
           {prompt.name}
         </option>
       ))}

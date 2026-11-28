@@ -184,7 +184,14 @@ export function FileDetailDialog({
   return (
     <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
       <div ref={rootRef} className="flex h-full flex-col">
-        <DetailHeader file={file} assetName={asset?.name ?? null} title={title} list={list} closeRef={closeRef} onClose={close} />
+        <DetailHeader
+          file={file}
+          assetName={asset?.name ?? null}
+          title={title}
+          list={list}
+          closeRef={closeRef}
+          onClose={close}
+        />
         <div className="flex min-h-0 flex-1">
           <FileDetailsPanel
             file={file}
@@ -300,7 +307,14 @@ function DetailHeader({ file, assetName, title, list, closeRef, onClose }: Detai
             <StepButton list={list} direction={1} className={ICON_BUTTON} />
           </>
         )}
-        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={`ml-2 ${ICON_BUTTON}`} onClick={onClose}>
+        <button
+          ref={closeRef}
+          type="button"
+          aria-label="Close"
+          title="Close"
+          className={`ml-2 ${ICON_BUTTON}`}
+          onClick={onClose}
+        >
           <X size={18} aria-hidden />
         </button>
       </div>

@@ -172,10 +172,16 @@ describe('site profile schemas', () => {
     expect(SiteCrawlResultSchema.safeParse(result).success).toBe(true);
     expect(SiteCrawlResultSchema.safeParse({ ...result, problems: undefined }).success).toBe(false);
     expect(
-      SiteCrawlResultSchema.safeParse({ ...result, problems: [{ url: 'x', stage: 'page', reason: 'timeout', detail: null }] }).success,
+      SiteCrawlResultSchema.safeParse({
+        ...result,
+        problems: [{ url: 'x', stage: 'page', reason: 'timeout', detail: null }],
+      }).success,
     ).toBe(false);
     expect(
-      SiteCrawlResultSchema.safeParse({ ...result, problems: [{ url: 'x', stage: 'file', reason: 'beyond_limit', detail: null }] }).success,
+      SiteCrawlResultSchema.safeParse({
+        ...result,
+        problems: [{ url: 'x', stage: 'file', reason: 'beyond_limit', detail: null }],
+      }).success,
     ).toBe(false);
     expect(SiteCrawlProblemReasonSchema.options).toHaveLength(12);
     expect(SiteCrawlResultSchema.safeParse({ ...result, truncated: 'pages' }).success).toBe(true);
@@ -198,10 +204,14 @@ describe('site profile schemas', () => {
       'sites:import',
     ]);
     expect(ipcContract['sites:openLogin'].request.safeParse({ profileId: uuid }).success).toBe(true);
-    expect(ipcContract['sites:openLogin'].request.safeParse({ profileId: uuid, url: 'https://example.com/' }).success).toBe(true);
+    expect(
+      ipcContract['sites:openLogin'].request.safeParse({ profileId: uuid, url: 'https://example.com/' }).success,
+    ).toBe(true);
     expect(ipcContract['sites:openCheck'].request.safeParse({ host: 'example.com' }).success).toBe(true);
     expect(ipcContract['sites:openCheck'].request.safeParse({ host: '' }).success).toBe(false);
-    expect(ipcContract['sites:openCheck'].request.safeParse({ host: 'example.com', url: 'https://example.com/' }).success).toBe(false);
+    expect(
+      ipcContract['sites:openCheck'].request.safeParse({ host: 'example.com', url: 'https://example.com/' }).success,
+    ).toBe(false);
     expect(ipcContract['sites:crawl'].request.safeParse({ profileId: uuid }).success).toBe(false);
     expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid, target: null }).success).toBe(true);
     expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid }).success).toBe(false);

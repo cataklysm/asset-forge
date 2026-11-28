@@ -25,12 +25,7 @@ import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
 import { createElectronSiteSessions, type ElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
-import {
-  findOriginalIn,
-  findSourceIn,
-  findVideoIn,
-  handleMediaRequest,
-} from './media-protocol.js';
+import { findOriginalIn, findSourceIn, findVideoIn, handleMediaRequest } from './media-protocol.js';
 import { openFile } from './media-file.js';
 import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from './media-routes.js';
 import { isTrustedSender } from './sender.js';

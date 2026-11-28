@@ -44,9 +44,7 @@ export function Page({ title, count, countTitle, actions, toolbar, detail, child
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </section>
       {detail !== undefined && (
-        <aside
-          className={`w-[264px] shrink-0 overflow-auto border-l p-6 min-[1280px]:w-[300px] ${BORDER}`}
-        >
+        <aside className={`w-[264px] shrink-0 overflow-auto border-l p-6 min-[1280px]:w-[300px] ${BORDER}`}>
           {detail}
         </aside>
       )}

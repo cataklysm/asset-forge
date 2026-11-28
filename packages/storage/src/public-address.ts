@@ -42,7 +42,7 @@ const REFUSED_V4_MASKS = REFUSED_V4.map(([network, bits]) => {
  * @returns true for a globally routable unicast address
  */
 function isPublicIpv4Number(value: number): boolean {
-  return !REFUSED_V4_MASKS.some(({ network, mask }) => ((value & mask) >>> 0) === network);
+  return !REFUSED_V4_MASKS.some(({ network, mask }) => (value & mask) >>> 0 === network);
 }
 
 /**

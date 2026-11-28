@@ -31,7 +31,8 @@ export function parseExtraParameters(text: string, kind: VisionKind): ExtraParam
   } catch {
     return { ok: false, reason: 'not_json' };
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ok: false, reason: 'not_object' };
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    return { ok: false, reason: 'not_object' };
   const value = parsed as Record<string, unknown>;
   const key = RESERVED_EXTRA_KEYS[kind].find((reserved) => Object.hasOwn(value, reserved));
   if (key !== undefined) return { ok: false, reason: 'reserved', key };

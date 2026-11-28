@@ -270,9 +270,7 @@ describe('video route with an unsatisfiable or malformed range', () => {
     const seen = await inspect(response);
     expect(seen.status).toBe(416);
     expect(seen.body.byteLength).toBe(0);
-    expect(seen.headers.filter(([name]) => name !== 'content-length')).toEqual([
-      ['content-range', `bytes */${SIZE}`],
-    ]);
+    expect(seen.headers.filter(([name]) => name !== 'content-length')).toEqual([['content-range', `bytes */${SIZE}`]]);
     expect(await settled(await lastHandle())).toBe(-1);
   });
 
@@ -364,7 +362,9 @@ describe('video route failures', () => {
 
   it('no video answers 404 without opening anything', async () => {
     const opener = vi.fn(openFile);
-    await expectBare404(await handleMediaRequest(request('bytes=0-'), fakeDeps({ findVideo: async () => null, openFile: opener })));
+    await expectBare404(
+      await handleMediaRequest(request('bytes=0-'), fakeDeps({ findVideo: async () => null, openFile: opener })),
+    );
     expect(opener).not.toHaveBeenCalled();
   });
 

@@ -5,7 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { cookieHeader, createSiteAccess } from '../src/main/site-access.js';
 import { EXTRACT_LIMITS, extractionCode, readExtraction } from '../src/main/site-extraction.js';
 import { loginNavigationAllowed, loginTitle } from '../src/main/site-login-window.js';
-import { createPageLoader, leftSiteHost, pageNavigationAllowed, PAGE_TIMING, type PageView } from '../src/main/site-page-loader.js';
+import {
+  createPageLoader,
+  leftSiteHost,
+  pageNavigationAllowed,
+  PAGE_TIMING,
+  type PageView,
+} from '../src/main/site-page-loader.js';
 import { createHostVetter, pageResourceBlocked, requestDecision } from '../src/main/site-request-filter.js';
 import { createElectronSiteSessions, sitePartition } from '../src/main/site-sessions.js';
 
@@ -27,7 +33,14 @@ describe('request filter', () => {
   it('lets only http and https through, data and blob only for sub-resources', () => {
     expect(requestDecision('https://www.example.com/a', 'mainFrame')).toEqual({ host: 'www.example.com' });
     expect(requestDecision('http://cdn.example.net/x.png', 'image')).toEqual({ host: 'cdn.example.net' });
-    for (const url of ['ftp://example.com/', 'file:///C:/x', 'chrome://settings', 'ws://example.com/', 'javascript:alert(1)', 'nonsense']) {
+    for (const url of [
+      'ftp://example.com/',
+      'file:///C:/x',
+      'chrome://settings',
+      'ws://example.com/',
+      'javascript:alert(1)',
+      'nonsense',
+    ]) {
       expect(requestDecision(url, 'mainFrame')).toBe('refuse');
     }
     expect(requestDecision('data:image/png;base64,AAAA', 'image')).toBe('allow');
@@ -79,9 +92,20 @@ describe('request filter', () => {
 
 describe('cookies, titles and navigation', () => {
   it('builds the cookie header and leaves out what cannot go into one', () => {
-    expect(cookieHeader([{ name: 'a', value: '1' }, { name: 'sid', value: 'x y' }])).toBe('a=1; sid=x y');
+    expect(
+      cookieHeader([
+        { name: 'a', value: '1' },
+        { name: 'sid', value: 'x y' },
+      ]),
+    ).toBe('a=1; sid=x y');
     expect(cookieHeader([])).toBeNull();
-    expect(cookieHeader([{ name: 'bad', value: 'a\r\nb' }, { name: 'x;y', value: '1' }, { name: 'ok', value: '2' }])).toBe('ok=2');
+    expect(
+      cookieHeader([
+        { name: 'bad', value: 'a\r\nb' },
+        { name: 'x;y', value: '1' },
+        { name: 'ok', value: '2' },
+      ]),
+    ).toBe('ok=2');
     expect(cookieHeader([{ name: 'bad', value: 'a;b' }])).toBeNull();
   });
 
@@ -106,7 +130,9 @@ describe('extraction answer', () => {
     const query = `'); globalThis.pwned = 1; ('`;
     const code = extractionCode({ thumbnails: query });
     // The expression only appears inside the doubly encoded JSON input.
-    expect(code.endsWith(`(${JSON.stringify(JSON.stringify({ queries: { thumbnails: query }, ...EXTRACT_LIMITS }))})`)).toBe(true);
+    expect(
+      code.endsWith(`(${JSON.stringify(JSON.stringify({ queries: { thumbnails: query }, ...EXTRACT_LIMITS }))})`),
+    ).toBe(true);
   });
 
   it('trusts nothing the page answers', () => {
@@ -115,7 +141,11 @@ describe('extraction answer', () => {
     expect(readExtraction({ invalid: 'a' }, ['a'])).toEqual({ kind: 'invalid', query: 'a' });
     const limits = { maxResults: 2, maxLength: 3 };
     expect(
-      readExtraction({ results: { a: ['abcdef', 7, 'x', 'y'], extra: ['z'] }, counts: { a: 4, extra: 1 } }, ['a', 'b'], limits),
+      readExtraction(
+        { results: { a: ['abcdef', 7, 'x', 'y'], extra: ['z'] }, counts: { a: 4, extra: 1 } },
+        ['a', 'b'],
+        limits,
+      ),
     ).toEqual({ kind: 'results', results: { a: ['abc', 'x'], b: [] }, counts: { a: 4, b: 0 }, baseUrl: '' });
     const base = (baseUrl: unknown) => readExtraction({ results: {}, counts: {}, baseUrl }, ['a']);
     expect(base('https://example.com/g/')).toMatchObject({ baseUrl: 'https://example.com/g/' });
@@ -153,7 +183,11 @@ function fakeView(o: {
 }
 
 const fast = { pollMs: 5, settleMs: 60, totalMs: 300 };
-const request = (signal = new AbortController().signal) => ({ queries: { thumbnails: '//a', pagination: '//b' }, waitFor: 'thumbnails', signal });
+const request = (signal = new AbortController().signal) => ({
+  queries: { thumbnails: '//a', pagination: '//b' },
+  waitFor: 'thumbnails',
+  signal,
+});
 
 describe('page loader', () => {
   it('waits until the waited-for query matches a node and answers every query', async () => {
@@ -174,7 +208,11 @@ describe('page loader', () => {
 
   it('answers invalid_xpath with the query name', async () => {
     const loader = createPageLoader(fakeView({ evaluate: () => ({ invalid: 'pagination' }) }), 'example.com', fast);
-    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'invalid_xpath', query: 'pagination' });
+    expect(await loader.load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'invalid_xpath',
+      query: 'pagination',
+    });
   });
 
   it('answers no_match when the page loaded but nothing matches in time, and keeps asking after a failed evaluation', async () => {
@@ -197,7 +235,10 @@ describe('page loader', () => {
   });
 
   it('answers timeout when the page never finishes loading', async () => {
-    const loader = createPageLoader(fakeView({ navigate: () => new Promise(() => {}) }), 'example.com', { ...fast, totalMs: 30 });
+    const loader = createPageLoader(fakeView({ navigate: () => new Promise(() => {}) }), 'example.com', {
+      ...fast,
+      totalMs: 30,
+    });
     expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'timeout' });
   });
 
@@ -208,14 +249,22 @@ describe('page loader', () => {
       return 'loaded';
     };
     const loader = createPageLoader(view, 'example.com', fast);
-    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 403 });
+    expect(await loader.load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'http_error',
+      status: 403,
+    });
 
     // An error answer Chromium shows its own page for fails the navigation.
     view.navigate = async () => {
       view.answer(500);
       return 'failed';
     };
-    expect(await loader.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 500 });
+    expect(await loader.load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'http_error',
+      status: 500,
+    });
 
     // Still loading when the limit ends it.
     view.navigate = () => {
@@ -223,7 +272,11 @@ describe('page loader', () => {
       return new Promise(() => {});
     };
     const slow = createPageLoader(view, 'example.com', { ...fast, totalMs: 30 });
-    expect(await slow.load('https://example.com/g', request())).toEqual({ ok: false, reason: 'http_error', status: 503 });
+    expect(await slow.load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'http_error',
+      status: 503,
+    });
   });
 
   it('takes an error page that matches as a page, and ignores a status below 400, -1 and one between loads', async () => {
@@ -250,7 +303,10 @@ describe('page loader', () => {
 
   it('answers failed for a failed load and polls on after a load replaced within the site', async () => {
     expect(
-      await createPageLoader(fakeView({ navigate: async () => 'failed' }), 'example.com', fast).load('https://example.com/g', request()),
+      await createPageLoader(fakeView({ navigate: async () => 'failed' }), 'example.com', fast).load(
+        'https://example.com/g',
+        request(),
+      ),
     ).toEqual({ ok: false, reason: 'failed' });
     const replaced = fakeView({
       navigate: async () => 'aborted',
@@ -266,7 +322,11 @@ describe('page loader', () => {
   it('answers left_site with the host for a URL off the site and for a refused navigation', async () => {
     const view = fakeView({ navigate: () => new Promise(() => {}) });
     const loader = createPageLoader(view, 'example.com', fast);
-    expect(await loader.load('https://Other.org:8443/g', request())).toEqual({ ok: false, reason: 'left_site', host: 'other.org' });
+    expect(await loader.load('https://Other.org:8443/g', request())).toEqual({
+      ok: false,
+      reason: 'left_site',
+      host: 'other.org',
+    });
     const pending = loader.load('https://example.com/g', request());
     await new Promise((r) => setTimeout(r, 5));
     view.leave('https://LOGIN.other.org/sign-in?next=/g');
@@ -287,7 +347,10 @@ describe('page loader', () => {
   it('stops the page and answers at once on abort', async () => {
     const view = fakeView({ navigate: () => new Promise(() => {}) });
     const controller = new AbortController();
-    const pending = createPageLoader(view, 'example.com', PAGE_TIMING).load('https://example.com/g', request(controller.signal));
+    const pending = createPageLoader(view, 'example.com', PAGE_TIMING).load(
+      'https://example.com/g',
+      request(controller.signal),
+    );
     controller.abort();
     expect(await pending).toEqual({ ok: false, reason: 'failed' });
     expect(view.stops).toBe(1);
@@ -295,7 +358,11 @@ describe('page loader', () => {
 
   it('answers the base URL the page reports', async () => {
     const view = fakeView({
-      evaluate: () => ({ results: { thumbnails: ['page2'] }, counts: { thumbnails: 1 }, baseUrl: 'https://example.com/g/' }),
+      evaluate: () => ({
+        results: { thumbnails: ['page2'] },
+        counts: { thumbnails: 1 },
+        baseUrl: 'https://example.com/g/',
+      }),
     });
     expect(await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).toEqual({
       ok: true,
@@ -395,9 +462,18 @@ describe('site access', () => {
   });
 
   it("answers the session's cookie header and user agent on the site", async () => {
-    const sessions = { cookies: vi.fn(async () => [{ name: 'sid', value: 's' }, { name: 'b', value: '2' }]), userAgent: () => 'UA' };
+    const sessions = {
+      cookies: vi.fn(async () => [
+        { name: 'sid', value: 's' },
+        { name: 'b', value: '2' },
+      ]),
+      userAgent: () => 'UA',
+    };
     const access = createSiteAccess(store, sessions);
-    expect(await access.headersFor(profile.id, 'https://img.example.com/1.jpg')).toEqual({ cookie: 'sid=s; b=2', userAgent: 'UA' });
+    expect(await access.headersFor(profile.id, 'https://img.example.com/1.jpg')).toEqual({
+      cookie: 'sid=s; b=2',
+      userAgent: 'UA',
+    });
     expect(sessions.cookies).toHaveBeenCalledWith(profile.id, 'https://img.example.com/1.jpg');
     const none = createSiteAccess(store, { cookies: async () => [], userAgent: () => 'UA' });
     expect(await none.headersFor(profile.id, 'https://example.com/1.jpg')).toEqual({ userAgent: 'UA' });
@@ -626,7 +702,11 @@ describe('electron site sessions', () => {
     expect(w.webContents.openHandler!({ url: 'https://example.com/popup' })).toEqual({ action: 'deny' });
     expect(w.webContents.loaded).toEqual([]);
 
-    const result = await page.loader.load('https://example.com/g', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    const result = await page.loader.load('https://example.com/g', {
+      queries: { thumbnails: '//a' },
+      waitFor: 'thumbnails',
+      signal: new AbortController().signal,
+    });
     expect(result).toEqual({ ok: true, results: { thumbnails: ['/1.jpg'] }, baseUrl: 'https://example.com/g/' });
     const [world, scripts] = w.webContents.executeJavaScriptInIsolatedWorld.mock.calls[0]!;
     expect(world).not.toBe(0);
@@ -637,17 +717,29 @@ describe('electron site sessions', () => {
 
     // A redirect off the site during a load ends it as left_site.
     w.webContents.loadResult = () => new Promise(() => {});
-    const pending = page.loader.load('https://example.com/h', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    const pending = page.loader.load('https://example.com/h', {
+      queries: { thumbnails: '//a' },
+      waitFor: 'thumbnails',
+      signal: new AbortController().signal,
+    });
     await new Promise((r) => setTimeout(r, 5));
     expect(w.webContents.navigate('will-redirect', 'https://other.org/')).toBe(true);
     expect(await pending).toEqual({ ok: false, reason: 'left_site', host: 'other.org' });
 
     // The main-frame status of did-navigate reaches the running load.
-    w.webContents.executeJavaScriptInIsolatedWorld.mockResolvedValue({ results: { thumbnails: [] }, counts: { thumbnails: 0 }, baseUrl: '' });
+    w.webContents.executeJavaScriptInIsolatedWorld.mockResolvedValue({
+      results: { thumbnails: [] },
+      counts: { thumbnails: 0 },
+      baseUrl: '',
+    });
     w.webContents.loadResult = async () => {
       w.webContents.emit('did-navigate', {}, 'https://example.com/i', 401, 'Unauthorized');
     };
-    const refused = await page.loader.load('https://example.com/i', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    const refused = await page.loader.load('https://example.com/i', {
+      queries: { thumbnails: '//a' },
+      waitFor: 'thumbnails',
+      signal: new AbortController().signal,
+    });
     expect(refused).toEqual({ ok: false, reason: 'http_error', status: 401 });
 
     page.close();
@@ -685,7 +777,11 @@ describe('electron site sessions', () => {
     const before = { commit: c.listenerCount('did-navigate'), ready: c.listenerCount('dom-ready') };
     let finishLoad: () => void = () => {};
     c.loadResult = () => new Promise((resolve) => (finishLoad = resolve));
-    const pending = page.loader.load('https://example.com/g', { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal });
+    const pending = page.loader.load('https://example.com/g', {
+      queries: { thumbnails: '//a' },
+      waitFor: 'thumbnails',
+      signal: new AbortController().signal,
+    });
     // The document that is being replaced reports dom-ready: nothing is asked yet.
     c.emit('dom-ready');
     await new Promise((r) => setTimeout(r, 15));
@@ -707,9 +803,11 @@ describe('electron site sessions', () => {
     const page = e.site.openPage(profile);
     const w = e.windows[0]!;
     const r = { queries: { thumbnails: '//a' }, waitFor: 'thumbnails', signal: new AbortController().signal };
-    w.webContents.loadResult = () => Promise.reject(Object.assign(new Error('ERR_ABORTED (-3)'), { code: 'ERR_ABORTED', errno: -3 }));
+    w.webContents.loadResult = () =>
+      Promise.reject(Object.assign(new Error('ERR_ABORTED (-3)'), { code: 'ERR_ABORTED', errno: -3 }));
     expect((await page.loader.load('https://example.com/g', r)).ok).toBe(true);
-    w.webContents.loadResult = () => Promise.reject(Object.assign(new Error('ERR_NAME_NOT_RESOLVED'), { code: 'ERR_NAME_NOT_RESOLVED', errno: -105 }));
+    w.webContents.loadResult = () =>
+      Promise.reject(Object.assign(new Error('ERR_NAME_NOT_RESOLVED'), { code: 'ERR_NAME_NOT_RESOLVED', errno: -105 }));
     expect(await page.loader.load('https://example.com/g', r)).toEqual({ ok: false, reason: 'failed' });
     page.close();
   });

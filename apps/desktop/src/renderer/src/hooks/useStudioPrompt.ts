@@ -98,7 +98,9 @@ const settingsFields = (next: StudioForm): StudioFields => ({
  * @returns true when it is
  */
 function isListedImageEntry(providers: ProvidersState, providerId: string | null): boolean {
-  return providers.list?.providers.some((entry) => entry.id === providerId && purposeOf(entry.kind) === 'image') ?? false;
+  return (
+    providers.list?.providers.some((entry) => entry.id === providerId && purposeOf(entry.kind) === 'image') ?? false
+  );
 }
 
 /**

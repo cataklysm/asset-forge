@@ -44,7 +44,12 @@ const isMissing = (error: unknown): boolean => (error as { code?: unknown } | nu
  * @param missingIsNull true to answer null for a file that is gone
  * @returns the bytes, or null
  */
-async function readBounded(path: string, maxBytes: number, signal: AbortSignal, missingIsNull: boolean): Promise<Buffer | null> {
+async function readBounded(
+  path: string,
+  maxBytes: number,
+  signal: AbortSignal,
+  missingIsNull: boolean,
+): Promise<Buffer | null> {
   try {
     if ((await stat(path)).size > maxBytes) return null;
     const data = await readFile(path, { signal });

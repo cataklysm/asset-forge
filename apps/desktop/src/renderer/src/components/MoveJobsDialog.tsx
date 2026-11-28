@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { JOB_ERROR_MESSAGES, isVisionKind, purposeOf, type ProviderList, type WaitingByProvider } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  isVisionKind,
+  purposeOf,
+  type ProviderList,
+  type WaitingByProvider,
+} from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { useJobs } from '../jobs-context';
 import {
@@ -17,7 +23,13 @@ import {
   PROVIDER_STATE_LABELS,
   WAITING_COUNT,
 } from '../labels';
-import { defaultModelOf, defaultProviderId, providerStatus, useProviders, type ProvidersState } from '../provider-context';
+import {
+  defaultModelOf,
+  defaultProviderId,
+  providerStatus,
+  useProviders,
+  type ProvidersState,
+} from '../provider-context';
 import { ALERT, BUTTON, LABEL, SELECT } from '../ui';
 import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
@@ -75,7 +87,8 @@ const isTarget = (list: ProviderList | null, id: string | null) =>
  * @returns true for a listed image entry
  */
 const isImageLane = (list: ProviderList | null, id: string | null) =>
-  id !== null && list?.providers.some((provider) => provider.id === id && purposeOf(provider.kind) === 'image') === true;
+  id !== null &&
+  list?.providers.some((provider) => provider.id === id && purposeOf(provider.kind) === 'image') === true;
 
 /**
  * The target a move preselects: the default vision entry unless it is the source, else the first other one.
@@ -117,7 +130,11 @@ function fromLane(
  * @param from the lane the jobs move from
  * @returns the target and model
  */
-function effectiveChoice(providers: ProvidersState, choice: MoveChoice | null, from: string | null | undefined): MoveChoice {
+function effectiveChoice(
+  providers: ProvidersState,
+  choice: MoveChoice | null,
+  from: string | null | undefined,
+): MoveChoice {
   if (choice !== null && choice.target !== from && isTarget(providers.list, choice.target)) return choice;
   const target = pickTarget(providers, from);
   return { target, model: defaultModelOf(providers, target, 'tagging') };

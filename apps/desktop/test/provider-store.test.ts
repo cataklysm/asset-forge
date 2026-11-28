@@ -66,10 +66,18 @@ function allFiles(root: string): Map<string, Buffer> {
   return out;
 }
 
-function writeV1(vision: { baseUrl: string | null; timeoutSeconds?: number; taggingModel?: string | null; promptModel?: string | null }) {
+function writeV1(vision: {
+  baseUrl: string | null;
+  timeoutSeconds?: number;
+  taggingModel?: string | null;
+  promptModel?: string | null;
+}) {
   writeFileSync(
     settingsFile(),
-    JSON.stringify({ version: 1, vision: { timeoutSeconds: 300, taggingModel: 'tagger', promptModel: null, ...vision } }),
+    JSON.stringify({
+      version: 1,
+      vision: { timeoutSeconds: 300, taggingModel: 'tagger', promptModel: null, ...vision },
+    }),
   );
 }
 
@@ -83,7 +91,16 @@ function writeV2(o: { baseUrl: string; marker: { id: string; origin: string } | 
     settingsFile(),
     JSON.stringify({
       version: 2,
-      providers: [{ id: PREPARED, name: 'Ollama', baseUrl: o.baseUrl, timeoutSeconds: 120, taggingModel: null, promptModel: null }],
+      providers: [
+        {
+          id: PREPARED,
+          name: 'Ollama',
+          baseUrl: o.baseUrl,
+          timeoutSeconds: 120,
+          taggingModel: null,
+          promptModel: null,
+        },
+      ],
       lastUsedId: null,
       adoptLegacyKey: o.marker,
     }),
@@ -92,7 +109,13 @@ function writeV2(o: { baseUrl: string; marker: { id: string; origin: string } | 
 
 describe('provider store: upgrade and start', () => {
   it('is empty without a file and writes nothing', () => {
-    expect(store().list()).toEqual({ providers: [], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true });
+    expect(store().list()).toEqual({
+      providers: [],
+      lastUsedId: null,
+      lastUsedImageId: null,
+      fromEnvironment: false,
+      canStoreKey: true,
+    });
     expect(readdirSync(dir)).toEqual([]);
   });
 
@@ -152,11 +175,19 @@ describe('provider store: upgrade and start', () => {
     writeLegacyKey();
     expect(store().list().providers).toEqual([]);
     expect(existsSync(legacyKeyFile())).toBe(false);
-    expect(readSettings()).toEqual({ version: 4, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null });
+    expect(readSettings()).toEqual({
+      version: 4,
+      providers: [],
+      lastUsed: { vision: null, image: null },
+      adoptLegacyKey: null,
+    });
   });
 
   it('adopts the legacy key after a crash between writing version 2 and the rename', () => {
-    writeV2({ baseUrl: 'http://192.168.1.20:11434/api', marker: { id: PREPARED, origin: 'http://192.168.1.20:11434' } });
+    writeV2({
+      baseUrl: 'http://192.168.1.20:11434/api',
+      marker: { id: PREPARED, origin: 'http://192.168.1.20:11434' },
+    });
     writeLegacyKey();
     const s = store();
     expect(s.list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
@@ -208,7 +239,10 @@ describe('provider store: upgrade and start', () => {
     mkdirSync(credentials());
     writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
     writeFileSync(keyFile(UNKNOWN), codec.encrypt(OTHER_KEY));
-    writeFileSync(join(credentials(), `vision-api-key-${PREPARED}.22222222-2222-4222-8222-222222222222.tmp`), 'partial');
+    writeFileSync(
+      join(credentials(), `vision-api-key-${PREPARED}.22222222-2222-4222-8222-222222222222.tmp`),
+      'partial',
+    );
     writeFileSync(join(credentials(), 'unrelated.tmp'), 'other');
     expect(store().list().providers).toMatchObject([{ id: PREPARED, hasApiKey: true }]);
     expect(readdirSync(credentials()).sort()).toEqual(['unrelated.tmp', `vision-api-key-${PREPARED}`]);
@@ -218,14 +252,29 @@ describe('provider store: upgrade and start', () => {
     ['not JSON', 'not json'],
     ['a JSON array', '[1]'],
     ['no version', JSON.stringify({ providers: [] })],
-    ['an unknown version', JSON.stringify({ version: 5, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null })],
-    ['a provider list that is not a list', JSON.stringify({ version: 4, providers: {}, lastUsed: { vision: null, image: null }, adoptLegacyKey: null })],
-    ['a bad version 1', JSON.stringify({ version: 1, vision: { baseUrl: 'http://u:p@h', timeoutSeconds: 120, taggingModel: null, promptModel: null } })],
+    [
+      'an unknown version',
+      JSON.stringify({ version: 5, providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+    ],
+    [
+      'a provider list that is not a list',
+      JSON.stringify({ version: 4, providers: {}, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+    ],
+    [
+      'a bad version 1',
+      JSON.stringify({
+        version: 1,
+        vision: { baseUrl: 'http://u:p@h', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+      }),
+    ],
   ])('sets a file with %s aside, reads an empty list and keeps every key file', (_label, content) => {
     writeFileSync(settingsFile(), content);
     writeLegacyKey();
     writeFileSync(keyFile(PREPARED), codec.encrypt(KEY));
-    writeFileSync(join(credentials(), `vision-api-key-${PREPARED}.22222222-2222-4222-8222-222222222222.tmp`), 'partial');
+    writeFileSync(
+      join(credentials(), `vision-api-key-${PREPARED}.22222222-2222-4222-8222-222222222222.tmp`),
+      'partial',
+    );
     const before = allFiles(credentials());
     const s = store();
     expect(s.list().providers).toEqual([]);
@@ -264,7 +313,11 @@ describe('provider store: save', () => {
     const edited = s.save(input({ id: a.id, name: 'A2', timeoutSeconds: 60 }));
     expect(edited).toMatchObject({ id: a.id, name: 'A2', timeoutSeconds: 60 });
     expect(s.list().providers.map((p) => p.name)).toEqual(['A2', 'B']);
-    expect(store().list().providers.map((p) => p.name)).toEqual(['A2', 'B']);
+    expect(
+      store()
+        .list()
+        .providers.map((p) => p.name),
+    ).toEqual(['A2', 'B']);
     expect(s.first()?.id).toBe(a.id);
     expect(s.get(b.id)?.name).toBe('B');
     expect(s.get(UNKNOWN)).toBeNull();
@@ -301,7 +354,10 @@ describe('provider store: save', () => {
   it('refuses an 11th entry; an edit at the limit is fine', () => {
     const s = store();
     for (let i = 0; i < 10; i++) s.save(input({ name: `P${i}` }));
-    expect(errorOf(() => s.save(input({ name: 'P10' })))).toEqual({ code: 'invalid_operation', message: 'No more than 10 providers' });
+    expect(errorOf(() => s.save(input({ name: 'P10' })))).toEqual({
+      code: 'invalid_operation',
+      message: 'No more than 10 providers',
+    });
     const first = s.first()!;
     expect(s.save(input({ id: first.id, name: 'Renamed' })).name).toBe('Renamed');
     expect(s.list().providers).toHaveLength(10);
@@ -309,7 +365,10 @@ describe('provider store: save', () => {
 
   it('answers not_found for an unknown id and for the environment id outside environment mode', () => {
     const s = store();
-    expect(errorOf(() => s.save(input({ id: UNKNOWN })))).toEqual({ code: 'not_found', message: 'This provider does not exist' });
+    expect(errorOf(() => s.save(input({ id: UNKNOWN })))).toEqual({
+      code: 'not_found',
+      message: 'This provider does not exist',
+    });
     expect(codeOf(() => s.save(input({ id: 'environment' })))).toBe('not_found');
     expect(readdirSync(dir)).toEqual([]);
   });
@@ -435,7 +494,9 @@ describe('provider store: keys', () => {
     const s = store();
     const a = s.save(input({ apiKey: KEY }));
     expect(s.save(input({ id: a.id, name: 'Renamed' })).hasApiKey).toBe(true);
-    expect(s.save(input({ id: a.id, name: 'Renamed', baseUrl: 'http://192.168.1.20:11434/ollama' })).hasApiKey).toBe(true);
+    expect(s.save(input({ id: a.id, name: 'Renamed', baseUrl: 'http://192.168.1.20:11434/ollama' })).hasApiKey).toBe(
+      true,
+    );
     expect(s.apiKeyFor(a.id, 'http://192.168.1.20:11434')).toBe(KEY);
   });
 
@@ -660,8 +721,22 @@ describe('provider store: version 3', () => {
       JSON.stringify({
         version: 2,
         providers: [
-          { id: PREPARED, name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null },
-          { id: SECOND, name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer' },
+          {
+            id: PREPARED,
+            name: 'One',
+            baseUrl: 'http://192.168.1.20:11434',
+            timeoutSeconds: 120,
+            taggingModel: 'tagger',
+            promptModel: null,
+          },
+          {
+            id: SECOND,
+            name: 'Two',
+            baseUrl: 'http://192.168.1.30:11434',
+            timeoutSeconds: 90,
+            taggingModel: null,
+            promptModel: 'writer',
+          },
         ],
         lastUsedId: SECOND,
         adoptLegacyKey: null,
@@ -678,7 +753,13 @@ describe('provider store: version 3', () => {
     const s = store();
     const list = s.list();
     expect(list.providers).toEqual([
-      expect.objectContaining({ id: PREPARED, kind: 'ollama', editModel: null, taggingModel: 'tagger', hasApiKey: true }),
+      expect.objectContaining({
+        id: PREPARED,
+        kind: 'ollama',
+        editModel: null,
+        taggingModel: 'tagger',
+        hasApiKey: true,
+      }),
       expect.objectContaining({ id: SECOND, kind: 'ollama', editModel: null, promptModel: 'writer', hasApiKey: true }),
     ]);
     expect(list.lastUsedId).toBe(SECOND);
@@ -698,14 +779,38 @@ describe('provider store: version 3', () => {
     expect(readSettings()).toEqual({
       version: 4,
       providers: [
-        { id: PREPARED, kind: 'ollama', name: 'One', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null, options },
-        { id: SECOND, kind: 'ollama', name: 'Two', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 90, taggingModel: null, promptModel: 'writer', editModel: null, options },
+        {
+          id: PREPARED,
+          kind: 'ollama',
+          name: 'One',
+          baseUrl: 'http://192.168.1.20:11434',
+          timeoutSeconds: 120,
+          taggingModel: 'tagger',
+          promptModel: null,
+          editModel: null,
+          options,
+        },
+        {
+          id: SECOND,
+          kind: 'ollama',
+          name: 'Two',
+          baseUrl: 'http://192.168.1.30:11434',
+          timeoutSeconds: 90,
+          taggingModel: null,
+          promptModel: 'writer',
+          editModel: null,
+          options,
+        },
       ],
       lastUsed: { vision: PREPARED, image: null },
       adoptLegacyKey: null,
     });
     expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
-    expect(store().list().providers.map((p) => [p.id, p.hasApiKey])).toEqual([
+    expect(
+      store()
+        .list()
+        .providers.map((p) => [p.id, p.hasApiKey]),
+    ).toEqual([
       [PREPARED, true],
       [SECOND, true],
     ]);
@@ -730,8 +835,16 @@ describe('provider store: kinds', () => {
       hasApiKey: false,
       options: null,
     });
-    expect(readSettings().providers[1]).toMatchObject({ kind: 'venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
-    expect(readSettings().providers.map((p: { options: unknown }) => p.options)).toEqual([DEFAULT_PROVIDER_OPTIONS, null]);
+    expect(readSettings().providers[1]).toMatchObject({
+      kind: 'venice',
+      taggingModel: null,
+      promptModel: null,
+      editModel: 'edit-a',
+    });
+    expect(readSettings().providers.map((p: { options: unknown }) => p.options)).toEqual([
+      DEFAULT_PROVIDER_OPTIONS,
+      null,
+    ]);
     expect(store().get(v.id)).toMatchObject({ kind: 'venice', editModel: 'edit-a' });
   });
 
@@ -751,7 +864,9 @@ describe('provider store: kinds', () => {
       code: 'invalid_operation',
       message: 'The kind of a provider cannot be changed',
     });
-    expect(errorOf(() => s.save(venice({ id: v.id, kind: 'ollama' })))?.message).toBe('The kind of a provider cannot be changed');
+    expect(errorOf(() => s.save(venice({ id: v.id, kind: 'ollama' })))?.message).toBe(
+      'The kind of a provider cannot be changed',
+    );
     expect(s.save(input({ id: o.id, kind: 'ollama', name: 'Same' })).kind).toBe('ollama');
     const { kind: _omit, ...noKind } = venice({ id: v.id, name: 'Still venice' });
     expect(s.save(noKind)).toMatchObject({ kind: 'venice', taggingModel: null });
@@ -790,7 +905,16 @@ describe('provider store: kinds', () => {
       JSON.stringify({
         version: 3,
         providers: [
-          { id: PREPARED, kind: 'venice', name: 'V', baseUrl, timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: 'edit-a' },
+          {
+            id: PREPARED,
+            kind: 'venice',
+            name: 'V',
+            baseUrl,
+            timeoutSeconds: 120,
+            taggingModel: null,
+            promptModel: null,
+            editModel: 'edit-a',
+          },
         ],
         lastUsed: { vision: null, image: null },
         adoptLegacyKey: null,
@@ -872,9 +996,18 @@ describe('provider store: resolve by kind', () => {
     const v = s.save(venice());
     expect(s.resolve(v.id, 'image')?.id).toBe(v.id);
     expect(s.resolve(o.id)?.id).toBe(o.id);
-    expect(errorOf(() => s.resolve(o.id, 'image'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
-    expect(errorOf(() => s.resolve(v.id))).toEqual({ code: 'invalid_operation', message: 'This provider cannot analyse images' });
-    expect(errorOf(() => s.resolve(UNKNOWN, 'image'))).toEqual({ code: 'not_found', message: 'This provider does not exist' });
+    expect(errorOf(() => s.resolve(o.id, 'image'))).toEqual({
+      code: 'invalid_operation',
+      message: 'This provider cannot generate images',
+    });
+    expect(errorOf(() => s.resolve(v.id))).toEqual({
+      code: 'invalid_operation',
+      message: 'This provider cannot analyse images',
+    });
+    expect(errorOf(() => s.resolve(UNKNOWN, 'image'))).toEqual({
+      code: 'not_found',
+      message: 'This provider does not exist',
+    });
   });
 
   it('lists only the environment entry in environment mode, with no image entry used last', () => {
@@ -892,16 +1025,43 @@ describe('provider store: resolve by kind', () => {
 const openai = (overrides: Partial<SaveProvider> = {}): SaveProvider =>
   input({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:1/v1', ...overrides });
 
-const CUSTOM = { temperature: 0.7, thinking: 'off', maxTokens: 512, extra: '{"top_p":0.9}', parallelRequests: 4 } as const;
+const CUSTOM = {
+  temperature: 0.7,
+  thinking: 'off',
+  maxTokens: 512,
+  extra: '{"top_p":0.9}',
+  parallelRequests: 4,
+} as const;
 
 describe('provider store: version 4 and options', () => {
   const SECOND = '66666666-7777-4888-8999-aaaaaaaaaaaa';
   const v3Entries = [
-    { id: PREPARED, kind: 'ollama', name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: 'tagger', promptModel: null, editModel: null },
-    { id: SECOND, kind: 'venice', name: 'V', baseUrl: 'https://v.example.test/api/v1', timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: 'edit-a' },
+    {
+      id: PREPARED,
+      kind: 'ollama',
+      name: 'O',
+      baseUrl: 'http://192.168.1.20:11434',
+      timeoutSeconds: 120,
+      taggingModel: 'tagger',
+      promptModel: null,
+      editModel: null,
+    },
+    {
+      id: SECOND,
+      kind: 'venice',
+      name: 'V',
+      baseUrl: 'https://v.example.test/api/v1',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      editModel: 'edit-a',
+    },
   ];
   const writeFile = (version: number, providers: unknown[]) =>
-    writeFileSync(settingsFile(), JSON.stringify({ version, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }));
+    writeFileSync(
+      settingsFile(),
+      JSON.stringify({ version, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+    );
 
   it('reads version 3 with default options on ollama and none on venice, and writes version 4 on the first write', () => {
     writeFile(3, v3Entries);
@@ -924,7 +1084,14 @@ describe('provider store: version 4 and options', () => {
   it('creates an openai entry with its options and reads it back', () => {
     const s = store();
     const saved = s.save(openai({ options: CUSTOM }));
-    expect(saved).toMatchObject({ kind: 'openai', baseUrl: 'http://127.0.0.1:1/v1', taggingModel: 'tagger', promptModel: 'writer', editModel: null, options: CUSTOM });
+    expect(saved).toMatchObject({
+      kind: 'openai',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      taggingModel: 'tagger',
+      promptModel: 'writer',
+      editModel: null,
+      options: CUSTOM,
+    });
     expect(readSettings().providers[0]).toMatchObject({ kind: 'openai', options: CUSTOM });
     expect(store().get(saved.id)).toEqual(s.get(saved.id));
     expect(s.save(openai({ name: 'Plain' })).options).toEqual(DEFAULT_PROVIDER_OPTIONS);
@@ -980,8 +1147,13 @@ describe('provider store: version 4 and options', () => {
     const s = store();
     const o = s.save(input());
     const a = s.save(openai());
-    expect(errorOf(() => s.save(openai({ id: o.id })))).toEqual({ code: 'invalid_operation', message: 'The kind of a provider cannot be changed' });
-    expect(errorOf(() => s.save(input({ id: a.id, kind: 'ollama' })))?.message).toBe('The kind of a provider cannot be changed');
+    expect(errorOf(() => s.save(openai({ id: o.id })))).toEqual({
+      code: 'invalid_operation',
+      message: 'The kind of a provider cannot be changed',
+    });
+    expect(errorOf(() => s.save(input({ id: a.id, kind: 'ollama' })))?.message).toBe(
+      'The kind of a provider cannot be changed',
+    );
     const { kind: _omit, ...noKind } = openai({ id: a.id, name: 'Still openai' });
     expect(s.save(noKind).kind).toBe('openai');
   });
@@ -998,7 +1170,10 @@ describe('provider store: version 4 and options', () => {
     expect(store().resolve(undefined)?.id).toBe(a.id);
     expect(s.resolve(a.id)?.id).toBe(a.id);
     expect(s.resolve(undefined, 'image')).toBeNull();
-    expect(errorOf(() => s.resolve(a.id, 'image'))).toEqual({ code: 'invalid_operation', message: 'This provider cannot generate images' });
+    expect(errorOf(() => s.resolve(a.id, 'image'))).toEqual({
+      code: 'invalid_operation',
+      message: 'This provider cannot generate images',
+    });
     s.delete(o.id);
     expect(s.first()?.id).toBe(a.id);
   });
@@ -1017,10 +1192,16 @@ describe('provider store: version 4 and options', () => {
 
   it('reads a version 4 entry without parallel requests as 1 and writes the field on the first write', () => {
     const { parallelRequests: _omit, ...withoutField } = DEFAULT_PROVIDER_OPTIONS;
-    writeFile(4, [{ ...v3Entries[0], options: { ...withoutField, temperature: 0.5 } }, { ...v3Entries[1], options: null }]);
+    writeFile(4, [
+      { ...v3Entries[0], options: { ...withoutField, temperature: 0.5 } },
+      { ...v3Entries[1], options: null },
+    ]);
     const before = readFileSync(settingsFile(), 'utf8');
     const s = store();
-    expect(s.list().providers.map((p) => p.options)).toEqual([{ ...DEFAULT_PROVIDER_OPTIONS, temperature: 0.5, parallelRequests: 1 }, null]);
+    expect(s.list().providers.map((p) => p.options)).toEqual([
+      { ...DEFAULT_PROVIDER_OPTIONS, temperature: 0.5, parallelRequests: 1 },
+      null,
+    ]);
     expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
     s.markUsed(PREPARED);
     expect(readSettings().providers.map((p: { options: unknown }) => p.options)).toEqual([
@@ -1029,13 +1210,19 @@ describe('provider store: version 4 and options', () => {
     ]);
   });
 
-  it.each([0, 65, 2.5, -3, '4', null])('reads a stored parallel requests value of %s as 1 and keeps the entry', (parallelRequests) => {
-    writeFile(4, [{ ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } }, { ...v3Entries[1], options: null }]);
-    const s = store();
-    expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED, SECOND]);
-    expect(s.get(PREPARED)?.options?.parallelRequests).toBe(1);
-    expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
-  });
+  it.each([0, 65, 2.5, -3, '4', null])(
+    'reads a stored parallel requests value of %s as 1 and keeps the entry',
+    (parallelRequests) => {
+      writeFile(4, [
+        { ...v3Entries[0], options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } },
+        { ...v3Entries[1], options: null },
+      ]);
+      const s = store();
+      expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED, SECOND]);
+      expect(s.get(PREPARED)?.options?.parallelRequests).toBe(1);
+      expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
+    },
+  );
 
   it('gives the upgrades from versions 1 to 3 one parallel request', () => {
     writeFile(3, v3Entries);
@@ -1053,14 +1240,19 @@ describe('provider store: version 4 and options', () => {
     expect(readSettings().providers[0].options.parallelRequests).toBe(16);
     expect(store().list().providers[0]?.options?.parallelRequests).toBe(16);
     expect(s.save(openai({ id: o.id, name: 'Renamed' })).options?.parallelRequests).toBe(16);
-    expect(s.save(openai({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests: 64 } })).options?.parallelRequests).toBe(64);
+    expect(
+      s.save(openai({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests: 64 } })).options
+        ?.parallelRequests,
+    ).toBe(64);
   });
 
   it.each([0, 65, 1.5])('refuses a parallel requests value of %s and writes nothing', (parallelRequests) => {
     const s = store();
     const o = s.save(input());
     const before = readFileSync(settingsFile(), 'utf8');
-    expect(codeOf(() => s.save(input({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } })))).toBe('invalid_operation');
+    expect(codeOf(() => s.save(input({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests } })))).toBe(
+      'invalid_operation',
+    );
     expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
     expect(s.get(o.id)?.options?.parallelRequests).toBe(1);
   });
@@ -1082,8 +1274,12 @@ describe('provider store: version 4 and options', () => {
     ]);
     expect(s.get(PREPARED)?.options?.extra).toBe(extra);
     expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
-    expect(readdirSync(credentials()).sort()).toEqual([`vision-api-key-${PREPARED}`, `vision-api-key-${SECOND}`].sort());
-    expect(errorOf(() => s.save(openai({ id: PREPARED, options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))?.code).toBe('validation_failed');
+    expect(readdirSync(credentials()).sort()).toEqual(
+      [`vision-api-key-${PREPARED}`, `vision-api-key-${SECOND}`].sort(),
+    );
+    expect(errorOf(() => s.save(openai({ id: PREPARED, options: { ...DEFAULT_PROVIDER_OPTIONS, extra } })))?.code).toBe(
+      'validation_failed',
+    );
   });
 });
 
@@ -1124,7 +1320,11 @@ describe('provider store: damaged entries', () => {
     writeFile({ version: 4, providers, lastUsed, adoptLegacyKey });
   const writeKeys = (...ids: string[]) => {
     mkdirSync(credentials(), { recursive: true });
-    for (const id of ids) writeFileSync(keyFile(id), codec.encrypt(encodeKeyPayload(id === SECOND ? 'https://v.example.test' : 'http://192.168.1.20:11434', KEY)));
+    for (const id of ids)
+      writeFileSync(
+        keyFile(id),
+        codec.encrypt(encodeKeyPayload(id === SECOND ? 'https://v.example.test' : 'http://192.168.1.20:11434', KEY)),
+      );
   };
   const copies = () => readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'));
   const expectCopyOf = (text: string) => {
@@ -1153,7 +1353,9 @@ describe('provider store: damaged entries', () => {
       [SECOND, true],
     ]);
     expectCopyOf(text);
-    expect(readdirSync(credentials()).sort()).toEqual([PREPARED, SECOND, THIRD].map((id) => `vision-api-key-${id}`).sort());
+    expect(readdirSync(credentials()).sort()).toEqual(
+      [PREPARED, SECOND, THIRD].map((id) => `vision-api-key-${id}`).sort(),
+    );
   });
 
   it('keeps every key file for the rest of the session after a degraded load, also after saves', () => {
@@ -1174,7 +1376,10 @@ describe('provider store: damaged entries', () => {
   });
 
   it('reads an empty list when every entry is broken, copies the file and keeps every key file', () => {
-    const text = writeV4([{ ...brokenVision, editModel: 'x' }, { ...brokenImage, id: PREPARED, taggingModel: 'x' }]);
+    const text = writeV4([
+      { ...brokenVision, editModel: 'x' },
+      { ...brokenImage, id: PREPARED, taggingModel: 'x' },
+    ]);
     writeKeys(PREPARED, THIRD);
     expect(store().list().providers).toEqual([]);
     expectCopyOf(text);
@@ -1182,10 +1387,13 @@ describe('provider store: damaged entries', () => {
   });
 
   it('reads the entry used last of a dropped entry as null', () => {
-    writeV4([good, { ...brokenVision, editModel: 'x' }, image, { ...brokenImage, id: UNKNOWN, name: 'C', taggingModel: 'x' }], {
-      vision: THIRD,
-      image: UNKNOWN,
-    });
+    writeV4(
+      [good, { ...brokenVision, editModel: 'x' }, image, { ...brokenImage, id: UNKNOWN, name: 'C', taggingModel: 'x' }],
+      {
+        vision: THIRD,
+        image: UNKNOWN,
+      },
+    );
     const s = store();
     expect(s.list()).toMatchObject({ lastUsedId: null, lastUsedImageId: null });
     expect(s.resolve(undefined)?.id).toBe(PREPARED);
@@ -1207,7 +1415,11 @@ describe('provider store: damaged entries', () => {
   it('keeps the first entry of a duplicate id', () => {
     const text = writeV4([good, image, { ...good, name: 'Second O' }]);
     writeKeys(PREPARED, SECOND);
-    expect(store().list().providers.map((p) => [p.id, p.name])).toEqual([
+    expect(
+      store()
+        .list()
+        .providers.map((p) => [p.id, p.name]),
+    ).toEqual([
       [PREPARED, 'O'],
       [SECOND, 'V'],
     ]);
@@ -1219,7 +1431,11 @@ describe('provider store: damaged entries', () => {
     writeKeys(PREPARED);
     writeLegacyKey();
     const s = store();
-    expect(s.list()).toMatchObject({ providers: [{ id: PREPARED, hasApiKey: true }], lastUsedId: null, lastUsedImageId: null });
+    expect(s.list()).toMatchObject({
+      providers: [{ id: PREPARED, hasApiKey: true }],
+      lastUsedId: null,
+      lastUsedImageId: null,
+    });
     expectCopyOf(text);
     expect(existsSync(legacyKeyFile())).toBe(true);
   });
@@ -1228,7 +1444,14 @@ describe('provider store: damaged entries', () => {
     const v2 = writeFile({
       version: 2,
       providers: [
-        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
+        {
+          id: PREPARED,
+          name: 'O',
+          baseUrl: 'http://192.168.1.20:11434',
+          timeoutSeconds: 120,
+          taggingModel: null,
+          promptModel: null,
+        },
         { id: THIRD, name: 'B', baseUrl: 'ftp://x', timeoutSeconds: 120, taggingModel: null, promptModel: null },
       ],
       lastUsedId: THIRD,
@@ -1240,8 +1463,17 @@ describe('provider store: damaged entries', () => {
     rmSync(join(dir, copies()[0]!));
     const { options: _a, ...v3Good } = good;
     const { options: _b, ...v3Broken } = brokenVision;
-    const v3 = writeFile({ version: 3, providers: [v3Good, { ...v3Broken, editModel: 'x' }], lastUsed: noSlots, adoptLegacyKey: null });
-    expect(store().list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    const v3 = writeFile({
+      version: 3,
+      providers: [v3Good, { ...v3Broken, editModel: 'x' }],
+      lastUsed: noSlots,
+      adoptLegacyKey: null,
+    });
+    expect(
+      store()
+        .list()
+        .providers.map((p) => p.id),
+    ).toEqual([PREPARED]);
     expectCopyOf(v3);
     expect(existsSync(keyFile(THIRD))).toBe(true);
   });
@@ -1250,8 +1482,22 @@ describe('provider store: damaged entries', () => {
     writeFile({
       version: 2,
       providers: [
-        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
-        { id: THIRD, name: 'B', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 5, taggingModel: null, promptModel: null },
+        {
+          id: PREPARED,
+          name: 'O',
+          baseUrl: 'http://192.168.1.20:11434',
+          timeoutSeconds: 120,
+          taggingModel: null,
+          promptModel: null,
+        },
+        {
+          id: THIRD,
+          name: 'B',
+          baseUrl: 'http://192.168.1.30:11434',
+          timeoutSeconds: 5,
+          taggingModel: null,
+          promptModel: null,
+        },
       ],
       lastUsedId: null,
       adoptLegacyKey: { id: THIRD, origin: 'http://192.168.1.30:11434' },
@@ -1269,8 +1515,22 @@ describe('provider store: damaged entries', () => {
     const text = writeFile({
       version: 2,
       providers: [
-        { id: PREPARED, name: 'O', baseUrl: 'http://192.168.1.20:11434', timeoutSeconds: 120, taggingModel: null, promptModel: null },
-        { id: THIRD, name: 'B', baseUrl: 'http://192.168.1.30:11434', timeoutSeconds: 5, taggingModel: null, promptModel: null },
+        {
+          id: PREPARED,
+          name: 'O',
+          baseUrl: 'http://192.168.1.20:11434',
+          timeoutSeconds: 120,
+          taggingModel: null,
+          promptModel: null,
+        },
+        {
+          id: THIRD,
+          name: 'B',
+          baseUrl: 'http://192.168.1.30:11434',
+          timeoutSeconds: 5,
+          taggingModel: null,
+          promptModel: null,
+        },
       ],
       lastUsedId: null,
       adoptLegacyKey: { id: PREPARED, origin: 'http://192.168.1.20:11434' },
@@ -1302,7 +1562,17 @@ describe('provider store: key bound to its origin', () => {
       JSON.stringify({
         version: 4,
         providers: [
-          { id: PREPARED, kind: 'ollama', name: 'O', baseUrl: `${ORIGIN}/api`, timeoutSeconds: 120, taggingModel: null, promptModel: null, editModel: null, options: DEFAULT_PROVIDER_OPTIONS },
+          {
+            id: PREPARED,
+            kind: 'ollama',
+            name: 'O',
+            baseUrl: `${ORIGIN}/api`,
+            timeoutSeconds: 120,
+            taggingModel: null,
+            promptModel: null,
+            editModel: null,
+            options: DEFAULT_PROVIDER_OPTIONS,
+          },
         ],
         lastUsed: { vision: null, image: null },
         adoptLegacyKey: null,
@@ -1404,7 +1674,10 @@ describe('provider store: a later start', () => {
     ...extra,
   });
   const writeV4 = (providers: unknown[]) =>
-    writeFileSync(settingsFile(), JSON.stringify({ version: 4, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }));
+    writeFileSync(
+      settingsFile(),
+      JSON.stringify({ version: 4, providers, lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+    );
   const writeKeys = (...ids: string[]) => {
     mkdirSync(credentials(), { recursive: true });
     for (const id of ids) writeFileSync(keyFile(id), codec.encrypt(encodeKeyPayload('http://192.168.1.20:11434', KEY)));
@@ -1437,7 +1710,11 @@ describe('provider store: a later start', () => {
     expect(s.list().providers.map((p) => p.id)).toEqual([PREPARED]);
     s.markUsed(PREPARED);
     expect(readSettings().providers).toHaveLength(1);
-    expect(store().list().providers.map((p) => p.id)).toEqual([PREPARED]);
+    expect(
+      store()
+        .list()
+        .providers.map((p) => p.id),
+    ).toEqual([PREPARED]);
     expect(existsSync(keyFile(ORPHAN))).toBe(true);
   });
 

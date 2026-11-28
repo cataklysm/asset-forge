@@ -34,15 +34,23 @@ beforeEach(async () => {
   measure.mockReset();
   measure.mockResolvedValue(null);
   base = await mkdtemp(join(tmpdir(), 'af-lib-ipc-'));
-  manager = createWorkspaceManager({ userDataPath: join(base, 'userData'), migrationsFolder: MIGRATIONS_FOLDER,
+  manager = createWorkspaceManager({
+    userDataPath: join(base, 'userData'),
+    migrationsFolder: MIGRATIONS_FOLDER,
     imageProbe: { measure },
   });
-  handlers = createWorkspaceHandlers(manager, {
-    pickDirectory: async () => null,
-    pickFiles: async () => [],
-    confirmRemoveWorkspace: async () => 'cancel',
-    confirmRemoveWorkflow: confirmWorkflow,
-  }, { ...noopHost, openExternal }, idleJobHost, idleServices);
+  handlers = createWorkspaceHandlers(
+    manager,
+    {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: confirmWorkflow,
+    },
+    { ...noopHost, openExternal },
+    idleJobHost,
+    idleServices,
+  );
 });
 afterEach(async () => {
   await manager.close();
@@ -182,7 +190,11 @@ describe('library IPC', () => {
     const byTag = await ok('projects:list', { ...page, tagNames: ['OAK'] });
     expect(ipcContract['projects:list'].response.safeParse(byTag).success).toBe(true);
     expect(byTag.items).toMatchObject([
-      { id: created.id, assetCount: 1, matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }] },
+      {
+        id: created.id,
+        assetCount: 1,
+        matchedTags: [{ name: 'oak', displayName: 'Oak', onAsset: true, onFiles: false }],
+      },
     ]);
   });
 
@@ -241,7 +253,9 @@ describe('library IPC', () => {
 
       const results = await ok<any[]>('files:import', { sourcePaths: [source], unpackArchives: true });
       expect(ipcContract['files:import'].response.safeParse(results).success).toBe(true);
-      expect(results).toMatchObject([{ sourcePath: source, entryName: null, error: null, file: { status: 'complete' } }]);
+      expect(results).toMatchObject([
+        { sourcePath: source, entryName: null, error: null, file: { status: 'complete' } },
+      ]);
     });
 
     it('passes unpackArchives through to the import', async () => {
@@ -250,7 +264,13 @@ describe('library IPC', () => {
       await writeFile(source, 'not a zip');
       // The source is no ZIP, so unpacking answers the archive-level message.
       expect(await ok<any[]>('files:import', { sourcePaths: [source], unpackArchives: true })).toEqual([
-        { sourcePath: source, entryName: null, file: null, error: 'This file is not a readable ZIP archive', duplicateOf: [] },
+        {
+          sourcePath: source,
+          entryName: null,
+          file: null,
+          error: 'This file is not a readable ZIP archive',
+          duplicateOf: [],
+        },
       ]);
       expect(await ok<any[]>('files:import', { sourcePaths: [source] })).toMatchObject([
         { sourcePath: source, entryName: null, error: null, file: { status: 'complete', originalName: 'pack.zip' } },
@@ -332,7 +352,9 @@ describe('library IPC', () => {
       const tagNames = Array.from({ length: 11 }, (_, i) => `t${i}`);
       const invalid = { ok: false, error: { code: 'invalid_request' } };
       expect(await call('files:list', { ...page, scope: { kind: 'all' }, tagNames })).toMatchObject(invalid);
-      expect(await call('files:list', { ...page, scope: { kind: 'all' }, query: 'x'.repeat(201) })).toMatchObject(invalid);
+      expect(await call('files:list', { ...page, scope: { kind: 'all' }, query: 'x'.repeat(201) })).toMatchObject(
+        invalid,
+      );
     });
 
     it('files:list filters the inbox by query, tag and kind', async () => {
@@ -347,7 +369,10 @@ describe('library IPC', () => {
       const listed = await ok('files:list', { ...inbox, query: 'OAK', tagNames: ['SCI-FI', 'sci-fi'], kind: 'image' });
       expect(ipcContract['files:list'].response.safeParse(listed).success).toBe(true);
       expect(listed).toMatchObject({ total: 1, items: [{ id: bark.id, tags: [{ name: 'sci-fi' }] }] });
-      expect(await ok('files:list', { ...inbox, query: 'oak', kind: 'model' })).toMatchObject({ total: 1, items: [{ id: trunk.id }] });
+      expect(await ok('files:list', { ...inbox, query: 'oak', kind: 'model' })).toMatchObject({
+        total: 1,
+        items: [{ id: trunk.id }],
+      });
       expect(await ok('files:list', { ...inbox, query: 'fi' })).toMatchObject({ total: 1, items: [{ id: bark.id }] });
       expect(await ok('files:list', { ...inbox, tagNames: ['unknown'] })).toEqual({ items: [], total: 0 });
       expect((await ok('files:list', { ...inbox, query: '%' })).total).toBe(2); // no words: no filter
@@ -404,13 +429,19 @@ describe('library IPC', () => {
       const renamed = await ok('tags:rename', { from: 'front view', to: ' Frontal ', merge: false });
       expect(ipcContract['tags:rename'].response.safeParse(renamed).success).toBe(true);
       expect(renamed).toEqual({ name: 'frontal', displayName: 'Frontal', merged: false });
-      expect((await ok('assets:get', { id: asset.id })).tags).toMatchObject([{ name: 'frontal', displayName: 'Frontal', origin: 'manual' }]);
+      expect((await ok('assets:get', { id: asset.id })).tags).toMatchObject([
+        { name: 'frontal', displayName: 'Frontal', origin: 'manual' },
+      ]);
 
       expect(await call('tags:rename', { from: 'frontal', to: 'front', merge: false })).toMatchObject({
         ok: false,
         error: { code: 'invalid_operation', message: 'A tag with this name already exists' },
       });
-      expect(await ok('tags:rename', { from: 'frontal', to: 'FRONT', merge: true })).toEqual({ name: 'front', displayName: 'FRONT', merged: true });
+      expect(await ok('tags:rename', { from: 'frontal', to: 'FRONT', merge: true })).toEqual({
+        name: 'front',
+        displayName: 'FRONT',
+        merged: true,
+      });
       expect((await ok('assets:get', { id: asset.id })).tags).toMatchObject([{ name: 'front', displayName: 'FRONT' }]);
       expect((await ok('assets:list', { ...page, query: 'frontal' })).total).toBe(0);
       expect((await ok('assets:list', { ...page, query: 'front' })).total).toBe(1);
@@ -427,8 +458,22 @@ describe('library IPC', () => {
       const usage = await ok('tags:usage', { name: ' METAL ' });
       expect(ipcContract['tags:usage'].response.safeParse(usage).success).toBe(true);
       expect(usage).toEqual({ exists: true, name: 'metal', displayName: 'Metal', assets: 1, files: 1, prompts: 0 });
-      expect(await ok('tags:usage', { name: 'wood' })).toEqual({ exists: false, name: 'wood', displayName: '', assets: 0, files: 0, prompts: 0 });
-      expect(await ok('tags:usage', { name: '!!!' })).toEqual({ exists: false, name: '', displayName: '', assets: 0, files: 0, prompts: 0 });
+      expect(await ok('tags:usage', { name: 'wood' })).toEqual({
+        exists: false,
+        name: 'wood',
+        displayName: '',
+        assets: 0,
+        files: 0,
+        prompts: 0,
+      });
+      expect(await ok('tags:usage', { name: '!!!' })).toEqual({
+        exists: false,
+        name: '',
+        displayName: '',
+        assets: 0,
+        files: 0,
+        prompts: 0,
+      });
     });
 
     it('tags:suggest rejects limit 0 and 51', async () => {
@@ -514,8 +559,12 @@ describe('library IPC', () => {
       await openWorkspace();
       const many = Array.from({ length: 1001 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
       const invalid = { ok: false, error: { code: 'invalid_request' } };
-      expect(await call('files:assignMany', { fileIds: many, assetId: uuid, role: 'reference' })).toMatchObject(invalid);
-      expect(await call('files:assignMany', { fileIds: [uuid, uuid], assetId: uuid, role: 'reference' })).toMatchObject(invalid);
+      expect(await call('files:assignMany', { fileIds: many, assetId: uuid, role: 'reference' })).toMatchObject(
+        invalid,
+      );
+      expect(await call('files:assignMany', { fileIds: [uuid, uuid], assetId: uuid, role: 'reference' })).toMatchObject(
+        invalid,
+      );
       expect(await call('files:addTagMany', { fileIds: [uuid, uuid], name: 'oak' })).toMatchObject(invalid);
     });
 
@@ -526,7 +575,11 @@ describe('library IPC', () => {
       expect(ipcContract['files:assignMany'].response.safeParse(res).success).toBe(true);
       expect(res.items.map((i: any) => i.fileId)).toEqual([f1, uuid, f2]);
       expect(res.items.map((i: any) => i.error?.code ?? null)).toEqual([null, 'not_found', null]);
-      expect(res.items[0].file).toMatchObject({ assetId, role: 'reference', relativePath: assetFilePath(assetId, 'reference', f1, 'a.png') });
+      expect(res.items[0].file).toMatchObject({
+        assetId,
+        role: 'reference',
+        relativePath: assetFilePath(assetId, 'reference', f1, 'a.png'),
+      });
       expect(res.items[1].file).toBeNull();
       expect(JSON.stringify(res)).not.toContain(base); // no absolute paths
     });
@@ -537,7 +590,9 @@ describe('library IPC', () => {
       vi.spyOn(session.database.files, 'get').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const res = await ok('files:assignMany', { fileIds: ids, assetId, role: 'reference' });
-      expect(res.items).toEqual([{ fileId: ids[0], file: null, error: { code: 'internal_error', message: 'Unexpected error' } }]);
+      expect(res.items).toEqual([
+        { fileId: ids[0], file: null, error: { code: 'internal_error', message: 'Unexpected error' } },
+      ]);
     });
 
     it('files:addTagMany and files:removeTagMany tag and untag every file', async () => {
@@ -568,11 +623,20 @@ describe('library IPC', () => {
       const chosen = await ok('files:list', { ...inbox, ids: [a, b] });
       expect(chosen.total).toBe(2);
       expect(chosen.items.map((f: any) => f.id).sort()).toEqual([a, b].sort());
-      expect(await ok('files:list', { ...inbox, ids: [a, b], tagNames: ['oak'] })).toMatchObject({ total: 1, items: [{ id: b }] });
+      expect(await ok('files:list', { ...inbox, ids: [a, b], tagNames: ['oak'] })).toMatchObject({
+        total: 1,
+        items: [{ id: b }],
+      });
       expect(await ok('files:list', { ...inbox, ids: [c] })).toEqual({ items: [], total: 0 });
       const tooMany = Array.from({ length: 101 }, () => a);
-      expect(await call('files:list', { ...inbox, ids: tooMany })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
-      expect(await call('files:list', { ...inbox, ids: [] })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+      expect(await call('files:list', { ...inbox, ids: tooMany })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' },
+      });
+      expect(await call('files:list', { ...inbox, ids: [] })).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' },
+      });
     });
 
     it('files:addTagMany with a pending file fails with validation_failed and tags nothing', async () => {
@@ -607,8 +671,7 @@ describe('library IPC', () => {
       return (await ok('assets:create', { name: 'A', typeId: type!.id })).id as string;
     }
 
-    const listIds = async (scope: unknown) =>
-      (await ok('files:list', { ...page, scope })).items.map((f: any) => f.id);
+    const listIds = async (scope: unknown) => (await ok('files:list', { ...page, scope })).items.map((f: any) => f.id);
 
     it('the trash channels answer no_workspace_open without a workspace', async () => {
       const requests: [IpcChannel, unknown][] = [
@@ -619,7 +682,10 @@ describe('library IPC', () => {
         ['trash:summary', {}],
       ];
       for (const [channel, request] of requests) {
-        expect(await call(channel, request), channel).toMatchObject({ ok: false, error: { code: 'no_workspace_open' } });
+        expect(await call(channel, request), channel).toMatchObject({
+          ok: false,
+          error: { code: 'no_workspace_open' },
+        });
       }
     });
 
@@ -643,7 +709,12 @@ describe('library IPC', () => {
       expect(ipcContract['files:trashMany'].response.safeParse(res).success).toBe(true);
       expect(res.items.map((i: any) => i.fileId)).toEqual([a, uuid, b]);
       expect(res.items.map((i: any) => i.error?.code ?? null)).toEqual([null, 'not_found', null]);
-      expect(res.items[0].file).toMatchObject({ id: a, assetId: null, role: null, relativePath: trashPath(a, 'a.png') });
+      expect(res.items[0].file).toMatchObject({
+        id: a,
+        assetId: null,
+        role: null,
+        relativePath: trashPath(a, 'a.png'),
+      });
       expect(res.items[0].file.deletedAt).not.toBeNull();
       expect(res.items[1].file).toBeNull();
       expect(JSON.stringify(res)).not.toContain(base);
@@ -668,12 +739,19 @@ describe('library IPC', () => {
       expect(await listIds({ kind: 'all' })).toEqual([other]);
       expect(await listIds({ kind: 'asset', assetId })).toEqual([]);
       expect((await listIds({ kind: 'trash' })).sort()).toEqual([placed, loose].sort());
-      const trashed = (await ok('files:list', { ...page, scope: { kind: 'trash' } })).items.find((f: any) => f.id === placed);
+      const trashed = (await ok('files:list', { ...page, scope: { kind: 'trash' } })).items.find(
+        (f: any) => f.id === placed,
+      );
       expect(trashed).toMatchObject({ trashedAssetId: assetId, trashedAssetName: 'A', trashedRole: 'reference' });
 
       const restored = await ok('files:restoreMany', { fileIds: [placed, other] });
       expect(ipcContract['files:restoreMany'].response.safeParse(restored).success).toBe(true);
-      expect(restored.items[0].file).toMatchObject({ assetId, role: 'reference', relativePath: assetPath, deletedAt: null });
+      expect(restored.items[0].file).toMatchObject({
+        assetId,
+        role: 'reference',
+        relativePath: assetPath,
+        deletedAt: null,
+      });
       expect(restored.items[1].error).toEqual({ code: 'invalid_operation', message: 'The file is not in the trash' });
       expect(existsSync(join(root(), assetPath))).toBe(true);
       expect(await listIds({ kind: 'asset', assetId })).toEqual([placed]);
@@ -790,7 +868,9 @@ describe('library IPC', () => {
       const workspaceId = (await ok<{ id: string }>('workspace:current', {})).id;
       const raw = new Database(join(base, 'userData', 'workspaces', workspaceId, 'assetforge.sqlite'));
       try {
-        raw.prepare('UPDATE asset_source SET url = ? WHERE id = ?').run('file:///C:/Windows/System32/calc.exe', added.sources[0].id);
+        raw
+          .prepare('UPDATE asset_source SET url = ? WHERE id = ?')
+          .run('file:///C:/Windows/System32/calc.exe', added.sources[0].id);
       } finally {
         raw.close();
       }
@@ -926,8 +1006,14 @@ describe('URL import channels', () => {
   it('refuses 5001 lines and no line as an invalid request', async () => {
     await openWorkspace();
     const lines = Array.from({ length: 5001 }, (_, i) => `https://example.org/${i}.png`);
-    expect(await call('files:importUrls', { urls: lines })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
-    expect(await call('files:importUrls', { urls: [] })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await call('files:importUrls', { urls: lines })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
+    expect(await call('files:importUrls', { urls: [] })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
   });
 
   it('queues the usable lines and reports the invalid ones', async () => {
@@ -935,14 +1021,25 @@ describe('URL import channels', () => {
     const result = await ok('files:importUrls', {
       urls: ['https://example.org/a.png', '', 'not a url', 'https://example.org/a.png#x', 'https://example.org/b.png'],
     });
-    expect(result).toEqual({ queued: 2, alreadyImported: 0, alreadyQueued: 1, invalid: [{ line: 3, text: 'not a url' }] });
+    expect(result).toEqual({
+      queued: 2,
+      alreadyImported: 0,
+      alreadyQueued: 1,
+      invalid: [{ line: 3, text: 'not a url' }],
+    });
   });
 
   it('answers not_found for the origins of an unknown file and for an unknown origin', async () => {
     const { fileId } = await fileWithOrigin('https://example.org/a.png');
     expect(await call('files:origins', { fileId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
-    expect(await call('files:openOrigin', { fileId: uuid, originId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
-    expect(await call('files:openOrigin', { fileId, originId: uuid })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await call('files:openOrigin', { fileId: uuid, originId: uuid })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+    expect(await call('files:openOrigin', { fileId, originId: uuid })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
     expect(openExternal).not.toHaveBeenCalled();
   });
 

@@ -103,7 +103,11 @@ export function focusedIndex(root: HTMLElement | null): number | null {
  * @param container the browser's element, where the focus is looked for
  * @returns the restore of the remounted view
  */
-export function reloadRestore(position: ViewHandle | null, viewKey: string, container: HTMLElement | null): ViewRestore {
+export function reloadRestore(
+  position: ViewHandle | null,
+  viewKey: string,
+  container: HTMLElement | null,
+): ViewRestore {
   const current = position?.viewKey === viewKey ? position.get() : null;
   const focused = focusedIndex(container);
   return { scrollOffset: current?.scrollOffset ?? 0, index: focused, focus: focused !== null };

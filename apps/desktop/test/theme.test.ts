@@ -67,14 +67,36 @@ describe('design tokens and window appearance', () => {
 
   it('pins the button, chip and type specs', () => {
     const tokens = (s: string) => s.split(' ').filter(Boolean);
-    for (const c of ['border-line', 'bg-raised', 'text-text', 'rounded-control', 'hover:border-line-strong', 'aria-pressed:bg-nav-active', 'aria-pressed:border-accent', 'disabled:opacity-50', 'focus-visible:outline-2', 'focus-visible:outline-offset-2', 'focus-visible:outline-accent'])
+    for (const c of [
+      'border-line',
+      'bg-raised',
+      'text-text',
+      'rounded-control',
+      'hover:border-line-strong',
+      'aria-pressed:bg-nav-active',
+      'aria-pressed:border-accent',
+      'disabled:opacity-50',
+      'focus-visible:outline-2',
+      'focus-visible:outline-offset-2',
+      'focus-visible:outline-accent',
+    ])
       expect(tokens(BUTTON_LOOK)).toContain(c);
     expect(BUTTON_LOOK).not.toMatch(/hover:bg-/);
     expect(tokens(BUTTON)).toEqual(expect.arrayContaining(['h-9', 'px-3.5']));
     expect(tokens(ICON_BUTTON)).toEqual(expect.arrayContaining(['h-9', 'w-9']));
     expect(tokens(BUTTON_INLINE)).toEqual(expect.arrayContaining(['h-8', 'px-3.5']));
     expect(tokens(ICON_BUTTON_INLINE)).toEqual(expect.arrayContaining(['h-8', 'w-8']));
-    expect(tokens(CHIP)).toEqual(expect.arrayContaining(['h-[26px]', 'px-2.5', 'text-[13px]', 'font-normal', 'rounded-control', 'border-line-strong', 'bg-transparent']));
+    expect(tokens(CHIP)).toEqual(
+      expect.arrayContaining([
+        'h-[26px]',
+        'px-2.5',
+        'text-[13px]',
+        'font-normal',
+        'rounded-control',
+        'border-line-strong',
+        'bg-transparent',
+      ]),
+    );
     expect(tokens(FILTER_CHIP)).toEqual(expect.arrayContaining(['border-accent', 'text-accent']));
     for (const chip of [CHIP, FILTER_CHIP]) {
       const t = tokens(chip);
@@ -95,6 +117,7 @@ describe('design tokens and window appearance', () => {
     const files = renderedSources();
     expect(files.length).toBeGreaterThan(20);
     // The word boundary keeps utilities such as `translate-y-1/2` from matching `slate-`.
-    for (const file of files) expect(readFileSync(file, 'utf8'), file).not.toMatch(/\bdark:|\bslate-|bg-white|text-black/);
+    for (const file of files)
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/\bdark:|\bslate-|bg-white|text-black/);
   });
 });

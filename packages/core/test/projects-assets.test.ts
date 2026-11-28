@@ -157,7 +157,8 @@ describe('asset list filters', () => {
         importedAt: '2026-01-01T00:00:00.000Z',
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+      if (status === 'complete')
+        await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (status === 'failed') await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${originalName}`, assetId, role });
       return id;
@@ -340,7 +341,12 @@ describe('project list filters', () => {
       return a.id;
     };
     let n = 0;
-    const addFile = async (assetId: string, originalName: string, kind: FileKind, status: 'complete' | 'failed' = 'complete') => {
+    const addFile = async (
+      assetId: string,
+      originalName: string,
+      kind: FileKind,
+      status: 'complete' | 'failed' = 'complete',
+    ) => {
       const id = `f0000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
       await db.files.insertPending({
         id,
@@ -351,16 +357,22 @@ describe('project list filters', () => {
         importedAt: '2026-01-01T00:00:00.000Z',
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+      if (status === 'complete')
+        await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       else await db.files.markFailed(id, 'x');
-      await db.files.setPlacement(id, { relativePath: `assets/${assetId}/${originalName}`, assetId, role: 'reference' });
+      await db.files.setPlacement(id, {
+        relativePath: `assets/${assetId}/${originalName}`,
+        assetId,
+        role: 'reference',
+      });
       return id;
     };
     const tagAsset = (assetId: string, name: string) =>
       db.tags.addToAsset({ assetId, name, displayName: name, origin: 'manual', newId: `t-${name}`, now: 'now' });
     const tagFile = (fileId: string, name: string) =>
       db.tags.addToFile({ fileId, name, displayName: name, origin: 'manual', newId: `t-${name}`, now: 'now' });
-    const list = async (q: Partial<ProjectQuery>) => (await listProjects(session, { limit: 60, offset: 0, ...q })).items;
+    const list = async (q: Partial<ProjectQuery>) =>
+      (await listProjects(session, { limit: 60, offset: 0, ...q })).items;
     const names = async (q: Partial<ProjectQuery>) => (await list(q)).map((p) => p.name);
     return { session, project, member, addFile, tagAsset, tagFile, list, names };
   }

@@ -25,7 +25,14 @@ describe('createPauseGate', () => {
   });
 
   it('resets the count on a success or any other outcome', () => {
-    for (const reset of ['ok', 'other', 'invalid_response', 'provider_rejected', 'file_unavailable', 'internal_error'] as const) {
+    for (const reset of [
+      'ok',
+      'other',
+      'invalid_response',
+      'provider_rejected',
+      'file_unavailable',
+      'internal_error',
+    ] as const) {
       const { g } = gate();
       g.record('local_gpu', null, 'provider_unreachable');
       g.record('local_gpu', null, 'provider_unreachable');
@@ -170,7 +177,11 @@ describe('createPauseGate', () => {
   });
 
   it('resets the count on provider_outcome_unknown, provider_content_refused and generation_result_not_stored', () => {
-    for (const reset of ['provider_outcome_unknown', 'provider_content_refused', 'generation_result_not_stored'] as const) {
+    for (const reset of [
+      'provider_outcome_unknown',
+      'provider_content_refused',
+      'generation_result_not_stored',
+    ] as const) {
       const { g } = gate();
       g.record('remote_api', 'a', 'provider_unreachable');
       g.record('remote_api', 'a', 'provider_unreachable');

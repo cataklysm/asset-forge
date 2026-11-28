@@ -1,6 +1,12 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { IMAGE_GENERATE_JOB, type FileRecord, type Generation, type JobSummary, type ProviderView } from '@assetforge/contracts';
+import {
+  IMAGE_GENERATE_JOB,
+  type FileRecord,
+  type Generation,
+  type JobSummary,
+  type ProviderView,
+} from '@assetforge/contracts';
 import {
   MOCK_EDIT_MODEL,
   MOCK_PROMPT_BUSY,
@@ -41,10 +47,20 @@ describe('generation studio end to end', () => {
   }
 
   const edit = (fileId: string, prompt: string) =>
-    h.ok('generations:start', { kind: 'edit', fileId, model: MOCK_EDIT_MODEL, prompt, aspectRatio: '1:1', resolution: '4K', safeMode: true });
+    h.ok('generations:start', {
+      kind: 'edit',
+      fileId,
+      model: MOCK_EDIT_MODEL,
+      prompt,
+      aspectRatio: '1:1',
+      resolution: '4K',
+      safeMode: true,
+    });
 
   /** Starts a generation and answers it; fails the test when the start was refused. */
-  async function started(result: Promise<{ ok: true; generation: Generation } | { ok: false; code: string }>): Promise<Generation> {
+  async function started(
+    result: Promise<{ ok: true; generation: Generation } | { ok: false; code: string }>,
+  ): Promise<Generation> {
     const answer = await result;
     if (!answer.ok) throw new Error(`generations:start answered ${answer.code}`);
     return answer.generation;
@@ -72,17 +88,35 @@ describe('generation studio end to end', () => {
 
   it('edits an image into its asset, upscales the result and keeps the lineage after the source is purged', async () => {
     const { entry, assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
 
     const first = await started(edit(sourceId, 'Make it night'));
-    expect(first).toMatchObject({ kind: 'edit', status: 'pending', providerId: entry.id, providerName: 'Venice', model: MOCK_EDIT_MODEL });
+    expect(first).toMatchObject({
+      kind: 'edit',
+      status: 'pending',
+      providerId: entry.id,
+      providerName: 'Venice',
+      model: MOCK_EDIT_MODEL,
+    });
     await h.until((s) => s.succeeded === 1 && active(s) === 0);
 
     const done = await generation(sourceId, first.id);
     expect(done).toMatchObject({ status: 'succeeded', errorCode: null, prompt: 'Make it night' });
     const resultId = done.outputs[0]!.fileId!;
     const result = (await filesOf(assetId)).find((f) => f.id === resultId);
-    expect(result).toMatchObject({ status: 'complete', assetId, role: 'generated', originalName: 'oak edit 1.png', width: 256, height: 256 });
+    expect(result).toMatchObject({
+      status: 'complete',
+      assetId,
+      role: 'generated',
+      originalName: 'oak edit 1.png',
+      width: 256,
+      height: 256,
+    });
     expect((await h.ok('generations:forFile', { fileId: resultId })).madeBy).toMatchObject({
       id: first.id,
       inputs: [{ fileId: sourceId, name: 'oak.png', trashed: false }],
@@ -120,15 +154,34 @@ describe('generation studio end to end', () => {
 
   it('edits from a prompt version, keeps its copies after the prompt is deleted and refuses the deleted version', async () => {
     const { assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
-    const prompt = await h.ok('prompts:create', { title: 'Turnaround', description: '', content: 'A {{view}} view at night', defaults: {} });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
+    const prompt = await h.ok('prompts:create', {
+      title: 'Turnaround',
+      description: '',
+      content: 'A {{view}} view at night',
+      defaults: {},
+    });
     const versionId = prompt.currentVersion.id;
-    const start = { kind: 'edit', fileId: sourceId, model: MOCK_EDIT_MODEL, promptVersionId: versionId, safeMode: true } as const;
+    const start = {
+      kind: 'edit',
+      fileId: sourceId,
+      model: MOCK_EDIT_MODEL,
+      promptVersionId: versionId,
+      safeMode: true,
+    } as const;
 
     const first = await started(h.ok('generations:start', { ...start, variables: { View: ' side ' } }));
     await h.until((s) => s.succeeded === 1 && active(s) === 0);
     expect(mock!.imageRequests).toHaveLength(1);
-    expect(mock!.imageRequests[0]).toMatchObject({ path: '/api/v1/image/edit', fields: { prompt: 'A side view at night' } });
+    expect(mock!.imageRequests[0]).toMatchObject({
+      path: '/api/v1/image/edit',
+      fields: { prompt: 'A side view at night' },
+    });
     expect(await generation(sourceId, first.id)).toMatchObject({
       status: 'succeeded',
       prompt: 'A side view at night',
@@ -157,8 +210,18 @@ describe('generation studio end to end', () => {
 
   it('retries a failed generation from a prompt version with its text and copies', async () => {
     const { assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
-    const prompt = await h.ok('prompts:create', { title: 'Failing', description: '', content: 'mock:{{code}}', defaults: {} });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
+    const prompt = await h.ok('prompts:create', {
+      title: 'Failing',
+      description: '',
+      content: 'mock:{{code}}',
+      defaults: {},
+    });
     const copies = {
       prompt: MOCK_PROMPT_FAIL,
       promptId: prompt.id,
@@ -180,7 +243,10 @@ describe('generation studio end to end', () => {
     await h.until((s) => s.failed === 1 && active(s) === 0);
     expect(await generation(sourceId, failing.id)).toMatchObject({ status: 'failed', ...copies });
 
-    expect(await h.ok('generations:retry', { generationId: failing.id })).toMatchObject({ status: 'pending', ...copies });
+    expect(await h.ok('generations:retry', { generationId: failing.id })).toMatchObject({
+      status: 'pending',
+      ...copies,
+    });
     await h.until((s) => s.failed === 2 && active(s) === 0);
     expect(await generation(sourceId, failing.id)).toMatchObject({ status: 'failed', ...copies });
     expect(mock!.imageRequests.map((r) => r.fields.prompt)).toEqual([MOCK_PROMPT_FAIL, MOCK_PROMPT_FAIL]);
@@ -188,20 +254,38 @@ describe('generation studio end to end', () => {
 
   it('fails a 500 as provider_outcome_unknown after one request and never repeats it', async () => {
     const { assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
     const started500 = await started(edit(sourceId, MOCK_PROMPT_FAIL));
     await h.until((s) => s.failed === 1 && active(s) === 0);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(mock!.imageRequests).toHaveLength(1);
     const [job] = (await h.ok('jobs:list', page)).items;
-    expect(job).toMatchObject({ type: IMAGE_GENERATE_JOB, status: 'failed', attempt: 1, errorCode: 'provider_outcome_unknown' });
-    expect(await generation(sourceId, started500.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+    expect(job).toMatchObject({
+      type: IMAGE_GENERATE_JOB,
+      status: 'failed',
+      attempt: 1,
+      errorCode: 'provider_outcome_unknown',
+    });
+    expect(await generation(sourceId, started500.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+    });
     expect((await filesOf(assetId)).map((f) => f.id)).toEqual([sourceId]);
   });
 
   it('retries a 429 and ends with the third failure', async () => {
     const { assetId } = await setup({ fastRetries: true });
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
     const busy = await started(edit(sourceId, MOCK_PROMPT_BUSY));
     await h.until((s) => s.failed === 1 && active(s) === 0);
     expect(mock!.imageRequests).toHaveLength(3);
@@ -216,7 +300,12 @@ describe('generation studio end to end', () => {
 
     it('jobs:cancel ends a queued generation job and settles its generation cancelled', async () => {
       const { assetId } = await setup(noScheduler);
-      const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+      const sourceId = await h.importPng({
+        name: 'oak.png',
+        width: 256,
+        height: 256,
+        target: { assetId, role: 'reference' },
+      });
       const g = await started(edit(sourceId, 'Make it night'));
       const before = (await h.ok('jobs:summary', {})).changes;
 
@@ -230,7 +319,12 @@ describe('generation studio end to end', () => {
 
     it('jobs:cancelAll ends every waiting job, answers the count and settles the generations cancelled', async () => {
       const { assetId } = await setup(noScheduler);
-      const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+      const sourceId = await h.importPng({
+        name: 'oak.png',
+        width: 256,
+        height: 256,
+        target: { assetId, role: 'reference' },
+      });
       const gs = [await started(edit(sourceId, 'Make it night')), await started(edit(sourceId, 'Make it day'))];
 
       expect(await h.ok('jobs:cancelAll', {})).toEqual({ cancelled: 2 });
@@ -243,7 +337,12 @@ describe('generation studio end to end', () => {
 
   it('lets running generations finish into the former asset when their source goes to the trash, cancels the queued one and never repeats a request', async () => {
     const { assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
     const running = [await started(edit(sourceId, MOCK_PROMPT_SLOW)), await started(edit(sourceId, MOCK_PROMPT_SLOW))];
     // Both requests were sent and wait at the mock for their answer.
     await untilMock(() => mock!.slowWaiting() === 2);
@@ -270,17 +369,26 @@ describe('generation studio end to end', () => {
     expect(files).toHaveLength(2);
     for (const file of files) expect(file).toMatchObject({ status: 'complete', assetId, role: 'generated' });
     expect(files.map((f) => f.id).sort()).toEqual(
-      results.filter((g) => g.status === 'succeeded').map((g) => g.outputs[0]!.fileId!).sort(),
+      results
+        .filter((g) => g.status === 'succeeded')
+        .map((g) => g.outputs[0]!.fileId!)
+        .sort(),
     );
   });
 
   it('fails a slow edit interrupted by closing as provider_outcome_unknown and sends it only once', async () => {
     const { assetId } = await setup();
-    const sourceId = await h.importPng({ name: 'oak.png', width: 256, height: 256, target: { assetId, role: 'reference' } });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
     const slow = await started(edit(sourceId, MOCK_PROMPT_SLOW));
     await h.until((s) => s.running === 1);
     const deadline = Date.now() + 10_000;
-    while (mock!.imageRequests.length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    while (mock!.imageRequests.length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
     expect(mock!.imageRequests).toHaveLength(1);
 
     await h.services.workspaceClosing();
@@ -289,7 +397,10 @@ describe('generation studio end to end', () => {
 
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
-    expect(await generation(sourceId, slow.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+    expect(await generation(sourceId, slow.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+    });
     expect(mock!.imageRequests).toHaveLength(1);
     expect((await filesOf(assetId)).map((f) => f.id)).toEqual([sourceId]);
   });

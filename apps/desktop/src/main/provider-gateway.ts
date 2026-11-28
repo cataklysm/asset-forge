@@ -9,7 +9,13 @@ import {
   type VisionKind,
   type VisionRequestOptions,
 } from '@assetforge/contracts';
-import { InvalidOperationError, JobError, NotFoundError, type ImageProvider, type VisionProvider } from '@assetforge/core';
+import {
+  InvalidOperationError,
+  JobError,
+  NotFoundError,
+  type ImageProvider,
+  type VisionProvider,
+} from '@assetforge/core';
 import { PROVIDER_NOT_FOUND, wrongKind, type ProviderEntry } from './provider-entry.js';
 import type { ProviderStore } from './provider-store.js';
 
@@ -32,7 +38,9 @@ interface AdapterOptions {
 export type ImageAdapterFactory = (options: AdapterOptions) => ImageProvider;
 
 /** What `createOllamaVision` and `createOpenAiVision` accept; typed structurally like `ImageAdapterFactory`. */
-export type VisionAdapterFactory = (options: AdapterOptions & { requestOptions: VisionRequestOptions }) => VisionProvider;
+export type VisionAdapterFactory = (
+  options: AdapterOptions & { requestOptions: VisionRequestOptions },
+) => VisionProvider;
 
 /** The adapters of the provider entries and their model lists. */
 export interface ProviderGateway {

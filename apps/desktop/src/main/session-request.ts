@@ -12,7 +12,12 @@ export interface SessionNetRequest {
   on(event: 'response', listener: (response: SessionNetResponse) => void): unknown;
   on(
     event: 'redirect',
-    listener: (statusCode: number, method: string, redirectUrl: string, headers: Record<string, string | string[]>) => void,
+    listener: (
+      statusCode: number,
+      method: string,
+      redirectUrl: string,
+      headers: Record<string, string | string[]>,
+    ) => void,
   ): unknown;
   on(event: 'error', listener: (error: unknown) => void): unknown;
   abort(): void;
@@ -23,7 +28,10 @@ export interface SessionNetRequest {
  * The only headers a session request sets itself. The session adds its own cookies and its unchanged user agent;
  * no `Cookie`, `User-Agent` or `Referer` is ever set by hand.
  */
-export const SESSION_REQUEST_HEADERS: Readonly<Record<string, string>> = { Accept: '*/*', 'Accept-Encoding': 'identity' };
+export const SESSION_REQUEST_HEADERS: Readonly<Record<string, string>> = {
+  Accept: '*/*',
+  'Accept-Encoding': 'identity',
+};
 
 /** The options of every session request; nothing else is ever passed to `net.request`. */
 export interface SessionRequestOptions {

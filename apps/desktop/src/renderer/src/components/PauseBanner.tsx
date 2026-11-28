@@ -1,6 +1,20 @@
-import { JOB_ERROR_MESSAGES, purposeOf, type JobErrorCode, type PausedHost, type PausedProvider } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  purposeOf,
+  type JobErrorCode,
+  type PausedHost,
+  type PausedProvider,
+} from '@assetforge/contracts';
 import { useResume } from '../hooks/useResume';
-import { laneLabel, MOVE_JOBS_LABEL, MOVE_JOBS_TITLE, OPEN_SITE_LABEL, OPEN_SITE_TITLE, RESUME_LABEL, RESUME_TITLE } from '../labels';
+import {
+  laneLabel,
+  MOVE_JOBS_LABEL,
+  MOVE_JOBS_TITLE,
+  OPEN_SITE_LABEL,
+  OPEN_SITE_TITLE,
+  RESUME_LABEL,
+  RESUME_TITLE,
+} from '../labels';
 import { BUTTON, WARNING } from '../ui';
 import { BUSY_TITLE } from './busy-title';
 
@@ -35,7 +49,17 @@ interface PauseBannerProps {
  * @param props the paused lanes and their actions
  * @returns the alert region
  */
-export function PauseBanner({ paused, pausedHosts, busy, checkHosts, onResume, onMove, onResumeHost, onOpenCheck, onSettings }: PauseBannerProps) {
+export function PauseBanner({
+  paused,
+  pausedHosts,
+  busy,
+  checkHosts,
+  onResume,
+  onMove,
+  onResumeHost,
+  onOpenCheck,
+  onSettings,
+}: PauseBannerProps) {
   return (
     <div role="alert" className={`m-6 mb-0 flex flex-col gap-3 ${WARNING}`}>
       {paused.map((entry) => (
@@ -53,7 +77,11 @@ export function PauseBanner({ paused, pausedHosts, busy, checkHosts, onResume, o
           key={`host:${entry.host}`}
           entry={entry}
           onResume={() => onResumeHost(entry.host)}
-          onOpenCheck={entry.reason === 'download_browser_check' && checkHosts.has(entry.host) ? () => onOpenCheck(entry.host) : null}
+          onOpenCheck={
+            entry.reason === 'download_browser_check' && checkHosts.has(entry.host)
+              ? () => onOpenCheck(entry.host)
+              : null
+          }
         />
       ))}
     </div>
@@ -85,11 +113,18 @@ function HostPauseLine({ entry, onResume, onOpenCheck }: HostPauseLineProps) {
   return (
     <div role="group" aria-label={entry.host} className="flex items-center justify-between gap-4">
       <span className="min-w-0 break-words">
-        <span className="font-semibold">{entry.host}</span> {resumeError ?? check.resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
+        <span className="font-semibold">{entry.host}</span>{' '}
+        {resumeError ?? check.resumeError ?? JOB_ERROR_MESSAGES[entry.reason]}
       </span>
       <div className="flex shrink-0 items-center gap-2">
         {onOpenCheck !== null && (
-          <button type="button" className={BUTTON} title={OPEN_SITE_TITLE} disabled={check.resuming} onClick={() => void check.resume()}>
+          <button
+            type="button"
+            className={BUTTON}
+            title={OPEN_SITE_TITLE}
+            disabled={check.resuming}
+            onClick={() => void check.resume()}
+          >
             {OPEN_SITE_LABEL}
           </button>
         )}

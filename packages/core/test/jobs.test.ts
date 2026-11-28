@@ -72,17 +72,36 @@ async function setup() {
 describe('job use cases', () => {
   it('counts retry_wait and waiting_remote together as waiting', async () => {
     const { session, addJob } = await setup();
-    for (const s of ['queued', 'running', 'running', 'retry_wait', 'waiting_remote', 'failed', 'cancelled', 'succeeded'] as const) {
+    for (const s of [
+      'queued',
+      'running',
+      'running',
+      'retry_wait',
+      'waiting_remote',
+      'failed',
+      'cancelled',
+      'succeeded',
+    ] as const) {
       await addJob(s);
     }
-    expect(await countJobs(session)).toEqual({ queued: 1, running: 2, waiting: 2, failed: 1, cancelled: 1, succeeded: 1 });
+    expect(await countJobs(session)).toEqual({
+      queued: 1,
+      running: 2,
+      waiting: 2,
+      failed: 1,
+      cancelled: 1,
+      succeeded: 1,
+    });
   });
 
   it('lists jobs by status', async () => {
     const { session, addJob } = await setup();
     await addJob('queued');
     const failed = await addJob('failed');
-    expect(await listJobs(session, { limit: 10, offset: 0, status: 'failed' })).toMatchObject({ items: [{ id: failed }], total: 1 });
+    expect(await listJobs(session, { limit: 10, offset: 0, status: 'failed' })).toMatchObject({
+      items: [{ id: failed }],
+      total: 1,
+    });
   });
 
   it('cancels a pending job through the control and leaves a finished one alone', async () => {

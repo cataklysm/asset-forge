@@ -86,16 +86,18 @@ describe('addAssetSource', () => {
     const now = new Date('2026-05-01T12:00:00.000Z');
     const session: WorkspaceSession = { ...ctx.session, now: () => now };
     const detail = await addAssetSource(session, { assetId: ctx.asset.id, url: 'https://Example.org/a' });
-    expect(detail.sources).toEqual([{ id: expect.any(String), url: 'https://example.org/a', createdAt: now.toISOString() }]);
+    expect(detail.sources).toEqual([
+      { id: expect.any(String), url: 'https://example.org/a', createdAt: now.toISOString() },
+    ]);
     expect(detail.updatedAt).toBe(now.toISOString());
     expect((await ctx.db.assets.get(ctx.asset.id))!.updatedAt).toBe(now.toISOString());
   });
 
   it('answers not_found for an unknown asset', async () => {
     const ctx = await setup();
-    await expect(addAssetSource(ctx.session, { assetId: UNKNOWN_ID, url: 'https://example.org/' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      addAssetSource(ctx.session, { assetId: UNKNOWN_ID, url: 'https://example.org/' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('refuses an address the asset already has in its normalised form', async () => {
@@ -147,9 +149,9 @@ describe('removeAssetSource', () => {
 
   it('answers not_found for an unknown source and for a source of another asset', async () => {
     const ctx = await setup();
-    await expect(removeAssetSource(ctx.session, { assetId: ctx.asset.id, sourceId: UNKNOWN_ID })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      removeAssetSource(ctx.session, { assetId: ctx.asset.id, sourceId: UNKNOWN_ID }),
+    ).rejects.toBeInstanceOf(NotFoundError);
     const foreign = await addAssetSource(ctx.session, { assetId: ctx.other.id, url: 'https://example.org/' });
     await expect(
       removeAssetSource(ctx.session, { assetId: ctx.asset.id, sourceId: foreign.sources[0]!.id }),
@@ -178,7 +180,12 @@ describe('resolveAssetSourceUrl', () => {
   it('checks a stored address again before handing it out', async () => {
     const ctx = await setup();
     const id = '11111111-1111-4111-8111-111111111111';
-    await ctx.db.assetSources.insert({ id, assetId: ctx.asset.id, url: 'file:///x', createdAt: '2026-01-01T00:00:00.000Z' });
+    await ctx.db.assetSources.insert({
+      id,
+      assetId: ctx.asset.id,
+      url: 'file:///x',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
     await expect(resolveAssetSourceUrl(ctx.session, { assetId: ctx.asset.id, sourceId: id })).rejects.toBeInstanceOf(
       ValidationFailedError,
     );

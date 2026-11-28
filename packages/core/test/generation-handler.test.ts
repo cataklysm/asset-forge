@@ -3,7 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { IMAGE_GENERATE_JOB, type Generation, type StartGeneration } from '@assetforge/contracts';
 import { createAsset, generationNames, JobError, relocateFile, startGeneration } from '../src/index.js';
 import { trashForTest } from './fakes.js';
-import { expectJobError, failingStream, outcomeOf, RESULT_BYTES, runNext, setup, VENICE_ID, type Setup } from './generation-setup.js';
+import {
+  expectJobError,
+  failingStream,
+  outcomeOf,
+  RESULT_BYTES,
+  runNext,
+  setup,
+  VENICE_ID,
+  type Setup,
+} from './generation-setup.js';
 
 const edit = (fileId: string): StartGeneration => ({
   kind: 'edit',
@@ -45,7 +54,11 @@ describe('generationNames', () => {
 describe('the image.generate handler', () => {
   it('is a remote_api handler that fails an interrupted job with provider_outcome_unknown', async () => {
     const t = await setup();
-    expect(t.handler).toMatchObject({ resourceClass: 'remote_api', onInterrupted: 'fail', interruptedCode: 'provider_outcome_unknown' });
+    expect(t.handler).toMatchObject({
+      resourceClass: 'remote_api',
+      onInterrupted: 'fail',
+      interruptedCode: 'provider_outcome_unknown',
+    });
   });
 
   it('edits: sends the read image with the stored parameters and imports the answer as `face edit 1.png`', async () => {
@@ -54,7 +67,12 @@ describe('the image.generate handler', () => {
     const { error } = await runNext(t);
     expect(error).toBeNull();
     expect(t.images.reads).toEqual([
-      { absolutePath: `/memory/${t.file.relativePath}`, mimeType: 'image/png', sha256: t.file.sha256, sizeBytes: t.file.sizeBytes },
+      {
+        absolutePath: `/memory/${t.file.relativePath}`,
+        mimeType: 'image/png',
+        sha256: t.file.sha256,
+        sizeBytes: t.file.sizeBytes,
+      },
     ]);
     expect(t.providers.provider.edits).toEqual([
       {
@@ -67,7 +85,13 @@ describe('the image.generate handler', () => {
       },
     ]);
     const [result] = results(t);
-    expect(result).toMatchObject({ originalName: 'face edit 1.png', status: 'complete', mimeType: 'image/png', assetId: null, role: null });
+    expect(result).toMatchObject({
+      originalName: 'face edit 1.png',
+      status: 'complete',
+      mimeType: 'image/png',
+      assetId: null,
+      role: null,
+    });
     expect(t.storage.files.get(result!.relativePath)).toEqual(RESULT_BYTES);
     expect(await generation(t, g.id)).toMatchObject({
       status: 'succeeded',
@@ -83,7 +107,11 @@ describe('the image.generate handler', () => {
     await started(t, edit(t.file.id));
     await started(t, { kind: 'upscale', fileId: t.file.id, providerId: VENICE_ID, scale: 4 });
     for (let i = 0; i < 3; i++) expect((await runNext(t)).error).toBeNull();
-    expect(results(t).map((f) => f.originalName).sort()).toEqual(['face 4x.png', 'face edit 1.png', 'face edit 2.png']);
+    expect(
+      results(t)
+        .map((f) => f.originalName)
+        .sort(),
+    ).toEqual(['face 4x.png', 'face edit 1.png', 'face edit 2.png']);
     expect(t.providers.provider.upscales).toEqual([{ image: t.images.result, scale: 4 }]);
   });
 
@@ -140,7 +168,11 @@ describe('the image.generate handler', () => {
   it('fails file_unavailable when the input is in the trash', async () => {
     const t = await setup();
     const g = await started(t, edit(t.file.id));
-    const job = (await t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: t.session.now().toISOString() }))!;
+    const job = (await t.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [IMAGE_GENERATE_JOB],
+      now: t.session.now().toISOString(),
+    }))!;
     await trashForTest(t.session, [t.file.id]);
     const error = await t.handler.run(job, new AbortController().signal).catch((e: unknown) => e);
     expectJobError(error, 'file_unavailable');
@@ -185,7 +217,11 @@ describe('the image.generate handler', () => {
     };
     expectJobError((await runNext(t)).error, 'provider_content_refused');
     expect(results(t)).toEqual([]);
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_content_refused', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_content_refused',
+      outputs: [],
+    });
   });
 
   it('fails provider_outcome_unknown when the answer stream errors during the import, without an output', async () => {
@@ -196,7 +232,11 @@ describe('the image.generate handler', () => {
     // The import discards its row: no failed inbox row and no binary remain.
     expect(results(t)).toEqual([]);
     expect([...t.storage.files.keys()].filter((p) => p.startsWith('inbox/') && p !== t.file.relativePath)).toEqual([]);
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+      outputs: [],
+    });
   });
 
   it('stores a JPEG answer as `.jpg` with its mime type', async () => {
@@ -206,7 +246,9 @@ describe('the image.generate handler', () => {
     expect((await runNext(t)).error).toBeNull();
     const [result] = results(t);
     expect(result).toMatchObject({ originalName: 'face edit 1.jpg', mimeType: 'image/jpeg', status: 'complete' });
-    expect((await generation(t, g.id)).outputs).toEqual([expect.objectContaining({ fileId: result!.id, name: 'face edit 1.jpg' })]);
+    expect((await generation(t, g.id)).outputs).toEqual([
+      expect.objectContaining({ fileId: result!.id, name: 'face edit 1.jpg' }),
+    ]);
   });
 
   it('imports nothing for an answer that is not PNG, JPEG or WebP and fails provider_outcome_unknown', async () => {
@@ -217,7 +259,11 @@ describe('the image.generate handler', () => {
     expectJobError((await runNext(t)).error, 'provider_outcome_unknown');
     expect(stream.destroyed).toBe(true);
     expect(results(t)).toEqual([]);
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+      outputs: [],
+    });
   });
 
   it('fails generation_result_not_stored when the import fails for a storage reason, leaving no row', async () => {
@@ -226,7 +272,11 @@ describe('the image.generate handler', () => {
     t.storage.failNext('writeStream', new Error('ENOSPC'));
     expectJobError((await runNext(t)).error, 'generation_result_not_stored');
     expect(results(t)).toEqual([]);
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'generation_result_not_stored', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'generation_result_not_stored',
+      outputs: [],
+    });
   });
 
   it('fails generation_result_not_stored when the move after the checksum fails, leaving no row', async () => {
@@ -245,7 +295,11 @@ describe('the image.generate handler', () => {
     expectJobError((await runNext(t)).error, 'generation_result_not_stored');
     const [result] = results(t);
     expect(result).toMatchObject({ status: 'complete', assetId: null });
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'generation_result_not_stored', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'generation_result_not_stored',
+      outputs: [],
+    });
   });
 
   it('a crash between import and link leaves an unlinked complete inbox file and, after recovery, provider_outcome_unknown', async () => {
@@ -257,10 +311,18 @@ describe('the image.generate handler', () => {
       if (++calls === 1) throw new Error('SQLITE_IOERR');
       return succeed(r);
     };
-    const job = (await t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: t.session.now().toISOString() }))!;
+    const job = (await t.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [IMAGE_GENERATE_JOB],
+      now: t.session.now().toISOString(),
+    }))!;
     await expect(t.handler.run(job, new AbortController().signal)).rejects.toBeDefined();
     const [result] = results(t);
-    expect(result).toMatchObject({ status: 'complete', assetId: null, relativePath: expect.stringMatching(/^inbox\//) });
+    expect(result).toMatchObject({
+      status: 'complete',
+      assetId: null,
+      relativePath: expect.stringMatching(/^inbox\//),
+    });
     expect((await generation(t, g.id)).outputs).toEqual([]);
     // Recovery ends the running job with the handler's interrupted code.
     await t.db.jobs.finish(job.id, {
@@ -269,14 +331,22 @@ describe('the image.generate handler', () => {
       now: t.session.now().toISOString(),
       settled: () => t.handler.settled!(job, outcomeOf(new JobError(t.handler.interruptedCode!))),
     });
-    expect(await generation(t, g.id)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', outputs: [] });
+    expect(await generation(t, g.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+      outputs: [],
+    });
     expect(await t.db.generations.madeBy(result!.id)).toBeNull();
   });
 
   it('a late cancel after the result was committed leaves the generation succeeded', async () => {
     const t = await setup();
     const g = await started(t, edit(t.file.id));
-    const job = (await t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: t.session.now().toISOString() }))!;
+    const job = (await t.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [IMAGE_GENERATE_JOB],
+      now: t.session.now().toISOString(),
+    }))!;
     await t.handler.run(job, new AbortController().signal);
     await t.db.jobs.finish(job.id, {
       status: 'cancelled',
@@ -300,7 +370,11 @@ describe('the image.generate handler', () => {
   it('does not import an answer when the run was aborted before it', async () => {
     const t = await setup();
     await started(t, edit(t.file.id));
-    const job = (await t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: t.session.now().toISOString() }))!;
+    const job = (await t.db.jobs.claimNext({
+      resourceClass: 'remote_api',
+      types: [IMAGE_GENERATE_JOB],
+      now: t.session.now().toISOString(),
+    }))!;
     const abort = new AbortController();
     t.providers.provider.answer = async () => {
       abort.abort(new Error('cancelled'));

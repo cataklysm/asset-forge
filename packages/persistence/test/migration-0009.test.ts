@@ -50,9 +50,15 @@ const ROW_COUNTS = ['asset', 'file', 'file_move', 'file_tag', 'job'] as const;
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
-    s.prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)").run(uuid(3));
+    s.prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)").run(
+      uuid(3),
+    );
     s.prepare(
       `INSERT INTO asset (id, name, type_id, description, status, created_at, updated_at)
        VALUES (?, 'Pump', ?, '', 'draft', ?, ?)`,
@@ -73,7 +79,11 @@ function seed(): void {
        VALUES (?, 'restore', ?, ?, 'reference', ?)`,
     ).run(uuid(21), `assets/${uuid(10)}/references/${uuid(21)}_b.png`, uuid(10), TS);
     s.prepare("INSERT INTO tag (id, name, display_name, created_at) VALUES (?, 'metal', 'metal', ?)").run(uuid(40), TS);
-    s.prepare("INSERT INTO file_tag (file_id, tag_id, origin, created_at) VALUES (?, ?, 'manual', ?)").run(uuid(21), uuid(40), TS);
+    s.prepare("INSERT INTO file_tag (file_id, tag_id, origin, created_at) VALUES (?, ?, 'manual', ?)").run(
+      uuid(21),
+      uuid(40),
+      TS,
+    );
     s.prepare(
       `INSERT INTO job (id, type, resource_class, status, file_id, payload, dedupe_key, attempt, created_at, updated_at)
        VALUES (?, 'vision.analyze_file', 'local_gpu', 'queued', ?, '{"version":1}', ?, 0, ?, ?)`,
@@ -112,7 +122,11 @@ describe('migration 0009', () => {
     const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
     try {
       await expect(db.files.listPurgedIds()).resolves.toEqual([]);
-      expect(await db.files.get(uuid(21))).toMatchObject({ deletedAt: TS, trashedAssetId: uuid(10), tags: [{ name: 'metal' }] });
+      expect(await db.files.get(uuid(21))).toMatchObject({
+        deletedAt: TS,
+        trashedAssetId: uuid(10),
+        tags: [{ name: 'metal' }],
+      });
       expect(await db.fileMoves.list()).toEqual([expect.objectContaining({ fileId: uuid(21), kind: 'restore' })]);
       expect(await db.jobs.get(uuid(30))).toMatchObject({ status: 'queued', fileId: uuid(20) });
     } finally {
@@ -132,9 +146,9 @@ describe('migration 0009', () => {
       expect(check.pragma('foreign_key_list(file_purge)')).toEqual([]);
       check.prepare('INSERT INTO file_purge (file_id, purged_at) VALUES (?, ?)').run(uuid(99), TS);
       expect(check.pragma('foreign_key_check')).toEqual([]);
-      expect(() => check.prepare('INSERT INTO file_purge (file_id, purged_at) VALUES (?, ?)').run(uuid(99), TS)).toThrow(
-        /UNIQUE|PRIMARY KEY/,
-      );
+      expect(() =>
+        check.prepare('INSERT INTO file_purge (file_id, purged_at) VALUES (?, ?)').run(uuid(99), TS),
+      ).toThrow(/UNIQUE|PRIMARY KEY/);
     } finally {
       check.close();
     }

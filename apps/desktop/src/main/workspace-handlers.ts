@@ -60,8 +60,7 @@ export function createWorkspaceHandlers(
     'workspace:list': () => manager.list(),
     'workspace:current': async () => manager.current(),
     'workspace:create': (request) => lifecycle.run(() => manager.create(request)),
-    'workspace:resolveCreatePath': async (request) =>
-      join(request.parentPath, workspaceFolderName(request.name)),
+    'workspace:resolveCreatePath': async (request) => join(request.parentPath, workspaceFolderName(request.name)),
     'workspace:open': (request) => lifecycle.run(() => manager.open(request)),
     'workspace:remove': (request) => lifecycle.remove(request),
     'workspace:close': () => lifecycle.close(),

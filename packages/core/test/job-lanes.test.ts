@@ -24,7 +24,17 @@ async function addJob(
 ): Promise<string> {
   const id = `job-${++counter}`;
   await c.db.jobs.enqueue({
-    jobs: [{ id, type: r.type ?? ANALYZE_FILE_JOB, resourceClass: 'local_gpu', fileId: null, lane: r.lane, payload: r.payload, dedupeKey: null }],
+    jobs: [
+      {
+        id,
+        type: r.type ?? ANALYZE_FILE_JOB,
+        resourceClass: 'local_gpu',
+        fileId: null,
+        lane: r.lane,
+        payload: r.payload,
+        dedupeKey: null,
+      },
+    ],
     now: r.createdAt ?? T0,
   });
   const row = c.db.jobs.rows.find((j) => j.id === id)!;
@@ -45,7 +55,9 @@ describe('rerouteJobs', () => {
     const c = await setup();
     await addJob(c, { lane: A, payload: v4('Local') });
     const before = structuredClone(c.db.jobs.rows);
-    const error = await rerouteJobs(c.session, { fromLane: A, to: { id: A, name: 'Local' }, model: 'm' }).catch((e: unknown) => e);
+    const error = await rerouteJobs(c.session, { fromLane: A, to: { id: A, name: 'Local' }, model: 'm' }).catch(
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(InvalidOperationError);
     expect((error as Error).message).toBe('Jobs cannot be moved onto the same provider');
     expect(c.db.jobs.rows).toEqual(before);
@@ -54,12 +66,18 @@ describe('rerouteJobs', () => {
   it('moves the waiting jobs of a lane with the new name and model and counts them', async () => {
     const c = await setup();
     const queued = await addJob(c, { lane: A, payload: v3('propose') });
-    const waiting = await addJob(c, { lane: A, payload: { version: 2, model: 'old', mode: 'apply' }, status: 'retry_wait' });
+    const waiting = await addJob(c, {
+      lane: A,
+      payload: { version: 2, model: 'old', mode: 'apply' },
+      status: 'retry_wait',
+    });
     const running = await addJob(c, { lane: A, payload: v4('Local'), status: 'running' });
     const failed = await addJob(c, { lane: A, payload: v4('Local'), status: 'failed' });
     const other = await addJob(c, { lane: null, payload: v4('Local') });
 
-    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'qwen:9b' })).toEqual({ moved: 2 });
+    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'qwen:9b' })).toEqual({
+      moved: 2,
+    });
 
     const row = (id: string) => c.db.jobs.rows.find((j) => j.id === id)!;
     expect(row(queued)).toMatchObject({
@@ -80,14 +98,18 @@ describe('rerouteJobs', () => {
     expect(row(failed)).toMatchObject({ lane: A, status: 'failed' });
     expect(row(other).lane).toBeNull();
 
-    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'qwen:9b' })).toEqual({ moved: 0 });
+    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'qwen:9b' })).toEqual({
+      moved: 0,
+    });
   });
 
   it('moves a job whose payload does not parse but keeps its payload', async () => {
     const c = await setup();
     const future = { version: 5, model: 'old', mode: 'propose', prompt: PROMPT };
     const id = await addJob(c, { lane: A, payload: future });
-    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'm' })).toEqual({ moved: 1 });
+    expect(await rerouteJobs(c.session, { fromLane: A, to: { id: B, name: 'RunPod' }, model: 'm' })).toEqual({
+      moved: 1,
+    });
     expect(c.db.jobs.rows.find((j) => j.id === id)).toMatchObject({ lane: B, status: 'queued', payload: future });
   });
 
@@ -95,7 +117,9 @@ describe('rerouteJobs', () => {
     const c = await setup();
     const v1 = await addJob(c, { lane: null, payload: { version: 1 } });
     await addJob(c, { lane: A, payload: v4('Local') });
-    expect(await rerouteJobs(c.session, { fromLane: null, to: { id: B, name: 'RunPod' }, model: 'm' })).toEqual({ moved: 1 });
+    expect(await rerouteJobs(c.session, { fromLane: null, to: { id: B, name: 'RunPod' }, model: 'm' })).toEqual({
+      moved: 1,
+    });
     expect(c.db.jobs.rows.find((j) => j.id === v1)).toMatchObject({
       lane: B,
       payload: { version: 4, model: 'm', mode: 'apply', prompt: null, providerName: 'RunPod' },
@@ -106,7 +130,11 @@ describe('rerouteJobs', () => {
 describe('assignUnroutedJobs', () => {
   it('assigns the active jobs without a lane and keeps their model', async () => {
     const c = await setup();
-    const v2 = await addJob(c, { lane: null, payload: { version: 2, model: 'own', mode: 'propose' }, status: 'retry_wait' });
+    const v2 = await addJob(c, {
+      lane: null,
+      payload: { version: 2, model: 'own', mode: 'propose' },
+      status: 'retry_wait',
+    });
     const v1 = await addJob(c, { lane: null, payload: { version: 1 } });
     const done = await addJob(c, { lane: null, payload: v3(), status: 'succeeded' });
 
@@ -119,7 +147,10 @@ describe('assignUnroutedJobs', () => {
       attempt: 2,
       payload: { version: 4, model: 'own', mode: 'propose', prompt: null, providerName: 'Ollama' },
     });
-    expect(row(v1)).toMatchObject({ lane: A, payload: { version: 4, model: 'llava', mode: 'apply', prompt: null, providerName: 'Ollama' } });
+    expect(row(v1)).toMatchObject({
+      lane: A,
+      payload: { version: 4, model: 'llava', mode: 'apply', prompt: null, providerName: 'Ollama' },
+    });
     expect(row(done)).toMatchObject({ lane: null, payload: v3() });
   });
 

@@ -115,7 +115,9 @@ class SiteProfiles {
   save(input: SaveSiteProfile): SiteProfile {
     const parsed = SaveSiteProfileSchema.safeParse(input);
     if (!parsed.success) {
-      throw new ValidationFailedError(parsed.error.issues.some((issue) => issue.path[0] === 'url') ? NOT_A_WEB_ADDRESS : INVALID);
+      throw new ValidationFailedError(
+        parsed.error.issues.some((issue) => issue.path[0] === 'url') ? NOT_A_WEB_ADDRESS : INVALID,
+      );
     }
     const { id, url, ...fields } = parsed.data;
     const current = this.load();
@@ -130,10 +132,13 @@ class SiteProfiles {
       site = found;
     }
     const others = current.filter((profile) => profile.id !== id);
-    if (others.some((profile) => nameKey(profile.name) === nameKey(fields.name))) throw new ValidationFailedError(DUPLICATE_NAME);
+    if (others.some((profile) => nameKey(profile.name) === nameKey(fields.name)))
+      throw new ValidationFailedError(DUPLICATE_NAME);
     if (previous === null && current.length >= MAX_SITE_PROFILES) throw new InvalidOperationError(TOO_MANY);
     const saved = SiteProfileSchema.parse({ id: previous?.id ?? this.newId(), site, ...fields });
-    this.commit(previous === null ? [...current, saved] : current.map((profile) => (profile.id === saved.id ? saved : profile)));
+    this.commit(
+      previous === null ? [...current, saved] : current.map((profile) => (profile.id === saved.id ? saved : profile)),
+    );
     return saved;
   }
 

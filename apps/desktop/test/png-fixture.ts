@@ -35,7 +35,12 @@ export function pngOf(width: number, height: number, shade = 0): Buffer {
   const row = Buffer.alloc(1 + width * 3);
   for (let x = 0; x < width; x += 1) row.set([shade & 0xff, 0x80, 0x40], 1 + x * 3);
   const raw = Buffer.concat(Array.from({ length: height }, () => row));
-  return Buffer.concat([SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([
+    SIGNATURE,
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 /** Measures a PNG from its IHDR chunk, standing in for the media worker pool; null for anything else. */
@@ -47,7 +52,8 @@ export const pngProbe: ImageProbe = {
     } catch {
       return null;
     }
-    if (bytes.length < 24 || !bytes.subarray(0, 8).equals(SIGNATURE) || bytes.toString('ascii', 12, 16) !== 'IHDR') return null;
+    if (bytes.length < 24 || !bytes.subarray(0, 8).equals(SIGNATURE) || bytes.toString('ascii', 12, 16) !== 'IHDR')
+      return null;
     return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
   },
 };

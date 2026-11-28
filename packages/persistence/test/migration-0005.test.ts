@@ -43,7 +43,9 @@ async function createDatabaseUpTo0004(): Promise<void> {
 function seedAssetWithFile(): void {
   const seed = new Database(dbPath);
   try {
-    seed.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    seed
+      .prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)')
+      .run(uuid(1), 'ws', TS);
     seed.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
     seed
       .prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)")
@@ -82,14 +84,23 @@ describe('migration 0005', () => {
     const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
     try {
       const record = await db.files.get(uuid(20));
-      expect(record).toMatchObject({ id: uuid(20), originalName: 'a.png', status: 'complete', width: null, height: null });
+      expect(record).toMatchObject({
+        id: uuid(20),
+        originalName: 'a.png',
+        status: 'complete',
+        width: null,
+        height: null,
+      });
     } finally {
       await db.close();
     }
 
     const check = new Database(dbPath, { readonly: true });
     try {
-      expect(check.prepare('SELECT width, height FROM file WHERE id = ?').get(uuid(20))).toEqual({ width: null, height: null });
+      expect(check.prepare('SELECT width, height FROM file WHERE id = ?').get(uuid(20))).toEqual({
+        width: null,
+        height: null,
+      });
       expect(check.pragma('foreign_key_check')).toEqual([]);
     } finally {
       check.close();

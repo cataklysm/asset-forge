@@ -170,8 +170,14 @@ describe('site handlers', () => {
       message: 'Another login window is open',
     });
     // The profile of the open window can be neither changed nor deleted.
-    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toEqual({ code: 'invalid_operation', message: 'This profile is in use' });
-    expect(await error('sites:delete', { id: a.id })).toEqual({ code: 'invalid_operation', message: 'This profile is in use' });
+    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toEqual({
+      code: 'invalid_operation',
+      message: 'This profile is in use',
+    });
+    expect(await error('sites:delete', { id: a.id })).toEqual({
+      code: 'invalid_operation',
+      message: 'This profile is in use',
+    });
     sessions.login = null;
     expect(await h!.ok('sites:openLogin', { profileId: b.id, url: 'https://login.example.net/start' })).toEqual({});
     expect(sessions.opened[1]).toEqual({ profileId: b.id, url: 'https://login.example.net/start' });
@@ -180,7 +186,9 @@ describe('site handlers', () => {
   it('refuses a login address that is not a web address and an unknown profile', async () => {
     await harness({ workspace: false });
     const a = await h!.ok('sites:save', profileRequest());
-    expect(await error('sites:openLogin', { profileId: a.id, url: 'file:///etc/passwd' })).toMatchObject({ code: 'validation_failed' });
+    expect(await error('sites:openLogin', { profileId: a.id, url: 'file:///etc/passwd' })).toMatchObject({
+      code: 'validation_failed',
+    });
     expect(await error('sites:openLogin', { profileId: crypto.randomUUID() })).toMatchObject({ code: 'not_found' });
     expect(sessions.opened).toEqual([]);
   });
@@ -198,7 +206,9 @@ describe('site handlers', () => {
       message: 'A site import test is already running',
     });
     // A crawling profile is in use as well.
-    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toMatchObject({ message: 'This profile is in use' });
+    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toMatchObject({
+      message: 'This profile is in use',
+    });
     expect(await h!.ok('sites:crawlProgress', {})).toEqual({ pages: 0, files: 0, cancelling: false });
     expect(await h!.ok('sites:cancelCrawl', {})).toEqual({ cancelling: true });
     const answer = await first;
@@ -233,7 +243,9 @@ describe('site handlers', () => {
       code: 'validation_failed',
       message: "This address does not belong to the profile's site",
     });
-    expect(await error('sites:crawl', { profileId: a.id, url: 'not a url' })).toMatchObject({ code: 'validation_failed' });
+    expect(await error('sites:crawl', { profileId: a.id, url: 'not a url' })).toMatchObject({
+      code: 'validation_failed',
+    });
     expect(sessions.pages).toBe(1);
     expect(sessions.closed).toBe(1);
     expect(await h!.ok('sites:crawlProgress', {})).toBeNull();
@@ -253,12 +265,18 @@ describe('site handlers', () => {
       message: 'Run the test again',
     });
     const crawl = await h!.ok('sites:crawl', { profileId: a.id, url: GALLERY });
-    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({ code: 'no_workspace_open' });
+    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({
+      code: 'no_workspace_open',
+    });
     // A second crawl replaces the answer; a change of the profile drops it.
     const second = await h!.ok('sites:crawl', { profileId: a.id, url: GALLERY });
-    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({ message: 'Run the test again' });
+    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({
+      message: 'Run the test again',
+    });
     await h!.ok('sites:save', { ...profileRequest({ name: 'Renamed' }), id: a.id });
-    expect(await error('sites:import', { crawlId: second.crawlId, target: null })).toMatchObject({ message: 'Run the test again' });
+    expect(await error('sites:import', { crawlId: second.crawlId, target: null })).toMatchObject({
+      message: 'Run the test again',
+    });
   });
 
   it('queues site downloads with the filter of the crawl, adds the gallery as a source and refuses deleting the profile meanwhile', async () => {
@@ -267,7 +285,10 @@ describe('site handlers', () => {
     const crawl = await h!.ok('sites:crawl', { profileId: a.id, url: GALLERY });
     const [type] = await h!.ok('assetTypes:list', {});
     const asset = await h!.ok('assets:create', { name: 'A', typeId: type!.id });
-    const result = await h!.ok('sites:import', { crawlId: crawl.crawlId, target: { assetId: asset.id, role: 'reference' } });
+    const result = await h!.ok('sites:import', {
+      crawlId: crawl.crawlId,
+      target: { assetId: asset.id, role: 'reference' },
+    });
     expect(result.queued).toBe(2);
     const detail = await h!.ok('assets:get', { id: asset.id });
     expect(detail.sources.map((s) => s.url)).toEqual([GALLERY]);
@@ -287,7 +308,10 @@ describe('site handlers', () => {
     expect(limit('local_gpu', a.site)).toBeUndefined();
 
     // A second import of the same answer skips what is queued; the existing source does not fail it.
-    const again = await h!.ok('sites:import', { crawlId: crawl.crawlId, target: { assetId: asset.id, role: 'reference' } });
+    const again = await h!.ok('sites:import', {
+      crawlId: crawl.crawlId,
+      target: { assetId: asset.id, role: 'reference' },
+    });
     expect(again.queued).toBe(0);
     expect((await h!.ok('assets:get', { id: asset.id })).sources).toHaveLength(1);
 
@@ -307,7 +331,9 @@ describe('site handlers', () => {
     const crawl = await h!.ok('sites:crawl', { profileId: a.id, url: GALLERY });
     // A save drops the answer, so an import can never pair it with another filter.
     await h!.ok('sites:save', { ...profileRequest({ kinds: ['video'], minBytes: 0 }), id: a.id });
-    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({ message: 'Run the test again' });
+    expect(await error('sites:import', { crawlId: crawl.crawlId, target: null })).toMatchObject({
+      message: 'Run the test again',
+    });
     expect(await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).toEqual([]);
   });
 
@@ -327,13 +353,18 @@ describe('site handlers', () => {
    * @param code the error code the downloads end with
    * @returns the URLs of the failed jobs in the order they failed
    */
-  async function failDownloads(profileId: string, code: 'download_browser_check' | 'download_blocked'): Promise<string[]> {
+  async function failDownloads(
+    profileId: string,
+    code: 'download_browser_check' | 'download_blocked',
+  ): Promise<string[]> {
     const crawl = await h!.ok('sites:crawl', { profileId, url: GALLERY });
     await h!.ok('sites:import', { crawlId: crawl.crawlId, target: null });
     const urls: string[] = [];
     for (let i = 0; ; i++) {
       const now = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
-      const job = await h!.manager.read((s) => s.database.jobs.claimNext({ resourceClass: 'io', types: ['file.download'], now }));
+      const job = await h!.manager.read((s) =>
+        s.database.jobs.claimNext({ resourceClass: 'io', types: ['file.download'], now }),
+      );
       if (job === null) return urls;
       await h!.manager.read((s) => s.database.jobs.finish(job.id, { status: 'failed', errorCode: code, now }));
       urls.push((job.payload as { url: string }).url);
@@ -351,9 +382,14 @@ describe('site handlers', () => {
     expect(await h!.ok('sites:openCheck', { host: a.site })).toEqual({});
     expect(sessions.focused).toBe(1);
     const b = await h!.ok('sites:save', profileRequest({ name: 'Other', url: 'https://other.example.org/' }));
-    expect(await error('sites:openCheck', { host: b.site })).toEqual({ code: 'invalid_operation', message: 'Another login window is open' });
+    expect(await error('sites:openCheck', { host: b.site })).toEqual({
+      code: 'invalid_operation',
+      message: 'Another login window is open',
+    });
     expect(sessions.opened).toHaveLength(1);
-    expect(await error('sites:openCheck', { host: a.site, url: 'https://evil.example.net/' })).toMatchObject({ code: 'invalid_request' });
+    expect(await error('sites:openCheck', { host: a.site, url: 'https://evil.example.net/' })).toMatchObject({
+      code: 'invalid_request',
+    });
   });
 
   it('opens the start page of the site without a refused download, without a workspace or for another reason', async () => {
@@ -392,7 +428,10 @@ describe('site handlers', () => {
     const a = await h!.ok('sites:save', profileRequest());
     await failDownloads(a.id, 'download_browser_check');
     expect(await h!.ok('jobs:resumeHost', { host: a.site })).toEqual({});
-    expect((await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).map((job) => job.lane)).toEqual([a.site, a.site]);
+    expect((await h!.manager.read((s) => s.database.jobs.listByStatus('queued'))).map((job) => job.lane)).toEqual([
+      a.site,
+      a.site,
+    ]);
 
     // Other failures of the lane stay failed.
     await h!.ok('jobs:cancelAll', {});

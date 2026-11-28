@@ -67,8 +67,17 @@ describe('site profile store', () => {
 
   it('refuses a creation without a usable web address', () => {
     const s = store();
-    for (const url of ['example.com', 'ftp://example.com/', 'https://user:pw@example.com/', '', 'https://example.com./']) {
-      expect(errorOf(() => s.save(input({ url })))).toEqual({ code: 'validation_failed', message: 'This is not a web address' });
+    for (const url of [
+      'example.com',
+      'ftp://example.com/',
+      'https://user:pw@example.com/',
+      '',
+      'https://example.com./',
+    ]) {
+      expect(errorOf(() => s.save(input({ url })))).toEqual({
+        code: 'validation_failed',
+        message: 'This is not a web address',
+      });
     }
     const { url: _url, ...withoutUrl } = input();
     expect(errorOf(() => s.save(withoutUrl as SaveSiteProfile))?.code).toBe('validation_failed');
@@ -79,7 +88,10 @@ describe('site profile store', () => {
   it('refuses a single-label site but takes an IP literal', () => {
     const s = store();
     for (const url of ['https://localhost/', 'http://intranet:8080/g', 'https://www.intranet/']) {
-      expect(errorOf(() => s.save(input({ url })))).toEqual({ code: 'validation_failed', message: 'This is not a web address' });
+      expect(errorOf(() => s.save(input({ url })))).toEqual({
+        code: 'validation_failed',
+        message: 'This is not a web address',
+      });
     }
     expect(s.list()).toEqual([]);
     expect(s.save(input({ url: 'http://127.0.0.1:8080/g' })).site).toBe('127.0.0.1');
@@ -137,7 +149,10 @@ describe('site profile store', () => {
     const s = store();
     const good = s.save(input({ name: 'Good' }));
     const twin = { ...good, id: '11111111-2222-4333-8444-555555555555', name: 'good' };
-    writeFileSync(file(), JSON.stringify({ v: 1, profiles: [good, { ...good, id: 'not-a-uuid' }, twin, { ...good }, 7] }));
+    writeFileSync(
+      file(),
+      JSON.stringify({ v: 1, profiles: [good, { ...good, id: 'not-a-uuid' }, twin, { ...good }, 7] }),
+    );
     expect(store().list()).toEqual([good]);
     const copies = readdirSync(dir).filter((name) => name.startsWith(`${SITE_PROFILES_FILE}.corrupt-`));
     expect(copies).toHaveLength(1);

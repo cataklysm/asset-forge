@@ -104,7 +104,10 @@ function countsTowardPause(outcome: JobErrorCode | 'ok' | 'other'): outcome is J
  * @param resourceClass the class
  * @returns the class's map of values by lane
  */
-function lanesOf<T>(maps: Map<ResourceClass, Map<string | null, T>>, resourceClass: ResourceClass): Map<string | null, T> {
+function lanesOf<T>(
+  maps: Map<ResourceClass, Map<string | null, T>>,
+  resourceClass: ResourceClass,
+): Map<string | null, T> {
   let map = maps.get(resourceClass);
   if (!map) maps.set(resourceClass, (map = new Map()));
   return map;

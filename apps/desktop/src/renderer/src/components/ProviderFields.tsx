@@ -1,4 +1,12 @@
-import { PROVIDER_EXTRA_MAX, PARALLEL_REQUESTS_MAX, PARALLEL_REQUESTS_MIN, type ProviderKind, type ProviderList, type ProviderView, type Thinking } from '@assetforge/contracts';
+import {
+  PROVIDER_EXTRA_MAX,
+  PARALLEL_REQUESTS_MAX,
+  PARALLEL_REQUESTS_MIN,
+  type ProviderKind,
+  type ProviderList,
+  type ProviderView,
+  type Thinking,
+} from '@assetforge/contracts';
 import {
   API_KEY_LABEL,
   API_KEY_TITLE,

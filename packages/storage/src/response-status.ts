@@ -11,7 +11,8 @@ const BLOCKED_STATUSES = new Set([401, 403, 407, 451]);
 const NOT_FOUND_STATUSES = new Set([404, 410]);
 
 /** The shape of an IMF-fixdate, e.g. `Sun, 06 Nov 1994 08:49:37 GMT`. */
-const HTTP_DATE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+const HTTP_DATE =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 /** The headers of an answer that decide its failure besides the status. */
 export interface StatusHeaders {

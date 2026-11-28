@@ -40,10 +40,7 @@ export function onStorageUnreachable(listener: () => void): () => void {
  * @returns resolves to the channel's answer
  * @throws ApiError with the forwarded code, or `internal_error` when the invoke itself failed
  */
-export async function call<C extends IpcChannel>(
-  channel: C,
-  request: IpcRequest<C>,
-): Promise<IpcResponse<C>> {
+export async function call<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
   let result;
   try {
     result = await window.assetForge.invoke(channel, request);
@@ -62,8 +59,7 @@ const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   not_found: 'This item no longer exists.',
   directory_not_empty: 'The folder is not empty. Choose an empty folder for a new workspace.',
   workspace_not_found: 'No workspace was found in this folder.',
-  storage_unreachable:
-    'The folder cannot be reached. Check that the drive or network share is available.',
+  storage_unreachable: 'The folder cannot be reached. Check that the drive or network share is available.',
   validation_failed: 'This action is not possible for this file.',
   unsupported_format_version: 'This workspace was created by a newer version of AssetForge.',
   workspace_mismatch: 'The local database does not belong to this workspace.',

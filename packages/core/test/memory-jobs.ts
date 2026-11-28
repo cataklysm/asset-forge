@@ -20,8 +20,12 @@ const oldestFirst = (a: Job, b: Job) => cmp(a.createdAt, b.createdAt) || cmp(a.i
 
 const isActive = (status: JobStatus) => (ACTIVE_JOB_STATUSES as readonly JobStatus[]).includes(status);
 const isWaiting = (status: JobStatus) => status === 'queued' || status === 'retry_wait';
-const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
-const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) => !(excludeLanes ?? []).includes(r.lane);
+const errorOf = (code: JobErrorCode | null) => ({
+  errorCode: code,
+  errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code],
+});
+const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) =>
+  !(excludeLanes ?? []).includes(r.lane);
 
 /**
  * Snapshots `rows` and answers a function that puts them back as they were. Restores in place, so
@@ -95,17 +99,25 @@ export class InMemoryJobRepository implements JobRepository {
   }
 
   async latestForFile(fileId: string, type: string): Promise<Job | null> {
-    const newestFirst = this.rows.filter((r) => r.fileId === fileId && r.type === type).sort((a, b) => oldestFirst(b, a));
+    const newestFirst = this.rows
+      .filter((r) => r.fileId === fileId && r.type === type)
+      .sort((a, b) => oldestFirst(b, a));
     const chosen = newestFirst.find((r) => isActive(r.status)) ?? newestFirst[0];
     return chosen ? structuredClone(chosen) : null;
   }
 
   async activeForFile(fileId: string): Promise<Job[]> {
-    return this.rows.filter((r) => r.fileId === fileId && isActive(r.status)).sort(oldestFirst).map((r) => structuredClone(r));
+    return this.rows
+      .filter((r) => r.fileId === fileId && isActive(r.status))
+      .sort(oldestFirst)
+      .map((r) => structuredClone(r));
   }
 
   async listByStatus(status: JobStatus): Promise<Job[]> {
-    return this.rows.filter((r) => r.status === status).sort(oldestFirst).map((r) => structuredClone(r));
+    return this.rows
+      .filter((r) => r.status === status)
+      .sort(oldestFirst)
+      .map((r) => structuredClone(r));
   }
 
   async claimNext({
@@ -129,7 +141,14 @@ export class InMemoryJobRepository implements JobRepository {
       .filter(notExcluded(excludeLanes))
       .sort(oldestFirst)[0];
     if (!next) return null;
-    Object.assign(next, { status: 'running', attempt: next.attempt + 1, startedAt: now, runAfter: null, ...errorOf(null), updatedAt: now });
+    Object.assign(next, {
+      status: 'running',
+      attempt: next.attempt + 1,
+      startedAt: now,
+      runAfter: null,
+      ...errorOf(null),
+      updatedAt: now,
+    });
     return structuredClone(next);
   }
 
@@ -144,10 +163,20 @@ export class InMemoryJobRepository implements JobRepository {
 
   async finish(
     id: string,
-    r: { status: 'succeeded' | 'failed' | 'cancelled'; errorCode: JobErrorCode | null; now: string; settled?: () => void },
+    r: {
+      status: 'succeeded' | 'failed' | 'cancelled';
+      errorCode: JobErrorCode | null;
+      now: string;
+      settled?: () => void;
+    },
   ): Promise<boolean> {
     return this.inTransaction(() => {
-      const changed = this.fromRunning(id, { status: r.status, ...errorOf(r.errorCode), finishedAt: r.now, updatedAt: r.now });
+      const changed = this.fromRunning(id, {
+        status: r.status,
+        ...errorOf(r.errorCode),
+        finishedAt: r.now,
+        updatedAt: r.now,
+      });
       if (changed) r.settled?.();
       return changed;
     });
@@ -173,7 +202,12 @@ export class InMemoryJobRepository implements JobRepository {
   }
 
   async scheduleRetry(id: string, r: { errorCode: JobErrorCode; runAfter: string; now: string }): Promise<boolean> {
-    return this.fromRunning(id, { status: 'retry_wait', ...errorOf(r.errorCode), runAfter: r.runAfter, updatedAt: r.now });
+    return this.fromRunning(id, {
+      status: 'retry_wait',
+      ...errorOf(r.errorCode),
+      runAfter: r.runAfter,
+      updatedAt: r.now,
+    });
   }
 
   async setOutcome(id: string, r: { fileId: string | null; result: JobResult | null; now: string }): Promise<boolean> {
@@ -187,7 +221,10 @@ export class InMemoryJobRepository implements JobRepository {
   async holdLane(r: { types: readonly string[]; lane: string | null; until: string; now: string }): Promise<number> {
     const held = this.rows.filter(
       (row) =>
-        r.types.includes(row.type) && row.lane === r.lane && isWaiting(row.status) && (row.runAfter === null || row.runAfter < r.until),
+        r.types.includes(row.type) &&
+        row.lane === r.lane &&
+        isWaiting(row.status) &&
+        (row.runAfter === null || row.runAfter < r.until),
     );
     for (const row of held) Object.assign(row, { status: 'retry_wait', runAfter: r.until, updatedAt: r.now });
     return held.length;
@@ -195,10 +232,23 @@ export class InMemoryJobRepository implements JobRepository {
 
   async release(id: string, now: string): Promise<boolean> {
     const row = this.rows.find((r) => r.id === id);
-    return this.fromRunning(id, { status: 'queued', attempt: Math.max((row?.attempt ?? 0) - 1, 0), startedAt: null, updatedAt: now });
+    return this.fromRunning(id, {
+      status: 'queued',
+      attempt: Math.max((row?.attempt ?? 0) - 1, 0),
+      startedAt: null,
+      updatedAt: now,
+    });
   }
 
-  async cancelPending({ id, now, settled }: { id?: string; now: string; settled?: (job: Job) => void }): Promise<number> {
+  async cancelPending({
+    id,
+    now,
+    settled,
+  }: {
+    id?: string;
+    now: string;
+    settled?: (job: Job) => void;
+  }): Promise<number> {
     return this.inTransaction(() => {
       let n = 0;
       for (const row of this.rows) {
@@ -225,7 +275,8 @@ export class InMemoryJobRepository implements JobRepository {
   }): Promise<{ refused: boolean; cancelled: number }> {
     return this.inTransaction(() => {
       const ofFile = this.rows.filter((r) => r.fileId === fileId);
-      if (ofFile.some((r) => r.status === 'running' && refuseRunning.includes(r.type))) return { refused: true, cancelled: 0 };
+      if (ofFile.some((r) => r.status === 'running' && refuseRunning.includes(r.type)))
+        return { refused: true, cancelled: 0 };
       let cancelled = 0;
       for (const row of ofFile) {
         if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
@@ -237,7 +288,15 @@ export class InMemoryJobRepository implements JobRepository {
     });
   }
 
-  async retry({ id, now, excludeTypes }: { id?: string; now: string; excludeTypes?: readonly string[] }): Promise<number> {
+  async retry({
+    id,
+    now,
+    excludeTypes,
+  }: {
+    id?: string;
+    now: string;
+    excludeTypes?: readonly string[];
+  }): Promise<number> {
     const candidates = this.rows
       .filter((r) => (id === undefined || r.id === id) && (r.status === 'failed' || r.status === 'cancelled'))
       .filter((r) => !(excludeTypes ?? []).includes(r.type))
@@ -246,7 +305,15 @@ export class InMemoryJobRepository implements JobRepository {
     let n = 0;
     for (const row of candidates) {
       if (row.dedupeKey !== null && this.keyHeld(row.dedupeKey)) continue;
-      Object.assign(row, { status: 'queued', attempt: 0, ...errorOf(null), runAfter: null, startedAt: null, finishedAt: null, updatedAt: now });
+      Object.assign(row, {
+        status: 'queued',
+        attempt: 0,
+        ...errorOf(null),
+        runAfter: null,
+        startedAt: null,
+        finishedAt: null,
+        updatedAt: now,
+      });
       if (row.type === FILE_DOWNLOAD_JOB) row.fileId = null;
       this.results.delete(row.id);
       n++;
@@ -268,7 +335,12 @@ export class InMemoryJobRepository implements JobRepository {
     return result;
   }
 
-  async list(q: { limit: number; offset: number; status?: JobStatus; lane?: string }): Promise<{ items: JobView[]; total: number }> {
+  async list(q: {
+    limit: number;
+    offset: number;
+    status?: JobStatus;
+    lane?: string;
+  }): Promise<{ items: JobView[]; total: number }> {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
       .sort((a, b) => oldestFirst(b, a));
@@ -338,7 +410,12 @@ export class InMemoryJobRepository implements JobRepository {
     return moving.length;
   }
 
-  async assignLane(r: { type: string; lane: string; rewrite: (payload: unknown) => unknown | null; now: string }): Promise<number> {
+  async assignLane(r: {
+    type: string;
+    lane: string;
+    rewrite: (payload: unknown) => unknown | null;
+    now: string;
+  }): Promise<number> {
     const candidates = this.rows.filter((row) => row.type === r.type && row.lane === null && isActive(row.status));
     const changes = candidates
       .map((row) => ({ row, payload: r.rewrite(structuredClone(row.payload)) }))

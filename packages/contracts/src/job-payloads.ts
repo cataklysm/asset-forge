@@ -28,7 +28,10 @@ export const FileDownloadPayloadV2Schema = z.object({
   filter: SiteFilterSchema,
 });
 /** The payload of a `file.download` job, by version. */
-export const FileDownloadPayloadSchema = z.discriminatedUnion('v', [FileDownloadPayloadV1Schema, FileDownloadPayloadV2Schema]);
+export const FileDownloadPayloadSchema = z.discriminatedUnion('v', [
+  FileDownloadPayloadV1Schema,
+  FileDownloadPayloadV2Schema,
+]);
 /** The payload of a `file.download` job. */
 export type FileDownloadPayload = z.infer<typeof FileDownloadPayloadSchema>;
 

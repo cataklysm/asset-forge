@@ -430,7 +430,9 @@ describe('media protocol', () => {
   it('serves the preview and the original of a trashed file', async () => {
     const file = await importFile('pump.png', 'png bytes');
     await manager.exclusive((s) => s.database.files.setDimensions(file.id, { width: 4, height: 3 }));
-    const [item] = await manager.exclusive((s) => trashFiles(s, { wake: () => {}, cancel: async () => {}, cancelAll: async () => 0 }, [file.id]));
+    const [item] = await manager.exclusive((s) =>
+      trashFiles(s, { wake: () => {}, cancel: async () => {}, cancelAll: async () => 0 }, [file.id]),
+    );
     expect(item!.error).toBeNull();
 
     const seen = await inspect(await handleMediaRequest({ url: url(file.id), method: 'GET' }, realDeps()));

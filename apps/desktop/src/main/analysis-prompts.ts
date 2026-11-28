@@ -44,7 +44,9 @@ interface Stored {
 
 const StoredFileSchema = z.object({
   version: z.literal(1),
-  prompts: z.array(AnalysisPromptSchema).refine((prompts) => new Set(prompts.map((prompt) => prompt.id)).size === prompts.length),
+  prompts: z
+    .array(AnalysisPromptSchema)
+    .refine((prompts) => new Set(prompts.map((prompt) => prompt.id)).size === prompts.length),
   lastUsed: z.object({ tagging: z.uuid().nullable(), imagePrompt: z.uuid().nullable() }),
 });
 
@@ -152,12 +154,16 @@ class AnalysisPrompts {
     const samePurpose = current.prompts.filter((prompt) => prompt.purpose === fields.purpose && prompt.id !== id);
     // Names are trimmed by the schema, on save and on load.
     const key = fields.name.toLowerCase();
-    if (samePurpose.some((prompt) => prompt.name.toLowerCase() === key)) throw new InvalidOperationError(DUPLICATE_NAME);
-    if (id === undefined && samePurpose.length >= ANALYSIS_PROMPTS_PER_PURPOSE) throw new InvalidOperationError(TOO_MANY);
+    if (samePurpose.some((prompt) => prompt.name.toLowerCase() === key))
+      throw new InvalidOperationError(DUPLICATE_NAME);
+    if (id === undefined && samePurpose.length >= ANALYSIS_PROMPTS_PER_PURPOSE)
+      throw new InvalidOperationError(TOO_MANY);
 
     const saved: AnalysisPrompt = { id: id ?? this.options.newId(), ...fields };
     const prompts =
-      id === undefined ? [...current.prompts, saved] : current.prompts.map((prompt) => (prompt.id === id ? saved : prompt));
+      id === undefined
+        ? [...current.prompts, saved]
+        : current.prompts.map((prompt) => (prompt.id === id ? saved : prompt));
     this.commit({ ...current, prompts });
     return saved;
   }
@@ -201,7 +207,10 @@ class AnalysisPrompts {
    * @param id the prompt, if one was chosen
    * @returns the prompt
    */
-  resolve<P extends AnalysisPromptPurpose>(purpose: P, id: string | undefined): Extract<AnalysisPrompt, { purpose: P }> {
+  resolve<P extends AnalysisPromptPurpose>(
+    purpose: P,
+    id: string | undefined,
+  ): Extract<AnalysisPrompt, { purpose: P }> {
     type Result = Extract<AnalysisPrompt, { purpose: P }>;
     if (id !== undefined) {
       const prompt = this.find(id);

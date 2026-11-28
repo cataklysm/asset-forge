@@ -43,7 +43,14 @@ beforeEach(async () => {
   }
   await db.storages.ensurePrimary({ id: STORAGE, createdAt: TS });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
   await db.assets.insert(asset(PUMP, 'Pump'));
   await db.assets.insert(asset(MOTEL, 'Motel'));
@@ -72,7 +79,11 @@ async function addFile(
     kind: o.kind ?? 'image',
   });
   if (o.complete !== false) await db.files.markComplete(id, { sizeBytes: 1, sha256: SHA, width: null, height: null });
-  if (placement) await db.files.setPlacement(id, { relativePath: `assets/${placement.assetId}/${id}_${originalName}`, ...placement });
+  if (placement)
+    await db.files.setPlacement(id, {
+      relativePath: `assets/${placement.assetId}/${id}_${originalName}`,
+      ...placement,
+    });
   return id;
 }
 
@@ -116,7 +127,9 @@ const ids = async (scope: Parameters<WorkspaceDatabase['files']['list']>[0]['sco
 
 /** No row in the trash keeps an asset or a role. */
 function expectInvariant(): void {
-  expect(rows('select id from file where deleted_at is not null and (asset_id is not null or role is not null)')).toEqual([]);
+  expect(
+    rows('select id from file where deleted_at is not null and (asset_id is not null or role is not null)'),
+  ).toEqual([]);
 }
 
 describe('file trash repository', () => {
@@ -149,7 +162,8 @@ describe('file trash repository', () => {
 
   test("trashing removes the file name from the asset's search index", async () => {
     const f = await addFile('zebracrossing.png', { assetId: PUMP, role: 'reference' });
-    const found = async () => (await db.assets.list({ limit: 10, offset: 0, query: 'zebracrossing' })).items.map((a) => a.id);
+    const found = async () =>
+      (await db.assets.list({ limit: 10, offset: 0, query: 'zebracrossing' })).items.map((a) => a.id);
     await expect(found()).resolves.toEqual([PUMP]);
     await trash(f);
     await expect(found()).resolves.toEqual([]);
@@ -179,9 +193,20 @@ describe('file trash repository', () => {
 
   test('an inbox file is trashed with a null origin and restored to the inbox', async () => {
     const f = await addFile('f.png');
-    await expect(trash(f)).resolves.toMatchObject({ assetId: null, role: null, trashedAssetId: null, trashedRole: null, trashedAssetName: null });
+    await expect(trash(f)).resolves.toMatchObject({
+      assetId: null,
+      role: null,
+      trashedAssetId: null,
+      trashedRole: null,
+      trashedAssetName: null,
+    });
     await expect(ids({ kind: 'inbox' })).resolves.toEqual({ ids: [], total: 0 });
-    await expect(restore(f, null)).resolves.toMatchObject({ assetId: null, role: null, deletedAt: null, relativePath: `inbox/${f}/f.png` });
+    await expect(restore(f, null)).resolves.toMatchObject({
+      assetId: null,
+      role: null,
+      deletedAt: null,
+      relativePath: `inbox/${f}/f.png`,
+    });
     await expect(ids({ kind: 'inbox' })).resolves.toEqual({ ids: [f], total: 1 });
     expectInvariant();
   });
@@ -192,7 +217,11 @@ describe('file trash repository', () => {
     expect(handle.pragma('foreign_keys', { simple: true })).toBe(1);
     handle.prepare('delete from asset_search_map where asset_id = ?').run(MOTEL);
     handle.prepare('delete from asset where id = ?').run(MOTEL);
-    await expect(db.files.get(f)).resolves.toMatchObject({ trashedAssetId: null, trashedAssetName: null, trashedRole: 'reference' });
+    await expect(db.files.get(f)).resolves.toMatchObject({
+      trashedAssetId: null,
+      trashedAssetName: null,
+      trashedRole: 'reference',
+    });
   });
 
   test('scope all, inbox and asset exclude a trashed file; scope trash lists only trashed files, newest deletion first', async () => {
@@ -278,7 +307,15 @@ describe('file trash repository', () => {
       });
       await db.jobs.enqueue({
         jobs: [
-          { id: newId(), type: 'vision.analyze_file', resourceClass: 'local_gpu', fileId: f, lane: null, payload: { version: 1 }, dedupeKey: null },
+          {
+            id: newId(),
+            type: 'vision.analyze_file',
+            resourceClass: 'local_gpu',
+            fileId: f,
+            lane: null,
+            payload: { version: 1 },
+            dedupeKey: null,
+          },
         ],
         now: TS,
       });
@@ -307,8 +344,24 @@ describe('file trash repository', () => {
     const queued = newId();
     await db.jobs.enqueue({
       jobs: [
-        { id: running, type: 'image.generate', resourceClass: 'remote_api', fileId: f, lane: null, payload: { v: 1 }, dedupeKey: null },
-        { id: queued, type: 'image.generate', resourceClass: 'remote_api', fileId: f, lane: null, payload: { v: 1 }, dedupeKey: null },
+        {
+          id: running,
+          type: 'image.generate',
+          resourceClass: 'remote_api',
+          fileId: f,
+          lane: null,
+          payload: { v: 1 },
+          dedupeKey: null,
+        },
+        {
+          id: queued,
+          type: 'image.generate',
+          resourceClass: 'remote_api',
+          fileId: f,
+          lane: null,
+          payload: { v: 1 },
+          dedupeKey: null,
+        },
       ],
       now: TS,
     });
@@ -368,7 +421,10 @@ describe('file trash repository', () => {
     // A move row left behind by a restore whose commit failed.
     await db.fileMoves.begin({ ...trashMove(f), kind: 'restore' });
 
-    await expect(db.files.purge(f)).rejects.toMatchObject({ code: 'invalid_operation', message: 'The file is being moved' });
+    await expect(db.files.purge(f)).rejects.toMatchObject({
+      code: 'invalid_operation',
+      message: 'The file is being moved',
+    });
     await expect(db.files.get(f)).resolves.toMatchObject({ id: f });
     expect(countOf('file_tag', f)).toBe(1);
     expect(countOf('file_move', f)).toBe(1);
@@ -458,7 +514,11 @@ describe('trash invariant guards', () => {
     const f = await addFile('f.png', { assetId: PUMP, role: 'texture' });
     await trash(f);
     await expectRefusedCommit(trashMove(f, '2026-04-01T00:00:00.000Z'), 'The file is already in the trash');
-    expect(await db.files.get(f)).toMatchObject({ trashedAssetId: PUMP, trashedRole: 'texture', deletedAt: '2026-02-01T00:00:00.000Z' });
+    expect(await db.files.get(f)).toMatchObject({
+      trashedAssetId: PUMP,
+      trashedRole: 'texture',
+      deletedAt: '2026-02-01T00:00:00.000Z',
+    });
   });
 
   test('a restore commit on a live file is refused', async () => {
@@ -491,8 +551,14 @@ describe('trash invariant guards', () => {
     // An interrupted trash move finds a live row, an interrupted restore a trashed one.
     const live = await addFile('live.png', { assetId: PUMP, role: 'texture' });
     await db.fileMoves.begin(trashMove(live));
-    await expect(db.fileMoves.commit(live)).resolves.toMatchObject({ deletedAt: '2026-02-01T00:00:00.000Z', trashedAssetId: PUMP });
-    await expect(restore(live, { assetId: PUMP, role: 'texture' })).resolves.toMatchObject({ assetId: PUMP, deletedAt: null });
+    await expect(db.fileMoves.commit(live)).resolves.toMatchObject({
+      deletedAt: '2026-02-01T00:00:00.000Z',
+      trashedAssetId: PUMP,
+    });
+    await expect(restore(live, { assetId: PUMP, role: 'texture' })).resolves.toMatchObject({
+      assetId: PUMP,
+      deletedAt: null,
+    });
     expect(moveRow(live)).toBeUndefined();
     expectInvariant();
   });

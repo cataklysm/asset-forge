@@ -101,7 +101,9 @@ export function fetchHop(target: HopTarget, bounds: HopBounds): Promise<HopOutco
       }
       const verdict = judgeResponse(response, bounds.limits.maxBytes);
       if (verdict.kind === 'file') {
-        settle(() => resolve({ kind: 'file', file: responseFile(request, response, target.url, verdict.contentLength, bounds) }));
+        settle(() =>
+          resolve({ kind: 'file', file: responseFile(request, response, target.url, verdict.contentLength, bounds) }),
+        );
         return;
       }
       response.destroy();

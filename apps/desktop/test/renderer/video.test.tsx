@@ -140,7 +140,9 @@ it('formats a duration as m:ss, and as h:mm:ss from one hour', () => {
 });
 
 it('the video URL is the media protocol route of the file', () => {
-  expect(videoUrl('00000000-0000-4000-8000-000000000001')).toBe('assetforge-media://video/00000000-0000-4000-8000-000000000001');
+  expect(videoUrl('00000000-0000-4000-8000-000000000001')).toBe(
+    'assetforge-media://video/00000000-0000-4000-8000-000000000001',
+  );
 });
 
 it('a video plays in the video stage instead of the image stage, with the poster and the fixed element options', () => {
@@ -169,7 +171,11 @@ it('the toolbar of a video has only the fullscreen button', () => {
   install();
   render(<Harness file={videoRecord({ width: 640, height: 360 })} />);
   const toolbar = screen.getByRole('toolbar', { name: 'Viewer' });
-  expect(within(toolbar).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Fullscreen']);
+  expect(
+    within(toolbar)
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? b.textContent),
+  ).toEqual(['Fullscreen']);
 });
 
 it('a video the element cannot play shows the message and Open externally', async () => {
@@ -181,7 +187,9 @@ it('a video the element cannot play shows the message and Open externally', asyn
   expect(within(stage).getByText('This video cannot be played here')).toBeTruthy();
   expect(stage.querySelector('video')).toBeNull();
   await userEvent.setup().click(within(stage).getByRole('button', { name: 'Open externally' }));
-  expect(api.calls.filter((c) => c.channel === 'files:openExternal').map((c) => c.request)).toEqual([{ fileId: file.id }]);
+  expect(api.calls.filter((c) => c.channel === 'files:openExternal').map((c) => c.request)).toEqual([
+    { fileId: file.id },
+  ]);
 });
 
 it('a failing Open externally shows its message in the dialog', async () => {
@@ -198,7 +206,15 @@ it('a failing Open externally shows its message in the dialog', async () => {
 
 it('Open externally in the error state is disabled for a file that cannot be opened', () => {
   install();
-  render(<Harness file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), deletedAt: '2026-11-27T00:00:00.000Z', openable: false })} />);
+  render(
+    <Harness
+      file={trashedRecord({
+        ...videoRecord({ width: 640, height: 360 }),
+        deletedAt: '2026-11-27T00:00:00.000Z',
+        openable: false,
+      })}
+    />,
+  );
   fireEvent.error(videoElement());
   expect((screen.getByRole('button', { name: 'Open externally' }) as HTMLButtonElement).disabled).toBe(true);
 });
@@ -208,7 +224,9 @@ it('the details show the dimensions and the duration when known', () => {
   const { unmount } = render(<Harness file={videoRecord({ width: 1920, height: 1080, durationMs: 65_400 })} />);
   expect(detailValue('Dimensions')).toBe('1920 × 1080 px');
   expect(detailValue('Duration')).toBe('1:05');
-  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map((dt) => dt.textContent);
+  const labels = [...screen.getByRole('region', { name: 'Details' }).querySelectorAll('dt')].map(
+    (dt) => dt.textContent,
+  );
   expect(labels).toEqual(['Filename', 'Format', 'Dimensions', 'Duration', 'Size', 'Imported']);
   unmount();
 
@@ -343,7 +361,9 @@ it('Delete in the viewer deletes the shown file, and asks to purge a trashed one
   install();
   const onDelete = vi.fn();
   const onPurge = vi.fn();
-  const first = render(<Harness file={videoRecord({ width: 640, height: 360 })} actions={{ ...ACTIONS, onDelete, onPurge }} />);
+  const first = render(
+    <Harness file={videoRecord({ width: 640, height: 360 })} actions={{ ...ACTIONS, onDelete, onPurge }} />,
+  );
   fireEvent.keyDown(videoElement(), { key: 'Delete' });
   await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
   expect(onPurge).not.toHaveBeenCalled();
@@ -391,7 +411,15 @@ it('the video keeps its source under StrictMode, whose simulated unmount leaves 
 
 it('a trashed video that could otherwise be opened gets no Open externally', () => {
   install();
-  render(<Harness file={trashedRecord({ ...videoRecord({ width: 640, height: 360 }), deletedAt: '2026-11-27T00:00:00.000Z', openable: true })} />);
+  render(
+    <Harness
+      file={trashedRecord({
+        ...videoRecord({ width: 640, height: 360 }),
+        deletedAt: '2026-11-27T00:00:00.000Z',
+        openable: true,
+      })}
+    />,
+  );
   fireEvent.error(videoElement());
   expect((screen.getByRole('button', { name: 'Open externally' }) as HTMLButtonElement).disabled).toBe(true);
 });
@@ -422,10 +450,13 @@ function ListHarness({ files, start = 0 }: { files: FileRecord[]; start?: number
   );
 }
 
-
 it('keys stay alive after stepping video to video by keyboard', () => {
   install();
-  const files = [videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 })];
+  const files = [
+    videoRecord({ width: 640, height: 360 }),
+    videoRecord({ width: 640, height: 360 }),
+    videoRecord({ width: 640, height: 360 }),
+  ];
   render(<ListHarness files={files} />);
   const first = videoElement();
   // jsdom does not count a video with controls as focusable, as Chromium does.
@@ -449,7 +480,11 @@ it('keys stay alive after stepping video to video by keyboard', () => {
 
 it('keys stay alive after stepping image to video to image by keyboard', () => {
   install();
-  const files = [fileRecord({ width: 100, height: 100 }), videoRecord({ width: 640, height: 360 }), fileRecord({ width: 100, height: 100 })];
+  const files = [
+    fileRecord({ width: 100, height: 100 }),
+    videoRecord({ width: 640, height: 360 }),
+    fileRecord({ width: 100, height: 100 }),
+  ];
   render(<ListHarness files={files} />);
   screen.getByRole('region', { name: 'Image' }).focus();
   fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
@@ -483,7 +518,11 @@ it('a file change does not take focus from an element outside the stage', () => 
 
 it('stepping on drops a failed state and the playback, video to video and video to image', () => {
   install();
-  const files = [videoRecord({ width: 640, height: 360 }), videoRecord({ width: 640, height: 360 }), fileRecord({ width: 100, height: 100 })];
+  const files = [
+    videoRecord({ width: 640, height: 360 }),
+    videoRecord({ width: 640, height: 360 }),
+    fileRecord({ width: 100, height: 100 }),
+  ];
   render(<ListHarness files={files} />);
   fireEvent.error(videoElement());
   expect(screen.getByText('This video cannot be played here')).toBeTruthy();
@@ -530,7 +569,8 @@ it('a video offers neither analysis nor the studio, but Open externally and Use 
   }).map((item) => item.label);
   expect(labels).toContain('Open externally');
   expect(labels).toContain('Use as cover');
-  for (const absent of ['Analyse', 'Image to prompt', 'Generate from image', 'Upscale 2×', 'Upscale 4×']) expect(labels).not.toContain(absent);
+  for (const absent of ['Analyse', 'Image to prompt', 'Generate from image', 'Upscale 2×', 'Upscale 4×'])
+    expect(labels).not.toContain(absent);
 });
 
 it('a video tile shows its frame with the film icon, or the format label with the icon', () => {

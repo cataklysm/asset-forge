@@ -50,6 +50,9 @@ export function useStartGuard(): StartGuard {
       runGuarded(inFlight, setStartingKeys, `${kind}:${fileId}`, start),
     [],
   );
-  const starting = useCallback((fileId: string, kind: StartKind) => startingKeys.has(`${kind}:${fileId}`), [startingKeys]);
+  const starting = useCallback(
+    (fileId: string, kind: StartKind) => startingKeys.has(`${kind}:${fileId}`),
+    [startingKeys],
+  );
   return { starting, guardStart };
 }

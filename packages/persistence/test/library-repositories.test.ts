@@ -2,7 +2,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { Asset, AssetType, FileKind, FileRole, FileScope, Project, ProjectAssignment } from '@assetforge/contracts';
+import type {
+  Asset,
+  AssetType,
+  FileKind,
+  FileRole,
+  FileScope,
+  Project,
+  ProjectAssignment,
+} from '@assetforge/contracts';
 import {
   BUILT_IN_ASSET_TYPES,
   InvalidOperationError,
@@ -130,7 +138,11 @@ describe('asset repository', () => {
   test('update returns null for an unknown id and the changed row otherwise', async () => {
     const { prop } = await seed();
     await expect(db.assets.update(uuid(9), { name: 'x', updatedAt: TS })).resolves.toBeNull();
-    const updated = await db.assets.update(uuid(1), { typeId: prop, status: 'in_review', updatedAt: '2026-02-01T00:00:00.000Z' });
+    const updated = await db.assets.update(uuid(1), {
+      typeId: prop,
+      status: 'in_review',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    });
     expect(updated).toEqual({
       ...asset(1, 'Gas station', prop, 'in_review'),
       updatedAt: '2026-02-01T00:00:00.000Z',
@@ -309,7 +321,14 @@ describe('file dimensions', () => {
   test('setDimensions stores the size and returns the record with its tags', async () => {
     await pending(1);
     await db.files.markComplete(fileId(1), { sizeBytes: 5, sha256: 'a'.repeat(64), width: null, height: null });
-    await db.tags.addToFile({ fileId: fileId(1), name: 'rust', displayName: 'Rust', origin: 'manual', newId: uuid(950), now: TS });
+    await db.tags.addToFile({
+      fileId: fileId(1),
+      name: 'rust',
+      displayName: 'Rust',
+      origin: 'manual',
+      newId: uuid(950),
+      now: TS,
+    });
     const record = await db.files.setDimensions(fileId(1), { width: 640, height: 480 });
     expect([record.width, record.height]).toEqual([640, 480]);
     expect(record.tags.map((t) => t.name)).toEqual(['rust']);
@@ -393,8 +412,16 @@ describe('file placement and moves', () => {
       importedAt: '2026-01-05T00:00:00.000Z',
       kind: 'video',
     });
-    await expect(db.files.get(fileId(1))).resolves.toMatchObject({ previewable: true, thumbnail: true, openable: true });
-    await expect(db.files.get(fileId(4))).resolves.toMatchObject({ previewable: false, thumbnail: false, openable: false });
+    await expect(db.files.get(fileId(1))).resolves.toMatchObject({
+      previewable: true,
+      thumbnail: true,
+      openable: true,
+    });
+    await expect(db.files.get(fileId(4))).resolves.toMatchObject({
+      previewable: false,
+      thumbnail: false,
+      openable: false,
+    });
     await expect(db.files.get(fileId(5))).resolves.toMatchObject({
       previewable: false,
       thumbnail: true,
@@ -467,7 +494,11 @@ describe('file placement and moves', () => {
 
   test('lists files by scope', async () => {
     await seed();
-    await db.files.setPlacement(fileId(1), { relativePath: 'assets/a/references/f1.png', assetId: uuid(1), role: 'reference' });
+    await db.files.setPlacement(fileId(1), {
+      relativePath: 'assets/a/references/f1.png',
+      assetId: uuid(1),
+      role: 'reference',
+    });
     await db.files.setPlacement(fileId(2), { relativePath: 'assets/b/models/f2.png', assetId: uuid(2), role: 'model' });
     const page = { limit: 10, offset: 0 };
     const all = await db.files.list({ ...page, scope: { kind: 'all' } });
@@ -498,7 +529,11 @@ describe('file placement and moves', () => {
   test('a file cannot reference an unknown asset', async () => {
     await seed();
     await expect(
-      db.files.setPlacement(fileId(1), { relativePath: 'assets/x/references/f1.png', assetId: uuid(9), role: 'reference' }),
+      db.files.setPlacement(fileId(1), {
+        relativePath: 'assets/x/references/f1.png',
+        assetId: uuid(9),
+        role: 'reference',
+      }),
     ).rejects.toThrow(/FOREIGN KEY/i);
     await expect(db.fileMoves.begin(move(1, { targetAssetId: uuid(9) }))).rejects.toThrow(/FOREIGN KEY/i);
     await expect(db.files.get(fileId(1))).resolves.toMatchObject({ assetId: null, relativePath: 'inbox/f1.png' });
@@ -546,7 +581,9 @@ describe('asset relations', () => {
   test('insert returns false for an existing relation', async () => {
     await seed();
     await expect(db.relations.insert(relation(1, 2))).resolves.toBe(true);
-    await expect(db.relations.insert({ ...relation(1, 2), createdAt: '2027-01-01T00:00:00.000Z' })).resolves.toBe(false);
+    await expect(db.relations.insert({ ...relation(1, 2), createdAt: '2027-01-01T00:00:00.000Z' })).resolves.toBe(
+      false,
+    );
     await expect(db.relations.insert(relation(1, 2, 'part_of'))).resolves.toBe(true);
     await expect(db.relations.insert(relation(2, 1))).resolves.toBe(true);
     const outgoing = (await db.relations.listForAsset(uuid(1))).filter((r) => r.direction === 'outgoing');
@@ -615,7 +652,8 @@ describe('asset repository filters', () => {
         importedAt: TS,
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+      if (status === 'complete')
+        await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (status === 'failed') await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath, assetId, role });
       return id;
@@ -706,7 +744,15 @@ describe('file repository filters', () => {
       const relativePath = `inbox/${id}/${originalName}`;
       // Later files are newer, so the newest-first order is the reverse of insertion.
       const importedAt = new Date(Date.UTC(2026, 0, 1, 0, minute++)).toISOString();
-      await db.files.insertPending({ id, storageId: uuid(900), originalName, relativePath, mimeType: 'image/png', importedAt, kind });
+      await db.files.insertPending({
+        id,
+        storageId: uuid(900),
+        originalName,
+        relativePath,
+        mimeType: 'image/png',
+        importedAt,
+        kind,
+      });
       await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       if (placement) await db.files.setPlacement(id, { relativePath: `assets/${id}`, ...placement });
       return id;
@@ -791,9 +837,14 @@ describe('file repository filters', () => {
     await tagFile(b, 'red');
 
     await expect(names({ scope: inbox, ids: [a, b] })).resolves.toEqual(['b.png', 'a.png']);
-    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [a, b] })).resolves.toMatchObject({ total: 2 });
+    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [a, b] })).resolves.toMatchObject({
+      total: 2,
+    });
     await expect(names({ scope: inbox, ids: [a, b], tagNames: ['red'] })).resolves.toEqual(['b.png']);
-    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [placed] })).resolves.toEqual({ items: [], total: 0 });
+    await expect(db.files.list({ limit: 60, offset: 0, scope: inbox, ids: [placed] })).resolves.toEqual({
+      items: [],
+      total: 0,
+    });
     await expect(names({ scope: tree, ids: [a, placed] })).resolves.toEqual(['placed.png']);
   });
 });
@@ -838,7 +889,8 @@ describe('project repository filters', () => {
         importedAt: TS,
         kind,
       });
-      if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+      if (status === 'complete')
+        await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
       else await db.files.markFailed(id, 'x');
       await db.files.setPlacement(id, { relativePath, assetId, role: 'reference' });
       return id;

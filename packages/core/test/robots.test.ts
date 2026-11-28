@@ -50,9 +50,13 @@ describe('robots rules', () => {
   });
 
   it('lets the longest match win and Allow win a tie', () => {
-    const text = ['User-agent: *', 'Disallow: /gallery', 'Allow: /gallery/public', 'Disallow: /same', 'Allow: /same'].join(
-      '\n',
-    );
+    const text = [
+      'User-agent: *',
+      'Disallow: /gallery',
+      'Allow: /gallery/public',
+      'Disallow: /same',
+      'Allow: /same',
+    ].join('\n');
     expect(allows(text, 'https://a.test/gallery/secret')).toBe(false);
     expect(allows(text, 'https://a.test/gallery/public/1')).toBe(true);
     expect(allows(text, 'https://a.test/same')).toBe(true);
@@ -79,9 +83,13 @@ describe('robots rules', () => {
   });
 
   it('ignores comments, unknown lines and rules before any group', () => {
-    const text = ['Disallow: /early', '# User-agent: *', 'Sitemap: https://a.test/s.xml', 'User-agent: * # all', 'Disallow: /late # c'].join(
-      '\r\n',
-    );
+    const text = [
+      'Disallow: /early',
+      '# User-agent: *',
+      'Sitemap: https://a.test/s.xml',
+      'User-agent: * # all',
+      'Disallow: /late # c',
+    ].join('\r\n');
     expect(allows(text, 'https://a.test/early')).toBe(true);
     expect(allows(text, 'https://a.test/late')).toBe(false);
   });
@@ -157,7 +165,14 @@ describe('createRobotsReader', () => {
   });
 
   it('answers unavailable for any other failure', async () => {
-    for (const failure of ['unreachable', 'unavailable', 'blocked', 'rejected', 'address_refused', 'throttled'] as const) {
+    for (const failure of [
+      'unreachable',
+      'unavailable',
+      'blocked',
+      'rejected',
+      'address_refused',
+      'throttled',
+    ] as const) {
       const remote = remoteOf(() => new RemoteFileError(failure));
       await expect(createRobotsReader(remote)('https://a.test', signal())).resolves.toEqual({ kind: 'unavailable' });
     }

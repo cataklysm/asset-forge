@@ -40,12 +40,14 @@ interface Lineage {
  */
 function distinctOutputs(results: readonly Generation[]): GenerationFile[] {
   const seen = new Set<string>();
-  return results.flatMap((generation) => generation.outputs).filter((output) => {
-    const key = output.fileId ?? `name:${output.name}:${output.sha256}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return results
+    .flatMap((generation) => generation.outputs)
+    .filter((output) => {
+      const key = output.fileId ?? `name:${output.name}:${output.sha256}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 /**
@@ -173,7 +175,10 @@ function AttachedPrompt({ generation }: { generation: Generation }) {
             {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
           </span>
         ) : (
-          <Link title={promptValuesTitle(generation.promptVariables)} onFollow={() => studio.openPrompt(generation.promptId!)}>
+          <Link
+            title={promptValuesTitle(generation.promptVariables)}
+            onFollow={() => studio.openPrompt(generation.promptId!)}
+          >
             {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
           </Link>
         )}

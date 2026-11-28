@@ -11,7 +11,12 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
-import { MODEL_NOT_LISTED, PROMPTS_LOAD_FAILED, PROVIDER_STATE_LABELS, SETTINGS_LOAD_FAILED } from '../../src/renderer/src/labels';
+import {
+  MODEL_NOT_LISTED,
+  PROMPTS_LOAD_FAILED,
+  PROVIDER_STATE_LABELS,
+  SETTINGS_LOAD_FAILED,
+} from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider, useProviders, type ProvidersState } from '../../src/renderer/src/provider-context';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import {
@@ -55,7 +60,11 @@ function oneProvider(entry: ProviderView | null, models: ListModelsResult) {
     : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: models }).handlers;
 }
 
-function install(entry: ProviderView | null = CONFIGURED, models: ListModelsResult = MODELS, handlers: FakeHandlers = {}) {
+function install(
+  entry: ProviderView | null = CONFIGURED,
+  models: ListModelsResult = MODELS,
+  handlers: FakeHandlers = {},
+) {
   return installFakeApi({
     ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
     ...oneProvider(entry, models),
@@ -101,7 +110,13 @@ const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as H
 
 async function ready() {
   await waitFor(() => expect(modelSelect().value).toBe('vision-a'));
-  await waitFor(() => expect(within(modelSelect()).getAllByRole('option').map((o) => o.textContent)).toContain('vision-b'));
+  await waitFor(() =>
+    expect(
+      within(modelSelect())
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toContain('vision-b'),
+  );
   await waitFor(() => expect(promptSelect().value).not.toBe(''));
 }
 
@@ -230,7 +245,13 @@ it('Settings is disabled with the given reason while the settings screen cannot 
   render(
     <ProviderSettingsProvider>
       <AnalysisPromptsProvider>
-        <PromptDialog open file={FILE} onClose={onClose} onOpenSettings={onOpenSettings} settingsBlocked="Import in progress" />
+        <PromptDialog
+          open
+          file={FILE}
+          onClose={onClose}
+          onOpenSettings={onOpenSettings}
+          settingsBlocked="Import in progress"
+        />
       </AnalysisPromptsProvider>
     </ProviderSettingsProvider>,
   );
@@ -388,7 +409,11 @@ it('no selectable model: Generate is disabled with a title and Settings is offer
   install({ ...CONFIGURED, promptModel: null }, { ok: true, models: [{ name: 'text-only', vision: false }] });
   render(ui({}));
   await waitFor(() =>
-    expect(within(modelSelect()).getAllByRole('option').map((o) => o.textContent)).toContain('text-only'),
+    expect(
+      within(modelSelect())
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toContain('text-only'),
   );
   expect(button('Generate').disabled).toBe(true);
   expect(button('Generate').title).not.toBe('');
@@ -426,14 +451,23 @@ it('the prompt select lists the Image to prompt prompts only, below the model se
 });
 
 it('preselects the Image to prompt prompt used last', async () => {
-  install(CONFIGURED, MODELS, fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DEFAULT.id, imagePrompt: IMAGE_SHORT.id } }).handlers);
+  install(
+    CONFIGURED,
+    MODELS,
+    fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DEFAULT.id, imagePrompt: IMAGE_SHORT.id } })
+      .handlers,
+  );
   render(ui({}));
   await ready();
   expect(promptSelect().value).toBe(IMAGE_SHORT.id);
 });
 
 it('preselects the first Image to prompt prompt when the one used last is gone', async () => {
-  install(CONFIGURED, MODELS, fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: null, imagePrompt: nextId() } }).handlers);
+  install(
+    CONFIGURED,
+    MODELS,
+    fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: null, imagePrompt: nextId() } }).handlers,
+  );
   render(ui({}));
   await ready();
   expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
@@ -512,7 +546,11 @@ it('a Generate refused with not_found shows the error and falls back to an exist
   expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
   await waitFor(() => expect(promptSelect().value).toBe(IMAGE_DEFAULT.id));
   expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
-  expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Describe']);
+  expect(
+    within(promptSelect())
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['Describe']);
 });
 
 describe('provider choice', () => {
@@ -532,9 +570,16 @@ describe('provider choice', () => {
   const DOWN: ListModelsResult = { ok: false, code: 'provider_unreachable' };
 
   const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
-  const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+  const optionTexts = (el: HTMLSelectElement) =>
+    within(el)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
 
-  function installTwo(lastUsedId: string | null, models: Record<string, ListModelsResult> = {}, handlers: FakeHandlers = {}) {
+  function installTwo(
+    lastUsedId: string | null,
+    models: Record<string, ListModelsResult> = {},
+    handlers: FakeHandlers = {},
+  ) {
     const providers = fakeProviders(
       { providers: [CONFIGURED, RUNPOD], lastUsedId },
       { [CONFIGURED.id]: MODELS, [RUNPOD.id]: POD_MODELS, ...models },

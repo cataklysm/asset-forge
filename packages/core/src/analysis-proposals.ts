@@ -1,4 +1,10 @@
-import { ANALYZE_FILE_JOB, analysisJobFields, normalizeTagName, type JobView, type ProposalView } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  analysisJobFields,
+  normalizeTagName,
+  type JobView,
+  type ProposalView,
+} from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { Job } from './jobs.js';
@@ -44,7 +50,13 @@ function viewOf(job: Job, fileName: string | null): JobView {
  * @returns its model, prompt name, time, staleness and tags
  */
 function proposalViewOf(stored: StoredProposal): ProposalView {
-  return { model: stored.model, promptName: stored.promptName, createdAt: stored.createdAt, stale: stored.stale, tags: stored.tags };
+  return {
+    model: stored.model,
+    promptName: stored.promptName,
+    createdAt: stored.createdAt,
+    stale: stored.stale,
+    tags: stored.tags,
+  };
 }
 
 /**
@@ -77,7 +89,10 @@ export async function getProposal(
  * @throws `NotFoundError` without a proposal; `InvalidOperationError` for a foreign or empty choice and for a
  *   stale proposal, which is deleted
  */
-export async function acceptProposal(session: WorkspaceSession, request: { fileId: string; names: string[] }): Promise<void> {
+export async function acceptProposal(
+  session: WorkspaceSession,
+  request: { fileId: string; names: string[] },
+): Promise<void> {
   const proposal = await session.database.analyses.getProposal(request.fileId);
   if (proposal === null) throw new NotFoundError('The file has no tag proposal');
   // Checked before the stale branch, so a trashed file keeps its proposal for a restore.

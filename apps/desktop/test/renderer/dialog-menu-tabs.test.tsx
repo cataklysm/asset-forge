@@ -59,7 +59,13 @@ it('the detail dialog follows the window size with an even margin; the form dial
   await user.click(screen.getByRole('button', { name: 'New asset' }));
   let classes = document.querySelector('dialog')!.className.split(/\s+/);
   expect(classes).toEqual(
-    expect.arrayContaining(['w-[calc(100vw-3rem)]', 'h-[calc(100vh-3rem)]', 'max-w-none', 'max-h-none', 'rounded-dialog']),
+    expect.arrayContaining([
+      'w-[calc(100vw-3rem)]',
+      'h-[calc(100vh-3rem)]',
+      'max-w-none',
+      'max-h-none',
+      'rounded-dialog',
+    ]),
   );
   expect(classes.some((c) => /\d+px/.test(c))).toBe(false);
   unmount();

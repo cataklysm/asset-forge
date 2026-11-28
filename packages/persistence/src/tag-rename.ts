@@ -91,11 +91,13 @@ function mergeTag(transaction: RenameTransaction, sourceId: string, targetId: st
  */
 function affectedAssets(transaction: RenameTransaction, tagId: string): string[] {
   return transaction
-    .all<{ assetId: string }>(sql`
+    .all<{ assetId: string }>(
+      sql`
       select asset_id as assetId from asset_tag where tag_id = ${tagId}
       union
       select f.asset_id from file_tag as ft join file as f on f.id = ft.file_id
-      where ft.tag_id = ${tagId} and f.asset_id is not null`)
+      where ft.tag_id = ${tagId} and f.asset_id is not null`,
+    )
     .map((row) => row.assetId);
 }
 
@@ -111,7 +113,12 @@ function affectedAssets(transaction: RenameTransaction, tagId: string): string[]
  * @param targetId the tag that stays
  * @returns nothing
  */
-function mergeLinks(transaction: RenameTransaction, { table, owner }: LinkTable, sourceId: string, targetId: string): void {
+function mergeLinks(
+  transaction: RenameTransaction,
+  { table, owner }: LinkTable,
+  sourceId: string,
+  targetId: string,
+): void {
   transaction.run(sql`
     update ${table} set origin = 'manual'
     where tag_id = ${targetId} and origin = 'ai'

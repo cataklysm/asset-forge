@@ -50,7 +50,12 @@ export function FileFrame({ file, className }: { file: FileRecord; className: st
  */
 export function VideoMark({ className }: { className: string }) {
   return (
-    <span role="img" aria-label={VIDEO_LABEL} title={VIDEO_LABEL} className={`flex rounded-control bg-surface/85 p-1 text-text ${className}`}>
+    <span
+      role="img"
+      aria-label={VIDEO_LABEL}
+      title={VIDEO_LABEL}
+      className={`flex rounded-control bg-surface/85 p-1 text-text ${className}`}
+    >
       <Film size={16} aria-hidden />
     </span>
   );
@@ -182,7 +187,13 @@ export function fileItemHandlers(props: FileViewProps, rows: VirtualRows, index:
  * @param index the item's list index
  * @param file the item's file; null while it is not loaded
  */
-function onItemKey(event: KeyboardEvent, props: FileViewProps, rows: VirtualRows, index: number, file: FileRecord | null): void {
+function onItemKey(
+  event: KeyboardEvent,
+  props: FileViewProps,
+  rows: VirtualRows,
+  index: number,
+  file: FileRecord | null,
+): void {
   if (event.target !== event.currentTarget) return;
   if (event.key === 'Enter' && plainKey(event)) {
     event.preventDefault();

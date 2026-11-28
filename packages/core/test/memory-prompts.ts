@@ -68,7 +68,14 @@ export class InMemoryPromptRepository implements PromptRepository {
     return { id: v.id, number, content: v.content, variables: structuredClone(v.variables), createdAt: now };
   }
 
-  async create(r: { id: string; title: string; titleKey: string; description: string; version: NewPromptVersion; now: string }): Promise<boolean> {
+  async create(r: {
+    id: string;
+    title: string;
+    titleKey: string;
+    description: string;
+    version: NewPromptVersion;
+    now: string;
+  }): Promise<boolean> {
     if (this.rows.has(r.id)) throw new Error('UNIQUE constraint failed: prompt.id');
     if (this.titleHolder(r.titleKey)) return false;
     this.rows.set(r.id, {
@@ -83,7 +90,13 @@ export class InMemoryPromptRepository implements PromptRepository {
     return true;
   }
 
-  async update(r: { id: string; title: string; titleKey: string; description: string; now: string }): Promise<'ok' | 'missing' | 'title_taken'> {
+  async update(r: {
+    id: string;
+    title: string;
+    titleKey: string;
+    description: string;
+    now: string;
+  }): Promise<'ok' | 'missing' | 'title_taken'> {
     const p = this.rows.get(r.id);
     if (!p) return 'missing';
     const holder = this.titleHolder(r.titleKey);
@@ -106,7 +119,12 @@ export class InMemoryPromptRepository implements PromptRepository {
     return null;
   }
 
-  async addVersion(r: { promptId: string; baseVersionId: string; version: NewPromptVersion; now: string }): Promise<'ok' | 'missing' | 'stale'> {
+  async addVersion(r: {
+    promptId: string;
+    baseVersionId: string;
+    version: NewPromptVersion;
+    now: string;
+  }): Promise<'ok' | 'missing' | 'stale'> {
     const p = this.rows.get(r.promptId);
     if (!p) return 'missing';
     const current = p.versions.at(-1)!;
@@ -129,15 +147,29 @@ export class InMemoryPromptRepository implements PromptRepository {
     return fields.some((f) => foldSearchWord(f).includes(word));
   }
 
-  async list(q: { words: readonly string[]; tagNames: readonly string[]; offset: number; limit: number }): Promise<{ items: PromptSummary[]; total: number }> {
+  async list(q: {
+    words: readonly string[];
+    tagNames: readonly string[];
+    offset: number;
+    limit: number;
+  }): Promise<{ items: PromptSummary[]; total: number }> {
     const hits = [...this.rows.values()]
       .filter((p) => q.words.every((w) => this.matches(p, w)))
-      .filter((p) => q.tagNames.every((n) => this.tags.promptAssignments.some((l) => l.promptId === p.id && l.name === n)))
+      .filter((p) =>
+        q.tagNames.every((n) => this.tags.promptAssignments.some((l) => l.promptId === p.id && l.name === n)),
+      )
       .sort((a, b) => cmp(b.updatedAt, a.updatedAt) || cmp(a.id, b.id));
     return { items: hits.slice(q.offset, q.offset + q.limit).map((p) => this.summary(p)), total: hits.length };
   }
 
-  async addTag(r: { promptId: string; name: string; displayName: string; newId: string; now: string; max: number }): Promise<'ok' | 'missing' | 'limit'> {
+  async addTag(r: {
+    promptId: string;
+    name: string;
+    displayName: string;
+    newId: string;
+    now: string;
+    max: number;
+  }): Promise<'ok' | 'missing' | 'limit'> {
     const p = this.rows.get(r.promptId);
     if (!p) return 'missing';
     const links = this.tags.promptAssignments.filter((l) => l.promptId === r.promptId);

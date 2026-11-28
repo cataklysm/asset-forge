@@ -42,7 +42,9 @@ async function createPhase3aDatabase(): Promise<void> {
 function seedAssetWithFile(): void {
   const seed = new Database(dbPath);
   try {
-    seed.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    seed
+      .prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)')
+      .run(uuid(1), 'ws', TS);
     seed.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
     seed
       .prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)")
@@ -90,9 +92,9 @@ describe('migration 0004', () => {
       expect(check.prepare('SELECT id, name, status FROM asset').all()).toEqual([
         { id: uuid(10), name: 'Pump', status: 'draft' },
       ]);
-      expect(
-        check.prepare('SELECT id, original_name AS n, relative_path AS p, status FROM file').all(),
-      ).toEqual([{ id: uuid(20), n: 'a.png', p: 'files/a.png', status: 'complete' }]);
+      expect(check.prepare('SELECT id, original_name AS n, relative_path AS p, status FROM file').all()).toEqual([
+        { id: uuid(20), n: 'a.png', p: 'files/a.png', status: 'complete' },
+      ]);
       expect(check.pragma('foreign_key_check')).toEqual([]);
     } finally {
       check.close();
@@ -126,12 +128,18 @@ describe('migration 0004', () => {
     const sqlite = new Database(dbPath);
     try {
       sqlite.pragma('foreign_keys = ON');
-      sqlite.prepare('INSERT INTO tag (id, name, display_name, created_at) VALUES (?, ?, ?, ?)').run(uuid(30), 'rust', 'Rust', TS);
+      sqlite
+        .prepare('INSERT INTO tag (id, name, display_name, created_at) VALUES (?, ?, ?, ?)')
+        .run(uuid(30), 'rust', 'Rust', TS);
       expect(() =>
-        sqlite.prepare('INSERT INTO tag (id, name, display_name, created_at) VALUES (?, ?, ?, ?)').run(uuid(31), 'rust', 'RUST', TS),
+        sqlite
+          .prepare('INSERT INTO tag (id, name, display_name, created_at) VALUES (?, ?, ?, ?)')
+          .run(uuid(31), 'rust', 'RUST', TS),
       ).toThrow(/UNIQUE/);
 
-      const assetTag = sqlite.prepare('INSERT INTO asset_tag (asset_id, tag_id, origin, created_at) VALUES (?, ?, ?, ?)');
+      const assetTag = sqlite.prepare(
+        'INSERT INTO asset_tag (asset_id, tag_id, origin, created_at) VALUES (?, ?, ?, ?)',
+      );
       assetTag.run(uuid(10), uuid(30), 'manual', TS);
       expect(() => assetTag.run(uuid(10), uuid(30), 'manual', TS)).toThrow(/UNIQUE|PRIMARY/);
       assetTag.run(uuid(10), uuid(30), 'ai', TS);

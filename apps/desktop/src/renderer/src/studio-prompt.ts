@@ -34,7 +34,8 @@ export function attach(
   given: Readonly<Record<string, string>> = {},
 ): AttachedPrompt {
   const byKey = new Map<string, string>();
-  for (const [name, value] of Object.entries(given)) if (!byKey.has(variableKey(name))) byKey.set(variableKey(name), value);
+  for (const [name, value] of Object.entries(given))
+    if (!byKey.has(variableKey(name))) byKey.set(variableKey(name), value);
   const values: Record<string, string> = {};
   for (const variable of version.variables)
     values[variable.name] = byKey.get(variableKey(variable.name)) ?? recall(variable.name) ?? variable.defaultValue;
@@ -62,5 +63,8 @@ export function preview(attached: AttachedPrompt): { text: string; blocked: 'mis
     usable,
     Object.fromEntries(usable.map((variable) => [variable.name, attached.values[variable.name] ?? ''])),
   );
-  return { text: partial.ok ? partial.text : content, blocked: full.reason === 'value_too_long' ? 'value_too_long' : 'missing' };
+  return {
+    text: partial.ok ? partial.text : content,
+    blocked: full.reason === 'value_too_long' ? 'value_too_long' : 'missing',
+  };
 }

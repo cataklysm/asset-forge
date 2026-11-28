@@ -54,7 +54,12 @@ function usdOf(value: unknown): number | null {
  */
 function priceOf(pricing: unknown): string | null {
   if (pricing === null || typeof pricing !== 'object') return null;
-  const usd = usdOf(pricing) ?? Object.values(pricing).map(usdOf).find((value) => value !== null) ?? null;
+  const usd =
+    usdOf(pricing) ??
+    Object.values(pricing)
+      .map(usdOf)
+      .find((value) => value !== null) ??
+    null;
   if (usd === null) return null;
   return usd.toLocaleString('en-US', {
     style: 'currency',

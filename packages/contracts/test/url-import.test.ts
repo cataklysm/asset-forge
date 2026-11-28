@@ -72,14 +72,18 @@ describe('download job contracts', () => {
   });
 
   test('exactly three download codes are retryable', () => {
-    const retryable = Object.keys(DOWNLOAD_MESSAGES).filter((c) => isRetryableJobError(c as keyof typeof DOWNLOAD_MESSAGES));
+    const retryable = Object.keys(DOWNLOAD_MESSAGES).filter((c) =>
+      isRetryableJobError(c as keyof typeof DOWNLOAD_MESSAGES),
+    );
     expect(retryable).toEqual(['download_unreachable', 'download_unavailable', 'download_throttled']);
   });
 
   test('the download payload is v1 or v2', () => {
     const payload = { v: 1, url: 'https://example.com/a.png', target: null, skipDuplicates: true };
     expect(FileDownloadPayloadSchema.safeParse(payload).success).toBe(true);
-    expect(FileDownloadPayloadSchema.safeParse({ ...payload, target: { assetId: uuid, role: 'reference' } }).success).toBe(true);
+    expect(
+      FileDownloadPayloadSchema.safeParse({ ...payload, target: { assetId: uuid, role: 'reference' } }).success,
+    ).toBe(true);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, v: 2 }).success).toBe(false);
     expect(FileDownloadPayloadSchema.safeParse({ ...payload, v: 3 }).success).toBe(false);
     const v2 = { ...payload, v: 2, siteProfileId: uuid, filter: { kinds: ['image', 'video'], minBytes: 1024 } };
@@ -96,12 +100,20 @@ describe('download job contracts', () => {
 
   test('downloadJobFields reads url and host; anything else yields nulls', () => {
     const url = 'https://Example.com:8443/a.png';
-    expect(downloadJobFields({ v: 1, url, target: null, skipDuplicates: false })).toEqual({ url, host: 'example.com:8443' });
-    expect(downloadJobFields({ v: 1, url: 'https://example.com:443/a.png', target: null, skipDuplicates: true })).toEqual({
+    expect(downloadJobFields({ v: 1, url, target: null, skipDuplicates: false })).toEqual({
+      url,
+      host: 'example.com:8443',
+    });
+    expect(
+      downloadJobFields({ v: 1, url: 'https://example.com:443/a.png', target: null, skipDuplicates: true }),
+    ).toEqual({
       url: 'https://example.com:443/a.png',
       host: 'example.com',
     });
-    expect(downloadJobFields({ v: 1, url: 'not a url', target: null, skipDuplicates: true })).toEqual({ url: null, host: null });
+    expect(downloadJobFields({ v: 1, url: 'not a url', target: null, skipDuplicates: true })).toEqual({
+      url: null,
+      host: null,
+    });
     expect(downloadJobFields({ version: 4, model: 'm', mode: 'apply', prompt: null, providerName: 'RunPod' })).toEqual({
       url: null,
       host: null,
@@ -111,7 +123,14 @@ describe('download job contracts', () => {
 
   test('downloadJobFields reads a v2 payload', () => {
     const url = 'https://Cdn.Example.com:8443/a.png';
-    const payload = { v: 2, url, target: null, skipDuplicates: true, siteProfileId: uuid, filter: { kinds: ['image'], minBytes: 0 } };
+    const payload = {
+      v: 2,
+      url,
+      target: null,
+      skipDuplicates: true,
+      siteProfileId: uuid,
+      filter: { kinds: ['image'], minBytes: 0 },
+    };
     expect(downloadJobFields(payload)).toEqual({ url, host: 'cdn.example.com:8443' });
   });
 
@@ -128,7 +147,17 @@ describe('download job contracts', () => {
   });
 
   test('the summary lists paused hosts', () => {
-    const ok = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+    const ok = {
+      queued: 0,
+      running: 0,
+      waiting: 0,
+      failed: 0,
+      cancelled: 0,
+      succeeded: 0,
+      changes: 0,
+      paused: [],
+      pausedHosts: [],
+    };
     expect(JobSummarySchema.safeParse(ok).success).toBe(true);
     const host = { host: 'example.com', reason: 'download_blocked' };
     expect(JobSummarySchema.safeParse({ ...ok, pausedHosts: [host] }).success).toBe(true);
@@ -156,7 +185,9 @@ describe('URL import channels', () => {
     expect(UrlImportResultSchema.safeParse(ok).success).toBe(true);
     expect(ipcContract['files:importUrls'].response.safeParse(ok).success).toBe(true);
     expect(UrlImportResultSchema.safeParse({ ...ok, invalid: [{ line: 0, text: 'x' }] }).success).toBe(false);
-    expect(UrlImportResultSchema.safeParse({ ...ok, invalid: [{ line: 1, text: 'x'.repeat(201) }] }).success).toBe(false);
+    expect(UrlImportResultSchema.safeParse({ ...ok, invalid: [{ line: 1, text: 'x'.repeat(201) }] }).success).toBe(
+      false,
+    );
     expect(UrlImportResultSchema.safeParse({ ...ok, queued: -1 }).success).toBe(false);
   });
 

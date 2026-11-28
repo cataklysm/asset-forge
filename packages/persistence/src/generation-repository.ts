@@ -98,7 +98,10 @@ async function createGeneration(
         promptVariables: record.promptRef ? JSON.stringify({ v: 1, values: record.promptRef.variables }) : null,
       })
       .run();
-    transaction.insert(generationInput).values(fileRefRow(record.id, 0, input)).run();
+    transaction
+      .insert(generationInput)
+      .values(fileRefRow(record.id, 0, input))
+      .run();
     // A skipped job (file gone or trashed) rolls the whole transaction back.
     if (!insertJob(transaction, newJob, record.createdAt)) throw new Error('The generation job was not inserted');
   });
@@ -156,7 +159,10 @@ async function editRank(database: BetterSQLite3Database, id: string): Promise<nu
         and(
           eq(generation.kind, 'edit'),
           eq(generationInput.fileId, row.fileId),
-          or(lt(generation.createdAt, row.createdAt), and(eq(generation.createdAt, row.createdAt), lt(generation.id, id))),
+          or(
+            lt(generation.createdAt, row.createdAt),
+            and(eq(generation.createdAt, row.createdAt), lt(generation.id, id)),
+          ),
         ),
       )
       .get();
@@ -188,7 +194,10 @@ async function succeed(
       .from(generationOutput)
       .where(eq(generationOutput.generationId, id))
       .get();
-    transaction.insert(generationOutput).values(fileRefRow(id, next?.n ?? 0, output)).run();
+    transaction
+      .insert(generationOutput)
+      .values(fileRefRow(id, next?.n ?? 0, output))
+      .run();
     return true;
   });
 }
@@ -239,7 +248,11 @@ async function requeue(
   { id, job: newJob, now }: Parameters<GenerationRepository['requeue']>[0],
 ): Promise<boolean> {
   return database.transaction((transaction) => {
-    const row = transaction.select({ id: generation.id }).from(generation).where(and(eq(generation.id, id), isRetired)).get();
+    const row = transaction
+      .select({ id: generation.id })
+      .from(generation)
+      .where(and(eq(generation.id, id), isRetired))
+      .get();
     if (!row) return false;
     if (!insertJob(transaction, newJob, now)) return false;
     transaction
@@ -260,7 +273,12 @@ async function requeue(
  */
 async function removeGeneration(database: BetterSQLite3Database, id: string): Promise<boolean> {
   // The input and output rows go with it through their `cascade` rule.
-  return database.delete(generation).where(and(eq(generation.id, id), isRetired)).run().changes > 0;
+  return (
+    database
+      .delete(generation)
+      .where(and(eq(generation.id, id), isRetired))
+      .run().changes > 0
+  );
 }
 
 /**

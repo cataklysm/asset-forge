@@ -9,7 +9,13 @@ import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
-const STORED = providerView({ name: 'Local', timeoutSeconds: 90, taggingModel: 'vision-b', promptModel: 'vision-a', hasApiKey: true });
+const STORED = providerView({
+  name: 'Local',
+  timeoutSeconds: 90,
+  taggingModel: 'vision-b',
+  promptModel: 'vision-a',
+  hasApiKey: true,
+});
 
 const MODELS: ListModelsResult = {
   ok: true,
@@ -22,13 +28,18 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-function install(seed: Partial<ProviderList> = { providers: [STORED] }, models: ListModelsResult = MODELS, handlers: FakeHandlers = {}) {
+function install(
+  seed: Partial<ProviderList> = { providers: [STORED] },
+  models: ListModelsResult = MODELS,
+  handlers: FakeHandlers = {},
+) {
   const ids = (seed.providers ?? []).map((p) => p.id);
   const fake = fakeProviders(seed, Object.fromEntries(ids.map((id) => [id, models])));
   return installFakeApi({ ...fake.handlers, ...handlers });
 }
 
-const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) => api.calls.filter((c) => c.channel === channel);
+const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
+  api.calls.filter((c) => c.channel === channel);
 
 function renderScreen() {
   return render(
@@ -41,7 +52,10 @@ function renderScreen() {
 const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const select = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
-const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+const optionTexts = (el: HTMLSelectElement) =>
+  within(el)
+    .getAllByRole('option')
+    .map((o) => o.textContent);
 const providersSection = () => screen.getByRole('heading', { name: 'Vision providers' }).closest('section')!;
 
 async function loaded() {
@@ -69,7 +83,10 @@ it('the provider loads the list once and the models of every entry', async () =>
   );
   expect(await screen.findByText('2|5|5')).toBeTruthy();
   expect(callsOf(api, 'providers:list')).toHaveLength(1);
-  expect(callsOf(api, 'providers:listModels').map((c) => c.request)).toEqual([{ providerId: STORED.id }, { providerId: other.id }]);
+  expect(callsOf(api, 'providers:listModels').map((c) => c.request)).toEqual([
+    { providerId: STORED.id },
+    { providerId: other.id },
+  ]);
 });
 
 it('a newer list reload wins over an older one that answers later', async () => {

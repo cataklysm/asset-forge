@@ -49,9 +49,15 @@ const ROW_COUNTS = ['asset', 'file', 'file_move', 'job', 'file_analysis'] as con
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
-    s.prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)").run(uuid(3));
+    s.prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)").run(
+      uuid(3),
+    );
     const asset = s.prepare(
       `INSERT INTO asset (id, name, type_id, description, status, created_at, updated_at)
        VALUES (?, ?, ?, '', 'draft', ?, ?)`,
@@ -141,8 +147,11 @@ describe('migration 0008', () => {
       expect(check.prepare('SELECT kind FROM file_move').all()).toEqual([{ kind: 'relocate' }]);
       expect(check.pragma('foreign_key_check')).toEqual([]);
       expect(
-        (check.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'file_deleted_at_idx'").all() as unknown[])
-          .length,
+        (
+          check
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'file_deleted_at_idx'")
+            .all() as unknown[]
+        ).length,
       ).toBe(1);
 
       // `trashed_asset_id` points at an asset and is cleared when that asset goes.
@@ -150,7 +159,9 @@ describe('migration 0008', () => {
         /FOREIGN KEY/,
       );
       check
-        .prepare("UPDATE file SET asset_id = NULL, role = NULL, trashed_asset_id = ?, trashed_role = 'concept', deleted_at = ? WHERE id = ?")
+        .prepare(
+          "UPDATE file SET asset_id = NULL, role = NULL, trashed_asset_id = ?, trashed_role = 'concept', deleted_at = ? WHERE id = ?",
+        )
         .run(uuid(11), TS, uuid(20));
       check.prepare('DELETE FROM file_move').run();
       check.prepare('DELETE FROM asset WHERE id = ?').run(uuid(11));

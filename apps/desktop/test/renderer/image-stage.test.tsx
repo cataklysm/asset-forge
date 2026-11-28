@@ -58,8 +58,10 @@ const png = (width: number | null, height: number | null) =>
 
 const stage = () => screen.getByRole('region', { name: 'Image' });
 const images = () => [...stage().querySelectorAll('img')];
-const preview = (file: FileRecord) => images().find((img) => img.src === `assetforge-media://preview/${file.id}?size=detail`);
-const large = (file: FileRecord) => images().find((img) => img.src !== `assetforge-media://preview/${file.id}?size=detail`);
+const preview = (file: FileRecord) =>
+  images().find((img) => img.src === `assetforge-media://preview/${file.id}?size=detail`);
+const large = (file: FileRecord) =>
+  images().find((img) => img.src !== `assetforge-media://preview/${file.id}?size=detail`);
 const percent = () => document.querySelector('[aria-live="polite"]')?.textContent;
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const box = () => images()[0]!.parentElement!;
@@ -212,7 +214,8 @@ it('at 100% with a fractional devicePixelRatio every size and offset lies on the
   fireEvent.click(button('100%'));
   expect(percent()).toBe('100%');
   for (const element of [box(), ...images()]) {
-    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top]) onDeviceGrid(value, 1.25);
+    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top])
+      onDeviceGrid(value, 1.25);
   }
   expect(px(large(file)!.style.width) * 1.25).toBeCloseTo(1001, 6);
   expect(px(large(file)!.style.height) * 1.25).toBeCloseTo(601, 6);
@@ -222,7 +225,8 @@ it('at 100% with a fractional devicePixelRatio every size and offset lies on the
   expect(px(box().style.width) * 1.25).toBeCloseTo(601, 6);
   expect(px(box().style.height) * 1.25).toBeCloseTo(1001, 6);
   for (const element of [box(), ...images()]) {
-    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top]) onDeviceGrid(value, 1.25);
+    for (const value of [element.style.width, element.style.height, element.style.left, element.style.top])
+      onDeviceGrid(value, 1.25);
   }
   expect(large(file)!.style.transform).toBe('rotate(90deg)');
 });
@@ -282,7 +286,10 @@ it('another file resets zoom and rotation and mounts exactly one large image', (
   expect(larges.map((img) => img.src)).toEqual([`assetforge-media://original/${second.id}`]);
 });
 
-const overflow = () => stage().className.split(/\s+/).filter((c) => c.startsWith('overflow-'));
+const overflow = () =>
+  stage()
+    .className.split(/\s+/)
+    .filter((c) => c.startsWith('overflow-'));
 
 it('Fit never makes the box larger than the stage with a fractional devicePixelRatio', () => {
   const cases = [

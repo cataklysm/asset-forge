@@ -55,18 +55,38 @@ async function createDatabaseUpTo0015(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at, derived_data_version) VALUES (?, 1, ?, ?, 1)').run(
-      uuid(1),
-      'ws',
-      TS,
-    );
+    s.prepare(
+      'INSERT INTO workspace (id, format_version, name, created_at, derived_data_version) VALUES (?, 1, ?, ?, 1)',
+    ).run(uuid(1), 'ws', TS);
     s.prepare('INSERT INTO storage (id, kind, created_at) VALUES (?, ?, ?)').run(uuid(2), 'workspace_root', TS);
     const insert = s.prepare(
       `INSERT INTO file (id, storage_id, original_name, relative_path, mime_type, size_bytes, sha256, kind, status, imported_at, width, height)
        VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'complete', ?, ?, ?)`,
     );
-    insert.run(uuid(3), uuid(2), 'oak.png', `inbox/${uuid(3)}_oak.png`, 'image/png', 'a'.repeat(64), 'image', TS, 64, 48);
-    insert.run(uuid(4), uuid(2), 'clip.mp4', `inbox/${uuid(4)}_clip.mp4`, 'application/octet-stream', 'b'.repeat(64), 'other', TS, null, null);
+    insert.run(
+      uuid(3),
+      uuid(2),
+      'oak.png',
+      `inbox/${uuid(3)}_oak.png`,
+      'image/png',
+      'a'.repeat(64),
+      'image',
+      TS,
+      64,
+      48,
+    );
+    insert.run(
+      uuid(4),
+      uuid(2),
+      'clip.mp4',
+      `inbox/${uuid(4)}_clip.mp4`,
+      'application/octet-stream',
+      'b'.repeat(64),
+      'other',
+      TS,
+      null,
+      null,
+    );
   } finally {
     s.close();
   }
@@ -88,8 +108,17 @@ describe('migration 0016', () => {
 
     const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
     try {
-      expect(await db.files.get(uuid(3))).toMatchObject({ originalName: 'oak.png', width: 64, height: 48, durationMs: null });
-      expect(await db.files.get(uuid(4))).toMatchObject({ kind: 'other', mimeType: 'application/octet-stream', durationMs: null });
+      expect(await db.files.get(uuid(3))).toMatchObject({
+        originalName: 'oak.png',
+        width: 64,
+        height: 48,
+        durationMs: null,
+      });
+      expect(await db.files.get(uuid(4))).toMatchObject({
+        kind: 'other',
+        mimeType: 'application/octet-stream',
+        durationMs: null,
+      });
       await db.ensureDerivedData();
       expect(await db.files.get(uuid(4))).toMatchObject({ kind: 'video', mimeType: 'video/mp4', thumbnail: true });
       expect(await db.files.get(uuid(3))).toMatchObject({ kind: 'image', mimeType: 'image/png' });
@@ -99,7 +128,10 @@ describe('migration 0016', () => {
 
     const check = new Database(dbPath);
     try {
-      expect(check.prepare('SELECT duration_ms FROM file ORDER BY id').all()).toEqual([{ duration_ms: null }, { duration_ms: null }]);
+      expect(check.prepare('SELECT duration_ms FROM file ORDER BY id').all()).toEqual([
+        { duration_ms: null },
+        { duration_ms: null },
+      ]);
       const column = (check.pragma('table_info(file)') as { name: string; type: string; notnull: number }[]).find(
         (c) => c.name === 'duration_ms',
       );

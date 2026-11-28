@@ -38,9 +38,14 @@ const pendingRow = (n: number, importedAt = T1) => ({
   kind: 'image' as const,
 });
 
-async function addFile(n: number, status: 'pending' | 'complete' | 'failed' = 'complete', importedAt = T1): Promise<string> {
+async function addFile(
+  n: number,
+  status: 'pending' | 'complete' | 'failed' = 'complete',
+  importedAt = T1,
+): Promise<string> {
   await db.files.insertPending(pendingRow(n, importedAt));
-  if (status === 'complete') await db.files.markComplete(uuid(n), { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+  if (status === 'complete')
+    await db.files.markComplete(uuid(n), { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await db.files.markFailed(uuid(n), 'This file cannot be read');
   return uuid(n);
 }
@@ -103,9 +108,9 @@ describe('file origin repository', () => {
     await db.fileOrigins.insert(origin(102, failed, URL_B));
     await db.fileOrigins.insert(origin(103, trashed, 'https://example.org/t.png'));
     await trash(trashed);
-    expect(await db.fileOrigins.knownUrls([URL_A, URL_B, 'https://example.org/t.png', 'https://example.org/none'])).toEqual(
-      new Set(['https://example.org/t.png']),
-    );
+    expect(
+      await db.fileOrigins.knownUrls([URL_A, URL_B, 'https://example.org/t.png', 'https://example.org/none']),
+    ).toEqual(new Set(['https://example.org/t.png']));
     expect(await db.fileOrigins.knownUrls([])).toEqual(new Set());
     expect(await db.fileOrigins.findCompleteFileByUrl(URL_A)).toBeNull();
     expect(await db.fileOrigins.findCompleteFileByUrl('https://example.org/t.png')).toBe(trashed);
@@ -157,7 +162,9 @@ describe('pending downloads', () => {
     await addFile(9);
     await db.fileOrigins.insert(origin(100, uuid(9), URL_A));
     // The origin id is taken: the file row is rolled back with it.
-    await expect(db.files.insertPending({ ...pendingRow(10), origin: { id: uuid(100), url: URL_B } })).rejects.toThrow();
+    await expect(
+      db.files.insertPending({ ...pendingRow(10), origin: { id: uuid(100), url: URL_B } }),
+    ).rejects.toThrow();
     expect(await db.files.get(uuid(10))).toBeNull();
   });
 

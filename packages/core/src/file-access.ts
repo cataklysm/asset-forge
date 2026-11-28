@@ -33,10 +33,7 @@ async function completeFile(session: WorkspaceSession, fileId: string): Promise<
  * @param fileId the file
  * @returns the preview source; null otherwise
  */
-export async function resolvePreviewSource(
-  session: WorkspaceSession,
-  fileId: string,
-): Promise<PreviewSource | null> {
+export async function resolvePreviewSource(session: WorkspaceSession, fileId: string): Promise<PreviewSource | null> {
   const file = await completeFile(session, fileId);
   if (file === null) return null;
   const video = videoFormat(file.mimeType);
@@ -79,10 +76,7 @@ export interface OriginalSource {
  * @param fileId the file
  * @returns the original source; null otherwise
  */
-export async function resolveOriginalSource(
-  session: WorkspaceSession,
-  fileId: string,
-): Promise<OriginalSource | null> {
+export async function resolveOriginalSource(session: WorkspaceSession, fileId: string): Promise<OriginalSource | null> {
   const file = await completeFile(session, fileId);
   if (file === null || viewSource(file.mimeType, file.width, file.height) !== 'original') return null;
   const mimeType = ORIGINAL_MIME_TYPES.find((type) => type === file.mimeType);

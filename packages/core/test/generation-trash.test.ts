@@ -24,13 +24,24 @@ async function started(t: Setup): Promise<{ generationId: string; jobId: string 
 }
 
 const now = (t: Setup) => t.session.now().toISOString();
-const claimGeneration = (t: Setup) => t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: now(t) });
+const claimGeneration = (t: Setup) =>
+  t.db.jobs.claimNext({ resourceClass: 'remote_api', types: [IMAGE_GENERATE_JOB], now: now(t) });
 const status = (t: Setup, jobId: string) => t.db.jobs.rows.find((r) => r.id === jobId)?.status;
 const generationStatus = async (t: Setup, id: string) => (await t.db.generations.get(id))?.status;
 
 async function analysisJob(t: Setup, id: string, running: boolean): Promise<void> {
   await t.db.jobs.enqueue({
-    jobs: [{ id, type: ANALYZE_FILE_JOB, resourceClass: 'local_gpu', fileId: t.file.id, lane: null, payload: {}, dedupeKey: null }],
+    jobs: [
+      {
+        id,
+        type: ANALYZE_FILE_JOB,
+        resourceClass: 'local_gpu',
+        fileId: t.file.id,
+        lane: null,
+        payload: {},
+        dedupeKey: null,
+      },
+    ],
     now: now(t),
   });
   if (running) await t.db.jobs.claimNext({ resourceClass: 'local_gpu', types: [ANALYZE_FILE_JOB], now: now(t) });

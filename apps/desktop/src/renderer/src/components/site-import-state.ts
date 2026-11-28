@@ -237,7 +237,8 @@ export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problem
   if (first.stage === 'gallery') {
     if (first.reason === 'no_thumbnails') return NO_THUMBNAILS_HEADLINE;
     if (first.reason === 'left_site') return leftSiteHeadline(first.detail ?? '');
-    if (first.reason === 'http_error' && (first.detail === '401' || first.detail === '403')) return refusedPageHeadline(first.detail);
+    if (first.reason === 'http_error' && (first.detail === '401' || first.detail === '403'))
+      return refusedPageHeadline(first.detail);
   }
   return problemText(first);
 }
@@ -287,5 +288,9 @@ export function useCrawlProgress(active: boolean): CrawlProgressState {
     }, refused);
   }, []);
 
-  return { progress: active ? progress : null, cancelling: active && (cancelling || progress?.cancelling === true), cancel };
+  return {
+    progress: active ? progress : null,
+    cancelling: active && (cancelling || progress?.cancelling === true),
+    cancel,
+  };
 }

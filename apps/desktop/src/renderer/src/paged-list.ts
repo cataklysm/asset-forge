@@ -7,10 +7,7 @@ export const PAGE_SIZE = 60;
 export const MAX_IN_FLIGHT = 2;
 
 /** One page of the list. */
-export type PageEntry<T> =
-  | { status: 'loading' }
-  | { status: 'loaded'; items: readonly T[] }
-  | { status: 'failed' };
+export type PageEntry<T> = { status: 'loading' } | { status: 'loaded'; items: readonly T[] } | { status: 'failed' };
 
 /** The loaded part of a list. */
 export interface PagedState<T> {
@@ -23,10 +20,7 @@ export interface PagedState<T> {
 }
 
 /** What is shown at one index. */
-export type Slot<T> =
-  | { kind: 'placeholder' }
-  | { kind: 'loaded'; item: T }
-  | { kind: 'failed'; page: number };
+export type Slot<T> = { kind: 'placeholder' } | { kind: 'loaded'; item: T } | { kind: 'failed'; page: number };
 
 /**
  * A list with nothing loaded.

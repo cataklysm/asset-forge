@@ -25,7 +25,9 @@ const UNSAFE_COOKIE = /[\u0000-\u001f\u007f;]/;
  */
 export function cookieHeader(cookies: readonly { name: string; value: string }[]): string | null {
   const parts = cookies
-    .filter((cookie) => !UNSAFE_COOKIE.test(cookie.name) && !UNSAFE_COOKIE.test(cookie.value) && !cookie.name.includes('='))
+    .filter(
+      (cookie) => !UNSAFE_COOKIE.test(cookie.name) && !UNSAFE_COOKIE.test(cookie.value) && !cookie.name.includes('='),
+    )
     .map((cookie) => `${cookie.name}=${cookie.value}`);
   return parts.length === 0 ? null : parts.join('; ');
 }
@@ -48,7 +50,11 @@ export interface SiteDownloadOptions {
  * @param download the plain source and the limits of a session download; without it `open` is absent
  * @returns the site access of the download handler
  */
-export function createSiteAccess(store: ProfileLookup, sessions: AccessSessions, download?: SiteDownloadOptions): SiteAccess {
+export function createSiteAccess(
+  store: ProfileLookup,
+  sessions: AccessSessions,
+  download?: SiteDownloadOptions,
+): SiteAccess {
   const open = sessionDownloadOf(store, sessions, download);
   return {
     ...(open === undefined ? {} : { open }),

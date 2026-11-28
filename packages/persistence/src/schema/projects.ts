@@ -5,7 +5,7 @@ import { APPROVAL_STATUSES, PRIORITIES, PROJECT_STATUSES, oneOf } from './vocabu
 // The projects and their n:m assignments to assets.
 
 /** A project. */
-export const project =sqliteTable(
+export const project = sqliteTable(
   'project',
   {
     id: text('id').primaryKey(),
@@ -19,7 +19,7 @@ export const project =sqliteTable(
 );
 
 /** The assignment of an asset to a project with its project-specific data; removing it never touches the asset. */
-export const projectAsset =sqliteTable(
+export const projectAsset = sqliteTable(
   'project_asset',
   {
     projectId: text('project_id')

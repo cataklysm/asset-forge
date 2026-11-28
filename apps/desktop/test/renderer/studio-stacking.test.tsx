@@ -17,9 +17,34 @@ import { fileRecord, nextId } from './fixtures';
 // The real studio inside the real provider: whichever of the studio and the linked file dialog was
 // requested last must call `showModal()` last, so that it sits on top of the other one.
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
-const VENICE = providerView({ kind: 'venice', name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', taggingModel: null, promptModel: null, editModel: 'mock-edit', hasApiKey: true });
-const MODEL: ImageModel = { name: 'mock-edit', aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
+const VENICE = providerView({
+  kind: 'venice',
+  name: 'Venice',
+  baseUrl: 'https://api.venice.ai/api/v1',
+  taggingModel: null,
+  promptModel: null,
+  editModel: 'mock-edit',
+  hasApiKey: true,
+});
+const MODEL: ImageModel = {
+  name: 'mock-edit',
+  aspectRatios: null,
+  resolutions: null,
+  defaultResolution: null,
+  promptCharacterLimit: null,
+  price: null,
+};
 const SOURCE = fileRecord({ originalName: 'oak.png' });
 const RESULT = fileRecord({ originalName: 'oak edit 1.png' });
 
@@ -63,7 +88,11 @@ beforeEach(() => {
     'tags:suggest': () => [],
     'generations:recentPrompts': () => ({ prompts: [] }),
     'generations:forFile': ({ fileId }) =>
-      fileId === RESULT.id ? { madeBy: MADE, results: [] } : fileId === SOURCE.id ? { madeBy: null, results: [MADE] } : { madeBy: null, results: [] },
+      fileId === RESULT.id
+        ? { madeBy: MADE, results: [] }
+        : fileId === SOURCE.id
+          ? { madeBy: null, results: [MADE] }
+          : { madeBy: null, results: [] },
     'files:measure': ({ fileId }) => {
       const record = [SOURCE, RESULT].find((f) => f.id === fileId);
       if (record === undefined) throw new Error('unknown file');
@@ -76,7 +105,13 @@ afterEach(() => {
   showModal.mockRestore();
 });
 
-function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => Promise<boolean> }) {
+function Providers({
+  children,
+  onOpenPrompt,
+}: {
+  children: ReactNode;
+  onOpenPrompt?: (id: string) => Promise<boolean>;
+}) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -107,7 +142,9 @@ function DialogHost({ file }: { file: FileRecord }) {
 
 function MenuHost({ file }: { file: FileRecord }) {
   const studio = useStudio();
-  return <Menu label="More" items={fileMenuItems(file, { cover: null, onDetails: () => {}, studio, onError: () => {} })} />;
+  return (
+    <Menu label="More" items={fileMenuItems(file, { cover: null, onDetails: () => {}, studio, onError: () => {} })} />
+  );
 }
 
 /** The dialog element that called `showModal()` last. */
@@ -176,19 +213,28 @@ it('Generate from image in the linked dialog raises the studio that was already 
 
   // Closing the raised studio returns focus to the linked dialog below it.
   await user.click(within(raised).getByRole('button', { name: CLOSE_LABEL }));
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: `${STUDIO_TITLE} ${RESULT.originalName}` })).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: `${STUDIO_TITLE} ${RESULT.originalName}` })).toBeNull(),
+  );
   expect(screen.getByRole('dialog', { name: RESULT.originalName }).contains(document.activeElement)).toBe(true);
 });
 
 async function openPromptFromLinked(onOpenPrompt: (id: string) => Promise<boolean>) {
-  const made = { ...MADE, promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: {} };
+  const made = {
+    ...MADE,
+    promptId: 'prompt-1',
+    promptTitle: 'Turnaround',
+    promptVersionNumber: 3,
+    promptVariables: {},
+  };
   installFakeApi({
     ...fakeProviders({ providers: [VENICE], lastUsedImageId: VENICE.id }).handlers,
     'providers:listImageModels': () => ({ ok: true, models: [MODEL] }),
     'jobs:summary': () => IDLE,
     'tags:suggest': () => [],
     'generations:recentPrompts': () => ({ prompts: [] }),
-    'generations:forFile': ({ fileId }) => (fileId === RESULT.id ? { madeBy: made, results: [] } : { madeBy: null, results: [MADE] }),
+    'generations:forFile': ({ fileId }) =>
+      fileId === RESULT.id ? { madeBy: made, results: [] } : { madeBy: null, results: [MADE] },
     'files:measure': ({ fileId }) => [SOURCE, RESULT].find((f) => f.id === fileId)!,
   });
   render(

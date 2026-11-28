@@ -180,7 +180,11 @@ class FrameExtractor {
       await mkdir(dirname(targetPath), { recursive: true });
       for (const atSeconds of [FRAME_AT_SECONDS, 0]) {
         const attempt = new FrameAttempt(this.config, this.running, () => this.isClosed);
-        const result = await attempt.run(binary, frameArguments(sourcePath, format, atSeconds, temporaryPath), deadline);
+        const result = await attempt.run(
+          binary,
+          frameArguments(sourcePath, format, atSeconds, temporaryPath),
+          deadline,
+        );
         if (result.isKilled) return null;
         if (result.info && (await frameWritten(temporaryPath, result.info))) {
           if (this.isClosed) return null;

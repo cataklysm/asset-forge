@@ -1,12 +1,6 @@
 import { z } from 'zod';
 import { FileListFilterSchema } from './analysis';
-import {
-  AssignManyResultSchema,
-  FileIdsSchema,
-  FileListSchema,
-  FileRecordSchema,
-  FileRecordsSchema,
-} from './files';
+import { AssignManyResultSchema, FileIdsSchema, FileListSchema, FileRecordSchema, FileRecordsSchema } from './files';
 import { FileRoleSchema } from './library';
 import { PageRequestSchema } from './paging';
 import { type ChannelContracts, ChosenIdsSchema, IdSchema } from './ipc-shared';

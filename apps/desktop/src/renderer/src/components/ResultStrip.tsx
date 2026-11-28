@@ -51,7 +51,13 @@ export function assignFailures(items: FileBatchResult['items'], nameOf: (fileId:
   return items.flatMap((item) =>
     item.error === null
       ? []
-      : [{ key: item.fileId, name: nameOf(item.fileId), message: describeError(new ApiError(item.error.code, item.error.message)) }],
+      : [
+          {
+            key: item.fileId,
+            name: nameOf(item.fileId),
+            message: describeError(new ApiError(item.error.code, item.error.message)),
+          },
+        ],
   );
 }
 

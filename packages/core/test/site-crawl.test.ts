@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { SITE_MAX_PROBLEMS, SiteCrawlResultSchema, type SiteCrawlProblem, type SiteProfile } from '@assetforge/contracts';
+import {
+  SITE_MAX_PROBLEMS,
+  SiteCrawlResultSchema,
+  type SiteCrawlProblem,
+  type SiteProfile,
+} from '@assetforge/contracts';
 import {
   crawlSite,
   InvalidOperationError,
@@ -163,7 +168,11 @@ describe('crawlSite', () => {
       {},
     );
     const result = await run(d, profile({ pagination: '//a[@rel="next"]' }), `${G}/gallery`);
-    expect(result).toMatchObject({ files: [`${G}/gallery/img/1.jpg`, `${G}/gallery/img/2.jpg`], pages: 2, pageFailures: 0 });
+    expect(result).toMatchObject({
+      files: [`${G}/gallery/img/1.jpg`, `${G}/gallery/img/2.jpg`],
+      pages: 2,
+      pageFailures: 0,
+    });
     expect(d.loads.map((l) => l.url)).toEqual([`${G}/gallery`, `${G}/gallery/page2`]);
   });
 
@@ -207,7 +216,9 @@ describe('crawlSite', () => {
 
   it('throws when the robots.txt of the gallery origin cannot be read', async () => {
     const d = deps({}, { [G]: { kind: 'unavailable' } });
-    await expect(run(d, profile())).rejects.toThrow(new InvalidOperationError("The site's robots.txt could not be read"));
+    await expect(run(d, profile())).rejects.toThrow(
+      new InvalidOperationError("The site's robots.txt could not be read"),
+    );
     expect(d.loads).toEqual([]);
   });
 
@@ -332,14 +343,18 @@ describe('crawlSite', () => {
 
   it('counts strings that are no usable URL as invalid', async () => {
     const d = deps({
-      [`${G}/g`]: ok({ thumbnails: ['javascript:alert(1)', 'https://user:pw@gallery.test/1.jpg', '', 'ftp://x.test/a.jpg', '/ok.jpg'] }),
+      [`${G}/g`]: ok({
+        thumbnails: ['javascript:alert(1)', 'https://user:pw@gallery.test/1.jpg', '', 'ftp://x.test/a.jpg', '/ok.jpg'],
+      }),
     });
     const result = await run(d, profile());
     expect(result).toMatchObject({ files: [`${G}/ok.jpg`], invalid: 4 });
   });
 
   it('makes files unique by their normalised form', async () => {
-    const d = deps({ [`${G}/g`]: ok({ thumbnails: ['/1.jpg', 'HTTPS://GALLERY.TEST/1.jpg', '/1.jpg#x', ' /1.jpg '] }) });
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['/1.jpg', 'HTTPS://GALLERY.TEST/1.jpg', '/1.jpg#x', ' /1.jpg '] }),
+    });
     const result = await run(d, profile());
     expect(result).toMatchObject({ files: [`${G}/1.jpg`], duplicates: 3 });
   });
@@ -382,7 +397,12 @@ describe('crawlSite', () => {
     );
     const result = await run(d, profile({ pagination: '//p' }));
     expect(result).toMatchObject({
-      files: [`${G}/a/1.jpg`, 'https://cdn.other.test/3.jpg', 'https://cdn.other.test/5.jpg', 'https://cdn.other.test/6.jpg'],
+      files: [
+        `${G}/a/1.jpg`,
+        'https://cdn.other.test/3.jpg',
+        'https://cdn.other.test/5.jpg',
+        'https://cdn.other.test/6.jpg',
+      ],
       disallowed: 2,
     });
     expect(d.robotsAsked).toEqual([G, 'https://cdn.other.test']);
@@ -547,7 +567,9 @@ describe('crawl problems', () => {
   it('records robots_disallowed for the gallery, a detail page, a pagination target, a file and a page base', async () => {
     const robots = { [G]: 'User-agent: *\nDisallow: /private' };
     const gallery = await run(deps({}, robots), profile(), `${G}/private/g`);
-    expect(gallery.problems).toEqual([{ url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null }]);
+    expect(gallery.problems).toEqual([
+      { url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null },
+    ]);
     expect(gallery.disallowed).toBe(1);
 
     const d = deps(
@@ -567,19 +589,35 @@ describe('crawl problems', () => {
     expect(result.disallowed).toBe(3);
 
     const based = await run(deps({ [`${G}/g`]: ok({ thumbnails: ['/1.jpg'] }, `${G}/private/g`) }, robots), profile());
-    expect(based.problems).toEqual([{ url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null }]);
+    expect(based.problems).toEqual([
+      { url: `${G}/private/g`, stage: 'gallery', reason: 'robots_disallowed', detail: null },
+    ]);
     expect(based.disallowed).toBe(1);
   });
 
   it('records robots_unavailable with the host for each URL of an origin whose robots.txt cannot be read', async () => {
     const d = deps(
-      { [`${G}/g`]: ok({ thumbnails: ['/1.jpg', 'https://cdn.other.test:8443/2.jpg', 'https://cdn.other.test:8443/3.jpg'] }) },
+      {
+        [`${G}/g`]: ok({
+          thumbnails: ['/1.jpg', 'https://cdn.other.test:8443/2.jpg', 'https://cdn.other.test:8443/3.jpg'],
+        }),
+      },
       { 'https://cdn.other.test:8443': { kind: 'unavailable' } },
     );
     const result = await run(d, profile());
     expect(result.problems).toEqual([
-      { url: 'https://cdn.other.test:8443/2.jpg', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.test:8443' },
-      { url: 'https://cdn.other.test:8443/3.jpg', stage: 'file', reason: 'robots_unavailable', detail: 'cdn.other.test:8443' },
+      {
+        url: 'https://cdn.other.test:8443/2.jpg',
+        stage: 'file',
+        reason: 'robots_unavailable',
+        detail: 'cdn.other.test:8443',
+      },
+      {
+        url: 'https://cdn.other.test:8443/3.jpg',
+        stage: 'file',
+        reason: 'robots_unavailable',
+        detail: 'cdn.other.test:8443',
+      },
     ]);
     expect(result.disallowed).toBe(2);
   });
@@ -594,7 +632,9 @@ describe('crawl problems', () => {
     expect(result.problems).toEqual([
       { url: `https://${host}/1.jpg`, stage: 'file', reason: 'robots_unavailable', detail: '' },
     ]);
-    expect(SiteCrawlResultSchema.safeParse({ ...result, crawlId: '00000000-0000-4000-8000-000000000009' }).success).toBe(true);
+    expect(
+      SiteCrawlResultSchema.safeParse({ ...result, crawlId: '00000000-0000-4000-8000-000000000009' }).success,
+    ).toBe(true);
   });
 
   it('strips control and format characters from an invalid_link value and cuts without splitting a pair', async () => {
@@ -625,7 +665,10 @@ describe('crawl problems', () => {
 
   it('records off_site for pagination and detail links off the site, each once', async () => {
     const d = deps({
-      [`${G}/g`]: ok({ thumbnails: ['https://other.test/d/1', '/d/2'], pagination: ['https://other.test/g2', '/g?p=2'] }),
+      [`${G}/g`]: ok({
+        thumbnails: ['https://other.test/d/1', '/d/2'],
+        pagination: ['https://other.test/g2', '/g?p=2'],
+      }),
       [`${G}/d/2`]: ok({ file: ['/2.jpg'] }),
       [`${G}/g?p=2`]: ok({ thumbnails: ['https://other.test/d/1'], pagination: ['https://other.test/g2'] }),
     });
@@ -638,7 +681,9 @@ describe('crawl problems', () => {
   });
 
   it('records filtered_text and filtered_kind for the files the filters leave out, and no duplicate or limit', async () => {
-    const d = deps({ [`${G}/g`]: ok({ thumbnails: ['/full/1.jpg', '/small/2.jpg', '/full/3.pdf', '/full/1.jpg', '/full/4.jpg'] }) });
+    const d = deps({
+      [`${G}/g`]: ok({ thumbnails: ['/full/1.jpg', '/small/2.jpg', '/full/3.pdf', '/full/1.jpg', '/full/4.jpg'] }),
+    });
     const result = await run(d, profile({ urlContains: 'full', maxFiles: 1 }));
     expect(result).toMatchObject({ files: [`${G}/full/1.jpg`], filtered: 2, duplicates: 1, truncated: 'files' });
     expect(result.problems).toEqual([
@@ -660,7 +705,10 @@ describe('crawl problems', () => {
   it('keeps the counters in step with the problems', async () => {
     const d = deps(
       {
-        [`${G}/g`]: ok({ thumbnails: ['/1.jpg', '/1.jpg', '/a.pdf', '/private/2.jpg', 'ftp://x.test/3.jpg'], pagination: ['/g?p=2'] }),
+        [`${G}/g`]: ok({
+          thumbnails: ['/1.jpg', '/1.jpg', '/a.pdf', '/private/2.jpg', 'ftp://x.test/3.jpg'],
+          pagination: ['/g?p=2'],
+        }),
         [`${G}/g?p=2`]: { ok: false, reason: 'http_error', status: 500 },
       },
       { [G]: 'User-agent: *\nDisallow: /private' },
@@ -671,6 +719,8 @@ describe('crawl problems', () => {
     expect(counted(['filtered_kind', 'filtered_text'])).toBe(result.filtered);
     expect(counted(['robots_disallowed', 'robots_unavailable'])).toBe(result.disallowed);
     expect(counted(['invalid_link'])).toBe(result.invalid);
-    expect(counted(['no_thumbnails', 'no_file', 'timeout', 'left_site', 'http_error', 'load_failed'])).toBe(result.pageFailures);
+    expect(counted(['no_thumbnails', 'no_file', 'timeout', 'left_site', 'http_error', 'load_failed'])).toBe(
+      result.pageFailures,
+    );
   });
 });

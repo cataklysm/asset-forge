@@ -168,7 +168,11 @@ export function RelationsPanel({ assetId, relations, disabled, onOpenAsset }: Re
                 title="Removes the relation only; both assets and their files are kept"
                 onClick={() =>
                   void attempt(setError, async () => {
-                    await call('relations:remove', { fromAssetId: item.fromAssetId, toAssetId: item.toAssetId, kind: item.kind });
+                    await call('relations:remove', {
+                      fromAssetId: item.fromAssetId,
+                      toAssetId: item.toAssetId,
+                      kind: item.kind,
+                    });
                     relations.reload();
                   })
                 }

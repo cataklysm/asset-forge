@@ -44,7 +44,16 @@ interface ModelListSelectProps {
  *
  * @param props the label, the options, the load state and the selected model with its setter
  */
-function ModelListSelect({ label, providerId, options, loading, message, value, onChange, disabled }: ModelListSelectProps) {
+function ModelListSelect({
+  label,
+  providerId,
+  options,
+  loading,
+  message,
+  value,
+  onChange,
+  disabled,
+}: ModelListSelectProps) {
   const { loadModels } = useProviders();
   const listed = value !== null && options.some((option) => option.name === value);
   const canRefresh = !disabled && !loading && providerId !== null;

@@ -143,7 +143,10 @@ async function onMock(options: Partial<Parameters<typeof createVeniceImage>[0]> 
 }
 
 /** An adapter whose fetch answers with `answer`. */
-function stubbed(answer: () => Response | Promise<Response>, options: Partial<Parameters<typeof createVeniceImage>[0]> = {}) {
+function stubbed(
+  answer: () => Response | Promise<Response>,
+  options: Partial<Parameters<typeof createVeniceImage>[0]> = {},
+) {
   const failures: unknown[][] = [];
   const adapter = createVeniceImage({
     baseUrl: 'http://127.0.0.1:1/api/v1',
@@ -157,7 +160,10 @@ function stubbed(answer: () => Response | Promise<Response>, options: Partial<Pa
 }
 
 function status(code: number, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify({ error: 'x' }), { status: code, headers: { 'content-type': 'application/json', ...headers } });
+  return new Response(JSON.stringify({ error: 'x' }), {
+    status: code,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 function fetchFailure(code: string): () => never {
@@ -202,16 +208,21 @@ describe('Venice image adapter, requests', () => {
 
   it('sends the image with its own type', async () => {
     const seen: { type: string; size: number }[] = [];
-    const { adapter } = stubbed(() => new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': 'image/png' } }), {
-      fetch: async (_url, init) => {
-        const image = (init?.body as FormData).get('image') as Blob;
-        seen.push({ type: image.type, size: image.size });
-        return new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': 'image/png' } });
+    const { adapter } = stubbed(
+      () => new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': 'image/png' } }),
+      {
+        fetch: async (_url, init) => {
+          const image = (init?.body as FormData).get('image') as Blob;
+          seen.push({ type: image.type, size: image.size });
+          return new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': 'image/png' } });
+        },
       },
-    });
+    );
     const jpeg: ImageInput = { data: new Uint8Array([0xff, 0xd8, 0xff, 1, 2]), mimeType: 'image/jpeg' };
     await bytesOf((await edit(adapter, { image: jpeg })).stream);
-    await bytesOf((await adapter.upscaleImage({ image: { ...jpeg, mimeType: 'image/webp' }, scale: 2, signal: signal() })).stream);
+    await bytesOf(
+      (await adapter.upscaleImage({ image: { ...jpeg, mimeType: 'image/webp' }, scale: 2, signal: signal() })).stream,
+    );
     expect(seen).toEqual([
       { type: 'image/jpeg', size: 5 },
       { type: 'image/webp', size: 5 },
@@ -220,11 +231,20 @@ describe('Venice image adapter, requests', () => {
 
   it('sends an upscale with image and scale only', async () => {
     const { mock, adapter } = await onMock();
-    const result = await adapter.upscaleImage({ image: { data: png(64, 64), mimeType: 'image/png' }, scale: 4, signal: signal() });
+    const result = await adapter.upscaleImage({
+      image: { data: png(64, 64), mimeType: 'image/png' },
+      scale: 4,
+      signal: signal(),
+    });
     expect(result.mimeType).toBe('image/png');
     expect(sizeOf(await bytesOf(result.stream))).toEqual({ width: 256, height: 256 });
     expect(mock.imageRequests).toEqual([
-      { path: '/api/v1/image/upscale', authorization: `Bearer ${KEY}`, fields: { scale: '4' }, fileBytes: png(64, 64).byteLength },
+      {
+        path: '/api/v1/image/upscale',
+        authorization: `Bearer ${KEY}`,
+        fields: { scale: '4' },
+        fileBytes: png(64, 64).byteLength,
+      },
     ]);
   });
 
@@ -247,7 +267,11 @@ describe('Venice image adapter, requests', () => {
     expect(bodies).toHaveLength(3);
     expect(bodies[0]).toContain('a red chair');
     for (const body of bodies) expect(body).not.toContain(KEY);
-    expect(mock.requests.map((request) => request.headers.authorization)).toEqual([`Bearer ${KEY}`, `Bearer ${KEY}`, `Bearer ${KEY}`]);
+    expect(mock.requests.map((request) => request.headers.authorization)).toEqual([
+      `Bearer ${KEY}`,
+      `Bearer ${KEY}`,
+      `Bearer ${KEY}`,
+    ]);
   });
 
   it('reads the key for every request and sends none when there is none', async () => {
@@ -255,10 +279,18 @@ describe('Venice image adapter, requests', () => {
     const { mock, adapter } = await onMock({ apiKey: () => key });
     await bytesOf((await adapter.upscaleImage({ image: input, scale: 2, signal: signal() })).stream);
     key = 'test-key-not-real-2';
-    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_unauthorized');
+    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+      'provider_unauthorized',
+    );
     key = null;
-    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_unauthorized');
-    expect(mock.imageRequests.map((request) => request.authorization)).toEqual([`Bearer ${KEY}`, 'Bearer test-key-not-real-2', null]);
+    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+      'provider_unauthorized',
+    );
+    expect(mock.imageRequests.map((request) => request.authorization)).toEqual([
+      `Bearer ${KEY}`,
+      'Bearer test-key-not-real-2',
+      null,
+    ]);
   });
 
   it('refuses a key that cannot be sent without sending anything', async () => {
@@ -313,31 +345,45 @@ describe('Venice image adapter, error mapping', () => {
       onFailure: (...args) => void failures.push(args),
     });
     expect(await codeOf(edit(adapter))).toBe('provider_unreachable');
-    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_unreachable');
+    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+      'provider_unreachable',
+    );
     expect(failures).toEqual([
       ['provider_unreachable', null],
       ['provider_unreachable', null],
     ]);
   });
 
-  it.each(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'])('maps %s in the cause chain to provider_unreachable', async (code) => {
-    const { adapter } = stubbed(fetchFailure(code));
-    expect(await codeOf(edit(adapter))).toBe('provider_unreachable');
-    const nested = stubbed(() => {
-      throw new TypeError('fetch failed', { cause: new Error('outer', { cause: Object.assign(new Error('inner'), { code }) }) });
-    });
-    expect(await codeOf(nested.adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_unreachable');
-  });
+  it.each(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'])(
+    'maps %s in the cause chain to provider_unreachable',
+    async (code) => {
+      const { adapter } = stubbed(fetchFailure(code));
+      expect(await codeOf(edit(adapter))).toBe('provider_unreachable');
+      const nested = stubbed(() => {
+        throw new TypeError('fetch failed', {
+          cause: new Error('outer', { cause: Object.assign(new Error('inner'), { code }) }),
+        });
+      });
+      expect(await codeOf(nested.adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+        'provider_unreachable',
+      );
+    },
+  );
 
-  it.each(['ECONNRESET', 'UND_ERR_SOCKET', 'EPIPE'])('maps any other fetch failure (%s) to provider_outcome_unknown', async (code) => {
-    const { adapter, failures } = stubbed(fetchFailure(code));
-    expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
-    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_outcome_unknown');
-    expect(failures).toEqual([
-      ['provider_outcome_unknown', null],
-      ['provider_outcome_unknown', null],
-    ]);
-  });
+  it.each(['ECONNRESET', 'UND_ERR_SOCKET', 'EPIPE'])(
+    'maps any other fetch failure (%s) to provider_outcome_unknown',
+    async (code) => {
+      const { adapter, failures } = stubbed(fetchFailure(code));
+      expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
+      expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+        'provider_outcome_unknown',
+      );
+      expect(failures).toEqual([
+        ['provider_outcome_unknown', null],
+        ['provider_outcome_unknown', null],
+      ]);
+    },
+  );
 
   it('maps a timeout to provider_outcome_unknown', async () => {
     const { adapter, failures } = await onMock({ timeoutMs: 100 });
@@ -402,11 +448,16 @@ describe('Venice image adapter, error mapping', () => {
     ]);
   });
 
-  it.each([200, 400, 429, 500])('maps the content-violation header on status %i to provider_content_refused', async (httpStatus) => {
-    const { adapter, failures } = stubbed(() => status(httpStatus, { 'x-venice-is-content-violation': 'true' }));
-    expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe('provider_content_refused');
-    expect(failures).toEqual([['provider_content_refused', httpStatus]]);
-  });
+  it.each([200, 400, 429, 500])(
+    'maps the content-violation header on status %i to provider_content_refused',
+    async (httpStatus) => {
+      const { adapter, failures } = stubbed(() => status(httpStatus, { 'x-venice-is-content-violation': 'true' }));
+      expect(await codeOf(adapter.upscaleImage({ image: input, scale: 2, signal: signal() }))).toBe(
+        'provider_content_refused',
+      );
+      expect(failures).toEqual([['provider_content_refused', httpStatus]]);
+    },
+  );
 
   it('maps an answer that is not an image to provider_outcome_unknown', async () => {
     const { adapter, failures } = stubbed(() => status(200));
@@ -467,11 +518,16 @@ describe('Venice image adapter, error mapping', () => {
     expect(failures).toEqual([['provider_outcome_unknown', 200]]);
   });
 
-  it.each(['image/svg+xml', 'image/gif', 'text/html'])('maps a 200 answer of type %s to provider_outcome_unknown', async (type) => {
-    const { adapter, failures } = stubbed(() => new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': type } }));
-    expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
-    expect(failures).toEqual([['provider_outcome_unknown', 200]]);
-  });
+  it.each(['image/svg+xml', 'image/gif', 'text/html'])(
+    'maps a 200 answer of type %s to provider_outcome_unknown',
+    async (type) => {
+      const { adapter, failures } = stubbed(
+        () => new Response(new Uint8Array(png(1, 1)), { headers: { 'content-type': type } }),
+      );
+      expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
+      expect(failures).toEqual([['provider_outcome_unknown', 200]]);
+    },
+  );
 
   it.each([
     ['image/png', 'image/png'],
@@ -501,7 +557,11 @@ describe('Venice image adapter, error mapping', () => {
         return status(200);
       },
     });
-    for (const pending of [edit(adapter), adapter.upscaleImage({ image: input, scale: 2, signal: signal() }), adapter.listEditModels(signal())]) {
+    for (const pending of [
+      edit(adapter),
+      adapter.upscaleImage({ image: input, scale: 2, signal: signal() }),
+      adapter.listEditModels(signal()),
+    ]) {
       const error = (await failureOf(pending)) as JobError;
       expect(error).toBeInstanceOf(JobError);
       expect(error.code).toBe('internal_error');
@@ -518,7 +578,10 @@ describe('Venice image adapter, error mapping', () => {
 
   it('refuses a declared length past the cap before reading', async () => {
     const { adapter, failures } = stubbed(
-      () => new Response(new Uint8Array(4), { headers: { 'content-type': 'image/png', 'content-length': String(IMAGE_ANSWER_MAX_BYTES + 1) } }),
+      () =>
+        new Response(new Uint8Array(4), {
+          headers: { 'content-type': 'image/png', 'content-length': String(IMAGE_ANSWER_MAX_BYTES + 1) },
+        }),
     );
     expect(await codeOf(edit(adapter))).toBe('provider_outcome_unknown');
     expect(failures).toEqual([['provider_outcome_unknown', 200]]);
@@ -573,7 +636,9 @@ describe('Venice image adapter, edit models', () => {
         price: null,
       },
     ]);
-    expect(mock.requests).toMatchObject([{ method: 'GET', path: '/api/v1/models', headers: { authorization: `Bearer ${KEY}` } }]);
+    expect(mock.requests).toMatchObject([
+      { method: 'GET', path: '/api/v1/models', headers: { authorization: `Bearer ${KEY}` } },
+    ]);
   });
 
   it('asks for the inpaint models', async () => {
@@ -603,15 +668,26 @@ describe('Venice image adapter, edit models', () => {
             pricing: { usd: 'free' },
           },
         },
-        { id: 'flat-price', model_spec: { constraints: { promptCharacterLimit: 2.5, resolutions: [] }, pricing: { usd: 0.1 } } },
+        {
+          id: 'flat-price',
+          model_spec: { constraints: { promptCharacterLimit: 2.5, resolutions: [] }, pricing: { usd: 0.1 } },
+        },
         { id: 'no-spec' },
         { id: '' },
         { name: 'no id' },
         null,
       ],
     };
-    const { adapter } = stubbed(() => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
-    const nulls = { aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null };
+    const { adapter } = stubbed(
+      () => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }),
+    );
+    const nulls = {
+      aspectRatios: null,
+      resolutions: null,
+      defaultResolution: null,
+      promptCharacterLimit: null,
+      price: null,
+    };
     expect(await adapter.listEditModels(signal())).toEqual([
       { name: 'odd', ...nulls },
       { name: 'flat-price', ...nulls, price: '$0.10' },
@@ -620,7 +696,9 @@ describe('Venice image adapter, edit models', () => {
   });
 
   it('answers invalid_response for an answer without a model list', async () => {
-    const { adapter, failures } = stubbed(() => new Response('not json', { headers: { 'content-type': 'application/json' } }));
+    const { adapter, failures } = stubbed(
+      () => new Response('not json', { headers: { 'content-type': 'application/json' } }),
+    );
     expect(await codeOf(adapter.listEditModels(signal()))).toBe('invalid_response');
     const other = stubbed(() => new Response('{"models":[]}', { headers: { 'content-type': 'application/json' } }));
     expect(await codeOf(other.adapter.listEditModels(signal()))).toBe('invalid_response');

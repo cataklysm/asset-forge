@@ -71,7 +71,8 @@ function MarkTile({ g, busy, onRetry, onRemove }: MarkTileProps) {
   const state = tileState(g);
   const output = g.outputs[0];
   const mark = MARKS[state as Exclude<TileState, 'ready'>];
-  const message = state === 'failed' ? JOB_ERROR_MESSAGES[g.errorCode ?? 'internal_error'] : (output?.name ?? undefined);
+  const message =
+    state === 'failed' ? JOB_ERROR_MESSAGES[g.errorCode ?? 'internal_error'] : (output?.name ?? undefined);
   const settled = state === 'failed' || state === 'cancelled';
   const gone = (state === 'trashed' || state === 'deleted') && output !== undefined;
   return (
@@ -134,16 +135,28 @@ function UpscaleTiles({ upscales, busy, onOpen, onDelete, onRetry, onRemove }: U
     <ul aria-label={UPSCALES_LABEL} className={GRID}>
       {upscales.map((upscale) => {
         const output = readyOutput(upscale);
-        if (output === null) return <MarkTile key={upscale.id} g={upscale} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
+        if (output === null)
+          return <MarkTile key={upscale.id} g={upscale} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
         const fileId = output.fileId;
         return (
           <li key={upscale.id} aria-label={output.name} title={output.name} className="flex flex-col gap-2">
-            <CoverImage fileId={fileId} size="thumb" fallback={formatLabel(output.name)} className={`aspect-square w-full border ${BORDER}`} />
+            <CoverImage
+              fileId={fileId}
+              size="thumb"
+              fallback={formatLabel(output.name)}
+              className={`aspect-square w-full border ${BORDER}`}
+            />
             <div className="flex flex-wrap justify-center gap-2">
               <button type="button" className={BUTTON_INLINE} onClick={() => onOpen(fileId)}>
                 {OPEN_LABEL}
               </button>
-              <button type="button" className={BUTTON_INLINE} title={DELETE_TITLE} disabled={busy} onClick={() => onDelete(fileId)}>
+              <button
+                type="button"
+                className={BUTTON_INLINE}
+                title={DELETE_TITLE}
+                disabled={busy}
+                onClick={() => onDelete(fileId)}
+              >
                 {DELETE_LABEL}
               </button>
             </div>
@@ -193,7 +206,13 @@ function SelectedResult(props: SelectedResultProps) {
         <button type="button" className={BUTTON} disabled={busy} onClick={() => props.onUseSettings(selected)}>
           {USE_SETTINGS_LABEL}
         </button>
-        <button type="button" className={BUTTON} title={DELETE_TITLE} disabled={busy} onClick={() => props.onDelete(fileId)}>
+        <button
+          type="button"
+          className={BUTTON}
+          title={DELETE_TITLE}
+          disabled={busy}
+          onClick={() => props.onDelete(fileId)}
+        >
           {DELETE_LABEL}
         </button>
       </div>
@@ -220,7 +239,8 @@ function SelectedResult(props: SelectedResultProps) {
  */
 export function StudioResults(props: Props) {
   const { generations, selectedId, onSelect, busy, onRetry, onRemove } = props;
-  const selected = generations.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
+  const selected =
+    generations.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
   const selectedOutput = selected?.outputs[0] ?? null;
   const selectedFileId = selectedOutput?.fileId ?? null;
 
@@ -233,7 +253,8 @@ export function StudioResults(props: Props) {
       <ul aria-label={RESULTS_LABEL} className={GRID}>
         {generations.map((generation) => {
           const output = readyOutput(generation);
-          if (output === null) return <MarkTile key={generation.id} g={generation} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
+          if (output === null)
+            return <MarkTile key={generation.id} g={generation} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
           const pressed = generation.id === selectedId;
           return (
             <li key={generation.id} aria-label={output.name} title={output.name}>

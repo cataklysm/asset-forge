@@ -169,7 +169,10 @@ export function JobsScreen() {
   const [rows, setRows] = useState<ShownRows | null>(null);
 
   // The list's filter without paging; also the base of a read of chosen ids.
-  const listRequest: ListRequest = { ...(status === '' ? {} : { status }), ...(providerId === '' ? {} : { providerId }) };
+  const listRequest: ListRequest = {
+    ...(status === '' ? {} : { status }),
+    ...(providerId === '' ? {} : { providerId }),
+  };
   const fetchPage = useCallback(
     (offset: number, limit: number) => call('jobs:list', { limit, offset, ...listRequest }),
     // `status` and `providerId` are all `listRequest` holds.

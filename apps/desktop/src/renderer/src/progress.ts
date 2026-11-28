@@ -20,11 +20,7 @@ export function formatProgress(progress: WorkflowProgress | null): string {
  * @param typeDefault the asset type's default template
  * @returns the template id; '' when there is none
  */
-export function pickTemplate(
-  templateIds: readonly string[],
-  chosen: string,
-  typeDefault: string | null,
-): string {
+export function pickTemplate(templateIds: readonly string[], chosen: string, typeDefault: string | null): string {
   if (templateIds.includes(chosen)) return chosen;
   if (typeDefault !== null && templateIds.includes(typeDefault)) return typeDefault;
   return templateIds[0] ?? '';

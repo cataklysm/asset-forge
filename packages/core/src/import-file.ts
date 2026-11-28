@@ -246,7 +246,17 @@ function startRun(context: ImportContext, source: ImportSource, options: ImportO
     kind: fileKind(name),
     ...(options.origin === undefined ? {} : { origin: options.origin }),
   };
-  const run: ImportRun = { context, source, options, id, staging, finalPath, pending, streamError: null, isMoved: false };
+  const run: ImportRun = {
+    context,
+    source,
+    options,
+    id,
+    staging,
+    finalPath,
+    pending,
+    streamError: null,
+    isMoved: false,
+  };
   if (options.onStreamError !== undefined) {
     source.stream.on('error', (error: unknown) => {
       run.streamError ??= { error };
@@ -368,7 +378,14 @@ async function failRun(run: ImportRun, error: unknown): Promise<ImportResult> {
   } catch {
     // The row stays pending and is failed by recovery on the next open.
   }
-  const file = recordOf(run, { status: 'failed', error: message, sizeBytes: null, sha256: null, width: null, height: null });
+  const file = recordOf(run, {
+    status: 'failed',
+    error: message,
+    sizeBytes: null,
+    sha256: null,
+    width: null,
+    height: null,
+  });
   return { ...resultWithoutFile(run, message, []), file };
 }
 

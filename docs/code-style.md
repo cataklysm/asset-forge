@@ -79,6 +79,10 @@ so the files are parsed by Babel's TypeScript grammar and no rule uses type info
 A rule the code comes to pass completely is raised to an error. An `eslint-disable` comment is only allowed
 for an exception recorded here or in `docs/backlog.md`, with a one-line reason; an unused one is an error.
 
+`pnpm format` runs Prettier (`.prettierrc.json`: 120 columns, single quotes, trailing commas) over code, tests
+and configuration and decides every layout question; `pnpm format:check` only reports. Markdown, the lockfile
+and the migrations are left alone (`.prettierignore`).
+
 ## What a clean-up does not do
 
 No behaviour change, no changed message text, no new dependency, no changed public channel or schema, no

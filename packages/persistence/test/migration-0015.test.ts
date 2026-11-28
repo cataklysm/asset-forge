@@ -54,7 +54,11 @@ async function createDatabaseUpTo0014(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare('INSERT INTO storage (id, kind, created_at) VALUES (?, ?, ?)').run(uuid(2), 'workspace_root', TS);
     s.prepare(
       `INSERT INTO file (id, storage_id, original_name, relative_path, mime_type, size_bytes, sha256, kind, status, imported_at)
@@ -87,7 +91,9 @@ describe('migration 0015', () => {
     try {
       expect(await db.files.get(uuid(3))).toMatchObject({ status: 'complete', originalName: 'oak.png' });
       const { items } = await db.jobs.list({ limit: 10, offset: 0 });
-      expect(items).toEqual([expect.objectContaining({ id: uuid(10), status: 'succeeded', fileName: 'oak.png', result: null })]);
+      expect(items).toEqual([
+        expect.objectContaining({ id: uuid(10), status: 'succeeded', fileName: 'oak.png', result: null }),
+      ]);
       expect(await db.fileOrigins.listByFile(uuid(3))).toEqual([]);
     } finally {
       await db.close();

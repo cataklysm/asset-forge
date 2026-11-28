@@ -71,7 +71,11 @@ export const START_COUNTS: readonly {
   title: string;
 }[] = [
   { key: 'analysable', label: 'To analyse', title: 'Files that will be analysed with this model' },
-  { key: 'alreadyAnalysed', label: 'Already analysed', title: 'Files already analysed with this model; skipped unless analysed again' },
+  {
+    key: 'alreadyAnalysed',
+    label: 'Already analysed',
+    title: 'Files already analysed with this model; skipped unless analysed again',
+  },
   { key: 'alreadyQueued', label: 'Already queued', title: 'Files with an analysis that is queued or running' },
   { key: 'notAnalysable', label: 'Not analysable', title: 'Files that are not complete images of a supported type' },
 ];

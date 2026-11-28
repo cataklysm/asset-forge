@@ -1,4 +1,10 @@
-import { DEFAULT_PROVIDER_OPTIONS, isVisionKind, type ProviderKind, type ProviderOptions, type ProviderPurpose } from '@assetforge/contracts';
+import {
+  DEFAULT_PROVIDER_OPTIONS,
+  isVisionKind,
+  type ProviderKind,
+  type ProviderOptions,
+  type ProviderPurpose,
+} from '@assetforge/contracts';
 
 // One provider entry as the store keeps it, the rules every entry obeys, and the refusals that name an entry.
 
@@ -47,7 +53,8 @@ export interface ProviderEntry {
  * @param kind the entry's kind
  * @returns a copy of the default options for a vision kind, null for `venice`
  */
-export const optionsFor = (kind: ProviderKind): ProviderOptions | null => (isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null);
+export const optionsFor = (kind: ProviderKind): ProviderOptions | null =>
+  isVisionKind(kind) ? { ...DEFAULT_PROVIDER_OPTIONS } : null;
 
 /**
  * An image provider carries a key for a paid service: https, or plain http only to this machine.

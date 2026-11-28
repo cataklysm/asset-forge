@@ -228,7 +228,9 @@ export function TrashScreen({ state, onStateChange }: Props) {
               </p>
             ),
         )}
-        {result !== null && <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />}
+        {result !== null && (
+          <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
+        )}
         <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>
           <button
             type="button"
@@ -239,7 +241,13 @@ export function TrashScreen({ state, onStateChange }: Props) {
           >
             {RESTORE_LABEL}
           </button>
-          <button type="button" className={BUTTON} disabled={busy} title={PURGE_SELECTION_TITLE} onClick={() => askPurge(selected)}>
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={busy}
+            title={PURGE_SELECTION_TITLE}
+            onClick={() => askPurge(selected)}
+          >
             {PURGE_LABEL}
           </button>
         </SelectionBar>

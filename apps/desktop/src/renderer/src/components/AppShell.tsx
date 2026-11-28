@@ -1,4 +1,14 @@
-import { ArrowLeft, FolderOpen, Inbox, ListChecks, Package, ScrollText, Settings, Trash2, type LucideIcon } from 'lucide-react';
+import {
+  ArrowLeft,
+  FolderOpen,
+  Inbox,
+  ListChecks,
+  Package,
+  ScrollText,
+  Settings,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
@@ -220,7 +230,13 @@ export function AppShell({
       <ShellHeader workspaceName={workspaceName} rootPath={rootPath} busy={busy} onClose={onClose} />
 
       <div className="flex min-h-0 flex-1">
-        <NavLinks section={section} busy={busy} activeJobs={activeJobs} trashCount={trashCount} onNavigate={onNavigate} />
+        <NavLinks
+          section={section}
+          busy={busy}
+          activeJobs={activeJobs}
+          trashCount={trashCount}
+          onNavigate={onNavigate}
+        />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {unreachable && (

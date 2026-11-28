@@ -62,7 +62,12 @@ function isTextTarget(target: EventTarget | null): boolean {
 
 /** Space activates these itself; it toggles playback only elsewhere (the video, the stage). */
 function isActivatable(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('button, a, summary, select, [role="button"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"], [role="radio"]') !== null;
+  return (
+    target instanceof Element &&
+    target.closest(
+      'button, a, summary, select, [role="button"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="tab"], [role="radio"]',
+    ) !== null
+  );
 }
 
 /**
@@ -80,7 +85,8 @@ function actionOf(event: KeyboardEvent, actions: ViewerKeyActions): (() => void)
   }
   const toggle = actions.togglePlayback;
   if (event.key === ' ') return toggle !== undefined && !isActivatable(event.target) ? toggle : null;
-  if (event.key === 'Delete') return actions.remove !== undefined && !event.shiftKey && !event.repeat ? actions.remove : null;
+  if (event.key === 'Delete')
+    return actions.remove !== undefined && !event.shiftKey && !event.repeat ? actions.remove : null;
   const name = KEYS[event.key];
   return name === undefined ? null : () => actions[name]();
 }

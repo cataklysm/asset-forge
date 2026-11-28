@@ -6,7 +6,7 @@ import { STEP_STATES, oneOf } from './vocabulary.js';
 // Workflows. Template, version and step definition rows are immutable once written.
 
 /** A workflow template, identified by its stable key. */
-export const workflowTemplate =sqliteTable('workflow_template', {
+export const workflowTemplate = sqliteTable('workflow_template', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
   name: text('name').notNull(),
@@ -25,13 +25,11 @@ export const workflowTemplateVersion = sqliteTable(
     version: integer('version').notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (table) => [
-    uniqueIndex('workflow_template_version_template_id_version_unique').on(table.templateId, table.version),
-  ],
+  (table) => [uniqueIndex('workflow_template_version_template_id_version_unique').on(table.templateId, table.version)],
 );
 
 /** A step of a template version, at a position and with a key unique within the version. */
-export const workflowStepDefinition =sqliteTable(
+export const workflowStepDefinition = sqliteTable(
   'workflow_step_definition',
   {
     id: text('id').primaryKey(),

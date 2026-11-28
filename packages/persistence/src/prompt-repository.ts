@@ -109,11 +109,20 @@ async function updatePrompt(
 ): ReturnType<PromptRepository['update']> {
   return database.transaction((transaction) => {
     if (!exists(transaction, request.id)) return 'missing' as const;
-    const holder = transaction.select({ id: prompt.id }).from(prompt).where(eq(prompt.titleKey, request.titleKey)).get();
+    const holder = transaction
+      .select({ id: prompt.id })
+      .from(prompt)
+      .where(eq(prompt.titleKey, request.titleKey))
+      .get();
     if (holder && holder.id !== request.id) return 'title_taken' as const;
     transaction
       .update(prompt)
-      .set({ title: request.title, titleKey: request.titleKey, description: request.description, updatedAt: request.now })
+      .set({
+        title: request.title,
+        titleKey: request.titleKey,
+        description: request.description,
+        updatedAt: request.now,
+      })
       .where(eq(prompt.id, request.id))
       .run();
     return 'ok' as const;
@@ -149,7 +158,10 @@ async function getPrompt(database: BetterSQLite3Database, id: string): Promise<P
  * @param versionId the version
  * @returns the version; null when unknown
  */
-async function getVersion(database: BetterSQLite3Database, versionId: string): ReturnType<PromptRepository['getVersion']> {
+async function getVersion(
+  database: BetterSQLite3Database,
+  versionId: string,
+): ReturnType<PromptRepository['getVersion']> {
   const row = database
     .select({ version: promptVersion, title: prompt.title })
     .from(promptVersion)
@@ -282,7 +294,8 @@ async function removeTag(
         ),
       )
       .run().changes;
-    if (removed > 0) transaction.update(prompt).set({ updatedAt: request.now }).where(eq(prompt.id, request.promptId)).run();
+    if (removed > 0)
+      transaction.update(prompt).set({ updatedAt: request.now }).where(eq(prompt.id, request.promptId)).run();
     return 'ok' as const;
   });
 }

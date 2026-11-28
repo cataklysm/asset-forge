@@ -104,7 +104,14 @@ class ChangeEntries {
    */
   since(cursor: string | null): Changes {
     const from = this.position(cursor);
-    const answer: Changes = { cursor: this.cursorOf(this.next()), reset: from === null, jobIds: [], jobs: false, fileIds: [], added: [] };
+    const answer: Changes = {
+      cursor: this.cursorOf(this.next()),
+      reset: from === null,
+      jobIds: [],
+      jobs: false,
+      fileIds: [],
+      added: [],
+    };
     if (from === null) return answer;
     const jobIds = new Set<string>();
     const fileIds = new Set<string>();

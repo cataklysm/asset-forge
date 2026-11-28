@@ -202,7 +202,9 @@ describe('trashed files', () => {
       video: null,
     });
     expect(file.width).not.toBeNull();
-    expect(await resolveOriginalSource(session, file.id)).toMatchObject({ absolutePath: `/memory/${trashed.relativePath}` });
+    expect(await resolveOriginalSource(session, file.id)).toMatchObject({
+      absolutePath: `/memory/${trashed.relativePath}`,
+    });
   });
 });
 

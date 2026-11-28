@@ -85,7 +85,16 @@ export function AssetToolbar(props: Props) {
  * @param props the filters, the types and projects, the analysis and the view
  * @returns the row's controls
  */
-function SearchRow({ filters, onFilterChange, types, projects, analysisBlocked, onAnalyseAll, view, onSwitchView }: SearchRowProps) {
+function SearchRow({
+  filters,
+  onFilterChange,
+  types,
+  projects,
+  analysisBlocked,
+  onAnalyseAll,
+  view,
+  onSwitchView,
+}: SearchRowProps) {
   return (
     <>
       <SearchField
@@ -186,7 +195,9 @@ function FileRow({ filters, onFilterChange }: Pick<SearchRowProps, 'filters' | '
         aria-label="File type"
         title="Assets with a file of this type"
         value={filters.fileKind}
-        onChange={(event) => onFilterChange({ fileKind: KINDS.find((option) => option.kind === event.target.value)?.kind ?? '' })}
+        onChange={(event) =>
+          onFilterChange({ fileKind: KINDS.find((option) => option.kind === event.target.value)?.kind ?? '' })
+        }
       >
         <option value="">All file types</option>
         {KINDS.map((option) => (

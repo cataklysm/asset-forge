@@ -4,7 +4,11 @@ import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docke
 import { createOllamaVision } from '../src/index.js';
 
 const image = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x10, 0x7f, 0x80, 0xfe]);
-const schema = { type: 'object', properties: { tags: { type: 'array', items: { type: 'string' } } }, required: ['tags'] };
+const schema = {
+  type: 'object',
+  properties: { tags: { type: 'array', items: { type: 'string' } } },
+  required: ['tags'],
+};
 const prompt = 'Describe the image as tags.';
 
 let provider: MockProvider | undefined;

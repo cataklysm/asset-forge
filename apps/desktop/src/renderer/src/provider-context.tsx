@@ -25,13 +25,7 @@ import { ApiError, call } from './api';
 
 /** The state of one provider entry as the selects and the settings show it. */
 export type ProviderStatus =
-  | 'checking'
-  | 'ready'
-  | 'unreachable'
-  | 'unauthorized'
-  | 'no_vision_model'
-  | 'no_edit_model'
-  | 'error';
+  'checking' | 'ready' | 'unreachable' | 'unauthorized' | 'no_vision_model' | 'no_edit_model' | 'error';
 
 /** What the provider context offers. */
 export interface ProvidersState {
@@ -266,15 +260,18 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
 
   const loadModels = useCallback(
     (id: string, refresh = false) =>
-      loadEntryModels({ disposed, list: listRef, requests: modelRequests.current, setModels, setImageModels }, id, refresh),
+      loadEntryModels(
+        { disposed, list: listRef, requests: modelRequests.current, setModels, setImageModels },
+        id,
+        refresh,
+      ),
     [],
   );
 
   // Only the newest reload may take its answer; an older one arriving later is dropped.
   const reloadRequest = useRef(0);
   const reload = useCallback(
-    () =>
-      reloadList({ disposed, list: listRef, request: reloadRequest, takeList, setLoading, setFailed, loadModels }),
+    () => reloadList({ disposed, list: listRef, request: reloadRequest, takeList, setLoading, setFailed, loadModels }),
     [loadModels, takeList],
   );
 
@@ -390,7 +387,10 @@ export function providerStatus(
  * @param purpose the purpose of the dialog; `vision` unless given
  * @returns the entry, null without any
  */
-export function defaultProviderId(state: Pick<ProvidersState, 'list'>, purpose: ProviderPurpose = 'vision'): string | null {
+export function defaultProviderId(
+  state: Pick<ProvidersState, 'list'>,
+  purpose: ProviderPurpose = 'vision',
+): string | null {
   const list = state.list;
   if (list === null) return null;
   const providers = list.providers.filter((entry) => purposeOf(entry.kind) === purpose);
@@ -425,7 +425,10 @@ export function defaultModelOf(
  * @param id the entry; null for none
  * @returns the model, or null
  */
-export function defaultEditModelOf(state: Pick<ProvidersState, 'list' | 'imageModels'>, id: string | null): string | null {
+export function defaultEditModelOf(
+  state: Pick<ProvidersState, 'list' | 'imageModels'>,
+  id: string | null,
+): string | null {
   const entry = id === null ? undefined : state.list?.providers.find((provider) => provider.id === id);
   if (entry === undefined || entry.kind !== 'venice') return null;
   const answer = state.imageModels[entry.id];

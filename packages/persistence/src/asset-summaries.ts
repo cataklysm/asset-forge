@@ -49,7 +49,11 @@ export function automaticCovers(
       ),
     )
     .as('ranked');
-  const rows = transaction.select({ assetId: ranked.assetId, id: ranked.id }).from(ranked).where(eq(ranked.rank, 1)).all();
+  const rows = transaction
+    .select({ assetId: ranked.assetId, id: ranked.id })
+    .from(ranked)
+    .where(eq(ranked.rank, 1))
+    .all();
   return new Map(rows.flatMap((row) => (row.assetId === null ? [] : [[row.assetId, row.id] as const])));
 }
 
@@ -112,7 +116,11 @@ export function summaries(
  * @param tagNames the tag filter of the list
  * @returns the summaries with their tags
  */
-export function withTags(transaction: IndexTransaction, items: BareSummary[], tagNames: readonly string[]): AssetSummary[] {
+export function withTags(
+  transaction: IndexTransaction,
+  items: BareSummary[],
+  tagNames: readonly string[],
+): AssetSummary[] {
   if (items.length === 0) return [];
   const ids = items.map((summary) => summary.id);
   const coverIds = items.flatMap((summary) => (summary.coverFileId === null ? [] : [summary.coverFileId]));

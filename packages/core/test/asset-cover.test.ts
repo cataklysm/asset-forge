@@ -63,7 +63,8 @@ async function addFile(
     kind: f.kind ?? 'image',
   });
   const status = f.status ?? 'complete';
-  if (status === 'complete') await ctx.db.files.markComplete(f.id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+  if (status === 'complete')
+    await ctx.db.files.markComplete(f.id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await ctx.db.files.markFailed(f.id, 'Import failed');
   if (assetId !== null) await ctx.db.files.setPlacement(f.id, { relativePath, assetId, role });
   ctx.storage.files.set(relativePath, Buffer.from(f.name));
@@ -101,9 +102,26 @@ describe('automaticCover', () => {
 
     const ctx = await setup();
     // Placed rows that never completed: the repository does not check the status, only the use case.
-    await addFile(ctx, { id: uuid(1), name: 'p.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id, status: 'pending' });
-    await addFile(ctx, { id: uuid(2), name: 'f.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id, status: 'failed' });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: null, coverIsChosen: false });
+    await addFile(ctx, {
+      id: uuid(1),
+      name: 'p.png',
+      mimeType: png,
+      importedAt: T1,
+      assetId: ctx.asset.id,
+      status: 'pending',
+    });
+    await addFile(ctx, {
+      id: uuid(2),
+      name: 'f.png',
+      mimeType: png,
+      importedAt: T1,
+      assetId: ctx.asset.id,
+      status: 'failed',
+    });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: null,
+      coverIsChosen: false,
+    });
     for (const fileId of [uuid(1), uuid(2)]) {
       await expect(setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId })).rejects.toMatchObject({
         code: 'validation_failed',
@@ -119,11 +137,21 @@ describe('asset cover', () => {
     const ctx = await setup();
     await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
     await addFile(ctx, { id: uuid(2), name: 'b.png', mimeType: png, importedAt: T2, assetId: ctx.asset.id });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: uuid(1), coverIsChosen: false });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: uuid(1),
+      coverIsChosen: false,
+    });
 
     const before = await ctx.db.assets.get(ctx.asset.id);
     const chosen = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) });
-    expect(chosen).toEqual({ ...before, updatedAt: chosen.updatedAt, coverFileId: uuid(2), coverIsChosen: true, tags: [], sources: [] });
+    expect(chosen).toEqual({
+      ...before,
+      updatedAt: chosen.updatedAt,
+      coverFileId: uuid(2),
+      coverIsChosen: true,
+      tags: [],
+      sources: [],
+    });
     await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toEqual(chosen);
   });
 
@@ -139,21 +167,38 @@ describe('asset cover', () => {
 
   it('no image means no cover', async () => {
     const ctx = await setup();
-    await addFile(ctx, { id: uuid(1), name: 'pump.blend', mimeType: 'application/octet-stream', importedAt: T1, assetId: ctx.asset.id });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: null, coverIsChosen: false });
+    await addFile(ctx, {
+      id: uuid(1),
+      name: 'pump.blend',
+      mimeType: 'application/octet-stream',
+      importedAt: T1,
+      assetId: ctx.asset.id,
+    });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: null,
+      coverIsChosen: false,
+    });
   });
 
   it('getAssetDetail and setAssetCover reject an unknown asset with not_found', async () => {
     const ctx = await setup();
     await expect(getAssetDetail(ctx.session, UNKNOWN_ID)).rejects.toMatchObject({ code: 'not_found' });
-    await expect(setAssetCover(ctx.session, { assetId: UNKNOWN_ID, fileId: null })).rejects.toMatchObject({ code: 'not_found' });
+    await expect(setAssetCover(ctx.session, { assetId: UNKNOWN_ID, fileId: null })).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
 
   it('setAssetCover rejects files of another asset, inbox files and non-images', async () => {
     const ctx = await setup();
     await addFile(ctx, { id: uuid(1), name: 'other.png', mimeType: png, importedAt: T1, assetId: ctx.other.id });
     await addFile(ctx, { id: uuid(2), name: 'inbox.png', mimeType: png, importedAt: T1 });
-    await addFile(ctx, { id: uuid(3), name: 'pump.blend', mimeType: 'application/octet-stream', importedAt: T1, assetId: ctx.asset.id });
+    await addFile(ctx, {
+      id: uuid(3),
+      name: 'pump.blend',
+      mimeType: 'application/octet-stream',
+      importedAt: T1,
+      assetId: ctx.asset.id,
+    });
     const before = await ctx.db.assets.get(ctx.asset.id);
     for (const fileId of [uuid(1), uuid(2), uuid(3), UNKNOWN_ID]) {
       await expect(setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId })).rejects.toMatchObject({
@@ -161,7 +206,10 @@ describe('asset cover', () => {
       });
     }
     await expect(ctx.db.assets.get(ctx.asset.id)).resolves.toEqual(before);
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: null, coverIsChosen: false });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: null,
+      coverIsChosen: false,
+    });
   });
 
   it('setAssetCover with null returns to the automatic cover', async () => {
@@ -190,8 +238,14 @@ describe('asset cover', () => {
     await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
     await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(1) });
     await relocateFile(ctx.session, uuid(1), { assetId: ctx.other.id, role: 'reference' });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: null, coverIsChosen: false });
-    await expect(getAssetDetail(ctx.session, ctx.other.id)).resolves.toMatchObject({ coverFileId: uuid(1), coverIsChosen: false });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: null,
+      coverIsChosen: false,
+    });
+    await expect(getAssetDetail(ctx.session, ctx.other.id)).resolves.toMatchObject({
+      coverFileId: uuid(1),
+      coverIsChosen: false,
+    });
   });
 
   it('a role change within the asset keeps the cover', async () => {
@@ -211,7 +265,13 @@ describe('asset cover', () => {
 
   it('repairing a committed move on open clears the choice', async () => {
     const ctx = await setup();
-    const file = await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    const file = await addFile(ctx, {
+      id: uuid(1),
+      name: 'a.png',
+      mimeType: png,
+      importedAt: T1,
+      assetId: ctx.asset.id,
+    });
     await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(1) });
     const target = assetFilePath(ctx.other.id, 'reference', file.id, 'a.png');
     await ctx.db.fileMoves.begin({
@@ -225,7 +285,10 @@ describe('asset cover', () => {
     await ctx.storage.move(file.relativePath, target);
     const result = await recoverFileMoves({ storage: ctx.storage, files: ctx.db.files, fileMoves: ctx.db.fileMoves });
     expect(result.completed).toEqual([file.id]);
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: null, coverIsChosen: false });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: null,
+      coverIsChosen: false,
+    });
   });
 
   it('listAssets carries the effective cover of each asset', async () => {
@@ -235,7 +298,13 @@ describe('asset cover', () => {
     await addFile(ctx, { id: uuid(2), name: 'b.png', mimeType: png, importedAt: T2, assetId: ctx.asset.id });
     await addFile(ctx, { id: uuid(4), name: 'd.png', mimeType: png, importedAt: T1, assetId: ctx.other.id });
     await addFile(ctx, { id: uuid(3), name: 'c.png', mimeType: png, importedAt: T1, assetId: ctx.other.id });
-    await addFile(ctx, { id: uuid(5), name: 'z.blend', mimeType: 'application/octet-stream', importedAt: T1, assetId: third.id });
+    await addFile(ctx, {
+      id: uuid(5),
+      name: 'z.blend',
+      mimeType: 'application/octet-stream',
+      importedAt: T1,
+      assetId: third.id,
+    });
     await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) });
 
     const listed = await listAssets(ctx.session, { limit: 10, offset: 0 });
@@ -250,7 +319,13 @@ describe('asset cover', () => {
 describe('asset cover of a trashed file', () => {
   it('setAssetCover refuses a trashed file', async () => {
     const ctx = await setup();
-    const file = await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    const file = await addFile(ctx, {
+      id: uuid(1),
+      name: 'a.png',
+      mimeType: png,
+      importedAt: T1,
+      assetId: ctx.asset.id,
+    });
     await trashForTest(ctx.session, [file.id]);
     const error = await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: file.id }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(InvalidOperationError);
@@ -284,23 +359,50 @@ describe('asset cover with a video', () => {
 
   it('an asset with an earlier video and a later image keeps the image as automatic cover', async () => {
     const ctx = await setup();
-    await addFile(ctx, { id: uuid(1), name: 'clip.mp4', mimeType: mp4, importedAt: T1, kind: 'video', assetId: ctx.asset.id });
+    await addFile(ctx, {
+      id: uuid(1),
+      name: 'clip.mp4',
+      mimeType: mp4,
+      importedAt: T1,
+      kind: 'video',
+      assetId: ctx.asset.id,
+    });
     await addFile(ctx, { id: uuid(2), name: 'b.png', mimeType: png, importedAt: T2, assetId: ctx.asset.id });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: uuid(2), coverIsChosen: false });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: uuid(2),
+      coverIsChosen: false,
+    });
     const listed = await listAssets(ctx.session, { limit: 10, offset: 0 });
     expect(listed.items.find((a) => a.id === ctx.asset.id)!.coverFileId).toBe(uuid(2));
   });
 
   it('an asset with only a video has it as automatic cover', async () => {
     const ctx = await setup();
-    await addFile(ctx, { id: uuid(1), name: 'clip.webm', mimeType: 'video/webm', importedAt: T1, kind: 'video', assetId: ctx.asset.id });
-    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({ coverFileId: uuid(1), coverIsChosen: false });
+    await addFile(ctx, {
+      id: uuid(1),
+      name: 'clip.webm',
+      mimeType: 'video/webm',
+      importedAt: T1,
+      kind: 'video',
+      assetId: ctx.asset.id,
+    });
+    await expect(getAssetDetail(ctx.session, ctx.asset.id)).resolves.toMatchObject({
+      coverFileId: uuid(1),
+      coverIsChosen: false,
+    });
   });
 
   it('setAssetCover accepts a complete video', async () => {
     const ctx = await setup();
     await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
-    await addFile(ctx, { id: uuid(2), name: 'clip.mp4', mimeType: mp4, importedAt: T2, kind: 'video', assetId: ctx.asset.id });
+    await addFile(ctx, {
+      id: uuid(2),
+      name: 'clip.mp4',
+      mimeType: mp4,
+      importedAt: T2,
+      kind: 'video',
+      assetId: ctx.asset.id,
+    });
     await expect(setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(2) })).resolves.toMatchObject({
       coverFileId: uuid(2),
       coverIsChosen: true,

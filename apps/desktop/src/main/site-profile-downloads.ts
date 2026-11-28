@@ -1,4 +1,10 @@
-import { belongsToSite, FILE_DOWNLOAD_JOB, FileDownloadPayloadSchema, type JobStatus, type SiteProfile } from '@assetforge/contracts';
+import {
+  belongsToSite,
+  FILE_DOWNLOAD_JOB,
+  FileDownloadPayloadSchema,
+  type JobStatus,
+  type SiteProfile,
+} from '@assetforge/contracts';
 import { browserCheckFailures, type WorkspaceSession } from '@assetforge/core';
 
 // What the open workspace holds about the downloads of one site profile.

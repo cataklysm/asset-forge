@@ -193,7 +193,16 @@ describe('preview cache', () => {
     await service(fakePool(), { limitBytes: 600 }).cleanup();
     // Only full exceeds the limit and shrinks to at most 540 bytes.
     expect(await Promise.all(full.map(exists))).toEqual([
-      false, false, false, false, false, true, true, true, true, true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
     ]);
     expect((await Promise.all(others.map(exists))).every(Boolean)).toBe(true);
   });
@@ -267,9 +276,7 @@ describe('preview cache', () => {
     expect(await s.get({ sha256: A, sourcePath, size: 'thumb' })).toBeNull();
     expect(pool.calls).toHaveLength(0);
     await writeFile(sourcePath, 'source');
-    expect(await s.get({ sha256: A, sourcePath, size: 'thumb' })).toBe(
-      join(cacheDir, previewRelativePath(A, 'thumb')),
-    );
+    expect(await s.get({ sha256: A, sourcePath, size: 'thumb' })).toBe(join(cacheDir, previewRelativePath(A, 'thumb')));
     expect(pool.calls).toHaveLength(1);
   });
 
@@ -365,7 +372,16 @@ describe('preview cache', () => {
     await s.cleanup();
     // Only previews exceed the limit and shrink to at most 540 bytes; thumbnails stay whole.
     expect(await Promise.all(previews.map(exists))).toEqual([
-      false, false, false, false, false, true, true, true, true, true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
     ]);
     expect((await Promise.all(thumbs.map(exists))).every(Boolean)).toBe(true);
   });
@@ -411,7 +427,11 @@ describe('preview cache', () => {
       return fake;
     }
 
-    function videoService(pool: WorkerPool, frames: VideoFrames, options: { limitBytes?: number; cleanupEvery?: number } = {}) {
+    function videoService(
+      pool: WorkerPool,
+      frames: VideoFrames,
+      options: { limitBytes?: number; cleanupEvery?: number } = {},
+    ) {
       const created = createPreviewService({ cacheDir, pool, frames, ...options });
       services.push(created);
       return created;
@@ -582,8 +602,20 @@ describe('preview cache', () => {
       await new Promise<void>((resolve, reject) =>
         execFile(
           ffmpegPath as string,
-          ['-nostdin', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=25:duration=2',
-            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', sourcePath],
+          [
+            '-nostdin',
+            '-loglevel',
+            'error',
+            '-f',
+            'lavfi',
+            '-i',
+            'testsrc=size=640x360:rate=25:duration=2',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            sourcePath,
+          ],
           { windowsHide: true },
           (error) => (error ? reject(error) : resolve()),
         ),

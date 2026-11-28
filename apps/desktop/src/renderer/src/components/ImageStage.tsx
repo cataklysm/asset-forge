@@ -174,8 +174,14 @@ function useAnchoredScroll(
     const scroller = stageRef.current;
     if (pending === null || scroller === null) return;
     anchor.current = null;
-    const axis = (scroll: number, pointer: number, before: number, beforeOffset: number, after: number, afterOffset: number) =>
-      anchoredScroll(scroll - beforeOffset, pointer, before, after) + afterOffset;
+    const axis = (
+      scroll: number,
+      pointer: number,
+      before: number,
+      beforeOffset: number,
+      after: number,
+      afterOffset: number,
+    ) => anchoredScroll(scroll - beforeOffset, pointer, before, after) + afterOffset;
     scroller.scrollLeft = axis(pending.scrollLeft, pending.x, pending.box.width, pending.offset.x, box.width, offset.x);
     scroller.scrollTop = axis(pending.scrollTop, pending.y, pending.box.height, pending.offset.y, box.height, offset.y);
   });
@@ -188,7 +194,10 @@ function useAnchoredScroll(
  * @param stageRef the stage
  * @param onWheel the zoom of the latest render
  */
-function useCtrlWheel(stageRef: RefObject<HTMLDivElement | null>, onWheel: MutableRefObject<{ wheel(event: WheelEvent): void }>): void {
+function useCtrlWheel(
+  stageRef: RefObject<HTMLDivElement | null>,
+  onWheel: MutableRefObject<{ wheel(event: WheelEvent): void }>,
+): void {
   useEffect(() => {
     const scroller = stageRef.current;
     if (scroller === null) return;
@@ -218,7 +227,12 @@ function useDragPan() {
     const x = event.clientX - rect.left - scroller.clientLeft;
     const y = event.clientY - rect.top - scroller.clientTop;
     if (x < 0 || y < 0 || x >= scroller.clientWidth || y >= scroller.clientHeight) return;
-    drag.current = { x: event.clientX, y: event.clientY, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop };
+    drag.current = {
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: scroller.scrollLeft,
+      scrollTop: scroller.scrollTop,
+    };
     scroller.setPointerCapture?.(event.pointerId);
   }
   function onPointerMove(event: PointerEvent<HTMLDivElement>) {
@@ -271,7 +285,13 @@ function Stage({ file, onControls }: Props) {
   function zoomTo(next: Zoom, at?: Point) {
     const scroller = stageRef.current;
     const point = at ?? { x: stage.width / 2, y: stage.height / 2 };
-    anchor.current = { ...point, scrollLeft: scroller?.scrollLeft ?? 0, scrollTop: scroller?.scrollTop ?? 0, box, offset };
+    anchor.current = {
+      ...point,
+      scrollLeft: scroller?.scrollLeft ?? 0,
+      scrollTop: scroller?.scrollTop ?? 0,
+      box,
+      offset,
+    };
     setZoom(next);
   }
 
@@ -335,7 +355,8 @@ function Stage({ file, onControls }: Props) {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onDoubleClick={(event) => {
-          if (canActual) zoomTo(zoom.mode === 'fit' ? { mode: 'percent', percent: 100 } : { mode: 'fit' }, pointerOf(event));
+          if (canActual)
+            zoomTo(zoom.mode === 'fit' ? { mode: 'percent', percent: 100 } : { mode: 'fit' }, pointerOf(event));
         }}
       >
         {/* As large as the box, at least the client area: it overflows only when the box really does. */}

@@ -16,16 +16,12 @@ const WORKSPACE_PACKAGES = [
   '@assetforge/storage',
 ];
 
-const PERSISTENCE_MIGRATIONS = fileURLToPath(
-  new URL('../../packages/persistence/migrations', import.meta.url),
-);
+const PERSISTENCE_MIGRATIONS = fileURLToPath(new URL('../../packages/persistence/migrations', import.meta.url));
 
 const MAIN_ENTRY = fileURLToPath(new URL('src/main/index.ts', import.meta.url));
 
 // Worker thread entry; built next to index.js as out/main/preview-worker.js.
-const PREVIEW_WORKER_ENTRY = fileURLToPath(
-  new URL('../../packages/media/src/preview-worker.ts', import.meta.url),
-);
+const PREVIEW_WORKER_ENTRY = fileURLToPath(new URL('../../packages/media/src/preview-worker.ts', import.meta.url));
 
 /** Copies the SQL migrations next to the built main bundle (`out/main/migrations`). */
 function copyMigrations(): Plugin {
@@ -43,9 +39,7 @@ export default defineConfig(({ command }) => ({
   main: {
     // Dev reads the migrations straight from the persistence package; a build uses the copy.
     define: {
-      __ASSETFORGE_DEV_MIGRATIONS_FOLDER__: JSON.stringify(
-        command === 'serve' ? PERSISTENCE_MIGRATIONS : null,
-      ),
+      __ASSETFORGE_DEV_MIGRATIONS_FOLDER__: JSON.stringify(command === 'serve' ? PERSISTENCE_MIGRATIONS : null),
     },
     plugins: command === 'build' ? [copyMigrations()] : [],
     build: {

@@ -11,7 +11,10 @@ import { AnalyzeFilePayloadSchema, type AnalyzeFilePayload } from '@assetforge/c
  * @param to the name and the chosen model of the provider the job moves to
  * @returns the rewritten payload, or the stored one when it does not parse
  */
-export function rewriteForProvider(payload: unknown, to: { name: string; model: string }): AnalyzeFilePayload | unknown {
+export function rewriteForProvider(
+  payload: unknown,
+  to: { name: string; model: string },
+): AnalyzeFilePayload | unknown {
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
   if (!parsed.success) return payload;
   const stored = parsed.data;

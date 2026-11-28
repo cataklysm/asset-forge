@@ -1,7 +1,10 @@
 import type { StudioForm } from './studio-state';
 
 /** The form fields the studio holds itself; provider and model come from the provider choice. */
-export type StudioFields = Pick<StudioForm, 'prompt' | 'attached' | 'origin' | 'aspectRatio' | 'resolution' | 'safeMode'>;
+export type StudioFields = Pick<
+  StudioForm,
+  'prompt' | 'attached' | 'origin' | 'aspectRatio' | 'resolution' | 'safeMode'
+>;
 
 /** An entry and model still to be chosen once the entry is selected ("Use settings", a restored form). */
 export interface PendingModel {

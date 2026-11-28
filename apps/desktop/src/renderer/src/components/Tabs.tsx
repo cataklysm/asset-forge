@@ -103,7 +103,13 @@ export function Tabs<T extends string>({ tabs, active, onChange, label, children
           );
         })}
       </div>
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(active)} tabIndex={0} className={`flex min-h-0 flex-1 flex-col ${FOCUS}`}>
+      <div
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={tabId(active)}
+        tabIndex={0}
+        className={`flex min-h-0 flex-1 flex-col ${FOCUS}`}
+      >
         {children}
       </div>
     </div>

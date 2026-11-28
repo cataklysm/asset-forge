@@ -37,10 +37,20 @@ async function setup() {
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 /** Every binary an import wrote: inbox, asset directories and staging. */
 const written = (storage: InMemoryStorage) =>
-  [...storage.files.keys()].filter((k) => k.startsWith('inbox/') || k.startsWith('assets/') || k.startsWith(`${STAGING_DIR}/`));
-const stagingEntries = (storage: InMemoryStorage) => [...storage.files.keys()].filter((k) => k.startsWith(`${STAGING_DIR}/`));
-const dirs = (count: number): FakeArchiveEntry[] => Array.from({ length: count }, (_, i) => ({ name: `d${i}/`, isDirectory: true }));
-const failure = (sourcePath: string, error: string) => ({ sourcePath, entryName: null, file: null, error, duplicateOf: [] });
+  [...storage.files.keys()].filter(
+    (k) => k.startsWith('inbox/') || k.startsWith('assets/') || k.startsWith(`${STAGING_DIR}/`),
+  );
+const stagingEntries = (storage: InMemoryStorage) =>
+  [...storage.files.keys()].filter((k) => k.startsWith(`${STAGING_DIR}/`));
+const dirs = (count: number): FakeArchiveEntry[] =>
+  Array.from({ length: count }, (_, i) => ({ name: `d${i}/`, isDirectory: true }));
+const failure = (sourcePath: string, error: string) => ({
+  sourcePath,
+  entryName: null,
+  file: null,
+  error,
+  duplicateOf: [],
+});
 
 describe('importFiles without unpacking', () => {
   it('imports a .zip as one file when unpackArchives is omitted or false', async () => {
@@ -48,11 +58,20 @@ describe('importFiles without unpacking', () => {
     sources.set('/src/pack.zip', Buffer.from('PK-bytes'));
     archives.set('/src/pack.zip', [{ name: 'a.png', content: 'a' }]);
 
-    for (const results of [await manager.importFiles(['/src/pack.zip']), await manager.importFiles(['/src/pack.zip'], null, { unpackArchives: false })]) {
+    for (const results of [
+      await manager.importFiles(['/src/pack.zip']),
+      await manager.importFiles(['/src/pack.zip'], null, { unpackArchives: false }),
+    ]) {
       expect(results).toHaveLength(1);
       const [result] = results;
       expect(result).toMatchObject({ sourcePath: '/src/pack.zip', entryName: null, error: null });
-      expect(result!.file).toMatchObject({ status: 'complete', originalName: 'pack.zip', sha256: sha('PK-bytes'), sizeBytes: 8, kind: 'other' });
+      expect(result!.file).toMatchObject({
+        status: 'complete',
+        originalName: 'pack.zip',
+        sha256: sha('PK-bytes'),
+        sizeBytes: 8,
+        kind: 'other',
+      });
       expect(storage.files.get(result!.file!.relativePath)?.toString()).toBe('PK-bytes');
     }
     expect(archives.opened).toEqual([]);
@@ -75,7 +94,14 @@ describe('importFiles unpacking archives', () => {
     ]);
     expect(results.map((r) => r.file)).toMatchObject([
       { status: 'complete', originalName: 'b.png', sha256: sha('bee'), sizeBytes: 3, kind: 'image', assetId: null },
-      { status: 'complete', originalName: 'notes.txt', sha256: sha('alpha!'), sizeBytes: 6, kind: 'document', assetId: null },
+      {
+        status: 'complete',
+        originalName: 'notes.txt',
+        sha256: sha('alpha!'),
+        sizeBytes: 6,
+        kind: 'document',
+        assetId: null,
+      },
     ]);
     for (const { file } of results) {
       expect(db.files.records.get(file!.id)).toMatchObject({ status: 'complete', sha256: file!.sha256 });
@@ -122,7 +148,11 @@ describe('importFiles unpacking archives', () => {
     expect(results).toHaveLength(2);
     for (const { file, error } of results) {
       expect(error).toBeNull();
-      expect(file).toMatchObject({ assetId: asset.id, role: 'texture', relativePath: assetFilePath(asset.id, 'texture', file!.id, file!.originalName) });
+      expect(file).toMatchObject({
+        assetId: asset.id,
+        role: 'texture',
+        relativePath: assetFilePath(asset.id, 'texture', file!.id, file!.originalName),
+      });
       expect(db.files.records.get(file!.id)).toMatchObject({ assetId: asset.id, role: 'texture' });
     }
     expect(written(storage).filter((k) => k.startsWith('inbox/'))).toEqual([]);
@@ -147,8 +177,21 @@ describe('importFiles unpacking archives', () => {
 
   it('entry paths never influence the storage path', async () => {
     const { unpack, archives } = await setup();
-    const names = ['../../evil.png', '/abs/root.png', 'C:\\Windows\\x.png', 'C:x.png', 'a\\..\\b.png', 'dir/..', '..\\..\\up.txt', '\\\\server\\share\\s.png', 'x.png:stream'];
-    archives.set('/src/pack.zip', names.map((name, i) => ({ name, content: `c${i}` })));
+    const names = [
+      '../../evil.png',
+      '/abs/root.png',
+      'C:\\Windows\\x.png',
+      'C:x.png',
+      'a\\..\\b.png',
+      'dir/..',
+      '..\\..\\up.txt',
+      '\\\\server\\share\\s.png',
+      'x.png:stream',
+    ];
+    archives.set(
+      '/src/pack.zip',
+      names.map((name, i) => ({ name, content: `c${i}` })),
+    );
 
     const results = await unpack(['/src/pack.zip']);
 
@@ -180,7 +223,13 @@ describe('importFiles unpacking archives', () => {
 
     const results = await unpack(['/src/pack.zip']);
 
-    const refused = (entryName: string, error: string) => ({ sourcePath: '/src/pack.zip', entryName, file: null, error, duplicateOf: [] });
+    const refused = (entryName: string, error: string) => ({
+      sourcePath: '/src/pack.zip',
+      entryName,
+      file: null,
+      error,
+      duplicateOf: [],
+    });
     expect(results.slice(0, -1)).toEqual([
       refused('tool.exe', REFUSED_IMPORT_MESSAGE),
       refused('inner.zip', REFUSED_IMPORT_MESSAGE),
@@ -190,7 +239,11 @@ describe('importFiles unpacking archives', () => {
       refused('bad\u0001.png', ARCHIVE_ENTRY_REFUSED_MESSAGE),
       refused('bad\u007f.png', ARCHIVE_ENTRY_REFUSED_MESSAGE),
     ]);
-    expect(results.at(-1)).toMatchObject({ entryName: 'ok.png', error: null, file: { status: 'complete', originalName: 'ok.png' } });
+    expect(results.at(-1)).toMatchObject({
+      entryName: 'ok.png',
+      error: null,
+      file: { status: 'complete', originalName: 'ok.png' },
+    });
     expect(archives.openedEntries).toEqual([10]);
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['ok.png']);
     expect(written(storage)).toEqual([results.at(-1)!.file!.relativePath]);
@@ -206,7 +259,13 @@ describe('importFiles unpacking archives', () => {
 
     const results = await unpack(['/src/pack.zip']);
 
-    expect(results[0]).toEqual({ sourcePath: '/src/pack.zip', entryName: `dir/${name}`, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(results[0]).toEqual({
+      sourcePath: '/src/pack.zip',
+      entryName: `dir/${name}`,
+      file: null,
+      error: REFUSED_IMPORT_MESSAGE,
+      duplicateOf: [],
+    });
     expect(results[1]).toMatchObject({ entryName: 'ok.png', error: null, file: { status: 'complete' } });
     expect(archives.openedEntries).toEqual([1]);
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['ok.png']);
@@ -226,7 +285,13 @@ describe('importFiles unpacking archives', () => {
     const results = await unpack(['/src/pack.zip']);
 
     expect(results[0]).toMatchObject({ entryName: `deep/${fits}`, error: null, file: { status: 'complete' } });
-    expect(results[1]).toEqual({ sourcePath: '/src/pack.zip', entryName: `deep/${tooLong}`, file: null, error: ARCHIVE_ENTRY_REFUSED_MESSAGE, duplicateOf: [] });
+    expect(results[1]).toEqual({
+      sourcePath: '/src/pack.zip',
+      entryName: `deep/${tooLong}`,
+      file: null,
+      error: ARCHIVE_ENTRY_REFUSED_MESSAGE,
+      duplicateOf: [],
+    });
     expect(archives.openedEntries).toEqual([0]);
     expect(db.files.records.size).toBe(1);
   });
@@ -249,11 +314,17 @@ describe('importFiles unpacking archives', () => {
   it('an archive without entries, or with only skipped ones, contains no files', async () => {
     const { unpack, archives, db } = await setup();
     archives.set('/src/empty.zip', []);
-    archives.set('/src/dirs.zip', [{ name: 'tex/', isDirectory: true }, { name: '__MACOSX/._a.png', content: 'x' }]);
+    archives.set('/src/dirs.zip', [
+      { name: 'tex/', isDirectory: true },
+      { name: '__MACOSX/._a.png', content: 'x' },
+    ]);
 
     const results = await unpack(['/src/empty.zip', '/src/dirs.zip']);
 
-    expect(results).toEqual([failure('/src/empty.zip', ARCHIVE_EMPTY_MESSAGE), failure('/src/dirs.zip', ARCHIVE_EMPTY_MESSAGE)]);
+    expect(results).toEqual([
+      failure('/src/empty.zip', ARCHIVE_EMPTY_MESSAGE),
+      failure('/src/dirs.zip', ARCHIVE_EMPTY_MESSAGE),
+    ]);
     expect(db.files.records.size).toBe(0);
     expect(archives.closed).toBe(2);
   });
@@ -376,9 +447,17 @@ describe('importFiles archive failures', () => {
 
     const [broken, fine] = await unpack(['/src/pack.zip']);
 
-    expect(broken).toMatchObject({ entryName: 'broken.png', error: 'Import failed', file: { status: 'failed', originalName: 'broken.png' } });
+    expect(broken).toMatchObject({
+      entryName: 'broken.png',
+      error: 'Import failed',
+      file: { status: 'failed', originalName: 'broken.png' },
+    });
     expect(db.files.records.get(broken!.file!.id)).toMatchObject({ status: 'failed', error: 'Import failed' });
-    expect(fine).toMatchObject({ entryName: 'fine.png', error: null, file: { status: 'complete', sha256: sha('fine') } });
+    expect(fine).toMatchObject({
+      entryName: 'fine.png',
+      error: null,
+      file: { status: 'complete', sha256: sha('fine') },
+    });
     expect(stagingEntries(storage)).toEqual([]);
     expect(written(storage)).toEqual([fine!.file!.relativePath]);
   });
@@ -396,8 +475,20 @@ describe('importFiles archive failures', () => {
 
     expect(results[0]).toMatchObject({ entryName: 'one.png', error: null, file: { status: 'complete' } });
     expect(results.slice(1)).toEqual([
-      { sourcePath: '/src/pack.zip', entryName: 'two.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] },
-      { sourcePath: '/src/pack.zip', entryName: 'three.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] },
+      {
+        sourcePath: '/src/pack.zip',
+        entryName: 'two.png',
+        file: null,
+        error: ARCHIVE_TRUNCATED_MESSAGE,
+        duplicateOf: [],
+      },
+      {
+        sourcePath: '/src/pack.zip',
+        entryName: 'three.png',
+        file: null,
+        error: ARCHIVE_TRUNCATED_MESSAGE,
+        duplicateOf: [],
+      },
     ]);
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['one.png']);
     expect(archives.openedEntries).toEqual([0, 1, 2]);
@@ -414,8 +505,18 @@ describe('importFiles archive failures', () => {
 
     const results = await unpack(['/src/pack.zip']);
 
-    expect(results[0]).toEqual({ sourcePath: '/src/pack.zip', entryName: 'one.png', file: null, error: ARCHIVE_TRUNCATED_MESSAGE, duplicateOf: [] });
-    expect(results[1]).toMatchObject({ entryName: 'two.png', error: null, file: { status: 'complete', sha256: sha('two') } });
+    expect(results[0]).toEqual({
+      sourcePath: '/src/pack.zip',
+      entryName: 'one.png',
+      file: null,
+      error: ARCHIVE_TRUNCATED_MESSAGE,
+      duplicateOf: [],
+    });
+    expect(results[1]).toMatchObject({
+      entryName: 'two.png',
+      error: null,
+      file: { status: 'complete', sha256: sha('two') },
+    });
     expect([...db.files.records.values()].map((r) => r.originalName)).toEqual(['two.png']);
     expect(archives.openedEntries).toEqual([0, 1]);
   });

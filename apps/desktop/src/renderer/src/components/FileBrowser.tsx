@@ -12,14 +12,7 @@ import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type
 import { PAGE_SIZE, slotAt, type Slot } from '../paged-list';
 import { clickSelect, NO_SELECTION, toggleSelect, type FileSelection, type ItemAt } from '../selection';
 import { BUTTON, MUTED } from '../ui';
-import {
-  nextRows,
-  reloadRestore,
-  TOP,
-  viewerPages,
-  type BrowserLatest,
-  type KeyedRows,
-} from './file-browser-state';
+import { nextRows, reloadRestore, TOP, viewerPages, type BrowserLatest, type KeyedRows } from './file-browser-state';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { FileGridView, TILE_HEIGHT, TILE_WIDTH } from './FileGridView';
 import { FileTable } from './FileTable';
@@ -175,7 +168,14 @@ export function FileBrowser(props: FileBrowserProps) {
   latest.current = { props, viewKey, paged, key, listRequest };
 
   useFileListChanges(scope, latest);
-  const viewerList = useViewerSync({ tracking, latest, position, viewedId, state: paged.state, pending: paged.pending });
+  const viewerList = useViewerSync({
+    tracking,
+    latest,
+    position,
+    viewedId,
+    state: paged.state,
+    pending: paged.pending,
+  });
 
   useEffect(() => () => publishPosition(latest, position), []);
 
@@ -288,7 +288,8 @@ export function FileBrowser(props: FileBrowserProps) {
  */
 function publishPosition(latest: MutableRefObject<BrowserLatest>, position: MutableRefObject<ViewHandle | null>): void {
   const { props: current, viewKey } = latest.current;
-  if (current.positionRef && position.current?.viewKey === viewKey) current.positionRef.current = position.current.get();
+  if (current.positionRef && position.current?.viewKey === viewKey)
+    current.positionRef.current = position.current.get();
 }
 
 /** What `fileViewProps` builds the view's props from. */

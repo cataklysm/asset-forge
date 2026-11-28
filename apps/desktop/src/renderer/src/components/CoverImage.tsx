@@ -26,9 +26,7 @@ export function CoverImage({ fileId, size, fallback, className = '' }: Props) {
   const [failed, setFailed] = useState<string | null>(null);
   const showImage = fileId !== null && failed !== fileId;
   return (
-    <div
-      className={`flex items-center justify-center overflow-hidden rounded-control bg-raised ${className}`}
-    >
+    <div className={`flex items-center justify-center overflow-hidden rounded-control bg-raised ${className}`}>
       {showImage ? (
         <img
           src={previewUrl(fileId, size)}

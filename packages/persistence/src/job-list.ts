@@ -1,4 +1,10 @@
-import { FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB, analysisJobFields, downloadJobFields, type JobView } from '@assetforge/contracts';
+import {
+  FILE_DOWNLOAD_JOB,
+  IMAGE_GENERATE_JOB,
+  analysisJobFields,
+  downloadJobFields,
+  type JobView,
+} from '@assetforge/contracts';
 import type { JobRepository } from '@assetforge/core';
 import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';

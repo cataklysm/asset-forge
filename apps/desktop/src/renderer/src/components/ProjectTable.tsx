@@ -235,7 +235,9 @@ function TableRow(props: TableRowProps) {
         if (project) onSelect(project);
       }}
     >
-      {project !== null && <ProjectCells project={project} tagged={tagged} onOpen={() => onOpen(project, rows.scrollOffset())} />}
+      {project !== null && (
+        <ProjectCells project={project} tagged={tagged} onOpen={() => onOpen(project, rows.scrollOffset())} />
+      )}
     </div>
   );
 }

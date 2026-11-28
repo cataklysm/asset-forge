@@ -82,7 +82,9 @@ function Harness(props: { onState?(s: TrashListState): void }) {
 }
 
 function tile(name: string): HTMLElement {
-  const element = within(screen.getByRole('listbox', { name: 'Files' })).getByText(name).closest<HTMLElement>('[data-index]');
+  const element = within(screen.getByRole('listbox', { name: 'Files' }))
+    .getByText(name)
+    .closest<HTMLElement>('[data-index]');
   if (element === null) throw new Error(`no tile for ${name}`);
   return element;
 }
@@ -122,7 +124,11 @@ it('Restore from the menu calls files:restoreMany without asking and reloads', a
   const api = install([hero, loose]);
   render(<Harness />);
   await openMenu(user, 'hero.png');
-  expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Details', 'Restore', 'Delete permanently']);
+  expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+    'Details',
+    'Restore',
+    'Delete permanently',
+  ]);
   await user.click(screen.getByRole('menuitem', { name: 'Restore' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(callsOf(api, 'files:restoreMany')).toEqual([{ fileIds: [hero.id] }]);
@@ -271,7 +277,9 @@ it('searching the trash sends the query with scope trash', async () => {
   await screen.findByText('hero.png');
   await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'hero');
   await waitFor(() =>
-    expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.query === 'hero' && r.scope.kind === 'trash')).toBe(true),
+    expect(
+      (callsOf(api, 'files:list') as ListRequest[]).some((r) => r.query === 'hero' && r.scope.kind === 'trash'),
+    ).toBe(true),
   );
 });
 

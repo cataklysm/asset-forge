@@ -54,7 +54,11 @@ const found = async (query: string, q: Partial<Parameters<WorkspaceDatabase['ass
   (await db.assets.list({ limit: 50, offset: 0, query, ...q })).items.map((a) => a.name);
 
 /** Inserts an inbox file in the given state and returns its id. */
-const addInboxFile = async (originalName: string, status: 'complete' | 'pending' | 'failed' = 'complete', kind: FileKind = 'image') => {
+const addInboxFile = async (
+  originalName: string,
+  status: 'complete' | 'pending' | 'failed' = 'complete',
+  kind: FileKind = 'image',
+) => {
   const id = newId();
   await db.files.insertPending({
     id,
@@ -65,7 +69,8 @@ const addInboxFile = async (originalName: string, status: 'complete' | 'pending'
     importedAt: TS,
     kind,
   });
-  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+  if (status === 'complete')
+    await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await db.files.markFailed(id, 'x');
   return id;
 };
@@ -77,7 +82,12 @@ const place = (fileId: string, assetId: string | null, role: FileRole | null = '
     role: assetId === null ? null : role,
   });
 
-const addFile = async (assetId: string, originalName: string, role: FileRole = 'reference', kind: FileKind = 'image') => {
+const addFile = async (
+  assetId: string,
+  originalName: string,
+  role: FileRole = 'reference',
+  kind: FileKind = 'image',
+) => {
   const id = await addInboxFile(originalName, 'complete', kind);
   await place(id, assetId, role);
   return id;
@@ -178,7 +188,9 @@ describe('search index triggers', () => {
     const second = await addFile(uuid(1), 'drawing.png');
     await db.fileMoves.begin(target(second));
     await expect(found('drawing')).resolves.toEqual(['Alpha']);
-    const storage = { exists: async (path: string) => path === target(second).targetRelativePath } as unknown as Storage;
+    const storage = {
+      exists: async (path: string) => path === target(second).targetRelativePath,
+    } as unknown as Storage;
     const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
     expect(result.completed).toEqual([second]);
     await expect(found('drawing')).resolves.toEqual(['Bravo']);
@@ -287,7 +299,14 @@ describe('search queries', () => {
   });
 
   test('search combines with every filter', async () => {
-    await db.projects.insert({ id: uuid(800), name: 'Game', description: '', status: 'active', createdAt: TS, updatedAt: TS });
+    await db.projects.insert({
+      id: uuid(800),
+      name: 'Game',
+      description: '',
+      status: 'active',
+      createdAt: TS,
+      updatedAt: TS,
+    });
     const member = async (n: number) =>
       db.projectAssets.insert({
         projectId: uuid(800),
@@ -349,7 +368,9 @@ describe('search queries', () => {
 
     const [first] = (await db.assets.list({ ...q, query: 'iron', limit: 1, offset: 0 })).items;
     expect(first).toMatchObject({ id: uuid(1), projectCount: 1, fileCount: 1, workflowProgress: null });
-    await expect(db.assets.list({ ...q, tagNames: ['metal', 'nope'], query: 'iron', limit: 2, offset: 0 })).resolves.toEqual({
+    await expect(
+      db.assets.list({ ...q, tagNames: ['metal', 'nope'], query: 'iron', limit: 2, offset: 0 }),
+    ).resolves.toEqual({
       items: [],
       total: 0,
     });
@@ -385,7 +406,14 @@ describe('list item tags', () => {
   test('list items carry asset tags and the tags of the effective cover', async () => {
     await db.assets.insert(asset(1, 'A'));
     await tagAs(uuid(1), 'oak', 'Oak');
-    await db.tags.addToAsset({ assetId: uuid(1), name: 'fir', displayName: 'Fir', origin: 'ai', newId: newId(), now: TS });
+    await db.tags.addToAsset({
+      assetId: uuid(1),
+      name: 'fir',
+      displayName: 'Fir',
+      origin: 'ai',
+      newId: newId(),
+      now: TS,
+    });
     const chosen = await addFile(uuid(1), 'a.png');
     await tagFile(chosen, 'bark');
     await tagFile(await addFile(uuid(1), 'b.png'), 'moss');

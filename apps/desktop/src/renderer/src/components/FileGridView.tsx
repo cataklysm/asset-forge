@@ -102,7 +102,11 @@ function GridRows(props: GridRowsProps) {
 }
 
 /** The props of one tile: the view's props plus the row windowing and the list index. */
-type GridItemProps = FileViewProps & { rows: ReturnType<typeof useVirtualRows>; index: number; paged: PagedState<FileRecord> };
+type GridItemProps = FileViewProps & {
+  rows: ReturnType<typeof useVirtualRows>;
+  index: number;
+  paged: PagedState<FileRecord>;
+};
 
 /**
  * One tile: Retry for a failed page, a placeholder while unloaded, else the file with its picture, checkbox, menu,
@@ -188,7 +192,11 @@ function GridItem(props: GridItemProps) {
             >
               <Search size={16} aria-hidden />
             </button>
-            {file.id === coverFileId && <span className={`absolute bottom-2 ${file.kind === 'video' ? 'left-10' : 'left-2'} ${BADGE}`}>Cover</span>}
+            {file.id === coverFileId && (
+              <span className={`absolute bottom-2 ${file.kind === 'video' ? 'left-10' : 'left-2'} ${BADGE}`}>
+                Cover
+              </span>
+            )}
           </div>
           <div className="px-3 py-3">
             <div className="flex min-w-0 items-center gap-1.5">

@@ -47,13 +47,20 @@ describe('analysis targets', () => {
   test('each target kind parses', () => {
     const targets = [
       { kind: 'files', fileIds: [uuid(1), uuid(2)] },
-      { kind: 'fileFilter', filter: { scope: { kind: 'inbox' }, query: 'tree', tagNames: ['oak'], role: 'reference', kind: 'image' } },
+      {
+        kind: 'fileFilter',
+        filter: { scope: { kind: 'inbox' }, query: 'tree', tagNames: ['oak'], role: 'reference', kind: 'image' },
+      },
       { kind: 'fileFilter', filter: { scope: { kind: 'asset', assetId: uuid(3) } } },
       { kind: 'asset', assetId: uuid(4) },
       { kind: 'assetFilter', filter: {} },
-      { kind: 'assetFilter', filter: { typeId: uuid(5), status: 'draft', fileRole: 'reference', fileKind: 'image', tagNames: ['oak'] } },
+      {
+        kind: 'assetFilter',
+        filter: { typeId: uuid(5), status: 'draft', fileRole: 'reference', fileKind: 'image', tagNames: ['oak'] },
+      },
     ];
-    for (const target of targets) expect(AnalysisTargetSchema.safeParse(target).success, JSON.stringify(target)).toBe(true);
+    for (const target of targets)
+      expect(AnalysisTargetSchema.safeParse(target).success, JSON.stringify(target)).toBe(true);
   });
 
   test('a files target holds 1 to 1000 distinct ids', () => {
@@ -74,10 +81,14 @@ describe('analysis targets', () => {
     expect(FileListFilterSchema.safeParse({}).success).toBe(false);
     expect(AssetListFilterSchema.safeParse({ fileKind: 'model' }).success).toBe(true);
     const files = ipcContract['files:list'].request;
-    expect(files.safeParse({ limit: 10, offset: 0, scope: { kind: 'all' }, role: 'reference', hasProposal: true }).success).toBe(true);
+    expect(
+      files.safeParse({ limit: 10, offset: 0, scope: { kind: 'all' }, role: 'reference', hasProposal: true }).success,
+    ).toBe(true);
     expect(files.safeParse({ limit: 10, offset: 0, scope: { kind: 'all' }, hasProposal: 'yes' }).success).toBe(false);
     const assets = ipcContract['assets:list'].request;
-    expect(assets.safeParse({ limit: 10, offset: 0, query: 'oak', fileRole: 'reference', fileKind: 'image' }).success).toBe(true);
+    expect(
+      assets.safeParse({ limit: 10, offset: 0, query: 'oak', fileRole: 'reference', fileKind: 'image' }).success,
+    ).toBe(true);
   });
 
   test('analysis:enqueue takes a target, a model, a mode and force', () => {
@@ -93,15 +104,27 @@ describe('analysis targets', () => {
 
 describe('analysis results', () => {
   test('preview and enqueue results are counts', () => {
-    expect(AnalysisPreviewSchema.safeParse({ analysable: 3, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 2 }).success).toBe(true);
-    expect(AnalysisPreviewSchema.safeParse({ analysable: -1, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 2 }).success).toBe(false);
+    expect(
+      AnalysisPreviewSchema.safeParse({ analysable: 3, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 2 })
+        .success,
+    ).toBe(true);
+    expect(
+      AnalysisPreviewSchema.safeParse({ analysable: -1, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 2 })
+        .success,
+    ).toBe(false);
     const skipped = { notFound: 0, notAnalysable: 1, alreadyQueued: 2, alreadyAnalysed: 3 };
     expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 4, skipped }).success).toBe(true);
     expect(EnqueueAnalysisResultSchema.safeParse({ enqueued: 4, skipped: [] }).success).toBe(false);
   });
 
   test('a proposal view carries its model, age, staleness and tags', () => {
-    const view = { model: 'qwen', promptName: 'General', createdAt: '2026-11-26T10:00:00.000Z', stale: false, tags: [{ name: 'oak', displayName: 'Oak' }] };
+    const view = {
+      model: 'qwen',
+      promptName: 'General',
+      createdAt: '2026-11-26T10:00:00.000Z',
+      stale: false,
+      tags: [{ name: 'oak', displayName: 'Oak' }],
+    };
     expect(ProposalViewSchema.safeParse(view).success).toBe(true);
     expect(ProposalViewSchema.safeParse({ ...view, stale: undefined }).success).toBe(false);
     const tags = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `tag ${i}`, displayName: `tag ${i}` }));

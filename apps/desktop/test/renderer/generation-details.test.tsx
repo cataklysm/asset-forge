@@ -26,8 +26,25 @@ vi.mock('../../src/renderer/src/components/GenerationStudio', () => ({
   ),
 }));
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
-const VENICE = providerView({ kind: 'venice', name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', taggingModel: null, promptModel: null, editModel: 'mock-edit' });
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
+const VENICE = providerView({
+  kind: 'venice',
+  name: 'Venice',
+  baseUrl: 'https://api.venice.ai/api/v1',
+  taggingModel: null,
+  promptModel: null,
+  editModel: 'mock-edit',
+});
 const SOURCE = fileRecord({ originalName: 'oak.png' });
 const RESULT = fileRecord({ originalName: 'oak edit 1.png' });
 const PROMPT = 'Turn the tree to face left';
@@ -73,7 +90,13 @@ function install(handlers: FakeHandlers = {}, providers = [VENICE]) {
   });
 }
 
-function Providers({ children, onOpenPrompt }: { children: ReactNode; onOpenPrompt?: (id: string) => Promise<boolean> }) {
+function Providers({
+  children,
+  onOpenPrompt,
+}: {
+  children: ReactNode;
+  onOpenPrompt?: (id: string) => Promise<boolean>;
+}) {
   return (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -129,7 +152,14 @@ it('a complete PNG offers Generate from image and both upscales; an SVG and a tr
     </Providers>,
   );
   let user = await openMenu();
-  expect(menuLabels()).toEqual(['Details', 'Open externally', 'Show in folder', 'Generate from image', 'Upscale 2×', 'Upscale 4×']);
+  expect(menuLabels()).toEqual([
+    'Details',
+    'Open externally',
+    'Show in folder',
+    'Generate from image',
+    'Upscale 2×',
+    'Upscale 4×',
+  ]);
   await user.keyboard('{Escape}');
   unmount();
 
@@ -217,7 +247,11 @@ it('Generate from image opens the studio on that file', async () => {
 function linkedHandlers(made: Generation): FakeHandlers {
   return {
     'generations:forFile': ({ fileId }) =>
-      fileId === RESULT.id ? { madeBy: made, results: [] } : fileId === SOURCE.id ? { madeBy: null, results: [made] } : { madeBy: null, results: [] },
+      fileId === RESULT.id
+        ? { madeBy: made, results: [] }
+        : fileId === SOURCE.id
+          ? { madeBy: null, results: [made] }
+          : { madeBy: null, results: [] },
     'files:measure': ({ fileId }) => {
       const record = [SOURCE, RESULT].find((f) => f.id === fileId);
       if (record === undefined) throw new Error('unknown file');
@@ -381,7 +415,12 @@ it('Open in the studio shows the result in the file detail dialog', async () => 
   expect(await within(dialog).findByRole('region', { name: 'Generated from' })).not.toBeNull();
 });
 
-const FROM_LIBRARY = { promptId: 'prompt-1', promptTitle: 'Turnaround', promptVersionNumber: 3, promptVariables: { hero: 'Ana', mood: 'calm' } };
+const FROM_LIBRARY = {
+  promptId: 'prompt-1',
+  promptTitle: 'Turnaround',
+  promptVersionNumber: 3,
+  promptVariables: { hero: 'Ana', mood: 'calm' },
+};
 
 async function showDetails(made: Generation, onOpenPrompt?: (id: string) => Promise<boolean>) {
   install({ 'generations:forFile': () => ({ madeBy: made, results: [] }) });

@@ -130,7 +130,9 @@ describe('URL import', () => {
     clock = manualClock();
     const harness = await createHarness({
       clock,
-      ...(o.remote === 'app' ? {} : { remote: createUrlSource({ userAgent: 'AssetForge/test', allowAddress: () => true }) }),
+      ...(o.remote === 'app'
+        ? {}
+        : { remote: createUrlSource({ userAgent: 'AssetForge/test', allowAddress: () => true }) }),
       host: {
         workspaceOpened: async () => {
           if (!holdJobs) await harness.services.workspaceOpened();
@@ -155,7 +157,12 @@ describe('URL import', () => {
     });
     const harness = await open();
 
-    expect(await harness.ok('files:importUrls', { urls })).toEqual({ queued: 3, alreadyImported: 0, alreadyQueued: 0, invalid: [] });
+    expect(await harness.ok('files:importUrls', { urls })).toEqual({
+      queued: 3,
+      alreadyImported: 0,
+      alreadyQueued: 0,
+      invalid: [],
+    });
     await harness.until((s) => s.succeeded === 3 && active(s) === 0);
 
     const inbox = await files({ kind: 'inbox' });
@@ -166,7 +173,8 @@ describe('URL import', () => {
     }
     const list = await jobs();
     expect(list.map((j) => j.url).sort()).toEqual([...urls].sort());
-    for (const job of list) expect(job).toMatchObject({ type: 'file.download', status: 'succeeded', host: a.host, result: null });
+    for (const job of list)
+      expect(job).toMatchObject({ type: 'file.download', status: 'succeeded', host: a.host, result: null });
     expect(new Set(list.map((j) => j.fileId))).toEqual(new Set(inbox.map((f) => f.id)));
 
     for (const request of a.requests) {
@@ -176,7 +184,12 @@ describe('URL import', () => {
     }
     expect(a.requests).toHaveLength(3);
 
-    expect(await harness.ok('files:importUrls', { urls })).toEqual({ queued: 0, alreadyImported: 3, alreadyQueued: 0, invalid: [] });
+    expect(await harness.ok('files:importUrls', { urls })).toEqual({
+      queued: 0,
+      alreadyImported: 3,
+      alreadyQueued: 0,
+      invalid: [],
+    });
     await pause(100);
     expect(a.requests).toHaveLength(3);
     expect(await jobs()).toHaveLength(3);
@@ -219,7 +232,10 @@ describe('URL import', () => {
     const [type] = await harness.ok('assetTypes:list', {});
     const asset = await harness.ok('assets:create', { name: 'Door', typeId: type!.id });
 
-    await harness.ok('files:importUrls', { urls: [a.url('/door.png')], target: { assetId: asset.id, role: 'reference' } });
+    await harness.ok('files:importUrls', {
+      urls: [a.url('/door.png')],
+      target: { assetId: asset.id, role: 'reference' },
+    });
     await harness.until((s) => s.succeeded === 1 && active(s) === 0);
 
     expect(await files({ kind: 'inbox' })).toEqual([]);

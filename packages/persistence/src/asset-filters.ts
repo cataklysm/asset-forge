@@ -70,8 +70,10 @@ export function assetFilter(
       sql`exists (select 1 from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId} and ${qualified(projectAsset, projectAsset.projectId)} = ${query.projectId})`,
     );
   }
-  if (query.fileRole !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.role)} = ${query.fileRole}`));
-  if (query.fileKind !== undefined) conditions.push(hasCompleteFile(sql`${qualified(file, file.kind)} = ${query.fileKind}`));
+  if (query.fileRole !== undefined)
+    conditions.push(hasCompleteFile(sql`${qualified(file, file.role)} = ${query.fileRole}`));
+  if (query.fileKind !== undefined)
+    conditions.push(hasCompleteFile(sql`${qualified(file, file.kind)} = ${query.fileKind}`));
   const names = [...new Set(query.tagNames ?? [])];
   if (names.length > 0) {
     const tagIds = transaction.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();

@@ -76,7 +76,12 @@ function usePromptPages({ query, tagNames, reload, renameToken }: PromptPagesInp
 
   const fetchPage = useCallback(
     (offset: number, limit: number) =>
-      call('prompts:list', { offset, limit, ...(query !== '' && { query }), ...(tagNames.length > 0 && { tagNames: [...tagNames] }) }),
+      call('prompts:list', {
+        offset,
+        limit,
+        ...(query !== '' && { query }),
+        ...(tagNames.length > 0 && { tagNames: [...tagNames] }),
+      }),
     [query, tagNames],
   );
   const [wanted, setWanted] = useState<readonly number[]>([0]);
@@ -195,7 +200,11 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
               value={queryText}
               onChange={(text) => setFilter({ query: text })}
             />
-            <TagFilter value={tagNames} title={PROMPT_TAG_FILTER_TITLE} onChange={(names) => setFilter({ tagNames: names })} />
+            <TagFilter
+              value={tagNames}
+              title={PROMPT_TAG_FILTER_TITLE}
+              onChange={(names) => setFilter({ tagNames: names })}
+            />
           </FilterBar>
           <div className="flex min-h-0 flex-1 flex-col" aria-busy={pages.paged.pending || undefined}>
             {promptsBody(pages, filtered, editing?.id ?? null, (prompt) => void edit(prompt.id))}

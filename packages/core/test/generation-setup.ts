@@ -35,14 +35,28 @@ export const MODELS: ImageModel[] = [
     promptCharacterLimit: 1500,
     price: null,
   },
-  { name: 'free-edit', aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null },
+  {
+    name: 'free-edit',
+    aspectRatios: null,
+    resolutions: null,
+    defaultResolution: null,
+    promptCharacterLimit: null,
+    price: null,
+  },
 ];
 
 type Answer = { stream: Readable; mimeType: string };
 
 /** Answers every edit and upscale with `answer()`; records each request without its signal. */
 export class FakeImageProvider implements ImageProvider {
-  readonly edits: { image: ImageInput; model: string; prompt: string; aspectRatio: string | null; resolution: string | null; safeMode: boolean }[] = [];
+  readonly edits: {
+    image: ImageInput;
+    model: string;
+    prompt: string;
+    aspectRatio: string | null;
+    resolution: string | null;
+    safeMode: boolean;
+  }[] = [];
   readonly upscales: { image: ImageInput; scale: 2 | 4 }[] = [];
   answer: () => Promise<Answer> = async () => ({ stream: Readable.from([RESULT_BYTES]), mimeType: 'image/png' });
 
@@ -112,7 +126,12 @@ export class FakeGenerationImageSource implements GenerationImageSource {
   readonly reads: { absolutePath: string; mimeType: string; sha256: string; sizeBytes: number }[] = [];
   result: ImageInput | null = { data: new Uint8Array([1, 2, 3]), mimeType: 'image/png' };
 
-  async read(file: { absolutePath: string; mimeType: string; sha256: string; sizeBytes: number }): Promise<ImageInput | null> {
+  async read(file: {
+    absolutePath: string;
+    mimeType: string;
+    sha256: string;
+    sizeBytes: number;
+  }): Promise<ImageInput | null> {
     this.reads.push({ ...file });
     return this.result;
   }

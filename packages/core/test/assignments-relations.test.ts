@@ -59,8 +59,12 @@ describe('project assignments', () => {
 
   it('assignAsset rejects an unknown project or asset with not_found', async () => {
     const { session, project, asset } = await openSession();
-    await expect(assignAsset(session, { projectId: UNKNOWN_ID, assetId: asset.id })).rejects.toBeInstanceOf(NotFoundError);
-    await expect(assignAsset(session, { projectId: project.id, assetId: UNKNOWN_ID })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(assignAsset(session, { projectId: UNKNOWN_ID, assetId: asset.id })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(assignAsset(session, { projectId: project.id, assetId: UNKNOWN_ID })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     await expect(assignAsset(session, { projectId: UNKNOWN_ID, assetId: asset.id })).rejects.toMatchObject({
       code: 'not_found',
     });
@@ -76,7 +80,12 @@ describe('project assignments', () => {
       intendedUse: 'hero prop',
       notes: 'check scale',
     });
-    expect(updated).toMatchObject({ priority: 'high', approvalStatus: 'approved', intendedUse: 'hero prop', notes: 'check scale' });
+    expect(updated).toMatchObject({
+      priority: 'high',
+      approvalStatus: 'approved',
+      intendedUse: 'hero prop',
+      notes: 'check scale',
+    });
     expect(updated.updatedAt > first.updatedAt).toBe(true);
     expect(updated.assignedAt).toBe(first.assignedAt);
     await expect(getAsset(session, asset.id)).resolves.toEqual(asset);
@@ -105,7 +114,9 @@ describe('project assignments', () => {
     expect((await listProjects(session, { limit: 10, offset: 0 })).items[0]!.assetCount).toBe(2);
     const filtered = await listAssets(session, { limit: 10, offset: 0, projectId: project.id });
     expect(filtered.items.map((a) => a.projectCount)).toEqual([1, 1]);
-    await expect(listMembersOfProject(session, UNKNOWN_ID, { limit: 1, offset: 0 })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(listMembersOfProject(session, UNKNOWN_ID, { limit: 1, offset: 0 })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     await expect(listAssignmentsOfAsset(session, UNKNOWN_ID)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
@@ -113,19 +124,19 @@ describe('project assignments', () => {
 describe('asset relations', () => {
   it('addRelation rejects a self-relation with invalid_operation', async () => {
     const { session, asset } = await openSession();
-    await expect(addRelation(session, { fromAssetId: asset.id, toAssetId: asset.id, kind: 'uses' })).rejects.toBeInstanceOf(
-      InvalidOperationError,
-    );
+    await expect(
+      addRelation(session, { fromAssetId: asset.id, toAssetId: asset.id, kind: 'uses' }),
+    ).rejects.toBeInstanceOf(InvalidOperationError);
   });
 
   it('addRelation rejects an unknown asset with not_found', async () => {
     const { session, asset } = await openSession();
-    await expect(addRelation(session, { fromAssetId: asset.id, toAssetId: UNKNOWN_ID, kind: 'uses' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
-    await expect(addRelation(session, { fromAssetId: UNKNOWN_ID, toAssetId: asset.id, kind: 'uses' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      addRelation(session, { fromAssetId: asset.id, toAssetId: UNKNOWN_ID, kind: 'uses' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      addRelation(session, { fromAssetId: UNKNOWN_ID, toAssetId: asset.id, kind: 'uses' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('adding a relation twice keeps one and returns the first', async () => {

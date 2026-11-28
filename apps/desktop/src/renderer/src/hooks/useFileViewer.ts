@@ -98,7 +98,8 @@ export function useViewerSync(options: ViewerSyncOptions): ViewerList | null {
     if (record === null) return;
     const previous = handed.current;
     handed.current = record;
-    if (previous !== null && previous.id === record.id && previous !== record) latest.current.props.viewer?.onView(record);
+    if (previous !== null && previous.id === record.id && previous !== record)
+      latest.current.props.viewer?.onView(record);
   }, [state, viewedId]);
 
   // After the viewer closed, the tile of the file shown last comes into view and takes the focus.
@@ -240,8 +241,11 @@ function viewerListOf(
   const total = state.total;
   const { found, knownIndex, setWantRange } = tracking;
   const viewIndex =
-    total === null || total === 0 ? null : (found?.index ?? (knownIndex === null ? null : Math.min(knownIndex, total - 1)));
-  if (latest.current.props.viewer === undefined || viewedId === null || total === null || viewIndex === null) return null;
+    total === null || total === 0
+      ? null
+      : (found?.index ?? (knownIndex === null ? null : Math.min(knownIndex, total - 1)));
+  if (latest.current.props.viewer === undefined || viewedId === null || total === null || viewIndex === null)
+    return null;
   return {
     total,
     index: viewIndex,

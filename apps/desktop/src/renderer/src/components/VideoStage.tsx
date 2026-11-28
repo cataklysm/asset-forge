@@ -92,7 +92,9 @@ export function VideoStage({ file, videoRef, canOpenExternally, onOpenExternally
     <div role="region" aria-label={VIDEO_LABEL} className="flex h-full w-full items-center justify-center bg-raised">
       {failed ? (
         <div className="flex flex-col items-center gap-4">
-          <p role="status" className={MUTED}>{VIDEO_UNPLAYABLE_TEXT}</p>
+          <p role="status" className={MUTED}>
+            {VIDEO_UNPLAYABLE_TEXT}
+          </p>
           <button type="button" className={BUTTON} disabled={!canOpenExternally} onClick={onOpenExternally}>
             {OPEN_EXTERNALLY_LABEL}
           </button>

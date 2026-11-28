@@ -40,7 +40,8 @@ export function messageOf(error: unknown): string {
 const isBlank = (line: string) => line.trim() === '';
 
 /** A line the schema would refuse goes trimmed and cut: still over the length limit, it is reported as invalid. */
-const sendable = (line: string) => (line.length > IMPORT_URL_STRING_MAX ? line.trim().slice(0, IMPORT_URL_STRING_MAX) : line);
+const sendable = (line: string) =>
+  line.length > IMPORT_URL_STRING_MAX ? line.trim().slice(0, IMPORT_URL_STRING_MAX) : line;
 
 /**
  * The lines to send, the typed line number (from 1) of each, and whether there are too many addresses. Up to

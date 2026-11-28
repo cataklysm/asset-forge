@@ -204,7 +204,14 @@ function PreviewCounts({ preview, previewing, force }: PreviewCountsProps) {
  *
  * @param props the target, whether it is open and the handlers
  */
-export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings, settingsBlocked = null }: Props) {
+export function AnalysisStartDialog({
+  open,
+  target,
+  onClose,
+  onStarted,
+  onOpenSettings,
+  settingsBlocked = null,
+}: Props) {
   const providers = useProviders();
   const prompts = useAnalysisPrompts();
   const jobs = useJobs();
@@ -237,7 +244,9 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   // The way to the settings depends on the provider and the model only, never on the counts.
   const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
   const blocked =
-    providerBlocked ?? promptGate(prompts, promptId) ?? countsBlocked(previewError, previewing || preview === null, nothingToDo);
+    providerBlocked ??
+    promptGate(prompts, promptId) ??
+    countsBlocked(previewError, previewing || preview === null, nothingToDo);
   const canStart = blocked === null && !starting && target !== null;
 
   /**
@@ -247,7 +256,14 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
    */
   function start(event?: FormEvent) {
     event?.preventDefault();
-    if (startingRef.current || !canStart || target === null || providerId === null || model === null || promptId === null)
+    if (
+      startingRef.current ||
+      !canStart ||
+      target === null ||
+      providerId === null ||
+      model === null ||
+      promptId === null
+    )
       return;
     const effects: StartEffects = {
       startingRef,
@@ -296,7 +312,12 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
         <PromptSelect purpose="tagging" value={promptId} onChange={setPromptChoice} disabled={starting} />
         <PreviewCounts preview={preview} previewing={previewing} force={force} />
         <label className="flex items-center gap-2 text-sm" title={START_FORCE_TITLE}>
-          <input type="checkbox" checked={force} disabled={starting} onChange={(event) => setForce(event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={force}
+            disabled={starting}
+            onChange={(event) => setForce(event.target.checked)}
+          />
           {START_FORCE_LABEL}
         </label>
         <div className="flex justify-end gap-2">

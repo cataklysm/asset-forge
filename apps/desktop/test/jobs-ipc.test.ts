@@ -3,11 +3,23 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ipcContract, type IpcChannel, type IpcRequest, type IpcResponse, type IpcResult, type JobSummary } from '@assetforge/contracts';
+import {
+  ipcContract,
+  type IpcChannel,
+  type IpcRequest,
+  type IpcResponse,
+  type IpcResult,
+  type JobSummary,
+} from '@assetforge/contracts';
 import { composeTaggingRequest, type WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS, type PauseGate } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
-import { MOCK_MODEL, startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import {
+  MOCK_MODEL,
+  startMockProvider,
+  type MockFailure,
+  type MockProvider,
+} from '../../../docker/mock-provider/server.mjs';
 import { ANALYSIS_PROMPTS_FILE, LAST_USED_WRITE_FAILED } from '../src/main/analysis-prompts.js';
 import { createWorkspaceManager } from '../src/main/composition.js';
 import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
@@ -32,7 +44,12 @@ let store: ProviderStore;
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
-const filesRequest = (fileIds: string[]) => ({ target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: true });
+const filesRequest = (fileIds: string[]) => ({
+  target: { kind: 'files' as const, fileIds },
+  model: MOCK_MODEL,
+  mode: 'apply' as const,
+  force: true,
+});
 const NONE_SKIPPED = { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 };
 
 beforeEach(async () => {
@@ -246,7 +263,12 @@ describe('job IPC', () => {
 
   it('answers changes:since with a reset without a workspace, and the changes after a cursor with one', async () => {
     await setup();
-    expect(await ok('changes:since', { cursor: null })).toMatchObject({ reset: true, jobIds: [], fileIds: [], added: [] });
+    expect(await ok('changes:since', { cursor: null })).toMatchObject({
+      reset: true,
+      jobIds: [],
+      fileIds: [],
+      added: [],
+    });
     expect(await ok('changes:since', { cursor: 'unknown:3' })).toMatchObject({ reset: true });
 
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
@@ -264,7 +286,12 @@ describe('job IPC', () => {
     const after = await ok('changes:since', { cursor: first.cursor });
     expect(after).toMatchObject({ reset: false, jobs: true, fileIds: [fileId] });
     expect(after.jobIds).toContain(job!.id);
-    expect(await ok('changes:since', { cursor: after.cursor })).toMatchObject({ reset: false, jobs: false, jobIds: [], fileIds: [] });
+    expect(await ok('changes:since', { cursor: after.cursor })).toMatchObject({
+      reset: false,
+      jobs: false,
+      jobIds: [],
+      fileIds: [],
+    });
   });
 
   it('lists only the chosen job ids that match the status', async () => {
@@ -285,7 +312,10 @@ describe('job IPC', () => {
     });
     expect(await ok('jobs:list', { ...page, ids: [uuid] })).toEqual({ items: [], total: 0 });
     const tooMany = Array.from({ length: 101 }, () => uuid);
-    expect(await call('jobs:list', { ...page, ids: tooMany })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await call('jobs:list', { ...page, ids: tooMany })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
   });
 
   it('refuses to retry a queued job and to cancel an unknown one', async () => {
@@ -406,7 +436,13 @@ describe('analysis:enqueue with an analysis prompt', () => {
 
     // Without an id the prompt used last runs.
     await ok('analysis:enqueue', filesRequest([second!]));
-    const expected = { version: 4, model: MOCK_MODEL, mode: 'apply', prompt: { name: 'Armour', text: 'Only armour.', maxTags: 3 }, providerName: 'Mock' };
+    const expected = {
+      version: 4,
+      model: MOCK_MODEL,
+      mode: 'apply',
+      prompt: { name: 'Armour', text: 'Only armour.', maxTags: 3 },
+      providerName: 'Mock',
+    };
     expect(await payloads()).toEqual([expected, expected]);
   });
 
@@ -466,7 +502,8 @@ describe('analysis:enqueue with an analysis prompt', () => {
       const prompt = await ok('analysisPrompts:save', armour);
       await ok('analysis:enqueue', { ...filesRequest([fileId!]), promptId: prompt.id });
 
-      if (change === 'edited') await ok('analysisPrompts:save', { ...armour, id: prompt.id, text: 'Only helmets.', maxTags: 7 });
+      if (change === 'edited')
+        await ok('analysisPrompts:save', { ...armour, id: prompt.id, text: 'Only helmets.', maxTags: 7 });
       else await ok('analysisPrompts:delete', { id: prompt.id });
       const [running] = (await ok('jobs:list', { ...page, status: 'running' })).items;
       await ok('jobs:cancel', { jobId: running!.id });
@@ -493,12 +530,22 @@ describe('analysis:enqueue with an analysis prompt', () => {
     const after = await ok('jobs:summary', {});
     expect(after.pausedHosts).toEqual([]);
     expect(after.paused).toHaveLength(1);
-    expect(await call('jobs:resumeHost', { host: '' })).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await call('jobs:resumeHost', { host: '' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' },
+    });
   });
 
   /** An `openai` entry on the mock's OpenAI-compatible API, without a key. */
   const openAiEntry = () =>
-    store.save({ kind: 'openai', name: 'vLLM', baseUrl: `${mock!.url}/v1`, timeoutSeconds: 30, taggingModel: null, promptModel: null });
+    store.save({
+      kind: 'openai',
+      name: 'vLLM',
+      baseUrl: `${mock!.url}/v1`,
+      timeoutSeconds: 30,
+      taggingModel: null,
+      promptModel: null,
+    });
 
   it('reports the real kind of a paused lane, and for a lane whose entry is gone what its resource class implies', async () => {
     await setup();
@@ -525,7 +572,9 @@ describe('analysis:enqueue with an analysis prompt', () => {
     expect(await ok('jobs:waitingByProvider', {})).toEqual([{ providerId: entryId, providerName: 'Mock', waiting: 2 }]);
     const openai = openAiEntry();
 
-    expect(await ok('jobs:reroute', { fromProviderId: entryId, toProviderId: openai.id, model: MOCK_MODEL })).toEqual({ moved: 2 });
+    expect(await ok('jobs:reroute', { fromProviderId: entryId, toProviderId: openai.id, model: MOCK_MODEL })).toEqual({
+      moved: 2,
+    });
     await until((s) => s.succeeded === 2);
 
     const { items } = await ok('jobs:list', page);
@@ -539,7 +588,11 @@ describe('analysis:enqueue with an analysis prompt', () => {
   it('resumes only the queues of the request when a host and a provider lane share a name', async () => {
     await setup();
     const lane = 'environment';
-    const pausedClasses = () => jobHost.paused().filter((p) => p.lane === lane).map((p) => p.resourceClass);
+    const pausedClasses = () =>
+      jobHost
+        .paused()
+        .filter((p) => p.lane === lane)
+        .map((p) => p.resourceClass);
     const pauseAll = () => {
       for (let i = 0; i < 3; i++) pause.record('io', lane, 'download_blocked');
       pause.record('local_gpu', lane, 'provider_unauthorized');
@@ -566,10 +619,19 @@ describe('analysis:enqueue with an analysis prompt', () => {
 
     expect(await ok('jobs:waitingByProvider', {})).toEqual([]);
     // A host is no provider id, so the contract alone keeps a host lane out; the lane without a provider holds none either.
-    expect(ipcContract['jobs:reroute'].request.safeParse({ fromProviderId: 'example.org', toProviderId: entryId, model: MOCK_MODEL }).success).toBe(false);
-    expect(await ok('jobs:reroute', { fromProviderId: null, toProviderId: entryId, model: MOCK_MODEL })).toEqual({ moved: 0 });
+    expect(
+      ipcContract['jobs:reroute'].request.safeParse({
+        fromProviderId: 'example.org',
+        toProviderId: entryId,
+        model: MOCK_MODEL,
+      }).success,
+    ).toBe(false);
+    expect(await ok('jobs:reroute', { fromProviderId: null, toProviderId: entryId, model: MOCK_MODEL })).toEqual({
+      moved: 0,
+    });
     const { items } = await ok('jobs:list', page);
     expect(items).toHaveLength(3);
-    for (const job of items) expect(job).toMatchObject({ type: 'file.download', host: 'example.org', providerId: null });
+    for (const job of items)
+      expect(job).toMatchObject({ type: 'file.download', host: 'example.org', providerId: null });
   });
 });

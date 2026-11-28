@@ -83,7 +83,15 @@ function assignment(assetId: string, name: string): AssetAssignment {
 }
 
 function relation(assetId: string, otherName: string): AssetRelationView {
-  const other = { id: nextId(), name: otherName, typeId: TYPE.id, description: '', status: 'draft' as const, createdAt: NOW, updatedAt: NOW };
+  const other = {
+    id: nextId(),
+    name: otherName,
+    typeId: TYPE.id,
+    description: '',
+    status: 'draft' as const,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
   return { fromAssetId: assetId, toAssetId: other.id, kind: 'uses', createdAt: NOW, direction: 'outgoing', other };
 }
 
@@ -146,7 +154,9 @@ function Harness(props: HarnessProps) {
 }
 
 function tile(name: string): HTMLElement {
-  const element = within(screen.getByRole('listbox', { name: 'Files' })).getByText(name).closest<HTMLElement>('[data-index]');
+  const element = within(screen.getByRole('listbox', { name: 'Files' }))
+    .getByText(name)
+    .closest<HTMLElement>('[data-index]');
   if (element === null) throw new Error(`no tile for ${name}`);
   return element;
 }
@@ -171,7 +181,11 @@ it('tabs show counts from list totals and the active tab survives remount', asyn
   expect(await screen.findByRole('tab', { name: 'Files 7' })).toBeTruthy();
   expect(await screen.findByRole('tab', { name: 'Projects 2' })).toBeTruthy();
   expect(await screen.findByRole('tab', { name: 'Relations 1' })).toBeTruthy();
-  expect(callsOf(api, 'files:list')).toContainEqual({ limit: 1, offset: 0, scope: { kind: 'asset', assetId: asset.id } });
+  expect(callsOf(api, 'files:list')).toContainEqual({
+    limit: 1,
+    offset: 0,
+    scope: { kind: 'asset', assetId: asset.id },
+  });
 
   // An active filter does not change the tab count.
   await screen.findByText('f0.png');
@@ -231,7 +245,13 @@ it('import shows the result strip with failed names and errors, and reports busy
     'dialog:pickFiles': () => picked.promise,
     'files:import': () => [
       { sourcePath: 'C:\\in\\a.png', entryName: null, file: imported, error: null, duplicateOf: [] },
-      { sourcePath: 'C:\\in\\b.exe', entryName: null, file: null, error: 'This file type cannot be imported', duplicateOf: [] },
+      {
+        sourcePath: 'C:\\in\\b.exe',
+        entryName: null,
+        file: null,
+        error: 'This file type cannot be imported',
+        duplicateOf: [],
+      },
     ],
   });
   const onBusyChange = vi.fn();
@@ -253,7 +273,11 @@ it('import shows the result strip with failed names and errors, and reports busy
   expect(strip.textContent).toContain('This file type cannot be imported');
   expect(strip.textContent).not.toContain('C:\\in');
   expect(callsOf(api, 'files:import')).toEqual([
-    { sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.exe'], target: { assetId: asset.id, role: 'concept' }, unpackArchives: false },
+    {
+      sourcePaths: ['C:\\in\\a.png', 'C:\\in\\b.exe'],
+      target: { assetId: asset.id, role: 'concept' },
+      unpackArchives: false,
+    },
   ]);
   expect(screen.queryByRole('dialog')).toBeNull();
   await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
@@ -267,7 +291,12 @@ it('a picked ZIP asks first; Unpack imports the entries with the role and the st
   const user = userEvent.setup();
   const asset = assetDetail();
   const d = fileRecord({ originalName: 'd.png', assetId: asset.id, role: 'reference' });
-  const failedRow = fileRecord({ originalName: 'e.png', status: 'failed', sha256: null, error: 'The checksum did not match' });
+  const failedRow = fileRecord({
+    originalName: 'e.png',
+    status: 'failed',
+    sha256: null,
+    error: 'The checksum did not match',
+  });
   const api = install(asset, {
     'dialog:pickFiles': () => ['C:\\in\\pack.zip'],
     'files:import': () => [
@@ -300,7 +329,9 @@ it('Import as file in the asset screen sends unpackArchives false', async () => 
   });
   render(<Harness id={asset.id} />);
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
-  await user.click(within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Import as file' }));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Import as file' }),
+  );
   const strip = await screen.findByRole('alert');
   expect(within(strip).getByText('0 imported, 1 failed')).toBeTruthy();
   expect(within(strip).getByText('pack.zip')).toBeTruthy();
@@ -316,8 +347,12 @@ it('Cancel in the ZIP dialog of the asset screen imports nothing and ends the bu
   const onBusyChange = vi.fn();
   render(<Harness id={asset.id} onBusyChange={onBusyChange} />);
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
-  await user.click(within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Cancel' }));
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Import files' }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Cancel' }),
+  );
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Import files' }) as HTMLButtonElement).disabled).toBe(false),
+  );
   expect(onBusyChange).toHaveBeenLastCalledWith(false);
   expect(callsOf(api, 'files:import')).toEqual([]);
   expect(screen.queryByRole('alert')).toBeNull();
@@ -327,7 +362,13 @@ async function selectThree(asset: AssetDetail, handlers: FakeHandlers = {}) {
   const user = userEvent.setup();
   const c1 = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
   const c2 = fileRecord({ originalName: 'c2.png', assetId: asset.id, role: 'reference' });
-  const bad = fileRecord({ originalName: 'bad.png', assetId: asset.id, role: 'reference', status: 'failed', sha256: null });
+  const bad = fileRecord({
+    originalName: 'bad.png',
+    assetId: asset.id,
+    role: 'reference',
+    status: 'failed',
+    sha256: null,
+  });
   const api = install(asset, { 'files:list': listOf([c1, c2, bad]), ...handlers });
   render(<Harness id={asset.id} />);
   await screen.findByText('c1.png');
@@ -432,7 +473,9 @@ it('the file dialog returns focus to the same file after the list reloaded while
 });
 
 function threeFiles(asset: AssetDetail) {
-  return ['a.png', 'b.png', 'c.png'].map((name) => fileRecord({ originalName: name, assetId: asset.id, role: 'reference' }));
+  return ['a.png', 'b.png', 'c.png'].map((name) =>
+    fileRecord({ originalName: name, assetId: asset.id, role: 'reference' }),
+  );
 }
 
 async function openFile(user: ReturnType<typeof userEvent.setup>, name: string) {
@@ -596,7 +639,11 @@ it('projects tab: links, remove with tooltip and add to project', async () => {
   const onOpenProject = vi.fn();
   const api = install(asset, {
     'assignments:listByAsset': () => [forest],
-    'projects:list': () => pageOf([{ ...forest.project, assetCount: 1, imageCount: 0 }, { ...city, assetCount: 0, imageCount: 0 }]),
+    'projects:list': () =>
+      pageOf([
+        { ...forest.project, assetCount: 1, imageCount: 0 },
+        { ...city, assetCount: 0, imageCount: 0 },
+      ]),
     'assignments:remove': () => null,
     'assignments:assign': () => forest as never,
   });
@@ -616,7 +663,15 @@ it('relations tab: remove with tooltip and add through the asset picker without 
   const user = userEvent.setup();
   const asset = assetDetail();
   const bark = relation(asset.id, 'Bark');
-  const leaf = { id: nextId(), name: 'Leaf', typeId: TYPE.id, description: '', status: 'draft' as const, createdAt: NOW, updatedAt: NOW };
+  const leaf = {
+    id: nextId(),
+    name: 'Leaf',
+    typeId: TYPE.id,
+    description: '',
+    status: 'draft' as const,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
   const onOpenAsset = vi.fn();
   const api = install(asset, {
     'relations:list': () => [bark],
@@ -634,13 +689,21 @@ it('relations tab: remove with tooltip and add through the asset picker without 
   const remove = screen.getByRole('button', { name: 'Remove relation Uses Bark' });
   expect(remove.getAttribute('title')).toBe('Removes the relation only; both assets and their files are kept');
   await user.click(remove);
-  expect(callsOf(api, 'relations:remove')).toEqual([{ fromAssetId: asset.id, toAssetId: bark.toAssetId, kind: 'uses' }]);
+  expect(callsOf(api, 'relations:remove')).toEqual([
+    { fromAssetId: asset.id, toAssetId: bark.toAssetId, kind: 'uses' },
+  ]);
 
   await user.selectOptions(screen.getByRole('combobox', { name: 'Relation kind' }), 'variant_of');
   const picker = screen.getByRole('combobox', { name: 'Search assets' });
   await user.click(picker);
   const results = await screen.findByRole('listbox', { name: 'Assets' });
-  await waitFor(() => expect(within(results).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leaf']));
+  await waitFor(() =>
+    expect(
+      within(results)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Leaf']),
+  );
   await user.keyboard('{ArrowDown}{Enter}');
   await waitFor(() =>
     expect(callsOf(api, 'relations:add')).toEqual([{ fromAssetId: asset.id, toAssetId: leaf.id, kind: 'variant_of' }]),
@@ -660,7 +723,15 @@ it('workflow tab: start, step state without skipped for mandatory steps, and rem
     createdAt: NOW,
     progress: { done: 0, total: 1 },
     steps: [
-      { id: nextId(), key: 'model', name: 'Model', position: 0, mandatory: true, state: 'not_started' as const, notes: '' },
+      {
+        id: nextId(),
+        key: 'model',
+        name: 'Model',
+        position: 0,
+        mandatory: true,
+        state: 'not_started' as const,
+        notes: '',
+      },
     ],
   };
   install(asset, {
@@ -684,9 +755,21 @@ function analysisHandlers(entry: ProviderView | null = VISION): FakeHandlers {
   return {
     ...(entry === null
       ? fakeProviders().handlers
-      : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } })
-          .handlers),
-    'jobs:summary': () => ({ queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] }),
+      : fakeProviders(
+          { providers: [entry], lastUsedId: entry.id },
+          { [entry.id]: { ok: true, models: [{ name: 'vision-a', vision: true }] } },
+        ).handlers),
+    'jobs:summary': () => ({
+      queued: 0,
+      running: 0,
+      waiting: 0,
+      failed: 0,
+      cancelled: 0,
+      succeeded: 0,
+      changes: 0,
+      paused: [],
+      pausedHosts: [],
+    }),
     'analysis:getProposal': () => ({ proposal: null, job: null }),
     'analysis:preview': () => ({ analysable: 2, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 0 }),
     'analysis:enqueue': () => ({ enqueued: 2, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 } }),
@@ -709,8 +792,20 @@ it('a file a job added to this asset refreshes the files and the tab count in pl
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const asset = assetDetail();
-    let files = Array.from({ length: 3 }, (_, i) => fileRecord({ originalName: `f${i}.png`, assetId: asset.id, role: 'reference' }));
-    let summary = { queued: 1, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 1, paused: [], pausedHosts: [] };
+    let files = Array.from({ length: 3 }, (_, i) =>
+      fileRecord({ originalName: `f${i}.png`, assetId: asset.id, role: 'reference' }),
+    );
+    let summary = {
+      queued: 1,
+      running: 0,
+      waiting: 0,
+      failed: 0,
+      cancelled: 0,
+      succeeded: 0,
+      changes: 1,
+      paused: [],
+      pausedHosts: [],
+    };
     let changes = noChanges();
     const api = install(asset, {
       ...analysisHandlers(),
@@ -786,7 +881,13 @@ it('files tab: Analyse in the selection bar opens the start dialog for the selec
   const asset = assetDetail();
   const c1 = fileRecord({ originalName: 'c1.png', assetId: asset.id, role: 'reference' });
   const c2 = fileRecord({ originalName: 'c2.png', assetId: asset.id, role: 'reference' });
-  const bad = fileRecord({ originalName: 'bad.png', assetId: asset.id, role: 'reference', status: 'failed', sha256: null });
+  const bad = fileRecord({
+    originalName: 'bad.png',
+    assetId: asset.id,
+    role: 'reference',
+    status: 'failed',
+    sha256: null,
+  });
   const api = install(asset, { 'files:list': listOf([c1, c2, bad]), ...analysisHandlers() });
   renderWithProvider(asset.id);
   await screen.findByText('c1.png');
@@ -797,7 +898,9 @@ it('files tab: Analyse in the selection bar opens the start dialog for the selec
   expect(await screen.findByText('3 selected')).toBeTruthy();
   await user.click(selectionAnalyse());
   await screen.findByRole('dialog', { name: 'Analyse' });
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false),
+  );
   expect(callsOf(api, 'analysis:preview')).toEqual([
     { target: { kind: 'files', fileIds: [c1.id, c2.id, bad.id] }, model: 'vision-a', providerId: VISION.id },
   ]);
@@ -850,7 +953,11 @@ it('the header Analyse starts the whole asset', async () => {
   await user.click(header);
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
-  expect(callsOf(api, 'analysis:preview')[0]).toEqual({ target: { kind: 'asset', assetId: asset.id }, model: 'vision-a', providerId: VISION.id });
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({
+    target: { kind: 'asset', assetId: asset.id },
+    model: 'vision-a',
+    providerId: VISION.id,
+  });
   await user.click(screen.getByRole('button', { name: 'Start' }));
   expect(within(await screen.findByRole('status')).getByText('2 queued, 1 already analysed')).toBeTruthy();
 });
@@ -860,8 +967,16 @@ function trashAnswer(files: FileRecord[], failing: ReadonlySet<string> = new Set
   return (r: IpcRequest<'files:trashMany'>) => ({
     items: r.fileIds.map((fileId) =>
       failing.has(fileId)
-        ? { fileId, file: null, error: { code: 'invalid_operation' as const, message: 'The file is still being imported' } }
-        : { fileId, file: { ...files.find((f) => f.id === fileId)!, assetId: null, role: null, deletedAt: NOW }, error: null },
+        ? {
+            fileId,
+            file: null,
+            error: { code: 'invalid_operation' as const, message: 'The file is still being imported' },
+          }
+        : {
+            fileId,
+            file: { ...files.find((f) => f.id === fileId)!, assetId: null, role: null, deletedAt: NOW },
+            error: null,
+          },
     ),
   });
 }
@@ -1111,10 +1226,18 @@ it('files tab: a rename reloads the list where it was, also with a filter on the
   });
   Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
   fireEvent.scroll(grid);
-  await waitFor(() => expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front view')).toBe(true));
+  await waitFor(() =>
+    expect(
+      (callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front view'),
+    ).toBe(true),
+  );
 
   await renameThroughDialog(user, 'Front View', 'Front');
-  await waitFor(() => expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front')).toBe(true));
+  await waitFor(() =>
+    expect(
+      (callsOf(api, 'files:list') as ListRequest[]).some((r) => r.offset === 60 && r.tagNames?.join() === 'front'),
+    ).toBe(true),
+  );
   // The reloaded view starts where the old one was, not at the top.
   await waitFor(() => expect(screen.getByRole('listbox', { name: 'Files' })).not.toBe(grid));
   expect(screen.queryByText('File 0.png')).toBeNull();
@@ -1139,7 +1262,9 @@ it('the header lists the sources; add, remove and open send their requests', asy
   await user.type(within(block).getByRole('textbox', { name: 'Add URL' }), 'https://textures.example.com/wood{Enter}');
   expect(await within(block).findByRole('link', { name: 'https://textures.example.com/wood' })).toBeTruthy();
   expect(callsOf(api, 'assets:addSource')).toEqual([{ assetId: asset.id, url: 'https://textures.example.com/wood' }]);
-  await waitFor(() => expect((within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement).value).toBe(''));
+  await waitFor(() =>
+    expect((within(block).getByRole('textbox', { name: 'Add URL' }) as HTMLInputElement).value).toBe(''),
+  );
 
   await user.click(within(block).getByRole('link', { name: oak.url }));
   expect(callsOf(api, 'assets:openSource')).toEqual([{ assetId: asset.id, sourceId: oak.id }]);
@@ -1185,7 +1310,11 @@ it('an address that is not a web address shows the fixed message in the header',
 
 it('removing a source moves focus to the next source, else the previous one, else the input', async () => {
   const user = userEvent.setup();
-  const [a, b, c] = [sourceOf('https://example.org/a'), sourceOf('https://example.org/b'), sourceOf('https://example.org/c')];
+  const [a, b, c] = [
+    sourceOf('https://example.org/a'),
+    sourceOf('https://example.org/b'),
+    sourceOf('https://example.org/c'),
+  ];
   const asset = assetDetail({ sources: [a!, b!, c!] });
   install(asset, fakeAssetSources(asset).handlers);
   render(<Harness id={asset.id} />);
@@ -1306,7 +1435,9 @@ it('Import from site follows Import from URLs, targets the asset with the select
   expect(siteButton.previousElementSibling?.textContent).toBe('Import from URLs');
   await user.click(siteButton);
   const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
-  await waitFor(() => expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'));
+  await waitFor(() =>
+    expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'),
+  );
   await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URL' }), 'https://example.com/g');
   await user.click(within(dialog).getByRole('button', { name: 'Test' }));
   await within(dialog).findByRole('list', { name: 'Found files' });
@@ -1326,7 +1457,9 @@ it('Import from URLs is disabled while files are imported', async () => {
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
   expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(true);
   picked.resolve([]);
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Import from URLs' }) as HTMLButtonElement).disabled).toBe(false),
+  );
 });
 
 it('a running import in the asset screen shows its progress, reloads the files while done changes and ends the title after a cancel', async () => {

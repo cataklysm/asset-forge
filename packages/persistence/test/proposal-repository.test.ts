@@ -40,11 +40,30 @@ beforeEach(async () => {
   await open();
   await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T0 });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
-  await db.assets.insert({ id: ASSET_ID, name: 'Pump', typeId: TYPE_ID, description: '', status: 'draft', createdAt: T0, updatedAt: T0 });
+  await db.assets.insert({
+    id: ASSET_ID,
+    name: 'Pump',
+    typeId: TYPE_ID,
+    description: '',
+    status: 'draft',
+    createdAt: T0,
+    updatedAt: T0,
+  });
   await addFile(FILE_ID);
-  await db.files.setPlacement(FILE_ID, { relativePath: `assets/${ASSET_ID}/f.png`, assetId: ASSET_ID, role: 'reference' });
+  await db.files.setPlacement(FILE_ID, {
+    relativePath: `assets/${ASSET_ID}/f.png`,
+    assetId: ASSET_ID,
+    role: 'reference',
+  });
 });
 
 afterEach(async () => {
@@ -101,8 +120,16 @@ describe('tag proposals', () => {
 
   test('a new proposal replaces the older one', async () => {
     await db.analyses.propose(proposal());
-    expect(await db.analyses.propose(proposal({ model: 'llava', tags: [{ name: 'blue', displayName: 'Blue' }], createdAt: T2 }))).toBe(true);
-    expect(await db.analyses.getProposal(FILE_ID)).toMatchObject({ model: 'llava', tags: [{ name: 'blue', displayName: 'Blue' }], createdAt: T2 });
+    expect(
+      await db.analyses.propose(
+        proposal({ model: 'llava', tags: [{ name: 'blue', displayName: 'Blue' }], createdAt: T2 }),
+      ),
+    ).toBe(true);
+    expect(await db.analyses.getProposal(FILE_ID)).toMatchObject({
+      model: 'llava',
+      tags: [{ name: 'blue', displayName: 'Blue' }],
+      createdAt: T2,
+    });
     expect(rowCount('file_analysis_proposal')).toBe(1);
   });
 
@@ -129,9 +156,31 @@ describe('tag proposals', () => {
   });
 
   test('accept applies exactly the given tags, writes the analysis row and deletes the proposal', async () => {
-    await db.tags.addToFile({ fileId: FILE_ID, name: 'old', displayName: 'old', origin: 'ai', newId: uuid(4000), now: T0 });
-    await db.tags.addToFile({ fileId: FILE_ID, name: 'rusty', displayName: 'rusty', origin: 'manual', newId: uuid(4001), now: T0 });
-    await db.analyses.propose(proposal({ tags: [{ name: 'rusty', displayName: 'Rusty' }, { name: 'metal', displayName: 'metal' }, { name: 'blue', displayName: 'blue' }] }));
+    await db.tags.addToFile({
+      fileId: FILE_ID,
+      name: 'old',
+      displayName: 'old',
+      origin: 'ai',
+      newId: uuid(4000),
+      now: T0,
+    });
+    await db.tags.addToFile({
+      fileId: FILE_ID,
+      name: 'rusty',
+      displayName: 'rusty',
+      origin: 'manual',
+      newId: uuid(4001),
+      now: T0,
+    });
+    await db.analyses.propose(
+      proposal({
+        tags: [
+          { name: 'rusty', displayName: 'Rusty' },
+          { name: 'metal', displayName: 'metal' },
+          { name: 'blue', displayName: 'blue' },
+        ],
+      }),
+    );
 
     expect(await accept([t('rusty', 'Rusty'), t('metal')], { now: T3 })).toBe(true);
     expect(await tagsOf()).toEqual(['metal/ai', 'rusty/manual']);
@@ -150,7 +199,13 @@ describe('tag proposals', () => {
 
   test('accept changes no workflow step and not the asset status', async () => {
     const versionId = uuid(60);
-    await db.workflowTemplates.insertTemplate({ id: uuid(50), key: 'character', name: 'Character', builtIn: true, createdAt: T0 });
+    await db.workflowTemplates.insertTemplate({
+      id: uuid(50),
+      key: 'character',
+      name: 'Character',
+      builtIn: true,
+      createdAt: T0,
+    });
     await db.workflowTemplates.insertVersion({
       id: versionId,
       templateId: uuid(50),
@@ -213,7 +268,16 @@ describe('tag proposals', () => {
   test('apply deletes a waiting proposal', async () => {
     await db.analyses.propose(proposal());
     expect(
-      await db.analyses.apply({ fileId: FILE_ID, sha256: SHA, tags: [t('blue')], provider: 'ollama', model: 'qwen', promptVersion: 1, promptName: null, now: T2 }),
+      await db.analyses.apply({
+        fileId: FILE_ID,
+        sha256: SHA,
+        tags: [t('blue')],
+        provider: 'ollama',
+        model: 'qwen',
+        promptVersion: 1,
+        promptName: null,
+        now: T2,
+      }),
     ).toBe(true);
     expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
   });
@@ -234,7 +298,14 @@ describe('tag proposals', () => {
     expect((await db.files.get(other))?.hasProposal).toBe(false);
 
     const ids = async (hasProposal?: boolean) =>
-      (await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, ...(hasProposal !== undefined && { hasProposal }) })).items
+      (
+        await db.files.list({
+          limit: 10,
+          offset: 0,
+          scope: { kind: 'all' },
+          ...(hasProposal !== undefined && { hasProposal }),
+        })
+      ).items
         .map((f) => f.id)
         .sort();
     expect(await ids(true)).toEqual([FILE_ID]);
@@ -267,7 +338,8 @@ describe('tag proposals', () => {
 describe('tag rename and waiting proposals', () => {
   const tagAsset = (name: string, displayName = name) =>
     db.tags.addToAsset({ assetId: ASSET_ID, name, displayName, origin: 'manual', newId: uuid(nextTagId++), now: T0 });
-  const rawProposal = (fileId: string) => handle.prepare('select * from file_analysis_proposal where file_id = ?').get(fileId);
+  const rawProposal = (fileId: string) =>
+    handle.prepare('select * from file_analysis_proposal where file_id = ?').get(fileId);
   const pairs = (...names: [string, string][]) => names.map(([name, displayName]) => ({ name, displayName }));
 
   test('a merge rewrites the source entry with the target display name and keeps the rest of the proposal', async () => {
@@ -285,9 +357,16 @@ describe('tag rename and waiting proposals', () => {
     const untouched = rawProposal(third);
 
     await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: true });
-    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...held, tags: pairs(['frontal', 'Frontal'], ['metal', 'Metal']), stale: false });
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({
+      ...held,
+      tags: pairs(['frontal', 'Frontal'], ['metal', 'Metal']),
+      stale: false,
+    });
     // The target entry takes the new display name; nothing else of that proposal changes.
-    expect(rawProposal(other)).toEqual({ ...before, tags: JSON.stringify(pairs(['metal', 'Metal'], ['frontal', 'Frontal'])) });
+    expect(rawProposal(other)).toEqual({
+      ...before,
+      tags: JSON.stringify(pairs(['metal', 'Metal'], ['frontal', 'Frontal'])),
+    });
     expect(rawProposal(third)).toEqual(untouched);
   });
 
@@ -338,7 +417,9 @@ describe('tag rename and waiting proposals', () => {
 
     for (const [i, name] of names.entries()) {
       await db.tags.rename({ from: name, name: `renamed ${i}`, displayName: `Renamed ${i}`, merge: false });
-      expect((await db.analyses.getProposal(files[i]!))!.tags).toEqual(pairs([`renamed ${i}`, `Renamed ${i}`], ['metal', 'metal']));
+      expect((await db.analyses.getProposal(files[i]!))!.tags).toEqual(
+        pairs([`renamed ${i}`, `Renamed ${i}`], ['metal', 'metal']),
+      );
     }
     expect(rawProposal(lookalike)).toEqual(untouched);
   });

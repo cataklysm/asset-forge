@@ -88,7 +88,8 @@ function raw<T>(fn: (sqlite: Database.Database) => T): T {
 }
 
 const snapshot = () => raw((s) => s.prepare(SNAPSHOT_SQL).all());
-const stamp = () => raw((s) => (s.prepare('select derived_data_version as v from workspace').get() as { v: number | null }).v);
+const stamp = () =>
+  raw((s) => (s.prepare('select derived_data_version as v from workspace').get() as { v: number | null }).v);
 const setStamp = (v: number | null) => raw((s) => s.prepare('update workspace set derived_data_version = ?').run(v));
 const kinds = () => raw((s) => s.prepare('select original_name as n, kind from file order by original_name').all());
 
@@ -97,10 +98,31 @@ async function buildLibrary(): Promise<void> {
   await db.assets.insert(asset(1, 'Lantern', { description: 'A glowing light' }));
   await db.assets.insert(asset(2, 'Crate'));
   await db.assets.insert(asset(3, 'Barrel'));
-  await db.tags.addToAsset({ assetId: uuid(1), name: 'brass', displayName: 'Brass', origin: 'manual', newId: newId(), now: TS });
-  await db.tags.addToAsset({ assetId: uuid(2), name: 'wooden', displayName: 'Wooden', origin: 'ai', newId: newId(), now: TS });
+  await db.tags.addToAsset({
+    assetId: uuid(1),
+    name: 'brass',
+    displayName: 'Brass',
+    origin: 'manual',
+    newId: newId(),
+    now: TS,
+  });
+  await db.tags.addToAsset({
+    assetId: uuid(2),
+    name: 'wooden',
+    displayName: 'Wooden',
+    origin: 'ai',
+    newId: newId(),
+    now: TS,
+  });
   const lamp = await addFile(uuid(1), 'lamp.png');
-  await db.tags.addToFile({ fileId: lamp, name: 'mossy', displayName: 'Mossy', origin: 'manual', newId: newId(), now: TS });
+  await db.tags.addToFile({
+    fileId: lamp,
+    name: 'mossy',
+    displayName: 'Mossy',
+    origin: 'manual',
+    newId: newId(),
+    now: TS,
+  });
   await addFile(uuid(2), 'crate.blend', 'model');
   const moving = await addFile(uuid(1), 'blueprint.png');
   await db.fileMoves.begin({
@@ -144,7 +166,9 @@ describe('derived-data step', () => {
     await buildLibrary();
     setStamp(DERIVED_DATA_VERSION);
     raw((s) =>
-      s.prepare('delete from asset_search where rowid = (select rowid from asset_search_map where asset_id = ?)').run(uuid(1)),
+      s
+        .prepare('delete from asset_search where rowid = (select rowid from asset_search_map where asset_id = ?)')
+        .run(uuid(1)),
     );
     const before = snapshot();
     expect(before).toHaveLength(2);
@@ -195,7 +219,12 @@ describe('derived-data step', () => {
         { id: hidden, kind: 'other', mimeType: 'application/octet-stream' },
       ].sort((a, b) => (a.id < b.id ? -1 : 1)),
     );
-    await expect(db.files.get(video)).resolves.toMatchObject({ kind: 'video', mimeType: 'video/mp4', thumbnail: true, previewable: false });
+    await expect(db.files.get(video)).resolves.toMatchObject({
+      kind: 'video',
+      mimeType: 'video/mp4',
+      thumbnail: true,
+      previewable: false,
+    });
     expect(stamp()).toBe(2);
   });
 

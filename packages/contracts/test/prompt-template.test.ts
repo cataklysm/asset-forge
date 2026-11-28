@@ -52,7 +52,10 @@ describe('resolvePromptText', () => {
   });
 
   test('does not apply defaults', () => {
-    expect(resolvePromptText('{{a}}', [{ name: 'a', defaultValue: 'd' }], {})).toEqual({ ok: false, reason: 'missing' });
+    expect(resolvePromptText('{{a}}', [{ name: 'a', defaultValue: 'd' }], {})).toEqual({
+      ok: false,
+      reason: 'missing',
+    });
   });
 
   test('whitespace counts as missing', () => {
@@ -78,9 +81,16 @@ describe('resolvePromptText', () => {
 
 describe('names that collide with object properties', () => {
   test('a variable named __proto__ is resolved and kept in values', () => {
-    const variables = buildPromptVariables('x {{__proto__}}', JSON.parse('{"__proto__":"d"}') as Record<string, string>);
+    const variables = buildPromptVariables(
+      'x {{__proto__}}',
+      JSON.parse('{"__proto__":"d"}') as Record<string, string>,
+    );
     expect(variables).toEqual([{ name: '__proto__', defaultValue: 'd' }]);
-    const result = resolvePromptText('x {{__proto__}}', variables, JSON.parse('{"__proto__":"v"}') as Record<string, string>);
+    const result = resolvePromptText(
+      'x {{__proto__}}',
+      variables,
+      JSON.parse('{"__proto__":"v"}') as Record<string, string>,
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.text).toBe('x v');

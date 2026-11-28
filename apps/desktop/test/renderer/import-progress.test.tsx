@@ -53,7 +53,8 @@ const shown = () => screen.getByRole('status', { name: 'Progress' }).textContent
 const requested = () => screen.getByRole('status', { name: 'Requested' }).textContent;
 const toggle = () => act(async () => fireEvent.click(screen.getByRole('button', { name: 'Toggle' })));
 const stop = () => act(async () => fireEvent.click(screen.getByRole('button', { name: 'Stop' })));
-const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) => api.calls.filter((c) => c.channel === channel);
+const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
+  api.calls.filter((c) => c.channel === channel);
 
 it('polls every 500 ms only while active and resets to null when inactive', async () => {
   let done = 0;
@@ -242,7 +243,10 @@ it('the bar value adds the fraction of the current file and stays finite between
 it('the view shows "<done> of <total>", the bar value and a Cancel button disabled once cancelling', () => {
   const onCancel = vi.fn();
   const { rerender } = render(
-    <ImportProgressView progress={progressOf({ done: 3, total: 8, currentBytes: 1, currentSize: 2 })} onCancel={onCancel} />,
+    <ImportProgressView
+      progress={progressOf({ done: 3, total: 8, currentBytes: 1, currentSize: 2 })}
+      onCancel={onCancel}
+    />,
   );
   expect(screen.getByText('3 of 8')).toBeTruthy();
   const bar = screen.getByRole('progressbar');
@@ -263,7 +267,9 @@ it('the view shows "<done> of <total>", the bar value and a Cancel button disabl
 it('the import title ends with ", cancelled" after a cancel', () => {
   const results = [importResultOf('C:\\in\\a.png', { file: fileRecord() })];
   expect(importTitle(results, { duplicates: false, cancelled: true })).toBe('1 imported, 0 failed, cancelled');
-  expect(importTitle(results, { duplicates: true, cancelled: true })).toBe('1 imported, 0 failed, 0 duplicates, cancelled');
+  expect(importTitle(results, { duplicates: true, cancelled: true })).toBe(
+    '1 imported, 0 failed, 0 duplicates, cancelled',
+  );
   expect(importTitle(results, { duplicates: false, cancelled: false })).toBe('1 imported, 0 failed');
   expect(importTitle(results, { duplicates: false })).toBe('1 imported, 0 failed');
 });

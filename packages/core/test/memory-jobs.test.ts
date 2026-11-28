@@ -30,8 +30,18 @@ async function repoWith(jobs: NewJob[]): Promise<InMemoryJobRepository> {
 const row = (repo: InMemoryJobRepository, id: string) => repo.rows.find((r) => r.id === id)!;
 
 /** Puts a job into `status` directly, as a test fixture. */
-function setStatus(repo: InMemoryJobRepository, id: string, status: 'running' | 'failed' | 'cancelled' | 'succeeded' | 'retry_wait' | 'waiting_remote', runAfter: string | null = null) {
-  Object.assign(row(repo, id), { status, runAfter, attempt: 2, errorCode: status === 'retry_wait' ? 'provider_timeout' : null });
+function setStatus(
+  repo: InMemoryJobRepository,
+  id: string,
+  status: 'running' | 'failed' | 'cancelled' | 'succeeded' | 'retry_wait' | 'waiting_remote',
+  runAfter: string | null = null,
+) {
+  Object.assign(row(repo, id), {
+    status,
+    runAfter,
+    attempt: 2,
+    errorCode: status === 'retry_wait' ? 'provider_timeout' : null,
+  });
 }
 
 const claim = (repo: InMemoryJobRepository, excludeLanes?: (string | null)[]) =>
@@ -137,7 +147,12 @@ describe('InMemoryJobRepository lanes', () => {
     });
 
     expect(changed).toBe(2);
-    expect(row(repo, 'q')).toMatchObject({ lane: 'b', status: 'queued', attempt: 0, payload: { keep: false, laned: true } });
+    expect(row(repo, 'q')).toMatchObject({
+      lane: 'b',
+      status: 'queued',
+      attempt: 0,
+      payload: { keep: false, laned: true },
+    });
     expect(row(repo, 'w')).toMatchObject({
       lane: 'b',
       status: 'retry_wait',
@@ -173,7 +188,14 @@ describe('InMemoryJobRepository lanes', () => {
   });
 
   it('countActiveInLane counts every active job of the lane', async () => {
-    const repo = await repoWith([job('a1', 'a'), job('a2', 'a'), job('a3', 'a'), job('a4', 'a'), job('b1', 'b'), job('x', 'a', {}, 'other.type')]);
+    const repo = await repoWith([
+      job('a1', 'a'),
+      job('a2', 'a'),
+      job('a3', 'a'),
+      job('a4', 'a'),
+      job('b1', 'b'),
+      job('x', 'a', {}, 'other.type'),
+    ]);
     setStatus(repo, 'a2', 'running');
     setStatus(repo, 'a3', 'waiting_remote');
     setStatus(repo, 'a4', 'cancelled');
@@ -183,7 +205,12 @@ describe('InMemoryJobRepository lanes', () => {
   });
 
   it('latestPayloadOfLane answers the payload of the newest job of the lane in any status', async () => {
-    const repo = await repoWith([job('a1', 'a', { n: 1 }), job('a2', 'a', { n: 2 }), job('b1', 'b', { n: 3 }), job('n1', null, { n: 4 })]);
+    const repo = await repoWith([
+      job('a1', 'a', { n: 1 }),
+      job('a2', 'a', { n: 2 }),
+      job('b1', 'b', { n: 3 }),
+      job('n1', null, { n: 4 }),
+    ]);
     setStatus(repo, 'a2', 'failed');
     expect(await repo.latestPayloadOfLane(T, 'a')).toEqual({ n: 2 });
     expect(await repo.latestPayloadOfLane(T, null)).toEqual({ n: 4 });
@@ -193,7 +220,11 @@ describe('InMemoryJobRepository lanes', () => {
 
   it('list filters by lane and carries provider id, provider name and model', async () => {
     const v4 = { version: 4, model: 'm4', mode: 'apply', prompt: null, providerName: 'RunPod' };
-    const repo = await repoWith([job('a1', 'a', v4), job('b1', 'b', { version: 2, model: 'm2', mode: 'apply' }), job('n1', null)]);
+    const repo = await repoWith([
+      job('a1', 'a', v4),
+      job('b1', 'b', { version: 2, model: 'm2', mode: 'apply' }),
+      job('n1', null),
+    ]);
 
     const all = await repo.list({ limit: 10, offset: 0 });
     expect(all.total).toBe(3);
@@ -222,7 +253,9 @@ describe('InMemoryJobRepository settled hooks and retry exclusions', () => {
     };
     expect(await repo.finish('r', { status: 'failed', errorCode: 'provider_timeout', now: LATER, settled })).toBe(true);
     expect(calls).toBe(1);
-    expect(await repo.finish('r', { status: 'failed', errorCode: 'provider_timeout', now: LATER, settled })).toBe(false);
+    expect(await repo.finish('r', { status: 'failed', errorCode: 'provider_timeout', now: LATER, settled })).toBe(
+      false,
+    );
     expect(await repo.finish('q', { status: 'succeeded', errorCode: null, now: LATER, settled })).toBe(false);
     expect(calls).toBe(1);
   });
@@ -233,7 +266,9 @@ describe('InMemoryJobRepository settled hooks and retry exclusions', () => {
     const settled = () => {
       throw new Error('boom');
     };
-    await expect(repo.finish('r', { status: 'succeeded', errorCode: null, now: LATER, settled })).rejects.toThrow('boom');
+    await expect(repo.finish('r', { status: 'succeeded', errorCode: null, now: LATER, settled })).rejects.toThrow(
+      'boom',
+    );
     expect(row(repo, 'r')).toMatchObject({ status: 'running', finishedAt: null });
   });
 
@@ -287,7 +322,8 @@ describe('InMemoryJobRepository download jobs', () => {
     payload: { v: 1, url, target: null, skipDuplicates: true },
     dedupeKey: null,
   });
-  const claimIo = (repo: InMemoryJobRepository, now: string) => repo.claimNext({ resourceClass: 'io', types: [DL], now });
+  const claimIo = (repo: InMemoryJobRepository, now: string) =>
+    repo.claimNext({ resourceClass: 'io', types: [DL], now });
 
   it('setOutcome sets file and result of a running job only and list shows them', async () => {
     const repo = new InMemoryJobRepository(
@@ -315,11 +351,18 @@ describe('InMemoryJobRepository download jobs', () => {
   });
 
   it('setOutcome with a null file records a filtered download without a file', async () => {
-    const repo = new InMemoryJobRepository(() => null, () => 'unknown');
+    const repo = new InMemoryJobRepository(
+      () => null,
+      () => 'unknown',
+    );
     await repo.enqueue({ jobs: [download('d1', 'https://example.org/a.png')], now: T0 });
     await claimIo(repo, T1);
     expect(await repo.setOutcome('d1', { fileId: null, result: 'filtered', now: T2 })).toBe(true);
-    expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: 'filtered' });
+    expect((await repo.list({ limit: 10, offset: 0 })).items[0]).toMatchObject({
+      fileId: null,
+      fileName: null,
+      result: 'filtered',
+    });
   });
 
   it('holdLane moves the waiting jobs of a lane that would run earlier', async () => {
@@ -335,8 +378,19 @@ describe('InMemoryJobRepository download jobs', () => {
     setStatus(repo, 'a4', 'retry_wait', LATER);
     setStatus(repo, 'a2', 'retry_wait', T2);
     expect(await repo.holdLane({ types: [DL], lane: 'a', until: UNTIL, now: T2 })).toBe(2);
-    expect(row(repo, 'a1')).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 0, errorCode: null, updatedAt: T2 });
-    expect(row(repo, 'a2')).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 2, errorCode: 'provider_timeout' });
+    expect(row(repo, 'a1')).toMatchObject({
+      status: 'retry_wait',
+      runAfter: UNTIL,
+      attempt: 0,
+      errorCode: null,
+      updatedAt: T2,
+    });
+    expect(row(repo, 'a2')).toMatchObject({
+      status: 'retry_wait',
+      runAfter: UNTIL,
+      attempt: 2,
+      errorCode: 'provider_timeout',
+    });
     expect(row(repo, 'b1')).toMatchObject({ status: 'queued' });
     expect(row(repo, 'a3')).toMatchObject({ status: 'running' });
     expect(row(repo, 'a4')).toMatchObject({ runAfter: LATER });

@@ -106,10 +106,7 @@ export class LocalFileSystemStorage implements Storage {
     return this.guarded(relativePath, async () => {
       const absolutePath = await this.resolve(relativePath);
       await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-      const temporaryPath = path.join(
-        path.dirname(absolutePath),
-        `${path.basename(absolutePath)}.${randomUUID()}.tmp`,
-      );
+      const temporaryPath = path.join(path.dirname(absolutePath), `${path.basename(absolutePath)}.${randomUUID()}.tmp`);
       try {
         // Flush before the rename: otherwise a crash can leave the renamed file
         // (e.g. workspace.json) truncated or zeroed.

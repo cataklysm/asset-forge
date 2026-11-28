@@ -120,7 +120,8 @@ interface Props {
  * @returns the form's section
  */
 export function SiteProfileForm(props: Props) {
-  const { selectId, selectRef, profiles, selectedId, saved, draft, locked, dirty, savable, onSelect, onDraftChange } = props;
+  const { selectId, selectRef, profiles, selectedId, saved, draft, locked, dirty, savable, onSelect, onDraftChange } =
+    props;
 
   /** Adds or removes one kind, keeping the checkbox order. */
   function toggleKind(kind: FileKind, on: boolean) {

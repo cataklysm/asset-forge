@@ -100,7 +100,14 @@ function ResultBody({ current, busy, analyseRow, onCancel, onToggle, onAccept, o
  *
  * @param props the file, whether it is open and the handlers
  */
-export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSettings, settingsBlocked = null }: Props) {
+export function AnalysisResultDialog({
+  open,
+  file,
+  onClose,
+  onChanged,
+  onOpenSettings,
+  settingsBlocked = null,
+}: Props) {
   const { changeToken, refresh } = useJobs();
   const providers = useProviders();
   const prompts = useAnalysisPrompts();
@@ -120,7 +127,12 @@ export function AnalysisResultDialog({ open, file, onClose, onChanged, onOpenSet
    * @param live whether the opening is still the current one
    * @returns the context
    */
-  const actionOf = (live: () => boolean): ResultAction => ({ live, reader: opening.reader, setError: opening.setError, refresh });
+  const actionOf = (live: () => boolean): ResultAction => ({
+    live,
+    reader: opening.reader,
+    setError: opening.setError,
+    refresh,
+  });
   const records = { prompts, providers, dropChosenPrompt: () => opening.setChosenPrompt(null) };
   const analyse = () => run((live) => analyseFile(actionOf(live), file, { providerId, model, promptId }, records));
 

@@ -47,7 +47,9 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
           </dl>
           <section className="flex flex-col gap-1">
             <h3 className={LABEL}>Description</h3>
-            <p className="text-sm break-words whitespace-pre-wrap">{project.description === '' ? '–' : project.description}</p>
+            <p className="text-sm break-words whitespace-pre-wrap">
+              {project.description === '' ? '–' : project.description}
+            </p>
           </section>
           {requestKey !== null && (
             <MatchingSection current={current} typeName={typeName} onOpenAsset={onOpenAsset} onShowAll={onShowAll} />

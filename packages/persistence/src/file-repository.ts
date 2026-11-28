@@ -1,6 +1,12 @@
 import { IMAGE_GENERATE_JOB } from '@assetforge/contracts';
 import type { FileList, FileRecord, ImportStatus } from '@assetforge/contracts';
-import { InvalidOperationError, NotFoundError, RUNNING_GENERATION_MESSAGE, type FileQuery, type FileRepository } from '@assetforge/core';
+import {
+  InvalidOperationError,
+  NotFoundError,
+  RUNNING_GENERATION_MESSAGE,
+  type FileQuery,
+  type FileRepository,
+} from '@assetforge/core';
 import { and, asc, count, desc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { countQuery, fileListWhere, live, pageQuery, trashed } from './file-list.js';
@@ -308,7 +314,11 @@ async function listFiles(database: BetterSQLite3Database, query: FileQuery): Pro
  */
 async function purge(database: BetterSQLite3Database, id: string): Promise<boolean> {
   return database.transaction((transaction) => {
-    const row = transaction.select({ deletedAt: file.deletedAt, status: file.status }).from(file).where(eq(file.id, id)).get();
+    const row = transaction
+      .select({ deletedAt: file.deletedAt, status: file.status })
+      .from(file)
+      .where(eq(file.id, id))
+      .get();
     if (!row || (row.deletedAt === null && row.status !== 'failed')) return false;
     // An open move may have put the binary outside the trash; it is resolved first, never dropped.
     if (transaction.select({ fileId: fileMove.fileId }).from(fileMove).where(eq(fileMove.fileId, id)).get()) {
@@ -332,7 +342,11 @@ async function purge(database: BetterSQLite3Database, id: string): Promise<boole
     transaction.delete(file).where(eq(file.id, id)).run();
     // The tombstone tells the trash sweep that a leftover binary of this id may go.
     if (row.deletedAt !== null) {
-      transaction.insert(filePurge).values({ fileId: id, purgedAt: new Date().toISOString() }).onConflictDoNothing().run();
+      transaction
+        .insert(filePurge)
+        .values({ fileId: id, purgedAt: new Date().toISOString() })
+        .onConflictDoNothing()
+        .run();
     }
     reindexAssets(transaction, [left]);
     return true;

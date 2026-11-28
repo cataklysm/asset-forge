@@ -1,4 +1,10 @@
-import { ANALYSIS_PROMPT_NAME_MAX, ANALYSIS_PROMPT_TEXT_MAX, ANALYSIS_TAG_LIMIT_MAX, ANALYSIS_TAG_LIMIT_MIN, type AnalysisPrompt } from '@assetforge/contracts';
+import {
+  ANALYSIS_PROMPT_NAME_MAX,
+  ANALYSIS_PROMPT_TEXT_MAX,
+  ANALYSIS_TAG_LIMIT_MAX,
+  ANALYSIS_TAG_LIMIT_MIN,
+  type AnalysisPrompt,
+} from '@assetforge/contracts';
 import { invalidReason, tagLimitOf, type AnalysisPromptDraft } from '../analysis-prompt-draft';
 import {
   ANALYSIS_DELETE_PROMPT_TITLE,

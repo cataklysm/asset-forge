@@ -40,7 +40,13 @@ describe('analysis', () => {
   it('the menu adds Review tags with a proposal and Image to prompt, both after Analyse', () => {
     const onReviewTags = vi.fn();
     const onImageToPrompt = vi.fn();
-    const ctx: FileActionContext = { cover: null, onDetails: () => {}, onAnalyse: () => {}, onReviewTags, onImageToPrompt };
+    const ctx: FileActionContext = {
+      cover: null,
+      onDetails: () => {},
+      onAnalyse: () => {},
+      onReviewTags,
+      onImageToPrompt,
+    };
     expect(labels(ctx)).toEqual(['Details', 'Open externally', 'Show in folder', 'Analyse', 'Image to prompt']);
     const items = fileMenuItems(fileRecord({ hasProposal: true }), ctx);
     expect(items.map((item) => item.label)).toEqual([
@@ -84,11 +90,11 @@ describe('analysis', () => {
   });
 
   it('enqueueTitle counts the queued files and each skip reason that is not zero', () => {
-    expect(enqueueTitle({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } })).toBe(
-      '3 queued',
-    );
-    expect(enqueueTitle({ enqueued: 0, skipped: { notFound: 1, notAnalysable: 2, alreadyQueued: 3, alreadyAnalysed: 4 } })).toBe(
-      '0 queued, 4 already analysed, 3 already queued, 2 not analysable, 1 not found',
-    );
+    expect(
+      enqueueTitle({ enqueued: 3, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } }),
+    ).toBe('3 queued');
+    expect(
+      enqueueTitle({ enqueued: 0, skipped: { notFound: 1, notAnalysable: 2, alreadyQueued: 3, alreadyAnalysed: 4 } }),
+    ).toBe('0 queued, 4 already analysed, 3 already queued, 2 not analysable, 1 not found');
   });
 });

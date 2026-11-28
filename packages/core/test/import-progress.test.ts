@@ -1,7 +1,13 @@
 import type { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import type { ImportProgress } from '@assetforge/contracts';
-import { ARCHIVE_EMPTY_MESSAGE, ARCHIVE_TRUNCATED_MESSAGE, NotFoundError, REFUSED_IMPORT_MESSAGE, WorkspaceManager } from '../src/index.js';
+import {
+  ARCHIVE_EMPTY_MESSAGE,
+  ARCHIVE_TRUNCATED_MESSAGE,
+  NotFoundError,
+  REFUSED_IMPORT_MESSAGE,
+  WorkspaceManager,
+} from '../src/index.js';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -33,7 +39,13 @@ async function setup() {
   return { ...fake, manager, storage, writes, unpack, onWrite: (fn: (index: number) => void) => (beforeWrite = fn) };
 }
 
-const progress = (done: number, total: number, currentBytes: number, currentSize: number | null, cancelling = false) => ({
+const progress = (
+  done: number,
+  total: number,
+  currentBytes: number,
+  currentSize: number | null,
+  cancelling = false,
+) => ({
   done,
   total,
   currentBytes,
@@ -138,7 +150,11 @@ describe('import progress', () => {
 
     const results = await unpack(['/src/bad.zip', '/src/empty.zip', '/src/after.png']);
 
-    expect(results.map((r) => r.error)).toEqual(['This file is not a readable ZIP archive', ARCHIVE_EMPTY_MESSAGE, null]);
+    expect(results.map((r) => r.error)).toEqual([
+      'This file is not a readable ZIP archive',
+      ARCHIVE_EMPTY_MESSAGE,
+      null,
+    ]);
     expect(writes.map((w) => w[0])).toEqual([progress(2, 3, 0, 1)]);
   });
 
@@ -215,7 +231,9 @@ describe('import progress', () => {
     const { manager, sources, writes } = await setup();
     sources.set('/src/a.png', Buffer.from('a'));
 
-    await expect(manager.importFiles(['/src/a.png'], { assetId: UNKNOWN_ASSET, role: 'reference' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      manager.importFiles(['/src/a.png'], { assetId: UNKNOWN_ASSET, role: 'reference' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
     expect(manager.importProgress()).toBeNull();
     expect(manager.cancelImport()).toBe(false);
 
@@ -226,7 +244,10 @@ describe('import progress', () => {
 });
 
 /** The manager's live progress object, captured while the import runs and inspected after it settled. */
-function captureLive(manager: WorkspaceManager, onWrite: (fn: (index: number) => void) => void): () => ImportProgress | null {
+function captureLive(
+  manager: WorkspaceManager,
+  onWrite: (fn: (index: number) => void) => void,
+): () => ImportProgress | null {
   let live: ImportProgress | null = null;
   onWrite(() => {
     live ??= (manager as unknown as { importProgress_: ImportProgress | null }).importProgress_;

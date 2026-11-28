@@ -154,7 +154,9 @@ describe('workspace database', () => {
 
   test('markComplete and markFailed reject for an unknown id', async () => {
     const d = await open();
-    await expect(d.files.markComplete(uuid(9), { sizeBytes: 1, sha256: HASH_A, width: null, height: null })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      d.files.markComplete(uuid(9), { sizeBytes: 1, sha256: HASH_A, width: null, height: null }),
+    ).rejects.toBeInstanceOf(NotFoundError);
     await expect(d.files.markFailed(uuid(9), 'x')).rejects.toBeInstanceOf(NotFoundError);
   });
 

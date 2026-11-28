@@ -56,7 +56,11 @@ async function addFile(f: FileSpec): Promise<void> {
   });
   if (f.complete !== false) await db.files.markComplete(f.id, { sizeBytes: 1, sha256: SHA, width: null, height: null });
   if (f.asset) {
-    await db.files.setPlacement(f.id, { relativePath: `assets/${f.asset.id}/${f.name}`, assetId: f.asset.id, role: f.asset.role });
+    await db.files.setPlacement(f.id, {
+      relativePath: `assets/${f.asset.id}/${f.name}`,
+      assetId: f.asset.id,
+      role: f.asset.role,
+    });
   }
 }
 
@@ -74,11 +78,25 @@ beforeEach(async () => {
   }
   await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T0 });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
   await addAsset(ASSET_A, 'Pump');
   await addAsset(ASSET_B, 'Valve');
-  await db.tags.addToAsset({ assetId: ASSET_A, name: 'hero', displayName: 'hero', origin: 'manual', newId: uuid(nextId++), now: T0 });
+  await db.tags.addToAsset({
+    assetId: ASSET_A,
+    name: 'hero',
+    displayName: 'hero',
+    origin: 'manual',
+    newId: uuid(nextId++),
+    now: T0,
+  });
 
   await addFile({ id: I_RUST, name: 'rust.png' });
   await addFile({ id: I_OTHER, name: 'other.png' });
@@ -87,7 +105,14 @@ beforeEach(async () => {
   await addFile({ id: A_REF, name: 'a-ref.png', asset: { id: ASSET_A, role: 'reference' } });
   await addFile({ id: A_CONCEPT, name: 'a-concept.png', asset: { id: ASSET_A, role: 'concept' } });
   await addFile({ id: B_REF, name: 'b.png', asset: { id: ASSET_B, role: 'reference' } });
-  await db.tags.addToFile({ fileId: I_RUST, name: 'metal', displayName: 'metal', origin: 'manual', newId: uuid(nextId++), now: T0 });
+  await db.tags.addToFile({
+    fileId: I_RUST,
+    name: 'metal',
+    displayName: 'metal',
+    origin: 'manual',
+    newId: uuid(nextId++),
+    now: T0,
+  });
 });
 
 afterEach(async () => {
@@ -95,7 +120,10 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const page = (target: AnalysisTarget, o: { fingerprint?: AnalysisFingerprint; afterId?: string | null; limit?: number } = {}) =>
+const page = (
+  target: AnalysisTarget,
+  o: { fingerprint?: AnalysisFingerprint; afterId?: string | null; limit?: number } = {},
+) =>
   db.analysisTargets.page({
     target,
     fingerprint: o.fingerprint ?? FP,
@@ -110,9 +138,25 @@ const analysedOf = async (fileId: string, fingerprint: AnalysisFingerprint = FP)
   (await page({ kind: 'files', fileIds: [fileId] }, { fingerprint }))[0]?.analysed;
 
 const applyAnalysis = (fileId: string) =>
-  db.analyses.apply({ fileId, sha256: SHA, tags: [], provider: FP.provider, model: FP.model, promptVersion: FP.promptVersion, promptName: null, now: T1 });
+  db.analyses.apply({
+    fileId,
+    sha256: SHA,
+    tags: [],
+    provider: FP.provider,
+    model: FP.model,
+    promptVersion: FP.promptVersion,
+    promptName: null,
+    now: T1,
+  });
 const proposeFor = (fileId: string) =>
-  db.analyses.propose({ fileId, sha256: SHA, ...FP, tags: [{ name: 'blue', displayName: 'blue' }], promptName: null, createdAt: T1 });
+  db.analyses.propose({
+    fileId,
+    sha256: SHA,
+    ...FP,
+    tags: [{ name: 'blue', displayName: 'blue' }],
+    promptName: null,
+    createdAt: T1,
+  });
 
 describe('analysis target reader', () => {
   test('a files target lists the known files by id and marks the analysable ones', async () => {
@@ -189,10 +233,18 @@ describe('analysis target reader', () => {
       payload: { version: 2 },
       dedupeKey: `vision.analyze_file:${B_REF}`,
     };
-    await db.jobs.enqueue({ jobs: [job, { ...job, id: uuid(901), fileId: I_RUST, dedupeKey: `vision.analyze_file:${I_RUST}` }], now: T0 });
+    await db.jobs.enqueue({
+      jobs: [job, { ...job, id: uuid(901), fileId: I_RUST, dedupeKey: `vision.analyze_file:${I_RUST}` }],
+      now: T0,
+    });
     const all = { kind: 'fileFilter', filter: { scope: { kind: 'all' } } } as const;
     expect(await count(all)).toEqual({ analysable: 1, alreadyAnalysed: 2, alreadyQueued: 2, notAnalysable: 2 });
-    expect(await count(all, { ...FP, model: 'llava' })).toEqual({ analysable: 3, alreadyAnalysed: 0, alreadyQueued: 2, notAnalysable: 2 });
+    expect(await count(all, { ...FP, model: 'llava' })).toEqual({
+      analysable: 3,
+      alreadyAnalysed: 0,
+      alreadyQueued: 2,
+      notAnalysable: 2,
+    });
 
     await db.jobs.cancelPending({ id: uuid(900), now: T1 });
     expect(await count(all)).toEqual({ analysable: 2, alreadyAnalysed: 2, alreadyQueued: 1, notAnalysable: 2 });
@@ -214,11 +266,24 @@ describe('analysis target reader', () => {
       ],
       now: T0,
     });
-    expect(await count({ kind: 'asset', assetId: ASSET_B })).toEqual({ analysable: 0, alreadyAnalysed: 1, alreadyQueued: 0, notAnalysable: 0 });
+    expect(await count({ kind: 'asset', assetId: ASSET_B })).toEqual({
+      analysable: 0,
+      alreadyAnalysed: 1,
+      alreadyQueued: 0,
+      notAnalysable: 0,
+    });
   });
 
   test('without mime types nothing is analysable', async () => {
-    expect(await db.analysisTargets.page({ target: { kind: 'asset', assetId: ASSET_A }, fingerprint: FP, mimeTypes: [], afterId: null, limit: 10 })).toEqual([
+    expect(
+      await db.analysisTargets.page({
+        target: { kind: 'asset', assetId: ASSET_A },
+        fingerprint: FP,
+        mimeTypes: [],
+        afterId: null,
+        limit: 10,
+      }),
+    ).toEqual([
       { fileId: A_REF, analysable: false, analysed: false },
       { fileId: A_CONCEPT, analysable: false, analysed: false },
     ]);
@@ -281,7 +346,11 @@ describe('trashed files as analysis targets', () => {
 
   test('a trashed file is not analysable for a fileFilter target', async () => {
     await trashSome();
-    expect(await ids({ kind: 'fileFilter', filter: { scope: { kind: 'inbox' } } })).toEqual([I_RUST, I_TEXT, I_PENDING]);
+    expect(await ids({ kind: 'fileFilter', filter: { scope: { kind: 'inbox' } } })).toEqual([
+      I_RUST,
+      I_TEXT,
+      I_PENDING,
+    ]);
     expect(await ids({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } })).not.toContain(I_OTHER);
     expect(await page({ kind: 'fileFilter', filter: { scope: { kind: 'trash' } } })).toEqual([
       { fileId: I_OTHER, analysable: false, analysed: false },

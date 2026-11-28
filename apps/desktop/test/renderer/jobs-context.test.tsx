@@ -4,7 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JOB_POLL_MS, JobsProvider, useChanges, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi, noChanges } from './fake-api';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 let seen: JobState[] = [];
 
@@ -135,8 +145,18 @@ describe('JobsProvider', () => {
   });
 
   it('a new pause list is taken, an equal one keeps the state object', async () => {
-    const a = { providerId: '00000000-0000-4000-8000-00000000a001', providerName: 'Local', kind: 'ollama', reason: 'provider_unreachable' } as const;
-    const b = { providerId: '00000000-0000-4000-8000-00000000b001', providerName: 'RunPod', kind: 'ollama', reason: 'provider_unauthorized' } as const;
+    const a = {
+      providerId: '00000000-0000-4000-8000-00000000a001',
+      providerName: 'Local',
+      kind: 'ollama',
+      reason: 'provider_unreachable',
+    } as const;
+    const b = {
+      providerId: '00000000-0000-4000-8000-00000000b001',
+      providerName: 'RunPod',
+      kind: 'ollama',
+      reason: 'provider_unauthorized',
+    } as const;
     let next: JobSummary = { ...IDLE, queued: 1, paused: [a] };
     installFakeApi({ 'jobs:summary': () => structuredClone(next) });
     render(

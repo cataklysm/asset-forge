@@ -49,7 +49,9 @@ export function createWorkflowTemplateRepository(database: BetterSQLite3Database
  * @returns the templates
  */
 async function listTemplates(database: BetterSQLite3Database): Promise<WorkflowTemplate[]> {
-  return selectTemplates(database).orderBy(sql`lower(${workflowTemplate.name})`, asc(workflowTemplate.id)).all();
+  return selectTemplates(database)
+    .orderBy(sql`lower(${workflowTemplate.name})`, asc(workflowTemplate.id))
+    .all();
 }
 
 /**
@@ -71,7 +73,10 @@ async function getTemplate(database: BetterSQLite3Database, id: string): Promise
  * @returns its id; null when unknown
  */
 async function findByKey(database: BetterSQLite3Database, key: string): Promise<{ id: string } | null> {
-  return database.select({ id: workflowTemplate.id }).from(workflowTemplate).where(eq(workflowTemplate.key, key)).get() ?? null;
+  return (
+    database.select({ id: workflowTemplate.id }).from(workflowTemplate).where(eq(workflowTemplate.key, key)).get() ??
+    null
+  );
 }
 
 /**
@@ -87,7 +92,13 @@ async function insertTemplate(
 ): Promise<void> {
   database
     .insert(workflowTemplate)
-    .values({ id: template.id, key: template.key, name: template.name, builtIn: template.builtIn, createdAt: template.createdAt })
+    .values({
+      id: template.id,
+      key: template.key,
+      name: template.name,
+      builtIn: template.builtIn,
+      createdAt: template.createdAt,
+    })
     .run();
 }
 
@@ -122,7 +133,12 @@ async function insertVersion(
   database.transaction((transaction) => {
     transaction
       .insert(workflowTemplateVersion)
-      .values({ id: version.id, templateId: version.templateId, version: version.version, createdAt: version.createdAt })
+      .values({
+        id: version.id,
+        templateId: version.templateId,
+        version: version.version,
+        createdAt: version.createdAt,
+      })
       .run();
     for (const step of version.steps) {
       transaction

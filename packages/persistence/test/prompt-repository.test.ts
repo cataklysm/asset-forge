@@ -72,7 +72,9 @@ const count = (table: string) => (handle.prepare(`select count(*) as n from ${ta
 describe('prompt repository', () => {
   test('create writes the prompt with version 1, and get reads it back', async () => {
     const variables = [{ name: 'Subject', defaultValue: 'oak' }];
-    expect(await create(1, 'Night Sky', { description: 'Dark', content: 'Paint {{Subject}} at night', variables })).toBe(true);
+    expect(
+      await create(1, 'Night Sky', { description: 'Dark', content: 'Paint {{Subject}} at night', variables }),
+    ).toBe(true);
     const v1 = { id: uuid(101), number: 1, content: 'Paint {{Subject}} at night', variables, createdAt: T0 };
     expect(await db.prompts.get(uuid(1))).toEqual({
       id: uuid(1),

@@ -174,7 +174,8 @@ class SettingsProviderStore {
     this.keys = new ProviderKeyFiles(options.userData, options.secrets);
     this.fromEnvironment = options.env[ENV_BASE_URL] !== undefined;
     // Once per store, i.e. per app start; the value itself is never logged.
-    if (this.fromEnvironment && usableBaseUrl(options.env[ENV_BASE_URL] ?? '') === null) console.warn(UNUSABLE_ENV_BASE_URL);
+    if (this.fromEnvironment && usableBaseUrl(options.env[ENV_BASE_URL] ?? '') === null)
+      console.warn(UNUSABLE_ENV_BASE_URL);
     this.environmentEntry = this.fromEnvironment ? environmentEntryOf(options.env) : null;
   }
 
@@ -218,7 +219,11 @@ class SettingsProviderStore {
    */
   private lastUsed(purpose: ProviderPurpose): ProviderEntry | null {
     // Environment mode has only the `ollama` environment entry, so its image slot stays empty.
-    const id = this.fromEnvironment ? (purpose === 'vision' ? this.environmentLastUsed : null) : this.load().lastUsed[purpose];
+    const id = this.fromEnvironment
+      ? purpose === 'vision'
+        ? this.environmentLastUsed
+        : null
+      : this.load().lastUsed[purpose];
     const entry = id === null ? null : this.get(id);
     return entry !== null && purposeOf(entry.kind) === purpose ? entry : null;
   }
@@ -324,13 +329,16 @@ class SettingsProviderStore {
     const encrypted = this.encryptedKey(request.apiKey, baseUrl);
     const entry = entryOf(request, previous, { kind, name, baseUrl, options });
     const providers =
-      previous === null ? [...current.providers, entry] : current.providers.map((provider) => (provider.id === entry.id ? entry : provider));
+      previous === null
+        ? [...current.providers, entry]
+        : current.providers.map((provider) => (provider.id === entry.id ? entry : provider));
     // The settings go first, so a failed write loses no key. A key is bound to the origin it was entered for, so an
     // old key left behind by a failed removal is never sent to a new origin.
     this.commit({ ...current, providers });
     // The entry changed once it is written, so listeners hear of it even if a key file operation fails.
     try {
-      if (previous === null || request.apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl)) this.keys.remove(entry.id);
+      if (previous === null || request.apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl))
+        this.keys.remove(entry.id);
       if (encrypted !== null) this.keys.write(entry.id, encrypted);
     } finally {
       this.notify(entry.id);
@@ -454,7 +462,11 @@ function checkedBaseUrl(rawBaseUrl: string, kind: ProviderKind): string {
  * @returns the options to store
  * @throws ValidationFailedError when the extra parameters break their rule
  */
-function checkedOptions(request: SaveProvider, previous: ProviderEntry | null, kind: ProviderKind): ProviderOptions | null {
+function checkedOptions(
+  request: SaveProvider,
+  previous: ProviderEntry | null,
+  kind: ProviderKind,
+): ProviderOptions | null {
   const vision = isVisionKind(kind);
   const options = vision ? (request.options ?? previous?.options ?? optionsFor(kind)) : null;
   if (vision && options !== null) {
@@ -473,7 +485,12 @@ function checkedOptions(request: SaveProvider, previous: ProviderEntry | null, k
  * @param previous the stored entry, or null for a new one
  * @throws InvalidOperationError for a repeated name or one entry too many
  */
-function checkRoom(current: StoredSettings, id: string | undefined, name: string, previous: ProviderEntry | null): void {
+function checkRoom(
+  current: StoredSettings,
+  id: string | undefined,
+  name: string,
+  previous: ProviderEntry | null,
+): void {
   const others = current.providers.filter((provider) => provider.id !== id);
   const key = name.toLowerCase();
   if (others.some((provider) => provider.name.toLowerCase() === key)) throw new InvalidOperationError(DUPLICATE_NAME);

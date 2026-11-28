@@ -26,7 +26,10 @@ const store = (data: Record<string, string>) => ({ getItem: (k: string) => data[
 describe('listKey', () => {
   it('listKey is independent of tag order and toAssetQuery drops empty values', () => {
     expect(listKey({ ...NO_FILTERS, tagNames: ['b', 'a'] })).toBe(listKey({ ...NO_FILTERS, tagNames: ['a', 'b'] }));
-    expect(toAssetQuery({ ...NO_FILTERS, query: 'oak', fileKind: 'image' })).toEqual({ query: 'oak', fileKind: 'image' });
+    expect(toAssetQuery({ ...NO_FILTERS, query: 'oak', fileKind: 'image' })).toEqual({
+      query: 'oak',
+      fileKind: 'image',
+    });
     expect(hasFilters(NO_FILE_FILTERS)).toBe(false);
   });
 

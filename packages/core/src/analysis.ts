@@ -108,7 +108,5 @@ export function cleanAnalysisTags(answer: unknown, limit: number): { name: strin
  * @returns true when it is complete, not in the trash, of a previewable MIME type and with a checksum
  */
 export function isAnalysable(file: FileRecord): boolean {
-  return (
-    file.status === 'complete' && file.deletedAt === null && isPreviewable(file.mimeType) && file.sha256 !== null
-  );
+  return file.status === 'complete' && file.deletedAt === null && isPreviewable(file.mimeType) && file.sha256 !== null;
 }

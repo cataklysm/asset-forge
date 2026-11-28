@@ -55,12 +55,25 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 const PREVIEW: AnalysisPreview = { analysable: 7, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 };
 const NOTHING_NEW: AnalysisPreview = { analysable: 0, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 };
 
-const ENQUEUED: EnqueueAnalysisResult = { enqueued: 7, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 } };
+const ENQUEUED: EnqueueAnalysisResult = {
+  enqueued: 7,
+  skipped: { ...NONE_SKIPPED, alreadyAnalysed: 3, alreadyQueued: 2, notAnalysable: 1 },
+};
 
 const assetTarget = (): AnalysisTarget => ({ kind: 'asset', assetId: '00000000-0000-4000-8000-0000000000aa' });
 
@@ -73,7 +86,11 @@ function oneProvider(entry: ProviderView | null, models: ListModelsResult = MODE
     : fakeProviders({ providers: [entry], lastUsedId: entry.id }, { [entry.id]: models }).handlers;
 }
 
-function install(handlers: FakeHandlers = {}, entry: ProviderView | null = CONFIGURED, models: ListModelsResult = MODELS) {
+function install(
+  handlers: FakeHandlers = {},
+  entry: ProviderView | null = CONFIGURED,
+  models: ListModelsResult = MODELS,
+) {
   return installFakeApi({
     ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
     ...oneProvider(entry, models),
@@ -133,7 +150,9 @@ it('opens with the tagging default selected and previews the target with it', as
   renderDialog();
   await previewShown();
   expect(modelSelect().value).toBe('vision-b');
-  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: assetTarget(), model: 'vision-b', providerId: CONFIGURED.id }]);
+  expect(callsOf(api, 'analysis:preview')).toEqual([
+    { target: assetTarget(), model: 'vision-b', providerId: CONFIGURED.id },
+  ]);
 });
 
 it('shows the four counts of the preview', async () => {
@@ -209,7 +228,14 @@ it('keeps Start disabled when nothing would be enqueued until Analyse again is c
   await userEvent.click(startButton());
   await waitFor(() => expect(onStarted).toHaveBeenCalled());
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: assetTarget(), model: 'vision-b', providerId: CONFIGURED.id, mode: 'apply', force: true, promptId: TAG_DEFAULT.id },
+    {
+      target: assetTarget(),
+      model: 'vision-b',
+      providerId: CONFIGURED.id,
+      mode: 'apply',
+      force: true,
+      promptId: TAG_DEFAULT.id,
+    },
   ]);
 });
 
@@ -230,7 +256,14 @@ it('Start enqueues in mode apply, then reports, closes and refreshes the jobs', 
   await userEvent.click(startButton());
   await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: assetTarget(), model: 'vision-b', providerId: CONFIGURED.id, mode: 'apply', force: false, promptId: TAG_DEFAULT.id },
+    {
+      target: assetTarget(),
+      model: 'vision-b',
+      providerId: CONFIGURED.id,
+      mode: 'apply',
+      force: false,
+      promptId: TAG_DEFAULT.id,
+    },
   ]);
   expect(onStarted).toHaveBeenCalledWith(ENQUEUED);
   expect(onStarted.mock.invocationCallOrder[0]!).toBeLessThan(onClose.mock.invocationCallOrder[0]!);
@@ -238,11 +271,19 @@ it('Start enqueues in mode apply, then reports, closes and refreshes the jobs', 
 });
 
 it('an OpenAI-compatible entry used last is preselected, and its models of unknown vision let it start', async () => {
-  const vllm = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl' });
+  const vllm = providerView({
+    kind: 'openai',
+    name: 'vLLM',
+    baseUrl: 'http://127.0.0.1:11500/v1',
+    taggingModel: 'qwen-vl',
+  });
   const unknown: ListModelsResult = { ok: true, models: [{ name: 'qwen-vl', vision: null }] };
   const api = installFakeApi({
     ...fakeAnalysisPrompts({ prompts: PROMPTS }).handlers,
-    ...fakeProviders({ providers: [CONFIGURED, vllm], lastUsedId: vllm.id }, { [CONFIGURED.id]: MODELS, [vllm.id]: unknown }).handlers,
+    ...fakeProviders(
+      { providers: [CONFIGURED, vllm], lastUsedId: vllm.id },
+      { [CONFIGURED.id]: MODELS, [vllm.id]: unknown },
+    ).handlers,
     'jobs:summary': () => IDLE,
     'analysis:preview': () => PREVIEW,
     'analysis:enqueue': () => ENQUEUED,
@@ -255,7 +296,14 @@ it('an OpenAI-compatible entry used last is preselected, and its models of unkno
   await userEvent.click(startButton());
   await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   expect(callsOf(api, 'analysis:enqueue')).toEqual([
-    { target: assetTarget(), model: 'qwen-vl', providerId: vllm.id, mode: 'apply', force: false, promptId: TAG_DEFAULT.id },
+    {
+      target: assetTarget(),
+      model: 'qwen-vl',
+      providerId: vllm.id,
+      mode: 'apply',
+      force: false,
+      promptId: TAG_DEFAULT.id,
+    },
   ]);
 });
 
@@ -414,7 +462,10 @@ it('a failed start keeps the retry of a preview that failed afterwards', async (
   previewFails = true;
   await userEvent.selectOptions(modelSelect(), 'vision-a');
   expect(await screen.findByRole('button', { name: 'Count again' })).toBeTruthy();
-  expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['invalid_operation', 'This item no longer exists.']);
+  expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual([
+    'invalid_operation',
+    'This item no longer exists.',
+  ]);
 });
 
 it('reopening starts again from the tagging default with Analyse again off', async () => {
@@ -521,7 +572,9 @@ it('a file target is sent as given', async () => {
   const api = install();
   renderDialog({ target: { kind: 'files', fileIds } });
   await previewShown();
-  expect(callsOf(api, 'analysis:preview')).toEqual([{ target: { kind: 'files', fileIds }, model: 'vision-b', providerId: CONFIGURED.id }]);
+  expect(callsOf(api, 'analysis:preview')).toEqual([
+    { target: { kind: 'files', fileIds }, model: 'vision-b', providerId: CONFIGURED.id },
+  ]);
 });
 
 it('every button uses the shared button look', async () => {
@@ -556,7 +609,9 @@ it('preselects the tagging prompt used last', async () => {
 });
 
 it('preselects the first tagging prompt when the one used last is gone', async () => {
-  install(fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id } }).handlers);
+  install(
+    fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id } }).handlers,
+  );
   renderDialog();
   await previewShown();
   await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
@@ -618,20 +673,36 @@ it('a start refused with not_found shows the error and falls back to an existing
   expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
   await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
   expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
-  expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Default']);
+  expect(
+    within(promptSelect())
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['Default']);
   expect(onStarted).not.toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
 });
 
 describe('provider choice', () => {
-  const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: 'big-vision', promptModel: null });
+  const RUNPOD = providerView({
+    name: 'RunPod',
+    baseUrl: 'https://pod.example.test',
+    taggingModel: 'big-vision',
+    promptModel: null,
+  });
   const POD_MODELS: ListModelsResult = { ok: true, models: [{ name: 'big-vision', vision: true }] };
   const DOWN: ListModelsResult = { ok: false, code: 'provider_unreachable' };
 
   const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
-  const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+  const optionTexts = (el: HTMLSelectElement) =>
+    within(el)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
 
-  function installTwo(lastUsedId: string | null, models: Record<string, ListModelsResult> = {}, handlers: FakeHandlers = {}) {
+  function installTwo(
+    lastUsedId: string | null,
+    models: Record<string, ListModelsResult> = {},
+    handlers: FakeHandlers = {},
+  ) {
     const providers = fakeProviders(
       { providers: [CONFIGURED, RUNPOD], lastUsedId },
       { [CONFIGURED.id]: MODELS, [RUNPOD.id]: POD_MODELS, ...models },
@@ -704,13 +775,20 @@ describe('provider choice', () => {
     expect(modelSelect().value).toBe('big-vision');
     expect(within(modelSelect()).queryByRole('option', { name: 'vision-a' })).toBeNull();
     await waitFor(() =>
-      expect(callsOf(api, 'analysis:preview').at(-1)).toEqual({ target: assetTarget(), model: 'big-vision', providerId: RUNPOD.id }),
+      expect(callsOf(api, 'analysis:preview').at(-1)).toEqual({
+        target: assetTarget(),
+        model: 'big-vision',
+        providerId: RUNPOD.id,
+      }),
     );
   });
 
   it('switching to an entry without a tagging default selects no model', async () => {
     const bare = providerView({ name: 'Bare', taggingModel: null });
-    const providers = fakeProviders({ providers: [CONFIGURED, bare], lastUsedId: CONFIGURED.id }, { [CONFIGURED.id]: MODELS });
+    const providers = fakeProviders(
+      { providers: [CONFIGURED, bare], lastUsedId: CONFIGURED.id },
+      { [CONFIGURED.id]: MODELS },
+    );
     install(providers.handlers);
     renderDialog();
     await previewShown();
@@ -739,7 +817,14 @@ describe('provider choice', () => {
     await userEvent.click(startButton());
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(callsOf(api, 'analysis:enqueue')).toEqual([
-      { target: assetTarget(), model: 'big-vision', providerId: RUNPOD.id, mode: 'apply', force: false, promptId: TAG_DEFAULT.id },
+      {
+        target: assetTarget(),
+        model: 'big-vision',
+        providerId: RUNPOD.id,
+        mode: 'apply',
+        force: false,
+        promptId: TAG_DEFAULT.id,
+      },
     ]);
     expect(probe!.list?.lastUsedId).toBe(RUNPOD.id);
     rerender(false);

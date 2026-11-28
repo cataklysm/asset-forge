@@ -127,7 +127,8 @@ function loadPage(
   request: PageLoadRequest,
 ): Promise<PageLoadResult> {
   if (request.signal.aborted) return Promise.resolve({ ok: false, reason: 'failed' });
-  if (!pageNavigationAllowed(url, site)) return Promise.resolve({ ok: false, reason: 'left_site', host: leftSiteHost(url) });
+  if (!pageNavigationAllowed(url, site))
+    return Promise.resolve({ ok: false, reason: 'left_site', host: leftSiteHost(url) });
   return new PageLoad(view, slots, timing, url, request).start();
 }
 
@@ -194,7 +195,10 @@ class PageLoad {
     signal.addEventListener('abort', this.onAbort, { once: true });
     this.slots.left = this.onLeft;
     this.slots.response = this.onResponse;
-    const overall = setTimeout(() => this.finish(this.missed(this.isLoaded ? 'no_match' : 'timeout')), this.timing.totalMs);
+    const overall = setTimeout(
+      () => this.finish(this.missed(this.isLoaded ? 'no_match' : 'timeout')),
+      this.timing.totalMs,
+    );
     this.navigate().catch(this.failed);
     try {
       return await this.ended;

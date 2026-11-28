@@ -17,10 +17,46 @@ const SHOW = {
 };
 
 const VOCABULARY = [
-  'chair', 'table', 'lamp', 'sword', 'shield', 'barrel', 'crate', 'tree', 'rock', 'house',
-  'tower', 'bridge', 'door', 'window', 'statue', 'vase', 'book', 'bottle', 'helmet', 'armor',
-  'wood', 'metal', 'stone', 'glass', 'leather', 'fabric', 'ceramic', 'iron', 'gold', 'rust',
-  'red', 'blue', 'green', 'yellow', 'brown', 'grey', 'white', 'black', 'orange', 'purple',
+  'chair',
+  'table',
+  'lamp',
+  'sword',
+  'shield',
+  'barrel',
+  'crate',
+  'tree',
+  'rock',
+  'house',
+  'tower',
+  'bridge',
+  'door',
+  'window',
+  'statue',
+  'vase',
+  'book',
+  'bottle',
+  'helmet',
+  'armor',
+  'wood',
+  'metal',
+  'stone',
+  'glass',
+  'leather',
+  'fabric',
+  'ceramic',
+  'iron',
+  'gold',
+  'rust',
+  'red',
+  'blue',
+  'green',
+  'yellow',
+  'brown',
+  'grey',
+  'white',
+  'black',
+  'orange',
+  'purple',
 ];
 const VIEWS = ['front view', 'side view', 'three-quarter view', 'top view', 'close-up'];
 const STYLES = ['photorealistic', 'stylized', 'concept art', 'line drawing', 'pixel art'];
@@ -69,7 +105,13 @@ export const MOCK_SLASH_MODEL = 'Qwen/Mock-VL:7B';
 
 const OPENAI_MODELS = [...MODELS, MOCK_THINKING_MODEL, MOCK_FENCED_MODEL, MOCK_REASONING_ONLY_MODEL, MOCK_SLASH_MODEL];
 /** The models that answer a chat on `/v1/chat/completions`. */
-const OPENAI_CHAT_MODELS = [MOCK_MODEL, MOCK_THINKING_MODEL, MOCK_FENCED_MODEL, MOCK_REASONING_ONLY_MODEL, MOCK_SLASH_MODEL];
+const OPENAI_CHAT_MODELS = [
+  MOCK_MODEL,
+  MOCK_THINKING_MODEL,
+  MOCK_FENCED_MODEL,
+  MOCK_REASONING_ONLY_MODEL,
+  MOCK_SLASH_MODEL,
+];
 const MOCK_REASONING = 'mock reasoning';
 
 /** The base64 data of the first `image_url` data URL in the messages; undefined when there is none. */
@@ -89,8 +131,10 @@ function openAiImageOf(messages) {
 
 /** The assistant message of a completion for `model`, given the plain content and whether it is JSON. */
 function openAiMessage(model, content, isJson) {
-  if (model === MOCK_REASONING_ONLY_MODEL) return { role: 'assistant', content: null, reasoning_content: MOCK_REASONING };
-  if (model === MOCK_THINKING_MODEL) return { role: 'assistant', content: `<think>\n${MOCK_REASONING}\n</think>\n\n${content}` };
+  if (model === MOCK_REASONING_ONLY_MODEL)
+    return { role: 'assistant', content: null, reasoning_content: MOCK_REASONING };
+  if (model === MOCK_THINKING_MODEL)
+    return { role: 'assistant', content: `<think>\n${MOCK_REASONING}\n</think>\n\n${content}` };
   if (model === MOCK_FENCED_MODEL && isJson) return { role: 'assistant', content: '```json\n' + content + '\n```' };
   return { role: 'assistant', content };
 }
@@ -181,12 +225,18 @@ function pngOf(width, height, seed) {
   const row = Buffer.alloc(1 + width * 3);
   for (let x = 0; x < width; x += 1) row.set([red, green, blue], 1 + x * 3);
   const raw = Buffer.concat(Array.from({ length: height }, () => row));
-  return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 /** The IHDR size of a PNG; null for anything else. */
 function pngSizeOf(bytes) {
-  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE) || bytes.toString('ascii', 12, 16) !== 'IHDR') return null;
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE) || bytes.toString('ascii', 12, 16) !== 'IHDR')
+    return null;
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
@@ -198,7 +248,11 @@ function sendPng(response, bytes, headers = {}) {
 /** The multipart fields of a request body: text fields and the bytes of `image`. */
 async function readForm(contentType, raw) {
   try {
-    const form = await new Request('http://mock/', { method: 'POST', headers: { 'content-type': contentType ?? '' }, body: raw }).formData();
+    const form = await new Request('http://mock/', {
+      method: 'POST',
+      headers: { 'content-type': contentType ?? '' },
+      body: raw,
+    }).formData();
     const fields = {};
     let image = null;
     for (const [name, value] of form) {
@@ -218,12 +272,16 @@ function editAnswer(fields) {
   const constraints = model.model_spec.constraints;
   const resolution = fields.resolution ?? constraints?.defaultResolution ?? '1K';
   const aspectRatio = fields.aspect_ratio ?? '1:1';
-  if (constraints && (!constraints.resolutions.includes(resolution) || !constraints.aspectRatios.includes(aspectRatio))) {
+  if (
+    constraints &&
+    (!constraints.resolutions.includes(resolution) || !constraints.aspectRatios.includes(aspectRatio))
+  ) {
     return { status: 400, error: 'Invalid parameters' };
   }
   const edge = LONG_EDGE[resolution];
   const ratio = /^(\d{1,2}):(\d{1,2})$/.exec(aspectRatio);
-  if (!edge || !ratio || Number(ratio[1]) === 0 || Number(ratio[2]) === 0) return { status: 400, error: 'Invalid parameters' };
+  if (!edge || !ratio || Number(ratio[1]) === 0 || Number(ratio[2]) === 0)
+    return { status: 400, error: 'Invalid parameters' };
   const [widthRatio, heightRatio] = [Number(ratio[1]), Number(ratio[2])];
   const width = widthRatio >= heightRatio ? edge : Math.max(1, Math.round((edge * widthRatio) / heightRatio));
   const height = heightRatio >= widthRatio ? edge : Math.max(1, Math.round((edge * heightRatio) / widthRatio));
@@ -264,14 +322,19 @@ export async function startMockProvider(options = {}) {
 
     const request = body && typeof body === 'object' ? body : {};
     if (!OPENAI_CHAT_MODELS.includes(request.model)) {
-      return sendJson(response, 404, { error: { message: `model '${String(request.model)}' not found`, type: 'invalid_request_error' } });
+      return sendJson(response, 404, {
+        error: { message: `model '${String(request.model)}' not found`, type: 'invalid_request_error' },
+      });
     }
     const hasFormat = request.response_format !== undefined;
     if (hasFormat && refuseResponseFormat) {
-      return sendJson(response, 400, { error: { message: 'response_format is not supported', type: 'invalid_request_error' } });
+      return sendJson(response, 400, {
+        error: { message: 'response_format is not supported', type: 'invalid_request_error' },
+      });
     }
     const image = openAiImageOf(Array.isArray(request.messages) ? request.messages : []);
-    if (image === undefined) return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
+    if (image === undefined)
+      return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
 
     const bytes = Buffer.from(image, 'base64');
     // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets the JSON.
@@ -279,7 +342,11 @@ export async function startMockProvider(options = {}) {
     const message =
       failure === 'invalid'
         ? { role: 'assistant', content: 'not json' }
-        : openAiMessage(request.model, isJson ? JSON.stringify({ tags: tagsFor(bytes) }) : descriptionFor(bytes), isJson);
+        : openAiMessage(
+            request.model,
+            isJson ? JSON.stringify({ tags: tagsFor(bytes) }) : descriptionFor(bytes),
+            isJson,
+          );
     completionCount += 1;
     const id = `chatcmpl-mock-${completionCount}`;
     answerLater(() =>
@@ -303,10 +370,16 @@ export async function startMockProvider(options = {}) {
       return sendJson(response, 200, { object: 'list', type, data: type === 'inpaint' ? EDIT_MODELS : [] });
     }
     const isEdit = path === '/api/v1/image/edit';
-    if (request.method !== 'POST' || (!isEdit && path !== '/api/v1/image/upscale')) return sendJson(response, 404, { error: 'not found' });
+    if (request.method !== 'POST' || (!isEdit && path !== '/api/v1/image/upscale'))
+      return sendJson(response, 404, { error: 'not found' });
 
     const { fields, image } = await readForm(request.headers['content-type'], raw);
-    imageRequests.push({ path, authorization: request.headers.authorization ?? null, fields, fileBytes: image?.length ?? 0 });
+    imageRequests.push({
+      path,
+      authorization: request.headers.authorization ?? null,
+      fields,
+      fileBytes: image?.length ?? 0,
+    });
     if (!authorized(request)) return sendJson(response, 401, { error: 'Authentication failed' });
     if (!image || image.length === 0) return sendJson(response, 400, { error: 'No image supplied' });
 
@@ -317,7 +390,8 @@ export async function startMockProvider(options = {}) {
       return sendPng(response, pngOf(base.width * scale, base.height * scale, image));
     }
 
-    if (typeof fields.prompt !== 'string' || fields.prompt.length === 0) return sendJson(response, 400, { error: 'No prompt supplied' });
+    if (typeof fields.prompt !== 'string' || fields.prompt.length === 0)
+      return sendJson(response, 400, { error: 'No prompt supplied' });
     const trigger = Object.hasOwn(TRIGGERS, fields.prompt) ? TRIGGERS[fields.prompt] : null;
     if (trigger) {
       const text = JSON.stringify({ error: trigger.error });
@@ -330,7 +404,8 @@ export async function startMockProvider(options = {}) {
     }
     const answer = editAnswer(fields);
     if (answer.status !== 200) return sendJson(response, answer.status, { error: answer.error });
-    if (fields.prompt === MOCK_PROMPT_VIOLATION_OK) return sendPng(response, answer.png, { [VIOLATION_HEADER]: 'true' });
+    if (fields.prompt === MOCK_PROMPT_VIOLATION_OK)
+      return sendPng(response, answer.png, { [VIOLATION_HEADER]: 'true' });
     if (fields.prompt !== MOCK_PROMPT_SLOW) return sendPng(response, answer.png);
 
     const send = () => {

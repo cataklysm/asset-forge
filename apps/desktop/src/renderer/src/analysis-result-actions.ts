@@ -101,7 +101,11 @@ export async function cancelJob(action: ResultAction, file: FileRecord | null, j
  * @param onChanged told that the data changed
  * @returns resolves once done; never rejects
  */
-export async function discardProposal(action: ResultAction, file: FileRecord | null, onChanged: () => void): Promise<void> {
+export async function discardProposal(
+  action: ResultAction,
+  file: FileRecord | null,
+  onChanged: () => void,
+): Promise<void> {
   if (file === null) return;
   try {
     await call('analysis:discardProposal', { fileId: file.id });

@@ -87,7 +87,8 @@ export class JobError extends Error {
 }
 
 /** How a job ended. */
-export type JobOutcome = { status: 'succeeded' } | { status: 'failed'; errorCode: JobErrorCode } | { status: 'cancelled' };
+export type JobOutcome =
+  { status: 'succeeded' } | { status: 'failed'; errorCode: JobErrorCode } | { status: 'cancelled' };
 
 /** Runs the jobs of one type. */
 export interface JobHandler {

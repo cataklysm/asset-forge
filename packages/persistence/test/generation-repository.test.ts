@@ -188,14 +188,24 @@ describe('generation repository', () => {
     await create(edit(1));
     await create(edit(2));
     await create(edit(3));
-    expect(db.generations.settle({ id: uuid(1), outcome: { status: 'failed', errorCode: 'provider_rejected' }, now: T2 })).toBe(true);
+    expect(
+      db.generations.settle({ id: uuid(1), outcome: { status: 'failed', errorCode: 'provider_rejected' }, now: T2 }),
+    ).toBe(true);
     expect(db.generations.settle({ id: uuid(2), outcome: { status: 'cancelled' }, now: T2 })).toBe(true);
     expect(db.generations.settle({ id: uuid(3), outcome: { status: 'succeeded' }, now: T2 })).toBe(true);
     expect(db.generations.settle({ id: uuid(1), outcome: { status: 'cancelled' }, now: T3 })).toBe(false);
     expect(db.generations.settle({ id: uuid(99), outcome: { status: 'cancelled' }, now: T3 })).toBe(false);
-    expect(await db.generations.get(uuid(1))).toMatchObject({ status: 'failed', errorCode: 'provider_rejected', finishedAt: T2 });
+    expect(await db.generations.get(uuid(1))).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_rejected',
+      finishedAt: T2,
+    });
     expect(await db.generations.get(uuid(2))).toMatchObject({ status: 'cancelled', errorCode: null, finishedAt: T2 });
-    expect(await db.generations.get(uuid(3))).toMatchObject({ status: 'failed', errorCode: 'internal_error', finishedAt: T2 });
+    expect(await db.generations.get(uuid(3))).toMatchObject({
+      status: 'failed',
+      errorCode: 'internal_error',
+      finishedAt: T2,
+    });
   });
 
   test('a settle inside jobs.finish ends the generation with the job', async () => {
@@ -204,8 +214,14 @@ describe('generation repository', () => {
     const settled = () => {
       db.generations.settle({ id: uuid(1), outcome: { status: 'failed', errorCode: 'provider_timeout' }, now: T2 });
     };
-    expect(await db.jobs.finish(uuid(101), { status: 'failed', errorCode: 'provider_timeout', now: T2, settled })).toBe(true);
-    expect(await db.generations.get(uuid(1))).toMatchObject({ status: 'failed', errorCode: 'provider_timeout', jobStatus: 'failed' });
+    expect(await db.jobs.finish(uuid(101), { status: 'failed', errorCode: 'provider_timeout', now: T2, settled })).toBe(
+      true,
+    );
+    expect(await db.generations.get(uuid(1))).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_timeout',
+      jobStatus: 'failed',
+    });
   });
 
   test('a settle that throws inside jobs.finish rolls the job back to running and the generation to pending', async () => {
@@ -215,9 +231,15 @@ describe('generation repository', () => {
       db.generations.settle({ id: uuid(1), outcome: { status: 'cancelled' }, now: T2 });
       throw new Error('boom');
     };
-    await expect(db.jobs.finish(uuid(101), { status: 'cancelled', errorCode: null, now: T2, settled })).rejects.toThrow('boom');
+    await expect(db.jobs.finish(uuid(101), { status: 'cancelled', errorCode: null, now: T2, settled })).rejects.toThrow(
+      'boom',
+    );
     expect(await db.jobs.get(uuid(101))).toMatchObject({ status: 'running', finishedAt: null });
-    expect(await db.generations.get(uuid(1))).toMatchObject({ status: 'pending', finishedAt: null, jobStatus: 'running' });
+    expect(await db.generations.get(uuid(1))).toMatchObject({
+      status: 'pending',
+      finishedAt: null,
+      jobStatus: 'running',
+    });
   });
 
   test('cancelPending with settled cancels the job and its generation in one transaction', async () => {
@@ -234,7 +256,11 @@ describe('generation repository', () => {
     });
     expect(n).toBe(1);
     expect(seen).toEqual([uuid(101)]);
-    expect(await db.generations.get(uuid(1))).toMatchObject({ status: 'cancelled', jobStatus: 'cancelled', finishedAt: T2 });
+    expect(await db.generations.get(uuid(1))).toMatchObject({
+      status: 'cancelled',
+      jobStatus: 'cancelled',
+      finishedAt: T2,
+    });
     expect(await db.generations.get(uuid(2))).toMatchObject({ status: 'pending', jobStatus: 'queued' });
   });
 
@@ -335,7 +361,11 @@ describe('generation repository', () => {
       jobId: uuid(1101),
       jobStatus: 'queued',
     });
-    expect(await db.jobs.get(uuid(1101))).toMatchObject({ status: 'queued', createdAt: T3, payload: { v: 1, generationId: uuid(1) } });
+    expect(await db.jobs.get(uuid(1101))).toMatchObject({
+      status: 'queued',
+      createdAt: T3,
+      payload: { v: 1, generationId: uuid(1) },
+    });
     expect((await db.generations.byJob(uuid(1101)))?.id).toBe(uuid(1));
     expect(await db.generations.byJob(uuid(101))).toBeNull();
   });
@@ -380,13 +410,14 @@ describe('generation repository', () => {
 
   test('a row whose parameters do not parse throws on read', async () => {
     await create(edit(1));
-    handle.prepare("update generation set parameters = '{\"v\":2}' where id = ?").run(uuid(1));
+    handle.prepare('update generation set parameters = \'{"v":2}\' where id = ?').run(uuid(1));
     await expect(db.generations.get(uuid(1))).rejects.toThrow();
   });
 
   test('the database refuses an unknown kind, status or provider kind', async () => {
     await create(edit(1));
-    const set = (column: string) => () => handle.prepare(`update generation set ${column} = 'other' where id = ?`).run(uuid(1));
+    const set = (column: string) => () =>
+      handle.prepare(`update generation set ${column} = 'other' where id = ?`).run(uuid(1));
     expect(set('kind')).toThrow(/CHECK/);
     expect(set('status')).toThrow(/CHECK/);
     expect(set('provider_kind')).toThrow(/CHECK/);

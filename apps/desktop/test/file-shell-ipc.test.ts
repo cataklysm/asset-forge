@@ -19,7 +19,13 @@ const openPath = vi.fn<(absolutePath: string) => Promise<string>>();
 const showItemInFolder = vi.fn<(absolutePath: string) => void>();
 const workspaceOpened = vi.fn<() => Promise<void>>();
 const workspaceClosing = vi.fn<() => Promise<void>>();
-const host: HostActions = { openPath, showItemInFolder, openExternal: async () => {}, workspaceOpened, workspaceClosing };
+const host: HostActions = {
+  openPath,
+  showItemInFolder,
+  openExternal: async () => {},
+  workspaceOpened,
+  workspaceClosing,
+};
 
 beforeEach(async () => {
   openPath.mockReset().mockResolvedValue('');
@@ -199,7 +205,14 @@ describe('file shell IPC', () => {
     await ok('workspace:close', {});
     await ok('workspace:open', { rootPath: root });
     expect(await call('workspace:open', { rootPath: join(base, 'does-not-exist') })).toMatchObject({ ok: false });
-    expect(order).toEqual(['closing:none', 'opened:Test', 'closing:Test', 'closing:none', 'opened:Test', 'closing:Test']);
+    expect(order).toEqual([
+      'closing:none',
+      'opened:Test',
+      'closing:Test',
+      'closing:none',
+      'opened:Test',
+      'closing:Test',
+    ]);
   });
 
   it('runs concurrent lifecycle channels one after the other', async () => {

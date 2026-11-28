@@ -201,7 +201,11 @@ async function moveAndCommit(session: WorkspaceSession, file: FileRecord, target
  * @param fileIds the files, in request order
  * @returns one item per file: the trashed file, null for a removed failed import, or the error
  */
-export function trashFiles(session: WorkspaceSession, control: JobControl, fileIds: readonly string[]): Promise<FileBatchItem[]> {
+export function trashFiles(
+  session: WorkspaceSession,
+  control: JobControl,
+  fileIds: readonly string[],
+): Promise<FileBatchItem[]> {
   return eachFile(fileIds, (fileId) => trashFile(session, control, fileId));
 }
 
@@ -357,7 +361,11 @@ async function restorePlacementOf(session: WorkspaceSession, file: FileRecord): 
  * @param fileIds the files, in request order
  * @returns one item per file: null for a purged file, or the error
  */
-export function purgeFiles(session: WorkspaceSession, control: JobControl, fileIds: readonly string[]): Promise<FileBatchItem[]> {
+export function purgeFiles(
+  session: WorkspaceSession,
+  control: JobControl,
+  fileIds: readonly string[],
+): Promise<FileBatchItem[]> {
   return eachFile(fileIds, (fileId) => purgeFile(session, control, fileId));
 }
 
@@ -407,7 +415,10 @@ async function removePurgedBinary(session: WorkspaceSession, file: FileRecord): 
  * @param control the job control that stops running jobs of the files
  * @returns how many files were purged and how many failed
  */
-export async function emptyTrash(session: WorkspaceSession, control: JobControl): Promise<{ purged: number; failed: number }> {
+export async function emptyTrash(
+  session: WorkspaceSession,
+  control: JobControl,
+): Promise<{ purged: number; failed: number }> {
   const ids = await session.database.files.listTrashedIds();
   const result = { purged: 0, failed: 0 };
   for (let i = 0; i < ids.length; i += EMPTY_CHUNK) {

@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type RefObject,
-} from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { nextFocusIndex, offsetShowingIndex, rowCount } from '../gallery';
 
@@ -153,7 +146,9 @@ export function useVirtualRows({
 
   const clampIndex = (index: number) => Math.min(Math.max(0, index), Math.max(0, total - 1));
   const [activeIndex, setActiveIndex] = useState(() => clampIndex(restore.index ?? 0));
-  const pendingFocus = useRef<number | null>(restore.focus && restore.index !== null ? clampIndex(restore.index) : null);
+  const pendingFocus = useRef<number | null>(
+    restore.focus && restore.index !== null ? clampIndex(restore.index) : null,
+  );
 
   const scrollOffset = () => virtualizer.scrollOffset ?? initialOffset;
   const firstVisibleRow = () => Math.max(0, Math.floor(scrollOffset() / rowHeight));

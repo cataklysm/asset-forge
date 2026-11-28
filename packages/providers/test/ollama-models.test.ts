@@ -135,7 +135,12 @@ describe('listModels', () => {
       () => json(200, { models: [{ name: 'slow' }, { name: 'quick' }] }),
       (model, init) => (model === 'slow' ? hanging(init) : json(200, { capabilities: [] })),
     );
-    const listed = createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 600_000, listTimeoutMs: 600_000 }).listModels(signal());
+    const listed = createOllamaVision({
+      baseUrl: BASE,
+      fetch: stub.fetch,
+      timeoutMs: 600_000,
+      listTimeoutMs: 600_000,
+    }).listModels(signal());
     let settled = false;
     void listed.finally(() => (settled = true));
     await vi.advanceTimersByTimeAsync(9_900);
@@ -152,7 +157,9 @@ describe('listModels', () => {
       () => hanging(stub.calls[0]!.init),
       () => json(200, {}),
     );
-    const error = await failureOf(createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 30 }).listModels(signal()));
+    const error = await failureOf(
+      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 30 }).listModels(signal()),
+    );
     expect(error).toBeInstanceOf(JobError);
     expect((error as JobError).code).toBe('provider_timeout');
   });
@@ -165,7 +172,12 @@ describe('listModels', () => {
     const reports: [string, number | null][] = [];
     const started = Date.now();
     const error = await failureOf(
-      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, listTimeoutMs: 50, onFailure: (c, s) => reports.push([c, s]) }).listModels(signal()),
+      createOllamaVision({
+        baseUrl: BASE,
+        fetch: stub.fetch,
+        listTimeoutMs: 50,
+        onFailure: (c, s) => reports.push([c, s]),
+      }).listModels(signal()),
     );
     expect((error as JobError).code).toBe('provider_timeout');
     expect(Date.now() - started).toBeLessThan(500);
@@ -179,7 +191,12 @@ describe('listModels', () => {
     );
     const reports: string[] = [];
     const error = await failureOf(
-      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, listTimeoutMs: 50, onFailure: (c) => reports.push(c) }).listModels(signal()),
+      createOllamaVision({
+        baseUrl: BASE,
+        fetch: stub.fetch,
+        listTimeoutMs: 50,
+        onFailure: (c) => reports.push(c),
+      }).listModels(signal()),
     );
     expect((error as JobError).code).toBe('provider_timeout');
     expect(reports).toEqual(['provider_timeout']);
@@ -232,7 +249,8 @@ describe('listModels', () => {
 
   it('skips entries without a usable name', async () => {
     const stub = server(
-      () => json(200, { models: [{ name: '' }, { model: 'x' }, { name: 7 }, { name: 'n'.repeat(201) }, { name: 'ok' }] }),
+      () =>
+        json(200, { models: [{ name: '' }, { model: 'x' }, { name: 7 }, { name: 'n'.repeat(201) }, { name: 'ok' }] }),
       () => json(200, { capabilities: ['vision'] }),
     );
     const models = await createOllamaVision({ baseUrl: BASE, fetch: stub.fetch }).listModels(signal());
@@ -306,7 +324,9 @@ describe('listModels', () => {
         return hanging(init);
       },
     );
-    const error = await failureOf(createOllamaVision({ baseUrl: BASE, fetch: stub.fetch }).listModels(controller.signal));
+    const error = await failureOf(
+      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch }).listModels(controller.signal),
+    );
     expect(error).toBe(reason);
   });
 

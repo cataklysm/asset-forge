@@ -64,7 +64,11 @@ export function createPageView(window: BrowserWindow, site: string): PageView {
  * @param onParsed called when the new document is parsed
  * @returns how the navigation ended; its listeners are removed by then
  */
-function navigatePage(contents: WebContents, url: string, onParsed: (() => void) | undefined): Promise<NavigationOutcome> {
+function navigatePage(
+  contents: WebContents,
+  url: string,
+  onParsed: (() => void) | undefined,
+): Promise<NavigationOutcome> {
   let isCommitted = false;
   const onCommit = () => {
     isCommitted = true;

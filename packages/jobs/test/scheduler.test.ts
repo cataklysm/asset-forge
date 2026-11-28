@@ -113,11 +113,19 @@ function setup(o: {
   });
   let seq = 0;
   /** Enqueues jobs one millisecond apart, so their created_at gives the order. */
-  const enqueue = async (type: string, resourceClass: ResourceClass, count = 1, lane: string | null = null): Promise<string[]> => {
+  const enqueue = async (
+    type: string,
+    resourceClass: ResourceClass,
+    count = 1,
+    lane: string | null = null,
+  ): Promise<string[]> => {
     const ids: string[] = [];
     for (let i = 0; i < count; i++) {
       const id = `job-${String(++seq).padStart(3, '0')}`;
-      await fake.enqueue({ jobs: [{ id, type, resourceClass, fileId: null, lane, payload: { version: 1 }, dedupeKey: null }], now: iso() });
+      await fake.enqueue({
+        jobs: [{ id, type, resourceClass, fileId: null, lane, payload: { version: 1 }, dedupeKey: null }],
+        now: iso(),
+      });
       ids.push(id);
       t += 1;
     }
@@ -251,7 +259,12 @@ describe('createScheduler', () => {
     await s.scheduler.start();
     h.runOf(id).reject(new JobError('provider_rejected'));
     await flush();
-    expect(s.row(id)).toMatchObject({ status: 'failed', attempt: 1, errorCode: 'provider_rejected', errorMessage: 'The provider rejected the request' });
+    expect(s.row(id)).toMatchObject({
+      status: 'failed',
+      attempt: 1,
+      errorCode: 'provider_rejected',
+      errorMessage: 'The provider rejected the request',
+    });
     expect(s.timers).toHaveLength(0);
   });
 
@@ -263,7 +276,11 @@ describe('createScheduler', () => {
     const cause = new Error('C:\\secret\\path exploded');
     h.runOf(id).reject(cause);
     await flush();
-    expect(s.row(id)).toMatchObject({ status: 'failed', errorCode: 'internal_error', errorMessage: 'The job failed unexpectedly' });
+    expect(s.row(id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'internal_error',
+      errorMessage: 'The job failed unexpectedly',
+    });
     expect(s.logged.map((l) => l.cause)).toEqual([cause]);
   });
 
@@ -319,7 +336,11 @@ describe('createScheduler', () => {
     const [a] = (await s.enqueue('again', 'cpu')) as [string];
     const [p] = (await s.enqueue('paid', 'remote_api')) as [string];
     const [u] = (await s.enqueue('unknown', 'cpu')) as [string];
-    for (const [rc, type] of [['cpu', 'again'], ['remote_api', 'paid'], ['cpu', 'unknown']] as const) {
+    for (const [rc, type] of [
+      ['cpu', 'again'],
+      ['remote_api', 'paid'],
+      ['cpu', 'unknown'],
+    ] as const) {
       await s.fake.claimNext({ resourceClass: rc, types: [type], now: s.iso() });
     }
 
@@ -426,7 +447,17 @@ describe('createScheduler', () => {
       log: (message) => logged.push(message),
     });
     await fake.enqueue({
-      jobs: [{ id: 'job-x', type: 't', resourceClass: 'cpu', fileId: null, lane: null, payload: { version: 1 }, dedupeKey: null }],
+      jobs: [
+        {
+          id: 'job-x',
+          type: 't',
+          resourceClass: 'cpu',
+          fileId: null,
+          lane: null,
+          payload: { version: 1 },
+          dedupeKey: null,
+        },
+      ],
       now: new Date().toISOString(),
     });
     await scheduler.start();
@@ -719,7 +750,13 @@ describe('createScheduler with a pause gate', () => {
     };
     const cpu = controlled('cpu');
     const s = setup({ handlers: { t: cpu.handler }, limits: { ...DEFAULT_LIMITS, cpu: 5 }, pause: spy });
-    const [ok, coded, plain, cancelled, released] = (await s.enqueue('t', 'cpu', 5)) as [string, string, string, string, string];
+    const [ok, coded, plain, cancelled, released] = (await s.enqueue('t', 'cpu', 5)) as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
     await s.scheduler.start();
 
     cpu.runOf(ok).resolve();
@@ -849,8 +886,16 @@ describe('createScheduler with lanes', () => {
     const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit, pause });
     const [a] = (await s.enqueue('gpu', 'local_gpu', 1, 'a')) as [string];
     const [b] = (await s.enqueue('gpu', 'local_gpu', 1, 'b')) as [string];
-    Object.assign(s.row(a), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString() });
-    Object.assign(s.row(b), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 30_000).toISOString() });
+    Object.assign(s.row(a), {
+      status: 'retry_wait',
+      attempt: 1,
+      runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString(),
+    });
+    Object.assign(s.row(b), {
+      status: 'retry_wait',
+      attempt: 1,
+      runAfter: new Date(Date.parse(s.iso()) + 30_000).toISOString(),
+    });
     pause.record('local_gpu', 'a', 'provider_unauthorized');
     await s.scheduler.start();
     expect(s.timers.map((x) => x.ms)).toEqual([30_000]);
@@ -870,7 +915,11 @@ describe('createScheduler with lanes', () => {
     const gpu = controlled('local_gpu');
     const s = setup({ handlers: { gpu: gpu.handler }, limits: gpuLimit });
     const [a1, a2] = (await s.enqueue('gpu', 'local_gpu', 2, 'a')) as [string, string];
-    Object.assign(s.row(a2), { status: 'retry_wait', attempt: 1, runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString() });
+    Object.assign(s.row(a2), {
+      status: 'retry_wait',
+      attempt: 1,
+      runAfter: new Date(Date.parse(s.iso()) + 5_000).toISOString(),
+    });
     await s.scheduler.start();
     expect(s.row(a1).status).toBe('running');
     expect(s.timers).toHaveLength(0);
@@ -918,7 +967,11 @@ describe('createScheduler with lanes', () => {
 
 describe('createScheduler with a settled hook', () => {
   /** A controlled handler with a `settled` hook that sees the repository of the setup made after it. */
-  function hooked(resourceClass: ResourceClass, onInterrupted: 'requeue' | 'fail' = 'requeue', interruptedCode?: JobErrorCode) {
+  function hooked(
+    resourceClass: ResourceClass,
+    onInterrupted: 'requeue' | 'fail' = 'requeue',
+    interruptedCode?: JobErrorCode,
+  ) {
     const ref: { repo: InMemoryJobRepository | null } = { repo: null };
     const h = controlled(resourceClass, onInterrupted, {
       settledHook: true,
@@ -968,9 +1021,16 @@ describe('createScheduler with a settled hook', () => {
       errorCode: 'provider_outcome_unknown',
       errorMessage: 'The provider may have processed this request; it was not repeated',
     });
-    expect(h.settled).toEqual([{ id, outcome: { status: 'failed', errorCode: 'provider_outcome_unknown' }, rowStatus: 'failed' }]);
+    expect(h.settled).toEqual([
+      { id, outcome: { status: 'failed', errorCode: 'provider_outcome_unknown' }, rowStatus: 'failed' },
+    ]);
 
-    const next = createScheduler({ jobs: s.fake, handlers: { t: h.handler }, setTimer: () => null, clearTimer: () => {} });
+    const next = createScheduler({
+      jobs: s.fake,
+      handlers: { t: h.handler },
+      setTimer: () => null,
+      clearTimer: () => {},
+    });
     await next.start();
     await flush();
     expect(h.runs).toHaveLength(1);
@@ -1021,7 +1081,9 @@ describe('createScheduler with a settled hook', () => {
     await s.scheduler.start();
     expect(s.row(p)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
     expect(paid.runs).toHaveLength(0);
-    expect(paid.settled).toEqual([{ id: p, outcome: { status: 'failed', errorCode: 'provider_outcome_unknown' }, rowStatus: 'failed' }]);
+    expect(paid.settled).toEqual([
+      { id: p, outcome: { status: 'failed', errorCode: 'provider_outcome_unknown' }, rowStatus: 'failed' },
+    ]);
     expect(s.row(a).status).toBe('running');
     expect(again.settled).toEqual([]);
   });
@@ -1049,7 +1111,9 @@ describe('createScheduler with a settled hook', () => {
     await s.fireTimer();
     h.runOf(id).reject(new JobError('provider_timeout'));
     await flush();
-    expect(h.settled).toEqual([{ id, outcome: { status: 'failed', errorCode: 'provider_timeout' }, rowStatus: 'failed' }]);
+    expect(h.settled).toEqual([
+      { id, outcome: { status: 'failed', errorCode: 'provider_timeout' }, rowStatus: 'failed' },
+    ]);
   });
 
   it('settles a final failure: a non-retryable code and a non-JobError', async () => {
@@ -1490,7 +1554,12 @@ describe('lane hold', () => {
     h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
     await flush();
     const until = new Date(Date.parse(s.iso()) + 120_000).toISOString();
-    expect(s.row(a1)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 1, errorCode: 'download_throttled' });
+    expect(s.row(a1)).toMatchObject({
+      status: 'retry_wait',
+      runAfter: until,
+      attempt: 1,
+      errorCode: 'download_throttled',
+    });
     expect(s.row(a2)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0, errorCode: null });
     expect(s.row(a3)).toMatchObject({ status: 'retry_wait', runAfter: until, attempt: 0, errorCode: null });
     expect(s.timers.map((x) => x.ms)).toEqual([120_000]);
@@ -1672,9 +1741,12 @@ describe('limit per lane', () => {
     ['2.5', () => 2.5],
     ['NaN', () => Number.NaN],
     ['Infinity', () => Number.POSITIVE_INFINITY],
-    ['a throw', () => {
-      throw new Error('broken');
-    }],
+    [
+      'a throw',
+      () => {
+        throw new Error('broken');
+      },
+    ],
   ])('falls back to the class limit for an answer of %s', async (_name, answer) => {
     const gpu = controlled('local_gpu');
     const s = setup({ handlers: { gpu: gpu.handler }, limits: { ...DEFAULT_LIMITS, local_gpu: 2 }, laneLimit: answer });

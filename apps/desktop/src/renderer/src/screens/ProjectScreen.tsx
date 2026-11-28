@@ -51,10 +51,7 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
     [id, offset, renameToken],
   );
   // The picker must exclude every member, not only those on the visible page.
-  const allMembers = useLoad(
-    () => call('assignments:listByProject', { projectId: id, limit: 200, offset: 0 }),
-    [id],
-  );
+  const allMembers = useLoad(() => call('assignments:listByProject', { projectId: id, limit: 200, offset: 0 }), [id]);
 
   function reloadMembers() {
     members.reload();
@@ -83,7 +80,9 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
   const loadErrors = [error, project.error, types.error, members.error, allMembers.error].filter(
     (message): message is string => message !== null,
   );
-  const breadcrumb = <Breadcrumb projectName={data?.name ?? null} onProjects={() => onNavigate({ name: 'projects' })} />;
+  const breadcrumb = (
+    <Breadcrumb projectName={data?.name ?? null} onProjects={() => onNavigate({ name: 'projects' })} />
+  );
 
   if (data === null) {
     return (

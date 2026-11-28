@@ -54,7 +54,9 @@ export function FileBrowserToolbar(props: FileBrowserToolbarProps) {
   return (
     <FilterBar
       resultCount={total === null ? null : `${total} ${total === 1 ? 'file' : 'files'}`}
-      countTitle={total !== null && total > MAX_SELECTION ? `At most ${MAX_SELECTION} files can be selected` : undefined}
+      countTitle={
+        total !== null && total > MAX_SELECTION ? `At most ${MAX_SELECTION} files can be selected` : undefined
+      }
       onClear={props.canClear ? props.onClear : null}
     >
       <>

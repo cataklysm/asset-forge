@@ -139,7 +139,14 @@ function searchedPage(transaction: IndexTransaction, query: AssetListQuery, word
   const { ids, total } = searchAssets(transaction, { ...query, words });
   if (ids.length === 0) return { items: [], total };
   const byId = new Map(summaries(transaction, inArray(asset.id, ids)).map((summary) => [summary.id, summary]));
-  return { items: withTags(transaction, ids.flatMap((id) => byId.get(id) ?? []), tagNames), total };
+  return {
+    items: withTags(
+      transaction,
+      ids.flatMap((id) => byId.get(id) ?? []),
+      tagNames,
+    ),
+    total,
+  };
 }
 
 /**

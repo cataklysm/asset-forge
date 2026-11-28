@@ -265,7 +265,8 @@ async function hasActiveProviderJobs(manager: WorkspaceManager, id: string): Pro
  */
 async function countActiveProviderJobs(session: WorkspaceSession, id: string): Promise<number> {
   return (
-    (await countActiveAnalysisJobs(session, id)) + (await session.database.jobs.countActiveInLane(IMAGE_GENERATE_JOB, id))
+    (await countActiveAnalysisJobs(session, id)) +
+    (await session.database.jobs.countActiveInLane(IMAGE_GENERATE_JOB, id))
   );
 }
 

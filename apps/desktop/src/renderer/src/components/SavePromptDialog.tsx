@@ -50,7 +50,9 @@ function storePrompt(prompt: string, title: string, origin: PromptDetail | null)
     promptId: origin.id,
     baseVersionId: origin.currentVersion.id,
     content: prompt,
-    defaults: Object.fromEntries(origin.currentVersion.variables.map((variable) => [variable.name, variable.defaultValue])),
+    defaults: Object.fromEntries(
+      origin.currentVersion.variables.map((variable) => [variable.name, variable.defaultValue]),
+    ),
   });
 }
 

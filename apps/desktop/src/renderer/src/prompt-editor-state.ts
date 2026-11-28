@@ -61,7 +61,11 @@ export function defaultsOf(draft: EditorDraft): Record<string, string> {
  * @param value its new default
  * @returns the new defaults
  */
-export function withDefault(defaults: Readonly<Record<string, string>>, name: string, value: string): Record<string, string> {
+export function withDefault(
+  defaults: Readonly<Record<string, string>>,
+  name: string,
+  value: string,
+): Record<string, string> {
   const kept = Object.entries(defaults).filter(([key]) => variableKey(key) !== variableKey(name));
   return Object.fromEntries([...kept, [name, value]]);
 }
@@ -92,7 +96,8 @@ export function versionDirty(draft: EditorDraft, detail: PromptDetail): boolean 
     variables.length !== current.variables.length ||
     variables.some(
       (variable, index) =>
-        variable.name !== current.variables[index]?.name || variable.defaultValue !== current.variables[index]?.defaultValue,
+        variable.name !== current.variables[index]?.name ||
+        variable.defaultValue !== current.variables[index]?.defaultValue,
     )
   );
 }

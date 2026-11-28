@@ -47,7 +47,13 @@ function ImageControls({ controls }: { controls: ViewerControls }) {
   const { zoom, percent, marker, canActual } = controls;
   return (
     <>
-      <button type="button" className={BUTTON} title="Fit (0)" aria-pressed={zoom.mode === 'fit'} onClick={controls.fit}>
+      <button
+        type="button"
+        className={BUTTON}
+        title="Fit (0)"
+        aria-pressed={zoom.mode === 'fit'}
+        onClick={controls.fit}
+      >
         Fit
       </button>
       <button
@@ -60,7 +66,13 @@ function ImageControls({ controls }: { controls: ViewerControls }) {
       >
         100%
       </button>
-      <button type="button" className={ICON_BUTTON} title="Zoom out (−)" aria-label="Zoom out" onClick={controls.zoomOut}>
+      <button
+        type="button"
+        className={ICON_BUTTON}
+        title="Zoom out (−)"
+        aria-label="Zoom out"
+        onClick={controls.zoomOut}
+      >
         <ZoomOut size={18} aria-hidden />
       </button>
       <span aria-live="polite" className="inline-flex min-w-16 items-center justify-center gap-1 text-sm tabular-nums">

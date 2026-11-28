@@ -41,22 +41,36 @@ describe('analysis prompt fields', () => {
 
 describe('analysis prompts', () => {
   test('only a tagging prompt carries maxTags', () => {
-    expect(AnalysisPromptSchema.safeParse({ id, purpose: 'tagging', name: 'General', text: 'x', maxTags: 15 }).success).toBe(true);
+    expect(
+      AnalysisPromptSchema.safeParse({ id, purpose: 'tagging', name: 'General', text: 'x', maxTags: 15 }).success,
+    ).toBe(true);
     expect(AnalysisPromptSchema.safeParse({ id, purpose: 'tagging', name: 'General', text: 'x' }).success).toBe(false);
-    expect(AnalysisPromptSchema.safeParse({ id, purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(true);
-    expect(AnalysisPromptSchema.safeParse({ id: 'nope', purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(false);
+    expect(AnalysisPromptSchema.safeParse({ id, purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(
+      true,
+    );
+    expect(
+      AnalysisPromptSchema.safeParse({ id: 'nope', purpose: 'image_prompt', name: 'Scene', text: 'x' }).success,
+    ).toBe(false);
   });
 
   test('a save without an id creates, a tagging save needs maxTags', () => {
     expect(SaveAnalysisPromptSchema.safeParse({ purpose: 'tagging', name: 'General', text: 'x' }).success).toBe(false);
-    expect(SaveAnalysisPromptSchema.safeParse({ purpose: 'tagging', name: 'General', text: 'x', maxTags: 15 }).success).toBe(true);
-    expect(SaveAnalysisPromptSchema.safeParse({ purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(true);
-    expect(SaveAnalysisPromptSchema.safeParse({ id, purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(true);
+    expect(
+      SaveAnalysisPromptSchema.safeParse({ purpose: 'tagging', name: 'General', text: 'x', maxTags: 15 }).success,
+    ).toBe(true);
+    expect(SaveAnalysisPromptSchema.safeParse({ purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(
+      true,
+    );
+    expect(SaveAnalysisPromptSchema.safeParse({ id, purpose: 'image_prompt', name: 'Scene', text: 'x' }).success).toBe(
+      true,
+    );
   });
 
   test('a list carries the prompts and the ones used last', () => {
     const prompts = [{ id, purpose: 'tagging', name: 'General', text: 'x', maxTags: 15 }];
-    expect(AnalysisPromptListSchema.safeParse({ prompts, lastUsed: { tagging: id, imagePrompt: null } }).success).toBe(true);
+    expect(AnalysisPromptListSchema.safeParse({ prompts, lastUsed: { tagging: id, imagePrompt: null } }).success).toBe(
+      true,
+    );
     expect(AnalysisPromptListSchema.safeParse({ prompts, lastUsed: { tagging: id } }).success).toBe(false);
   });
 });

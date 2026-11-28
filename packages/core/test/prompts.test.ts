@@ -37,7 +37,9 @@ async function setup() {
   return { session };
 }
 
-const input = (over: Partial<{ title: string; description: string; content: string; defaults: Record<string, string> }> = {}) => ({
+const input = (
+  over: Partial<{ title: string; description: string; content: string; defaults: Record<string, string> }> = {},
+) => ({
   title: 'Hero',
   description: '',
   content: 'A {{subject}} in {{place}}',
@@ -54,17 +56,23 @@ async function rejects(p: Promise<unknown>, code: string, message: string) {
 describe('createPrompt', () => {
   it('stores version 1 with the variables built from the content and the defaults', async () => {
     const { session } = await setup();
-    const detail = await createPrompt(session, input({
-      title: '  Hero  ',
-      description: ' Shot ',
-      content: '  A {{subject}} in {{Place}} by {{subject}}  ',
-      defaults: { place: 'the woods', unused: 'x' },
-    }));
+    const detail = await createPrompt(
+      session,
+      input({
+        title: '  Hero  ',
+        description: ' Shot ',
+        content: '  A {{subject}} in {{Place}} by {{subject}}  ',
+        defaults: { place: 'the woods', unused: 'x' },
+      }),
+    );
     expect(detail).toMatchObject({ title: 'Hero', description: 'Shot', tags: [] });
     expect(detail.currentVersion).toMatchObject({
       number: 1,
       content: 'A {{subject}} in {{Place}} by {{subject}}',
-      variables: [{ name: 'subject', defaultValue: '' }, { name: 'Place', defaultValue: 'the woods' }],
+      variables: [
+        { name: 'subject', defaultValue: '' },
+        { name: 'Place', defaultValue: 'the woods' },
+      ],
     });
     expect(detail.versions).toHaveLength(1);
     expect(await getPrompt(session, detail.id)).toEqual(detail);
@@ -74,22 +82,41 @@ describe('createPrompt', () => {
     const { session } = await setup();
     await rejects(createPrompt(session, input({ title: '   ' })), 'validation_failed', 'A prompt needs a title');
     await rejects(createPrompt(session, input({ content: ' \n ' })), 'validation_failed', 'A prompt needs a text');
-    await rejects(createPrompt(session, input({ title: 'x'.repeat(121) })), 'validation_failed', 'This text is too long');
-    await rejects(createPrompt(session, input({ description: 'x'.repeat(2001) })), 'validation_failed', 'This text is too long');
-    await rejects(createPrompt(session, input({ content: 'x'.repeat(8001) })), 'validation_failed', 'This text is too long');
+    await rejects(
+      createPrompt(session, input({ title: 'x'.repeat(121) })),
+      'validation_failed',
+      'This text is too long',
+    );
+    await rejects(
+      createPrompt(session, input({ description: 'x'.repeat(2001) })),
+      'validation_failed',
+      'This text is too long',
+    );
+    await rejects(
+      createPrompt(session, input({ content: 'x'.repeat(8001) })),
+      'validation_failed',
+      'This text is too long',
+    );
     await rejects(
       createPrompt(session, input({ defaults: { subject: 'x'.repeat(2001) } })),
       'validation_failed',
       'This text is too long',
     );
-    await rejects(createPrompt(session, input({ content: vars(21) })), 'validation_failed', 'A prompt can have at most 20 variables');
+    await rejects(
+      createPrompt(session, input({ content: vars(21) })),
+      'validation_failed',
+      'A prompt can have at most 20 variables',
+    );
   });
 
   it('accepts exactly 20 variables and the length limits themselves', async () => {
     const { session } = await setup();
     const detail = await createPrompt(session, input({ content: vars(20) }));
     expect(detail.currentVersion.variables).toHaveLength(20);
-    await createPrompt(session, input({ title: 't'.repeat(120), description: 'd'.repeat(2000), content: 'c'.repeat(8000) }));
+    await createPrompt(
+      session,
+      input({ title: 't'.repeat(120), description: 'd'.repeat(2000), content: 'c'.repeat(8000) }),
+    );
   });
 
   it('refuses a title another prompt holds in any case', async () => {
@@ -113,12 +140,20 @@ describe('updatePrompt', () => {
       'validation_failed',
       'This title is already used',
     );
-    await rejects(updatePrompt(session, { promptId: hero.id, title: ' ', description: '' }), 'validation_failed', 'A prompt needs a title');
+    await rejects(
+      updatePrompt(session, { promptId: hero.id, title: ' ', description: '' }),
+      'validation_failed',
+      'A prompt needs a title',
+    );
   });
 
   it('answers not_found for an unknown prompt', async () => {
     const { session } = await setup();
-    await rejects(updatePrompt(session, { promptId: UNKNOWN_ID, title: 'X', description: '' }), 'not_found', 'This prompt does not exist');
+    await rejects(
+      updatePrompt(session, { promptId: UNKNOWN_ID, title: 'X', description: '' }),
+      'not_found',
+      'This prompt does not exist',
+    );
     await rejects(getPrompt(session, UNKNOWN_ID), 'not_found', 'This prompt does not exist');
   });
 });
@@ -182,14 +217,29 @@ describe('savePromptVersion', () => {
   it('refuses a base that is not the current version', async () => {
     const { session } = await setup();
     const first = await createPrompt(session, input());
-    await savePromptVersion(session, { promptId: first.id, baseVersionId: first.currentVersion.id, content: 'Second', defaults: {} });
+    await savePromptVersion(session, {
+      promptId: first.id,
+      baseVersionId: first.currentVersion.id,
+      content: 'Second',
+      defaults: {},
+    });
     await rejects(
-      savePromptVersion(session, { promptId: first.id, baseVersionId: first.currentVersion.id, content: 'Third', defaults: {} }),
+      savePromptVersion(session, {
+        promptId: first.id,
+        baseVersionId: first.currentVersion.id,
+        content: 'Third',
+        defaults: {},
+      }),
       'invalid_operation',
       'This prompt was changed in the meantime',
     );
     await rejects(
-      savePromptVersion(session, { promptId: UNKNOWN_ID, baseVersionId: first.currentVersion.id, content: 'X', defaults: {} }),
+      savePromptVersion(session, {
+        promptId: UNKNOWN_ID,
+        baseVersionId: first.currentVersion.id,
+        content: 'X',
+        defaults: {},
+      }),
       'not_found',
       'This prompt does not exist',
     );
@@ -219,17 +269,29 @@ describe('prompt tags', () => {
       'validation_failed',
       'A tag needs a letter or digit and at most 64 characters',
     );
-    await rejects(addPromptTag(session, { promptId: UNKNOWN_ID, name: 'x' }), 'not_found', 'This prompt does not exist');
+    await rejects(
+      addPromptTag(session, { promptId: UNKNOWN_ID, name: 'x' }),
+      'not_found',
+      'This prompt does not exist',
+    );
 
     for (let i = 1; i < 50; i++) await addPromptTag(session, { promptId: prompt.id, name: `tag ${i}` });
     expect((await getPrompt(session, prompt.id)).tags).toHaveLength(50);
-    await rejects(addPromptTag(session, { promptId: prompt.id, name: 'one more' }), 'validation_failed', 'This prompt cannot take more tags');
+    await rejects(
+      addPromptTag(session, { promptId: prompt.id, name: 'one more' }),
+      'validation_failed',
+      'This prompt cannot take more tags',
+    );
 
     const before = await getPrompt(session, prompt.id);
     expect(await removePromptTag(session, { promptId: prompt.id, name: 'not there' })).toEqual(before);
     const removed = await removePromptTag(session, { promptId: prompt.id, name: 'DARK FOREST' });
     expect(removed.tags.some((t) => t.name === 'dark forest')).toBe(false);
-    await rejects(removePromptTag(session, { promptId: UNKNOWN_ID, name: 'x' }), 'not_found', 'This prompt does not exist');
+    await rejects(
+      removePromptTag(session, { promptId: UNKNOWN_ID, name: 'x' }),
+      'not_found',
+      'This prompt does not exist',
+    );
   });
 });
 

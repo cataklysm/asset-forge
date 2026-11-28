@@ -46,7 +46,14 @@ describe('asset source repository', () => {
     db = await openWorkspaceDatabase(join(dir, 'ws.db'), MIGRATIONS_FOLDER);
     await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T1 });
     await db.assetTypes.insertMissing([
-      { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+      {
+        id: TYPE_ID,
+        key: BUILT_IN_ASSET_TYPES[0]!.key,
+        name: 'T',
+        sortOrder: 0,
+        builtIn: true,
+        defaultWorkflowTemplateId: null,
+      },
     ]);
   });
 
@@ -55,16 +62,30 @@ describe('asset source repository', () => {
   });
 
   async function addAsset(n: number): Promise<Asset> {
-    const a: Asset = { id: uuid(n), name: `A${n}`, typeId: TYPE_ID, description: '', status: 'draft', createdAt: T1, updatedAt: T1 };
+    const a: Asset = {
+      id: uuid(n),
+      name: `A${n}`,
+      typeId: TYPE_ID,
+      description: '',
+      status: 'draft',
+      createdAt: T1,
+      updatedAt: T1,
+    };
     await db.assets.insert(a);
     return a;
   }
 
   test('lists by created_at, then id', async () => {
     const a = await addAsset(10);
-    expect(await db.assetSources.insert({ id: uuid(102), assetId: a.id, url: 'https://example.org/late', createdAt: T2 })).toBe(true);
-    expect(await db.assetSources.insert({ id: uuid(101), assetId: a.id, url: 'https://example.org/b', createdAt: T1 })).toBe(true);
-    expect(await db.assetSources.insert({ id: uuid(100), assetId: a.id, url: 'https://example.org/a', createdAt: T1 })).toBe(true);
+    expect(
+      await db.assetSources.insert({ id: uuid(102), assetId: a.id, url: 'https://example.org/late', createdAt: T2 }),
+    ).toBe(true);
+    expect(
+      await db.assetSources.insert({ id: uuid(101), assetId: a.id, url: 'https://example.org/b', createdAt: T1 }),
+    ).toBe(true);
+    expect(
+      await db.assetSources.insert({ id: uuid(100), assetId: a.id, url: 'https://example.org/a', createdAt: T1 }),
+    ).toBe(true);
     expect(await db.assetSources.listByAsset(a.id)).toEqual([
       { id: uuid(100), url: 'https://example.org/a', createdAt: T1 },
       { id: uuid(101), url: 'https://example.org/b', createdAt: T1 },
@@ -130,13 +151,17 @@ describe('migration 0011', () => {
     await createDatabaseUpTo0010(dbPath);
     const seed = new Database(dbPath);
     try {
-      seed.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', T1);
+      seed
+        .prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)')
+        .run(uuid(1), 'ws', T1);
       seed.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), T1);
       seed
         .prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'character', 'T', 0, 1)")
         .run(uuid(3));
       seed
-        .prepare("INSERT INTO asset (id, name, type_id, description, status, created_at, updated_at) VALUES (?, 'Door', ?, '', 'draft', ?, ?)")
+        .prepare(
+          "INSERT INTO asset (id, name, type_id, description, status, created_at, updated_at) VALUES (?, 'Door', ?, '', 'draft', ?, ?)",
+        )
         .run(uuid(10), uuid(3), T1, T1);
     } finally {
       seed.close();
@@ -146,7 +171,9 @@ describe('migration 0011', () => {
     try {
       expect(await db.assets.get(uuid(10))).toMatchObject({ id: uuid(10), name: 'Door' });
       expect(await db.assetSources.listByAsset(uuid(10))).toEqual([]);
-      expect(await db.assetSources.insert({ id: uuid(100), assetId: uuid(10), url: 'https://example.org/', createdAt: T1 })).toBe(true);
+      expect(
+        await db.assetSources.insert({ id: uuid(100), assetId: uuid(10), url: 'https://example.org/', createdAt: T1 }),
+      ).toBe(true);
     } finally {
       await db.close();
     }

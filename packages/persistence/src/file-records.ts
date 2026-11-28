@@ -23,7 +23,12 @@ type FileReader = Pick<BetterSQLite3Database, 'select'>;
  * @param trashedAssetName the name of the asset a trashed file left; null otherwise
  * @returns the record
  */
-const toRecord = (row: FileRow, tags: TagAssignment[], hasProposal: boolean, trashedAssetName: string | null): FileRecord => ({
+const toRecord = (
+  row: FileRow,
+  tags: TagAssignment[],
+  hasProposal: boolean,
+  trashedAssetName: string | null,
+): FileRecord => ({
   id: row.id,
   storageId: row.storageId,
   assetId: row.assetId,

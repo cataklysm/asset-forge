@@ -133,7 +133,12 @@ function downloadJob(session: WorkspaceSession, url: string, request: UrlImportR
   const payload: FileDownloadPayload =
     site === undefined
       ? { v: 1, ...fields }
-      : { v: 2, ...fields, siteProfileId: site.profileId, filter: { kinds: [...site.filter.kinds], minBytes: site.filter.minBytes } };
+      : {
+          v: 2,
+          ...fields,
+          siteProfileId: site.profileId,
+          filter: { kinds: [...site.filter.kinds], minBytes: site.filter.minBytes },
+        };
   return {
     id: session.newId(),
     type: FILE_DOWNLOAD_JOB,

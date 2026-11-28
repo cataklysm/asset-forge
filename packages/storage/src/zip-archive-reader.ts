@@ -281,7 +281,6 @@ function toArchiveEntry(entry: yauzl.Entry): ArchiveEntry {
     uncompressedSize: entry.uncompressedSize,
     isDirectory: name.endsWith('/'),
     isSymlink: ((entry.externalFileAttributes >>> 16) & S_IFMT) === S_IFLNK,
-    isUnsupported:
-      entry.isEncrypted() || (entry.compressionMethod !== STORED && entry.compressionMethod !== DEFLATED),
+    isUnsupported: entry.isEncrypted() || (entry.compressionMethod !== STORED && entry.compressionMethod !== DEFLATED),
   };
 }

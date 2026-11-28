@@ -34,7 +34,12 @@ async function insertRelation(
 ): Promise<boolean> {
   const result = database
     .insert(assetRelation)
-    .values({ fromAssetId: relation.fromAssetId, toAssetId: relation.toAssetId, kind: relation.kind, createdAt: relation.createdAt })
+    .values({
+      fromAssetId: relation.fromAssetId,
+      toAssetId: relation.toAssetId,
+      kind: relation.kind,
+      createdAt: relation.createdAt,
+    })
     .onConflictDoNothing()
     .run();
   return result.changes > 0;

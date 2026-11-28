@@ -81,9 +81,15 @@ describe('InMemoryGenerationRepository', () => {
     const { repo } = await created(1);
     expect(await repo.succeed({ id: id(1), output, now: T1 })).toBe(true);
     const before = await repo.get(id(1));
-    expect(repo.settle({ id: id(1), outcome: { status: 'failed', errorCode: 'provider_timeout' }, now: LATER })).toBe(false);
+    expect(repo.settle({ id: id(1), outcome: { status: 'failed', errorCode: 'provider_timeout' }, now: LATER })).toBe(
+      false,
+    );
     expect(await repo.get(id(1))).toEqual(before);
-    expect(before).toMatchObject({ status: 'succeeded', finishedAt: T1, outputs: [{ fileId: OUTPUT, name: 'oak edit 1.png' }] });
+    expect(before).toMatchObject({
+      status: 'succeeded',
+      finishedAt: T1,
+      outputs: [{ fileId: OUTPUT, name: 'oak edit 1.png' }],
+    });
     expect(await repo.succeed({ id: id(1), output, now: LATER })).toBe(false);
     expect((await repo.madeBy(OUTPUT))?.id).toBe(id(1));
     expect(await repo.madeBy(SOURCE)).toBeNull();
@@ -92,10 +98,16 @@ describe('InMemoryGenerationRepository', () => {
   it('settle maps the outcome of a pending generation', async () => {
     const { repo } = setup();
     for (const n of [1, 2, 3]) await repo.create({ generation: edit(n), input, job: jobFor(n) });
-    expect(repo.settle({ id: id(1), outcome: { status: 'failed', errorCode: 'provider_content_refused' }, now: LATER })).toBe(true);
+    expect(
+      repo.settle({ id: id(1), outcome: { status: 'failed', errorCode: 'provider_content_refused' }, now: LATER }),
+    ).toBe(true);
     expect(repo.settle({ id: id(2), outcome: { status: 'cancelled' }, now: LATER })).toBe(true);
     expect(repo.settle({ id: id(3), outcome: { status: 'succeeded' }, now: LATER })).toBe(true);
-    expect(await repo.get(id(1))).toMatchObject({ status: 'failed', errorCode: 'provider_content_refused', finishedAt: LATER });
+    expect(await repo.get(id(1))).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_content_refused',
+      finishedAt: LATER,
+    });
     expect(await repo.get(id(2))).toMatchObject({ status: 'cancelled', errorCode: null, finishedAt: LATER });
     expect(await repo.get(id(3))).toMatchObject({ status: 'failed', errorCode: 'internal_error' });
   });
@@ -182,7 +194,9 @@ describe('InMemoryGenerationRepository', () => {
       throw new Error('boom');
     };
 
-    await expect(jobs.finish(id(101), { status: 'cancelled', errorCode: null, now: LATER, settled: settleThenThrow(1) })).rejects.toThrow('boom');
+    await expect(
+      jobs.finish(id(101), { status: 'cancelled', errorCode: null, now: LATER, settled: settleThenThrow(1) }),
+    ).rejects.toThrow('boom');
     await expect(jobs.cancelPending({ now: LATER, settled: settleThenThrow(2) })).rejects.toThrow('boom');
 
     expect(await repo.get(id(1))).toMatchObject({ status: 'pending', finishedAt: null, jobStatus: 'running' });
@@ -200,10 +214,18 @@ describe('InMemoryGenerationRepository', () => {
     // Generation 5 keeps its queued job and stays pending.
 
     expect(await repo.reconcile(LATER)).toBe(4);
-    expect(await repo.get(id(1))).toMatchObject({ status: 'failed', errorCode: 'provider_content_refused', finishedAt: LATER });
+    expect(await repo.get(id(1))).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_content_refused',
+      finishedAt: LATER,
+    });
     expect(await repo.get(id(2))).toMatchObject({ status: 'cancelled', errorCode: null });
     expect(await repo.get(id(3))).toMatchObject({ status: 'failed', errorCode: 'internal_error' });
-    expect(await repo.get(id(4))).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown', jobStatus: null });
+    expect(await repo.get(id(4))).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+      jobStatus: null,
+    });
     expect(await repo.get(id(5))).toMatchObject({ status: 'pending', jobStatus: 'queued' });
     expect(await repo.reconcile(LATER)).toBe(0);
   });

@@ -44,10 +44,13 @@ export function TagsProvider({ children, onRenamed }: TagsProviderProps) {
   /** The callback of the current opening of the dialog. */
   const openerRef = useRef<((change: TagRename) => void) | null>(null);
 
-  const openRename = useCallback((next: { name: string; displayName: string }, onOpenerRenamed?: (change: TagRename) => void) => {
-    openerRef.current = onOpenerRenamed ?? null;
-    setTag(next);
-  }, []);
+  const openRename = useCallback(
+    (next: { name: string; displayName: string }, onOpenerRenamed?: (change: TagRename) => void) => {
+      openerRef.current = onOpenerRenamed ?? null;
+      setTag(next);
+    },
+    [],
+  );
   const handleRenamed = useCallback((change: TagRename) => {
     const opener = openerRef.current;
     openerRef.current = null;

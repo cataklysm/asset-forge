@@ -28,8 +28,11 @@ const tools: VideoFrames[] = [];
 /** Runs the bundled ffmpeg to build a fixture; only lavfi sources and local files. */
 function ffmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(FFMPEG, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', ...args], { windowsHide: true }, (error) =>
-      error ? reject(error) : resolve(),
+    execFile(
+      FFMPEG,
+      ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', ...args],
+      { windowsHide: true },
+      (error) => (error ? reject(error) : resolve()),
     );
   });
 }
@@ -41,33 +44,78 @@ function fixture(name: string): string {
 beforeAll(async () => {
   fixtures = await mkdtemp(join(tmpdir(), 'assetforge-video-'));
   await ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=3',
-    '-f', 'lavfi', '-i', 'sine=duration=3',
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', fixture('h264.mp4'),
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:rate=25:duration=3',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=duration=3',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-shortest',
+    fixture('h264.mp4'),
   ]);
   await ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=size=1280x720:rate=25:duration=2',
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fixture('large.mp4'),
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=1280x720:rate=25:duration=2',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    fixture('large.mp4'),
   ]);
   await ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2',
-    '-c:v', 'libvpx-vp9', '-deadline', 'realtime', fixture('vp9.webm'),
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:rate=25:duration=2',
+    '-c:v',
+    'libvpx-vp9',
+    '-deadline',
+    'realtime',
+    fixture('vp9.webm'),
   ]);
   await ffmpeg(['-display_rotation', '90', '-i', fixture('h264.mp4'), '-c', 'copy', fixture('rotated.mp4')]);
   await ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=0.4',
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fixture('short.mp4'),
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:rate=25:duration=0.4',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    fixture('short.mp4'),
   ]);
   const whole = await readFile(fixture('h264.mp4'));
   await writeFile(fixture('truncated.mp4'), whole.subarray(0, Math.floor(whole.length / 2)));
   await writeFile(
     fixture('image.mp4'),
-    await sharp({ create: { width: 64, height: 64, channels: 3, background: '#38a' } }).png().toBuffer(),
+    await sharp({ create: { width: 64, height: 64, channels: 3, background: '#38a' } })
+      .png()
+      .toBuffer(),
   );
   await writeFile(fixture('text.mp4'), 'This is not a video.\n');
   await ffmpeg([
-    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2',
-    '-vf', 'setsar=16/15', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fixture('anamorphic.mp4'),
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:rate=25:duration=2',
+    '-vf',
+    'setsar=16/15',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    fixture('anamorphic.mp4'),
   ]);
   await writeFile(fixture('forged.webm'), withForgedTrack(await webmToBuffer(), FORGED_CODEC_ID));
 }, 120_000);
@@ -87,8 +135,23 @@ function webmToBuffer(): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     execFile(
       FFMPEG,
-      ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2',
-        '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-f', 'webm', 'pipe:1'],
+      [
+        '-nostdin',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=320x240:rate=25:duration=2',
+        '-c:v',
+        'libvpx-vp9',
+        '-deadline',
+        'realtime',
+        '-f',
+        'webm',
+        'pipe:1',
+      ],
       { windowsHide: true, encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 },
       (error, stdout) => (error ? reject(error) : resolve(stdout)),
     );
@@ -141,7 +204,10 @@ function withForgedTrack(webm: Buffer, codecId: string): Buffer {
           element([0x86], Buffer.from(codecId, 'latin1')),
         ]),
       );
-      const tracks = element([0x16, 0x54, 0xae, 0x6b], Buffer.concat([webm.subarray(contentStart, contentStart + size.value), entry]));
+      const tracks = element(
+        [0x16, 0x54, 0xae, 0x6b],
+        Buffer.concat([webm.subarray(contentStart, contentStart + size.value), entry]),
+      );
       return Buffer.concat([webm.subarray(0, offset), tracks, webm.subarray(contentStart + size.value)]);
     }
     offset = contentStart + size.value;
@@ -269,8 +335,11 @@ describe('video frames', () => {
   it('log lines forged by the file do not set the size or the duration', async () => {
     // Control: ffmpeg does print the forged lines at the start of a line.
     const stderr = await new Promise<string>((resolve) => {
-      execFile(FFMPEG, ['-nostdin', '-hide_banner', '-i', fixture('forged.webm')], { windowsHide: true }, (_e, _o, err) =>
-        resolve(String(err)),
+      execFile(
+        FFMPEG,
+        ['-nostdin', '-hide_banner', '-i', fixture('forged.webm')],
+        { windowsHide: true },
+        (_e, _o, err) => resolve(String(err)),
       );
     });
     expect(stderr.split(/\r?\n/), stderr).toContain(FORGED_SHOWINFO);
@@ -546,8 +615,15 @@ describe('video frames', () => {
     });
 
     it('a forged size before the mapping does not count even when it scales to the same frame', () => {
-      expect(readDiagnostics(['Input #0, mov', '  Duration: 00:00:02.00, start: 0', info('8000x4000'), mapping, info('4000x2000')]))
-        .toEqual({ width: 4000, height: 2000, durationMs: 2000 });
+      expect(
+        readDiagnostics([
+          'Input #0, mov',
+          '  Duration: 00:00:02.00, start: 0',
+          info('8000x4000'),
+          mapping,
+          info('4000x2000'),
+        ]),
+      ).toEqual({ width: 4000, height: 2000, durationMs: 2000 });
     });
 
     it('takes the first duration after the last input header', () => {
@@ -576,9 +652,13 @@ describe('video frames', () => {
     });
 
     it('reads the size of a JPEG and nothing else', async () => {
-      const jpeg = await sharp({ create: { width: 33, height: 17, channels: 3, background: '#808080' } }).jpeg().toBuffer();
+      const jpeg = await sharp({ create: { width: 33, height: 17, channels: 3, background: '#808080' } })
+        .jpeg()
+        .toBuffer();
       expect(jpegDimensions(jpeg)).toEqual({ width: 33, height: 17 });
-      const png = await sharp({ create: { width: 3, height: 3, channels: 3, background: '#808080' } }).png().toBuffer();
+      const png = await sharp({ create: { width: 3, height: 3, channels: 3, background: '#808080' } })
+        .png()
+        .toBuffer();
       expect(jpegDimensions(png)).toBeNull();
       expect(jpegDimensions(jpeg.subarray(0, 10))).toBeNull();
     });

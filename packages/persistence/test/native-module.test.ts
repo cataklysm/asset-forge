@@ -16,9 +16,10 @@ test('the bundled SQLite supports FTS5 with unicode61 remove_diacritics 2', () =
       `CREATE VIRTUAL TABLE asset_search USING fts5(name, description, tags, file_names,
          tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');`,
     );
-    db.prepare("INSERT INTO asset_search (name, description, tags, file_names) VALUES ('Café Sword', '', '', '')").run();
-    const count = (q: string) =>
-      db.prepare('SELECT count(*) AS n FROM asset_search WHERE asset_search MATCH ?').get(q);
+    db.prepare(
+      "INSERT INTO asset_search (name, description, tags, file_names) VALUES ('Café Sword', '', '', '')",
+    ).run();
+    const count = (q: string) => db.prepare('SELECT count(*) AS n FROM asset_search WHERE asset_search MATCH ?').get(q);
     expect(count('"cafe"*')).toEqual({ n: 1 });
     expect(count('"swo"*')).toEqual({ n: 1 });
   } finally {

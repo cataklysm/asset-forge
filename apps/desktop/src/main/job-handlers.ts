@@ -164,7 +164,10 @@ async function listNamedJobs(
   );
   return {
     ...page,
-    items: page.items.map((job) => ({ ...job, providerName: nameOf(dependencies.providers, job.providerId, job.providerName) })),
+    items: page.items.map((job) => ({
+      ...job,
+      providerName: nameOf(dependencies.providers, job.providerId, job.providerName),
+    })),
   };
 }
 
@@ -262,7 +265,8 @@ async function retryIn(dependencies: JobHandlerDependencies, session: WorkspaceS
   const parsed = ImageGeneratePayloadSchema.safeParse(job.payload);
   const id =
     (await session.database.generations.byJob(job.id))?.id ?? (parsed.success ? parsed.data.generationId : null);
-  if (id === null || (await session.database.generations.get(id)) === null) throw new NotFoundError(GENERATION_NOT_FOUND);
+  if (id === null || (await session.database.generations.get(id)) === null)
+    throw new NotFoundError(GENERATION_NOT_FOUND);
   await retryGeneration(session, { providers: dependencies.imageProviders, control: dependencies.jobs }, id);
 }
 
@@ -362,7 +366,11 @@ function rerouteIn(
   // Only analysis jobs move, and only between analysis entries; generation jobs never move.
   if (isImageLane(providers, request.fromProviderId)) throw new InvalidOperationError(CANNOT_ANALYSE);
   const to = providers.resolve(request.toProviderId, 'vision')!;
-  return rerouteJobs(session, { fromLane: request.fromProviderId, to: { id: to.id, name: to.name }, model: request.model });
+  return rerouteJobs(session, {
+    fromLane: request.fromProviderId,
+    to: { id: to.id, name: to.name },
+    model: request.model,
+  });
 }
 
 /**

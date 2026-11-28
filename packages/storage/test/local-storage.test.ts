@@ -81,9 +81,7 @@ describe('files', () => {
 
   it('rejects writing to an existing path and keeps its content', async () => {
     await storage.writeText('inbox/a.txt', 'original');
-    await expect(
-      storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('new'))),
-    ).rejects.toThrow();
+    await expect(storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('new')))).rejects.toThrow();
     expect(await storage.readText('inbox/a.txt')).toBe('original');
   });
 
@@ -195,9 +193,7 @@ describe('file-system error mapping', () => {
   it('maps ENOSPC to StorageFullError with the relative path', async () => {
     const cause = errno('ENOSPC', path.join(root, 'inbox', 'a.txt'));
     vi.spyOn(fs, 'open').mockRejectedValueOnce(cause);
-    const error = await storage
-      .writeStream('inbox/a.txt', Readable.from(Buffer.from('x')))
-      .catch((e: unknown) => e);
+    const error = await storage.writeStream('inbox/a.txt', Readable.from(Buffer.from('x'))).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(StorageFullError);
     expect((error as StorageFullError).code).toBe('storage_full');
     expect((error as Error).cause).toBe(cause);
@@ -252,9 +248,7 @@ describe('file-system error mapping', () => {
 
     it('maps ENOSPC raised by the destination mid-stream to StorageFullError', async () => {
       failDestination('ENOSPC');
-      const error = await storage
-        .writeStream('inbox/a.txt', pushing('hello'))
-        .catch((e: unknown) => e);
+      const error = await storage.writeStream('inbox/a.txt', pushing('hello')).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(StorageFullError);
       expect((error as Error).message).not.toContain(tmp);
       vi.restoreAllMocks();
@@ -263,9 +257,7 @@ describe('file-system error mapping', () => {
 
     it('maps EACCES raised by the destination mid-stream to StorageAccessDeniedError', async () => {
       failDestination('EACCES');
-      const error = await storage
-        .writeStream('inbox/a.txt', pushing('hello'))
-        .catch((e: unknown) => e);
+      const error = await storage.writeStream('inbox/a.txt', pushing('hello')).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(StorageAccessDeniedError);
     });
 
@@ -313,9 +305,7 @@ describe('path escape', () => {
   }
 
   it('rejects an absolute path that points inside the root', async () => {
-    await expect(storage.readText(path.join(root, 'workspace.json'))).rejects.toBeInstanceOf(
-      PathEscapeError,
-    );
+    await expect(storage.readText(path.join(root, 'workspace.json'))).rejects.toBeInstanceOf(PathEscapeError);
   });
 
   it('rejects a path that reduces to the root with a fixed message', async () => {
@@ -347,9 +337,9 @@ describe('path escape', () => {
       const before = (await fs.readdir(tmp)).sort();
       await expect(storage.readText(rootish)).rejects.toBeInstanceOf(PathEscapeError);
       await expect(storage.writeText(rootish, 'x')).rejects.toBeInstanceOf(PathEscapeError);
-      await expect(
-        storage.writeStream(rootish, Readable.from(Buffer.from('x'))),
-      ).rejects.toBeInstanceOf(PathEscapeError);
+      await expect(storage.writeStream(rootish, Readable.from(Buffer.from('x')))).rejects.toBeInstanceOf(
+        PathEscapeError,
+      );
       await expect(storage.hashFile(rootish)).rejects.toBeInstanceOf(PathEscapeError);
       await expect(storage.remove(rootish)).rejects.toBeInstanceOf(PathEscapeError);
       await expect(storage.move(rootish, 'inbox/x')).rejects.toBeInstanceOf(PathEscapeError);
@@ -389,7 +379,9 @@ describe('path escape', () => {
 
   it('still refuses a dangling link found while the path is checked', async () => {
     await fs.symlink(path.join(tmp, 'nowhere'), path.join(root, 'inbox', 'dangling'), 'junction');
-    await expect(storage.writeText('inbox/dangling/a.txt', 'x')).rejects.toThrow(new PathEscapeError('Path crosses a dangling link'));
+    await expect(storage.writeText('inbox/dangling/a.txt', 'x')).rejects.toThrow(
+      new PathEscapeError('Path crosses a dangling link'),
+    );
   });
 
   it('allows a junction that stays inside the root', async () => {

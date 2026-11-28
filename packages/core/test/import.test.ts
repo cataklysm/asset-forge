@@ -39,7 +39,8 @@ async function setup() {
   return { ...fake, manager, storage, db, ctx };
 }
 
-const stagingEntries = (storage: InMemoryStorage) => [...storage.files.keys()].filter((k) => k.startsWith(`${STAGING_DIR}/`));
+const stagingEntries = (storage: InMemoryStorage) =>
+  [...storage.files.keys()].filter((k) => k.startsWith(`${STAGING_DIR}/`));
 const inboxEntries = (storage: InMemoryStorage) => [...storage.files.keys()].filter((k) => k.startsWith('inbox/'));
 
 describe('importFile', () => {
@@ -281,7 +282,10 @@ describe('importFile', () => {
     it('keeps the message of a domain error', async () => {
       const { ctx, sources, storage, db } = await setup();
       sources.set('/src/a.png', Buffer.from('x'));
-      storage.failNext('writeStream', new StorageFullError('Not enough free space to write .assetforge/staging/x.part'));
+      storage.failNext(
+        'writeStream',
+        new StorageFullError('Not enough free space to write .assetforge/staging/x.part'),
+      );
       const result = await importFile(ctx, '/src/a.png');
 
       expect(result.error).toBe('Not enough free space to write .assetforge/staging/x.part');
@@ -350,7 +354,13 @@ describe('refused imports', () => {
       return ctx.files.insertPending(r);
     };
     const result = await importFile({ ...ctx, files }, '/src/tool.exe');
-    expect(result).toEqual({ sourcePath: '/src/tool.exe', entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(result).toEqual({
+      sourcePath: '/src/tool.exe',
+      entryName: null,
+      file: null,
+      error: REFUSED_IMPORT_MESSAGE,
+      duplicateOf: [],
+    });
     expect(sources.opened).toEqual([]);
     expect(inserted).toBe(0);
   });
@@ -360,7 +370,13 @@ describe('refused imports', () => {
     for (const p of ['C:\\x\\a.exe::$DATA', 'C:\\x\\a.exe:stream', 'C:\\x\\evil.txt:payload.exe']) {
       sources.set(p, Buffer.from('x'));
       const result = await importFile(ctx, p);
-      expect(result).toEqual({ sourcePath: p, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+      expect(result).toEqual({
+        sourcePath: p,
+        entryName: null,
+        file: null,
+        error: REFUSED_IMPORT_MESSAGE,
+        duplicateOf: [],
+      });
     }
     expect(sources.opened).toEqual([]);
   });
@@ -373,7 +389,13 @@ describe('refused imports', () => {
 
     const [result] = await manager.importFiles([`/src/${name}`]);
 
-    expect(result).toEqual({ sourcePath: `/src/${name}`, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] });
+    expect(result).toEqual({
+      sourcePath: `/src/${name}`,
+      entryName: null,
+      file: null,
+      error: REFUSED_IMPORT_MESSAGE,
+      duplicateOf: [],
+    });
     expect(sources.opened).toEqual([]);
     expect(db.files.records.size).toBe(0);
     expect(stagingEntries(storage)).toEqual([]);
@@ -543,7 +565,10 @@ describe('importStream options', () => {
     const { ctx, storage } = await setup();
     storage.failNext('move', new Error('busy'));
     const seen: unknown[] = [];
-    const result = await importStream(ctx, source(Buffer.from('hello')), { discardOnFailure: true, onStreamError: (e) => seen.push(e) });
+    const result = await importStream(ctx, source(Buffer.from('hello')), {
+      discardOnFailure: true,
+      onStreamError: (e) => seen.push(e),
+    });
     expect(result.error).not.toBeNull();
     expect(seen).toEqual([]);
   });
@@ -551,7 +576,9 @@ describe('importStream options', () => {
   it('inserts the origin with the pending row, so the complete file carries it', async () => {
     const { ctx, db } = await setup();
     const originId = crypto.randomUUID();
-    const result = await importStream(ctx, source(Buffer.from('hello')), { origin: { id: originId, url: 'https://a.example/a.png' } });
+    const result = await importStream(ctx, source(Buffer.from('hello')), {
+      origin: { id: originId, url: 'https://a.example/a.png' },
+    });
     expect(result.file?.status).toBe('complete');
     await expect(db.fileOrigins.listByFile(result.file!.id)).resolves.toEqual([
       { id: originId, url: 'https://a.example/a.png', createdAt: result.file!.importedAt },

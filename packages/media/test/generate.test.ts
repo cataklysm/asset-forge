@@ -5,7 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_LIMITS, generatePreview, measureImage, MODEL_JPEG_EDGE, MODEL_JPEG_QUALITY, modelJpeg } from '../src/generate.js';
+import {
+  DEFAULT_LIMITS,
+  generatePreview,
+  measureImage,
+  MODEL_JPEG_EDGE,
+  MODEL_JPEG_QUALITY,
+  modelJpeg,
+} from '../src/generate.js';
 
 let dir: string;
 
@@ -162,7 +169,9 @@ describe('generatePreview', () => {
 /** Writes a TIFF of random RGBA pixels. */
 async function rgba(width: number, height: number, path: string): Promise<void> {
   const pixels = randomBytes(width * height * 4);
-  await sharp(pixels, { raw: { width, height, channels: 4 } }).tiff().toFile(path);
+  await sharp(pixels, { raw: { width, height, channels: 4 } })
+    .tiff()
+    .toFile(path);
 }
 
 async function rawRgba(input: string | Buffer, rotate = false) {

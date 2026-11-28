@@ -70,6 +70,10 @@ export const LINKED_FILE_FAILED = 'This file could not be opened';
  */
 export function generationParametersText(parameters: GenerationParameters): string {
   if ('scale' in parameters) return upscaleLabel(parameters.scale);
-  const parts = [parameters.aspectRatio, parameters.resolution, parameters.safeMode ? SAFE_MODE_LABEL : `${SAFE_MODE_LABEL} off`];
+  const parts = [
+    parameters.aspectRatio,
+    parameters.resolution,
+    parameters.safeMode ? SAFE_MODE_LABEL : `${SAFE_MODE_LABEL} off`,
+  ];
   return parts.filter((part): part is string => part !== null).join(' · ');
 }

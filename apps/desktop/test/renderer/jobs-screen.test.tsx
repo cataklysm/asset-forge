@@ -14,7 +14,15 @@ import { formatDateTime } from '../../src/renderer/src/format';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { JobsScreen } from '../../src/renderer/src/screens/JobsScreen';
-import { deferred, fakeError, fakeProviders, installFakeApi, noChanges, providerView, type FakeHandlers } from './fake-api';
+import {
+  deferred,
+  fakeError,
+  fakeProviders,
+  installFakeApi,
+  noChanges,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { nextId, pageOf } from './fixtures';
 
 afterEach(() => {
@@ -24,7 +32,17 @@ afterEach(() => {
 const CREATED = '2026-01-01T10:00:00.000Z';
 const RUN_AFTER = '2026-01-01T10:05:00.000Z';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 function job(p: Partial<JobView> = {}): JobView {
   return {
@@ -118,9 +136,30 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
     '',
   ]);
 
-  const cells = (row: HTMLElement) => within(row).getAllByRole('gridcell').map((c) => c.textContent);
-  expect(cells(rowOf('running.png'))).toEqual(['Analysis', 'running.png', 'No provider', 'Running', '1 / 3', formatDateTime(CREATED), '', '']);
-  expect(cells(rowOf('retrying.png'))).toEqual(['Analysis', 'retrying.png', 'No provider', 'Retrying', '2 / 3', formatDateTime(CREATED), '', '']);
+  const cells = (row: HTMLElement) =>
+    within(row)
+      .getAllByRole('gridcell')
+      .map((c) => c.textContent);
+  expect(cells(rowOf('running.png'))).toEqual([
+    'Analysis',
+    'running.png',
+    'No provider',
+    'Running',
+    '1 / 3',
+    formatDateTime(CREATED),
+    '',
+    '',
+  ]);
+  expect(cells(rowOf('retrying.png'))).toEqual([
+    'Analysis',
+    'retrying.png',
+    'No provider',
+    'Retrying',
+    '2 / 3',
+    formatDateTime(CREATED),
+    '',
+    '',
+  ]);
   expect(within(rowOf('retrying.png')).getByText('Retrying').closest('[title]')?.getAttribute('title')).toBe(
     `Next try at ${formatDateTime(RUN_AFTER)}`,
   );
@@ -183,7 +222,10 @@ it('a download job with a file shows the file name; an already present one says 
   });
   renderScreen();
   await screen.findByText('rock.png');
-  const cells = (name: string) => within(rowOf(name)).getAllByRole('gridcell').map((c) => c.textContent);
+  const cells = (name: string) =>
+    within(rowOf(name))
+      .getAllByRole('gridcell')
+      .map((c) => c.textContent);
   expect(cells('rock.png').slice(0, 4)).toEqual(['Download', 'rock.png', 'example.com', 'Already present']);
   expect(cells('moss.png').slice(0, 4)).toEqual(['Download', 'moss.png', 'example.com', 'Done']);
 });
@@ -209,7 +251,9 @@ it.each([
   });
   renderScreen();
   const cell = await screen.findByText('example.com/small.png');
-  const cells = within(cell.closest<HTMLElement>('[role="row"]')!).getAllByRole('gridcell').map((c) => c.textContent);
+  const cells = within(cell.closest<HTMLElement>('[role="row"]')!)
+    .getAllByRole('gridcell')
+    .map((c) => c.textContent);
   expect(cells.slice(0, 4)).toEqual(['Download', 'example.com/small.png', 'example.com', text]);
 });
 
@@ -239,16 +283,11 @@ it('the status filter asks for that status and offers All plus the seven labels'
   await screen.findByText('queued.png');
 
   const select = screen.getByRole('combobox', { name: 'Status' });
-  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
-    'All',
-    'Queued',
-    'Running',
-    'Retrying',
-    'Waiting',
-    'Done',
-    'Failed',
-    'Cancelled',
-  ]);
+  expect(
+    within(select)
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['All', 'Queued', 'Running', 'Retrying', 'Waiting', 'Done', 'Failed', 'Cancelled']);
   await user.selectOptions(select, 'Failed');
   await waitFor(() => expect(screen.queryByText('queued.png')).toBeNull());
   expect(screen.getByText('failed.png')).toBeTruthy();
@@ -389,7 +428,9 @@ it('a rejected retry shows the alert above the table', async () => {
   await user.click(screen.getByRole('button', { name: 'Retry job' }));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toBe('invalid_operation');
-  expect(alert.compareDocumentPosition(screen.getByRole('grid', { name: 'Jobs' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(
+    alert.compareDocumentPosition(screen.getByRole('grid', { name: 'Jobs' })) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 it('a second click while an action runs sends nothing and the page actions wait for it', async () => {
@@ -409,7 +450,9 @@ it('a second click while an action runs sends nothing and the page actions wait 
   );
   renderScreen();
   await screen.findByText('failed.png');
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false),
+  );
 
   const retry = screen.getByRole('button', { name: 'Retry job' });
   await user.click(retry);
@@ -425,7 +468,9 @@ it('a second click while an action runs sends nothing and the page actions wait 
   await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(lists));
   expect(api.calls.filter((c) => c.channel === 'jobs:retry')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement).disabled).toBe(false),
+  );
 });
 
 /** The screen under a job provider whose next poll moves and answers `p` from `changes:since` (see `change`). */
@@ -506,7 +551,6 @@ it('jobs changed in bulk (and a reset) refetch the visible page in place, keepin
   expect(screen.getByRole('grid', { name: 'Jobs' })).toBe(grid);
 });
 
-
 it('an empty table shows the jobs added in bulk', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const feed = withFeed([]);
@@ -529,7 +573,9 @@ it('a failed id read refetches the visible page instead', async () => {
   renderScreen();
   await screen.findByText('first.png');
   feed.api.set('jobs:list', (request) =>
-    request.ids !== undefined ? Promise.reject(new Error('boom')) : listOf([{ ...first, status: 'running', attempt: 1 }])(request),
+    request.ids !== undefined
+      ? Promise.reject(new Error('boom'))
+      : listOf([{ ...first, status: 'running', attempt: 1 }])(request),
   );
   feed.api.calls.length = 0;
   await feed.change({ jobIds: [first.id] });
@@ -591,20 +637,38 @@ it('the Provider column shows the entry name and the model, and the stored name 
     providerName: 'Gone Pod',
     model: 'm1',
   });
-  const nameless = job({ fileName: 'nameless.png', providerId: '00000000-0000-4000-8000-00000000beef', providerName: null });
+  const nameless = job({
+    fileName: 'nameless.png',
+    providerId: '00000000-0000-4000-8000-00000000beef',
+    providerName: null,
+  });
   withProviders({ 'jobs:list': listOf([onRunPod, removed, nameless]) });
   renderScreen();
   await screen.findByText('pod.png');
   // The current entry name wins over the one stored on the job once the list is loaded.
-  await waitFor(() => expect(within(rowOf('pod.png')).getAllByRole('gridcell')[2]!.textContent).toBe('RunPod · big-vision'));
+  await waitFor(() =>
+    expect(within(rowOf('pod.png')).getAllByRole('gridcell')[2]!.textContent).toBe('RunPod · big-vision'),
+  );
   expect(within(rowOf('pod.png')).getAllByRole('gridcell')[2]!.getAttribute('title')).toBe('RunPod · big-vision');
   expect(within(rowOf('gone.png')).getAllByRole('gridcell')[2]!.textContent).toBe('Gone Pod · m1');
   expect(within(rowOf('nameless.png')).getAllByRole('gridcell')[2]!.textContent).toBe('Removed provider');
 });
 
 it('the Provider column names the lane of a generation job, with the model of an edit and none for an upscale', async () => {
-  const edit = job({ type: IMAGE_GENERATE_JOB, fileName: 'edit.png', providerId: RUNPOD.id, providerName: 'RunPod', model: 'mock-edit' });
-  const upscale = job({ type: IMAGE_GENERATE_JOB, fileName: 'upscale.png', providerId: RUNPOD.id, providerName: 'RunPod', model: null });
+  const edit = job({
+    type: IMAGE_GENERATE_JOB,
+    fileName: 'edit.png',
+    providerId: RUNPOD.id,
+    providerName: 'RunPod',
+    model: 'mock-edit',
+  });
+  const upscale = job({
+    type: IMAGE_GENERATE_JOB,
+    fileName: 'upscale.png',
+    providerId: RUNPOD.id,
+    providerName: 'RunPod',
+    model: null,
+  });
   withProviders({ 'jobs:list': listOf([edit, upscale]) });
   renderScreen();
   await screen.findByText('edit.png');
@@ -621,7 +685,11 @@ it('the provider filter offers All providers plus the entries and sends provider
   await screen.findByText('local.png');
   const select = (await screen.findByRole('combobox', { name: 'Provider' })) as HTMLSelectElement;
   await waitFor(() =>
-    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All providers', 'Local Ollama', 'RunPod']),
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['All providers', 'Local Ollama', 'RunPod']),
   );
   expect((listCalls(api).at(-1)!.request as ListRequest).providerId).toBeUndefined();
 
@@ -653,7 +721,13 @@ it('Move jobs in the toolbar opens the move dialog with a source select, and clo
   await user.click(button);
   const dialog = await screen.findByRole('dialog', { name: 'Move jobs' });
   const from = within(dialog).getByRole('combobox', { name: 'From' }) as HTMLSelectElement;
-  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['Local Ollama', 'No provider']));
+  await waitFor(() =>
+    expect(
+      within(from)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Local Ollama', 'No provider']),
+  );
   expect(within(dialog).getByText('7 waiting')).toBeTruthy();
 
   const lists = listCalls(api).length;
@@ -665,7 +739,13 @@ it('Move jobs in the toolbar opens the move dialog with a source select, and clo
 
 it('the move dialog does not offer the lane of a Venice entry as a source', async () => {
   const user = userEvent.setup();
-  const venice = providerView({ kind: 'venice', name: 'Venice', taggingModel: null, promptModel: null, editModel: 'mock-edit' });
+  const venice = providerView({
+    kind: 'venice',
+    name: 'Venice',
+    taggingModel: null,
+    promptModel: null,
+    editModel: 'mock-edit',
+  });
   install({
     ...fakeProviders({ providers: [LOCAL, venice] }).handlers,
     'providers:listImageModels': () => ({ ok: true, models: [] }),
@@ -680,6 +760,12 @@ it('the move dialog does not offer the lane of a Venice entry as a source', asyn
   await user.click(screen.getByRole('button', { name: 'Move jobs' }));
   const dialog = await screen.findByRole('dialog', { name: 'Move jobs' });
   const from = within(dialog).getByRole('combobox', { name: 'From' }) as HTMLSelectElement;
-  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['Local Ollama']));
+  await waitFor(() =>
+    expect(
+      within(from)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Local Ollama']),
+  );
   expect(within(dialog).getByText('7 waiting')).toBeTruthy();
 });

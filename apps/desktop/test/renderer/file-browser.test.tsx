@@ -22,7 +22,11 @@ const ASSET_SCOPE: FileScope = { kind: 'asset', assetId: nextId() };
 
 function many(count: number): FileRecord[] {
   return Array.from({ length: count }, (_, i) =>
-    fileRecord({ originalName: `File ${i}.png`, assetId: ASSET_SCOPE.kind === 'asset' ? ASSET_SCOPE.assetId : null, role: 'reference' }),
+    fileRecord({
+      originalName: `File ${i}.png`,
+      assetId: ASSET_SCOPE.kind === 'asset' ? ASSET_SCOPE.assetId : null,
+      role: 'reference',
+    }),
   );
 }
 
@@ -565,7 +569,8 @@ const FULL_CONTEXT: FileActionContext = {
   onPurge: () => {},
 };
 
-const menuLabels = (file: FileRecord, ctx: FileActionContext = FULL_CONTEXT) => fileMenuItems(file, ctx).map((i) => i.label);
+const menuLabels = (file: FileRecord, ctx: FileActionContext = FULL_CONTEXT) =>
+  fileMenuItems(file, ctx).map((i) => i.label);
 
 it('the menu of a live file ends with Delete', () => {
   const file = fileRecord({ assetId: nextId(), role: 'reference' });
@@ -579,23 +584,34 @@ it('the menu of a live file ends with Delete', () => {
 });
 
 it('a pending file has no Delete', () => {
-  expect(menuLabels(fileRecord({ status: 'pending', sha256: null }), { cover: null, onDetails: () => {}, onDelete: () => {} })).toEqual([
-    'Details',
-  ]);
+  expect(
+    menuLabels(fileRecord({ status: 'pending', sha256: null }), {
+      cover: null,
+      onDetails: () => {},
+      onDelete: () => {},
+    }),
+  ).toEqual(['Details']);
 });
 
 it('a failed file offers Details and Delete', () => {
-  expect(menuLabels(fileRecord({ status: 'failed', sha256: null }), { cover: null, onDetails: () => {}, onDelete: () => {} })).toEqual([
-    'Details',
-    'Delete',
-  ]);
+  expect(
+    menuLabels(fileRecord({ status: 'failed', sha256: null }), {
+      cover: null,
+      onDetails: () => {},
+      onDelete: () => {},
+    }),
+  ).toEqual(['Details', 'Delete']);
 });
 
 it('a trashed file offers only Details, Restore and Delete permanently', () => {
   const file = trashedRecord({ trashedAssetId: nextId(), trashedAssetName: 'Hero', trashedRole: 'reference' });
   const items = fileMenuItems(file, FULL_CONTEXT);
   expect(items.map((i) => i.label)).toEqual(['Details', 'Restore', 'Delete permanently']);
-  expect(items.map((i) => i.title)).toEqual([undefined, 'Puts the file back where it was', 'Removes the file from disk; asks first']);
+  expect(items.map((i) => i.title)).toEqual([
+    undefined,
+    'Puts the file back where it was',
+    'Removes the file from disk; asks first',
+  ]);
   expect(menuLabels(file, { ...FULL_CONTEXT, onRestore: undefined, onPurge: undefined })).toEqual(['Details']);
 });
 
@@ -611,7 +627,9 @@ it('the Delete key on a focused tile calls onDeleteKey', async () => {
   // fireEvent returns false when the default was prevented.
   expect(event).toBe(false);
   // Not from a control inside the tile.
-  fireEvent.keyDown(within(itemOf('File 1.png')).getByRole('checkbox', { name: 'Select File 1.png' }), { key: 'Delete' });
+  fireEvent.keyDown(within(itemOf('File 1.png')).getByRole('checkbox', { name: 'Select File 1.png' }), {
+    key: 'Delete',
+  });
   expect(onDeleteKey).toHaveBeenCalledTimes(1);
 });
 
@@ -685,16 +703,15 @@ it('the file type filter offers Video and asks for the kind video', async () => 
   render(<Harness />);
   await screen.findByText('File 0.png');
   const select = screen.getByRole('combobox', { name: 'File type' });
-  expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
-    'All file types',
-    'Image',
-    'Video',
-    '3D model',
-    'Document',
-    'Other',
-  ]);
+  expect(
+    within(select)
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['All file types', 'Image', 'Video', '3D model', 'Document', 'Other']);
   await userEvent.setup().selectOptions(select, 'Video');
-  await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, scope: ASSET_SCOPE, kind: 'video' }));
+  await waitFor(() =>
+    expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, scope: ASSET_SCOPE, kind: 'video' }),
+  );
 });
 
 const FEED_IDLE: JobSummary = {
@@ -829,7 +846,10 @@ it('feed (e, f): a file added to this asset, and a reset, refetch the visible pa
   expect(feed.container.scrollTop).toBe(40);
 
   const again = fileRecord({ originalName: 'Again.png', assetId, role: 'reference' });
-  feed.api.set('files:list', feedList(() => [again, added, ...feed.items]));
+  feed.api.set(
+    'files:list',
+    feedList(() => [again, added, ...feed.items]),
+  );
   feed.api.calls.length = 0;
   await feed.change({ reset: true });
   expect(await screen.findByText('Again.png')).toBeTruthy();
@@ -853,7 +873,9 @@ it('feed (h): an id read that answers after a filter change patches nothing and 
   const feed = await startFeed();
   const target = feed.items[0]!;
   const read = deferred<FileList>();
-  feed.api.set('files:list', (request) => (request.ids !== undefined ? read.promise : feedList(() => feed.items)(request)));
+  feed.api.set('files:list', (request) =>
+    request.ids !== undefined ? read.promise : feedList(() => feed.items)(request),
+  );
   await feed.change({ fileIds: [target.id] });
   expect(listRequests(feed.api).at(-1)?.ids).toEqual([target.id]);
 

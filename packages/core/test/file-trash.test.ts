@@ -56,7 +56,10 @@ async function setup() {
   const asset = await createAsset(session, { name: 'Pump', typeId });
   let n = 0;
   /** Imports one file into the inbox, or onto `asset` with a role. */
-  const importOne = async (name = `file-${++n}.png`, target: { assetId: string; role: 'reference' | 'texture' } | null = null) => {
+  const importOne = async (
+    name = `file-${++n}.png`,
+    target: { assetId: string; role: 'reference' | 'texture' } | null = null,
+  ) => {
     const source = `/src/${++n}/${name}`;
     fake.sources.set(source, Buffer.from(`content of ${source}`));
     const [result] = await manager.importFiles([source], target);
@@ -105,7 +108,13 @@ describe('trashFiles', () => {
     const { session, storage, importOne, control } = await setup();
     const file = await importOne('a.png');
     const [file2] = ok(await trashFiles(session, control, [file.id]));
-    expect(file2).toMatchObject({ assetId: null, role: null, trashedAssetId: null, trashedRole: null, relativePath: trashPath(file.id, 'a.png') });
+    expect(file2).toMatchObject({
+      assetId: null,
+      role: null,
+      trashedAssetId: null,
+      trashedRole: null,
+      relativePath: trashPath(file.id, 'a.png'),
+    });
     expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(false);
   });
 
@@ -125,10 +134,29 @@ describe('trashFiles', () => {
   it('restore returns the file to its asset and role with tags, analysis record and proposal intact', async () => {
     const { session, storage, db, asset, importOne, control } = await setup();
     const file = await importOne('pump.png', { assetId: asset.id, role: 'texture' });
-    await db.tags.addToFile({ fileId: file.id, name: 'metal', displayName: 'Metal', origin: 'manual', newId: crypto.randomUUID(), now: TS });
+    await db.tags.addToFile({
+      fileId: file.id,
+      name: 'metal',
+      displayName: 'Metal',
+      origin: 'manual',
+      newId: crypto.randomUUID(),
+      now: TS,
+    });
     const fingerprint = { provider: 'ollama', model: 'm', promptVersion: 1, promptName: null };
-    await db.analyses.apply({ fileId: file.id, sha256: file.sha256!, tags: [{ name: 'red', displayName: 'red', newId: crypto.randomUUID() }], ...fingerprint, now: TS });
-    await db.analyses.propose({ fileId: file.id, sha256: file.sha256!, tags: [{ name: 'blue', displayName: 'blue' }], ...fingerprint, createdAt: TS });
+    await db.analyses.apply({
+      fileId: file.id,
+      sha256: file.sha256!,
+      tags: [{ name: 'red', displayName: 'red', newId: crypto.randomUUID() }],
+      ...fingerprint,
+      now: TS,
+    });
+    await db.analyses.propose({
+      fileId: file.id,
+      sha256: file.sha256!,
+      tags: [{ name: 'blue', displayName: 'blue' }],
+      ...fingerprint,
+      createdAt: TS,
+    });
     await db.assets.setCover(asset.id, file.id, TS);
 
     const [trashed] = ok(await trashFiles(session, control, [file.id]));
@@ -139,7 +167,14 @@ describe('trashFiles', () => {
     const [restored] = ok(await restoreFiles(session, [file.id]));
 
     const target = assetFilePath(asset.id, 'texture', file.id, 'pump.png');
-    expect(restored).toMatchObject({ assetId: asset.id, role: 'texture', relativePath: target, deletedAt: null, trashedAssetId: null, trashedRole: null });
+    expect(restored).toMatchObject({
+      assetId: asset.id,
+      role: 'texture',
+      relativePath: target,
+      deletedAt: null,
+      trashedAssetId: null,
+      trashedRole: null,
+    });
     expect(restored!.tags.map((t) => t.name)).toEqual(['metal', 'red']);
     expect(restored!.hasProposal).toBe(true);
     expect(await db.analyses.get(file.id)).toMatchObject({ ...fingerprint, sha256: file.sha256 });
@@ -157,7 +192,12 @@ describe('trashFiles', () => {
 
     const [restored] = ok(await restoreFiles(session, [file.id]));
 
-    expect(restored).toMatchObject({ assetId: null, role: null, relativePath: inboxPath(file.id, 'pump.png'), deletedAt: null });
+    expect(restored).toMatchObject({
+      assetId: null,
+      role: null,
+      relativePath: inboxPath(file.id, 'pump.png'),
+      deletedAt: null,
+    });
     expect(storage.files.has(inboxPath(file.id, 'pump.png'))).toBe(true);
   });
 
@@ -185,7 +225,15 @@ describe('trashFiles', () => {
     const { session, db, importOne, control } = await setup();
     const a = await importOne('a.png');
     const b = await importOne('b.png');
-    const job = (id: string, fileId: string) => ({ id, type: 't', resourceClass: 'cpu' as const, fileId, lane: null, payload: {}, dedupeKey: null });
+    const job = (id: string, fileId: string) => ({
+      id,
+      type: 't',
+      resourceClass: 'cpu' as const,
+      fileId,
+      lane: null,
+      payload: {},
+      dedupeKey: null,
+    });
     await db.jobs.enqueue({ jobs: [job('run', a.id)], now: TS });
     await db.jobs.claimNext({ resourceClass: 'cpu', types: ['t'], now: TS });
     await db.jobs.enqueue({ jobs: [job('queued', a.id), job('other', b.id)], now: TS });
@@ -340,7 +388,9 @@ describe('trashFiles', () => {
     const [item] = await trashFiles(session, control, [file.id]);
 
     expect(item!.error).toBeInstanceOf(InvalidOperationError);
-    expect(item!.error!.message).toBe('The file could not be moved; it may be in use, missing, or the target already exists');
+    expect(item!.error!.message).toBe(
+      'The file could not be moved; it may be in use, missing, or the target already exists',
+    );
     expect(await db.files.get(file.id)).toEqual(file);
     expect(storage.files.has(file.relativePath)).toBe(true);
     await expect(db.fileMoves.list()).resolves.toEqual([]);
@@ -351,7 +401,14 @@ describe('purgeFiles', () => {
   it('purge removes the row and then the binary', async () => {
     const { session, storage, db, importOne, control } = await setup();
     const file = await importOne('a.png');
-    await db.tags.addToFile({ fileId: file.id, name: 'x', displayName: 'x', origin: 'manual', newId: crypto.randomUUID(), now: TS });
+    await db.tags.addToFile({
+      fileId: file.id,
+      name: 'x',
+      displayName: 'x',
+      origin: 'manual',
+      newId: crypto.randomUUID(),
+      now: TS,
+    });
     const [trashed] = ok(await trashFiles(session, control, [file.id]));
     const purge = vi.spyOn(db.files, 'purge');
     const remove = vi.spyOn(storage, 'remove');
@@ -371,7 +428,15 @@ describe('purgeFiles', () => {
   it('removing a failed file outright leaves no tombstone', async () => {
     const { session, db, control } = await setup();
     const id = crypto.randomUUID();
-    await db.files.insertPending({ id, storageId: 's', originalName: 'f.png', relativePath: inboxPath(id, 'f.png'), mimeType: 'image/png', importedAt: TS, kind: 'image' });
+    await db.files.insertPending({
+      id,
+      storageId: 's',
+      originalName: 'f.png',
+      relativePath: inboxPath(id, 'f.png'),
+      mimeType: 'image/png',
+      importedAt: TS,
+      kind: 'image',
+    });
     await db.files.markFailed(id, 'Import was interrupted');
 
     ok(await trashFiles(session, control, [id]));
@@ -472,7 +537,15 @@ describe('emptyTrash', () => {
     const ids: string[] = [];
     for (let i = 0; i < 450; i++) {
       const id = crypto.randomUUID();
-      await db.files.insertPending({ id, storageId: 's', originalName: `${i}.png`, relativePath: inboxPath(id, `${i}.png`), mimeType: 'image/png', importedAt: TS, kind: 'image' });
+      await db.files.insertPending({
+        id,
+        storageId: 's',
+        originalName: `${i}.png`,
+        relativePath: inboxPath(id, `${i}.png`),
+        mimeType: 'image/png',
+        importedAt: TS,
+        kind: 'image',
+      });
       await db.files.markComplete(id, { sizeBytes: 1, sha256: 'b'.repeat(64), width: null, height: null });
       storage.files.set(inboxPath(id, `${i}.png`), Buffer.from(String(i)));
       ids.push(id);
@@ -620,7 +693,14 @@ describe('an open move row before restore and purge', () => {
     const { session, storage, db, importOne, control } = await setup();
     const file = await importOne('a.png');
     const [trashed] = ok(await trashFiles(session, control, [file.id]));
-    await db.fileMoves.begin({ fileId: file.id, kind: 'restore', targetRelativePath: inboxPath(file.id, 'a.png'), targetAssetId: null, targetRole: null, createdAt: TS });
+    await db.fileMoves.begin({
+      fileId: file.id,
+      kind: 'restore',
+      targetRelativePath: inboxPath(file.id, 'a.png'),
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: TS,
+    });
 
     expect(await purgeFiles(session, control, [file.id])).toEqual([{ fileId: file.id, file: null, error: null }]);
 
@@ -648,7 +728,14 @@ describe('an open move row before restore and purge', () => {
     const { db, session, importOne, control } = await setup();
     const file = await importOne('a.png');
     ok(await trashFiles(session, control, [file.id]));
-    await db.fileMoves.begin({ fileId: file.id, kind: 'restore', targetRelativePath: inboxPath(file.id, 'a.png'), targetAssetId: null, targetRole: null, createdAt: TS });
+    await db.fileMoves.begin({
+      fileId: file.id,
+      kind: 'restore',
+      targetRelativePath: inboxPath(file.id, 'a.png'),
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: TS,
+    });
 
     await expect(db.files.purge(file.id)).rejects.toThrow(new InvalidOperationError('The file is being moved'));
     expect(db.files.records.has(file.id)).toBe(true);
@@ -662,6 +749,8 @@ describe('relocate after restore', () => {
     const file = await importOne('a.png');
     await trashFiles(session, control, [file.id]);
     await restoreFiles(session, [file.id]);
-    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).resolves.toMatchObject({ assetId: asset.id });
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).resolves.toMatchObject({
+      assetId: asset.id,
+    });
   });
 });

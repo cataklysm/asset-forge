@@ -122,7 +122,11 @@ export async function enqueueAnalysis(
 function payloadOf(request: EnqueueAnalysisRequest): AnalyzeFilePayload {
   // The prompt is copied into every job, so later edits or a deletion do not reach waiting jobs.
   // It is not part of the fingerprint: a file analysed with another prompt still counts as analysed.
-  const prompt: AnalyzeFilePrompt = { name: request.prompt.name, text: request.prompt.text, maxTags: request.prompt.maxTags };
+  const prompt: AnalyzeFilePrompt = {
+    name: request.prompt.name,
+    text: request.prompt.text,
+    maxTags: request.prompt.maxTags,
+  };
   return { version: 4, model: request.model, mode: request.mode, prompt, providerName: request.entry.name };
 }
 

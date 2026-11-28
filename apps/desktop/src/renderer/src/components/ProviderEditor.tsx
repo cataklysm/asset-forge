@@ -1,5 +1,13 @@
 import { useState, type FormEvent } from 'react';
-import { JOB_ERROR_MESSAGES, PROVIDER_NAME_MAX, VISION_TIMEOUT_MAX_SECONDS, VISION_TIMEOUT_MIN_SECONDS, type ProviderList, type ProviderView, type SaveProvider } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  PROVIDER_NAME_MAX,
+  VISION_TIMEOUT_MAX_SECONDS,
+  VISION_TIMEOUT_MIN_SECONDS,
+  type ProviderList,
+  type ProviderView,
+  type SaveProvider,
+} from '@assetforge/contracts';
 import {
   BASE_URL_LABEL,
   BASE_URL_TITLE,
@@ -51,7 +59,11 @@ interface Props {
  * @param draft the draft, whose kind says which list applies
  * @returns the message, undefined when the list was read or is not asked
  */
-function modelsFailure(providers: ProvidersState, entry: ProviderView | null, draft: ProviderDraft): string | undefined {
+function modelsFailure(
+  providers: ProvidersState,
+  entry: ProviderView | null,
+  draft: ProviderDraft,
+): string | undefined {
   if (entry === null) return undefined;
   const answer = draft.kind === 'venice' ? providers.imageModels[entry.id] : providers.models[entry.id];
   if (answer === undefined || answer === 'checking' || answer.ok) return undefined;
@@ -164,7 +176,12 @@ export function ProviderEditor({ entry, list, busy, onSave, onDelete }: Props) {
       )}
 
       <div className="flex items-center gap-2">
-        <button type="submit" className={BUTTON} disabled={locked || busy || reason !== null} title={reason ?? undefined}>
+        <button
+          type="submit"
+          className={BUTTON}
+          disabled={locked || busy || reason !== null}
+          title={reason ?? undefined}
+        >
           {SAVE_LABEL}
         </button>
         <button

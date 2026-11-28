@@ -87,7 +87,10 @@ async function setup(o: { sites?: SiteAccess } = {}) {
   const now = () => session.now().toISOString();
 
   /** Queues a download job and claims it, so it is running. */
-  const claim = async (url: string, o: { target?: FileTarget | null; skipDuplicates?: boolean; payload?: unknown } = {}) => {
+  const claim = async (
+    url: string,
+    o: { target?: FileTarget | null; skipDuplicates?: boolean; payload?: unknown } = {},
+  ) => {
     await db.jobs.enqueue({
       jobs: [
         {
@@ -114,7 +117,11 @@ async function setup(o: { sites?: SiteAccess } = {}) {
   const download = async (url: string, o: Parameters<typeof claim>[1] = {}) => {
     const job = await claim(url, o);
     const error = await run(job);
-    await db.jobs.finish(job.id, { status: error === null ? 'succeeded' : 'failed', errorCode: error === null ? null : 'internal_error', now: now() });
+    await db.jobs.finish(job.id, {
+      status: error === null ? 'succeeded' : 'failed',
+      errorCode: error === null ? null : 'internal_error',
+      now: now(),
+    });
     return { job, error };
   };
   const jobRow = (id: string) => db.jobs.rows.find((j) => j.id === id)!;
@@ -124,7 +131,22 @@ async function setup(o: { sites?: SiteAccess } = {}) {
     const types = await db.assetTypes.list();
     return (await createAsset(session, { name, typeId: types[0]!.id })).id;
   };
-  return { fake, db, storage, session, remote, handler, claim, run, download, jobRow, files, staged, newAsset, effects };
+  return {
+    fake,
+    db,
+    storage,
+    session,
+    remote,
+    handler,
+    claim,
+    run,
+    download,
+    jobRow,
+    files,
+    staged,
+    newAsset,
+    effects,
+  };
 }
 
 const codeOf = (error: unknown) => (error instanceof JobError ? error.code : error);
@@ -162,7 +184,10 @@ describe('createFileDownloadHandler', () => {
 
   it('names the file after the final URL but stores the requested URL as origin', async () => {
     const t = await setup();
-    t.remote.answers.set('https://a.example/go', { finalUrl: 'https://cdn.example/real.png?sig=1', contentType: 'image/png' });
+    t.remote.answers.set('https://a.example/go', {
+      finalUrl: 'https://cdn.example/real.png?sig=1',
+      contentType: 'image/png',
+    });
     await t.download('https://a.example/go');
     const [file] = t.files();
     expect(file!.originalName).toBe('real.png');
@@ -199,7 +224,10 @@ describe('createFileDownloadHandler', () => {
     expect(error).toBeNull();
     expect(t.files()).toHaveLength(1);
     const file = t.files()[0]!;
-    expect((await t.db.fileOrigins.listByFile(file.id)).map((o) => o.url)).toEqual(['https://a.example/1.png', 'https://b.example/2.png']);
+    expect((await t.db.fileOrigins.listByFile(file.id)).map((o) => o.url)).toEqual([
+      'https://a.example/1.png',
+      'https://b.example/2.png',
+    ]);
     expect(t.jobRow(job.id).fileId).toBe(file.id);
     expect(t.db.jobs.results.get(job.id)).toBe('already_present');
     expect(t.staged()).toEqual([]);
@@ -325,7 +353,15 @@ describe('createFileDownloadHandler', () => {
 
   it('maps every failure kind', async () => {
     const t = await setup();
-    const kinds = ['unreachable', 'unavailable', 'blocked', 'not_found', 'rejected', 'address_refused', 'too_large'] as const;
+    const kinds = [
+      'unreachable',
+      'unavailable',
+      'blocked',
+      'not_found',
+      'rejected',
+      'address_refused',
+      'too_large',
+    ] as const;
     for (const kind of kinds) {
       const url = `https://a.example/${kind}.png`;
       t.remote.answers.set(url, new RemoteFileError(kind));
@@ -353,7 +389,9 @@ describe('createFileDownloadHandler', () => {
 
   it('a stream that fails mid-body with another error is internal_error', async () => {
     const t = await setup();
-    t.remote.answers.set('https://a.example/x.png', { stream: failingAfterChunk(new Error('boom https://a.example/x.png')) });
+    t.remote.answers.set('https://a.example/x.png', {
+      stream: failingAfterChunk(new Error('boom https://a.example/x.png')),
+    });
     const { error } = await t.download('https://a.example/x.png');
     expect(error).toBeInstanceOf(JobError);
     expect(codeOf(error)).toBe('internal_error');
@@ -549,7 +587,9 @@ describe('site downloads (payload v2)', () => {
     const f = fakeSites(false);
     const t = await setup({ sites: f.sites });
     t.remote.answers.set('https://a.example/x.png', {});
-    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    const job = await t.claim('https://a.example/x.png', {
+      payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }),
+    });
     expect(codeOf(await t.run(job))).toBe('download_profile_missing');
     expect(f.has).toEqual([PROFILE]);
     expect(t.remote.opened).toEqual([]);
@@ -559,7 +599,9 @@ describe('site downloads (payload v2)', () => {
   it('fails download_profile_missing when no site access is wired', async () => {
     const t = await setup();
     t.remote.answers.set('https://a.example/x.png', {});
-    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    const job = await t.claim('https://a.example/x.png', {
+      payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }),
+    });
     expect(codeOf(await t.run(job))).toBe('download_profile_missing');
     expect(t.remote.opened).toEqual([]);
   });
@@ -568,7 +610,9 @@ describe('site downloads (payload v2)', () => {
     const f = fakeSites();
     const t = await setup({ sites: f.sites });
     t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png') });
-    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }) });
+    const job = await t.claim('https://a.example/x.png', {
+      payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 0 }),
+    });
     expect(await t.run(job)).toBeNull();
     const headersFor = t.remote.options[0]?.headersFor;
     expect(headersFor).toBeTypeOf('function');
@@ -595,7 +639,9 @@ describe('site downloads (payload v2)', () => {
     const t = await setup({ sites: fakeSites().sites });
     const before = [...t.storage.files.keys()];
     t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: 3 });
-    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
+    const job = await t.claim('https://a.example/x.png', {
+      payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }),
+    });
     expect(await t.run(job)).toBeNull();
     expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.jobRow(job.id).fileId).toBeNull();
@@ -609,7 +655,9 @@ describe('site downloads (payload v2)', () => {
   it('a final name whose kind is not wanted ends filtered before anything is stored', async () => {
     const t = await setup({ sites: fakeSites().sites });
     t.remote.answers.set('https://a.example/go', { finalUrl: 'https://a.example/clip.mp4', contentType: 'video/mp4' });
-    const job = await t.claim('https://a.example/go', { payload: sitePayload('https://a.example/go', { kinds: ['image'], minBytes: 0 }) });
+    const job = await t.claim('https://a.example/go', {
+      payload: sitePayload('https://a.example/go', { kinds: ['image'], minBytes: 0 }),
+    });
     expect(await t.run(job)).toBeNull();
     expect(t.db.jobs.results.get(job.id)).toBe('filtered_kind');
     expect(t.jobRow(job.id).fileId).toBeNull();
@@ -619,7 +667,11 @@ describe('site downloads (payload v2)', () => {
 
   it('a wanted kind with an announced length at minBytes is stored', async () => {
     const t = await setup({ sites: fakeSites().sites });
-    t.remote.answers.set('https://a.example/clip.mp4', { body: Buffer.from('mp4!'), contentLength: 4, contentType: 'video/mp4' });
+    t.remote.answers.set('https://a.example/clip.mp4', {
+      body: Buffer.from('mp4!'),
+      contentLength: 4,
+      contentType: 'video/mp4',
+    });
     const job = await t.claim('https://a.example/clip.mp4', {
       payload: sitePayload('https://a.example/clip.mp4', { kinds: ['image', 'video'], minBytes: 4 }),
     });
@@ -632,7 +684,9 @@ describe('site downloads (payload v2)', () => {
     const t = await setup({ sites: fakeSites().sites });
     const before = [...t.storage.files.keys()];
     t.remote.answers.set('https://a.example/x.png', { body: Buffer.from('png'), contentLength: null });
-    const job = await t.claim('https://a.example/x.png', { payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }) });
+    const job = await t.claim('https://a.example/x.png', {
+      payload: sitePayload('https://a.example/x.png', { kinds: ['image'], minBytes: 4 }),
+    });
     expect(await t.run(job)).toBeNull();
     expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.jobRow(job.id).fileId).toBeNull();
@@ -648,7 +702,9 @@ describe('site downloads (payload v2)', () => {
     t.remote.answers.set('https://a.example/1.png', { body: Buffer.from('png') });
     t.remote.answers.set('https://a.example/2.png', { body: Buffer.from('png') });
     await t.download('https://a.example/1.png');
-    const job = await t.claim('https://a.example/2.png', { payload: sitePayload('https://a.example/2.png', { kinds: ['image'], minBytes: 4 }) });
+    const job = await t.claim('https://a.example/2.png', {
+      payload: sitePayload('https://a.example/2.png', { kinds: ['image'], minBytes: 4 }),
+    });
     expect(await t.run(job)).toBeNull();
     expect(t.db.jobs.results.get(job.id)).toBe('filtered_size');
     expect(t.db.fileOrigins.rows.size).toBe(1);

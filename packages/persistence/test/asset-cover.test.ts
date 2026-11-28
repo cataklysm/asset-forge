@@ -32,7 +32,14 @@ beforeEach(async () => {
   }
   await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T1 });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
 });
 
@@ -42,7 +49,15 @@ afterEach(async () => {
 });
 
 async function addAsset(n: number, name: string): Promise<Asset> {
-  const a: Asset = { id: uuid(n), name, typeId: TYPE_ID, description: '', status: 'draft', createdAt: T1, updatedAt: T1 };
+  const a: Asset = {
+    id: uuid(n),
+    name,
+    typeId: TYPE_ID,
+    description: '',
+    status: 'draft',
+    createdAt: T1,
+    updatedAt: T1,
+  };
   await db.assets.insert(a);
   return a;
 }
@@ -66,7 +81,8 @@ async function addFile(f: {
     kind: 'image',
   });
   const status = f.status ?? 'complete';
-  if (status === 'complete') await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
+  if (status === 'complete')
+    await db.files.markComplete(id, { sizeBytes: 1, sha256: 'a'.repeat(64), width: null, height: null });
   if (status === 'failed') await db.files.markFailed(id, 'Import failed');
   if (f.assetId !== null) await placeIn(id, f.assetId, f.role ?? 'reference');
   return id;
@@ -75,8 +91,7 @@ async function addFile(f: {
 const placeIn = (fileId: string, assetId: string, role: FileRole) =>
   db.files.setPlacement(fileId, { relativePath: `assets/${assetId}/${role}/${fileId}`, assetId, role });
 
-const covers = async () =>
-  (await db.assets.list({ limit: 200, offset: 0 })).items.map((a) => [a.name, a.coverFileId]);
+const covers = async () => (await db.assets.list({ limit: 200, offset: 0 })).items.map((a) => [a.name, a.coverFileId]);
 
 describe('asset cover repository', () => {
   test('list carries the chosen, the automatic (tie by id) or no cover', async () => {
@@ -168,7 +183,14 @@ describe('asset cover repository', () => {
     await db.assets.setCover(a.id, cover, T2);
     const move = (assetId: string, role: FileRole) =>
       db.fileMoves
-        .begin({ fileId: cover, kind: 'relocate', targetRelativePath: `assets/${assetId}/${role}/${cover}`, targetAssetId: assetId, targetRole: role, createdAt: T2 })
+        .begin({
+          fileId: cover,
+          kind: 'relocate',
+          targetRelativePath: `assets/${assetId}/${role}/${cover}`,
+          targetAssetId: assetId,
+          targetRole: role,
+          createdAt: T2,
+        })
         .then(() => db.fileMoves.commit(cover));
 
     await move(a.id, 'texture');

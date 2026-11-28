@@ -66,7 +66,14 @@ describe('migration 0002', () => {
 
     db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);
     expect(await db.assetTypes.list()).toEqual([
-      { id: uuid(1), key: 'character', name: 'Character', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+      {
+        id: uuid(1),
+        key: 'character',
+        name: 'Character',
+        sortOrder: 0,
+        builtIn: true,
+        defaultWorkflowTemplateId: null,
+      },
       { id: uuid(2), key: 'prop', name: 'Prop', sortOrder: 1, builtIn: true, defaultWorkflowTemplateId: null },
     ]);
     const list = await db.assets.list({ limit: 10, offset: 0 });

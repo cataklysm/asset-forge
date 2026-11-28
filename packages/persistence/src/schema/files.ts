@@ -8,7 +8,7 @@ import { storage } from './workspace.js';
 // purged ones.
 
 /** A file of the workspace with its storage and relative path; in an asset with a role, in the inbox, or trashed. */
-export const file =sqliteTable(
+export const file = sqliteTable(
   'file',
   {
     id: text('id').primaryKey(),
@@ -69,7 +69,7 @@ export const fileOrigin = sqliteTable(
 );
 
 /** The journal of a file move in progress: at most one per file, resolved on open when it was left behind. */
-export const fileMove =sqliteTable(
+export const fileMove = sqliteTable(
   'file_move',
   {
     fileId: text('file_id')

@@ -26,13 +26,7 @@ import {
   normalizeTagName,
   parseExtraParameters,
 } from '@assetforge/contracts';
-import {
-  BUILT_IN_IMAGE_PROMPT_TEXT,
-  BUILT_IN_TAGGING_TEXT,
-  imagePrompt,
-  nextId,
-  taggingPrompt,
-} from './fixtures';
+import { BUILT_IN_IMAGE_PROMPT_TEXT, BUILT_IN_TAGGING_TEXT, imagePrompt, nextId, taggingPrompt } from './fixtures';
 
 export type FakeHandlers = {
   [C in IpcChannel]?: (request: IpcRequest<C>) => IpcResponse<C> | Promise<IpcResponse<C>>;
@@ -78,7 +72,8 @@ export function urlImportResultOf(p: Partial<UrlImportResult> = {}): UrlImportRe
   return { queued: 0, alreadyImported: 0, alreadyQueued: 0, invalid: [], ...p };
 }
 
-type PromptChannel = 'analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
+type PromptChannel =
+  'analysisPrompts:list' | 'analysisPrompts:save' | 'analysisPrompts:delete' | 'analysisPrompts:reset';
 
 /**
  * In-memory handlers for the `analysisPrompts:*` channels, refusing what the main process refuses
@@ -106,7 +101,8 @@ export function fakeAnalysisPrompts(seed?: Partial<AnalysisPromptList>): {
     'analysisPrompts:save': (request) => {
       const name = request.name.trim();
       const taken = state.prompts.some(
-        (p) => p.purpose === request.purpose && p.id !== request.id && p.name.trim().toLowerCase() === name.toLowerCase(),
+        (p) =>
+          p.purpose === request.purpose && p.id !== request.id && p.name.trim().toLowerCase() === name.toLowerCase(),
       );
       if (taken) throw fakeError('invalid_operation', 'An analysis prompt with this name already exists');
       const next = { ...request, id: request.id ?? nextId(), name, text: request.text.trim() } as AnalysisPrompt;
@@ -139,7 +135,8 @@ export function fakeAnalysisPrompts(seed?: Partial<AnalysisPromptList>): {
   return { state, handlers };
 }
 
-type ProviderChannel = 'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels' | 'providers:listImageModels';
+type ProviderChannel =
+  'providers:list' | 'providers:save' | 'providers:delete' | 'providers:listModels' | 'providers:listImageModels';
 
 /** A stored provider entry: `Local` on the mock address, with a tagging and a prompt model and no key. */
 export function providerView(p: Partial<ProviderView> = {}): ProviderView {
@@ -192,11 +189,13 @@ export function fakeProviders(
       if (state.fromEnvironment)
         throw fakeError('invalid_operation', 'The provider settings are set by the environment and cannot be changed');
       const name = request.name.trim();
-      if (name.length < 1 || name.length > 60) throw fakeError('validation_failed', 'The provider name must have 1 to 60 characters');
+      if (name.length < 1 || name.length > 60)
+        throw fakeError('validation_failed', 'The provider name must have 1 to 60 characters');
       if (state.providers.some((p) => p.id !== request.id && p.name.toLowerCase() === name.toLowerCase()))
         throw fakeError('invalid_operation', 'A provider with this name already exists');
       const before = request.id === undefined ? undefined : find(request.id);
-      if (before === undefined && state.providers.length >= 10) throw fakeError('invalid_operation', 'No more than 10 providers');
+      if (before === undefined && state.providers.length >= 10)
+        throw fakeError('invalid_operation', 'No more than 10 providers');
       if (before !== undefined && request.kind !== undefined && request.kind !== before.kind)
         throw fakeError('invalid_operation', 'The kind of a provider cannot be changed');
       const kind = before?.kind ?? request.kind ?? 'ollama';
@@ -221,7 +220,8 @@ export function fakeProviders(
         hasApiKey: request.apiKey === undefined ? (before?.hasApiKey ?? false) : request.apiKey !== null,
         options: options === null ? null : { ...options },
       };
-      state.providers = before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
+      state.providers =
+        before === undefined ? [...state.providers, next] : state.providers.map((p) => (p.id === next.id ? next : p));
       return structuredClone(next);
     },
     'providers:delete': ({ id }) => {
@@ -275,9 +275,13 @@ export function fakeAssetSources(asset: AssetDetail): {
     'assets:addSource': ({ assetId, url }) => {
       const current = find(assetId);
       const href = normalised(url);
-      if (current.sources.some((s) => s.url === href)) throw fakeError('invalid_operation', 'This source already exists');
+      if (current.sources.some((s) => s.url === href))
+        throw fakeError('invalid_operation', 'This source already exists');
       if (current.sources.length >= 50) throw fakeError('invalid_operation', 'This asset cannot take more sources');
-      state.asset = { ...current, sources: [...current.sources, { id: nextId(), url: href, createdAt: current.updatedAt }] };
+      state.asset = {
+        ...current,
+        sources: [...current.sources, { id: nextId(), url: href, createdAt: current.updatedAt }],
+      };
       return structuredClone(state.asset);
     },
     'assets:removeSource': ({ assetId, sourceId }) => {
@@ -287,7 +291,8 @@ export function fakeAssetSources(asset: AssetDetail): {
       return structuredClone(state.asset);
     },
     'assets:openSource': ({ assetId, sourceId }) => {
-      if (!find(assetId).sources.some((s) => s.id === sourceId)) throw fakeError('not_found', 'The source does not exist');
+      if (!find(assetId).sources.some((s) => s.id === sourceId))
+        throw fakeError('not_found', 'The source does not exist');
       state.opened.push(sourceId);
       return null;
     },
@@ -309,7 +314,8 @@ export function fakeFileOrigins(origins: Record<string, FileOrigin[]>): {
   const handlers: { [C in OriginChannel]: NonNullable<FakeHandlers[C]> } = {
     'files:origins': ({ fileId }) => structuredClone(origins[fileId] ?? []),
     'files:openOrigin': ({ fileId, originId }) => {
-      if (!(origins[fileId] ?? []).some((o) => o.id === originId)) throw fakeError('not_found', 'The source does not exist');
+      if (!(origins[fileId] ?? []).some((o) => o.id === originId))
+        throw fakeError('not_found', 'The source does not exist');
       state.opened.push({ fileId, originId });
       return {};
     },
@@ -384,22 +390,42 @@ export function fakePrompts(seed: PromptDetail[] = []): {
   const versionOf = (content: string, defaults: Record<string, string>, number: number) => {
     const text = content.trim();
     if (text === '') throw fakeError('validation_failed', 'A prompt needs a text');
-    return { id: nextId(), number, content: text, variables: buildPromptVariables(text, defaults), createdAt: promptTime() };
+    return {
+      id: nextId(),
+      number,
+      content: text,
+      variables: buildPromptVariables(text, defaults),
+      createdAt: promptTime(),
+    };
   };
   const handlers: { [C in LibraryChannel]: NonNullable<FakeHandlers[C]> } = {
     'prompts:list': ({ query, tagNames = [], offset, limit }) => {
-      const words = (query ?? '').toLowerCase().split(/\s+/).filter((word) => word !== '');
+      const words = (query ?? '')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((word) => word !== '');
       const matching = state.prompts.filter((item) => {
         const text = `${item.title} ${item.description} ${item.currentVersion.content}`.toLowerCase();
-        return words.every((word) => text.includes(word)) && tagNames.every((name) => item.tags.some((tag) => tag.name === name));
+        return (
+          words.every((word) => text.includes(word)) &&
+          tagNames.every((name) => item.tags.some((tag) => tag.name === name))
+        );
       });
-      return { items: matching.slice(offset, offset + limit).map((item) => structuredClone(summaryOf(item))), total: matching.length };
+      return {
+        items: matching.slice(offset, offset + limit).map((item) => structuredClone(summaryOf(item))),
+        total: matching.length,
+      };
     },
     'prompts:get': ({ promptId }) => structuredClone(find(promptId)),
     'prompts:create': ({ title, description, content, defaults }) => {
       checkTitle(title.trim(), null);
       const version = versionOf(content, defaults, 1);
-      const created = promptDetail({ title: title.trim(), description: description.trim(), versions: [version], createdAt: version.createdAt });
+      const created = promptDetail({
+        title: title.trim(),
+        description: description.trim(),
+        versions: [version],
+        createdAt: version.createdAt,
+      });
       state.prompts = [created, ...state.prompts];
       return structuredClone(created);
     },
@@ -410,9 +436,15 @@ export function fakePrompts(seed: PromptDetail[] = []): {
     },
     'prompts:saveVersion': ({ promptId, baseVersionId, content, defaults }) => {
       const current = find(promptId);
-      if (current.currentVersion.id !== baseVersionId) throw fakeError('invalid_operation', 'This prompt was changed in the meantime');
+      if (current.currentVersion.id !== baseVersionId)
+        throw fakeError('invalid_operation', 'This prompt was changed in the meantime');
       const version = versionOf(content, defaults, current.currentVersion.number + 1);
-      return store({ ...current, currentVersion: version, versions: [version, ...current.versions], updatedAt: version.createdAt });
+      return store({
+        ...current,
+        currentVersion: version,
+        versions: [version, ...current.versions],
+        updatedAt: version.createdAt,
+      });
     },
     'prompts:delete': ({ promptId }) => {
       find(promptId);
@@ -424,7 +456,10 @@ export function fakePrompts(seed: PromptDetail[] = []): {
       const normalised = normalizeTagName(name);
       if (normalised === null) throw fakeError('validation_failed', 'invalid tag');
       if (current.tags.some((tag) => tag.name === normalised)) return structuredClone(current);
-      return store({ ...current, tags: [...current.tags, { name: normalised, displayName: cleanTagText(name), origin: 'manual' }] });
+      return store({
+        ...current,
+        tags: [...current.tags, { name: normalised, displayName: cleanTagText(name), origin: 'manual' }],
+      });
     },
     'prompts:removeTag': ({ promptId, name }) => {
       const current = find(promptId);

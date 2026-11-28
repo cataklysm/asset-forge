@@ -21,7 +21,11 @@ interface FilteredRequest {
  * @param vet answers whether a host may be reached
  * @param isPage whether a web contents id belongs to a page window
  */
-export function harden(session: Session, vet: (host: string) => Promise<boolean>, isPage: (contentsId: number) => boolean): void {
+export function harden(
+  session: Session,
+  vet: (host: string) => Promise<boolean>,
+  isPage: (contentsId: number) => boolean,
+): void {
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on('will-download', (event, item) => {
@@ -45,7 +49,11 @@ function filterRequest(
   vet: (host: string) => Promise<boolean>,
   isPage: (contentsId: number) => boolean,
 ): void {
-  if (details.webContentsId !== undefined && isPage(details.webContentsId) && pageResourceBlocked(details.resourceType)) {
+  if (
+    details.webContentsId !== undefined &&
+    isPage(details.webContentsId) &&
+    pageResourceBlocked(details.resourceType)
+  ) {
     callback({ cancel: true });
     return;
   }

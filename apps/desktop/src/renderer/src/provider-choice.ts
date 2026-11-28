@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { purposeOf, type ProviderPurpose } from '@assetforge/contracts';
-import { defaultEditModelOf, defaultModelOf, defaultProviderId, useProviders, type ProvidersState } from './provider-context';
+import {
+  defaultEditModelOf,
+  defaultModelOf,
+  defaultProviderId,
+  useProviders,
+  type ProvidersState,
+} from './provider-context';
 
 /** The provider and model one dialog uses, with their setters. */
 export interface ProviderChoice {

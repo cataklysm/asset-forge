@@ -43,7 +43,11 @@ function poll<T>(poller: Poller<T>): void {
  * @param intervalMs the pause before the first request and after every answer
  * @returns stops the poller; an answer still in flight is dropped
  */
-export function startPolling<T>(request: () => Promise<T>, onValue: (value: T) => void, intervalMs: number): () => void {
+export function startPolling<T>(
+  request: () => Promise<T>,
+  onValue: (value: T) => void,
+  intervalMs: number,
+): () => void {
   const poller: Poller<T> = { request, onValue, intervalMs, isStopped: false, timer: null };
   poller.timer = setTimeout(() => poll(poller), intervalMs);
   return () => {

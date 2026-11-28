@@ -20,10 +20,9 @@ function install(seed: PromptDetail[], handlers: FakeHandlers = {}) {
   return { api, store };
 }
 
-function requests<C extends 'prompts:list' | 'prompts:create' | 'prompts:update' | 'prompts:saveVersion' | 'prompts:delete'>(
-  api: ReturnType<typeof installFakeApi>,
-  channel: C,
-): IpcRequest<C>[] {
+function requests<
+  C extends 'prompts:list' | 'prompts:create' | 'prompts:update' | 'prompts:saveVersion' | 'prompts:delete',
+>(api: ReturnType<typeof installFakeApi>, channel: C): IpcRequest<C>[] {
   return api.calls.filter((c) => c.channel === channel).map((c) => c.request as IpcRequest<C>);
 }
 
@@ -47,11 +46,15 @@ const saveButton = () => within(editor()).getByRole<HTMLButtonElement>('button',
 
 async function openPrompt(user: ReturnType<typeof userEvent.setup>, title: string) {
   await user.click(await option(title));
-  await waitFor(() => expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe(title));
+  await waitFor(() =>
+    expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe(title),
+  );
 }
 
 it('the list shows the title, the first line and the tags, pages and reloads for a typed query', async () => {
-  const many = Array.from({ length: 70 }, (_, i) => promptDetail({ title: `Prompt ${i}`, content: `Line ${i}\nsecond` }));
+  const many = Array.from({ length: 70 }, (_, i) =>
+    promptDetail({ title: `Prompt ${i}`, content: `Line ${i}\nsecond` }),
+  );
   many[0] = { ...many[0]!, tags: [tagOf('Hero')] };
   const { api } = install(many);
   render(<PromptsScreen busy={false} />);
@@ -68,7 +71,9 @@ it('the list shows the title, the first line and the tags, pages and reloads for
   act(() => vi.advanceTimersByTime(249));
   expect(requests(api, 'prompts:list').some((r) => r.query !== undefined)).toBe(false);
   act(() => vi.advanceTimersByTime(1));
-  await waitFor(() => expect(requests(api, 'prompts:list').at(-1)).toEqual({ offset: 0, limit: 60, query: 'prompt 6' }));
+  await waitFor(() =>
+    expect(requests(api, 'prompts:list').at(-1)).toEqual({ offset: 0, limit: 60, query: 'prompt 6' }),
+  );
   await within(list()).findByText('Prompt 6');
   await waitFor(() => expect(within(list()).queryByText('Prompt 5')).toBeNull());
 });
@@ -79,7 +84,9 @@ it('the tag filter goes into prompts:list', async () => {
   render(<PromptsScreen busy={false} />);
   await option('Other');
   await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Shop{Enter}');
-  await waitFor(() => expect(requests(api, 'prompts:list').at(-1)).toEqual({ offset: 0, limit: 60, tagNames: ['shop'] }));
+  await waitFor(() =>
+    expect(requests(api, 'prompts:list').at(-1)).toEqual({ offset: 0, limit: 60, tagNames: ['shop'] }),
+  );
   await waitFor(() => expect(within(list()).queryByText('Other')).toBeNull());
   expect(within(list()).getByText('Hero')).toBeTruthy();
 });
@@ -131,7 +138,12 @@ it('editing the text sends prompts:saveVersion with the loaded version as base',
   await user.click(saveButton());
   await waitFor(() =>
     expect(requests(api, 'prompts:saveVersion')).toEqual([
-      { promptId: prompt.id, baseVersionId: prompt.currentVersion.id, content: 'A {{view}} at night', defaults: { view: 'front' } },
+      {
+        promptId: prompt.id,
+        baseVersionId: prompt.currentVersion.id,
+        content: 'A {{view}} at night',
+        defaults: { view: 'front' },
+      },
     ]),
   );
   expect(requests(api, 'prompts:update')).toEqual([]);
@@ -150,7 +162,12 @@ function gate() {
 
 it('while an update and a new version are being saved the fields take no typing, so no edit is lost', async () => {
   const user = userEvent.setup();
-  const prompt = promptDetail({ title: 'Hero', description: 'Shop', content: 'A {{view}}', defaults: { view: 'front' } });
+  const prompt = promptDetail({
+    title: 'Hero',
+    description: 'Shop',
+    content: 'A {{view}}',
+    defaults: { view: 'front' },
+  });
   const store = fakePrompts([prompt]);
   const hold = gate();
   const { api } = install([], {
@@ -162,7 +179,8 @@ it('while an update and a new version are being saved the fields take no typing,
   });
   render(<PromptsScreen busy={false} />);
   await openPrompt(user, 'Hero');
-  const field = (name: string) => within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
+  const field = (name: string) =>
+    within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
   await user.type(field('Title'), ' shot');
   await user.type(field('Text'), ' at night');
   await user.click(saveButton());
@@ -214,7 +232,9 @@ it('while a save runs no older version can be chosen or adopted, so the draft an
   fireEvent.change(select, { target: { value: older } });
   expect(within(editor()).queryByRole('button', { name: 'Use this version' })).toBeNull();
   hold.release();
-  await waitFor(() => expect(within(editor()).getByRole('combobox', { name: 'Version' }).textContent).toMatch(/^v3 · /));
+  await waitFor(() =>
+    expect(within(editor()).getByRole('combobox', { name: 'Version' }).textContent).toMatch(/^v3 · /),
+  );
   await waitFor(() => expect(saveButton().disabled).toBe(true));
   expect(text().value).toBe('New');
   expect(text().readOnly).toBe(false);
@@ -234,7 +254,8 @@ it('while a new prompt is being created the fields take no typing, so no edit is
   render(<PromptsScreen busy={false} />);
   await screen.findByText('No prompts');
   await user.click(screen.getByRole('button', { name: 'New' }));
-  const field = (name: string) => within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
+  const field = (name: string) =>
+    within(editor()).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox', { name });
   await user.type(field('Title'), 'Hero');
   await user.type(field('Text'), 'A cat');
   await user.click(saveButton());
@@ -285,8 +306,20 @@ it('a failed saveVersion after a stored title update still shows the new title i
 
 it('an older version is read-only; Use this version loads it into the draft and enables Save', async () => {
   const user = userEvent.setup();
-  const old = { id: nextId(), number: 1, content: 'Old {{light}}', variables: [{ name: 'light', defaultValue: 'soft' }], createdAt: '2026-11-26T10:00:00.000Z' };
-  const current = { id: nextId(), number: 2, content: 'New text', variables: [], createdAt: '2026-11-27T10:00:00.000Z' };
+  const old = {
+    id: nextId(),
+    number: 1,
+    content: 'Old {{light}}',
+    variables: [{ name: 'light', defaultValue: 'soft' }],
+    createdAt: '2026-11-26T10:00:00.000Z',
+  };
+  const current = {
+    id: nextId(),
+    number: 2,
+    content: 'New text',
+    variables: [],
+    createdAt: '2026-11-27T10:00:00.000Z',
+  };
   const prompt = promptDetail({ title: 'Hero', versions: [current, old] });
   const { api } = install([prompt]);
   render(<PromptsScreen busy={false} />);
@@ -322,7 +355,9 @@ it('Delete asks first, then deletes, selects nothing and reloads the list', asyn
   expect(requests(api, 'prompts:delete')).toEqual([]);
 
   await user.click(within(editor()).getByRole('button', { name: 'Delete' }));
-  await user.click(within(await screen.findByRole('dialog', { name: 'Delete this prompt?' })).getByRole('button', { name: 'Delete' }));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Delete this prompt?' })).getByRole('button', { name: 'Delete' }),
+  );
   await waitFor(() => expect(requests(api, 'prompts:delete')).toEqual([{ promptId: prompt.id }]));
   await waitFor(() => expect(within(list()).queryByText('Hero')).toBeNull());
   expect(screen.getByText('No prompt selected')).toBeTruthy();
@@ -341,8 +376,14 @@ it('a dirty draft asks before another prompt is chosen; cancel keeps the draft, 
   expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Hero shot');
 
   await user.click(await option('Other'));
-  await user.click(within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', { name: 'Discard' }));
-  await waitFor(() => expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Other'));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', {
+      name: 'Discard',
+    }),
+  );
+  await waitFor(() =>
+    expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Other'),
+  );
 });
 
 it('a dirty draft asks before New too', async () => {
@@ -352,15 +393,23 @@ it('a dirty draft asks before New too', async () => {
   await openPrompt(user, 'Hero');
   await user.type(within(editor()).getByRole('textbox', { name: 'Text' }), '!');
   await user.click(screen.getByRole('button', { name: 'New' }));
-  await user.click(within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', { name: 'Discard' }));
-  await waitFor(() => expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe(''));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', {
+      name: 'Discard',
+    }),
+  );
+  await waitFor(() =>
+    expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe(''),
+  );
 });
 
 it('the view with an id opens with that prompt selected', async () => {
   const other = promptDetail({ title: 'Other' });
   install([promptDetail({ title: 'Hero' }), other]);
   render(<PromptsScreen busy={false} initialId={other.id} />);
-  await waitFor(() => expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Other'));
+  await waitFor(() =>
+    expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Other'),
+  );
   expect((await option('Other')).getAttribute('aria-selected')).toBe('true');
 });
 

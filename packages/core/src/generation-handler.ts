@@ -12,7 +12,12 @@ import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generation-name
 import { settleGenerationOfJob } from './generations.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
-import type { GenerationImageSource, ImageInput, ImageProvider, ImageProviderDirectory } from './ports/image-provider.js';
+import type {
+  GenerationImageSource,
+  ImageInput,
+  ImageProvider,
+  ImageProviderDirectory,
+} from './ports/image-provider.js';
 import type { WorkspaceSession } from './session.js';
 
 /** What the `image.generate` job needs. */
@@ -192,7 +197,13 @@ async function readInput(
 ): Promise<ReadInput> {
   const { session } = dependencies;
   const file = fileId === null ? null : await session.database.files.get(fileId);
-  if (file === null || file.status !== 'complete' || file.deletedAt !== null || file.sha256 !== sha256 || file.sizeBytes === null) {
+  if (
+    file === null ||
+    file.status !== 'complete' ||
+    file.deletedAt !== null ||
+    file.sha256 !== sha256 ||
+    file.sizeBytes === null
+  ) {
     throw new JobError('file_unavailable');
   }
   let absolutePath: string;
@@ -201,7 +212,10 @@ async function readInput(
   } catch (cause) {
     throw new JobError('file_unavailable', { cause });
   }
-  const image = await dependencies.images.read({ absolutePath, mimeType: file.mimeType, sha256, sizeBytes: file.sizeBytes }, signal);
+  const image = await dependencies.images.read(
+    { absolutePath, mimeType: file.mimeType, sha256, sizeBytes: file.sizeBytes },
+    signal,
+  );
   if (image === null) throw new JobError('file_unavailable');
   return { image, name: file.originalName, id: file.id };
 }
@@ -256,7 +270,8 @@ async function requestEdit(
   signal: AbortSignal,
 ): Promise<RequestedResult> {
   const parameters = EditParametersSchema.safeParse(generation.parameters);
-  if (!parameters.success || generation.model === null || generation.prompt === null) throw new JobError('internal_error');
+  if (!parameters.success || generation.model === null || generation.prompt === null)
+    throw new JobError('internal_error');
   const rank = await session.database.generations.editRank(generation.id);
   const nameFor = (extension: string) => generationNames.edit(sourceName, rank, extension);
   const answer = await provider.editImage({

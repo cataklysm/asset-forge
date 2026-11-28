@@ -14,9 +14,11 @@ export const MAX_ARCHIVE_ENTRY_NAME_LENGTH = 255;
 /** The result of an archive without a single file entry. */
 export const ARCHIVE_EMPTY_MESSAGE: string = new ValidationFailedError('This archive contains no files').message;
 /** The result of an entry that is a symlink, unsupported, or has an unusable name. */
-export const ARCHIVE_ENTRY_REFUSED_MESSAGE: string = new ValidationFailedError('This archive entry cannot be imported').message;
+export const ARCHIVE_ENTRY_REFUSED_MESSAGE: string = new ValidationFailedError('This archive entry cannot be imported')
+  .message;
 /** The result of an entry that could not be opened. */
-export const ARCHIVE_TRUNCATED_MESSAGE: string = new ValidationFailedError('This archive could not be read to the end').message;
+export const ARCHIVE_TRUNCATED_MESSAGE: string = new ValidationFailedError('This archive could not be read to the end')
+  .message;
 
 /** What the current call may still unpack; `importArchive` subtracts every archive it unpacks. */
 export interface ArchiveBudget {

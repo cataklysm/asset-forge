@@ -30,7 +30,10 @@ export function createFileOriginRepository(database: BetterSQLite3Database): Fil
  * @param fileId the file
  * @returns the origins
  */
-async function listByFile(database: BetterSQLite3Database, fileId: string): ReturnType<FileOriginRepository['listByFile']> {
+async function listByFile(
+  database: BetterSQLite3Database,
+  fileId: string,
+): ReturnType<FileOriginRepository['listByFile']> {
   return database
     .select({ id: fileOrigin.id, url: fileOrigin.url, createdAt: fileOrigin.createdAt })
     .from(fileOrigin)

@@ -1,8 +1,7 @@
 // Shared class strings. The application is dark only; colours come from the design tokens in index.css.
 
 /** The keyboard focus ring of every interactive element. */
-export const FOCUS =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+export const FOCUS = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 /** Hover background of list items that are links (tiles, table rows). */
 export const ITEM_HOVER = 'hover:bg-raised';
@@ -35,7 +34,8 @@ export const INLINE_INPUT = `h-[26px] w-28 rounded-control border border-transpa
 export const SELECT = `h-9 rounded-control border border-line bg-surface px-2.5 text-text ${FOCUS}`;
 
 /** Shape and type shared by every chip; each chip adds one border and one text colour. */
-const CHIP_BASE = 'inline-flex h-[26px] items-center gap-1 rounded-control border bg-transparent px-2.5 text-[13px] font-normal';
+const CHIP_BASE =
+  'inline-flex h-[26px] items-center gap-1 rounded-control border bg-transparent px-2.5 text-[13px] font-normal';
 
 /** A manual tag. */
 export const CHIP = `${CHIP_BASE} border-line-strong text-text`;

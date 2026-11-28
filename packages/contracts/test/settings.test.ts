@@ -20,8 +20,21 @@ import {
 } from '../src/index';
 
 const uuid = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
-const save = { name: 'RunPod', baseUrl: 'http://127.0.0.1:11500', timeoutSeconds: 120, taggingModel: 'qwen', promptModel: null };
-const view = { ...save, id: uuid, kind: 'ollama', editModel: null, hasApiKey: false, options: DEFAULT_PROVIDER_OPTIONS };
+const save = {
+  name: 'RunPod',
+  baseUrl: 'http://127.0.0.1:11500',
+  timeoutSeconds: 120,
+  taggingModel: 'qwen',
+  promptModel: null,
+};
+const view = {
+  ...save,
+  id: uuid,
+  kind: 'ollama',
+  editModel: null,
+  hasApiKey: false,
+  options: DEFAULT_PROVIDER_OPTIONS,
+};
 const veniceView = {
   ...view,
   kind: 'venice',
@@ -64,7 +77,15 @@ describe('provider entries', () => {
   });
 
   test('the API key refuses control characters with a fixed message', () => {
-    for (const apiKey of ['test-key-not-real\n', 'test\rkey', 'test\tkey', 'test\u0000key', 'test\u007fkey', 'test\u0085key', 'test key']) {
+    for (const apiKey of [
+      'test-key-not-real\n',
+      'test\rkey',
+      'test\tkey',
+      'test\u0000key',
+      'test\u007fkey',
+      'test\u0085key',
+      'test key',
+    ]) {
       const parsed = SaveProviderSchema.safeParse({ ...save, apiKey });
       expect(parsed.success, JSON.stringify(apiKey)).toBe(false);
       expect(parsed.error?.issues[0]?.message).toBe(API_KEY_CHARACTERS);
@@ -131,12 +152,25 @@ describe('provider entries', () => {
     expect(
       ListImageModelsResultSchema.safeParse({
         ok: true,
-        models: [{ ...model, aspectRatios: ['1:1'], resolutions: ['1K'], defaultResolution: '1K', promptCharacterLimit: 1500, price: '0.01 USD' }],
+        models: [
+          {
+            ...model,
+            aspectRatios: ['1:1'],
+            resolutions: ['1K'],
+            defaultResolution: '1K',
+            promptCharacterLimit: 1500,
+            price: '0.01 USD',
+          },
+        ],
       }).success,
     ).toBe(true);
     expect(ImageModelSchema.safeParse({ ...model, promptCharacterLimit: 0 }).success).toBe(false);
-    expect(ListImageModelsResultSchema.safeParse({ ok: false, code: 'provider_insufficient_balance' }).success).toBe(true);
-    expect(ListImageModelsResultSchema.safeParse({ ok: true, models: Array.from({ length: 201 }, () => model) }).success).toBe(false);
+    expect(ListImageModelsResultSchema.safeParse({ ok: false, code: 'provider_insufficient_balance' }).success).toBe(
+      true,
+    );
+    expect(
+      ListImageModelsResultSchema.safeParse({ ok: true, models: Array.from({ length: 201 }, () => model) }).success,
+    ).toBe(false);
     const request = ipcContract['providers:listImageModels'].request;
     expect(request.safeParse({ providerId: uuid }).success).toBe(true);
     expect(request.safeParse({ providerId: uuid, refresh: true }).success).toBe(true);

@@ -7,7 +7,14 @@ import { PromptSettings } from '../../src/renderer/src/components/PromptSettings
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
-import { fakeAnalysisPrompts, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
+import {
+  fakeAnalysisPrompts,
+  fakeError,
+  fakeProviders,
+  installFakeApi,
+  providerView,
+  type FakeHandlers,
+} from './fake-api';
 import { BUILT_IN_TAGGING_TEXT, imagePrompt, taggingPrompt } from './fixtures';
 
 const DEFAULT_TAGGING = taggingPrompt();
@@ -32,7 +39,8 @@ function renderSection() {
 }
 
 const group = (name: string) => screen.getByRole('group', { name });
-const entry = (purpose: string, name: string) => within(group(purpose)).getByRole('button', { name }) as HTMLButtonElement;
+const entry = (purpose: string, name: string) =>
+  within(group(purpose)).getByRole('button', { name }) as HTMLButtonElement;
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement | HTMLTextAreaElement;
 
@@ -45,8 +53,16 @@ it('shows both lists and the editor of the selected entry', async () => {
   install();
   renderSection();
   await loaded();
-  expect(within(group('Tagging')).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Default', 'Detailed']);
-  expect(within(group('Image to prompt')).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Default']);
+  expect(
+    within(group('Tagging'))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent),
+  ).toEqual(['Default', 'Detailed']);
+  expect(
+    within(group('Image to prompt'))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent),
+  ).toEqual(['Default']);
 
   await userEvent.click(entry('Tagging', 'Detailed'));
   expect(entry('Tagging', 'Detailed').getAttribute('aria-pressed')).toBe('true');

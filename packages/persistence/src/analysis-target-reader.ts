@@ -1,4 +1,10 @@
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, normalizeTagName, type AnalysisPreview, type AnalysisTarget } from '@assetforge/contracts';
+import {
+  ACTIVE_JOB_STATUSES,
+  ANALYZE_FILE_JOB,
+  normalizeTagName,
+  type AnalysisPreview,
+  type AnalysisTarget,
+} from '@assetforge/contracts';
 import type { AnalysisFingerprint, AnalysisTargetEntry, AnalysisTargetReader } from '@assetforge/core';
 import { and, asc, eq, gt, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -155,7 +161,11 @@ async function targetPage(
         .orderBy(asc(file.id))
         .limit(request.limit)
         .all();
-      return rows.map((row) => ({ fileId: row.fileId, analysable: row.analysable === 1, analysed: row.analysed === 1 }));
+      return rows.map((row) => ({
+        fileId: row.fileId,
+        analysable: row.analysable === 1,
+        analysed: row.analysed === 1,
+      }));
     },
     { behavior: 'deferred' },
   );

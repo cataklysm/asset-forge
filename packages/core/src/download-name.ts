@@ -66,7 +66,8 @@ function lastSegment(finalUrl: string): string | null {
  */
 export function downloadBaseName(download: { finalUrl: string; dispositionName: string | null }): string {
   const { dispositionName } = download;
-  const raw = dispositionName !== null && dispositionName.trim() !== '' ? dispositionName : lastSegment(download.finalUrl);
+  const raw =
+    dispositionName !== null && dispositionName.trim() !== '' ? dispositionName : lastSegment(download.finalUrl);
   return sanitizeFileName(raw ?? FALLBACK_NAME);
 }
 

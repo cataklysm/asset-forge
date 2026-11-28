@@ -1,7 +1,13 @@
 import { useRef, type KeyboardEvent, type RefObject } from 'react';
 import type { PromptSummary } from '@assetforge/contracts';
 import { rowCount } from '../gallery';
-import { useElementSize, useVirtualRows, type ViewPosition, type ViewRestore, type VisibleRows } from '../hooks/useVirtualRows';
+import {
+  useElementSize,
+  useVirtualRows,
+  type ViewPosition,
+  type ViewRestore,
+  type VisibleRows,
+} from '../hooks/useVirtualRows';
 import { PROMPTS_LABEL, RETRY_LABEL } from '../labels';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
@@ -135,7 +141,12 @@ interface RetryRowProps {
  */
 function retryRow({ index, style, rows, onRetry }: RetryRowProps) {
   return (
-    <div key={index} role="presentation" className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`} style={style}>
+    <div
+      key={index}
+      role="presentation"
+      className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
+      style={style}
+    >
       <button
         type="button"
         data-index={index}

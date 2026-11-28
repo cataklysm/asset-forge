@@ -45,7 +45,8 @@ export async function openFile(path: string, range?: RangeRequest): Promise<Open
     await handle.close();
     throw error;
   }
-  const options = resolved === null ? { autoClose: true } : { autoClose: true, start: resolved.start, end: resolved.end };
+  const options =
+    resolved === null ? { autoClose: true } : { autoClose: true, start: resolved.start, end: resolved.end };
   const stream = Readable.toWeb(handle.createReadStream(options));
   return { size, stream: stream as ReadableStream<Uint8Array>, range: resolved };
 }

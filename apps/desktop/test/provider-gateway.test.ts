@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SaveProvider } from '@assetforge/contracts';
 import { JobError, type VisionProvider } from '@assetforge/core';
-import { createOllamaVision, createOpenAiVision, createVeniceImage, type OllamaVisionOptions, type VeniceImageOptions } from '@assetforge/providers';
+import {
+  createOllamaVision,
+  createOpenAiVision,
+  createVeniceImage,
+  type OllamaVisionOptions,
+  type VeniceImageOptions,
+} from '@assetforge/providers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MOCK_EDIT_BASIC_MODEL,
@@ -60,7 +66,12 @@ describe('provider gateway against two mock providers', () => {
   it('sends each entry only its own key, and no key after an entry moves to the other address', async () => {
     const mockA = await mock(KEY);
     const mockB = await mock(OTHER_KEY);
-    const g = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: createVeniceImage, log: (l) => lines.push(l) });
+    const g = createProviderGateway({
+      store,
+      createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+      createImage: createVeniceImage,
+      log: (l) => lines.push(l),
+    });
     const a = store.save(input({ name: 'A', baseUrl: mockA.url, apiKey: KEY }));
     const b = store.save(input({ name: 'B', baseUrl: mockB.url, apiKey: OTHER_KEY }));
 
@@ -87,14 +98,22 @@ describe('provider gateway against two mock providers', () => {
     for (const request of fromStale) expect(request.headers.authorization).toBeUndefined();
 
     // B is untouched.
-    expect(await g.models(b.id, true, signal())).toMatchObject({ ok: true, models: expect.arrayContaining([{ name: MOCK_MODEL, vision: true }]) });
+    expect(await g.models(b.id, true, signal())).toMatchObject({
+      ok: true,
+      models: expect.arrayContaining([{ name: MOCK_MODEL, vision: true }]),
+    });
     expect(mockA.requests.some((r) => r.headers.authorization === `Bearer ${OTHER_KEY}`)).toBe(false);
     expect(lines.join('\n')).not.toContain('test-key-not-real');
   });
 
   it('lists the models of an openai entry from the mock with its key', async () => {
     const m = await mock(KEY);
-    const g = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: createVeniceImage, log: (l) => lines.push(l) });
+    const g = createProviderGateway({
+      store,
+      createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+      createImage: createVeniceImage,
+      log: (l) => lines.push(l),
+    });
     const a = store.save(input({ kind: 'openai', baseUrl: `${m.url}/v1`, apiKey: KEY }));
     const result = await g.models(a.id, true, signal());
     expect(result).toMatchObject({ ok: true, models: expect.arrayContaining([{ name: MOCK_MODEL, vision: null }]) });
@@ -104,7 +123,12 @@ describe('provider gateway against two mock providers', () => {
 
   it('sends no key from a deleted entry to an entry recreated for the same address', async () => {
     const m = await mock(KEY);
-    const g = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: createVeniceImage, log: (l) => lines.push(l) });
+    const g = createProviderGateway({
+      store,
+      createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+      createImage: createVeniceImage,
+      log: (l) => lines.push(l),
+    });
     const old = store.save(input({ baseUrl: m.url, apiKey: KEY }));
     const stale = g.vision(old.id)!;
     store.delete(old.id);
@@ -136,7 +160,13 @@ describe('provider gateway with a fake adapter', () => {
       },
     };
   }
-  const gateway = () => createProviderGateway({ store, createVision: { ollama: fakeCreate, openai: fakeCreateOpenAi }, createImage: createVeniceImage, log: (l) => lines.push(l) });
+  const gateway = () =>
+    createProviderGateway({
+      store,
+      createVision: { ollama: fakeCreate, openai: fakeCreateOpenAi },
+      createImage: createVeniceImage,
+      log: (l) => lines.push(l),
+    });
   const calls = (baseUrl: string) => listCalls.get(baseUrl) ?? 0;
 
   beforeEach(() => {
@@ -161,14 +191,28 @@ describe('provider gateway with a fake adapter', () => {
   });
 
   it('hands the factory the parsed request options and rebuilds the adapter when they change', () => {
-    const a = store.save(openaiInput({ options: { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"top_k":20}', parallelRequests: 8 } }));
+    const a = store.save(
+      openaiInput({
+        options: { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"top_k":20}', parallelRequests: 8 },
+      }),
+    );
     const o = store.save(input());
     const g = gateway();
     const first = g.vision(a.id);
     g.vision(o.id);
-    expect(created[0]!.requestOptions).toEqual({ temperature: 0.4, thinking: 'on', maxTokens: 300, extra: { top_k: 20 } });
+    expect(created[0]!.requestOptions).toEqual({
+      temperature: 0.4,
+      thinking: 'on',
+      maxTokens: 300,
+      extra: { top_k: 20 },
+    });
     expect(created[1]!.requestOptions).toEqual({ temperature: 0, thinking: 'default', maxTokens: null, extra: {} });
-    store.save(openaiInput({ id: a.id, options: { temperature: 1, thinking: 'off', maxTokens: null, extra: '', parallelRequests: 1 } }));
+    store.save(
+      openaiInput({
+        id: a.id,
+        options: { temperature: 1, thinking: 'off', maxTokens: null, extra: '', parallelRequests: 1 },
+      }),
+    );
     const rebuilt = g.vision(a.id);
     expect(rebuilt).not.toBe(first);
     expect(kinds).toEqual(['openai', 'ollama', 'openai']);
@@ -177,11 +221,25 @@ describe('provider gateway with a fake adapter', () => {
 
   it('builds an entry whose stored extra parameters fail the rule with no extra parameters', () => {
     const id = '11111111-2222-4333-8444-555555555555';
-    const entry = { id, kind: 'openai', name: 'vLLM', baseUrl: 'http://192.168.1.40:8000/v1', timeoutSeconds: 60, taggingModel: 'tagger', promptModel: null, editModel: null };
+    const entry = {
+      id,
+      kind: 'openai',
+      name: 'vLLM',
+      baseUrl: 'http://192.168.1.40:8000/v1',
+      timeoutSeconds: 60,
+      taggingModel: 'tagger',
+      promptModel: null,
+      editModel: null,
+    };
     const options = { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"n":2,"top_k":20}' };
     writeFileSync(
       join(dir, 'provider-settings.json'),
-      JSON.stringify({ version: 4, providers: [{ ...entry, options }], lastUsed: { vision: null, image: null }, adoptLegacyKey: null }),
+      JSON.stringify({
+        version: 4,
+        providers: [{ ...entry, options }],
+        lastUsed: { vision: null, image: null },
+        adoptLegacyKey: null,
+      }),
     );
     store = createProviderStore({ userData: dir, secrets: new FakeCodec(), env: {} });
     expect(gateway().vision(id)).not.toBeNull();
@@ -192,7 +250,10 @@ describe('provider gateway with a fake adapter', () => {
   it('lists the models of an openai entry', async () => {
     const a = store.save(openaiInput());
     listResult = async () => [{ name: 'qwen', vision: null }];
-    expect(await gateway().models(a.id, false, signal())).toEqual({ ok: true, models: [{ name: 'qwen', vision: null }] });
+    expect(await gateway().models(a.id, false, signal())).toEqual({
+      ok: true,
+      models: [{ name: 'qwen', vision: null }],
+    });
     expect(kinds).toEqual(['openai']);
   });
 
@@ -344,7 +405,13 @@ describe('provider gateway: image adapters', () => {
     createdVision.push(options);
     return createOllamaVision(options);
   };
-  const gateway = () => createProviderGateway({ store, createVision: { ollama: recordingVision, openai: recordingVision }, createImage: recordingImage, log: (l) => lines.push(l) });
+  const gateway = () =>
+    createProviderGateway({
+      store,
+      createVision: { ollama: recordingVision, openai: recordingVision },
+      createImage: recordingImage,
+      log: (l) => lines.push(l),
+    });
   const veniceUrl = (m: MockProvider) => `${m.url}/api/v1`;
 
   beforeEach(() => {
@@ -408,7 +475,10 @@ describe('provider gateway: image adapters', () => {
     expect(lines).toEqual([`Image provider ${v.id} failed: provider_unauthorized (HTTP 401)`]);
     // The key is read per request: a key stored without a save (so no change event) is used at once.
     mkdirSync(join(dir, 'credentials'), { recursive: true });
-    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(encodeKeyPayload(new URL(veniceUrl(m)).origin, KEY)));
+    writeFileSync(
+      join(dir, 'credentials', `vision-api-key-${v.id}`),
+      new FakeCodec().encrypt(encodeKeyPayload(new URL(veniceUrl(m)).origin, KEY)),
+    );
     const again = await g.imageModels(v.id, false, signal());
     expect(again.ok && again.models.map((x) => x.name)).toEqual([MOCK_EDIT_MODEL, MOCK_EDIT_BASIC_MODEL]);
   });
@@ -417,7 +487,10 @@ describe('provider gateway: image adapters', () => {
     const m = await mock(KEY);
     const v = store.save(veniceInput({ baseUrl: veniceUrl(m) }));
     mkdirSync(join(dir, 'credentials'), { recursive: true });
-    writeFileSync(join(dir, 'credentials', `vision-api-key-${v.id}`), new FakeCodec().encrypt(encodeKeyPayload('https://other.example.test', KEY)));
+    writeFileSync(
+      join(dir, 'credentials', `vision-api-key-${v.id}`),
+      new FakeCodec().encrypt(encodeKeyPayload('https://other.example.test', KEY)),
+    );
     const g = gateway();
     expect(await g.imageModels(v.id, false, signal())).toEqual({ ok: false, code: 'provider_unauthorized' });
     expect(m.requests.length).toBeGreaterThan(0);
@@ -453,7 +526,10 @@ describe('provider gateway: image adapters', () => {
   it('answers not_found for an unknown id and refuses an ollama entry', async () => {
     const o = store.save(input());
     const g = gateway();
-    await expect(g.imageModels(UNKNOWN, false, signal())).rejects.toMatchObject({ code: 'not_found', message: 'This provider does not exist' });
+    await expect(g.imageModels(UNKNOWN, false, signal())).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'This provider does not exist',
+    });
     await expect(g.imageModels(o.id, false, signal())).rejects.toMatchObject({
       code: 'invalid_operation',
       message: 'This provider cannot generate images',
@@ -463,11 +539,17 @@ describe('provider gateway: image adapters', () => {
   it('does not cache an image list that belongs to an earlier build of the entry', async () => {
     const v = store.save(veniceInput());
     let release!: () => void;
-    let answer = () =>
-      new Promise<{ name: string }[]>((resolve) => (release = () => resolve([{ name: 'old' }])));
+    let answer = () => new Promise<{ name: string }[]>((resolve) => (release = () => resolve([{ name: 'old' }])));
     const fakeImage = () => ({
       listEditModels: async () =>
-        (await answer()).map((x) => ({ ...x, aspectRatios: null, resolutions: null, defaultResolution: null, promptCharacterLimit: null, price: null })),
+        (await answer()).map((x) => ({
+          ...x,
+          aspectRatios: null,
+          resolutions: null,
+          defaultResolution: null,
+          promptCharacterLimit: null,
+          price: null,
+        })),
       editImage: async () => {
         throw new Error('unused');
       },
@@ -475,7 +557,12 @@ describe('provider gateway: image adapters', () => {
         throw new Error('unused');
       },
     });
-    const g = createProviderGateway({ store, createVision: { ollama: createOllamaVision, openai: createOpenAiVision }, createImage: fakeImage, log: (l) => lines.push(l) });
+    const g = createProviderGateway({
+      store,
+      createVision: { ollama: createOllamaVision, openai: createOpenAiVision },
+      createImage: fakeImage,
+      log: (l) => lines.push(l),
+    });
     const pending = g.imageModels(v.id, false, signal());
     store.save(veniceInput({ id: v.id, timeoutSeconds: 200 }));
     release();

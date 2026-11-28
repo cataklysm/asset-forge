@@ -68,7 +68,13 @@ describe('renameInSelection', () => {
   it('rewrites the selected records in place and keeps the anchor and the order', () => {
     const a = fileRecord({ tags: [tagOf('oak')] });
     const b = fileRecord({ tags: [tagOf('front view', 'ai'), tagOf('front')] });
-    const sel: FileSelection = { selected: new Map([[a.id, a], [b.id, b]]), anchor: 3 };
+    const sel: FileSelection = {
+      selected: new Map([
+        [a.id, a],
+        [b.id, b],
+      ]),
+      anchor: 3,
+    };
     const next = renameInSelection(sel, toFront);
     expect(next).not.toBe(sel);
     expect(next.anchor).toBe(3);

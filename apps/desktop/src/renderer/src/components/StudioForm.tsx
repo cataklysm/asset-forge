@@ -160,7 +160,13 @@ interface AttachedPromptFieldsProps {
  * @param props the attached prompt, the id prefix and the callbacks
  * @returns the fields
  */
-function AttachedPromptFields({ attached, variablesId, onVariable, onEditText, onLoadCurrent }: AttachedPromptFieldsProps) {
+function AttachedPromptFields({
+  attached,
+  variablesId,
+  onVariable,
+  onEditText,
+  onLoadCurrent,
+}: AttachedPromptFieldsProps) {
   const label = attachedPromptLabel(attached.title, attached.version.number);
   return (
     <div className="flex flex-col gap-3">
@@ -170,7 +176,12 @@ function AttachedPromptFields({ attached, variablesId, onVariable, onEditText, o
             {label}
           </span>
         ) : (
-          <button type="button" className={`min-w-0 ${BUTTON_INLINE}`} title={NEWER_VERSION_TITLE} onClick={onLoadCurrent}>
+          <button
+            type="button"
+            className={`min-w-0 ${BUTTON_INLINE}`}
+            title={NEWER_VERSION_TITLE}
+            onClick={onLoadCurrent}
+          >
             <span className="truncate">{label}</span>
           </button>
         )}
@@ -257,8 +268,18 @@ export function StudioForm(props: Props) {
   return (
     <div className="flex flex-col gap-3">
       <ProviderSelect purpose="image" value={form.providerId} onChange={props.onProvider} />
-      <EditModelSelect providerId={form.providerId} value={form.model} onChange={props.onModel} disabled={form.providerId === null} />
-      <PromptHeading promptId={promptId} recentPrompts={props.recentPrompts} onLibrary={props.onLibrary} onRecent={props.onRecent} />
+      <EditModelSelect
+        providerId={form.providerId}
+        value={form.model}
+        onChange={props.onModel}
+        disabled={form.providerId === null}
+      />
+      <PromptHeading
+        promptId={promptId}
+        recentPrompts={props.recentPrompts}
+        onLibrary={props.onLibrary}
+        onRecent={props.onRecent}
+      />
       {attached !== null && (
         <AttachedPromptFields
           attached={attached}

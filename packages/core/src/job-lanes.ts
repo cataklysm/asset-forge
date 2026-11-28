@@ -27,7 +27,8 @@ export async function rerouteJobs(
   session: WorkspaceSession,
   request: { fromLane: string | null; to: { id: string; name: string }; model: string },
 ): Promise<{ moved: number }> {
-  if (request.fromLane === request.to.id) throw new InvalidOperationError('Jobs cannot be moved onto the same provider');
+  if (request.fromLane === request.to.id)
+    throw new InvalidOperationError('Jobs cannot be moved onto the same provider');
   const to = { name: request.to.name, model: request.model };
   const moved = await session.database.jobs.rerouteWaiting({
     type: ANALYZE_FILE_JOB,

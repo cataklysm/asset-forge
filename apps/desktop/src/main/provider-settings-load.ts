@@ -53,7 +53,12 @@ export function loadProviderSettings(settingsPath: string, keys: ProviderKeyFile
  * @param degraded whether something was left out; then nothing is deleted or written
  * @returns the settings without the marker, or unchanged on a degraded load that keeps the legacy key
  */
-function adoptLegacyKey(settingsPath: string, keys: ProviderKeyFiles, stored: StoredSettings, degraded: boolean): StoredSettings {
+function adoptLegacyKey(
+  settingsPath: string,
+  keys: ProviderKeyFiles,
+  stored: StoredSettings,
+  degraded: boolean,
+): StoredSettings {
   const marker = stored.adoptLegacyKey;
   if (marker === null) return stored;
   const entry = stored.providers.find((provider) => provider.id === marker.id);
@@ -78,7 +83,12 @@ function adoptLegacyKey(settingsPath: string, keys: ProviderKeyFiles, stored: St
  * @param keepKeys whether no key file may be deleted
  * @returns the upgraded settings
  */
-function upgradeVersionOne(settingsPath: string, keys: ProviderKeyFiles, vision: VersionOneVision, keepKeys: boolean): StoredSettings {
+function upgradeVersionOne(
+  settingsPath: string,
+  keys: ProviderKeyFiles,
+  vision: VersionOneVision,
+  keepKeys: boolean,
+): StoredSettings {
   if (vision.baseUrl === null) {
     writeStoredSettings(settingsPath, EMPTY_SETTINGS);
     if (!keepKeys) keys.removeLegacyKey();
@@ -96,7 +106,11 @@ function upgradeVersionOne(settingsPath: string, keys: ProviderKeyFiles, vision:
     editModel: null,
     options: optionsFor('ollama'),
   };
-  const marked: StoredSettings = { ...EMPTY_SETTINGS, providers: [entry], adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! } };
+  const marked: StoredSettings = {
+    ...EMPTY_SETTINGS,
+    providers: [entry],
+    adoptLegacyKey: { id, origin: originOf(entry.baseUrl)! },
+  };
   writeStoredSettings(settingsPath, marked);
   return adoptLegacyKey(settingsPath, keys, marked, keepKeys);
 }

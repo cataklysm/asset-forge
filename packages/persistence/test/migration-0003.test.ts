@@ -47,7 +47,9 @@ describe('migration 0003', () => {
   test('migration 0003 adds an empty cover column and fixes avif MIME types', async () => {
     await createPhase2bDatabase();
     const seed = new Database(dbPath);
-    seed.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    seed
+      .prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)')
+      .run(uuid(1), 'ws', TS);
     seed.prepare("INSERT INTO storage (id, kind, created_at) VALUES (?, 'workspace_root', ?)").run(uuid(2), TS);
     seed
       .prepare("INSERT INTO asset_type (id, key, name, sort_order, built_in) VALUES (?, 'prop', 'Prop', 0, 1)")
@@ -72,8 +74,7 @@ describe('migration 0003', () => {
 
     const check = new Database(dbPath, { readonly: true });
     try {
-      const cols = (table: string) =>
-        (check.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name);
+      const cols = (table: string) => (check.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name);
       const mime = (name: string) =>
         (check.prepare('SELECT mime_type AS m FROM file WHERE original_name = ?').get(name) as { m: string }).m;
       expect(cols('asset')).toContain('cover_file_id');

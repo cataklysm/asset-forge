@@ -1,4 +1,10 @@
-import type { ApprovalStatus, AssetAssignment, AssignmentPriority, ProjectAssignment, ProjectMemberList } from '@assetforge/contracts';
+import type {
+  ApprovalStatus,
+  AssetAssignment,
+  AssignmentPriority,
+  ProjectAssignment,
+  ProjectMemberList,
+} from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
 import type { Page } from './ports/page.js';
 import type { AssignmentKey } from './ports/project-repositories.js';

@@ -63,7 +63,17 @@ const MODELS: ListModelsResult = {
   ],
 };
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 function proposalOf(p: Partial<ProposalView> = {}): ProposalView {
   return {
@@ -167,7 +177,14 @@ function setup(file: FileRecord, options: Options = {}) {
     </JobsProvider>
   );
   const view = render(ui(options.open ?? true));
-  return { api, state, onClose, onChanged, onOpenSettings, rerender: (open: boolean, shownFile?: FileRecord) => view.rerender(ui(open, shownFile)) };
+  return {
+    api,
+    state,
+    onClose,
+    onChanged,
+    onOpenSettings,
+    rerender: (open: boolean, shownFile?: FileRecord) => view.rerender(ui(open, shownFile)),
+  };
 }
 
 const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
@@ -179,7 +196,13 @@ const modelSelect = () => screen.getByRole('combobox', { name: 'Tagging model' }
 
 /** Waits until the provider has the settings and the model list. */
 async function providerReady() {
-  await waitFor(() => expect(within(modelSelect()).getAllByRole('option').map((o) => o.textContent)).toContain('vision-b'));
+  await waitFor(() =>
+    expect(
+      within(modelSelect())
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toContain('vision-b'),
+  );
 }
 
 describe('AnalysisResultDialog', () => {
@@ -315,17 +338,26 @@ describe('AnalysisResultDialog', () => {
     rerender(false);
     rerender(true, b);
     await waitFor(() =>
-      expect(callsOf(api, 'analysis:getProposal').some((c) => (c.request as { fileId: string }).fileId === b.id)).toBe(true),
+      expect(callsOf(api, 'analysis:getProposal').some((c) => (c.request as { fileId: string }).fileId === b.id)).toBe(
+        true,
+      ),
     );
     await waitFor(() => expect(button('Analyse').disabled).toBe(false));
 
-    const readsOfA = callsOf(api, 'analysis:getProposal').filter((c) => (c.request as { fileId: string }).fileId === a.id).length;
+    const readsOfA = callsOf(api, 'analysis:getProposal').filter(
+      (c) => (c.request as { fileId: string }).fileId === a.id,
+    ).length;
     await act(async () =>
-      pending.resolve({ enqueued: 0, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } }),
+      pending.resolve({
+        enqueued: 0,
+        skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 },
+      }),
     );
     expect(screen.queryByRole('alert')).toBeNull();
     expect(button('Analyse').disabled).toBe(false);
-    expect(callsOf(api, 'analysis:getProposal').filter((c) => (c.request as { fileId: string }).fileId === a.id)).toHaveLength(readsOfA);
+    expect(
+      callsOf(api, 'analysis:getProposal').filter((c) => (c.request as { fileId: string }).fileId === a.id),
+    ).toHaveLength(readsOfA);
   });
 
   it('an accept that succeeds after the dialog moved on reports the change but does not close the new opening', async () => {
@@ -436,7 +468,7 @@ describe('AnalysisResultDialog', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect((screen.getByRole('status')).textContent).toContain('Running');
+    expect(screen.getByRole('status').textContent).toContain('Running');
 
     state.stored = { proposal: proposalOf(), job: { ...job, status: 'succeeded' } };
     state.summary = { ...IDLE, succeeded: 1, changes: 1 };
@@ -613,7 +645,8 @@ describe('AnalysisResultDialog', () => {
     setup(file, { stored: { proposal: proposalOf(), job: null } });
     await screen.findByRole('checkbox', { name: 'Wood' });
     await providerReady();
-    for (const el of screen.getAllByRole('button')) expect([BUTTON, ICON_BUTTON, BUTTON_INLINE]).toContain(el.className);
+    for (const el of screen.getAllByRole('button'))
+      expect([BUTTON, ICON_BUTTON, BUTTON_INLINE]).toContain(el.className);
   });
 });
 
@@ -636,14 +669,18 @@ describe('AnalysisResultDialog prompt choice', () => {
 
   it('preselects the tagging prompt used last', async () => {
     setup(fileRecord(), {
-      handlers: fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DETAIL.id, imagePrompt: null } }).handlers,
+      handlers: fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: TAG_DETAIL.id, imagePrompt: null } })
+        .handlers,
     });
     await waitFor(() => expect(promptSelect().value).toBe(TAG_DETAIL.id));
   });
 
   it('preselects the first tagging prompt when the one used last is gone', async () => {
     setup(fileRecord(), {
-      handlers: fakeAnalysisPrompts({ prompts: PROMPTS, lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id } }).handlers,
+      handlers: fakeAnalysisPrompts({
+        prompts: PROMPTS,
+        lastUsed: { tagging: nextId(), imagePrompt: IMAGE_DEFAULT.id },
+      }).handlers,
     });
     await providerReady();
     await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
@@ -711,7 +748,11 @@ describe('AnalysisResultDialog prompt choice', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
     await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
     expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
-    expect(within(promptSelect()).getAllByRole('option').map((o) => o.textContent)).toEqual(['Default']);
+    expect(
+      within(promptSelect())
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Default']);
   });
 
   it('shows the prompt name of a proposal beside its model', async () => {
@@ -738,12 +779,20 @@ describe('AnalysisResultDialog prompt choice', () => {
 });
 
 describe('AnalysisResultDialog provider choice', () => {
-  const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: 'big-vision', promptModel: null });
+  const RUNPOD = providerView({
+    name: 'RunPod',
+    baseUrl: 'https://pod.example.test',
+    taggingModel: 'big-vision',
+    promptModel: null,
+  });
   const POD_MODELS: ListModelsResult = { ok: true, models: [{ name: 'big-vision', vision: true }] };
   const DOWN: ListModelsResult = { ok: false, code: 'provider_unreachable' };
 
   const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
-  const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
+  const optionTexts = (el: HTMLSelectElement) =>
+    within(el)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
 
   function two(lastUsedId: string | null, models: Record<string, ListModelsResult> = {}): FakeHandlers {
     return fakeProviders(

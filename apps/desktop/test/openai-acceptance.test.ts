@@ -54,12 +54,18 @@ describe('OpenAI-compatible provider acceptance', () => {
     await h.until((s) => s.succeeded === 1);
     const [file] = (await h.ok('files:list', { limit: 10, offset: 0, scope: { kind: 'all' } })).items;
     expect(file!.tags.filter((t) => t.origin === 'ai').length).toBeGreaterThan(0);
-    expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({ provider: OPENAI_PROVIDER, model: MOCK_MODEL });
+    expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({
+      provider: OPENAI_PROVIDER,
+      model: MOCK_MODEL,
+    });
     expect(chatCompletions()).toHaveLength(1);
     expect(chatCompletions()[0]!.headers['authorization']).toBe(`Bearer ${TEST_KEY}`);
 
     // A second enqueue on the openai entry is skipped by the fingerprint.
-    expect(await enqueue(fileId!, openai.id)).toEqual({ enqueued: 0, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 } });
+    expect(await enqueue(fileId!, openai.id)).toEqual({
+      enqueued: 0,
+      skipped: { ...NONE_SKIPPED, alreadyAnalysed: 1 },
+    });
 
     // The same file and model name on an ollama entry is another provider: analysed again, not skipped.
     const ollama = await h.provider({ name: 'Ollama', url: mock.url, apiKey: TEST_KEY });
@@ -69,7 +75,12 @@ describe('OpenAI-compatible provider acceptance', () => {
     expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({ provider: OLLAMA_PROVIDER });
     expect(chatCompletions()).toHaveLength(1);
 
-    const answer = await h.ok('analysis:describe', { requestId: REQUEST_ID, fileId: fileId!, model: MOCK_MODEL, providerId: openai.id });
+    const answer = await h.ok('analysis:describe', {
+      requestId: REQUEST_ID,
+      fileId: fileId!,
+      model: MOCK_MODEL,
+      providerId: openai.id,
+    });
     expect(answer.ok).toBe(true);
     expect(answer.ok && answer.text.length).toBeGreaterThan(0);
     expect(chatCompletions()).toHaveLength(2);
@@ -80,7 +91,9 @@ describe('OpenAI-compatible provider acceptance', () => {
     await enqueue(second!, openai.id);
     await h.until((s) => s.succeeded === 3);
     const last = chatCompletions().at(-1)!;
-    expect((last.body as { chat_template_kwargs?: { enable_thinking?: unknown } }).chat_template_kwargs?.enable_thinking).toBe(false);
+    expect(
+      (last.body as { chat_template_kwargs?: { enable_thinking?: unknown } }).chat_template_kwargs?.enable_thinking,
+    ).toBe(false);
     expect(last.headers['authorization']).toBe(`Bearer ${TEST_KEY}`);
 
     for (const line of h.logs) {

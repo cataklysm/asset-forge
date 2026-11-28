@@ -7,7 +7,17 @@ import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 const LOCAL = providerView({ name: 'Local Ollama', taggingModel: 'vision-a' });
 const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: 'big-vision' });
@@ -46,7 +56,8 @@ function renderDialog(source: string | null | undefined, onClose = vi.fn()) {
   return { onClose, dialog: screen.getByRole('dialog', { name: 'Move jobs' }) };
 }
 
-const targetSelect = (dialog: HTMLElement) => within(dialog).getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
+const targetSelect = (dialog: HTMLElement) =>
+  within(dialog).getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
 const moveButton = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: 'Move' }) as HTMLButtonElement;
 const reroutes = (api: ReturnType<typeof installFakeApi>) =>
   api.calls.filter((c) => c.channel === 'jobs:reroute').map((c) => c.request as IpcRequest<'jobs:reroute'>);
@@ -58,10 +69,14 @@ it('a fixed source shows its name and waiting count; the target omits it and pre
   expect(within(dialog).getByText('Local Ollama')).toBeTruthy();
   expect(within(dialog).queryByRole('combobox', { name: 'From' })).toBeNull();
   await waitFor(() => expect(targetSelect(dialog).value).toBe(RUNPOD.id));
-  const options = within(targetSelect(dialog)).getAllByRole('option').map((o) => o.textContent);
+  const options = within(targetSelect(dialog))
+    .getAllByRole('option')
+    .map((o) => o.textContent);
   expect(options.some((o) => o?.startsWith('Local Ollama'))).toBe(false);
   expect(options).toEqual(['RunPod — ready', 'Spare — ready']);
-  expect((within(dialog).getByRole('combobox', { name: 'Tagging model' }) as HTMLSelectElement).value).toBe('big-vision');
+  expect((within(dialog).getByRole('combobox', { name: 'Tagging model' }) as HTMLSelectElement).value).toBe(
+    'big-vision',
+  );
   await waitFor(() => expect(moveButton(dialog).disabled).toBe(false));
 });
 
@@ -145,7 +160,13 @@ it('without a source the From select lists the lanes and switches the count and 
   const api = install();
   const { dialog } = renderDialog(undefined);
   const from = (await within(dialog).findByRole('combobox', { name: 'From' })) as HTMLSelectElement;
-  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['Local Ollama', 'No provider']));
+  await waitFor(() =>
+    expect(
+      within(from)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Local Ollama', 'No provider']),
+  );
   expect(within(dialog).getByText('312 waiting')).toBeTruthy();
   await user.selectOptions(from, 'No provider');
   expect(within(dialog).getByText('4 waiting')).toBeTruthy();
@@ -154,11 +175,19 @@ it('without a source the From select lists the lanes and switches the count and 
   await user.selectOptions(targetSelect(dialog), RUNPOD.id);
   await waitFor(() => expect(moveButton(dialog).disabled).toBe(false));
   await user.click(moveButton(dialog));
-  await waitFor(() => expect(reroutes(api)).toEqual([{ fromProviderId: null, toProviderId: RUNPOD.id, model: 'big-vision' }]));
+  await waitFor(() =>
+    expect(reroutes(api)).toEqual([{ fromProviderId: null, toProviderId: RUNPOD.id, model: 'big-vision' }]),
+  );
 });
 
 it('Move jobs offers no Venice target, even when it comes first or was used last', async () => {
-  const venice = providerView({ kind: 'venice', name: 'Venice', taggingModel: null, promptModel: null, editModel: 'edit-a' });
+  const venice = providerView({
+    kind: 'venice',
+    name: 'Venice',
+    taggingModel: null,
+    promptModel: null,
+    editModel: 'edit-a',
+  });
   installFakeApi({
     ...fakeProviders(
       { providers: [venice, LOCAL, RUNPOD, SPARE], lastUsedId: null, lastUsedImageId: venice.id },
@@ -170,13 +199,20 @@ it('Move jobs offers no Venice target, even when it comes first or was used last
   const { dialog } = renderDialog(LOCAL.id);
   await within(dialog).findByText('312 waiting');
   await waitFor(() => expect(targetSelect(dialog).value).toBe(RUNPOD.id));
-  const options = within(targetSelect(dialog)).getAllByRole('option').map((o) => o.textContent);
+  const options = within(targetSelect(dialog))
+    .getAllByRole('option')
+    .map((o) => o.textContent);
   expect(options).toEqual(['RunPod — ready', 'Spare — ready']);
 });
 
 it('an ollama source moves onto an OpenAI-compatible target', async () => {
   const user = userEvent.setup();
-  const vllm = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl' });
+  const vllm = providerView({
+    kind: 'openai',
+    name: 'vLLM',
+    baseUrl: 'http://127.0.0.1:11500/v1',
+    taggingModel: 'qwen-vl',
+  });
   const api = installFakeApi({
     ...fakeProviders(
       { providers: [LOCAL, vllm], lastUsedId: null },
@@ -189,10 +225,16 @@ it('an ollama source moves onto an OpenAI-compatible target', async () => {
   const { dialog } = renderDialog(LOCAL.id);
   await within(dialog).findByText('312 waiting');
   await waitFor(() => expect(targetSelect(dialog).value).toBe(vllm.id));
-  expect(within(targetSelect(dialog)).getAllByRole('option').map((o) => o.textContent)).toEqual(['vLLM — ready']);
+  expect(
+    within(targetSelect(dialog))
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['vLLM — ready']);
   await waitFor(() => expect(moveButton(dialog).disabled).toBe(false));
   await user.click(moveButton(dialog));
-  await waitFor(() => expect(reroutes(api)).toEqual([{ fromProviderId: LOCAL.id, toProviderId: vllm.id, model: 'qwen-vl' }]));
+  await waitFor(() =>
+    expect(reroutes(api)).toEqual([{ fromProviderId: LOCAL.id, toProviderId: vllm.id, model: 'qwen-vl' }]),
+  );
 });
 
 it('an OpenAI-compatible source is offered in the From select', async () => {
@@ -204,7 +246,13 @@ it('an OpenAI-compatible source is offered in the From select', async () => {
   });
   const { dialog } = renderDialog(undefined);
   const from = (await within(dialog).findByRole('combobox', { name: 'From' })) as HTMLSelectElement;
-  await waitFor(() => expect(within(from).getAllByRole('option').map((o) => o.textContent)).toEqual(['vLLM']));
+  await waitFor(() =>
+    expect(
+      within(from)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['vLLM']),
+  );
   await waitFor(() => expect(targetSelect(dialog).value).toBe(LOCAL.id));
 });
 

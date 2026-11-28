@@ -52,7 +52,9 @@ const samePaused = (left: JobSummary['paused'], right: JobSummary['paused']) =>
   left.length === right.length &&
   left.every(
     (pause, i) =>
-      pause.providerId === right[i]!.providerId && pause.providerName === right[i]!.providerName && pause.reason === right[i]!.reason,
+      pause.providerId === right[i]!.providerId &&
+      pause.providerName === right[i]!.providerName &&
+      pause.reason === right[i]!.reason,
   );
 
 /**
@@ -63,7 +65,8 @@ const samePaused = (left: JobSummary['paused'], right: JobSummary['paused']) =>
  * @returns true when they are equal
  */
 const samePausedHosts = (left: JobSummary['pausedHosts'], right: JobSummary['pausedHosts']) =>
-  left.length === right.length && left.every((pause, i) => pause.host === right[i]!.host && pause.reason === right[i]!.reason);
+  left.length === right.length &&
+  left.every((pause, i) => pause.host === right[i]!.host && pause.reason === right[i]!.reason);
 
 /**
  * Every count by value, and both pause lists entry by entry (each poll parses new objects).

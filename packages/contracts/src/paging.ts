@@ -16,5 +16,4 @@ export type PageRequest = z.infer<typeof PageRequestSchema>;
  * @param item the schema of one row
  * @returns a schema of `{ items, total }`, where `total` counts the rows of the whole list
  */
-export const pageOf = <T extends z.ZodType>(item: T) =>
-  z.object({ items: z.array(item), total: count });
+export const pageOf = <T extends z.ZodType>(item: T) => z.object({ items: z.array(item), total: count });

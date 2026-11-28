@@ -26,7 +26,10 @@ export function createAssetSourceRepository(database: BetterSQLite3Database): As
  * @param assetId the asset
  * @returns the sources
  */
-async function listByAsset(database: BetterSQLite3Database, assetId: string): ReturnType<AssetSourceRepository['listByAsset']> {
+async function listByAsset(
+  database: BetterSQLite3Database,
+  assetId: string,
+): ReturnType<AssetSourceRepository['listByAsset']> {
   return database
     .select({ id: assetSource.id, url: assetSource.url, createdAt: assetSource.createdAt })
     .from(assetSource)

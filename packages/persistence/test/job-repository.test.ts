@@ -77,7 +77,9 @@ const failedJob = (n: number, now: string, dedupeKey: string | null = null) => f
 
 describe('job repository', () => {
   test('enqueue inserts queued jobs with attempt 0 and keeps the payload', async () => {
-    expect(await enqueue(T0, newJob(10, { fileId: FILE_ID, payload: { version: 1, extra: [1, 2] } }))).toEqual([uuid(10)]);
+    expect(await enqueue(T0, newJob(10, { fileId: FILE_ID, payload: { version: 1, extra: [1, 2] } }))).toEqual([
+      uuid(10),
+    ]);
     expect(await db.jobs.get(uuid(10))).toEqual({
       id: uuid(10),
       type: TYPE,
@@ -100,10 +102,14 @@ describe('job repository', () => {
   });
 
   test('enqueue skips a job whose dedupe key is held, within one call and across calls', async () => {
-    expect(await enqueue(T0, newJob(10, { dedupeKey: 'k' }), newJob(11, { dedupeKey: 'k' }), newJob(12, { dedupeKey: 'other' }))).toEqual([
-      uuid(10),
-      uuid(12),
-    ]);
+    expect(
+      await enqueue(
+        T0,
+        newJob(10, { dedupeKey: 'k' }),
+        newJob(11, { dedupeKey: 'k' }),
+        newJob(12, { dedupeKey: 'other' }),
+      ),
+    ).toEqual([uuid(10), uuid(12)]);
     expect(await enqueue(T1, newJob(13, { dedupeKey: 'k' }), newJob(14))).toEqual([uuid(14)]);
     expect(await db.jobs.get(uuid(11))).toBeNull();
     expect(await db.jobs.get(uuid(13))).toBeNull();
@@ -210,7 +216,12 @@ describe('job repository', () => {
       updatedAt: T1,
     });
     expect(await db.jobs.finish(uuid(11), { status: 'succeeded', errorCode: null, now: T2 })).toBe(true);
-    expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'succeeded', errorCode: null, errorMessage: null, finishedAt: T2 });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({
+      status: 'succeeded',
+      errorCode: null,
+      errorMessage: null,
+      finishedAt: T2,
+    });
   });
 
   test('cancelPending cancels one or all pending jobs and leaves running and finished ones alone', async () => {
@@ -259,7 +270,9 @@ describe('job repository', () => {
     const settled = vi.fn();
     expect(await db.jobs.finish(uuid(10), { status: 'succeeded', errorCode: null, now: T1, settled })).toBe(true);
     expect(settled).toHaveBeenCalledTimes(1);
-    expect(await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T2, settled })).toBe(false);
+    expect(await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T2, settled })).toBe(
+      false,
+    );
     expect(settled).toHaveBeenCalledTimes(1);
   });
 
@@ -269,7 +282,9 @@ describe('job repository', () => {
     const settled = () => {
       throw new Error('boom');
     };
-    await expect(db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1, settled })).rejects.toThrow('boom');
+    await expect(
+      db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1, settled }),
+    ).rejects.toThrow('boom');
     expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'running', errorCode: null, finishedAt: null });
   });
 
@@ -308,11 +323,22 @@ describe('job repository', () => {
   });
 
   test('cancelPendingOfFile cancels only the pending jobs of the file, running settled per job', async () => {
-    await enqueue(T0, newJob(10, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(12), newJob(13, { fileId: FILE_ID }));
+    await enqueue(
+      T0,
+      newJob(10, { fileId: FILE_ID }),
+      newJob(11, { fileId: FILE_ID }),
+      newJob(12),
+      newJob(13, { fileId: FILE_ID }),
+    );
     await claim(T0); // 10 running: not of a refused type, so it stays and is not counted
     const seen: string[] = [];
     expect(
-      await db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: ['image.generate'], now: T1, settled: (j) => seen.push(j.id) }),
+      await db.jobs.cancelPendingOfFile({
+        fileId: FILE_ID,
+        refuseRunning: ['image.generate'],
+        now: T1,
+        settled: (j) => seen.push(j.id),
+      }),
     ).toEqual({ refused: false, cancelled: 2 });
     expect(seen.sort()).toEqual([uuid(11), uuid(13)]);
     expect(await db.jobs.get(uuid(11))).toMatchObject({ status: 'cancelled', finishedAt: T1 });
@@ -324,7 +350,9 @@ describe('job repository', () => {
     const throwing = () => {
       if (++calls === 2) throw new Error('boom');
     };
-    await expect(db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: [], now: T3, settled: throwing })).rejects.toThrow('boom');
+    await expect(
+      db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: [], now: T3, settled: throwing }),
+    ).rejects.toThrow('boom');
     expect((await db.jobs.get(uuid(14)))?.status).toBe('queued');
     expect((await db.jobs.get(uuid(15)))?.status).toBe('queued');
   });
@@ -424,7 +452,10 @@ describe('job repository', () => {
     expect(rest.items[0]).toMatchObject({ fileId: null, fileName: null });
 
     const failed = await db.jobs.list({ limit: 10, offset: 0, status: 'failed' });
-    expect(failed).toMatchObject({ total: 1, items: [{ id: uuid(13), errorCode: 'provider_rejected', errorMessage: JOB_ERROR_MESSAGES.provider_rejected }] });
+    expect(failed).toMatchObject({
+      total: 1,
+      items: [{ id: uuid(13), errorCode: 'provider_rejected', errorMessage: JOB_ERROR_MESSAGES.provider_rejected }],
+    });
   });
 
   test('latestForFile returns the newest job of the type for the file, whatever its status', async () => {
@@ -434,7 +465,12 @@ describe('job repository', () => {
     await db.jobs.finish(uuid(10), { status: 'failed', errorCode: 'provider_rejected', now: T1 });
     expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(10), status: 'failed' });
 
-    await enqueue(T2, newJob(12, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(13, { fileId: FILE_ID, type: 'other.type' }));
+    await enqueue(
+      T2,
+      newJob(12, { fileId: FILE_ID }),
+      newJob(11, { fileId: FILE_ID }),
+      newJob(13, { fileId: FILE_ID, type: 'other.type' }),
+    );
     await enqueue(T3, newJob(14));
     // Same created_at: the higher id wins.
     expect(await db.jobs.latestForFile(FILE_ID, TYPE)).toMatchObject({ id: uuid(12), status: 'queued' });
@@ -500,10 +536,21 @@ describe('jobs of trashed files', () => {
 
   test('activeForFile returns queued, retry_wait, running and waiting_remote jobs of the file only', async () => {
     await addOtherFile();
-    await enqueue(T0, newJob(10, { fileId: FILE_ID }), newJob(11, { fileId: FILE_ID }), newJob(12, { fileId: FILE_ID }));
-    await enqueue(T0, newJob(13, { fileId: FILE_ID }), newJob(14, { fileId: FILE_ID }), newJob(15, { fileId: FILE_ID }));
+    await enqueue(
+      T0,
+      newJob(10, { fileId: FILE_ID }),
+      newJob(11, { fileId: FILE_ID }),
+      newJob(12, { fileId: FILE_ID }),
+    );
+    await enqueue(
+      T0,
+      newJob(13, { fileId: FILE_ID }),
+      newJob(14, { fileId: FILE_ID }),
+      newJob(15, { fileId: FILE_ID }),
+    );
     await enqueue(T0, newJob(16, { fileId: TRASHED_ID }), newJob(17));
-    const set = (n: number, status: string) => handle.prepare('update job set status = ? where id = ?').run(status, uuid(n));
+    const set = (n: number, status: string) =>
+      handle.prepare('update job set status = ? where id = ?').run(status, uuid(n));
     set(10, 'running');
     set(11, 'retry_wait');
     set(12, 'waiting_remote');
@@ -573,7 +620,13 @@ describe('job lanes', () => {
     const retrying = status === 'retry_wait';
     handle
       .prepare('update job set status = ?, run_after = ?, attempt = 2, error_code = ?, error_message = ? where id = ?')
-      .run(status, runAfter, retrying ? 'provider_timeout' : null, retrying ? JOB_ERROR_MESSAGES.provider_timeout : null, uuid(n));
+      .run(
+        status,
+        runAfter,
+        retrying ? 'provider_timeout' : null,
+        retrying ? JOB_ERROR_MESSAGES.provider_timeout : null,
+        uuid(n),
+      );
   }
 
   const claimLanes = (excludeLanes?: (string | null)[]) =>
@@ -672,7 +725,9 @@ describe('job lanes', () => {
     expect(await db.jobs.get(uuid(14))).toMatchObject({ lane: 'a', status: 'cancelled' });
     expect((await db.jobs.get(uuid(15)))?.lane).toBe('c');
     expect((await db.jobs.get(uuid(16)))?.lane).toBe('a');
-    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite: (p) => p, now: LATER })).toBe(0);
+    expect(
+      await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite: (p) => p, now: LATER }),
+    ).toBe(0);
   });
 
   test('rerouteWaiting leaves a running job of the source lane uncounted and a second call moves 0', async () => {
@@ -682,7 +737,13 @@ describe('job lanes', () => {
 
     expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).toBe(1);
     expect(rewrite).toHaveBeenCalledTimes(1);
-    expect(await db.jobs.get(uuid(10))).toMatchObject({ lane: 'a', status: 'running', attempt: 1, payload: { n: 1 }, startedAt: LATER });
+    expect(await db.jobs.get(uuid(10))).toMatchObject({
+      lane: 'a',
+      status: 'running',
+      attempt: 1,
+      payload: { n: 1 },
+      startedAt: LATER,
+    });
     expect(await db.jobs.get(uuid(11))).toMatchObject({ lane: 'b', status: 'queued', payload: { n: 2, moved: true } });
 
     expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).toBe(0);
@@ -700,14 +761,18 @@ describe('job lanes', () => {
       return { ...(p as object), moved: true };
     };
 
-    await expect(db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).rejects.toThrow('boom');
+    await expect(
+      db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER }),
+    ).rejects.toThrow('boom');
     expect(calls).toBe(2);
     expect(handle.prepare('select * from job order by id').all()).toEqual(before);
   });
 
   test('rerouteWaiting from null moves the jobs without lane', async () => {
     await enqueueInOrder(laned(10, null), laned(11, 'a'));
-    expect(await db.jobs.rerouteWaiting({ type: TYPE, fromLane: null, toLane: 'b', rewrite: (p) => p, now: LATER })).toBe(1);
+    expect(
+      await db.jobs.rerouteWaiting({ type: TYPE, fromLane: null, toLane: 'b', rewrite: (p) => p, now: LATER }),
+    ).toBe(1);
     expect((await db.jobs.get(uuid(10)))?.lane).toBe('b');
     expect((await db.jobs.get(uuid(11)))?.lane).toBe('a');
   });
@@ -777,7 +842,14 @@ describe('job lanes', () => {
   });
 
   test('countActiveInLane counts every active job of the lane', async () => {
-    await enqueueInOrder(laned(10, 'a'), laned(11, 'a'), laned(12, 'a'), laned(13, 'a'), laned(14, 'b'), laned(15, 'a', {}, 'other.type'));
+    await enqueueInOrder(
+      laned(10, 'a'),
+      laned(11, 'a'),
+      laned(12, 'a'),
+      laned(13, 'a'),
+      laned(14, 'b'),
+      laned(15, 'a', {}, 'other.type'),
+    );
     setStatus(11, 'running');
     setStatus(12, 'waiting_remote');
     setStatus(13, 'cancelled');
@@ -787,7 +859,12 @@ describe('job lanes', () => {
   });
 
   test('latestPayloadOfLane answers the payload of the newest job of the lane in any status', async () => {
-    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }), laned(12, 'b', { n: 3 }), laned(13, null, { n: 4 }));
+    await enqueueInOrder(
+      laned(10, 'a', { n: 1 }),
+      laned(11, 'a', { n: 2 }),
+      laned(12, 'b', { n: 3 }),
+      laned(13, null, { n: 4 }),
+    );
     setStatus(11, 'failed');
     expect(await db.jobs.latestPayloadOfLane(TYPE, 'a')).toEqual({ n: 2 });
     expect(await db.jobs.latestPayloadOfLane(TYPE, null)).toEqual({ n: 4 });
@@ -802,7 +879,11 @@ describe('job lanes', () => {
 
   test('list filters by lane and carries provider id, provider name and model', async () => {
     const v4 = { version: 4, model: 'm4', mode: 'apply', prompt: null, providerName: 'RunPod' };
-    await enqueueInOrder(laned(10, 'a', v4), laned(11, 'b', { version: 2, model: 'm2', mode: 'apply' }), laned(12, null));
+    await enqueueInOrder(
+      laned(10, 'a', v4),
+      laned(11, 'b', { version: 2, model: 'm2', mode: 'apply' }),
+      laned(12, null),
+    );
 
     const all = await db.jobs.list({ limit: 10, offset: 0 });
     expect(all.total).toBe(3);
@@ -814,7 +895,13 @@ describe('job lanes', () => {
 
     const a = await db.jobs.list({ limit: 10, offset: 0, lane: 'a' });
     expect(a.total).toBe(1);
-    expect(a.items[0]).toMatchObject({ id: uuid(10), providerId: 'a', providerName: 'RunPod', model: 'm4', createdAt: T0 });
+    expect(a.items[0]).toMatchObject({
+      id: uuid(10),
+      providerId: 'a',
+      providerName: 'RunPod',
+      model: 'm4',
+      createdAt: T0,
+    });
     expect(await db.jobs.list({ limit: 10, offset: 0, lane: 'a', status: 'failed' })).toEqual({ items: [], total: 0 });
     expect((await db.jobs.list({ limit: 10, offset: 0, lane: 'b' })).items[0]?.createdAt).toBe(T1);
   });
@@ -825,8 +912,13 @@ describe('job lanes', () => {
     const chosen = await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10), uuid(12)] });
     expect(chosen.total).toBe(2);
     expect(chosen.items.map((i) => i.id)).toEqual([uuid(12), uuid(10)]);
-    expect((await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10), uuid(12)], lane: 'a' })).items.map((i) => i.id)).toEqual([uuid(10)]);
-    expect(await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10)], status: 'failed' })).toEqual({ items: [], total: 0 });
+    expect(
+      (await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10), uuid(12)], lane: 'a' })).items.map((i) => i.id),
+    ).toEqual([uuid(10)]);
+    expect(await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(10)], status: 'failed' })).toEqual({
+      items: [],
+      total: 0,
+    });
     expect(await db.jobs.list({ limit: 10, offset: 0, ids: [uuid(99)] })).toEqual({ items: [], total: 0 });
   });
 
@@ -870,7 +962,11 @@ describe('download jobs', () => {
     await claimIo(T1);
     expect(await db.jobs.setOutcome(uuid(10), { fileId: null, result: 'filtered', now: T2 })).toBe(true);
     expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'running', fileId: null, updatedAt: T2 });
-    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: 'filtered' });
+    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({
+      fileId: null,
+      fileName: null,
+      result: 'filtered',
+    });
   });
 
   test('list answers host and url of a download job and no provider', async () => {
@@ -890,7 +986,11 @@ describe('download jobs', () => {
     await db.jobs.finish(uuid(10), { status: 'cancelled', errorCode: null, now: T1 });
     expect(await db.jobs.retry({ id: uuid(10), now: T2 })).toBe(1);
     expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'queued', fileId: null });
-    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({ fileId: null, fileName: null, result: null });
+    expect((await db.jobs.list({ limit: 1, offset: 0 })).items[0]).toMatchObject({
+      fileId: null,
+      fileName: null,
+      result: null,
+    });
   });
 
   test('retry of another job keeps its file', async () => {
@@ -911,15 +1011,25 @@ describe('download jobs', () => {
     // 13 runs, 14 already waits longer than the hold.
     handle.prepare("update job set status = 'running', attempt = 1 where id = ?").run(uuid(13));
     handle
-      .prepare("update job set status = 'retry_wait', run_after = ?, attempt = 2, error_code = 'provider_timeout' where id = ?")
+      .prepare(
+        "update job set status = 'retry_wait', run_after = ?, attempt = 2, error_code = 'provider_timeout' where id = ?",
+      )
       .run(LATER, uuid(14));
     // 11 waits shorter than the hold, with an error.
     handle
-      .prepare("update job set status = 'retry_wait', run_after = ?, attempt = 1, error_code = 'provider_timeout', error_message = ? where id = ?")
+      .prepare(
+        "update job set status = 'retry_wait', run_after = ?, attempt = 1, error_code = 'provider_timeout', error_message = ? where id = ?",
+      )
       .run(T3, JOB_ERROR_MESSAGES.provider_timeout, uuid(11));
 
     expect(await db.jobs.holdLane({ types: [DL], lane: 'a', until: UNTIL, now: T9 })).toBe(2);
-    expect(await db.jobs.get(uuid(10))).toMatchObject({ status: 'retry_wait', runAfter: UNTIL, attempt: 0, errorCode: null, updatedAt: T9 });
+    expect(await db.jobs.get(uuid(10))).toMatchObject({
+      status: 'retry_wait',
+      runAfter: UNTIL,
+      attempt: 0,
+      errorCode: null,
+      updatedAt: T9,
+    });
     expect(await db.jobs.get(uuid(11))).toMatchObject({
       status: 'retry_wait',
       runAfter: UNTIL,

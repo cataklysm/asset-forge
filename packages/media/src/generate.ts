@@ -27,10 +27,7 @@ export const DEFAULT_LIMITS: PreviewLimits = { maxPixels: 100_000_000, maxBytes:
  * @param limits the decoder limits
  * @returns `ok` once the target is in place, otherwise `none`
  */
-export async function generatePreview(
-  job: PreviewJob,
-  limits: PreviewLimits = DEFAULT_LIMITS,
-): Promise<PreviewResult> {
+export async function generatePreview(job: PreviewJob, limits: PreviewLimits = DEFAULT_LIMITS): Promise<PreviewResult> {
   const temporaryPath = `${job.targetPath}.${randomUUID()}.tmp`;
   try {
     const info = await stat(job.sourcePath);

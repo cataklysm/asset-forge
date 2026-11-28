@@ -119,7 +119,15 @@ function isUsableInput(file: FileRecord): boolean {
  */
 function generationJob(session: WorkspaceSession, generationId: string, fileId: string, providerId: string): NewJob {
   const payload: ImageGeneratePayload = { v: 1, generationId };
-  return { id: session.newId(), type: IMAGE_GENERATE_JOB, resourceClass: 'remote_api', fileId, lane: providerId, payload, dedupeKey: null };
+  return {
+    id: session.newId(),
+    type: IMAGE_GENERATE_JOB,
+    resourceClass: 'remote_api',
+    fileId,
+    lane: providerId,
+    payload,
+    dedupeKey: null,
+  };
 }
 
 /**
@@ -151,7 +159,12 @@ async function requireSizedInput(session: WorkspaceSession, fileId: string): Pro
   if (!isUsableInput(file)) throw new InvalidOperationError(NOT_USABLE);
   if (file.width === null || file.height === null) file = await measureFile(session, file.id);
   const { width, height } = file;
-  if (width === null || height === null || width * height < IMAGE_INPUT_MIN_PIXELS || width * height > IMAGE_INPUT_MAX_PIXELS) {
+  if (
+    width === null ||
+    height === null ||
+    width * height < IMAGE_INPUT_MIN_PIXELS ||
+    width * height > IMAGE_INPUT_MAX_PIXELS
+  ) {
     throw new InvalidOperationError('This image cannot be sent to the provider');
   }
   return { file, width, height };
@@ -188,7 +201,12 @@ async function planEdit(
     model: offer.name,
     prompt,
     promptRef: resolved.promptRef,
-    parameters: { v: 1, aspectRatio: input.aspectRatio ?? null, resolution: input.resolution ?? null, safeMode: input.safeMode },
+    parameters: {
+      v: 1,
+      aspectRatio: input.aspectRatio ?? null,
+      resolution: input.resolution ?? null,
+      safeMode: input.safeMode,
+    },
   };
 }
 
@@ -204,7 +222,11 @@ function checkOffer(offer: ImageModel, prompt: string, input: EditStart): void {
   if (offer.promptCharacterLimit !== null && prompt.length > offer.promptCharacterLimit) {
     throw new ValidationFailedError('The prompt is longer than this model allows');
   }
-  if (input.aspectRatio !== undefined && offer.aspectRatios !== null && !offer.aspectRatios.includes(input.aspectRatio)) {
+  if (
+    input.aspectRatio !== undefined &&
+    offer.aspectRatios !== null &&
+    !offer.aspectRatios.includes(input.aspectRatio)
+  ) {
     throw new ValidationFailedError('This aspect ratio is not offered by the model');
   }
   if (input.resolution !== undefined && offer.resolutions !== null && !offer.resolutions.includes(input.resolution)) {
@@ -248,7 +270,8 @@ export async function startGeneration(
   const entry = dependencies.providers.resolve(input.providerId);
   if (entry === null) throw new ProviderNotConfiguredError('No provider is configured');
 
-  const plan = input.kind === 'edit' ? await planEdit(session, dependencies, entry.id, input) : planUpscale(source, input);
+  const plan =
+    input.kind === 'edit' ? await planEdit(session, dependencies, entry.id, input) : planUpscale(source, input);
   if ('ok' in plan) return plan;
 
   const { file } = source;
@@ -377,5 +400,9 @@ export function settleGenerationOfJob(session: WorkspaceSession, job: Job, outco
   if (job.type !== IMAGE_GENERATE_JOB) return false;
   const payload = ImageGeneratePayloadSchema.safeParse(job.payload);
   if (!payload.success) return false;
-  return session.database.generations.settle({ id: payload.data.generationId, outcome, now: session.now().toISOString() });
+  return session.database.generations.settle({
+    id: payload.data.generationId,
+    outcome,
+    now: session.now().toISOString(),
+  });
 }

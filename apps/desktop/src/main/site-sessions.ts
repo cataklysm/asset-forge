@@ -257,7 +257,11 @@ function shutdown(state: SessionsState): void {
  * @param url the URL
  * @returns name and value of each cookie
  */
-async function sessionCookies(state: SessionsState, profileId: string, url: string): Promise<{ name: string; value: string }[]> {
+async function sessionCookies(
+  state: SessionsState,
+  profileId: string,
+  url: string,
+): Promise<{ name: string; value: string }[]> {
   const cookies = await sessionOf(state, profileId).cookies.get({ url });
   return cookies.map((cookie) => ({ name: cookie.name, value: cookie.value }));
 }

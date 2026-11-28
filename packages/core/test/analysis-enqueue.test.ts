@@ -19,14 +19,37 @@ const ENTRY = { id: '11111111-1111-4111-8111-111111111111', name: 'RunPod' };
 
 function request(
   target: AnalysisTarget,
-  patch: { mode?: 'apply' | 'propose'; force?: boolean; model?: string; prompt?: typeof PROMPT; entry?: typeof ENTRY } = {},
+  patch: {
+    mode?: 'apply' | 'propose';
+    force?: boolean;
+    model?: string;
+    prompt?: typeof PROMPT;
+    entry?: typeof ENTRY;
+  } = {},
 ) {
-  return { target, model: MODEL, mode: 'apply' as const, force: false, provider: PROVIDER, prompt: PROMPT, entry: ENTRY, ...patch };
+  return {
+    target,
+    model: MODEL,
+    mode: 'apply' as const,
+    force: false,
+    provider: PROVIDER,
+    prompt: PROMPT,
+    entry: ENTRY,
+    ...patch,
+  };
 }
 
 function analysed(c: Setup, fileId: string, model = MODEL): void {
   const rec = c.db.files.records.get(fileId)!;
-  c.db.analyses.rows.set(fileId, { fileId, sha256: rec.sha256!, provider: PROVIDER, model, promptVersion: ANALYSIS_PROMPT_VERSION, promptName: null, analysedAt: T0 });
+  c.db.analyses.rows.set(fileId, {
+    fileId,
+    sha256: rec.sha256!,
+    provider: PROVIDER,
+    model,
+    promptVersion: ANALYSIS_PROMPT_VERSION,
+    promptName: null,
+    analysedAt: T0,
+  });
 }
 
 /** Records every `jobs.enqueue` call. */
@@ -53,7 +76,10 @@ describe('enqueueAnalysis', () => {
       request({ kind: 'files', fileIds: [c.file.id, UNKNOWN_ID, pending.id, blend.id, queued.id] }),
     );
 
-    expect(result).toEqual({ enqueued: 1, skipped: { notFound: 1, notAnalysable: 2, alreadyQueued: 1, alreadyAnalysed: 0 } });
+    expect(result).toEqual({
+      enqueued: 1,
+      skipped: { notFound: 1, notAnalysable: 2, alreadyQueued: 1, alreadyAnalysed: 0 },
+    });
     expect(c.db.jobs.rows.find((j) => j.fileId === c.file.id)).toMatchObject({
       type: ANALYZE_FILE_JOB,
       resourceClass: 'local_gpu',
@@ -90,7 +116,9 @@ describe('enqueueAnalysis', () => {
     analysed(c, c.file.id);
     const second = { id: '22222222-2222-4222-8222-222222222222', name: 'Second' };
 
-    expect(await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id, other.id] }, { entry: second }))).toEqual({
+    expect(
+      await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id, other.id] }, { entry: second })),
+    ).toEqual({
       enqueued: 1,
       skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 1 },
     });
@@ -121,9 +149,21 @@ describe('enqueueAnalysis', () => {
   it('proposes for one listed file, ignoring the fingerprint', async () => {
     const c = await setup();
     analysed(c, c.file.id);
-    const result = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { mode: 'propose' }));
-    expect(result).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 4, model: MODEL, mode: 'propose', prompt: PROMPT, providerName: 'RunPod' });
+    const result = await enqueueAnalysis(
+      c.session,
+      request({ kind: 'files', fileIds: [c.file.id] }, { mode: 'propose' }),
+    );
+    expect(result).toEqual({
+      enqueued: 1,
+      skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 },
+    });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({
+      version: 4,
+      model: MODEL,
+      mode: 'propose',
+      prompt: PROMPT,
+      providerName: 'RunPod',
+    });
   });
 
   it('refuses propose for anything but a one-file list', async () => {
@@ -136,7 +176,9 @@ describe('enqueueAnalysis', () => {
       { kind: 'assetFilter', filter: {} },
     ];
     for (const target of targets) {
-      await expect(enqueueAnalysis(c.session, request(target, { mode: 'propose' }))).rejects.toBeInstanceOf(InvalidOperationError);
+      await expect(enqueueAnalysis(c.session, request(target, { mode: 'propose' }))).rejects.toBeInstanceOf(
+        InvalidOperationError,
+      );
     }
     expect(c.db.jobs.rows).toEqual([]);
   });
@@ -146,10 +188,16 @@ describe('enqueueAnalysis', () => {
     for (let i = 0; i < 1200; i++) c.seedFile();
     const calls = spyEnqueue(c);
 
-    const result = await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
+    const result = await enqueueAnalysis(
+      c.session,
+      request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }),
+    );
 
     expect(ENQUEUE_CHUNK).toBe(500);
-    expect(result).toEqual({ enqueued: 1201, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
+    expect(result).toEqual({
+      enqueued: 1201,
+      skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 },
+    });
     expect(calls.map((jobs) => jobs.length)).toEqual([500, 500, 201]);
     expect(new Set(c.db.jobs.rows.map((j) => j.fileId)).size).toBe(1201);
   });
@@ -161,7 +209,10 @@ describe('enqueueAnalysis', () => {
     c.seedFile({ assetId, role: 'reference', mimeType: 'model/gltf-binary', kind: 'model' });
     c.seedFile();
     const result = await enqueueAnalysis(c.session, request({ kind: 'asset', assetId }));
-    expect(result).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } });
+    expect(result).toEqual({
+      enqueued: 1,
+      skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 },
+    });
     expect(c.db.jobs.rows.map((j) => j.fileId)).toEqual([a.id]);
   });
 
@@ -170,7 +221,8 @@ describe('enqueueAnalysis', () => {
     for (let i = 0; i < 3; i++) c.seedFile();
     await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
     expect(c.db.jobs.rows).toHaveLength(4);
-    for (const job of c.db.jobs.rows) expect(job.payload).toEqual({ version: 4, model: MODEL, mode: 'apply', prompt: PROMPT, providerName: 'RunPod' });
+    for (const job of c.db.jobs.rows)
+      expect(job.payload).toEqual({ version: 4, model: MODEL, mode: 'apply', prompt: PROMPT, providerName: 'RunPod' });
   });
 
   it('counts a file analysed with another prompt as analysed unless forced', async () => {
@@ -179,14 +231,25 @@ describe('enqueueAnalysis', () => {
     c.db.analyses.rows.set(c.file.id, { ...c.db.analyses.rows.get(c.file.id)!, promptName: 'A' });
     const promptB = { name: 'B', text: 'Second', maxTags: 7 };
 
-    expect(await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB }))).toEqual({
+    expect(
+      await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB })),
+    ).toEqual({
       enqueued: 0,
       skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 1 },
     });
     expect(
-      await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB, force: true })),
+      await enqueueAnalysis(
+        c.session,
+        request({ kind: 'files', fileIds: [c.file.id] }, { prompt: promptB, force: true }),
+      ),
     ).toEqual({ enqueued: 1, skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    expect(c.db.jobs.rows[0]!.payload).toEqual({ version: 4, model: MODEL, mode: 'apply', prompt: promptB, providerName: 'RunPod' });
+    expect(c.db.jobs.rows[0]!.payload).toEqual({
+      version: 4,
+      model: MODEL,
+      mode: 'apply',
+      prompt: promptB,
+      providerName: 'RunPod',
+    });
   });
 
   it('does not call enqueue when nothing is to be queued', async () => {
@@ -207,14 +270,28 @@ describe('previewAnalysis', () => {
     await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [queued.id] }));
     analysed(c, done.id);
 
-    expect(await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER, entry: ENTRY })).toEqual({
+    expect(
+      await previewAnalysis(c.session, {
+        target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } },
+        model: MODEL,
+        provider: PROVIDER,
+        entry: ENTRY,
+      }),
+    ).toEqual({
       analysable: 1,
       alreadyAnalysed: 1,
       alreadyQueued: 1,
       notAnalysable: 1,
     });
     expect(
-      (await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [done.id] }, model: 'another-model', provider: PROVIDER, entry: ENTRY })).analysable,
+      (
+        await previewAnalysis(c.session, {
+          target: { kind: 'files', fileIds: [done.id] },
+          model: 'another-model',
+          provider: PROVIDER,
+          entry: ENTRY,
+        })
+      ).analysable,
     ).toBe(1);
   });
 });
@@ -226,8 +303,14 @@ describe('trashed files', () => {
     await trashForTest(c.session, [c.file.id]);
 
     const byIds = await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }));
-    expect(byIds).toEqual({ enqueued: 0, skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 } });
-    const byFilter = await enqueueAnalysis(c.session, request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }));
+    expect(byIds).toEqual({
+      enqueued: 0,
+      skipped: { notFound: 0, notAnalysable: 1, alreadyQueued: 0, alreadyAnalysed: 0 },
+    });
+    const byFilter = await enqueueAnalysis(
+      c.session,
+      request({ kind: 'fileFilter', filter: { scope: { kind: 'all' } } }),
+    );
     expect(byFilter.enqueued).toBe(1);
     expect(c.db.jobs.rows.map((j) => j.fileId)).toEqual([live.id]);
     expect(c.db.jobs.rows.some((j) => j.fileId === c.file.id)).toBe(false);
@@ -236,12 +319,28 @@ describe('trashed files', () => {
   it('previewAnalysis counts agree', async () => {
     const c = await setup();
     await trashForTest(c.session, [c.file.id]);
-    expect(await previewAnalysis(c.session, { target: { kind: 'files', fileIds: [c.file.id] }, model: MODEL, provider: PROVIDER, entry: ENTRY })).toEqual({
+    expect(
+      await previewAnalysis(c.session, {
+        target: { kind: 'files', fileIds: [c.file.id] },
+        model: MODEL,
+        provider: PROVIDER,
+        entry: ENTRY,
+      }),
+    ).toEqual({
       analysable: 0,
       alreadyAnalysed: 0,
       alreadyQueued: 0,
       notAnalysable: 1,
     });
-    expect((await previewAnalysis(c.session, { target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } }, model: MODEL, provider: PROVIDER, entry: ENTRY })).analysable).toBe(0);
+    expect(
+      (
+        await previewAnalysis(c.session, {
+          target: { kind: 'fileFilter', filter: { scope: { kind: 'all' } } },
+          model: MODEL,
+          provider: PROVIDER,
+          entry: ENTRY,
+        })
+      ).analysable,
+    ).toBe(0);
   });
 });

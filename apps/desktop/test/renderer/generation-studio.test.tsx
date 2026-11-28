@@ -94,7 +94,17 @@ const VENICE: ProviderView = providerView({
   hasApiKey: true,
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 0, changes: 0, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 0,
+  changes: 0,
+  paused: [],
+  pausedHosts: [],
+};
 
 function generation(source: FileRecord, p: Partial<Generation> = {}): Generation {
   return {
@@ -135,7 +145,11 @@ interface Options {
   handlers?: FakeHandlers;
 }
 
-function studioHandlers(file: FileRecord, options: Options, state: { results: Generation[]; byFile: Record<string, Generation[]>; summary: JobSummary }): FakeHandlers {
+function studioHandlers(
+  file: FileRecord,
+  options: Options,
+  state: { results: Generation[]; byFile: Record<string, Generation[]>; summary: JobSummary },
+): FakeHandlers {
   const providers = options.providers ?? [VENICE];
   return {
     ...fakeProviders({ providers, lastUsedImageId: providers[0]?.id ?? null }).handlers,
@@ -147,8 +161,19 @@ function studioHandlers(file: FileRecord, options: Options, state: { results: Ge
       results: structuredClone(fileId === file.id ? state.results : (state.byFile[fileId] ?? [])),
     }),
     'generations:recentPrompts': () => ({ prompts: options.recent ?? [] }),
-    'generations:start': (request) => ({ ok: true, generation: generation(file, { status: 'pending', jobStatus: 'queued', outputs: [], prompt: 'prompt' in request ? (request.prompt ?? null) : null }) }),
-    'generations:retry': ({ generationId }) => ({ ...state.results.find((g) => g.id === generationId)!, status: 'pending' }),
+    'generations:start': (request) => ({
+      ok: true,
+      generation: generation(file, {
+        status: 'pending',
+        jobStatus: 'queued',
+        outputs: [],
+        prompt: 'prompt' in request ? (request.prompt ?? null) : null,
+      }),
+    }),
+    'generations:retry': ({ generationId }) => ({
+      ...state.results.find((g) => g.id === generationId)!,
+      status: 'pending',
+    }),
     'generations:remove': () => ({}),
     'files:trashMany': ({ fileIds }) => ({ items: fileIds.map((fileId) => ({ fileId, file: null, error: null })) }),
     ...options.handlers,
@@ -177,7 +202,10 @@ const callsOf = (api: ReturnType<typeof installFakeApi>, channel: string) =>
 
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const combobox = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
-const optionsOf = (select: HTMLSelectElement) => within(select).getAllByRole('option').map((o) => o.textContent);
+const optionsOf = (select: HTMLSelectElement) =>
+  within(select)
+    .getAllByRole('option')
+    .map((o) => o.textContent);
 const promptBox = () => screen.getByRole('textbox', { name: PROMPT_LABEL }) as HTMLTextAreaElement;
 const tileNames = () =>
   within(screen.getByRole('list', { name: 'Results' }))
@@ -315,14 +343,20 @@ describe('GenerationStudio', () => {
     await waitFor(() => expect(callsOf(api, 'generations:remove')).toHaveLength(1));
     expect(callsOf(api, 'generations:remove')[0]!.request).toEqual({ generationId: results[2]!.id });
     // Queued and running tiles offer nothing.
-    expect(within(screen.getByRole('listitem', { name: GENERATION_STATUS_LABELS.pending })).queryAllByRole('button')).toEqual([]);
+    expect(
+      within(screen.getByRole('listitem', { name: GENERATION_STATUS_LABELS.pending })).queryAllByRole('button'),
+    ).toEqual([]);
   });
 
   it('a cancelled result offers Retry and Remove', async () => {
     const file = fileRecord();
     setup({ results: [generation(file, { status: 'cancelled', jobStatus: 'cancelled', outputs: [] })] });
     const tile = await screen.findByRole('listitem', { name: GENERATION_STATUS_LABELS.cancelled });
-    expect(within(tile).getAllByRole('button').map((b) => b.textContent)).toEqual(['Retry', 'Remove']);
+    expect(
+      within(tile)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Retry', 'Remove']);
   });
 
   it('opening on a file with results shows them newest first', async () => {
@@ -443,15 +477,20 @@ describe('GenerationStudio', () => {
 
     const list = await screen.findByRole('list', { name: UPSCALES_LABEL });
     await waitFor(() =>
-      expect(within(list).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
-        'file edit 1 4x.png',
-        GENERATION_STATUS_LABELS.failed,
-      ]),
+      expect(
+        within(list)
+          .getAllByRole('listitem')
+          .map((li) => li.getAttribute('aria-label')),
+      ).toEqual(['file edit 1 4x.png', GENERATION_STATUS_LABELS.failed]),
     );
     expect(callsOf(api, 'generations:forFile').map((c) => c.request)).toContainEqual({ fileId: outputId });
 
     const tile = within(list).getByRole('listitem', { name: 'file edit 1 4x.png' });
-    expect(within(tile).getAllByRole('button').map((b) => b.textContent)).toEqual(['Open', 'Delete']);
+    expect(
+      within(tile)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Open', 'Delete']);
     await user.click(within(tile).getByRole('button', { name: 'Open' }));
     expect(onOpenFile).toHaveBeenCalledWith(upscaled.outputs[0]!.fileId);
     await user.click(within(tile).getByRole('button', { name: 'Delete' }));
@@ -494,9 +533,11 @@ describe('GenerationStudio', () => {
     await user.click(button('Upscale 2×'));
     const list = await screen.findByRole('list', { name: UPSCALES_LABEL });
     await waitFor(() =>
-      expect(within(list).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual([
-        GENERATION_STATUS_LABELS.pending,
-      ]),
+      expect(
+        within(list)
+          .getAllByRole('listitem')
+          .map((li) => li.getAttribute('aria-label')),
+      ).toEqual([GENERATION_STATUS_LABELS.pending]),
     );
   });
 
@@ -517,7 +558,12 @@ describe('GenerationStudio', () => {
 
   it('Use settings of a result whose entry is gone keeps the selected entry and fills the rest', async () => {
     const file = fileRecord();
-    const orphan = generation(file, { providerId: nextId(), providerName: 'Gone', model: 'mock-edit-basic', prompt: 'paint it red' });
+    const orphan = generation(file, {
+      providerId: nextId(),
+      providerName: 'Gone',
+      model: 'mock-edit-basic',
+      prompt: 'paint it red',
+    });
     setup({ results: [orphan] });
     await modelsReady();
     const user = userEvent.setup();
@@ -617,7 +663,13 @@ describe('GenerationStudio', () => {
 });
 
 function versionOf(content: string, number: number, defaults: Record<string, string> = {}): PromptVersion {
-  return { id: nextId(), number, content, variables: buildPromptVariables(content, defaults), createdAt: `2026-11-2${number}T08:00:00.000Z` };
+  return {
+    id: nextId(),
+    number,
+    content,
+    variables: buildPromptVariables(content, defaults),
+    createdAt: `2026-11-2${number}T08:00:00.000Z`,
+  };
 }
 
 /** `A {{view}} of {{who}}` with the default `front` for view and none for who. */
@@ -688,7 +740,13 @@ describe('GenerationStudio with library prompts', () => {
     const a = fileRecord({ originalName: 'a.png' });
     const b = fileRecord({ originalName: 'b.png' });
     const state = { results: [], byFile: {}, summary: IDLE };
-    installFakeApi(studioHandlers(a, { prompts: [hero(), promptDetail({ title: 'Close-up', content: 'Close-up of the {{View}}' })] }, state));
+    installFakeApi(
+      studioHandlers(
+        a,
+        { prompts: [hero(), promptDetail({ title: 'Close-up', content: 'Close-up of the {{View}}' })] },
+        state,
+      ),
+    );
     function Opener() {
       const studio = useStudio();
       return (
@@ -759,12 +817,19 @@ describe('GenerationStudio with library prompts', () => {
     await user.type(promptBox(), 'A {{{{view}} at night');
     await user.click(button(SAVE_TO_LIBRARY_LABEL));
     const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
-    const asVersion = (await within(dialog).findByRole('radio', { name: newVersionOfLabel('Hero shot') })) as HTMLInputElement;
+    const asVersion = (await within(dialog).findByRole('radio', {
+      name: newVersionOfLabel('Hero shot'),
+    })) as HTMLInputElement;
     expect(asVersion.checked).toBe(true);
     await user.click(within(dialog).getByRole('button', { name: SAVE_LABEL }));
     await waitFor(() =>
       expect(callsOf(api, 'prompts:saveVersion').map((c) => c.request)).toEqual([
-        { promptId: prompt.id, baseVersionId: prompt.currentVersion.id, content: 'A {{view}} at night', defaults: { view: 'front', who: '' } },
+        {
+          promptId: prompt.id,
+          baseVersionId: prompt.currentVersion.id,
+          content: 'A {{view}} at night',
+          defaults: { view: 'front', who: '' },
+        },
       ]),
     );
     expect(callsOf(api, 'prompts:create')).toEqual([]);
@@ -791,7 +856,11 @@ describe('GenerationStudio with library prompts', () => {
     await user.type(title, 'Blue');
     await user.click(within(dialog).getByRole('button', { name: SAVE_LABEL }));
     await screen.findByText(attachedPromptLabel('Blue', 1));
-    expect(callsOf(api, 'prompts:create').map((c) => c.request).at(-1)).toEqual({
+    expect(
+      callsOf(api, 'prompts:create')
+        .map((c) => c.request)
+        .at(-1),
+    ).toEqual({
       title: 'Blue',
       description: '',
       content: 'make it blue',
@@ -968,7 +1037,9 @@ describe('GenerationStudio raised over the linked file dialog', () => {
         await modelsReady();
       },
       async close() {
-        await user.click(within(screen.getByRole('dialog', { name: studioName })).getByRole('button', { name: CLOSE_LABEL }));
+        await user.click(
+          within(screen.getByRole('dialog', { name: studioName })).getByRole('button', { name: CLOSE_LABEL }),
+        );
         await waitFor(() => expect(screen.queryByRole('dialog', { name: studioName })).toBeNull());
       },
     };

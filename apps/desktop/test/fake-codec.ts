@@ -19,7 +19,9 @@ export class FakeCodec implements SecretCodec {
 
   decrypt(data: Buffer): string {
     if (!data.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('cannot decrypt');
-    const bytes = Buffer.from(data.subarray(MAGIC.length)).reverse().map((b) => b ^ 0x5a);
+    const bytes = Buffer.from(data.subarray(MAGIC.length))
+      .reverse()
+      .map((b) => b ^ 0x5a);
     return Buffer.from(bytes).toString('utf8');
   }
 }

@@ -161,9 +161,16 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       // A cancel of an earlier import does not count for this one, even before the next render.
       cancelRequested.current = false;
       setRunning(true);
-      const results = await call('files:import', { sourcePaths, target: { assetId: id, role: importRole }, unpackArchives });
+      const results = await call('files:import', {
+        sourcePaths,
+        target: { assetId: id, role: importRole },
+        unpackArchives,
+      });
       const cancelled = cancelRequested.current;
-      setImportResult({ title: importTitle(results, { duplicates: false, cancelled }), failures: importFailures(results) });
+      setImportResult({
+        title: importTitle(results, { duplicates: false, cancelled }),
+        failures: importFailures(results),
+      });
       filesChanged();
     } catch (caught) {
       setError(describeError(caught));
@@ -259,12 +266,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
           </div>
         )}
         {tab === 'projects' && (
-          <ProjectsPanel
-            asset={asset}
-            assignments={assignments}
-            disabled={importing}
-            onOpenProject={onOpenProject}
-          />
+          <ProjectsPanel asset={asset} assignments={assignments} disabled={importing} onOpenProject={onOpenProject} />
         )}
         {tab === 'relations' && (
           <RelationsPanel assetId={id} relations={relations} disabled={importing} onOpenAsset={onOpenAsset} />
@@ -272,9 +274,15 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       </Tabs>
       {analysis.dialogs}
       {zipChoice.dialog}
-      {urlImportTarget !== null && <UrlImportDialog target={urlImportTarget} onClose={() => setUrlImportTarget(null)} />}
+      {urlImportTarget !== null && (
+        <UrlImportDialog target={urlImportTarget} onClose={() => setUrlImportTarget(null)} />
+      )}
       {siteImportTarget !== null && (
-        <SiteImportDialog target={siteImportTarget} onClose={() => setSiteImportTarget(null)} onImported={() => loaded.reload()} />
+        <SiteImportDialog
+          target={siteImportTarget}
+          onClose={() => setSiteImportTarget(null)}
+          onImported={() => loaded.reload()}
+        />
       )}
     </div>
   );

@@ -84,7 +84,7 @@ describe('createUrlSource: the file', () => {
     ['attachment; filename="quoted \\"name\\".jpg"', 'quoted "name".jpg'],
     ['attachment; filename=token.jpg', 'token.jpg'],
     ['inline', null],
-    ['attachment; filename*=UTF-8\'\'%E0%A4%A', null],
+    ["attachment; filename*=UTF-8''%E0%A4%A", null],
   ])('reads the disposition name of %s', async (header, expected) => {
     handler = (_req, res) => {
       res.writeHead(200, { 'Content-Disposition': header });
@@ -209,17 +209,20 @@ describe('createUrlSource: status mapping', () => {
     expect(error.message).not.toContain('127.0.0.1');
   });
 
-  it.each([403, 503, 302, 200])('maps %i with cf-mitigated: challenge to challenge and keeps the status', async (status) => {
-    handler = (_req, res) => {
-      res.writeHead(status, { 'cf-mitigated': ' Challenge ', Location: `${base}/elsewhere`, 'Retry-After': '120' });
-      res.end('<html>check</html>');
-    };
-    const error = await failureOf(open(`${base}/s`));
-    expect(error.failure).toBe('challenge');
-    expect(error.status).toBe(status);
-    expect(error.retryAfterMs).toBeNull();
-    expect(requests).toHaveLength(1);
-  });
+  it.each([403, 503, 302, 200])(
+    'maps %i with cf-mitigated: challenge to challenge and keeps the status',
+    async (status) => {
+      handler = (_req, res) => {
+        res.writeHead(status, { 'cf-mitigated': ' Challenge ', Location: `${base}/elsewhere`, 'Retry-After': '120' });
+        res.end('<html>check</html>');
+      };
+      const error = await failureOf(open(`${base}/s`));
+      expect(error.failure).toBe('challenge');
+      expect(error.status).toBe(status);
+      expect(error.retryAfterMs).toBeNull();
+      expect(requests).toHaveLength(1);
+    },
+  );
 
   it('a 403 with another cf-mitigated value stays blocked', async () => {
     handler = (_req, res) => {
@@ -408,7 +411,9 @@ describe('createUrlSource: abort', () => {
       return true;
     };
     const started = Date.now();
-    await expect(open(`${base}/start`, { allowAddress, headerTimeoutMs: 3_000 }, controller.signal)).rejects.toBe(reason);
+    await expect(open(`${base}/start`, { allowAddress, headerTimeoutMs: 3_000 }, controller.signal)).rejects.toBe(
+      reason,
+    );
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(requests.map((r) => r.url)).toEqual(['/start']);
   });
@@ -480,7 +485,9 @@ describe('createUrlSource: the default address policy', () => {
       return isPublicAddress(address);
     };
     const source = strict({ lookup: async () => ['127.0.0.1'], allowAddress });
-    const error = await failureOf(source.open(`http://public.example.test:${port}/start`, new AbortController().signal));
+    const error = await failureOf(
+      source.open(`http://public.example.test:${port}/start`, new AbortController().signal),
+    );
     expect(error.failure).toBe('address_refused');
     expect(requests.map((r) => r.url)).toEqual(['/start']);
   });

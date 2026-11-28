@@ -130,7 +130,9 @@ describe('FileRecordSchema', () => {
 describe('FileScopeSchema', () => {
   it('accepts the trash scope', () => {
     expect(FileScopeSchema.safeParse({ kind: 'trash' }).success).toBe(true);
-    expect(ipcContract['files:list'].request.safeParse({ limit: 10, offset: 0, scope: { kind: 'trash' } }).success).toBe(true);
+    expect(
+      ipcContract['files:list'].request.safeParse({ limit: 10, offset: 0, scope: { kind: 'trash' } }).success,
+    ).toBe(true);
   });
 });
 
@@ -156,7 +158,12 @@ describe('ipcContract', () => {
 
   it('an import result requires entryName', () => {
     const response = ipcContract['files:import'].response;
-    const result = { sourcePath: 'C:\\in\\a.zip', file: null, error: 'This archive contains no files', duplicateOf: [] };
+    const result = {
+      sourcePath: 'C:\\in\\a.zip',
+      file: null,
+      error: 'This archive contains no files',
+      duplicateOf: [],
+    };
     expect(response.safeParse([result]).success).toBe(false);
     expect(response.safeParse([{ ...result, entryName: null }]).success).toBe(true);
     expect(response.safeParse([{ ...result, entryName: 'tex/a.png' }]).success).toBe(true);
@@ -288,7 +295,13 @@ describe('library IPC requests', () => {
   it('files:list accepts query, tagNames, role and kind within their limits', () => {
     const request = ipcContract['files:list'].request;
     const base = { limit: 10, offset: 0, scope: { kind: 'inbox' } };
-    const full = { ...base, query: 'x'.repeat(200), tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`), role: 'texture', kind: 'model' };
+    const full = {
+      ...base,
+      query: 'x'.repeat(200),
+      tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`),
+      role: 'texture',
+      kind: 'model',
+    };
     expect(request.parse(full)).toEqual(full);
     expect(request.safeParse({ ...base, query: 'x'.repeat(201) }).success).toBe(false);
     expect(request.safeParse({ ...base, tagNames: Array.from({ length: 11 }, (_, i) => `t${i}`) }).success).toBe(false);
@@ -300,7 +313,12 @@ describe('library IPC requests', () => {
   it('projects:list accepts query, status and tagNames within their limits', () => {
     const request = ipcContract['projects:list'].request;
     const base = { limit: 10, offset: 0 };
-    const full = { ...base, query: 'x'.repeat(200), status: 'on_hold', tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`) };
+    const full = {
+      ...base,
+      query: 'x'.repeat(200),
+      status: 'on_hold',
+      tagNames: Array.from({ length: 10 }, (_, i) => `t${i}`),
+    };
     expect(request.parse(base)).toEqual(base);
     expect(request.parse(full)).toEqual(full);
     expect(request.safeParse({ ...base, query: 'x'.repeat(201) }).success).toBe(false);
@@ -310,7 +328,15 @@ describe('library IPC requests', () => {
   });
 
   it('a project summary requires assetCount and imageCount and accepts matchedTags', () => {
-    const base = { id: uuid, name: 'P', description: '', status: 'active', createdAt: now, updatedAt: now, assetCount: 1 };
+    const base = {
+      id: uuid,
+      name: 'P',
+      description: '',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+      assetCount: 1,
+    };
     expect(ProjectSummarySchema.safeParse(base).success).toBe(false);
     expect(ProjectSummarySchema.safeParse({ ...base, imageCount: 2 }).success).toBe(true);
     expect(ProjectSummarySchema.safeParse({ ...base, imageCount: -1 }).success).toBe(false);
@@ -419,11 +445,17 @@ describe('asset cover', () => {
   });
 
   it('AssetDetailSchema requires coverFileId and coverIsChosen', () => {
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true, tags: [], sources: [] }).success).toBe(true);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, tags: [], sources: [] }).success).toBe(true);
+    expect(
+      AssetDetailSchema.safeParse({ ...asset, coverFileId: uuid, coverIsChosen: true, tags: [], sources: [] }).success,
+    ).toBe(true);
+    expect(
+      AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, tags: [], sources: [] }).success,
+    ).toBe(true);
     expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, tags: [], sources: [] }).success).toBe(false);
     expect(AssetDetailSchema.safeParse({ ...asset, coverIsChosen: false, tags: [], sources: [] }).success).toBe(false);
-    expect(AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, sources: [] }).success).toBe(false);
+    expect(
+      AssetDetailSchema.safeParse({ ...asset, coverFileId: null, coverIsChosen: false, sources: [] }).success,
+    ).toBe(false);
   });
 
   it('AssetDetailSchema requires sources', () => {
@@ -531,7 +563,10 @@ describe('file batch channels', () => {
   it.each([[[]], [Array.from({ length: 1001 }, (_, i) => uuidN(i))], [[uuidN(1), uuidN(1)]]])(
     'file id lists of length 0, 1001 or with duplicates are rejected',
     (ids) => {
-      expect(ipcContract['files:assignMany'].request.safeParse({ fileIds: ids, assetId: uuidN(9), role: 'reference' }).success).toBe(false);
+      expect(
+        ipcContract['files:assignMany'].request.safeParse({ fileIds: ids, assetId: uuidN(9), role: 'reference' })
+          .success,
+      ).toBe(false);
       expect(ipcContract['files:addTagMany'].request.safeParse({ fileIds: ids, name: 'oak' }).success).toBe(false);
       expect(ipcContract['files:removeTagMany'].request.safeParse({ fileIds: ids, name: 'oak' }).success).toBe(false);
     },
@@ -539,17 +574,25 @@ describe('file batch channels', () => {
 
   it('accepts 1 and 1000 distinct ids and bounds the tag name', () => {
     const many = Array.from({ length: 1000 }, (_, i) => uuidN(i));
-    expect(ipcContract['files:assignMany'].request.safeParse({ fileIds: many, assetId: uuidN(9), role: 'reference' }).success).toBe(true);
+    expect(
+      ipcContract['files:assignMany'].request.safeParse({ fileIds: many, assetId: uuidN(9), role: 'reference' })
+        .success,
+    ).toBe(true);
     expect(ipcContract['files:addTagMany'].request.safeParse({ fileIds: [uuidN(1)], name: 'oak' }).success).toBe(true);
-    expect(ipcContract['files:removeTagMany'].request.safeParse({ fileIds: [uuidN(1)], name: 'x'.repeat(201) }).success).toBe(false);
+    expect(
+      ipcContract['files:removeTagMany'].request.safeParse({ fileIds: [uuidN(1)], name: 'x'.repeat(201) }).success,
+    ).toBe(false);
   });
 
   it('an assignMany item carries either a file or an error', () => {
     const response = ipcContract['files:assignMany'].response;
     expect(
-      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'not_found', message: 'm' } }] }).success,
+      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'not_found', message: 'm' } }] })
+        .success,
     ).toBe(true);
-    expect(response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'bogus', message: 'm' } }] }).success).toBe(false);
+    expect(
+      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'bogus', message: 'm' } }] }).success,
+    ).toBe(false);
   });
 });
 
@@ -574,8 +617,9 @@ describe('trash channels', () => {
     const { response } = ipcContract[channel];
     expect(response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: null }] }).success).toBe(true);
     expect(
-      response.safeParse({ items: [{ fileId: uuidN(1), file: null, error: { code: 'invalid_operation', message: 'm' } }] })
-        .success,
+      response.safeParse({
+        items: [{ fileId: uuidN(1), file: null, error: { code: 'invalid_operation', message: 'm' } }],
+      }).success,
     ).toBe(true);
   });
 
@@ -633,7 +677,9 @@ describe('generation studio', () => {
   it('StartGenerationSchema accepts an edit without provider, aspect ratio and resolution', () => {
     const edit = { kind: 'edit', fileId: uuid, model: 'qwen-image', prompt: 'Make it night', safeMode: true };
     expect(StartGenerationSchema.safeParse(edit).success).toBe(true);
-    expect(StartGenerationSchema.safeParse({ ...edit, providerId: uuid, aspectRatio: '1:1', resolution: '1K' }).success).toBe(true);
+    expect(
+      StartGenerationSchema.safeParse({ ...edit, providerId: uuid, aspectRatio: '1:1', resolution: '1K' }).success,
+    ).toBe(true);
     expect(ipcContract['generations:start'].request.safeParse(edit).success).toBe(true);
   });
 
@@ -643,7 +689,9 @@ describe('generation studio', () => {
     expect(valid({ ...base, prompt: 'Make it night' })).toBe(true);
     expect(valid({ ...base, promptVersionId: uuid, variables: {} })).toBe(true);
     expect(valid({ ...base, promptVersionId: uuid, variables: { view: 'side' } })).toBe(true);
-    expect(ipcContract['generations:start'].request.safeParse({ ...base, promptVersionId: uuid, variables: {} }).success).toBe(true);
+    expect(
+      ipcContract['generations:start'].request.safeParse({ ...base, promptVersionId: uuid, variables: {} }).success,
+    ).toBe(true);
     expect(valid({ ...base, prompt: 'Make it night', promptVersionId: uuid, variables: {} })).toBe(false);
     expect(valid(base)).toBe(false);
     expect(valid({ ...base, promptVersionId: uuid })).toBe(false);
@@ -655,12 +703,16 @@ describe('generation studio', () => {
   });
 
   it('StartGenerationSchema refuses an edit without safe mode', () => {
-    expect(StartGenerationSchema.safeParse({ kind: 'edit', fileId: uuid, model: 'm', prompt: 'p' }).success).toBe(false);
+    expect(StartGenerationSchema.safeParse({ kind: 'edit', fileId: uuid, model: 'm', prompt: 'p' }).success).toBe(
+      false,
+    );
   });
 
   it('StartGenerationSchema takes an upscale of 2 or 4 only', () => {
     expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 2 }).success).toBe(true);
-    expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 4, providerId: uuid }).success).toBe(true);
+    expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 4, providerId: uuid }).success).toBe(
+      true,
+    );
     expect(StartGenerationSchema.safeParse({ kind: 'upscale', fileId: uuid, scale: 3 }).success).toBe(false);
     expect(StartGenerationSchema.safeParse({ kind: 'other', fileId: uuid, scale: 2 }).success).toBe(false);
   });
@@ -688,14 +740,17 @@ describe('generation studio', () => {
 
   it('the generation channels', () => {
     expect(ipcContract['generations:forFile'].request.safeParse({ fileId: uuid }).success).toBe(true);
-    expect(ipcContract['generations:forFile'].response.safeParse({ madeBy: null, results: [generation] }).success).toBe(true);
+    expect(ipcContract['generations:forFile'].response.safeParse({ madeBy: null, results: [generation] }).success).toBe(
+      true,
+    );
     expect(ipcContract['generations:retry'].request.safeParse({ generationId: uuid }).success).toBe(true);
     expect(ipcContract['generations:retry'].response.safeParse(generation).success).toBe(true);
     expect(ipcContract['generations:remove'].request.safeParse({ generationId: 'x' }).success).toBe(false);
     expect(ipcContract['generations:recentPrompts'].request.safeParse({}).success).toBe(true);
     expect(ipcContract['generations:recentPrompts'].response.safeParse({ prompts: ['a'] }).success).toBe(true);
     expect(
-      ipcContract['generations:recentPrompts'].response.safeParse({ prompts: Array.from({ length: 21 }, () => 'a') }).success,
+      ipcContract['generations:recentPrompts'].response.safeParse({ prompts: Array.from({ length: 21 }, () => 'a') })
+        .success,
     ).toBe(false);
   });
 });

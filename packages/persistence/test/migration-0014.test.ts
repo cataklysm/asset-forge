@@ -53,7 +53,11 @@ async function createDatabaseUpTo0013(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     s.prepare('INSERT INTO storage (id, kind, created_at) VALUES (?, ?, ?)').run(uuid(2), 'workspace_root', TS);
     s.prepare(
       `INSERT INTO file (id, storage_id, original_name, relative_path, mime_type, size_bytes, sha256, kind, status, imported_at)
@@ -71,7 +75,8 @@ function seed(): void {
   }
 }
 
-const count = (s: Database.Database, table: string) => (s.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+const count = (s: Database.Database, table: string) =>
+  (s.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'af-mig14-'));

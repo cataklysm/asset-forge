@@ -104,7 +104,15 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       changed();
       void loadRecent();
     };
-    const start = { session, fileId: file.id, disposed, setStarting: status.setStarting, setStartError, refresh, onStarted };
+    const start = {
+      session,
+      fileId: file.id,
+      disposed,
+      setStarting: status.setStarting,
+      setStartError,
+      refresh,
+      onStarted,
+    };
     void startEdit(start, editRequestOf(file.id, providerId, model, form));
   }
 
@@ -134,7 +142,10 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       <div className="flex h-full flex-col">
         <StudioHeader title={title} name={file.originalName} onClose={onClose} />
         <div className="flex min-h-0 flex-1">
-          <section aria-label={SOURCE_IMAGE_LABEL} className={`flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r p-5 ${BORDER}`}>
+          <section
+            aria-label={SOURCE_IMAGE_LABEL}
+            className={`flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r p-5 ${BORDER}`}
+          >
             <CoverImageFrame file={file} />
           </section>
           <div className={`w-96 shrink-0 overflow-y-auto border-r p-5 ${BORDER}`}>
@@ -190,7 +201,9 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
         </div>
       </div>
       {picking && <PromptPicker onPick={pickPrompt} onClose={() => setPicking(false)} />}
-      {saving && <SavePromptDialog prompt={form.prompt} origin={form.origin} onSaved={saved} onClose={() => setSaving(false)} />}
+      {saving && (
+        <SavePromptDialog prompt={form.prompt} origin={form.origin} onSaved={saved} onClose={() => setSaving(false)} />
+      )}
     </Dialog>
   );
 }
@@ -234,7 +247,12 @@ function StudioHeader({ title, name, onClose }: StudioHeaderProps) {
 function CoverImageFrame({ file }: { file: FileRecord }) {
   return (
     <>
-      <CoverImage fileId={file.id} size="detail" fallback={formatLabel(file.originalName)} className="aspect-square w-full" />
+      <CoverImage
+        fileId={file.id}
+        size="detail"
+        fallback={formatLabel(file.originalName)}
+        className="aspect-square w-full"
+      />
       <p title={file.originalName} className={`truncate text-sm ${MUTED}`}>
         {file.originalName}
       </p>

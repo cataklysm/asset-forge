@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 
 /** The part of a menu item the keyboard handling reads. */
 interface Selectable {

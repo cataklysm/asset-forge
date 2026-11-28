@@ -63,14 +63,23 @@ class FakeNetRequest extends EventEmitter {
 
 const publicLookup = async (host: string) => (host.endsWith('example.com') ? ['93.184.216.34'] : ['10.0.0.1']);
 
-function setup(scripts: Script[], options: { lookup?: (host: string) => Promise<string[]>; limits?: Record<string, number> } = {}) {
+function setup(
+  scripts: Script[],
+  options: { lookup?: (host: string) => Promise<string[]>; limits?: Record<string, number> } = {},
+) {
   const requests: FakeNetRequest[] = [];
   const request = vi.fn((_profileId: string, url: string) => {
     const r = new FakeNetRequest(url, scripts.shift() ?? 'hang');
     requests.push(r);
     return r as unknown as SessionNetRequest;
   });
-  const offSite = { stream: new PassThrough(), finalUrl: 'x', contentType: null, contentLength: null, dispositionName: null };
+  const offSite = {
+    stream: new PassThrough(),
+    finalUrl: 'x',
+    contentType: null,
+    contentLength: null,
+    dispositionName: null,
+  };
   const remote = { open: vi.fn(async (): Promise<RemoteFile> => offSite) } satisfies RemoteFileSource;
   const open = createSessionDownload({
     siteOf: (id) => (id === PROFILE ? 'example.com' : null),
@@ -114,18 +123,31 @@ describe('session download', () => {
         },
       },
     ]);
-    const file = await t.open(PROFILE, 'https://img.example.com/1.jpg', new AbortController().signal, { headersFor: t.headersFor });
+    const file = await t.open(PROFILE, 'https://img.example.com/1.jpg', new AbortController().signal, {
+      headersFor: t.headersFor,
+    });
     expect(t.request).toHaveBeenCalledWith(PROFILE, 'https://img.example.com/1.jpg');
     expect(t.asked).toEqual(['https://img.example.com/1.jpg']);
-    expect(file).toMatchObject({ finalUrl: 'https://img.example.com/1.jpg', contentType: 'image/jpeg', contentLength: 4, dispositionName: 'a b.jpg' });
+    expect(file).toMatchObject({
+      finalUrl: 'https://img.example.com/1.jpg',
+      contentType: 'image/jpeg',
+      contentLength: 4,
+      dispositionName: 'a b.jpg',
+    });
     expect((await read(file.stream)).toString()).toBe('file');
     expect(t.remote.open).not.toHaveBeenCalled();
   });
 
   it('aborts an on-site redirect in its event and sends the next hop through the session again', async () => {
     const t = setup([{ redirect: 'https://example.com/b.jpg' }, { redirect: '/c.jpg', status: 307 }, { status: 200 }]);
-    const file = await t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, { headersFor: t.headersFor });
-    expect(t.requests.map((r) => r.url)).toEqual(['https://example.com/a.jpg', 'https://example.com/b.jpg', 'https://example.com/c.jpg']);
+    const file = await t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {
+      headersFor: t.headersFor,
+    });
+    expect(t.requests.map((r) => r.url)).toEqual([
+      'https://example.com/a.jpg',
+      'https://example.com/b.jpg',
+      'https://example.com/c.jpg',
+    ]);
     expect(t.requests[0]!.aborted).toBeGreaterThan(0);
     expect(t.requests[1]!.aborted).toBeGreaterThan(0);
     expect(t.asked).toEqual(['https://example.com/a.jpg', 'https://example.com/b.jpg', 'https://example.com/c.jpg']);
@@ -153,9 +175,13 @@ describe('session download', () => {
 
   it('refuses a host with a non-public address before any request, and a host that does not resolve', async () => {
     const t = setup([], { lookup: async () => ['93.184.216.34', '192.168.1.5'] });
-    expect((await failureOf(t.open(PROFILE, 'https://example.com/1.jpg', new AbortController().signal, {}))).failure).toBe('address_refused');
+    expect(
+      (await failureOf(t.open(PROFILE, 'https://example.com/1.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('address_refused');
     const none = setup([], { lookup: async () => [] });
-    expect((await failureOf(none.open(PROFILE, 'https://example.com/1.jpg', new AbortController().signal, {}))).failure).toBe('unreachable');
+    expect(
+      (await failureOf(none.open(PROFILE, 'https://example.com/1.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('unreachable');
     const broken = setup([], {
       lookup: async () => {
         throw new Error('ENOTFOUND example.com');
@@ -172,7 +198,9 @@ describe('session download', () => {
     const t = setup([{ redirect: 'https://inner.example.com/1.jpg' }], {
       lookup: async (host) => (host === 'example.com' ? ['93.184.216.34'] : ['127.0.0.1']),
     });
-    expect((await failureOf(t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('address_refused');
+    expect(
+      (await failureOf(t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('address_refused');
     expect(t.request).toHaveBeenCalledTimes(1);
   });
 
@@ -192,7 +220,12 @@ describe('session download', () => {
     for (const [script, kind, status, retryAfterMs] of cases) {
       const t = setup([script]);
       const error = await failureOf(t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}));
-      expect([error.failure, error.status, error.retryAfterMs, error.cause]).toEqual([kind, status, retryAfterMs, undefined]);
+      expect([error.failure, error.status, error.retryAfterMs, error.cause]).toEqual([
+        kind,
+        status,
+        retryAfterMs,
+        undefined,
+      ]);
       expect(error.message).toBe(`Remote file failure: ${kind}`);
       expect(t.request).toHaveBeenCalledTimes(1);
     }
@@ -204,7 +237,9 @@ describe('session download', () => {
     expect(file.contentLength).toBeNull();
     expect((await read(file.stream)).toString()).toBe('file');
     const big = setup([{ status: 200, headers: { 'content-length': '11' } }], { limits: { maxBytes: 10 } });
-    expect((await failureOf(big.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('too_large');
+    expect(
+      (await failureOf(big.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('too_large');
     expect(big.requests[0]!.aborted).toBeGreaterThan(0);
   });
 
@@ -221,10 +256,17 @@ describe('session download', () => {
 
   it('fails a hop without an answer in time, and after too many redirects', async () => {
     const t = setup(['hang'], { limits: { headerTimeoutMs: 20 } });
-    expect((await failureOf(t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('unreachable');
+    expect(
+      (await failureOf(t.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('unreachable');
     expect(t.requests[0]!.aborted).toBeGreaterThan(0);
-    const loop = setup(Array.from({ length: 10 }, (_, i) => ({ redirect: `https://example.com/${i}` })), { limits: { maxRedirects: 2 } });
-    expect((await failureOf(loop.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('rejected');
+    const loop = setup(
+      Array.from({ length: 10 }, (_, i) => ({ redirect: `https://example.com/${i}` })),
+      { limits: { maxRedirects: 2 } },
+    );
+    expect(
+      (await failureOf(loop.open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('rejected');
     expect(loop.request).toHaveBeenCalledTimes(3);
   });
 
@@ -261,9 +303,15 @@ describe('session download', () => {
       remote: { open: vi.fn() },
       lookup: publicLookup,
     });
-    expect((await failureOf(open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('unreachable');
-    expect((await failureOf(open(PROFILE, 'ftp://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('rejected');
-    expect((await failureOf(open(PROFILE, 'https://u:p@example.com/a.jpg', new AbortController().signal, {}))).failure).toBe('rejected');
+    expect(
+      (await failureOf(open(PROFILE, 'https://example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('unreachable');
+    expect((await failureOf(open(PROFILE, 'ftp://example.com/a.jpg', new AbortController().signal, {}))).failure).toBe(
+      'rejected',
+    );
+    expect(
+      (await failureOf(open(PROFILE, 'https://u:p@example.com/a.jpg', new AbortController().signal, {}))).failure,
+    ).toBe('rejected');
   });
 });
 
@@ -286,7 +334,10 @@ describe('session request options', () => {
   });
 });
 
-type BeforeRequest = (d: { url: string; resourceType: string; webContentsId?: number }, cb: (r: { cancel?: boolean }) => void) => void;
+type BeforeRequest = (
+  d: { url: string; resourceType: string; webContentsId?: number },
+  cb: (r: { cancel?: boolean }) => void,
+) => void;
 
 function fakeSession() {
   const events = new EventEmitter();

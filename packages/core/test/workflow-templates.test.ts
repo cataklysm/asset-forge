@@ -74,7 +74,9 @@ describe('built-in workflow templates', () => {
     const v1 = await db.workflowTemplates.latestVersion(templateId);
 
     const bumped = { ...character, version: 2, steps: character.steps.slice(0, -1) };
-    await ensureBuiltInWorkflowTemplates({ database: db, newId: () => crypto.randomUUID(), now: () => new Date() }, [bumped]);
+    await ensureBuiltInWorkflowTemplates({ database: db, newId: () => crypto.randomUUID(), now: () => new Date() }, [
+      bumped,
+    ]);
 
     const latest = await db.workflowTemplates.latestVersion(templateId);
     expect(latest!.version).toBe(2);

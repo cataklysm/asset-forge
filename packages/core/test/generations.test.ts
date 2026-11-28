@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, type Generation, type PromptDetail, type StartGeneration } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  IMAGE_GENERATE_JOB,
+  type Generation,
+  type PromptDetail,
+  type StartGeneration,
+} from '@assetforge/contracts';
 import {
   cancelAllJobs,
   clearFinishedJobs,
@@ -32,7 +38,12 @@ const edit = (fileId: string, patch: Partial<Extract<StartGeneration, { kind: 'e
   ...patch,
 });
 
-const upscale = (fileId: string, scale: 2 | 4 = 2): StartGeneration => ({ kind: 'upscale', fileId, providerId: VENICE_ID, scale });
+const upscale = (fileId: string, scale: 2 | 4 = 2): StartGeneration => ({
+  kind: 'upscale',
+  fileId,
+  providerId: VENICE_ID,
+  scale,
+});
 
 async function started(t: Setup, input: StartGeneration): Promise<Generation> {
   const result = await startGeneration(t.session, t.deps, input);
@@ -41,7 +52,12 @@ async function started(t: Setup, input: StartGeneration): Promise<Generation> {
 }
 
 /** Expects the start to be refused with this error class and message, with nothing queued or stored. */
-async function refused(t: Setup, input: StartGeneration, type: new (...args: never[]) => Error, message?: string): Promise<void> {
+async function refused(
+  t: Setup,
+  input: StartGeneration,
+  type: new (...args: never[]) => Error,
+  message?: string,
+): Promise<void> {
   const error = await startGeneration(t.session, t.deps, input).catch((e: unknown) => e);
   expect(error).toBeInstanceOf(type);
   if (message !== undefined) expect((error as Error).message).toBe(message);
@@ -55,7 +71,11 @@ const NOT_USABLE = 'Only a complete image outside the trash can be used';
 describe('startGeneration', () => {
   it('queues an edit: the pending generation, its input and one remote_api job in the entry lane', async () => {
     const t = await setup();
-    const result = await startGeneration(t.session, t.deps, edit(t.file.id, { prompt: '  turn left  ', aspectRatio: '16:9', resolution: '2K' }));
+    const result = await startGeneration(
+      t.session,
+      t.deps,
+      edit(t.file.id, { prompt: '  turn left  ', aspectRatio: '16:9', resolution: '2K' }),
+    );
     expect(result.ok).toBe(true);
     const generation = result.ok ? result.generation : null;
     expect(generation).toMatchObject({
@@ -155,20 +175,42 @@ describe('startGeneration', () => {
     await refused(t, edit(t.file.id, { prompt: '   ' }), ValidationFailedError, message);
     await refused(t, edit(t.file.id, { model: 'free-edit', prompt: 'x'.repeat(8001) }), ValidationFailedError, message);
     expect(t.providers.modelCalls).toEqual([]);
-    expect((await started(t, edit(t.file.id, { model: 'free-edit', prompt: 'x'.repeat(8000) }))).prompt).toHaveLength(8000);
+    expect((await started(t, edit(t.file.id, { model: 'free-edit', prompt: 'x'.repeat(8000) }))).prompt).toHaveLength(
+      8000,
+    );
   });
 
   it('refuses 1501 characters for mock-edit and accepts 1500', async () => {
     const t = await setup();
-    await refused(t, edit(t.file.id, { prompt: 'x'.repeat(1501) }), ValidationFailedError, 'The prompt is longer than this model allows');
+    await refused(
+      t,
+      edit(t.file.id, { prompt: 'x'.repeat(1501) }),
+      ValidationFailedError,
+      'The prompt is longer than this model allows',
+    );
     await started(t, edit(t.file.id, { prompt: 'x'.repeat(1500) }));
   });
 
   it('refuses an unknown model, aspect ratio or resolution', async () => {
     const t = await setup();
-    await refused(t, edit(t.file.id, { model: 'nope' }), ValidationFailedError, 'This model is not offered by the provider');
-    await refused(t, edit(t.file.id, { aspectRatio: '4:3' }), ValidationFailedError, 'This aspect ratio is not offered by the model');
-    await refused(t, edit(t.file.id, { resolution: '4K' }), ValidationFailedError, 'This resolution is not offered by the model');
+    await refused(
+      t,
+      edit(t.file.id, { model: 'nope' }),
+      ValidationFailedError,
+      'This model is not offered by the provider',
+    );
+    await refused(
+      t,
+      edit(t.file.id, { aspectRatio: '4:3' }),
+      ValidationFailedError,
+      'This aspect ratio is not offered by the model',
+    );
+    await refused(
+      t,
+      edit(t.file.id, { resolution: '4K' }),
+      ValidationFailedError,
+      'This resolution is not offered by the model',
+    );
   });
 
   it('lets a model without constraints accept any aspect ratio and resolution', async () => {
@@ -180,7 +222,10 @@ describe('startGeneration', () => {
   it('answers a models result that is not ok as it is and queues nothing', async () => {
     const t = await setup();
     t.providers.modelsResult = { ok: false, code: 'provider_unreachable' };
-    expect(await startGeneration(t.session, t.deps, edit(t.file.id))).toEqual({ ok: false, code: 'provider_unreachable' });
+    expect(await startGeneration(t.session, t.deps, edit(t.file.id))).toEqual({
+      ok: false,
+      code: 'provider_unreachable',
+    });
     expect(t.db.jobs.rows).toHaveLength(0);
     expect(t.db.generations.rows).toHaveLength(0);
     expect(t.providers.used).toEqual([]);
@@ -189,7 +234,12 @@ describe('startGeneration', () => {
 
   it('refuses an ollama id and answers provider_not_configured without any entry', async () => {
     const t = await setup();
-    await refused(t, edit(t.file.id, { providerId: OLLAMA_ID }), InvalidOperationError, 'This provider cannot generate images');
+    await refused(
+      t,
+      edit(t.file.id, { providerId: OLLAMA_ID }),
+      InvalidOperationError,
+      'This provider cannot generate images',
+    );
     await refused(t, edit(t.file.id, { providerId: UNKNOWN_ID }), NotFoundError);
     t.providers.entries = t.providers.entries.filter((e) => e.kind === 'ollama');
     await refused(t, { ...edit(t.file.id), providerId: undefined }, ProviderNotConfiguredError);
@@ -260,10 +310,30 @@ describe('startGeneration from a prompt version', () => {
     const prompt = await libraryPrompt(t);
     const versionId = prompt.currentVersion.id;
     await refused(t, fromVersion(t.file.id, versionId, {}), ValidationFailedError, 'Every variable needs a value');
-    await refused(t, fromVersion(t.file.id, versionId, { view: '   ' }), ValidationFailedError, 'Every variable needs a value');
-    await refused(t, fromVersion(t.file.id, versionId, { view: 'side', angle: 'low' }), ValidationFailedError, 'This prompt has no such variable');
-    await refused(t, fromVersion(t.file.id, versionId, { view: 'x'.repeat(2001) }), ValidationFailedError, 'This text is too long');
-    await refused(t, fromVersion(t.file.id, UNKNOWN_ID, { view: 'side' }), NotFoundError, 'This prompt version does not exist');
+    await refused(
+      t,
+      fromVersion(t.file.id, versionId, { view: '   ' }),
+      ValidationFailedError,
+      'Every variable needs a value',
+    );
+    await refused(
+      t,
+      fromVersion(t.file.id, versionId, { view: 'side', angle: 'low' }),
+      ValidationFailedError,
+      'This prompt has no such variable',
+    );
+    await refused(
+      t,
+      fromVersion(t.file.id, versionId, { view: 'x'.repeat(2001) }),
+      ValidationFailedError,
+      'This text is too long',
+    );
+    await refused(
+      t,
+      fromVersion(t.file.id, UNKNOWN_ID, { view: 'side' }),
+      NotFoundError,
+      'This prompt version does not exist',
+    );
     expect(t.providers.modelCalls).toEqual([]);
   });
 
@@ -271,7 +341,12 @@ describe('startGeneration from a prompt version', () => {
     const t = await setup();
     const prompt = await libraryPrompt(t, `${'x'.repeat(1490)} {{view}}`);
     const versionId = prompt.currentVersion.id;
-    await refused(t, fromVersion(t.file.id, versionId, { view: 'y'.repeat(10) }), ValidationFailedError, 'The prompt is longer than this model allows');
+    await refused(
+      t,
+      fromVersion(t.file.id, versionId, { view: 'y'.repeat(10) }),
+      ValidationFailedError,
+      'The prompt is longer than this model allows',
+    );
     expect((await started(t, fromVersion(t.file.id, versionId, { view: 'y'.repeat(9) }))).prompt).toHaveLength(1500);
   });
 
@@ -285,14 +360,24 @@ describe('startGeneration from a prompt version', () => {
       defaults: {},
     });
     const g = await started(t, fromVersion(t.file.id, first.currentVersion.id, { view: 'front' }));
-    expect(g).toMatchObject({ prompt: 'A front view', promptVersionId: first.currentVersion.id, promptVersionNumber: 1 });
+    expect(g).toMatchObject({
+      prompt: 'A front view',
+      promptVersionId: first.currentVersion.id,
+      promptVersionNumber: 1,
+    });
   });
 
   it('records no prompt reference for a free prompt', async () => {
     const t = await setup();
     await libraryPrompt(t);
     const g = await started(t, edit(t.file.id));
-    expect(g).toMatchObject({ promptId: null, promptVersionId: null, promptTitle: null, promptVersionNumber: null, promptVariables: null });
+    expect(g).toMatchObject({
+      promptId: null,
+      promptVersionId: null,
+      promptTitle: null,
+      promptVersionNumber: null,
+      promptVariables: null,
+    });
   });
 });
 
@@ -330,10 +415,21 @@ describe('retryGeneration', () => {
     expect(await clearFinishedJobs(t.session)).toBe(1);
     const wakes = t.control.wakes;
     const retried = await retryGeneration(t.session, t.deps, failed.id);
-    expect(retried).toMatchObject({ id: failed.id, status: 'pending', errorCode: null, finishedAt: null, jobStatus: 'queued' });
+    expect(retried).toMatchObject({
+      id: failed.id,
+      status: 'pending',
+      errorCode: null,
+      finishedAt: null,
+      jobStatus: 'queued',
+    });
     expect(retried.jobId).not.toBe(failed.jobId);
     expect(t.db.jobs.rows).toEqual([
-      expect.objectContaining({ id: retried.jobId, type: IMAGE_GENERATE_JOB, lane: VENICE_ID, payload: { v: 1, generationId: failed.id } }),
+      expect.objectContaining({
+        id: retried.jobId,
+        type: IMAGE_GENERATE_JOB,
+        lane: VENICE_ID,
+        payload: { v: 1, generationId: failed.id },
+      }),
     ]);
     expect(t.control.wakes).toBe(wakes + 1);
     expect(t.db.generations.rows).toHaveLength(1);
@@ -441,7 +537,17 @@ describe('job use cases around generations', () => {
     const g = await started(t, edit(t.file.id));
     const other = await t.importOne('car.png');
     await t.db.jobs.enqueue({
-      jobs: [{ id: crypto.randomUUID(), type: ANALYZE_FILE_JOB, resourceClass: 'local_gpu', fileId: other.id, lane: null, payload: {}, dedupeKey: null }],
+      jobs: [
+        {
+          id: crypto.randomUUID(),
+          type: ANALYZE_FILE_JOB,
+          resourceClass: 'local_gpu',
+          fileId: other.id,
+          lane: null,
+          payload: {},
+          dedupeKey: null,
+        },
+      ],
       now: t.session.now().toISOString(),
     });
     for (const row of t.db.jobs.rows) row.status = 'failed';

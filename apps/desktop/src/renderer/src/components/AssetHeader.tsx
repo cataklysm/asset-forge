@@ -88,7 +88,12 @@ export function AssetHeader(props: Props) {
           maxLength={200}
           onCommit={(name) => onSave({ name })}
         />
-        <select className={SELECT} aria-label="Type" value={asset.typeId} onChange={(event) => void onSave({ typeId: event.target.value })}>
+        <select
+          className={SELECT}
+          aria-label="Type"
+          value={asset.typeId}
+          onChange={(event) => void onSave({ typeId: event.target.value })}
+        >
           {(types ?? []).map((type) => (
             <option key={type.id} value={type.id}>
               {type.name}
@@ -201,8 +206,12 @@ function AssetFields({ assetId, asset, importing, onSave, onAssetChange, reporte
         <SourceList
           sources={asset.sources}
           disabled={importing}
-          onAdd={(url) => reported(async () => onAssetChange(await call('assets:addSource', { assetId, url })), describeSourceError)}
-          onRemove={(sourceId) => reported(async () => onAssetChange(await call('assets:removeSource', { assetId, sourceId })))}
+          onAdd={(url) =>
+            reported(async () => onAssetChange(await call('assets:addSource', { assetId, url })), describeSourceError)
+          }
+          onRemove={(sourceId) =>
+            reported(async () => onAssetChange(await call('assets:removeSource', { assetId, sourceId })))
+          }
           onOpen={(sourceId) => reported(() => call('assets:openSource', { assetId, sourceId }))}
         />
       </div>

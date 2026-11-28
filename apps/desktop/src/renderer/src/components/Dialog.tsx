@@ -33,7 +33,17 @@ const SIZE = {
  * @param props the title, its id, whether the dialog is a detail dialog and the content
  * @returns the content
  */
-function DialogBody({ title, titleId, detail, children }: { title: string; titleId: string; detail: boolean; children: ReactNode }) {
+function DialogBody({
+  title,
+  titleId,
+  detail,
+  children,
+}: {
+  title: string;
+  titleId: string;
+  detail: boolean;
+  children: ReactNode;
+}) {
   if (detail) return <div className="h-full">{children}</div>;
   return (
     <div className="flex h-full flex-col gap-4 p-5">

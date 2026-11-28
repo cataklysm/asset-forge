@@ -38,7 +38,10 @@ const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resol
  * @param options the batch size and a hook after each index batch
  * @returns nothing
  */
-export async function ensureDerivedData(database: BetterSQLite3Database, options: DerivedDataOptions = {}): Promise<void> {
+export async function ensureDerivedData(
+  database: BetterSQLite3Database,
+  options: DerivedDataOptions = {},
+): Promise<void> {
   const stored = database.select({ version: workspace.derivedDataVersion }).from(workspace).limit(1).get();
   if (stored?.version === DERIVED_DATA_VERSION) return;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;

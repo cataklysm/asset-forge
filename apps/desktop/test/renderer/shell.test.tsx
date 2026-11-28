@@ -105,7 +105,17 @@ it('Ctrl+F focuses the page search field', async () => {
   expect(document.activeElement).toBe(screen.getByLabelText('Search'));
 });
 
-const IDLE: JobSummary = { queued: 0, running: 0, waiting: 0, failed: 0, cancelled: 0, succeeded: 4, changes: 9, paused: [], pausedHosts: [] };
+const IDLE: JobSummary = {
+  queued: 0,
+  running: 0,
+  waiting: 0,
+  failed: 0,
+  cancelled: 0,
+  succeeded: 4,
+  changes: 9,
+  paused: [],
+  pausedHosts: [],
+};
 
 function workspaceShell(summary: () => JobSummary, onResume: () => void = () => {}, handlers: FakeHandlers = {}) {
   const api = installFakeApi({
@@ -123,7 +133,12 @@ function workspaceShell(summary: () => JobSummary, onResume: () => void = () => 
   });
   render(
     <WorkspaceShell
-      workspace={{ id: '00000000-0000-4000-8000-00000000f001', name: 'W', rootPath: 'root', lastOpenedAt: '2026-01-01T00:00:00.000Z' }}
+      workspace={{
+        id: '00000000-0000-4000-8000-00000000f001',
+        name: 'W',
+        rootPath: 'root',
+        lastOpenedAt: '2026-01-01T00:00:00.000Z',
+      }}
       onClosed={() => {}}
     />,
   );
@@ -155,8 +170,18 @@ it('the Jobs entry shows no number while idle and the active count otherwise', a
 
 const LOCAL_ID = '00000000-0000-4000-8000-00000000a001';
 const RUNPOD_ID = '00000000-0000-4000-8000-00000000b001';
-const PAUSED_LOCAL: PausedProvider = { providerId: LOCAL_ID, providerName: 'Local Ollama', kind: 'ollama', reason: 'provider_unreachable' };
-const PAUSED_RUNPOD: PausedProvider = { providerId: RUNPOD_ID, providerName: 'RunPod', kind: 'ollama', reason: 'provider_unauthorized' };
+const PAUSED_LOCAL: PausedProvider = {
+  providerId: LOCAL_ID,
+  providerName: 'Local Ollama',
+  kind: 'ollama',
+  reason: 'provider_unreachable',
+};
+const PAUSED_RUNPOD: PausedProvider = {
+  providerId: RUNPOD_ID,
+  providerName: 'RunPod',
+  kind: 'ollama',
+  reason: 'provider_unauthorized',
+};
 
 /** The app frame of the workspace shell inside its job and provider state, without the screens. */
 function jobsShell(summary: () => JobSummary, handlers: FakeHandlers = {}) {
@@ -173,7 +198,14 @@ function jobsShell(summary: () => JobSummary, handlers: FakeHandlers = {}) {
   render(
     <JobsProvider>
       <ProviderSettingsProvider>
-        <JobsAppShell workspaceName="W" rootPath="root" section="assets" busy={false} onNavigate={onNavigate} onClose={() => {}}>
+        <JobsAppShell
+          workspaceName="W"
+          rootPath="root"
+          section="assets"
+          busy={false}
+          onNavigate={onNavigate}
+          onClose={() => {}}
+        >
           <p>content</p>
         </JobsAppShell>
       </ProviderSettingsProvider>
@@ -187,7 +219,11 @@ it('one line per paused provider; Resume on the second resumes that provider onl
   let summary: JobSummary = { ...IDLE, queued: 2, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] };
   const { api } = jobsShell(() => summary, {
     'jobs:resume': ({ providerId }) => {
-      summary = { ...summary, paused: summary.paused.filter((p) => p.providerId !== providerId), changes: summary.changes + 1 };
+      summary = {
+        ...summary,
+        paused: summary.paused.filter((p) => p.providerId !== providerId),
+        changes: summary.changes + 1,
+      };
       return {};
     },
   });
@@ -198,7 +234,9 @@ it('one line per paused provider; Resume on the second resumes that provider onl
   expect(runpod.textContent).toContain(JOB_ERROR_MESSAGES.provider_unauthorized);
   await user.click(within(runpod).getByRole('button', { name: 'Resume' }));
   await waitFor(() => expect(within(screen.getByRole('alert')).queryByRole('group', { name: 'RunPod' })).toBeNull());
-  expect(api.calls.filter((c) => c.channel === 'jobs:resume').map((c) => c.request)).toEqual([{ providerId: RUNPOD_ID }]);
+  expect(api.calls.filter((c) => c.channel === 'jobs:resume').map((c) => c.request)).toEqual([
+    { providerId: RUNPOD_ID },
+  ]);
   expect(within(screen.getByRole('alert')).getByRole('group', { name: 'Local Ollama' })).toBeTruthy();
 });
 
@@ -206,8 +244,12 @@ it('Settings is offered only on the line paused for a settings reason', async ()
   const user = userEvent.setup();
   const { onNavigate } = jobsShell(() => ({ ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] }));
   const banner = await screen.findByRole('alert');
-  expect(within(within(banner).getByRole('group', { name: 'Local Ollama' })).queryByRole('button', { name: 'Settings' })).toBeNull();
-  await user.click(within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Settings' }));
+  expect(
+    within(within(banner).getByRole('group', { name: 'Local Ollama' })).queryByRole('button', { name: 'Settings' }),
+  ).toBeNull();
+  await user.click(
+    within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Settings' }),
+  );
   expect(onNavigate).toHaveBeenCalledWith('settings');
 });
 
@@ -215,7 +257,9 @@ it('Move jobs on a line opens the move dialog with that provider as the fixed so
   const user = userEvent.setup();
   jobsShell(() => ({ ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] }));
   const banner = await screen.findByRole('alert');
-  await user.click(within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Move jobs' }));
+  await user.click(
+    within(within(banner).getByRole('group', { name: 'RunPod' })).getByRole('button', { name: 'Move jobs' }),
+  );
   const dialog = await screen.findByRole('dialog', { name: 'Move jobs' });
   expect(await within(dialog).findByText('3 waiting')).toBeTruthy();
   expect(within(dialog).getByText('RunPod')).toBeTruthy();
@@ -227,12 +271,19 @@ it('Move jobs on a line opens the move dialog with that provider as the fixed so
 it('the line of a paused Venice lane offers Resume and Settings but no Move jobs', async () => {
   const user = userEvent.setup();
   const VENICE_ID = '00000000-0000-4000-8000-00000000c001';
-  const venice: PausedProvider = { providerId: VENICE_ID, providerName: 'Venice', kind: 'venice', reason: 'provider_unauthorized' };
+  const venice: PausedProvider = {
+    providerId: VENICE_ID,
+    providerName: 'Venice',
+    kind: 'venice',
+    reason: 'provider_unauthorized',
+  };
   const { api, onNavigate } = jobsShell(() => ({ ...IDLE, paused: [venice, PAUSED_LOCAL] }));
   const banner = await screen.findByRole('alert');
   const line = within(banner).getByRole('group', { name: 'Venice' });
   expect(within(line).queryByRole('button', { name: 'Move jobs' })).toBeNull();
-  expect(within(within(banner).getByRole('group', { name: 'Local Ollama' })).getByRole('button', { name: 'Move jobs' })).toBeTruthy();
+  expect(
+    within(within(banner).getByRole('group', { name: 'Local Ollama' })).getByRole('button', { name: 'Move jobs' }),
+  ).toBeTruthy();
   await user.click(within(line).getByRole('button', { name: 'Settings' }));
   expect(onNavigate).toHaveBeenCalledWith('settings');
   await user.click(within(line).getByRole('button', { name: 'Resume' }));
@@ -243,12 +294,26 @@ it('the line of a paused Venice lane offers Resume and Settings but no Move jobs
 it('the line of a paused OpenAI-compatible entry offers Move jobs, a Venice one does not', async () => {
   const VLLM_ID = '00000000-0000-4000-8000-00000000d001';
   const VENICE_ID = '00000000-0000-4000-8000-00000000c001';
-  const vllm: PausedProvider = { providerId: VLLM_ID, providerName: 'vLLM', kind: 'openai', reason: 'provider_unreachable' };
-  const venice: PausedProvider = { providerId: VENICE_ID, providerName: 'Venice', kind: 'venice', reason: 'provider_unreachable' };
+  const vllm: PausedProvider = {
+    providerId: VLLM_ID,
+    providerName: 'vLLM',
+    kind: 'openai',
+    reason: 'provider_unreachable',
+  };
+  const venice: PausedProvider = {
+    providerId: VENICE_ID,
+    providerName: 'Venice',
+    kind: 'venice',
+    reason: 'provider_unreachable',
+  };
   jobsShell(() => ({ ...IDLE, paused: [vllm, venice] }));
   const banner = await screen.findByRole('alert');
-  expect(within(within(banner).getByRole('group', { name: 'vLLM' })).getByRole('button', { name: 'Move jobs' })).toBeTruthy();
-  expect(within(within(banner).getByRole('group', { name: 'Venice' })).queryByRole('button', { name: 'Move jobs' })).toBeNull();
+  expect(
+    within(within(banner).getByRole('group', { name: 'vLLM' })).getByRole('button', { name: 'Move jobs' }),
+  ).toBeTruthy();
+  expect(
+    within(within(banner).getByRole('group', { name: 'Venice' })).queryByRole('button', { name: 'Move jobs' }),
+  ).toBeNull();
 });
 
 it('no paused provider shows no banner', async () => {
@@ -306,7 +371,9 @@ it('the banner shows a failed resume in its line and keeps the pause', async () 
     </AppShell>,
   );
   await user.click(screen.getByRole('button', { name: 'Resume' }));
-  await waitFor(() => expect(screen.getByRole('alert').textContent).not.toContain(JOB_ERROR_MESSAGES.provider_unreachable));
+  await waitFor(() =>
+    expect(screen.getByRole('alert').textContent).not.toContain(JOB_ERROR_MESSAGES.provider_unreachable),
+  );
   expect(onResume).toHaveBeenCalledWith(LOCAL_ID);
   expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Move jobs' }));
@@ -325,21 +392,35 @@ it('after the provider lines one line per paused host; Resume resumes that host 
   };
   const { api } = jobsShell(() => summary, {
     'jobs:resumeHost': ({ host }) => {
-      summary = { ...summary, pausedHosts: summary.pausedHosts.filter((h) => h.host !== host), changes: summary.changes + 1 };
+      summary = {
+        ...summary,
+        pausedHosts: summary.pausedHosts.filter((h) => h.host !== host),
+        changes: summary.changes + 1,
+      };
       return {};
     },
   });
   const banner = await screen.findByRole('alert');
-  const groups = within(banner).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+  const groups = within(banner)
+    .getAllByRole('group')
+    .map((g) => g.getAttribute('aria-label'));
   expect(groups).toEqual(['Local Ollama', 'cdn.example.com', 'img.example.org:8443']);
   const blocked = within(banner).getByRole('group', { name: 'cdn.example.com' });
   const throttled = within(banner).getByRole('group', { name: 'img.example.org:8443' });
   expect(blocked.textContent).toContain(JOB_ERROR_MESSAGES.download_blocked);
   expect(throttled.textContent).toContain(JOB_ERROR_MESSAGES.download_throttled);
-  expect(within(throttled).getAllByRole('button').map((b) => b.textContent)).toEqual(['Resume']);
+  expect(
+    within(throttled)
+      .getAllByRole('button')
+      .map((b) => b.textContent),
+  ).toEqual(['Resume']);
   await user.click(within(throttled).getByRole('button', { name: 'Resume' }));
-  await waitFor(() => expect(within(screen.getByRole('alert')).queryByRole('group', { name: 'img.example.org:8443' })).toBeNull());
-  expect(api.calls.filter((c) => c.channel === 'jobs:resumeHost').map((c) => c.request)).toEqual([{ host: 'img.example.org:8443' }]);
+  await waitFor(() =>
+    expect(within(screen.getByRole('alert')).queryByRole('group', { name: 'img.example.org:8443' })).toBeNull(),
+  );
+  expect(api.calls.filter((c) => c.channel === 'jobs:resumeHost').map((c) => c.request)).toEqual([
+    { host: 'img.example.org:8443' },
+  ]);
   expect(api.calls.some((c) => c.channel === 'jobs:resume')).toBe(false);
   expect(within(screen.getByRole('alert')).getByRole('group', { name: 'cdn.example.com' })).toBeTruthy();
 });
@@ -421,19 +502,31 @@ it('offers Open site only for a browser check on the site of a profile; it sends
   const site = within(banner).getByRole('group', { name: 'example.com' });
   expect(site.textContent).toContain(JOB_ERROR_MESSAGES.download_browser_check);
   const open = await within(site).findByRole('button', { name: 'Open site' });
-  expect(within(site).getAllByRole('button').map((b) => b.textContent)).toEqual(['Open site', 'Resume']);
-  expect(open.getAttribute('title')).toBe('Opens the site so you can pass its check; Resume then repeats the refused downloads');
+  expect(
+    within(site)
+      .getAllByRole('button')
+      .map((b) => b.textContent),
+  ).toEqual(['Open site', 'Resume']);
+  expect(open.getAttribute('title')).toBe(
+    'Opens the site so you can pass its check; Resume then repeats the refused downloads',
+  );
   // No profile for that host, or another reason: Resume only.
-  expect(within(within(banner).getByRole('group', { name: 'cdn.example.org' })).getAllByRole('button').map((b) => b.textContent)).toEqual([
-    'Resume',
-  ]);
-  expect(within(within(banner).getByRole('group', { name: 'shop.example.net' })).getAllByRole('button').map((b) => b.textContent)).toEqual([
-    'Resume',
-  ]);
+  expect(
+    within(within(banner).getByRole('group', { name: 'cdn.example.org' }))
+      .getAllByRole('button')
+      .map((b) => b.textContent),
+  ).toEqual(['Resume']);
+  expect(
+    within(within(banner).getByRole('group', { name: 'shop.example.net' }))
+      .getAllByRole('button')
+      .map((b) => b.textContent),
+  ).toEqual(['Resume']);
 
   await user.click(open);
   await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(true));
-  expect(api.calls.filter((c) => c.channel === 'sites:openCheck').map((c) => c.request)).toEqual([{ host: 'example.com' }]);
+  expect(api.calls.filter((c) => c.channel === 'sites:openCheck').map((c) => c.request)).toEqual([
+    { host: 'example.com' },
+  ]);
   await act(async () => opening.resolve({}));
   await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false));
   expect(api.calls.some((c) => c.channel === 'jobs:resumeHost')).toBe(false);
@@ -470,14 +563,28 @@ it('a failed Open site shows in its line and keeps it', async () => {
 
 it('sameSummary compares the pause list entry by entry', () => {
   expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL }] })).toBe(true);
-  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, reason: 'provider_unauthorized' }] })).toBe(false);
-  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, providerName: 'Local' }] })).toBe(false);
-  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] })).toBe(false);
+  expect(
+    sameSummary(
+      { ...IDLE, paused: [PAUSED_LOCAL] },
+      { ...IDLE, paused: [{ ...PAUSED_LOCAL, reason: 'provider_unauthorized' }] },
+    ),
+  ).toBe(false);
+  expect(
+    sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [{ ...PAUSED_LOCAL, providerName: 'Local' }] }),
+  ).toBe(false);
+  expect(sameSummary({ ...IDLE, paused: [PAUSED_LOCAL] }, { ...IDLE, paused: [PAUSED_LOCAL, PAUSED_RUNPOD] })).toBe(
+    false,
+  );
   expect(sameSummary(IDLE, { ...IDLE, paused: [PAUSED_LOCAL] })).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, failed: 1 })).toBe(false);
   const host = { host: 'example.com', reason: 'download_blocked' } as const;
   expect(sameSummary({ ...IDLE, pausedHosts: [host] }, { ...IDLE, pausedHosts: [{ ...host }] })).toBe(true);
-  expect(sameSummary({ ...IDLE, pausedHosts: [host] }, { ...IDLE, pausedHosts: [{ ...host, reason: 'download_throttled' }] })).toBe(false);
+  expect(
+    sameSummary(
+      { ...IDLE, pausedHosts: [host] },
+      { ...IDLE, pausedHosts: [{ ...host, reason: 'download_throttled' }] },
+    ),
+  ).toBe(false);
   expect(sameSummary(IDLE, { ...IDLE, pausedHosts: [host] })).toBe(false);
 });
 
@@ -485,12 +592,16 @@ it('sameSummary compares the pause list entry by entry', () => {
 async function inboxWithProposal(handlers: FakeHandlers = {}) {
   const user = userEvent.setup();
   const file = fileRecord({ originalName: 'fox.png', hasProposal: true });
-  const api = workspaceShell(() => IDLE, () => {}, {
-    'files:list': () => pageOf([file]),
-    'tags:suggest': () => [],
-    'analysis:getProposal': () => ({ proposal: null, job: null }),
-    ...handlers,
-  });
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'files:list': () => pageOf([file]),
+      'tags:suggest': () => [],
+      'analysis:getProposal': () => ({ proposal: null, job: null }),
+      ...handlers,
+    },
+  );
   await user.click(screen.getByRole('link', { name: /Inbox/ }));
   const listbox = await screen.findByRole('listbox', { name: 'Files' });
   const tile = within(listbox).getByText('fox.png').closest<HTMLElement>('[data-index]')!;
@@ -575,26 +686,36 @@ it('no badge for an empty trash', () => {
 
 it('navigating to Trash renders the trash screen', async () => {
   const user = userEvent.setup();
-  const api = workspaceShell(() => IDLE, () => {}, {
-    'trash:summary': () => ({ count: 1 }),
-    'files:list': () => pageOf([trashedRecord({ originalName: 'gone.png' })]),
-    'tags:suggest': () => [],
-  });
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'trash:summary': () => ({ count: 1 }),
+      'files:list': () => pageOf([trashedRecord({ originalName: 'gone.png' })]),
+      'tags:suggest': () => [],
+    },
+  );
   await user.click(await screen.findByRole('link', { name: 'Trash, 1 file' }));
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Trash/ }).textContent).toBe('Trash1'));
   expect(await screen.findByText('gone.png')).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Trash, 1 file' }).getAttribute('aria-current')).toBe('page');
-  const scopes = api.calls.filter((c) => c.channel === 'files:list').map((c) => (c.request as { scope: unknown }).scope);
+  const scopes = api.calls
+    .filter((c) => c.channel === 'files:list')
+    .map((c) => (c.request as { scope: unknown }).scope);
   expect(scopes.length).toBeGreaterThan(0);
   expect(scopes.every((scope) => (scope as { kind: string }).kind === 'trash')).toBe(true);
 });
 
 it('the trash filters survive leaving and returning', async () => {
   const user = userEvent.setup();
-  const api = workspaceShell(() => IDLE, () => {}, {
-    'files:list': () => pageOf([]),
-    'tags:suggest': () => [],
-  });
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'files:list': () => pageOf([]),
+      'tags:suggest': () => [],
+    },
+  );
   await user.click(screen.getByRole('link', { name: 'Trash' }));
   await user.type(await screen.findByRole('searchbox', { name: 'Search files' }), 'hero');
   await waitFor(() =>
@@ -614,16 +735,26 @@ it('deleting a file in the inbox raises the count in the navigation', async () =
   const file = fileRecord({ originalName: 'fox.png' });
   let count = 0;
   let inbox = [file];
-  workspaceShell(() => IDLE, () => {}, {
-    'trash:summary': () => ({ count }),
-    'files:list': () => pageOf(inbox),
-    'tags:suggest': () => [],
-    'files:trashMany': ({ fileIds }) => {
-      count += fileIds.length;
-      inbox = inbox.filter((f) => !fileIds.includes(f.id));
-      return { items: fileIds.map((fileId) => ({ fileId, file: { ...file, deletedAt: '2026-01-02T00:00:00.000Z' }, error: null })) };
+  workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'trash:summary': () => ({ count }),
+      'files:list': () => pageOf(inbox),
+      'tags:suggest': () => [],
+      'files:trashMany': ({ fileIds }) => {
+        count += fileIds.length;
+        inbox = inbox.filter((f) => !fileIds.includes(f.id));
+        return {
+          items: fileIds.map((fileId) => ({
+            fileId,
+            file: { ...file, deletedAt: '2026-01-02T00:00:00.000Z' },
+            error: null,
+          })),
+        };
+      },
     },
-  });
+  );
   await user.click(screen.getByRole('link', { name: /Inbox/ }));
   const listbox = await screen.findByRole('listbox', { name: 'Files' });
   const tile = within(listbox).getByText('fox.png').closest<HTMLElement>('[data-index]')!;
@@ -637,17 +768,21 @@ it('a rename on the asset screen rewrites the gallery filter that is not mounted
   const user = userEvent.setup();
   const summary = assetSummary({ name: 'Oak tree', tags: [tagOf('Front View')] });
   const { projectCount: _p, fileCount: _f, workflowProgress: _w, coverTags: _c, ...detail } = summary;
-  const api = workspaceShell(() => IDLE, () => {}, {
-    'assets:list': () => pageOf([summary]),
-    'assets:get': () => ({ ...detail, coverIsChosen: false, sources: [] }),
-    'assignments:listByAsset': () => [],
-    'relations:list': () => [],
-    'files:list': () => pageOf([]),
-    'workflows:get': () => null,
-    'workflowTemplates:list': () => [],
-    'tags:suggest': () => [],
-    ...renameHandlers({ 'front view': 'Front View' }),
-  });
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'assets:list': () => pageOf([summary]),
+      'assets:get': () => ({ ...detail, coverIsChosen: false, sources: [] }),
+      'assignments:listByAsset': () => [],
+      'relations:list': () => [],
+      'files:list': () => pageOf([]),
+      'workflows:get': () => null,
+      'workflowTemplates:list': () => [],
+      'tags:suggest': () => [],
+      ...renameHandlers({ 'front view': 'Front View' }),
+    },
+  );
   await user.type(await screen.findByRole('combobox', { name: 'Tags' }), 'front view{Enter}');
   expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
   const grid = await screen.findByRole('grid', { name: 'Assets' });
@@ -659,14 +794,20 @@ it('a rename on the asset screen rewrites the gallery filter that is not mounted
   expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
   await waitFor(() =>
     expect(
-      api.calls.some((c) => c.channel === 'assets:list' && (c.request as { tagNames?: string[] }).tagNames?.join() === 'front'),
+      api.calls.some(
+        (c) => c.channel === 'assets:list' && (c.request as { tagNames?: string[] }).tagNames?.join() === 'front',
+      ),
     ).toBe(true),
   );
 });
 
 it('a dirty prompt draft asks before the main navigation leaves; cancel stays, discard leaves', async () => {
   const user = userEvent.setup();
-  workspaceShell(() => IDLE, () => {}, { 'tags:suggest': () => [], ...fakePrompts([promptDetail({ title: 'Hero' })]).handlers });
+  workspaceShell(
+    () => IDLE,
+    () => {},
+    { 'tags:suggest': () => [], ...fakePrompts([promptDetail({ title: 'Hero' })]).handlers },
+  );
   await user.click(screen.getByRole('link', { name: 'Prompts' }));
   expect(screen.getByRole('link', { name: 'Prompts' }).getAttribute('aria-current')).toBe('page');
   const listbox = await screen.findByRole('listbox', { name: 'Prompts' });
@@ -682,6 +823,10 @@ it('a dirty prompt draft asks before the main navigation leaves; cancel stays, d
   expect(within(editor).getByDisplayValue('Hero shot')).toBeTruthy();
 
   await user.click(screen.getByRole('link', { name: 'Assets' }));
-  await user.click(within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', { name: 'Discard' }));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' })).getByRole('button', {
+      name: 'Discard',
+    }),
+  );
   await waitFor(() => expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-current')).toBe('page'));
 });

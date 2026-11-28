@@ -32,11 +32,30 @@ beforeEach(async () => {
   }
   await db.storages.ensurePrimary({ id: STORAGE_ID, createdAt: T0 });
   await db.assetTypes.insertMissing([
-    { id: TYPE_ID, key: BUILT_IN_ASSET_TYPES[0]!.key, name: 'T', sortOrder: 0, builtIn: true, defaultWorkflowTemplateId: null },
+    {
+      id: TYPE_ID,
+      key: BUILT_IN_ASSET_TYPES[0]!.key,
+      name: 'T',
+      sortOrder: 0,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    },
   ]);
-  await db.assets.insert({ id: ASSET_ID, name: 'Pump', typeId: TYPE_ID, description: '', status: 'draft', createdAt: T0, updatedAt: T0 });
+  await db.assets.insert({
+    id: ASSET_ID,
+    name: 'Pump',
+    typeId: TYPE_ID,
+    description: '',
+    status: 'draft',
+    createdAt: T0,
+    updatedAt: T0,
+  });
   await addFile(FILE_ID);
-  await db.files.setPlacement(FILE_ID, { relativePath: `assets/${ASSET_ID}/f.png`, assetId: ASSET_ID, role: 'reference' });
+  await db.files.setPlacement(FILE_ID, {
+    relativePath: `assets/${ASSET_ID}/f.png`,
+    assetId: ASSET_ID,
+    role: 'reference',
+  });
 });
 
 afterEach(async () => {
@@ -60,7 +79,14 @@ async function addFile(id: string, complete = true): Promise<void> {
 const t = (name: string, displayName = name) => ({ name, displayName, newId: uuid(nextTagId++) });
 
 const apply = (
-  o: { fileId?: string; sha256?: string; tags?: ReturnType<typeof t>[]; model?: string; promptName?: string | null; now?: string } = {},
+  o: {
+    fileId?: string;
+    sha256?: string;
+    tags?: ReturnType<typeof t>[];
+    model?: string;
+    promptName?: string | null;
+    now?: string;
+  } = {},
 ) =>
   db.analyses.apply({
     fileId: o.fileId ?? FILE_ID,
@@ -117,8 +143,22 @@ describe('file analysis repository', () => {
   });
 
   test('manual assignments stay, and a tag carried manually gets no ai assignment', async () => {
-    await db.tags.addToFile({ fileId: FILE_ID, name: 'rusty', displayName: 'rusty', origin: 'manual', newId: uuid(4000), now: T0 });
-    await db.tags.addToFile({ fileId: FILE_ID, name: 'kept', displayName: 'kept', origin: 'manual', newId: uuid(4001), now: T0 });
+    await db.tags.addToFile({
+      fileId: FILE_ID,
+      name: 'rusty',
+      displayName: 'rusty',
+      origin: 'manual',
+      newId: uuid(4000),
+      now: T0,
+    });
+    await db.tags.addToFile({
+      fileId: FILE_ID,
+      name: 'kept',
+      displayName: 'kept',
+      origin: 'manual',
+      newId: uuid(4001),
+      now: T0,
+    });
     expect(await apply({ tags: [t('rusty'), t('metal')] })).toBe(true);
     expect(await tagsOf()).toEqual(['kept/manual', 'metal/ai', 'rusty/manual']);
   });
@@ -126,7 +166,13 @@ describe('file analysis repository', () => {
   test('a successful apply changes no workflow step and not the asset status', async () => {
     const versionId = uuid(60);
     const stepIds = [uuid(61), uuid(62)];
-    await db.workflowTemplates.insertTemplate({ id: uuid(50), key: 'character', name: 'Character', builtIn: true, createdAt: T0 });
+    await db.workflowTemplates.insertTemplate({
+      id: uuid(50),
+      key: 'character',
+      name: 'Character',
+      builtIn: true,
+      createdAt: T0,
+    });
     await db.workflowTemplates.insertVersion({
       id: versionId,
       templateId: uuid(50),
@@ -161,10 +207,14 @@ describe('file analysis repository', () => {
   test('the asset search and the tag filters find an ai tag afterwards', async () => {
     await apply({ tags: [t('corroded')] });
     expect((await db.assets.list({ limit: 10, offset: 0, query: 'corro' })).items.map((a) => a.id)).toEqual([ASSET_ID]);
-    expect((await db.assets.list({ limit: 10, offset: 0, tagNames: ['corroded'] })).items.map((a) => a.id)).toEqual([ASSET_ID]);
-    expect((await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, tagNames: ['corroded'] })).items.map((f) => f.id)).toEqual([
-      FILE_ID,
+    expect((await db.assets.list({ limit: 10, offset: 0, tagNames: ['corroded'] })).items.map((a) => a.id)).toEqual([
+      ASSET_ID,
     ]);
+    expect(
+      (await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, tagNames: ['corroded'] })).items.map(
+        (f) => f.id,
+      ),
+    ).toEqual([FILE_ID]);
 
     await apply({ tags: [t('shiny')], now: T2 });
     expect((await db.assets.list({ limit: 10, offset: 0, query: 'corro' })).total).toBe(0);

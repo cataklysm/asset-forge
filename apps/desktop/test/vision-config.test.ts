@@ -9,12 +9,19 @@ describe('usableBaseUrl', () => {
     expect(usableBaseUrl('http://h/base/')).toBe('http://h/base');
   });
 
-  it.each(['', 'nonsense', 'file:///x', 'http://user:secret@host', 'http://:secret@host', 'http://h/?k=secret', 'http://h/#x', 'http://h/?', 'http://h/#'])(
-    'refuses %j',
-    (value) => {
-      expect(usableBaseUrl(value)).toBeNull();
-    },
-  );
+  it.each([
+    '',
+    'nonsense',
+    'file:///x',
+    'http://user:secret@host',
+    'http://:secret@host',
+    'http://h/?k=secret',
+    'http://h/#x',
+    'http://h/?',
+    'http://h/#',
+  ])('refuses %j', (value) => {
+    expect(usableBaseUrl(value)).toBeNull();
+  });
 
   it('has no default base URL or model any more', () => {
     expect(Object.keys(visionConfig)).toEqual(['usableBaseUrl']);

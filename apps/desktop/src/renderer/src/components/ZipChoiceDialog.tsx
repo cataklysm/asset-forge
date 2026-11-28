@@ -56,7 +56,9 @@ export function useZipChoice(): {
   const dialog = (
     <Dialog open={pending !== null} title={ZIP_ARCHIVE_TITLE} onClose={() => answer(null)} initialFocusRef={unpackRef}>
       <div className="space-y-4">
-        <p className="break-words">{zipPaths.length === 1 ? baseName(zipPaths[0]!) : archiveCountLabel(zipPaths.length)}</p>
+        <p className="break-words">
+          {zipPaths.length === 1 ? baseName(zipPaths[0]!) : archiveCountLabel(zipPaths.length)}
+        </p>
         <div className="flex justify-end gap-2">
           <button type="button" className={BUTTON} title={ZIP_CANCEL_TITLE} onClick={() => answer(null)}>
             {CANCEL_LABEL}

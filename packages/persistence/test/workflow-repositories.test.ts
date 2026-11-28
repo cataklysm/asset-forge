@@ -127,7 +127,13 @@ describe('workflow template repository', () => {
     });
     await db.workflowTemplates.insertTemplate(template(uuid(51), 'prop', 'A prop'));
     await db.workflowTemplates.insertTemplate(template(uuid(52), 'building', 'Building'));
-    await db.workflowTemplates.insertVersion({ id: uuid(90), templateId: uuid(52), version: 1, steps: [], createdAt: TS });
+    await db.workflowTemplates.insertVersion({
+      id: uuid(90),
+      templateId: uuid(52),
+      version: 1,
+      steps: [],
+      createdAt: TS,
+    });
     expect(await db.workflowTemplates.list()).toEqual([
       { id: uuid(52), key: 'building', name: 'Building', builtIn: true, latestVersion: 1 },
       { id: TEMPLATE, key: 'character', name: 'Character', builtIn: true, latestVersion: 2 },
@@ -146,7 +152,13 @@ describe('workflow template repository', () => {
   test('rejects a duplicate (template, version)', async () => {
     await seedTemplate();
     await expect(
-      db.workflowTemplates.insertVersion({ id: uuid(80), templateId: TEMPLATE, version: 1, steps: [], createdAt: LATER }),
+      db.workflowTemplates.insertVersion({
+        id: uuid(80),
+        templateId: TEMPLATE,
+        version: 1,
+        steps: [],
+        createdAt: LATER,
+      }),
     ).rejects.toThrow(/UNIQUE/);
     expect(await db.workflowTemplates.latestVersion(TEMPLATE)).toEqual({ ...version1, steps: sortedSteps });
   });
@@ -205,10 +217,9 @@ describe('asset workflow repository', () => {
   test('an asset cannot have two workflows', async () => {
     await seedWorkflow();
     await expect(
-      db.assetWorkflows.insert(
-        { id: uuid(75), assetId: uuid(1), templateVersionId: version1.id, createdAt: LATER },
-        [{ id: uuid(76), stepDefinitionId: uuid(61), updatedAt: LATER }],
-      ),
+      db.assetWorkflows.insert({ id: uuid(75), assetId: uuid(1), templateVersionId: version1.id, createdAt: LATER }, [
+        { id: uuid(76), stepDefinitionId: uuid(61), updatedAt: LATER },
+      ]),
     ).rejects.toThrow(/UNIQUE/);
     expect(openRaw().prepare('SELECT count(*) AS n FROM asset_workflow_step').get()).toEqual({ n: 4 });
   });
@@ -251,8 +262,19 @@ describe('asset workflow repository', () => {
       importedAt: TS,
       kind: 'image',
     });
-    await db.files.setPlacement(uuid(31), { relativePath: `assets/${uuid(1)}/a.png`, assetId: uuid(1), role: 'reference' });
-    await db.projects.insert({ id: uuid(40), name: 'P', description: '', status: 'active', createdAt: TS, updatedAt: TS });
+    await db.files.setPlacement(uuid(31), {
+      relativePath: `assets/${uuid(1)}/a.png`,
+      assetId: uuid(1),
+      role: 'reference',
+    });
+    await db.projects.insert({
+      id: uuid(40),
+      name: 'P',
+      description: '',
+      status: 'active',
+      createdAt: TS,
+      updatedAt: TS,
+    });
     await db.projectAssets.insert({
       projectId: uuid(40),
       assetId: uuid(1),

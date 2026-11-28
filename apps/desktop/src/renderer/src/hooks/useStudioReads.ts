@@ -40,8 +40,17 @@ export interface StudioReads {
  * @returns the reads, the unmount flag and the selected result
  */
 export function useStudioReads(input: StudioReadsInput): StudioReads {
-  const { fileId, results, selectedId, changeToken, sessionStarting, setResults, setUpscales, setRecent, setLoadError } =
-    input;
+  const {
+    fileId,
+    results,
+    selectedId,
+    changeToken,
+    sessionStarting,
+    setResults,
+    setUpscales,
+    setRecent,
+    setLoadError,
+  } = input;
   const disposed = useRef(false);
   useEffect(() => {
     disposed.current = false;
@@ -66,7 +75,8 @@ export function useStudioReads(input: StudioReadsInput): StudioReads {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId]);
 
-  const selected = results?.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
+  const selected =
+    results?.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
   const selectedFileId = selected?.outputs[0]?.fileId ?? null;
 
   // The upscales of the selected result, one level deep; only the newest read may set them.

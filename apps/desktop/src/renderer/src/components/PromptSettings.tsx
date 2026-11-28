@@ -191,10 +191,15 @@ export function PromptSettings() {
   const confirmDelete = (target: AnalysisPrompt) => {
     const next = list.find((prompt) => prompt.purpose === target.purpose && prompt.id !== target.id)?.id ?? null;
     void run(() =>
-      deletePrompt(remove, target, () => setConfirming(false), () => {
-        dropDraft(target.id);
-        setSelectedId(next);
-      }),
+      deletePrompt(
+        remove,
+        target,
+        () => setConfirming(false),
+        () => {
+          dropDraft(target.id);
+          setSelectedId(next);
+        },
+      ),
     );
   };
 
@@ -232,7 +237,10 @@ export function PromptSettings() {
               only={list.filter((prompt) => prompt.purpose === selected.purpose).length === 1}
               busy={busy}
               onChange={(patch) =>
-                setDrafts((current) => ({ ...current, [selected.id]: { ...(current[selected.id] ?? draftOf(selected)), ...patch } }))
+                setDrafts((current) => ({
+                  ...current,
+                  [selected.id]: { ...(current[selected.id] ?? draftOf(selected)), ...patch },
+                }))
               }
               onSave={(draft) => savePrompt(selected, draft)}
               onReset={() => run(() => reset(selected.id).then(() => dropDraft(selected.id)))}

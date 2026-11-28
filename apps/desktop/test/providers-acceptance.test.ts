@@ -5,7 +5,15 @@ import { ANALYZE_FILE_JOB, DEFAULT_PROVIDER_OPTIONS, type JobSummary, type Provi
 import { MOCK_MODEL, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createProviderStore } from '../src/main/provider-store.js';
 import { providerLaneLimit } from '../src/main/lane-limits.js';
-import { createHarness, filesBelow, NONE_SKIPPED, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
+import {
+  createHarness,
+  filesBelow,
+  NONE_SKIPPED,
+  startTwoMocks,
+  TEST_KEY,
+  TEST_KEY_2,
+  type Harness,
+} from './analysis-harness.js';
 import { FakeCodec } from './fake-codec.js';
 
 const active = (s: JobSummary) => s.queued + s.running + s.waiting;
@@ -36,7 +44,9 @@ describe('several vision providers', () => {
   const chats = (mock: MockProvider) => mock.requests.filter((r) => r.path === '/api/chat');
   const laneOf = async (providerId: string) => (await h.ok('jobs:list', { ...page, providerId })).items;
   /** Entry A on mock A with key A and entry B on mock B with key B. */
-  async function twoEntries(o: Parameters<typeof startTwoMocks>[0] = {}): Promise<{ a: ProviderView; b: ProviderView }> {
+  async function twoEntries(
+    o: Parameters<typeof startTwoMocks>[0] = {},
+  ): Promise<{ a: ProviderView; b: ProviderView }> {
     mocks = await startTwoMocks(o);
     const a = await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY });
     const b = await h.provider({ name: 'B', url: mocks.b.url, apiKey: TEST_KEY_2 });
@@ -84,14 +94,20 @@ describe('several vision providers', () => {
 
     const paused = await h.until((s) => s.paused.length > 0 && s.succeeded === 2);
     expect(paused).toMatchObject({ waiting: 3, queued: 1, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unreachable' }]);
+    expect(paused.paused).toEqual([
+      { providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unreachable' },
+    ]);
     expect(await h.ok('jobs:waitingByProvider', {})).toEqual([{ providerId: a.id, providerName: 'A', waiting: 4 }]);
 
-    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 4 });
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({
+      moved: 4,
+    });
     await h.until((s) => s.succeeded === 6 && active(s) === 0);
     expect(chats(mocks!.b)).toHaveLength(6);
     expect((await laneOf(b.id)).map((j) => j.providerName)).toEqual(Array(6).fill('B'));
-    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 0 });
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({
+      moved: 0,
+    });
   });
 
   it('fails the jobs of an entry deleted while no workspace was open and lets them move from its gone id', async () => {
@@ -107,7 +123,9 @@ describe('several vision providers', () => {
     await h.ok('workspace:open', { rootPath: workspaceRoot() });
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ failed: 1, queued: 2 });
-    expect(paused.paused).toEqual([{ providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_not_configured' }]);
+    expect(paused.paused).toEqual([
+      { providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_not_configured' },
+    ]);
     const [failed] = (await h.ok('jobs:list', { ...page, status: 'failed' })).items;
     expect(failed).toMatchObject({ errorCode: 'provider_not_configured', providerId: a.id, providerName: 'A' });
 
@@ -123,7 +141,9 @@ describe('several vision providers', () => {
     expect(await laneOf(again.id)).toEqual([]);
     expect((await h.ok('jobs:summary', {})).paused).toEqual(paused.paused);
 
-    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 2 });
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({
+      moved: 2,
+    });
     await h.until((s) => s.succeeded === 2 && active(s) === 0);
     expect(chats(mocks!.b)).toHaveLength(2);
   });
@@ -175,8 +195,20 @@ describe('several vision providers', () => {
       const jobs = await laneOf(first.id);
       expect(jobs).toHaveLength(3);
       const payloads = await payloadsByFile();
-      expect(payloads.get(fileIds[0]!)).toEqual({ version: 4, model: MOCK_MODEL, mode: 'apply', prompt: null, providerName: 'First' });
-      expect(payloads.get(fileIds[1]!)).toEqual({ version: 4, model: 'legacy-model', mode: 'propose', prompt: null, providerName: 'First' });
+      expect(payloads.get(fileIds[0]!)).toEqual({
+        version: 4,
+        model: MOCK_MODEL,
+        mode: 'apply',
+        prompt: null,
+        providerName: 'First',
+      });
+      expect(payloads.get(fileIds[1]!)).toEqual({
+        version: 4,
+        model: 'legacy-model',
+        mode: 'propose',
+        prompt: null,
+        providerName: 'First',
+      });
       expect(payloads.get(fileIds[2]!)).toEqual({
         version: 4,
         model: MOCK_MODEL,
@@ -194,10 +226,13 @@ describe('several vision providers', () => {
 
       const paused = await h.until((s) => s.paused.length > 0);
       expect(paused).toMatchObject({ failed: 1, queued: 2 });
-      expect(paused.paused).toEqual([{ providerId: null, providerName: null, kind: 'ollama', reason: 'provider_not_configured' }]);
+      expect(paused.paused).toEqual([
+        { providerId: null, providerName: null, kind: 'ollama', reason: 'provider_not_configured' },
+      ]);
       const [failed] = (await h.ok('jobs:list', { ...page, status: 'failed' })).items;
       expect(failed).toMatchObject({ errorCode: 'provider_not_configured', providerId: null });
-      for (const payload of (await payloadsByFile()).values()) expect((payload as { version: number }).version).toBeLessThan(4);
+      for (const payload of (await payloadsByFile()).values())
+        expect((payload as { version: number }).version).toBeLessThan(4);
 
       expect(await h.ok('jobs:resume', { providerId: null })).toEqual({});
       await h.until((s) => s.failed === 2 && s.paused.length === 1);
@@ -223,7 +258,13 @@ describe('several vision providers', () => {
       ok: false,
       error: { code: 'not_found', message: 'This provider does not exist' },
     });
-    expect(await h.call('analysis:preview', { target: { kind: 'files', fileIds: [f4!] }, model: MOCK_MODEL, providerId: randomUUID() })).toMatchObject({
+    expect(
+      await h.call('analysis:preview', {
+        target: { kind: 'files', fileIds: [f4!] },
+        model: MOCK_MODEL,
+        providerId: randomUUID(),
+      }),
+    ).toMatchObject({
       ok: false,
       error: { code: 'not_found' },
     });
@@ -256,7 +297,9 @@ describe('several vision providers', () => {
     await createWorkspace();
     await h.ok('analysis:enqueue', request(await h.importImages(2, 'a'), a.id));
     await h.until((s) => s.paused.length === 1 && s.paused[0]!.providerId === a.id);
-    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 1 });
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({
+      moved: 1,
+    });
     const summary = await h.until((s) => s.paused.every((p) => p.providerId !== a.id));
     expect(summary.paused.some((p) => p.providerId === a.id)).toBe(false);
   });
@@ -268,7 +311,9 @@ describe('several vision providers', () => {
     await createWorkspace();
     await h.ok('analysis:enqueue', request(await h.importImages(1, 'a'), a.id));
     await h.until((s) => s.paused.length === 1 && s.failed === 1);
-    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({ moved: 0 });
+    expect(await h.ok('jobs:reroute', { fromProviderId: a.id, toProviderId: b.id, model: MOCK_MODEL })).toEqual({
+      moved: 0,
+    });
     expect((await h.ok('jobs:summary', {})).paused).toEqual([
       { providerId: a.id, providerName: 'A', kind: 'ollama', reason: 'provider_unauthorized' },
     ]);
@@ -308,14 +353,18 @@ describe('several vision providers', () => {
       ok: false,
       error: { code: 'invalid_operation', message: 'Jobs cannot be moved onto the same provider' },
     });
-    expect(await h.call('jobs:reroute', { fromProviderId: a.id, toProviderId: randomUUID(), model: MOCK_MODEL })).toEqual({
+    expect(
+      await h.call('jobs:reroute', { fromProviderId: a.id, toProviderId: randomUUID(), model: MOCK_MODEL }),
+    ).toEqual({
       ok: false,
       error: { code: 'not_found', message: 'This provider does not exist' },
     });
 
     await h.provider({ name: 'A', url: mocks.a.url, apiKey: TEST_KEY });
     const summary = await h.until((s) => s.succeeded === 1 && active(s) === 0);
-    expect(summary.paused).toEqual([{ providerId: b.id, providerName: 'Renamed', kind: 'ollama', reason: 'provider_unauthorized' }]);
+    expect(summary.paused).toEqual([
+      { providerId: b.id, providerName: 'Renamed', kind: 'ollama', reason: 'provider_unauthorized' },
+    ]);
     expect(chats(mocks.a).filter((r) => r.headers['authorization'] === `Bearer ${TEST_KEY}`)).toHaveLength(1);
   });
 });
@@ -355,7 +404,13 @@ describe('parallel requests per vision provider', () => {
       promptModel: null,
       options: parallel(8),
     });
-    const plain = store.save({ name: 'Ollama', baseUrl: 'http://127.0.0.1:2', timeoutSeconds: 120, taggingModel: null, promptModel: null });
+    const plain = store.save({
+      name: 'Ollama',
+      baseUrl: 'http://127.0.0.1:2',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+    });
     const venice = store.save({
       kind: 'venice',
       name: 'Venice',
@@ -372,12 +427,25 @@ describe('parallel requests per vision provider', () => {
     expect(limit('remote_api', venice.id)).toBeUndefined();
     expect(limit('remote_api', vision.id)).toBeUndefined();
     expect(limit('io', vision.id)).toBeUndefined();
-    store.save({ id: vision.id, kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:1/v1', timeoutSeconds: 120, taggingModel: null, promptModel: null, options: parallel(2) });
+    store.save({
+      id: vision.id,
+      kind: 'openai',
+      name: 'vLLM',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      timeoutSeconds: 120,
+      taggingModel: null,
+      promptModel: null,
+      options: parallel(2),
+    });
     expect(limit('local_gpu', vision.id)).toBe(2);
   });
 
   it('answers one request at a time for the environment entry', () => {
-    const store = createProviderStore({ userData: h.userData, secrets: new FakeCodec(), env: { ASSETFORGE_VISION_BASE_URL: 'http://127.0.0.1:11500' } });
+    const store = createProviderStore({
+      userData: h.userData,
+      secrets: new FakeCodec(),
+      env: { ASSETFORGE_VISION_BASE_URL: 'http://127.0.0.1:11500' },
+    });
     expect(providerLaneLimit(store)('local_gpu', 'environment')).toBe(1);
   });
 

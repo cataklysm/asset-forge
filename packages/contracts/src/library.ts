@@ -10,13 +10,7 @@ const count = z.number().int().min(0);
 // Vocabularies
 
 /** The status of an asset; separate from workflow step state and job status. */
-export const AssetStatusSchema = z.enum([
-  'draft',
-  'in_progress',
-  'in_review',
-  'completed',
-  'archived',
-]);
+export const AssetStatusSchema = z.enum(['draft', 'in_progress', 'in_review', 'completed', 'archived']);
 /** The status of an asset. */
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
 

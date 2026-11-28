@@ -32,9 +32,7 @@ export const job = sqliteTable(
   (table) => [
     index('job_claim_idx').on(table.status, table.resourceClass, table.createdAt, table.id),
     // At most one active job per dedupe key; finished jobs keep theirs.
-    uniqueIndex('job_active_dedupe_idx')
-      .on(table.dedupeKey)
-      .where(oneOf(table.status, ACTIVE_JOB_STATUSES)),
+    uniqueIndex('job_active_dedupe_idx').on(table.dedupeKey).where(oneOf(table.status, ACTIVE_JOB_STATUSES)),
     // The newest job of a type for one file (`latestForFile`).
     index('job_file_id_type_created_at_idx').on(table.fileId, table.type, table.createdAt, table.id),
     // Waiting and active jobs per lane (`waitingByLane`, `countActiveInLane`, `rerouteWaiting`).

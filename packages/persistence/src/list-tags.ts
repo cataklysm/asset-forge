@@ -12,10 +12,11 @@ import type { IndexTransaction } from './search-index.js';
  * @param values the values
  * @returns the list
  */
-const inList = (values: readonly string[]): SQL => sql`(${sql.join(
-  values.map((value) => sql`${value}`),
-  sql`, `,
-)})`;
+const inList = (values: readonly string[]): SQL =>
+  sql`(${sql.join(
+    values.map((value) => sql`${value}`),
+    sql`, `,
+  )})`;
 
 const tagId = qualified(tag, tag.id);
 const tagName = qualified(tag, tag.name);

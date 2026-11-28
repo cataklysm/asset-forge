@@ -57,11 +57,7 @@ function promptBlocked(form: StudioForm, imageModel: ImageModel | null): string 
  * @param imageModel the listed model; null when unknown
  * @returns the reason, or null when an edit can start
  */
-export function editBlocked(
-  providers: ProvidersState,
-  form: StudioForm,
-  imageModel: ImageModel | null,
-): string | null {
+export function editBlocked(providers: ProvidersState, form: StudioForm, imageModel: ImageModel | null): string | null {
   const providerBlocked =
     providers.list !== null && !hasImageProvider(providers)
       ? NO_IMAGE_PROVIDER_TITLE

@@ -1,4 +1,10 @@
-import { PromptVersionSchema, type PromptSummary, type PromptVariable, type PromptVersion, type TagAssignment } from '@assetforge/contracts';
+import {
+  PromptVersionSchema,
+  type PromptSummary,
+  type PromptVariable,
+  type PromptVersion,
+  type TagAssignment,
+} from '@assetforge/contracts';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { prompt, promptTag, promptVersion, tag } from './schema.js';

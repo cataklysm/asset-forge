@@ -49,7 +49,15 @@ interface FileDetailsPanelProps {
  * @param props the file, its asset, the role control, the error, the menu and the callbacks
  * @returns the column
  */
-export function FileDetailsPanel({ file, asset, roleControl, error, items, onChangeTag, onOpenAsset }: FileDetailsPanelProps) {
+export function FileDetailsPanel({
+  file,
+  asset,
+  roleControl,
+  error,
+  items,
+  onChangeTag,
+  onOpenAsset,
+}: FileDetailsPanelProps) {
   const complete = file.status === 'complete';
   // A file in the trash: read-only, without a role or assign control.
   const trashed = file.deletedAt !== null;
@@ -93,7 +101,11 @@ export function FileDetailsPanel({ file, asset, roleControl, error, items, onCha
           <section className="space-y-2">
             <h3 className={PANEL_TITLE}>Asset</h3>
             <div className="break-words">
-              {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
+              {onOpenAsset ? (
+                <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link>
+              ) : (
+                <span>{asset.name}</span>
+              )}
             </div>
           </section>
           {asset.tags.length > 0 && (

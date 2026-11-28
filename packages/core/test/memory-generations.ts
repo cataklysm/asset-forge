@@ -131,14 +131,21 @@ export class InMemoryGenerationRepository implements GenerationRepository {
     const row = this.find(id);
     const inputId = row?.inputs[0]?.fileId;
     if (!row || row.kind !== 'edit' || inputId === undefined) return 0;
-    const edits = this.rows.filter((r) => r.kind === 'edit' && r.inputs.some((i) => i.fileId === inputId)).sort(oldestFirst);
+    const edits = this.rows
+      .filter((r) => r.kind === 'edit' && r.inputs.some((i) => i.fileId === inputId))
+      .sort(oldestFirst);
     return edits.indexOf(row) + 1;
   }
 
   async succeed(r: { id: string; output: GenerationFileRef; now: string }): Promise<boolean> {
     const row = this.find(r.id);
     if (!row || row.status !== 'pending') return false;
-    Object.assign(row, { status: 'succeeded', errorCode: null, finishedAt: r.now, outputs: [...row.outputs, { ...r.output }] });
+    Object.assign(row, {
+      status: 'succeeded',
+      errorCode: null,
+      finishedAt: r.now,
+      outputs: [...row.outputs, { ...r.output }],
+    });
     return true;
   }
 

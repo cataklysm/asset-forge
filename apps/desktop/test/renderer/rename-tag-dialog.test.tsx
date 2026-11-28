@@ -111,7 +111,9 @@ it('a free name is looked up once after 250 ms and confirm waits for the answer'
   expect(confirmButton().textContent).toBe('Rename');
   expect(confirmButton().disabled).toBe(true);
 
-  await act(async () => answer.resolve({ exists: false, name: 'side', displayName: '', files: 0, assets: 0, prompts: 0 }));
+  await act(async () =>
+    answer.resolve({ exists: false, name: 'side', displayName: '', files: 0, assets: 0, prompts: 0 }),
+  );
   expect(confirmButton().disabled).toBe(false);
   expect(confirmButton().textContent).toBe('Rename');
   expect(screen.queryByText(/^Merges with/)).toBeNull();

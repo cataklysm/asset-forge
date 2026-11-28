@@ -99,4 +99,3 @@ function openSiteDownload(
     ? remote.open(url, signal, options)
     : open.call(login.sites, login.profileId, url, signal, options);
 }
-

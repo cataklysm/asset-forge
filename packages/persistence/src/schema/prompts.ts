@@ -48,8 +48,5 @@ export const promptTag = sqliteTable(
       .references(() => tag.id),
     createdAt: text('created_at').notNull(),
   },
-  (table) => [
-    primaryKey({ columns: [table.promptId, table.tagId] }),
-    index('prompt_tag_tag_id_idx').on(table.tagId),
-  ],
+  (table) => [primaryKey({ columns: [table.promptId, table.tagId] }), index('prompt_tag_tag_id_idx').on(table.tagId)],
 );

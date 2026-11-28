@@ -121,7 +121,9 @@ it('the state module sends Min. size in bytes and refuses fields the schema refu
   expect(saveRequestOf({ ...draft, kinds: [] }, profile.id)).toBeNull();
   expect(saveRequestOf({ ...draft, thumbnails: ' ' }, profile.id)).toBeNull();
   expect(saveRequestOf(draft, null)).toBeNull();
-  expect(saveRequestOf({ ...draft, siteAddress: 'https://www.example.com/' }, null)).toMatchObject({ url: 'https://www.example.com/' });
+  expect(saveRequestOf({ ...draft, siteAddress: 'https://www.example.com/' }, null)).toMatchObject({
+    url: 'https://www.example.com/',
+  });
 });
 
 it('without profiles a new one is created: the form saves and the list reloads with it', async () => {
@@ -237,10 +239,11 @@ it('Test shows the counts and the list of found files, and enables Import', asyn
   ])
     expect(text).toContain(line);
   const list = within(dialog()).getByRole('list', { name: 'Found files' });
-  expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-    'https://example.com/a.png',
-    'https://example.com/b.png',
-  ]);
+  expect(
+    within(list)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent),
+  ).toEqual(['https://example.com/a.png', 'https://example.com/b.png']);
   expect(button('Import').disabled).toBe(false);
 });
 
@@ -362,7 +365,9 @@ it('a cancelled test without files shows the cancelled state and no diagnosis', 
 it('reads a robots_unavailable problem without a host sensibly', async () => {
   await tested({
     'sites:crawl': () =>
-      crawlOf({ problems: [{ url: 'https://cdn.other.org/8.png', stage: 'file', reason: 'robots_unavailable', detail: '' }] }),
+      crawlOf({
+        problems: [{ url: 'https://cdn.other.org/8.png', stage: 'file', reason: 'robots_unavailable', detail: '' }],
+      }),
   });
   expect(within(dialog()).getByText('robots.txt could not be read')).toBeTruthy();
 });

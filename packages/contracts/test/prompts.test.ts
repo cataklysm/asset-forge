@@ -14,7 +14,13 @@ import {
 
 const id = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 const now = '2026-11-27T10:00:00.000Z';
-const version = { id, number: 1, content: 'A {{view}}', variables: [{ name: 'view', defaultValue: '' }], createdAt: now };
+const version = {
+  id,
+  number: 1,
+  content: 'A {{view}}',
+  variables: [{ name: 'view', defaultValue: '' }],
+  createdAt: now,
+};
 const summary = {
   id,
   title: 'T',
@@ -32,7 +38,9 @@ describe('prompt schemas', () => {
     expect(PromptDetailSchema.safeParse({ ...summary, versions: [version], createdAt: now }).success).toBe(true);
     expect(PromptPageSchema.safeParse({ items: [summary], total: 1 }).success).toBe(true);
     expect(ListPromptsSchema.safeParse({ offset: 0, limit: 50 }).success).toBe(true);
-    expect(CreatePromptSchema.safeParse({ title: 'T', description: '', content: 'c', defaults: {} }).success).toBe(true);
+    expect(CreatePromptSchema.safeParse({ title: 'T', description: '', content: 'c', defaults: {} }).success).toBe(
+      true,
+    );
     expect(UpdatePromptSchema.safeParse({ promptId: id, title: 'T', description: '' }).success).toBe(true);
     expect(
       SavePromptVersionSchema.safeParse({ promptId: id, baseVersionId: id, content: 'c', defaults: {} }).success,

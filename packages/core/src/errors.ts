@@ -97,7 +97,8 @@ export class ArchiveTooLargeError extends ValidationFailedError {
 }
 
 /** The fixed message of `CredentialStoreUnavailableError`. */
-export const CREDENTIAL_STORE_UNAVAILABLE_MESSAGE = 'The system credential store is not available, so the API key cannot be saved';
+export const CREDENTIAL_STORE_UNAVAILABLE_MESSAGE =
+  'The system credential store is not available, so the API key cannot be saved';
 
 /** The OS credential store cannot encrypt, so a secret is not saved; there is no plaintext fallback. */
 export class CredentialStoreUnavailableError extends AssetForgeError {

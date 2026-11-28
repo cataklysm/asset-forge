@@ -60,7 +60,12 @@ describe('recoverFileMoves for the trash', () => {
     const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
 
     expect(result.completed).toEqual([ID1]);
-    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS, assetId: null, role: null });
+    expect(db.files.records.get(ID1)).toMatchObject({
+      relativePath: trashPath(ID1, 'a.png'),
+      deletedAt: TS,
+      assetId: null,
+      role: null,
+    });
     await expect(db.fileMoves.list()).resolves.toEqual([]);
   });
 
@@ -83,7 +88,11 @@ describe('recoverFileMoves for the trash', () => {
     await complete(db, ID1, 'a.png');
     await db.fileMoves.begin(trashMove(ID1, 'a.png'));
     await db.fileMoves.commit(ID1);
-    await db.fileMoves.begin({ ...trashMove(ID1, 'a.png'), kind: 'restore', targetRelativePath: inboxPath(ID1, 'a.png') });
+    await db.fileMoves.begin({
+      ...trashMove(ID1, 'a.png'),
+      kind: 'restore',
+      targetRelativePath: inboxPath(ID1, 'a.png'),
+    });
     return { storage, db };
   };
 
@@ -94,7 +103,11 @@ describe('recoverFileMoves for the trash', () => {
     const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
 
     expect(result.completed).toEqual([ID1]);
-    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: inboxPath(ID1, 'a.png'), deletedAt: null, trashedAssetId: null });
+    expect(db.files.records.get(ID1)).toMatchObject({
+      relativePath: inboxPath(ID1, 'a.png'),
+      deletedAt: null,
+      trashedAssetId: null,
+    });
   });
 
   it('an interrupted restore move is aborted when it did not', async () => {
@@ -247,7 +260,10 @@ describe('recoverIncompleteImports best-effort', () => {
 
   it('leaves the pending rows for the next open when the download ids cannot be listed', async () => {
     const { storage, db } = await setup();
-    await db.files.insertPending({ ...pending(ID1, 'a.png'), origin: { id: '55555555-5555-4555-8555-555555555555', url: 'https://a.example/a.png' } });
+    await db.files.insertPending({
+      ...pending(ID1, 'a.png'),
+      origin: { id: '55555555-5555-4555-8555-555555555555', url: 'https://a.example/a.png' },
+    });
     const files = Object.create(db.files) as typeof db.files;
     files.listPendingDownloadIds = async () => {
       throw new Error('db gone');

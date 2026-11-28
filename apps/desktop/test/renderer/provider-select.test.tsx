@@ -19,14 +19,23 @@ import {
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView } from './fake-api';
 
 const LOCAL = providerView({ name: 'Local', taggingModel: 'vision-a', promptModel: 'vision-b' });
-const RUNPOD = providerView({ name: 'RunPod', baseUrl: 'https://pod.example.test', taggingModel: 'big-vision', promptModel: null });
+const RUNPOD = providerView({
+  name: 'RunPod',
+  baseUrl: 'https://pod.example.test',
+  taggingModel: 'big-vision',
+  promptModel: null,
+});
 
 const READY: ListModelsResult = { ok: true, models: [{ name: 'big-vision', vision: true }] };
 const UNREACHABLE: ListModelsResult = { ok: false, code: 'provider_unreachable' };
 
 const providerSelect = () => screen.getByRole('combobox', { name: 'Provider' }) as HTMLSelectElement;
-const optionTexts = (el: HTMLSelectElement) => within(el).getAllByRole('option').map((o) => o.textContent);
-const modelCalls = (api: ReturnType<typeof installFakeApi>) => api.calls.filter((c) => c.channel === 'providers:listModels');
+const optionTexts = (el: HTMLSelectElement) =>
+  within(el)
+    .getAllByRole('option')
+    .map((o) => o.textContent);
+const modelCalls = (api: ReturnType<typeof installFakeApi>) =>
+  api.calls.filter((c) => c.channel === 'providers:listModels');
 
 function Harness({ initial = null }: { initial?: string | null }) {
   const [value, setValue] = useState<string | null>(initial);
@@ -125,7 +134,9 @@ it('opening the select asks every entry once with refresh', async () => {
   const before = modelCalls(api).length;
   expect(modelCalls(api).every((c) => !('refresh' in (c.request as object)))).toBe(true);
   await user.click(providerSelect());
-  const refreshed = modelCalls(api).slice(before).map((c) => c.request);
+  const refreshed = modelCalls(api)
+    .slice(before)
+    .map((c) => c.request);
   expect(refreshed).toHaveLength(2);
   expect(refreshed).toEqual(
     expect.arrayContaining([
@@ -221,18 +232,22 @@ it('an answer that never comes keeps checking until the bound answers provider_t
 });
 
 it('a rejected model call ends checking with its state', async () => {
-  const fake = fakeProviders({ providers: [LOCAL] }, {
-    [LOCAL.id]: () => {
-      throw fakeError('not_found', 'This provider does not exist');
+  const fake = fakeProviders(
+    { providers: [LOCAL] },
+    {
+      [LOCAL.id]: () => {
+        throw fakeError('not_found', 'This provider does not exist');
+      },
     },
-  });
+  );
   installFakeApi(fake.handlers);
   renderHarness();
   await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Local — error']));
 });
 
 it('maps every answer to its state', () => {
-  const of = (answer: ListModelsResult | undefined) => providerStatus({ list: null, models: { x: answer }, imageModels: {} }, 'x');
+  const of = (answer: ListModelsResult | undefined) =>
+    providerStatus({ list: null, models: { x: answer }, imageModels: {} }, 'x');
   expect(of(undefined)).toBe('checking');
   expect(of(READY)).toBe('ready');
   expect(of({ ok: true, models: [{ name: 'unknown', vision: null }] })).toBe('ready');
@@ -286,7 +301,14 @@ it('noteUsed makes the entry the default', async () => {
 // --- defaults ---
 
 const listOf = (p: Partial<ProviderList>): Pick<ProvidersState, 'list'> => ({
-  list: { providers: [LOCAL, RUNPOD], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true, ...p },
+  list: {
+    providers: [LOCAL, RUNPOD],
+    lastUsedId: null,
+    lastUsedImageId: null,
+    fromEnvironment: false,
+    canStoreKey: true,
+    ...p,
+  },
 });
 
 it('defaultProviderId takes the entry used last', () => {
@@ -340,7 +362,8 @@ const imageModel = (name: string): ImageModel => ({
   price: null,
 });
 const EDIT_MODELS: ListImageModelsResult = { ok: true, models: [imageModel('edit-a'), imageModel('edit-b')] };
-const imageCalls = (api: ReturnType<typeof installFakeApi>) => api.calls.filter((c) => c.channel === 'providers:listImageModels');
+const imageCalls = (api: ReturnType<typeof installFakeApi>) =>
+  api.calls.filter((c) => c.channel === 'providers:listImageModels');
 
 it('image entries are asked through providers:listImageModels, vision entries through providers:listModels', async () => {
   const api = installFakeApi(fakeProviders({ providers: [LOCAL, VENICE] }).handlers);
@@ -354,7 +377,11 @@ it('image entries are asked through providers:listImageModels, vision entries th
   expect(imageCalls(api).map((c) => c.request)).toEqual([{ providerId: VENICE.id }]);
   expect(state!.models[VENICE.id]).toBeUndefined();
   act(() => state!.checkAll());
-  expect(imageCalls(api).slice(1).map((c) => c.request)).toEqual([{ providerId: VENICE.id, refresh: true }]);
+  expect(
+    imageCalls(api)
+      .slice(1)
+      .map((c) => c.request),
+  ).toEqual([{ providerId: VENICE.id, refresh: true }]);
   await waitFor(() => expect(state!.imageModels[VENICE.id]).toEqual({ ok: true, models: [] }));
 });
 
@@ -382,7 +409,13 @@ it('a Venice entry with an empty edit model list shows no edit model', async () 
 });
 
 it('maps every image list answer to its state', () => {
-  const list: ProviderList = { providers: [VENICE], lastUsedId: null, lastUsedImageId: null, fromEnvironment: false, canStoreKey: true };
+  const list: ProviderList = {
+    providers: [VENICE],
+    lastUsedId: null,
+    lastUsedImageId: null,
+    fromEnvironment: false,
+    canStoreKey: true,
+  };
   const of = (answer: ListImageModelsResult | 'checking' | undefined) =>
     providerStatus({ list, models: {}, imageModels: answer === undefined ? {} : { [VENICE.id]: answer } }, VENICE.id);
   expect(of(undefined)).toBe('checking');
@@ -455,7 +488,11 @@ it('the analysis choice offers only vision entries, even when an image entry is 
 
 it('the image choice preselects the image entry used last with its edit model when listed, else the first model', async () => {
   const user = userEvent.setup();
-  const fake = fakeProviders({ providers: [LOCAL, VENICE, VENICE_2], lastUsedId: LOCAL.id, lastUsedImageId: VENICE.id });
+  const fake = fakeProviders({
+    providers: [LOCAL, VENICE, VENICE_2],
+    lastUsedId: LOCAL.id,
+    lastUsedImageId: VENICE.id,
+  });
   installFakeApi({ ...fake.handlers, 'providers:listImageModels': () => EDIT_MODELS });
   render(
     <ProviderSettingsProvider>
@@ -519,19 +556,29 @@ it('defaultProviderId and defaultEditModelOf follow the kind', () => {
   expect(defaultProviderId({ list: { ...s.list!, providers: [LOCAL] } }, 'image')).toBeNull();
 
   expect(defaultEditModelOf(s, VENICE.id)).toBe('edit-b');
-  expect(defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: true, models: [imageModel('edit-z')] } } }, VENICE.id)).toBe('edit-z');
+  expect(
+    defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: true, models: [imageModel('edit-z')] } } }, VENICE.id),
+  ).toBe('edit-z');
   expect(defaultEditModelOf(s, VENICE_2.id)).toBeNull();
   // Before or without a usable list the stored model stands.
   expect(defaultEditModelOf({ ...s, imageModels: {} }, VENICE.id)).toBe('edit-b');
   expect(defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: 'checking' } }, VENICE.id)).toBe('edit-b');
-  expect(defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: false, code: 'provider_unreachable' } } }, VENICE.id)).toBe('edit-b');
+  expect(
+    defaultEditModelOf({ ...s, imageModels: { [VENICE.id]: { ok: false, code: 'provider_unreachable' } } }, VENICE.id),
+  ).toBe('edit-b');
   expect(defaultEditModelOf(s, null)).toBeNull();
   expect(defaultEditModelOf(s, LOCAL.id)).toBeNull();
 });
 
 // --- OpenAI-compatible entries ---
 
-const VLLM = providerView({ kind: 'openai', name: 'vLLM', baseUrl: 'http://127.0.0.1:11500/v1', taggingModel: 'qwen-vl', promptModel: null });
+const VLLM = providerView({
+  kind: 'openai',
+  name: 'vLLM',
+  baseUrl: 'http://127.0.0.1:11500/v1',
+  taggingModel: 'qwen-vl',
+  promptModel: null,
+});
 const UNKNOWN_VISION: ListModelsResult = { ok: true, models: [{ name: 'qwen-vl', vision: null }] };
 
 it('the analysis select lists the ollama and the openai entry and no venice one', async () => {
@@ -541,7 +588,9 @@ it('the analysis select lists the ollama and the openai entry and no venice one'
 });
 
 it('the analysis choice preselects the openai entry used last with its default model', async () => {
-  installFakeApi(fakeProviders({ providers: [LOCAL, VLLM], lastUsedId: VLLM.id }, { [VLLM.id]: UNKNOWN_VISION }).handlers);
+  installFakeApi(
+    fakeProviders({ providers: [LOCAL, VLLM], lastUsedId: VLLM.id }, { [VLLM.id]: UNKNOWN_VISION }).handlers,
+  );
   render(
     <ProviderSettingsProvider>
       <ChoiceProbe purpose="vision" opening="open" />

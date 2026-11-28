@@ -152,7 +152,15 @@ async function download(
   await requireSpaceFor(session, remote);
   throwIfFailedEarly(remote, streamErrors, signal);
 
-  const { imported, isFilteredOut } = await importDownload(context, session, remote, name, payload, filter, streamErrors);
+  const { imported, isFilteredOut } = await importDownload(
+    context,
+    session,
+    remote,
+    name,
+    payload,
+    filter,
+    streamErrors,
+  );
   await recordImport(dependencies, job, payload, imported, isFilteredOut, streamErrors);
 }
 
@@ -204,7 +212,8 @@ function refuse(remote: RemoteFile, code: JobErrorCode): never {
 function acceptedName(remote: RemoteFile): string {
   if (isWebPage(remote.contentType)) refuse(remote, 'download_not_a_file');
   const name = downloadFileName(remote);
-  if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse(remote, 'download_type_refused');
+  if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name))
+    refuse(remote, 'download_type_refused');
   return name;
 }
 
@@ -345,7 +354,12 @@ async function recordImport(
   const existing = isWithoutFile ? imported.duplicateOf[0] : undefined;
   if (existing !== undefined) {
     // A file already carrying this URL or 50 origins answers false; the job still points at it.
-    await session.database.fileOrigins.insert({ id: session.newId(), fileId: existing, url: payload.url, createdAt: session.now().toISOString() });
+    await session.database.fileOrigins.insert({
+      id: session.newId(),
+      fileId: existing,
+      url: payload.url,
+      createdAt: session.now().toISOString(),
+    });
     await setOutcome(session, job, existing, 'already_present');
     return;
   }
@@ -367,7 +381,11 @@ async function recordImport(
  * @param target the asset and role; null leaves the file in the inbox
  * @returns resolves once the effects are reported; never rejects
  */
-async function placeNewFile(dependencies: FileDownloadHandlerDependencies, fileId: string, target: FileTarget | null): Promise<void> {
+async function placeNewFile(
+  dependencies: FileDownloadHandlerDependencies,
+  fileId: string,
+  target: FileTarget | null,
+): Promise<void> {
   let placedIn: string | null = null;
   if (target !== null) {
     try {
@@ -390,6 +408,11 @@ async function placeNewFile(dependencies: FileDownloadHandlerDependencies, fileI
  * @param result what it produced besides the file; null on an ordinary result
  * @returns whether the job was still running
  */
-function setOutcome(session: WorkspaceSession, job: Job, fileId: string | null, result: JobResult | null): Promise<boolean> {
+function setOutcome(
+  session: WorkspaceSession,
+  job: Job,
+  fileId: string | null,
+  result: JobResult | null,
+): Promise<boolean> {
   return session.database.jobs.setOutcome(job.id, { fileId, result, now: session.now().toISOString() });
 }

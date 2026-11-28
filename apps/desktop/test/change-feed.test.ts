@@ -67,7 +67,16 @@ describe('the change feed', () => {
     const other = createChangeFeed();
     const foreign = other.since(null).cursor;
     feed.job('a');
-    for (const cursor of ['', 'x', 'x:', ':1', `${foreign.split(':')[0]}:-1`, `${feed.since(null).cursor}0`, foreign, 'a:b:c']) {
+    for (const cursor of [
+      '',
+      'x',
+      'x:',
+      ':1',
+      `${foreign.split(':')[0]}:-1`,
+      `${feed.since(null).cursor}0`,
+      foreign,
+      'a:b:c',
+    ]) {
       expect(feed.since(cursor)).toEqual({ ...RESET, cursor: expect.any(String) });
     }
   });

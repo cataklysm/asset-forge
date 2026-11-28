@@ -59,9 +59,15 @@ describe('normalizeDownloadUrl', () => {
   });
 
   it('refuses what the source rule refuses', () => {
-    expect(() => normalizeDownloadUrl('ftp://a.example/x.png')).toThrow(expect.objectContaining({ code: 'validation_failed' }));
-    expect(() => normalizeDownloadUrl('https://user:pw@a.example/x.png')).toThrow(expect.objectContaining({ code: 'validation_failed' }));
-    expect(() => normalizeDownloadUrl(`https://a.example/${'x'.repeat(1983)}`)).toThrow(expect.objectContaining({ code: 'validation_failed' }));
+    expect(() => normalizeDownloadUrl('ftp://a.example/x.png')).toThrow(
+      expect.objectContaining({ code: 'validation_failed' }),
+    );
+    expect(() => normalizeDownloadUrl('https://user:pw@a.example/x.png')).toThrow(
+      expect.objectContaining({ code: 'validation_failed' }),
+    );
+    expect(() => normalizeDownloadUrl(`https://a.example/${'x'.repeat(1983)}`)).toThrow(
+      expect.objectContaining({ code: 'validation_failed' }),
+    );
     expect(() => normalizeDownloadUrl('nope')).toThrow(expect.objectContaining({ code: 'validation_failed' }));
   });
 
@@ -144,13 +150,20 @@ describe('enqueueUrlImport', () => {
     const asset = await createAsset(session, { name: 'A', typeId: types[0]!.id });
     const target = { assetId: asset.id, role: 'reference' as const };
     await enqueueUrlImport(session, { urls: ['http://A.example:8080/x.png'], target, skipDuplicates: false });
-    expect(db.jobs.rows[0]).toMatchObject({ lane: 'a.example:8080', payload: { url: 'http://a.example:8080/x.png', target, skipDuplicates: false } });
+    expect(db.jobs.rows[0]).toMatchObject({
+      lane: 'a.example:8080',
+      payload: { url: 'http://a.example:8080/x.png', target, skipDuplicates: false },
+    });
   });
 
   it('reports a line over 2000 characters and cuts its text to 200', async () => {
     const { session } = await setup();
     const long = `https://a.example/${'x'.repeat(1990)}`;
-    const result = await enqueueUrlImport(session, { urls: [long, 'ftp://a.example/x'], target: null, skipDuplicates: true });
+    const result = await enqueueUrlImport(session, {
+      urls: [long, 'ftp://a.example/x'],
+      target: null,
+      skipDuplicates: true,
+    });
     expect(result.queued).toBe(0);
     expect(result.invalid).toEqual([
       { line: 1, text: long.slice(0, 200) },
@@ -170,7 +183,11 @@ describe('enqueueUrlImport', () => {
   it('an unknown target asset answers not_found and queues nothing', async () => {
     const { db, session } = await setup();
     await expect(
-      enqueueUrlImport(session, { urls: ['https://a.example/1.png'], target: { assetId: UNKNOWN, role: 'reference' }, skipDuplicates: true }),
+      enqueueUrlImport(session, {
+        urls: ['https://a.example/1.png'],
+        target: { assetId: UNKNOWN, role: 'reference' },
+        skipDuplicates: true,
+      }),
     ).rejects.toMatchObject({ code: 'not_found' });
     expect(db.jobs.rows).toEqual([]);
   });
@@ -197,7 +214,9 @@ describe('file origins', () => {
     const { session, downloaded } = await setup();
     const file = await downloaded('https://a.example/1.png');
     const [origin] = await listFileOrigins(session, file.id);
-    await expect(resolveFileOriginUrl(session, { fileId: file.id, originId: origin!.id })).resolves.toBe('https://a.example/1.png');
+    await expect(resolveFileOriginUrl(session, { fileId: file.id, originId: origin!.id })).resolves.toBe(
+      'https://a.example/1.png',
+    );
   });
 
   it('answers not_found for an unknown origin or one of another file', async () => {
@@ -205,8 +224,12 @@ describe('file origins', () => {
     const a = await downloaded('https://a.example/1.png');
     const b = await downloaded('https://a.example/2.png');
     const [origin] = await listFileOrigins(session, a.id);
-    await expect(resolveFileOriginUrl(session, { fileId: b.id, originId: origin!.id })).rejects.toMatchObject({ code: 'not_found' });
-    await expect(resolveFileOriginUrl(session, { fileId: a.id, originId: UNKNOWN })).rejects.toMatchObject({ code: 'not_found' });
+    await expect(resolveFileOriginUrl(session, { fileId: b.id, originId: origin!.id })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(resolveFileOriginUrl(session, { fileId: a.id, originId: UNKNOWN })).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
 
   it('applies the URL rule again to a stored URL', async () => {
@@ -214,14 +237,20 @@ describe('file origins', () => {
     const file = await downloaded('https://a.example/1.png');
     const [origin] = await listFileOrigins(session, file.id);
     db.fileOrigins.rows.get(origin!.id)!.url = 'javascript:alert(1)';
-    await expect(resolveFileOriginUrl(session, { fileId: file.id, originId: origin!.id })).rejects.toMatchObject({ code: 'validation_failed' });
+    await expect(resolveFileOriginUrl(session, { fileId: file.id, originId: origin!.id })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
   });
 });
 
 describe('browser check failures', () => {
   it('requeues only the failed downloads of the lane that a browser check refused', async () => {
     const { db, session } = await setup();
-    const site = { profileId: '11111111-1111-4111-8111-111111111111', site: 'gallery.example', filter: { kinds: [], minBytes: 0 } };
+    const site = {
+      profileId: '11111111-1111-4111-8111-111111111111',
+      site: 'gallery.example',
+      filter: { kinds: [], minBytes: 0 },
+    };
     const urls = ['https://gallery.example/1.png', 'https://gallery.example/2.png', 'https://gallery.example/3.png'];
     await enqueueUrlImport(session, { urls, target: null, skipDuplicates: true, site });
     await enqueueUrlImport(session, { urls: ['https://other.example/4.png'], target: null, skipDuplicates: true });

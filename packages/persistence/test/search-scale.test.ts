@@ -43,7 +43,16 @@ const STORAGE = uuid(9, 0);
 const ADJECTIVES = ['red', 'blue', 'rusty', 'golden', 'ancient', 'broken', 'mossy', 'tiny', 'heavy', 'silver'];
 const NOUNS = ['sword', 'shield', 'lantern', 'barrel', 'crate', 'helmet', 'statue', 'bridge', 'tower', 'wagon'];
 const DESCRIPTION_WORDS = ['worn', 'painted', 'carved', 'glowing', 'sworn', 'oak', 'iron', 'stone', 'cloth', 'leather'];
-const ROLES: readonly FileRole[] = ['reference', 'concept', 'generated', 'working', 'model', 'texture', 'final', 'other'];
+const ROLES: readonly FileRole[] = [
+  'reference',
+  'concept',
+  'generated',
+  'working',
+  'model',
+  'texture',
+  'final',
+  'other',
+];
 const EXTENSIONS = ['png', 'jpg', 'blend', 'glb', 'pdf', 'txt', 'zip'];
 const STATUSES: readonly AssetStatus[] = ['draft', 'in_progress', 'in_review', 'completed', 'archived'];
 
@@ -131,12 +140,16 @@ function seed(): void {
   const insertAsset = sqlite.prepare(
     `insert into asset (id, name, type_id, description, status, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)`,
   );
-  const insertAssetTag = sqlite.prepare(`insert into asset_tag (asset_id, tag_id, origin, created_at) values (?, ?, ?, ?)`);
+  const insertAssetTag = sqlite.prepare(
+    `insert into asset_tag (asset_id, tag_id, origin, created_at) values (?, ?, ?, ?)`,
+  );
   const insertFile = sqlite.prepare(
     `insert into file (id, storage_id, asset_id, role, original_name, relative_path, mime_type, size_bytes, sha256, kind, status, imported_at)
      values (?, ?, ?, ?, ?, ?, 'application/octet-stream', 1, ?, ?, ?, ?)`,
   );
-  const insertFileTag = sqlite.prepare(`insert into file_tag (file_id, tag_id, origin, created_at) values (?, ?, ?, ?)`);
+  const insertFileTag = sqlite.prepare(
+    `insert into file_tag (file_id, tag_id, origin, created_at) values (?, ?, ?, ?)`,
+  );
   const trashFile = sqlite.prepare(`update file set deleted_at = ? where id = ?`);
   const insertProjectAsset = sqlite.prepare(
     `insert into project_asset (project_id, asset_id, assigned_at, updated_at) values (?, ?, ?, ?)`,
@@ -176,15 +189,27 @@ function seed(): void {
         };
         a.files.push(sf);
         insertFile.run(
-          id, STORAGE, a.id, sf.role, name, `assets/${a.id}/${id}.bin`, 'a'.repeat(64), sf.kind,
-          sf.complete ? 'complete' : 'pending', TS,
+          id,
+          STORAGE,
+          a.id,
+          sf.role,
+          name,
+          `assets/${a.id}/${id}.bin`,
+          'a'.repeat(64),
+          sf.kind,
+          sf.complete ? 'complete' : 'pending',
+          TS,
         );
         insertFileTag.run(id, uuid(2, sf.tag), 'manual', TS);
       }
       if (a.projectId !== null) insertProjectAsset.run(a.projectId, a.id, TS, TS);
       seeded.push(a);
     }
-    for (const id of projectIds) seededMembers.set(id, seeded.filter((a) => a.projectId === id));
+    for (const id of projectIds)
+      seededMembers.set(
+        id,
+        seeded.filter((a) => a.projectId === id),
+      );
     for (let p = 0; p < LARGE_PROJECT_COUNT; p++) {
       const id = uuid(6, p);
       insertProject.run(id, `Large project ${String(p).padStart(3, '0')}`, TS, TS);
@@ -201,7 +226,18 @@ function seed(): void {
         tag: ASSET_TAG_COUNT + Math.floor(next() * (TAG_COUNT - ASSET_TAG_COUNT)),
       };
       const importedAt = new Date(Date.UTC(2026, 0, 2, 0, 0, i)).toISOString();
-      insertFile.run(id, STORAGE, null, null, f.name, `inbox/${id}/${f.name}`, 'a'.repeat(64), f.kind, 'complete', importedAt);
+      insertFile.run(
+        id,
+        STORAGE,
+        null,
+        null,
+        f.name,
+        `inbox/${id}/${f.name}`,
+        'a'.repeat(64),
+        f.kind,
+        'complete',
+        importedAt,
+      );
       insertFileTag.run(id, uuid(2, f.tag), 'manual', TS);
       seededInbox.push(f);
     }
@@ -213,7 +249,18 @@ function seed(): void {
         kind: i % 2 === 0 ? 'image' : 'model',
         tag: ASSET_TAG_COUNT + Math.floor(next() * (TAG_COUNT - ASSET_TAG_COUNT)),
       };
-      insertFile.run(id, STORAGE, null, null, f.name, `.assetforge/trash/${id}_${f.name}`, 'a'.repeat(64), f.kind, 'complete', TS);
+      insertFile.run(
+        id,
+        STORAGE,
+        null,
+        null,
+        f.name,
+        `.assetforge/trash/${id}_${f.name}`,
+        'a'.repeat(64),
+        f.kind,
+        'complete',
+        TS,
+      );
       trashFile.run(new Date(Date.UTC(2026, 1, 1, 0, 0, i)).toISOString(), id);
       insertFileTag.run(id, uuid(2, f.tag), 'manual', TS);
       seededTrash.push(f);
@@ -299,7 +346,9 @@ beforeAll(async () => {
   sqlite.prepare('update workspace set derived_data_version = null').run();
   const rebuildStart = performance.now();
   await db.ensureDerivedData();
-  console.info(`ensureDerivedData rebuild over ${ASSET_COUNT} assets: ${Math.round(performance.now() - rebuildStart)} ms`);
+  console.info(
+    `ensureDerivedData rebuild over ${ASSET_COUNT} assets: ${Math.round(performance.now() - rebuildStart)} ms`,
+  );
   // No ANALYZE: production never collects statistics, so the plans are asserted without them.
 }, 120_000);
 
@@ -323,7 +372,9 @@ describe('search scale', () => {
       expect(lines.some((l) => l.startsWith('SEARCH '))).toBe(true);
       expect(violations(lines)).toEqual(lines.filter((l) => l.startsWith('SEARCH ')));
     }
-    expect(violations(['SCAN asset_search VIRTUAL TABLE INDEX 0:'])).toEqual(['SCAN asset_search VIRTUAL TABLE INDEX 0:']);
+    expect(violations(['SCAN asset_search VIRTUAL TABLE INDEX 0:'])).toEqual([
+      'SCAN asset_search VIRTUAL TABLE INDEX 0:',
+    ]);
   });
 
   test('tag attachment does not grow with the page size', async () => {
@@ -332,10 +383,20 @@ describe('search scale', () => {
     try {
       for (const query of [undefined, 'sword']) {
         spy.mockClear();
-        const one = await db.assets.list({ limit: 1, offset: 0, tagNames: [seededTag], ...(query !== undefined && { query }) });
+        const one = await db.assets.list({
+          limit: 1,
+          offset: 0,
+          tagNames: [seededTag],
+          ...(query !== undefined && { query }),
+        });
         const oneCalls = spy.mock.calls.length;
         spy.mockClear();
-        const sixty = await db.assets.list({ limit: 60, offset: 0, tagNames: [seededTag], ...(query !== undefined && { query }) });
+        const sixty = await db.assets.list({
+          limit: 60,
+          offset: 0,
+          tagNames: [seededTag],
+          ...(query !== undefined && { query }),
+        });
         const sixtyCalls = spy.mock.calls.length;
         expect(one.items).toHaveLength(1);
         expect(sixty.items.length).toBeGreaterThan(1);
@@ -352,8 +413,20 @@ describe('search scale', () => {
     const page = seeded.slice(0, 60);
     const fileIds = Array.from({ length: 60 }, (_, n) => uuid(4, n));
     for (const [name, statement] of [
-      ['assetTagsSql', assetTagsSql(page.map((a) => a.id), fileIds)],
-      ['matchedTagsSql', matchedTagsSql(page.map((a) => a.id), [uuid(2, 0), uuid(2, ASSET_TAG_COUNT)])],
+      [
+        'assetTagsSql',
+        assetTagsSql(
+          page.map((a) => a.id),
+          fileIds,
+        ),
+      ],
+      [
+        'matchedTagsSql',
+        matchedTagsSql(
+          page.map((a) => a.id),
+          [uuid(2, 0), uuid(2, ASSET_TAG_COUNT)],
+        ),
+      ],
     ] as const) {
       const lines = plan(statement);
       console.info(`plan of ${name} for 60 assets:\n  ${lines.join('\n  ')}`);
@@ -363,7 +436,9 @@ describe('search scale', () => {
 
   test('search over 10 000 assets is driven by the match and uses indexes only', async () => {
     const tagged = seeded.find((a) => a.name.startsWith('red sword') && a.files.some((f) => f.complete))!;
-    const filtered = seeded.find((a) => a.name.includes('sword') && a.projectId !== null && a.files.some((f) => f.complete))!;
+    const filtered = seeded.find(
+      (a) => a.name.includes('sword') && a.projectId !== null && a.files.some((f) => f.complete),
+    )!;
     const filteredFile = filtered.files.find((f) => f.complete)!;
     const cases: { label: string; q: AssetQuery }[] = [
       { label: "'swo'", q: { limit: 50, offset: 0, query: 'swo' } },
@@ -456,7 +531,9 @@ describe('file list plans', () => {
         expect({ name, q, fileAccess }).toEqual({
           name,
           q,
-          fileAccess: [expect.stringMatching(/^SEARCH file USING (?:COVERING )?INDEX file_deleted_at_idx \(deleted_at>\?\)$/)],
+          fileAccess: [
+            expect.stringMatching(/^SEARCH file USING (?:COVERING )?INDEX file_deleted_at_idx \(deleted_at>\?\)$/),
+          ],
         });
         const rest = lines.filter((l) => !fileAccess.includes(l));
         expect({ name, q, violations: violations(rest) }).toEqual({ name, q, violations: [] });
@@ -480,7 +557,9 @@ describe('file list plans', () => {
       const deleted = result.items.map((f) => f.deletedAt!);
       expect(deleted).toEqual([...deleted].sort().reverse());
     }
-    expect((await db.files.list({ scope: { kind: 'trash' }, limit: 1, offset: 0 })).items[0]?.id).toBe(uuid(7, TRASH_FILE_COUNT - 1));
+    expect((await db.files.list({ scope: { kind: 'trash' }, limit: 1, offset: 0 })).items[0]?.id).toBe(
+      uuid(7, TRASH_FILE_COUNT - 1),
+    );
     await expect(db.files.countTrashed()).resolves.toBe(TRASH_FILE_COUNT);
   });
 
@@ -515,7 +594,11 @@ describe('project list plans', () => {
     a.tags.map(tagLabel).includes(name) || a.files.some((f) => f.complete && tagLabel(f.tag) === name);
 
   test('projects:list with tags reads project_asset, asset_tag, file and file_tag only by key', () => {
-    for (const q of [{ tagNames: [seededTag(), otherTag()] }, { query: 'large 01', status: 'active' as const, tagNames: [seededTag()] }, {}]) {
+    for (const q of [
+      { tagNames: [seededTag(), otherTag()] },
+      { query: 'large 01', status: 'active' as const, tagNames: [seededTag()] },
+      {},
+    ]) {
       const statements = projectListSql(orm, { limit: 60, offset: 0, ...q });
       expect(statements).not.toBeNull();
       for (const [name, statement] of Object.entries(statements!)) {
@@ -526,7 +609,8 @@ describe('project list plans', () => {
           q,
           violations: [],
         });
-        if (name === 'page') expect(lines).toContain('SEARCH file USING INDEX file_asset_id_kind_idx (asset_id=? AND kind=?)');
+        if (name === 'page')
+          expect(lines).toContain('SEARCH file USING INDEX file_asset_id_kind_idx (asset_id=? AND kind=?)');
       }
     }
     const pageIds = Array.from({ length: 60 }, (_, p) => uuid(6, p));
@@ -574,10 +658,15 @@ describe('project list plans', () => {
         })),
       );
       expect(p.imageCount).toBe(
-        seededMembers.get(p.id)!.flatMap((a) => a.files).filter((f) => f.complete && f.kind === 'image').length,
+        seededMembers
+          .get(p.id)!
+          .flatMap((a) => a.files)
+          .filter((f) => f.complete && f.kind === 'image').length,
       );
     }
     const single = await db.projects.list({ limit: 1, offset: 0, tagNames: [seededTag()] });
-    expect(single.total).toBe([...seededMembers.values()].filter((ms) => ms.some((a) => carries(a, seededTag()))).length);
+    expect(single.total).toBe(
+      [...seededMembers.values()].filter((ms) => ms.some((a) => carries(a, seededTag()))).length,
+    );
   });
 });

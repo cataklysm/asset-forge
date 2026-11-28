@@ -45,7 +45,12 @@ export function FilmStrip({ list }: { list: ViewerList }) {
 
   if (list.total < 2) return null;
   return (
-    <div ref={scroller} role="group" aria-label="Files" className="h-[104px] shrink-0 overflow-x-auto overflow-y-hidden">
+    <div
+      ref={scroller}
+      role="group"
+      aria-label="Files"
+      className="h-[104px] shrink-0 overflow-x-auto overflow-y-hidden"
+    >
       {/* Centred while narrower than the strip; scrolls once wider. */}
       <div className="relative mx-auto h-full" style={{ width: virtualizer.getTotalSize() }}>
         {items.map((item) => {
@@ -55,7 +60,12 @@ export function FilmStrip({ list }: { list: ViewerList }) {
             current ? 'border-accent' : 'border-line'
           }`;
           const file = slot.kind === 'loaded' ? slot.item : null;
-          const name = file === null ? undefined : file.kind === 'video' ? `${file.originalName}, ${VIDEO_LABEL}` : file.originalName;
+          const name =
+            file === null
+              ? undefined
+              : file.kind === 'video'
+                ? `${file.originalName}, ${VIDEO_LABEL}`
+                : file.originalName;
           return (
             <button
               key={item.key}
@@ -72,7 +82,9 @@ export function FilmStrip({ list }: { list: ViewerList }) {
               ) : file.status === 'complete' && file.thumbnail ? (
                 <CoverImage fileId={file.id} size="thumb" fallback={formatLabel(file.originalName)} className={frame} />
               ) : (
-                <span className={`${frame} ${MUTED}`}>{file.status === 'complete' ? formatLabel(file.originalName) : ''}</span>
+                <span className={`${frame} ${MUTED}`}>
+                  {file.status === 'complete' ? formatLabel(file.originalName) : ''}
+                </span>
               )}
               {file?.kind === 'video' && <VideoMark className="absolute bottom-1 left-1" />}
             </button>

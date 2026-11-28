@@ -17,7 +17,7 @@ import { workflowTemplate } from './workflows.js';
 // index.
 
 /** An asset type; the built-in ones are inserted on open, with an optional default workflow template. */
-export const assetType =sqliteTable('asset_type', {
+export const assetType = sqliteTable('asset_type', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
   name: text('name').notNull(),

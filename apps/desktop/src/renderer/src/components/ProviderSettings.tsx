@@ -50,7 +50,8 @@ interface Selection {
  */
 function selectionOf(list: ProviderList, selectedId: string | null): Selection {
   const providers = list.providers;
-  const selected = selectedId === NEW ? null : (providers.find((entry) => entry.id === selectedId) ?? providers[0] ?? null);
+  const selected =
+    selectedId === NEW ? null : (providers.find((entry) => entry.id === selectedId) ?? providers[0] ?? null);
   const editingNew = selected === null && (selectedId === NEW || (providers.length === 0 && !list.fromEnvironment));
   return { selected, editingNew };
 }
@@ -174,7 +175,14 @@ export function ProviderSettings() {
   const confirmDelete = (selected: ProviderView | null) => {
     if (selected === null) return;
     const target = selected;
-    void run(() => deleteEntry(remove, target.id, () => setConfirming(false), () => setSelectedId(null)));
+    void run(() =>
+      deleteEntry(
+        remove,
+        target.id,
+        () => setConfirming(false),
+        () => setSelectedId(null),
+      ),
+    );
   };
 
   const selection = list === null ? null : selectionOf(list, selectedId);

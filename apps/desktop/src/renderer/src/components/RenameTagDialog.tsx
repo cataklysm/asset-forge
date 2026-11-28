@@ -39,9 +39,21 @@ export function RenameTagDialog({ tag, onClose, onRenamed }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = useRef(false);
   return (
-    <Dialog open={tag !== null} title={RENAME_TAG_TITLE} onClose={() => !busy.current && onClose()} initialFocusRef={inputRef}>
+    <Dialog
+      open={tag !== null}
+      title={RENAME_TAG_TITLE}
+      onClose={() => !busy.current && onClose()}
+      initialFocusRef={inputRef}
+    >
       {tag !== null && (
-        <RenameTagForm key={tag.name} tag={tag} inputRef={inputRef} busyRef={busy} onClose={onClose} onRenamed={onRenamed} />
+        <RenameTagForm
+          key={tag.name}
+          tag={tag}
+          inputRef={inputRef}
+          busyRef={busy}
+          onClose={onClose}
+          onRenamed={onRenamed}
+        />
       )}
     </Dialog>
   );

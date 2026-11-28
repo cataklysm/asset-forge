@@ -8,7 +8,11 @@ import { useEffect, useRef, type RefObject } from 'react';
  * @param open whether the dialog is shown
  * @param initialFocusRef focused when the dialog opens; read when it opens only
  */
-export function useModalDialog(ref: RefObject<HTMLDialogElement | null>, open: boolean, initialFocusRef?: RefObject<HTMLElement | null>): void {
+export function useModalDialog(
+  ref: RefObject<HTMLDialogElement | null>,
+  open: boolean,
+  initialFocusRef?: RefObject<HTMLElement | null>,
+): void {
   const opener = useRef<HTMLElement | null>(null);
 
   function restoreFocus() {

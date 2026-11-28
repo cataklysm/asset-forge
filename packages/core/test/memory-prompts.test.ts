@@ -26,14 +26,22 @@ describe('InMemoryPromptRepository', () => {
     expect(await create(1, 'Night')).toBe(true);
     expect(await create(2, 'night')).toBe(false);
     expect(await create(3, 'Day')).toBe(true);
-    expect(await db.prompts.update({ id: id(3), title: 'NIGHT', titleKey: 'night', description: '', now: T1 })).toBe('title_taken');
+    expect(await db.prompts.update({ id: id(3), title: 'NIGHT', titleKey: 'night', description: '', now: T1 })).toBe(
+      'title_taken',
+    );
     expect(await db.prompts.update({ id: id(9), title: 'X', titleKey: 'x', description: '', now: T1 })).toBe('missing');
-    expect(await db.prompts.update({ id: id(1), title: 'Night sky', titleKey: 'night sky', description: 'd', now: T1 })).toBe('ok');
+    expect(
+      await db.prompts.update({ id: id(1), title: 'Night sky', titleKey: 'night sky', description: 'd', now: T1 }),
+    ).toBe('ok');
 
     const v = { id: id(201), content: 'Second', variables: [] };
     expect(await db.prompts.addVersion({ promptId: id(1), baseVersionId: id(101), version: v, now: T2 })).toBe('ok');
-    expect(await db.prompts.addVersion({ promptId: id(1), baseVersionId: id(101), version: { ...v, id: id(202) }, now: T2 })).toBe('stale');
-    expect(await db.prompts.addVersion({ promptId: id(9), baseVersionId: id(101), version: v, now: T2 })).toBe('missing');
+    expect(
+      await db.prompts.addVersion({ promptId: id(1), baseVersionId: id(101), version: { ...v, id: id(202) }, now: T2 }),
+    ).toBe('stale');
+    expect(await db.prompts.addVersion({ promptId: id(9), baseVersionId: id(101), version: v, now: T2 })).toBe(
+      'missing',
+    );
     const detail = await db.prompts.get(id(1));
     expect(detail?.versions.map((x) => x.number)).toEqual([2, 1]);
     expect(detail?.currentVersion).toMatchObject({ id: id(201), number: 2, content: 'Second' });
@@ -45,14 +53,27 @@ describe('InMemoryPromptRepository', () => {
     await create(2, 'Storm', T0);
     await create(1, 'Rain', T0);
     await create(3, 'Sun', T1);
-    await db.prompts.addTag({ promptId: id(2), name: 'weather', displayName: 'Weather', newId: id(500), now: T0, max: 50 });
+    await db.prompts.addTag({
+      promptId: id(2),
+      name: 'weather',
+      displayName: 'Weather',
+      newId: id(500),
+      now: T0,
+      max: 50,
+    });
     const all = await db.prompts.list({ words: [], tagNames: [], offset: 0, limit: 10 });
     expect(all.items.map((p) => p.id)).toEqual([id(3), id(1), id(2)]);
     expect(all.total).toBe(3);
-    expect((await db.prompts.list({ words: ['weath'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(2)]);
+    expect(
+      (await db.prompts.list({ words: ['weath'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id),
+    ).toEqual([id(2)]);
     await create(4, 'Über Kopf', T0);
-    expect((await db.prompts.list({ words: ['uber'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(4)]);
-    expect((await db.prompts.list({ words: [], tagNames: ['weather'], offset: 0, limit: 10 })).items.map((p) => p.id)).toEqual([id(2)]);
+    expect(
+      (await db.prompts.list({ words: ['uber'], tagNames: [], offset: 0, limit: 10 })).items.map((p) => p.id),
+    ).toEqual([id(4)]);
+    expect(
+      (await db.prompts.list({ words: [], tagNames: ['weather'], offset: 0, limit: 10 })).items.map((p) => p.id),
+    ).toEqual([id(2)]);
     expect(await db.tags.usage('weather')).toMatchObject({ prompts: 1 });
   });
 
@@ -77,7 +98,11 @@ describe('InMemoryPromptRepository', () => {
       inputs: [],
       outputs: [],
     });
-    expect(await db.generations.get(id(700))).toMatchObject({ promptId: id(1), promptVersionId: id(101), promptTitle: 'Night' });
+    expect(await db.generations.get(id(700))).toMatchObject({
+      promptId: id(1),
+      promptVersionId: id(101),
+      promptTitle: 'Night',
+    });
     await db.prompts.remove(id(1));
     expect(await db.generations.get(id(700))).toMatchObject({
       promptId: null,

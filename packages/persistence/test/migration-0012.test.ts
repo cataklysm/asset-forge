@@ -53,7 +53,11 @@ async function createDatabaseUpTo0011(): Promise<void> {
 function seed(): void {
   const s = new Database(dbPath);
   try {
-    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(uuid(1), 'ws', TS);
+    s.prepare('INSERT INTO workspace (id, format_version, name, created_at) VALUES (?, 1, ?, ?)').run(
+      uuid(1),
+      'ws',
+      TS,
+    );
     const insert = s.prepare(
       `INSERT INTO job (id, type, resource_class, status, payload, attempt, created_at, finished_at, updated_at)
        VALUES (?, ?, 'local_gpu', ?, ?, ?, ?, ?, ?)`,
@@ -98,7 +102,9 @@ describe('migration 0012', () => {
         { id: uuid(10), provider_id: null },
         { id: uuid(11), provider_id: null },
       ]);
-      expect(check.pragma('table_info(job)')).toContainEqual(expect.objectContaining({ name: 'provider_id', type: 'TEXT', notnull: 0 }));
+      expect(check.pragma('table_info(job)')).toContainEqual(
+        expect.objectContaining({ name: 'provider_id', type: 'TEXT', notnull: 0 }),
+      );
       expect(check.pragma('index_info(job_provider_id_status_idx)')).toEqual([
         expect.objectContaining({ seqno: 0, name: 'provider_id' }),
         expect.objectContaining({ seqno: 1, name: 'status' }),

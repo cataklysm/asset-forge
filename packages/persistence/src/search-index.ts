@@ -88,7 +88,8 @@ function clearedSearchRow(transaction: IndexTransaction, assetId: string): numbe
     .where(eq(assetSearchMap.assetId, assetId))
     .get();
   if (!mapped) {
-    return transaction.insert(assetSearchMap).values({ assetId }).returning({ rowid: assetSearchMap.rowid }).get().rowid;
+    return transaction.insert(assetSearchMap).values({ assetId }).returning({ rowid: assetSearchMap.rowid }).get()
+      .rowid;
   }
   transaction.run(sql`delete from asset_search where rowid = ${mapped.rowid}`);
   return mapped.rowid;

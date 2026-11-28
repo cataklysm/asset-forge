@@ -454,11 +454,14 @@ class JobScheduler {
    */
   private armTimer(earliest: number): void {
     const slot: TimerSlot = { handle: null };
-    slot.handle = this.config.setTimer(() => {
-      if (this.timer !== slot) return;
-      this.timer = null;
-      this.wake();
-    }, Math.max(earliest - this.config.now().getTime(), 0));
+    slot.handle = this.config.setTimer(
+      () => {
+        if (this.timer !== slot) return;
+        this.timer = null;
+        this.wake();
+      },
+      Math.max(earliest - this.config.now().getTime(), 0),
+    );
     this.timer = slot;
   }
 

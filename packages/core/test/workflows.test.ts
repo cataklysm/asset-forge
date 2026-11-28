@@ -187,9 +187,7 @@ describe('updating steps', () => {
 
   it('an unknown step fails with not_found', async () => {
     const ctx = await setup();
-    await expect(updateWorkflowStep(ctx.session, UNKNOWN_ID, { state: 'done' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(updateWorkflowStep(ctx.session, UNKNOWN_ID, { state: 'done' })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('steps are independent', async () => {

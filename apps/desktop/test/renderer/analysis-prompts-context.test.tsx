@@ -83,7 +83,9 @@ it('save appends a new prompt and replaces an existing one without listing again
   expect(created.name).toBe('Short');
   expect(state().prompts!.map((p) => p.id)).toEqual([DEFAULT_TAGGING.id, DETAILED.id, DEFAULT_IMAGE.id, created.id]);
 
-  await act(() => state().save({ id: DETAILED.id, purpose: 'tagging', name: 'Detailed', text: 'Changed', maxTags: 30 }));
+  await act(() =>
+    state().save({ id: DETAILED.id, purpose: 'tagging', name: 'Detailed', text: 'Changed', maxTags: 30 }),
+  );
   expect(state().prompts![1]).toEqual({ ...DETAILED, text: 'Changed', maxTags: 30 });
   expect(api.calls.filter((c) => c.channel === 'analysisPrompts:list')).toHaveLength(1);
 });
@@ -110,7 +112,9 @@ it('a refused call rejects and leaves the list as it was', async () => {
   installFakeApi(seeded().handlers);
   const state = mount();
   await screen.findByText('3 prompts');
-  await expect(state().remove(DEFAULT_IMAGE.id)).rejects.toThrow('The last analysis prompt of a purpose cannot be deleted');
+  await expect(state().remove(DEFAULT_IMAGE.id)).rejects.toThrow(
+    'The last analysis prompt of a purpose cannot be deleted',
+  );
   expect(state().prompts).toHaveLength(3);
 });
 
@@ -125,11 +129,23 @@ it('noteUsed changes the prompt used last', async () => {
 
 it('defaultPromptId prefers the prompt used last, falls back to the first of the purpose, and is null without a list', () => {
   const prompts = [DEFAULT_TAGGING, DETAILED, DEFAULT_IMAGE];
-  expect(defaultPromptId({ prompts, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'tagging')).toBe(DETAILED.id);
-  expect(defaultPromptId({ prompts, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'image_prompt')).toBe(DEFAULT_IMAGE.id);
-  expect(defaultPromptId({ prompts, lastUsed: { tagging: 'gone', imagePrompt: null } }, 'tagging')).toBe(DEFAULT_TAGGING.id);
+  expect(defaultPromptId({ prompts, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'tagging')).toBe(
+    DETAILED.id,
+  );
+  expect(defaultPromptId({ prompts, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'image_prompt')).toBe(
+    DEFAULT_IMAGE.id,
+  );
+  expect(defaultPromptId({ prompts, lastUsed: { tagging: 'gone', imagePrompt: null } }, 'tagging')).toBe(
+    DEFAULT_TAGGING.id,
+  );
   // An id of the other purpose is not taken.
-  expect(defaultPromptId({ prompts, lastUsed: { tagging: DEFAULT_IMAGE.id, imagePrompt: null } }, 'tagging')).toBe(DEFAULT_TAGGING.id);
-  expect(defaultPromptId({ prompts: [DEFAULT_TAGGING], lastUsed: { tagging: null, imagePrompt: null } }, 'image_prompt')).toBeNull();
-  expect(defaultPromptId({ prompts: null, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'tagging')).toBeNull();
+  expect(defaultPromptId({ prompts, lastUsed: { tagging: DEFAULT_IMAGE.id, imagePrompt: null } }, 'tagging')).toBe(
+    DEFAULT_TAGGING.id,
+  );
+  expect(
+    defaultPromptId({ prompts: [DEFAULT_TAGGING], lastUsed: { tagging: null, imagePrompt: null } }, 'image_prompt'),
+  ).toBeNull();
+  expect(
+    defaultPromptId({ prompts: null, lastUsed: { tagging: DETAILED.id, imagePrompt: null } }, 'tagging'),
+  ).toBeNull();
 });

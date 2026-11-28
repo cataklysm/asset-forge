@@ -41,7 +41,11 @@ export interface StoredSettings {
 }
 
 /** The settings without any entry. */
-export const EMPTY_SETTINGS: StoredSettings = { providers: [], lastUsed: { vision: null, image: null }, adoptLegacyKey: null };
+export const EMPTY_SETTINGS: StoredSettings = {
+  providers: [],
+  lastUsed: { vision: null, image: null },
+  adoptLegacyKey: null,
+};
 
 const TimeoutSchema = z.number().int().min(VISION_TIMEOUT_MIN_SECONDS).max(VISION_TIMEOUT_MAX_SECONDS);
 const StoredBaseUrlSchema = z.string().refine((url) => usableBaseUrl(url) === url);
@@ -249,19 +253,35 @@ interface ReadState {
  * @param values the raw entries
  * @returns the settings that could be read
  */
-function readEnvelope(path: string, text: string, version: number, raw: Record<string, unknown>, values: unknown[]): SettingsReadResult {
+function readEnvelope(
+  path: string,
+  text: string,
+  version: number,
+  raw: Record<string, unknown>,
+  values: unknown[],
+): SettingsReadResult {
   const read = readEntries(version, values);
   const state: ReadState = { degraded: read.degraded };
   let lastUsed: LastUsed;
   if (version === 2) {
     lastUsed = { vision: readSlot(raw.lastUsedId, read.providers, state), image: null };
   } else {
-    const slots = (typeof raw.lastUsed === 'object' && raw.lastUsed !== null ? raw.lastUsed : {}) as Record<string, unknown>;
-    lastUsed = { vision: readSlot(slots.vision, read.providers, state), image: readSlot(slots.image, read.providers, state) };
+    const slots = (typeof raw.lastUsed === 'object' && raw.lastUsed !== null ? raw.lastUsed : {}) as Record<
+      string,
+      unknown
+    >;
+    lastUsed = {
+      vision: readSlot(slots.vision, read.providers, state),
+      image: readSlot(slots.image, read.providers, state),
+    };
   }
   const marker = MarkerSchema.safeParse(raw.adoptLegacyKey);
   if (!marker.success) state.degraded = true;
-  const stored: StoredSettings = { providers: read.providers, lastUsed, adoptLegacyKey: marker.success ? marker.data : null };
+  const stored: StoredSettings = {
+    providers: read.providers,
+    lastUsed,
+    adoptLegacyKey: marker.success ? marker.data : null,
+  };
   // The original stays in place and is only rewritten by the next save; the copy keeps what was left out. A failed
   // copy leaves the load degraded all the same, and the next start tries again.
   if (state.degraded && !isAlreadyKept(path, text)) {
@@ -286,7 +306,9 @@ function readSlot(value: unknown, providers: ProviderEntry[], state: ReadState):
   const parsed = SlotSchema.safeParse(value);
   if (!parsed.success) state.degraded = true;
   // A slot naming an entry that was left out (or was never there) reads as nothing used last.
-  return parsed.success && parsed.data !== null && providers.some((provider) => provider.id === parsed.data) ? parsed.data : null;
+  return parsed.success && parsed.data !== null && providers.some((provider) => provider.id === parsed.data)
+    ? parsed.data
+    : null;
 }
 
 /**

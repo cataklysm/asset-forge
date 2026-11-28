@@ -83,7 +83,8 @@ function analysisItems(file: FileRecord, context: FileActionContext): MenuItem[]
   if (onReviewTags !== undefined && file.hasProposal) {
     items.push({ label: REVIEW_TAGS_LABEL, title: REVIEW_TAGS_TITLE, onSelect: onReviewTags });
   }
-  if (onImageToPrompt !== undefined) items.push(blockable(blocked, IMAGE_TO_PROMPT_LABEL, IMAGE_TO_PROMPT_TITLE, onImageToPrompt));
+  if (onImageToPrompt !== undefined)
+    items.push(blockable(blocked, IMAGE_TO_PROMPT_LABEL, IMAGE_TO_PROMPT_TITLE, onImageToPrompt));
   return items;
 }
 
@@ -118,7 +119,14 @@ function studioItems(file: FileRecord, context: FileActionContext): MenuItem[] {
 function coverItems(file: FileRecord, context: FileActionContext): MenuItem[] {
   const { cover, onSetCover } = context;
   if (cover === null || onSetCover === undefined) return [];
-  if (cover.isChosen) return [{ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) }];
+  if (cover.isChosen)
+    return [
+      {
+        label: 'Use automatic cover',
+        title: 'Return to the first image as the cover',
+        onSelect: () => onSetCover(null),
+      },
+    ];
   if (file.status !== 'complete' || !file.thumbnail) return [];
   const title = file.kind === 'video' ? 'Show this video as the asset cover' : 'Show this image as the asset cover';
   return [{ label: 'Use as cover', title, onSelect: () => onSetCover(file.id) }];
@@ -143,14 +151,17 @@ export function fileMenuItems(file: FileRecord, context: FileActionContext): Men
   };
   const items: MenuItem[] = [{ label: 'Details', onSelect: context.onDetails }];
   if (file.deletedAt !== null) {
-    if (context.onRestore !== undefined) items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: context.onRestore });
-    if (context.onPurge !== undefined) items.push({ label: PURGE_LABEL, title: PURGE_TITLE, onSelect: context.onPurge });
+    if (context.onRestore !== undefined)
+      items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: context.onRestore });
+    if (context.onPurge !== undefined)
+      items.push({ label: PURGE_LABEL, title: PURGE_TITLE, onSelect: context.onPurge });
     return items;
   }
   if (complete && file.openable) items.push({ label: 'Open externally', onSelect: shell('files:openExternal') });
   if (complete) items.push({ label: 'Show in folder', onSelect: shell('files:showInFolder') });
   items.push(...analysisItems(file, context), ...studioItems(file, context), ...coverItems(file, context));
-  if (context.onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: context.onDetach });
+  if (context.onDetach !== undefined)
+    items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: context.onDetach });
   if (context.onDelete !== undefined && file.status !== 'pending') {
     items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: context.onDelete });
   }

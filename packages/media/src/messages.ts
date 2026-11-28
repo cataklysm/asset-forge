@@ -23,9 +23,7 @@ export type PreviewResult = 'ok' | 'none';
 
 /** What a worker is asked to do: render a preview, measure an image or make a JPEG for a vision model. */
 export type WorkerJob =
-  | { kind: 'render'; job: PreviewJob }
-  | { kind: 'measure'; sourcePath: string }
-  | { kind: 'jpeg'; sourcePath: string };
+  { kind: 'render'; job: PreviewJob } | { kind: 'measure'; sourcePath: string } | { kind: 'jpeg'; sourcePath: string };
 
 /** One message to a worker. */
 export interface WorkerRequest {

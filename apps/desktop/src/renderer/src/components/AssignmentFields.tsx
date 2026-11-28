@@ -1,9 +1,5 @@
 import { useState } from 'react';
-import {
-  ApprovalStatusSchema,
-  AssignmentPrioritySchema,
-  type ProjectAssignment,
-} from '@assetforge/contracts';
+import { ApprovalStatusSchema, AssignmentPrioritySchema, type ProjectAssignment } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
 import { ALERT, SELECT } from '../ui';

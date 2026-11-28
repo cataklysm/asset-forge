@@ -1,11 +1,26 @@
-import { buildPromptVariables, PROMPT_VARIABLE_VALUE_MAX, type PromptDetail, type PromptVersion } from '@assetforge/contracts';
+import {
+  buildPromptVariables,
+  PROMPT_VARIABLE_VALUE_MAX,
+  type PromptDetail,
+  type PromptVersion,
+} from '@assetforge/contracts';
 import { describe, expect, it } from 'vitest';
 import { attach, preview } from '../src/renderer/src/studio-prompt.js';
 
 const PROMPT_ID = '00000000-0000-4000-8000-0000000000b1';
 
-function version(content: string, defaults: Record<string, string> = {}, id = '00000000-0000-4000-8000-0000000000c1'): PromptVersion {
-  return { id, number: 1, content, variables: buildPromptVariables(content, defaults), createdAt: '2026-11-27T08:00:00.000Z' };
+function version(
+  content: string,
+  defaults: Record<string, string> = {},
+  id = '00000000-0000-4000-8000-0000000000c1',
+): PromptVersion {
+  return {
+    id,
+    number: 1,
+    content,
+    variables: buildPromptVariables(content, defaults),
+    createdAt: '2026-11-27T08:00:00.000Z',
+  };
 }
 
 function detail(current: PromptVersion, versions: PromptVersion[] = [current]): PromptDetail {
@@ -63,6 +78,9 @@ describe('preview', () => {
 
   it('with every variable filled it is the resolved text', () => {
     const v = version('A {{view}} of {{who}}', { who: 'a hero' });
-    expect(preview(attach(detail(v), v, none, { view: ' side ' }))).toEqual({ text: 'A side of a hero', blocked: null });
+    expect(preview(attach(detail(v), v, none, { view: ' side ' }))).toEqual({
+      text: 'A side of a hero',
+      blocked: null,
+    });
   });
 });

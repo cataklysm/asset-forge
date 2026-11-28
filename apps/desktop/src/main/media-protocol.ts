@@ -108,7 +108,11 @@ async function serveOriginal(fileId: string, dependencies: MediaProtocolDependen
  * @param dependencies the lookups, the preview cache and the file access
  * @returns a 200 with the preview, or a 404
  */
-async function servePreview(fileId: string, size: PreviewSize, dependencies: MediaProtocolDependencies): Promise<Response> {
+async function servePreview(
+  fileId: string,
+  size: PreviewSize,
+  dependencies: MediaProtocolDependencies,
+): Promise<Response> {
   const source = await dependencies.findSource(fileId);
   if (source === null) return notFound();
   const request: PreviewRequest = { sha256: source.sha256, sourcePath: source.absolutePath, size };
@@ -141,14 +145,20 @@ async function servePreview(fileId: string, size: PreviewSize, dependencies: Med
  * @param dependencies the lookups and the file access
  * @returns the answer
  */
-async function serveVideo(fileId: string, rangeHeader: string | null, dependencies: MediaProtocolDependencies): Promise<Response> {
+async function serveVideo(
+  fileId: string,
+  rangeHeader: string | null,
+  dependencies: MediaProtocolDependencies,
+): Promise<Response> {
   const source = await dependencies.findVideo(fileId);
   if (source === null) return notFound();
   // The lookup already guarantees an allowed type; checked again because it becomes Content-Type.
   if (!VIDEO_MIME_TYPES.includes(source.mimeType)) return notFound();
   const asked = parseRangeHeader(rangeHeader);
   const file =
-    asked === null ? await dependencies.openFile(source.absolutePath) : await dependencies.openFile(source.absolutePath, asked);
+    asked === null
+      ? await dependencies.openFile(source.absolutePath)
+      : await dependencies.openFile(source.absolutePath, asked);
   if (file.stream === null) {
     return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${file.size}` } });
   }
@@ -180,7 +190,10 @@ async function serveVideo(fileId: string, rangeHeader: string | null, dependenci
  * @param dependencies the lookups, the preview cache and the file access
  * @returns the answer
  */
-export async function handleMediaRequest(request: MediaRequest, dependencies: MediaProtocolDependencies): Promise<Response> {
+export async function handleMediaRequest(
+  request: MediaRequest,
+  dependencies: MediaProtocolDependencies,
+): Promise<Response> {
   if (request.method !== 'GET') return notFound();
   try {
     const video = parseVideoUrl(request.url);

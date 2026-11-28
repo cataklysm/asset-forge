@@ -1,5 +1,12 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
-import { JOB_ERROR_MESSAGES, purposeOf, variableKey, type FileRecord, type TagAssignment, type UpscaleScale } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  purposeOf,
+  variableKey,
+  type FileRecord,
+  type TagAssignment,
+  type UpscaleScale,
+} from '@assetforge/contracts';
 import { call } from './api';
 import { FileDetailDialog } from './components/FileDetailDialog';
 import { GenerationStudio } from './components/GenerationStudio';
@@ -227,7 +234,9 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
   );
 
   const changeLinked = (fileId: string, change: (file: FileRecord) => FileRecord) =>
-    setLinked((current) => (current !== null && current.file.id === fileId ? { ...current, file: change(current.file) } : current));
+    setLinked((current) =>
+      current !== null && current.file.id === fileId ? { ...current, file: change(current.file) } : current,
+    );
 
   const closeStudio = () => {
     lower('studio', linked !== null);

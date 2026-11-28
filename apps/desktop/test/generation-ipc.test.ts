@@ -3,8 +3,21 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, IMAGE_INPUT_MAX_BYTES, type Generation, type IpcChannel, purposeOf, type ProviderView } from '@assetforge/contracts';
-import { NotFoundError, type ImageProvider, type ImageProviderDirectory, type WorkspaceManager } from '@assetforge/core';
+import {
+  ANALYZE_FILE_JOB,
+  IMAGE_GENERATE_JOB,
+  IMAGE_INPUT_MAX_BYTES,
+  type Generation,
+  type IpcChannel,
+  purposeOf,
+  type ProviderView,
+} from '@assetforge/contracts';
+import {
+  NotFoundError,
+  type ImageProvider,
+  type ImageProviderDirectory,
+  type WorkspaceManager,
+} from '@assetforge/core';
 import {
   MOCK_EDIT_MODEL,
   MOCK_MODEL,
@@ -109,7 +122,10 @@ describe('generation IPC', () => {
 
   it('answers the domain refusals with their fixed messages', async () => {
     const { fileId } = await ready();
-    expect(await h.call('generations:start', edit(UNKNOWN, 'night'))).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await h.call('generations:start', edit(UNKNOWN, 'night'))).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
     expect(await h.call('generations:start', edit(fileId, '   '))).toEqual({
       ok: false,
       error: { code: 'validation_failed', message: 'The prompt must have 1 to 8000 characters' },
@@ -164,7 +180,14 @@ describe('generation IPC', () => {
     const generation = await start(edit(fileId, MOCK_PROMPT_FAIL));
     await h.until((s) => s.failed === 1 && s.running === 0 && s.queued === 0);
     const [failed] = (await h.ok('jobs:list', page)).items;
-    expect(failed).toMatchObject({ type: IMAGE_GENERATE_JOB, fileId, fileName: 'oak.png', providerId: entry.id, providerName: 'Venice', model: MOCK_EDIT_MODEL });
+    expect(failed).toMatchObject({
+      type: IMAGE_GENERATE_JOB,
+      fileId,
+      fileName: 'oak.png',
+      providerId: entry.id,
+      providerName: 'Venice',
+      model: MOCK_EDIT_MODEL,
+    });
 
     expect(await h.ok('jobs:retryFailed', {})).toEqual({ retried: 0 });
     expect(await h.ok('jobs:summary', {})).toMatchObject({ failed: 1, queued: 0 });
@@ -181,7 +204,10 @@ describe('generation IPC', () => {
       expect(job).toMatchObject({ providerName: 'Venice', model: MOCK_EDIT_MODEL });
     }
 
-    expect(await h.ok('generations:retry', { generationId: generation.id })).toMatchObject({ id: generation.id, status: 'pending' });
+    expect(await h.ok('generations:retry', { generationId: generation.id })).toMatchObject({
+      id: generation.id,
+      status: 'pending',
+    });
     await h.until((s) => s.failed === 3 && s.running === 0 && s.queued === 0);
     expect(await h.ok('generations:remove', { generationId: generation.id })).toEqual({});
     expect(await h.ok('generations:forFile', { fileId })).toEqual({ madeBy: null, results: [] });
@@ -196,7 +222,10 @@ describe('generation IPC', () => {
     expect(summary.paused).toEqual([
       { providerId: entry.id, providerName: 'Venice', kind: 'venice', reason: 'provider_insufficient_balance' },
     ]);
-    expect((await h.ok('jobs:list', page)).items[0]).toMatchObject({ status: 'failed', errorCode: 'provider_insufficient_balance' });
+    expect((await h.ok('jobs:list', page)).items[0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_insufficient_balance',
+    });
     expect(h.logs).toContain(`Image provider ${entry.id} failed: provider_insufficient_balance (HTTP 402)`);
 
     expect(await h.ok('jobs:resume', { providerId: entry.id })).toEqual({});
@@ -232,7 +261,10 @@ describe('generation IPC', () => {
 
     expect(await h.ok('jobs:cancelAll', {})).toEqual({ cancelled: 1 });
     await h.until((s) => s.cancelled === 1 && s.running === 0);
-    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({ id: generation.id, status: 'cancelled' });
+    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({
+      id: generation.id,
+      status: 'cancelled',
+    });
     expect(await h.ok('providers:delete', { id: entry.id })).toEqual({});
   });
 
@@ -262,15 +294,21 @@ describe('generation IPC', () => {
     );
 
     expect(await h.ok('jobs:waitingByProvider', {})).toEqual([]);
-    expect(await h.call('jobs:reroute', { fromProviderId: ollama.id, toProviderId: venice.id, model: MOCK_MODEL })).toEqual({
+    expect(
+      await h.call('jobs:reroute', { fromProviderId: ollama.id, toProviderId: venice.id, model: MOCK_MODEL }),
+    ).toEqual({
       ok: false,
       error: { code: 'invalid_operation', message: 'This provider cannot analyse images' },
     });
-    expect(await h.call('jobs:reroute', { fromProviderId: venice.id, toProviderId: ollama.id, model: MOCK_MODEL })).toEqual({
+    expect(
+      await h.call('jobs:reroute', { fromProviderId: venice.id, toProviderId: ollama.id, model: MOCK_MODEL }),
+    ).toEqual({
       ok: false,
       error: { code: 'invalid_operation', message: 'This provider cannot analyse images' },
     });
-    const generationJobs = (await h.ok('jobs:list', { ...page, status: 'queued' })).items.filter((j) => j.type === IMAGE_GENERATE_JOB);
+    const generationJobs = (await h.ok('jobs:list', { ...page, status: 'queued' })).items.filter(
+      (j) => j.type === IMAGE_GENERATE_JOB,
+    );
     expect(generationJobs).toHaveLength(1);
     expect(generationJobs[0]).toMatchObject({ providerId: venice.id });
   });
@@ -282,11 +320,17 @@ describe('generation IPC', () => {
     const queued = await start(edit(fileId, 'night'));
     // Without `settled`, as a crash between the two writes would leave it.
     await h.manager.read((s) => s.database.jobs.cancelPending({ id: queued.jobId!, now: new Date().toISOString() }));
-    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({ id: queued.id, status: 'pending' });
+    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({
+      id: queued.id,
+      status: 'pending',
+    });
 
     await h.ok('workspace:close', {});
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
-    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({ id: queued.id, status: 'cancelled' });
+    expect((await h.ok('generations:forFile', { fileId })).results[0]).toMatchObject({
+      id: queued.id,
+      status: 'cancelled',
+    });
   });
 });
 
@@ -395,7 +439,10 @@ describe('image provider directory', () => {
       },
     } as unknown as ProviderGateway;
     const directory = createImageProviderDirectory(store, gateway, { timeoutMs: 30 });
-    expect(await directory.models(venice.id, new AbortController().signal)).toEqual({ ok: false, code: 'provider_timeout' });
+    expect(await directory.models(venice.id, new AbortController().signal)).toEqual({
+      ok: false,
+      code: 'provider_timeout',
+    });
     expect(seen?.aborted).toBe(true);
   });
 
@@ -448,13 +495,18 @@ describe('generation image source', () => {
     await writeFile(rendition, bytes);
     const get = vi.fn(async () => rendition);
     const source = createGenerationImageSource({ get });
-    expect(await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal)).toEqual({
+    expect(
+      await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal),
+    ).toEqual({
       data: new Uint8Array(bytes),
       mimeType: 'image/png',
     });
     expect(get).toHaveBeenLastCalledWith({ sha256, sourcePath: original, size: 'full' });
     expect(
-      await source.read({ absolutePath: original, mimeType: 'image/png', sha256, sizeBytes: IMAGE_INPUT_MAX_BYTES + 1 }, signal),
+      await source.read(
+        { absolutePath: original, mimeType: 'image/png', sha256, sizeBytes: IMAGE_INPUT_MAX_BYTES + 1 },
+        signal,
+      ),
     ).toEqual({ data: new Uint8Array(bytes), mimeType: 'image/png' });
   });
 
@@ -481,10 +533,14 @@ describe('generation image source', () => {
     const source = createGenerationImageSource({ get: async () => rendition });
     // The cache removes it after it was found and measured.
     vi.mocked(readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
-    expect(await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal)).toBeNull();
+    expect(
+      await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal),
+    ).toBeNull();
     // Without a rendition file at all, too.
     const missing = createGenerationImageSource({ get: async () => join(dir, 'gone.png') });
-    expect(await missing.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal)).toBeNull();
+    expect(
+      await missing.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 10 }, signal),
+    ).toBeNull();
   });
 
   it('answers null without a rendition or for a rendition over the limit', async () => {
@@ -499,6 +555,8 @@ describe('generation image source', () => {
     const rendition = join(dir, 'full.png');
     await writeFile(rendition, 'png');
     const source = createGenerationImageSource({ get: async () => rendition }, { maxBytes: 2 });
-    expect(await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 1 }, signal)).toBeNull();
+    expect(
+      await source.read({ absolutePath: original, mimeType: 'image/tiff', sha256, sizeBytes: 1 }, signal),
+    ).toBeNull();
   });
 });

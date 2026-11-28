@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ANALYZE_FILE_JOB, type IpcChannel, type IpcRequest, type IpcResponse, type JobSummary } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  type IpcChannel,
+  type IpcRequest,
+  type IpcResponse,
+  type JobSummary,
+} from '@assetforge/contracts';
 import type { WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
@@ -19,7 +25,11 @@ import { createHarness, filesBelow, NONE_SKIPPED, TEST_KEY, TEST_KEY_2, type Har
 import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 /** The tags the mock answers for these image bytes. */
-async function mockTagsOf(mock: MockProvider, bytes: Uint8Array, headers: Record<string, string> = {}): Promise<string[]> {
+async function mockTagsOf(
+  mock: MockProvider,
+  bytes: Uint8Array,
+  headers: Record<string, string> = {},
+): Promise<string[]> {
   const response = await fetch(`${mock.url}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
@@ -41,7 +51,12 @@ describe('phase 4a acceptance', () => {
   let manager: WorkspaceManager;
   let mock: MockProvider;
   /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
-  const filesRequest = (fileIds: string[]) => ({ target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: true });
+  const filesRequest = (fileIds: string[]) => ({
+    target: { kind: 'files' as const, fileIds },
+    model: MOCK_MODEL,
+    mode: 'apply' as const,
+    force: true,
+  });
 
   beforeEach(async () => {
     base = await mkdtemp(join(tmpdir(), 'af-analysis-accept-'));
@@ -112,7 +127,12 @@ describe('phase 4a acceptance', () => {
       for (let i = 0; i < 6; i++) {
         const path = join(sources, `image-${i}.png`);
         const background = { r: i * 40, g: 255 - i * 40, b: (i * 90) % 256 };
-        await writeFile(path, await sharp({ create: { width: 8, height: 8, channels: 3, background } }).png().toBuffer());
+        await writeFile(
+          path,
+          await sharp({ create: { width: 8, height: 8, channels: 3, background } })
+            .png()
+            .toBuffer(),
+        );
         paths.push(path);
       }
       await call('workspace:create', { name: 'Analysis', rootPath: workspaceRoot });
@@ -195,7 +215,8 @@ describe('phase 4b acceptance', () => {
   });
 
   /** Saves the mock as the only provider entry; no default models, so every job runs with the model it was enqueued with. */
-  const configure = (url: string, apiKey?: string | null) => h.provider({ url, ...(apiKey === undefined ? {} : { apiKey }) });
+  const configure = (url: string, apiKey?: string | null) =>
+    h.provider({ url, ...(apiKey === undefined ? {} : { apiKey }) });
   const createWorkspace = () => h.ok('workspace:create', { name: 'Analysis', rootPath: join(h.base, 'workspace') });
   const filesOf = async () => (await h.ok('files:list', { limit: 100, offset: 0, scope: { kind: 'all' } })).items;
 
@@ -230,11 +251,20 @@ describe('phase 4b acceptance', () => {
     await h.until((s) => s.succeeded === 3);
     for (const file of await filesOf()) expect(file.tags.filter((t) => t.origin === 'ai').length).toBeGreaterThan(0);
     for (const fileId of fileIds) {
-      expect(await h.manager.read((s) => s.database.analyses.get(fileId))).toMatchObject({ provider: OLLAMA_PROVIDER, model: MOCK_MODEL });
+      expect(await h.manager.read((s) => s.database.analyses.get(fileId))).toMatchObject({
+        provider: OLLAMA_PROVIDER,
+        model: MOCK_MODEL,
+      });
     }
 
-    expect(await h.ok('analysis:preview', { target, model: MOCK_MODEL })).toMatchObject({ analysable: 0, alreadyAnalysed: 3 });
-    expect(await h.ok('analysis:enqueue', request)).toEqual({ enqueued: 0, skipped: { ...NONE_SKIPPED, alreadyAnalysed: 3 } });
+    expect(await h.ok('analysis:preview', { target, model: MOCK_MODEL })).toMatchObject({
+      analysable: 0,
+      alreadyAnalysed: 3,
+    });
+    expect(await h.ok('analysis:enqueue', request)).toEqual({
+      enqueued: 0,
+      skipped: { ...NONE_SKIPPED, alreadyAnalysed: 3 },
+    });
     expect(await h.ok('analysis:enqueue', { ...request, force: true })).toEqual({ enqueued: 3, skipped: NONE_SKIPPED });
     await h.until((s) => s.succeeded === 6);
 
@@ -251,7 +281,12 @@ describe('phase 4b acceptance', () => {
     await configure(mock.url, TEST_KEY);
     await createWorkspace();
     const [fileId] = await h.importImages(1);
-    const propose = { target: { kind: 'files' as const, fileIds: [fileId!] }, model: MOCK_MODEL, mode: 'propose' as const, force: false };
+    const propose = {
+      target: { kind: 'files' as const, fileIds: [fileId!] },
+      model: MOCK_MODEL,
+      mode: 'propose' as const,
+      force: false,
+    };
 
     expect(await h.ok('analysis:enqueue', propose)).toEqual({ enqueued: 1, skipped: NONE_SKIPPED });
     await h.until((s) => s.succeeded === 1);
@@ -268,11 +303,13 @@ describe('phase 4b acceptance', () => {
     expect((await h.ok('analysis:getProposal', { fileId: fileId! })).proposal).toEqual(proposal);
 
     const chosen = proposal!.tags.slice(0, 2);
-    expect(await h.ok('analysis:acceptProposal', { fileId: fileId!, names: chosen.map((t) => t.displayName) })).toEqual({});
-    const [after] = await filesOf();
-    expect(after!.tags.map((t) => ({ name: t.name, origin: t.origin })).sort((a, b) => a.name.localeCompare(b.name))).toEqual(
-      chosen.map((t) => ({ name: t.name, origin: 'ai' })).sort((a, b) => a.name.localeCompare(b.name)),
+    expect(await h.ok('analysis:acceptProposal', { fileId: fileId!, names: chosen.map((t) => t.displayName) })).toEqual(
+      {},
     );
+    const [after] = await filesOf();
+    expect(
+      after!.tags.map((t) => ({ name: t.name, origin: t.origin })).sort((a, b) => a.name.localeCompare(b.name)),
+    ).toEqual(chosen.map((t) => ({ name: t.name, origin: 'ai' })).sort((a, b) => a.name.localeCompare(b.name)));
     expect(after).toMatchObject({ hasProposal: false });
     expect((await h.ok('analysis:getProposal', { fileId: fileId! })).proposal).toBeNull();
     expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({ model: MOCK_MODEL });
@@ -297,12 +334,19 @@ describe('phase 4b acceptance', () => {
     const entry = await configure(mock.url, WRONG_KEY);
     await createWorkspace();
     const fileIds = await h.importImages(3);
-    const request = { target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: false };
+    const request = {
+      target: { kind: 'files' as const, fileIds },
+      model: MOCK_MODEL,
+      mode: 'apply' as const,
+      force: false,
+    };
     expect(await h.ok('analysis:enqueue', request)).toMatchObject({ enqueued: 3 });
 
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ failed: 1, queued: 2, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unauthorized' }]);
+    expect(paused.paused).toEqual([
+      { providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unauthorized' },
+    ]);
     const [failed] = (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'failed' })).items;
     expect(failed).toMatchObject({ errorCode: 'provider_unauthorized' });
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -333,11 +377,18 @@ describe('phase 4b acceptance', () => {
     mock = undefined;
     await createWorkspace();
     const fileIds = await h.importImages(4);
-    await h.ok('analysis:enqueue', { target: { kind: 'files', fileIds }, model: MOCK_MODEL, mode: 'apply', force: false });
+    await h.ok('analysis:enqueue', {
+      target: { kind: 'files', fileIds },
+      model: MOCK_MODEL,
+      mode: 'apply',
+      force: false,
+    });
 
     const paused = await h.until((s) => s.paused.length > 0);
     expect(paused).toMatchObject({ waiting: 3, queued: 1, running: 0 });
-    expect(paused.paused).toEqual([{ providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unreachable' }]);
+    expect(paused.paused).toEqual([
+      { providerId: entry.id, providerName: 'Mock', kind: 'ollama', reason: 'provider_unreachable' },
+    ]);
     for (const job of (await h.ok('jobs:list', { limit: 10, offset: 0, status: 'retry_wait' })).items) {
       expect(job).toMatchObject({ attempt: 1, errorCode: 'provider_unreachable' });
     }
@@ -352,7 +403,12 @@ describe('phase 4b acceptance', () => {
     expect(await h.ok('providers:list', {})).toMatchObject({ providers: [], lastUsedId: null, fromEnvironment: false });
     await createWorkspace();
     const fileIds = await h.importImages(2);
-    const request = { target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const, force: false };
+    const request = {
+      target: { kind: 'files' as const, fileIds },
+      model: MOCK_MODEL,
+      mode: 'apply' as const,
+      force: false,
+    };
     for (const channel of ['analysis:enqueue', 'analysis:preview'] as const) {
       expect(await h.call(channel, request)).toEqual({
         ok: false,
@@ -408,12 +464,22 @@ describe('editable prompts acceptance', () => {
   });
 
   it('analyses with a chosen prompt, records its name and redoes the file with another prompt only on force', async () => {
-    const narrow = await h.ok('analysisPrompts:save', { purpose: 'tagging', name: 'Two tags', text: 'Only the main subject.', maxTags: 2 });
-    const defaultPrompt = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'tagging' && p.name === 'Default')!;
+    const narrow = await h.ok('analysisPrompts:save', {
+      purpose: 'tagging',
+      name: 'Two tags',
+      text: 'Only the main subject.',
+      maxTags: 2,
+    });
+    const defaultPrompt = (await h.ok('analysisPrompts:list', {})).prompts.find(
+      (p) => p.purpose === 'tagging' && p.name === 'Default',
+    )!;
     const [fileId] = await h.importImages(1);
     const request = filesRequest(fileId!);
 
-    expect(await h.ok('analysis:enqueue', { ...request, promptId: narrow.id })).toEqual({ enqueued: 1, skipped: NONE_SKIPPED });
+    expect(await h.ok('analysis:enqueue', { ...request, promptId: narrow.id })).toEqual({
+      enqueued: 1,
+      skipped: NONE_SKIPPED,
+    });
     await h.until((s) => s.succeeded === 1);
     const tags = await aiTagsOf(fileId!);
     expect(tags.length).toBeGreaterThan(0);
@@ -441,7 +507,12 @@ describe('editable prompts acceptance', () => {
   });
 
   it('shows the prompt name in a proposal', async () => {
-    const detailed = await h.ok('analysisPrompts:save', { purpose: 'tagging', name: 'Detailed', text: 'Every detail.', maxTags: 3 });
+    const detailed = await h.ok('analysisPrompts:save', {
+      purpose: 'tagging',
+      name: 'Detailed',
+      text: 'Every detail.',
+      maxTags: 3,
+    });
     const [fileId] = await h.importImages(1);
     expect(await h.ok('analysis:enqueue', { ...filesRequest(fileId!, 'propose'), promptId: detailed.id })).toEqual({
       enqueued: 1,
