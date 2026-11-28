@@ -24,8 +24,9 @@ export interface StudioState {
   open(file: FileRecord): void;
   /**
    * Starts an upscale of `file`. It names no entry: the main process runs the image provider used
-   * last (else the first), and an accepted start records it here too. Rejects with the reason a sent start failed. While an upscale of the file
-   * is in flight it sends nothing and resolves; the start in flight reports its own outcome.
+   * last (else the first), and an accepted start records it here too. Rejects with the reason a sent
+   * start failed. While an upscale of the file is in flight it sends nothing and resolves; the start
+   * in flight reports its own outcome.
    */
   upscale(file: FileRecord, scale: UpscaleScale): Promise<void>;
   /**

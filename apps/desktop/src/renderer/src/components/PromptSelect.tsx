@@ -22,7 +22,7 @@ interface Props {
  * @returns the select, with the retry after a failed load
  */
 export function PromptSelect({ purpose, value, onChange, disabled = false }: Props) {
-  const { prompts, loading, failed, reload } = useAnalysisPrompts();
+  const { loading, failed, reload } = useAnalysisPrompts();
   const select = <PromptOptions purpose={purpose} value={value} onChange={onChange} disabled={disabled} />;
   if (!failed) return select;
   return (
