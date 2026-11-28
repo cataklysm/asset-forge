@@ -16,12 +16,12 @@ import {
   frameRelativePath,
   FULL_CLEANUP_EVERY,
   FULL_FORMAT_VERSION,
-  evictLeastRecentlyUsed,
   PREVIEW_EDGE,
   PREVIEW_FORMAT_VERSION,
   previewRelativePath,
   type PreviewService,
 } from '../src/preview-cache.js';
+import { evictLeastRecentlyUsed } from '../src/cache-eviction.js';
 import type { VideoInfo } from '../src/video-diagnostics.js';
 import type { VideoFormat } from '../src/video-frame-arguments.js';
 import { createVideoFrames, type VideoFrames } from '../src/video-frames.js';
