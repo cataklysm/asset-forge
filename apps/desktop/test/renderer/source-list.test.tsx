@@ -76,6 +76,44 @@ it('a failed copy shows an alert that a working copy clears', async () => {
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
 
+it('a failed copy alert goes when the next action in the list starts', async () => {
+  const { user } = setup({ sources: [source('https://example.org/a')] });
+  vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('denied'));
+  await user.click(within(row('https://example.org/a')).getByRole('button', { name: 'Copy URL' }));
+  await screen.findByRole('alert');
+  await user.click(screen.getByRole('link', { name: 'https://example.org/a' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});
+
+it('a double click on Remove source sends one request', async () => {
+  const pending = deferred<void>();
+  const sources = [source('https://example.org/a')];
+  const { user, props } = setup({ sources, onRemove: vi.fn(() => pending.promise) });
+  await user.dblClick(within(row('https://example.org/a')).getByRole('button', { name: 'Remove source' }));
+  expect(props.onRemove).toHaveBeenCalledTimes(1);
+  pending.resolve();
+});
+
+it('after an add the input does not take back a focus the user moved elsewhere', async () => {
+  const pending = deferred<void>();
+  const sources = [source('https://example.org/a')];
+  const { user } = setup({ sources, onAdd: vi.fn(() => pending.promise) });
+  await user.type(input(), 'https://example.org/b{Enter}');
+  const copy = within(row('https://example.org/a')).getByRole('button', { name: 'Copy URL' });
+  copy.focus();
+  pending.resolve();
+  await waitFor(() => expect(input().disabled).toBe(false));
+  expect(document.activeElement).toBe(copy);
+});
+
+it('after an add the input takes the focus back when it fell to the page', async () => {
+  const pending = deferred<void>();
+  const { user } = setup({ onAdd: vi.fn(() => pending.promise) });
+  await user.type(input(), 'https://example.org/b{Enter}');
+  pending.resolve();
+  await waitFor(() => expect(document.activeElement).toBe(input()));
+});
+
 it('Enter adds the typed URL once and clears the input after it resolved', async () => {
   const pending = deferred<void>();
   const { user, props } = setup({ onAdd: vi.fn(() => pending.promise) });
