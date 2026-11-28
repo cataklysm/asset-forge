@@ -408,15 +408,20 @@ export class InMemoryJobRepository implements JobRepository {
     return { items, total: matching.length };
   }
 
-  async waitingByLane(type: string): Promise<{ lane: string | null; waiting: number }[]> {
+  async waitingByLane(type: string): Promise<{ lane: string | null; waiting: number; latestPayload: unknown }[]> {
     const counts = new Map<string | null, number>();
     for (const r of this.rows) {
       if (r.type === type && isWaiting(r.status)) counts.set(r.lane, (counts.get(r.lane) ?? 0) + 1);
     }
-    return [...counts].map(([lane, waiting]) => ({ lane, waiting }));
+    return [...counts].map(([lane, waiting]) => ({ lane, waiting, latestPayload: this.newestPayload(type, lane) }));
   }
 
   async latestPayloadOfLane(type: string, lane: string | null): Promise<unknown | null> {
+    return this.newestPayload(type, lane);
+  }
+
+  /** The payload of the newest job of the type and lane (created_at, then id); null without one. */
+  private newestPayload(type: string, lane: string | null): unknown | null {
     const newest = this.rows.filter((r) => r.type === type && r.lane === lane).sort((a, b) => oldestFirst(b, a))[0];
     return newest ? structuredClone(newest.payload) : null;
   }

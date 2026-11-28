@@ -68,21 +68,32 @@ export function assignUnroutedJobs(
  * @returns the name; null when there is none or it predates payload v4
  */
 export async function laneName(session: WorkspaceSession, lane: string | null): Promise<string | null> {
-  const payload = await session.database.jobs.latestPayloadOfLane(ANALYZE_FILE_JOB, lane);
+  return providerNameOf(await session.database.jobs.latestPayloadOfLane(ANALYZE_FILE_JOB, lane));
+}
+
+/**
+ * The provider name an analysis payload carries.
+ *
+ * @param payload the raw payload; null when there is none
+ * @returns the name; null without a payload or for one that predates payload v4
+ */
+function providerNameOf(payload: unknown): string | null {
   return payload === null ? null : analysisJobFields(payload).providerName;
 }
 
 /**
- * The waiting analysis jobs per lane, with the provider name from the lane's newest payload.
+ * The waiting analysis jobs per lane, with the provider name from the lane's newest payload, in one read.
  *
  * @param session the open workspace
  * @returns one entry per lane with waiting jobs
  */
 export async function listWaitingLanes(session: WorkspaceSession): Promise<WaitingLane[]> {
   const lanes = await session.database.jobs.waitingByLane(ANALYZE_FILE_JOB);
-  const result: WaitingLane[] = [];
-  for (const { lane, waiting } of lanes) result.push({ lane, payloadName: await laneName(session, lane), waiting });
-  return result;
+  return lanes.map(({ lane, waiting, latestPayload }) => ({
+    lane,
+    payloadName: providerNameOf(latestPayload),
+    waiting,
+  }));
 }
 
 /**
