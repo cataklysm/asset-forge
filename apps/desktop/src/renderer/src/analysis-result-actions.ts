@@ -1,7 +1,7 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { ApiError, call, describeError } from './api';
 import { namesOn, proposalKey, type Shown } from './analysis-result';
-import { recoverMissingPrompt, type AnalysisPromptsState } from './analysis-prompts-context';
+import { recoverMissingChoice, startErrorMessage, type AnalysisPromptsState } from './analysis-prompts-context';
 import type { ProposalReader } from './hooks/useResultOpening';
 import { NOT_ANALYSABLE, PROPOSAL_CHANGED } from './labels';
 import type { ProvidersState } from './provider-context';
@@ -66,10 +66,10 @@ export async function analyseFile(
     await action.reader.read(id);
     if (action.live() && result.enqueued === 0 && result.skipped.alreadyQueued === 0) action.setError(NOT_ANALYSABLE);
   } catch (error) {
-    recoverMissingPrompt(error, records.prompts, records.providers, () => {
+    recoverMissingChoice(error, records.prompts, records.providers, () => {
       if (action.live()) records.dropChosenPrompt();
     });
-    if (action.live()) action.setError(describeError(error));
+    if (action.live()) action.setError(startErrorMessage(error));
   }
 }
 

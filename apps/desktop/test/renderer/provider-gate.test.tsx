@@ -19,9 +19,13 @@ import {
   PROVIDER_STATE_LABELS,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
+  VARIABLE_MISSING_TITLE,
+  VARIABLE_TOO_LONG_TITLE,
 } from '../../src/renderer/src/labels';
 import type { ProvidersState } from '../../src/renderer/src/provider-context';
 import { imageProviderGate, promptGate, providerGate } from '../../src/renderer/src/provider-gate';
+import { editBlocked } from '../../src/renderer/src/studio-gate';
+import type { StudioForm } from '../../src/renderer/src/studio-state';
 import { providerView } from './fake-api';
 import { imagePrompt, taggingPrompt } from './fixtures';
 
@@ -317,4 +321,45 @@ it('the image gate shares the list load states', () => {
     blocked: START_LOADING,
     offerSettings: false,
   });
+});
+
+/**
+ * A studio form on the listed edit model with a library prompt of one variable.
+ *
+ * @param value the value of the variable
+ * @returns the form
+ */
+function attachedForm(value: string): StudioForm {
+  const version = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    number: 1,
+    content: 'a {{subject}}',
+    variables: [{ name: 'subject', defaultValue: '' }],
+    createdAt: '2026-11-28T00:00:00.000Z',
+  };
+  return {
+    providerId: VENICE.id,
+    model: 'edit-a',
+    prompt: '',
+    aspectRatio: null,
+    resolution: null,
+    safeMode: true,
+    attached: {
+      promptId: '00000000-0000-4000-8000-0000000000a2',
+      title: 'Library prompt',
+      version,
+      currentVersionId: version.id,
+      values: { subject: value },
+    },
+    origin: null,
+  };
+}
+
+it('a variable value over the limit blocks Generate with its own reason, an empty one asks to fill it in', () => {
+  // The studio gate reads only the list and the image models, so the actions of the context stay out.
+  const state = imageState({ [VENICE.id]: EDIT_LISTED }) as ProvidersState;
+  expect(editBlocked(state, attachedForm('x'.repeat(2001)), null)).toBe(VARIABLE_TOO_LONG_TITLE);
+  expect(VARIABLE_TOO_LONG_TITLE).toBe('A variable value is too long');
+  expect(editBlocked(state, attachedForm(''), null)).toBe(VARIABLE_MISSING_TITLE);
+  expect(editBlocked(state, attachedForm('fox'), null)).toBeNull();
 });

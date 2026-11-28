@@ -116,6 +116,33 @@ it('a reload under way while a save answers does not bring back the list from be
   expect(state().prompts!.map((p) => p.id)).toContain(created.id);
 });
 
+it('a newer reload wins over an older one that answers later', async () => {
+  const fake = seeded();
+  const api = installFakeApi(fake.handlers);
+  const state = mount();
+  await screen.findByText('3 prompts');
+  const older = deferred<AnalysisPromptList>();
+  const before = structuredClone(fake.state);
+  let lists = 0;
+  api.set('analysisPrompts:list', () => {
+    lists += 1;
+    return lists === 1 ? older.promise : { prompts: [DEFAULT_TAGGING, DEFAULT_IMAGE], lastUsed: before.lastUsed };
+  });
+  let first: Promise<void> | null = null;
+  act(() => {
+    first = state().reload();
+  });
+  await act(() => state().reload());
+  expect(state().prompts!.map((p) => p.id)).toEqual([DEFAULT_TAGGING.id, DEFAULT_IMAGE.id]);
+  expect(state().loading).toBe(false);
+  await act(async () => {
+    older.resolve(before);
+    await first;
+  });
+  expect(state().prompts!.map((p) => p.id)).toEqual([DEFAULT_TAGGING.id, DEFAULT_IMAGE.id]);
+  expect(state().loading).toBe(false);
+});
+
 it('remove drops the prompt and clears a matching prompt used last', async () => {
   installFakeApi(seeded().handlers);
   const state = mount();

@@ -32,15 +32,29 @@ export function onStorageUnreachable(listener: () => void): () => void {
   };
 }
 
+/** How `call` treats a failure. */
+export interface CallOptions {
+  /**
+   * False keeps a `storage_unreachable` failure from the `onStorageUnreachable` listeners, for a call
+   * repeated in the background whose failure must not raise the storage banner again; default true.
+   */
+  reportUnreachable?: boolean;
+}
+
 /**
  * Calls an IPC channel, unwrapping the result: failures (including a rejected invoke) throw `ApiError`.
  *
  * @param channel the IPC channel
  * @param request the channel's request
+ * @param options whether a `storage_unreachable` failure is reported to the listeners
  * @returns resolves to the channel's answer
  * @throws ApiError with the forwarded code, or `internal_error` when the invoke itself failed
  */
-export async function call<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
+export async function call<C extends IpcChannel>(
+  channel: C,
+  request: IpcRequest<C>,
+  options: CallOptions = {},
+): Promise<IpcResponse<C>> {
   let result;
   try {
     result = await window.assetForge.invoke(channel, request);
@@ -48,7 +62,8 @@ export async function call<C extends IpcChannel>(channel: C, request: IpcRequest
     throw new ApiError('internal_error', 'The application did not respond');
   }
   if (!result.ok) {
-    if (result.error.code === 'storage_unreachable') for (const listener of [...unreachableListeners]) listener();
+    const report = result.error.code === 'storage_unreachable' && options.reportUnreachable !== false;
+    if (report) for (const listener of [...unreachableListeners]) listener();
     throw new ApiError(result.error.code, result.error.message);
   }
   return result.value;

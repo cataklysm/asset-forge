@@ -347,7 +347,7 @@ interface JobsActionsProps {
  * @returns the buttons
  */
 function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: JobsActionsProps) {
-  const start = useFocusReturn(`${busy},${cancellable},${retryable === 0},${finished === 0}`, busy, run);
+  const { start, release } = useFocusReturn(`${busy},${cancellable},${retryable === 0},${finished === 0}`, busy, run);
   return (
     <>
       <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
@@ -358,6 +358,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         className={BUTTON}
         disabled={busy || !cancellable}
         onClick={(event) => start(event.currentTarget, () => call('jobs:cancelAll', {}))}
+        onBlur={(event) => release(event.currentTarget)}
       >
         {CANCEL_ALL_LABEL}
       </button>
@@ -366,6 +367,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         className={BUTTON}
         disabled={busy || retryable === 0}
         onClick={(event) => start(event.currentTarget, () => call('jobs:retryFailed', {}))}
+        onBlur={(event) => release(event.currentTarget)}
       >
         {RETRY_FAILED_LABEL}
       </button>
@@ -374,6 +376,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         className={BUTTON}
         disabled={busy || finished === 0}
         onClick={(event) => start(event.currentTarget, () => call('jobs:clearFinished', {}))}
+        onBlur={(event) => release(event.currentTarget)}
       >
         {CLEAR_FINISHED_LABEL}
       </button>
@@ -381,30 +384,59 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
   );
 }
 
+/** The page button whose focus is looked after, and the enabled state seen when its action ended. */
+interface FocusWatch {
+  button: HTMLButtonElement;
+  /** Null while the action runs. */
+  settledKey: string | null;
+}
+
+/** What {@link useFocusReturn} hands the buttons. */
+interface FocusReturn {
+  /** Starts an action from a button. */
+  start(button: HTMLButtonElement, action: () => Promise<unknown>): void;
+  /** The blur of a button: leaving an enabled button ends the watch, so the focus is never pulled back. */
+  release(button: HTMLButtonElement): void;
+}
+
 /**
  * A page button is disabled while its action runs, so the focus falls to the body: once the actions
  * are free again it goes back to the button that started the action, when nothing else took the focus
- * meanwhile. The button stays watched while it holds the focus, because the summary poll after the
- * action can disable it too (Retry failed with nothing left to retry); the focus then moves to the first
- * enabled page button instead of the body.
+ * meanwhile. The button stays watched until the first change of the enabled state after that, because
+ * the summary poll after the action can disable it too (Retry failed with nothing left to retry); the
+ * focus then moves to the first enabled page button instead of the body. Leaving the enabled button ends
+ * the watch at once.
  *
  * @param enabledKey changes whenever a page button is enabled or disabled
  * @param busy whether an action runs
  * @param run runs one action
- * @returns starts an action from a button
+ * @returns the start and the blur handler of the buttons
  */
 function useFocusReturn(
   enabledKey: string,
   busy: boolean,
   run: (action: () => Promise<unknown>) => Promise<void>,
-): (button: HTMLButtonElement, action: () => Promise<unknown>) => void {
-  const returnTo = useRef<HTMLButtonElement | null>(null);
+): FocusReturn {
+  const watch = useRef<FocusWatch | null>(null);
   useEffect(() => {
-    if (!busy) returnTo.current = returnFocus(returnTo.current);
+    const current = watch.current;
+    if (busy || current === null) return;
+    if (current.settledKey === null) {
+      const kept = returnFocus(current.button);
+      watch.current = kept === null ? null : { button: kept, settledKey: enabledKey };
+    } else if (current.settledKey !== enabledKey) {
+      watch.current = null;
+      returnFocus(current.button);
+    }
   }, [busy, enabledKey]);
-  return (button, action) => {
-    returnTo.current = button;
-    void run(action);
+  return {
+    start(button, action) {
+      watch.current = { button, settledKey: null };
+      void run(action);
+    },
+    release(button) {
+      if (!button.disabled && watch.current?.button === button) watch.current = null;
+    },
   };
 }
 

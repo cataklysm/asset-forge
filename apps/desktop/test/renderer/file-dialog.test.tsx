@@ -145,6 +145,7 @@ it('More offers the studio entries the host passes; a failing upscale shows its 
     openPrompt: vi.fn(),
     recallVariable: () => undefined,
     rememberVariables: () => {},
+    upscaling: () => false,
   };
   const file = fileRecord();
   render(<Harness file={file} asset={null} actions={{ ...ACTIONS, studio }} />);

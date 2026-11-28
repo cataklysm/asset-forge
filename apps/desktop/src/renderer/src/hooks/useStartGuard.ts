@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type MutableRefObject } from 'react';
-import type { StartKind } from '../studio-context';
+import type { StartKind } from '../studio-session';
 
 /** What `useStartGuard` offers. */
 export interface StartGuard {

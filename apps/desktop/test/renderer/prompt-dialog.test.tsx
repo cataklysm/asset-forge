@@ -563,7 +563,7 @@ it('a Generate refused with not_found shows the error and falls back to an exist
   await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
   const lists = callsOf(api, 'analysisPrompts:list').length;
   await user.click(button('Generate'));
-  expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+  expect((await screen.findByRole('alert')).textContent).toBe('The analysis prompt does not exist');
   await waitFor(() => expect(promptSelect().value).toBe(IMAGE_DEFAULT.id));
   expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
   expect(

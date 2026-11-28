@@ -558,6 +558,7 @@ it('a video offers neither analysis nor the studio, but Open externally and Use 
     openPrompt: vi.fn(),
     recallVariable: () => undefined,
     rememberVariables: () => {},
+    upscaling: () => false,
   };
   const file = videoRecord({ assetId: '00000000-0000-4000-8000-0000000000aa', role: 'reference' });
   const labels = fileMenuItems(file, {

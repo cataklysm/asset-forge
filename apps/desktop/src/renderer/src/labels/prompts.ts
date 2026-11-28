@@ -48,6 +48,8 @@ export const EDIT_PROMPT_TEXT_LABEL = 'Edit text';
 export const EDIT_PROMPT_TEXT_TITLE = 'Use the text as a free prompt';
 export const SAVE_TO_LIBRARY_LABEL = 'Save to library';
 export const VARIABLE_MISSING_TITLE = 'Fill in every variable';
+/** The reason Generate is blocked when a library prompt variable holds a value over its limit. */
+export const VARIABLE_TOO_LONG_TITLE = 'A variable value is too long';
 export const NEWER_VERSION_TITLE = 'A newer version exists; click to load it';
 export const NEW_LIBRARY_PROMPT_LABEL = 'New prompt';
 
