@@ -2,6 +2,7 @@ import type {
   AnalysisPrompt,
   AnalysisPromptList,
   AssetDetail,
+  BackupStatus,
   Changes,
   ErrorCode,
   FileOrigin,
@@ -501,12 +502,27 @@ export function noChanges(p: Partial<Changes> = {}): Changes {
   return { cursor: 'fake-cursor', reset: false, jobIds: [], jobs: false, fileIds: [], added: [], ...p };
 }
 
+/** A `backup:status` answer: the default place, reachable, no attempt and no copies; `p` sets the rest. */
+export function backupStatus(p: Partial<BackupStatus> = {}): BackupStatus {
+  return {
+    location: { kind: 'workspace', path: null },
+    reachable: true,
+    running: false,
+    last: null,
+    count: 0,
+    totalBytes: 0,
+    otherLineages: [],
+    ...p,
+  };
+}
+
 /**
  * Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see
  * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`), the
  * `generations:*` ones (see `fakeGenerationDefaults`), the origin channels of files without
  * origins (see `fakeFileOrigins`), `changes:since`, which answers no change (see `noChanges`),
- * `workspace:backups`, which answers no backups, and `backup:state`, which answers no open workspace.
+ * `workspace:backups`, which answers no backups, `backup:state`, which answers no open workspace,
+ * and `backup:status`, which answers `backupStatus()`.
  */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
@@ -520,6 +536,7 @@ export function installFakeApi(handlers: FakeHandlers): {
     'changes:since': () => noChanges(),
     'workspace:backups': () => ({ backups: [], unreachable: false }),
     'backup:state': () => ({ workspaceId: null, running: false, last: null }),
+    'backup:status': () => backupStatus(),
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

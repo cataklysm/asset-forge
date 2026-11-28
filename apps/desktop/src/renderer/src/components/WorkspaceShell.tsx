@@ -1,6 +1,7 @@
 import { useCallback, useState, type ComponentProps, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import { backupFailureOf, useBackupState } from '../hooks/useBackupState';
 import { useCheckHosts } from '../hooks/useCheckHosts';
 import { useShellState } from '../hooks/useShellState';
 import { JobsProvider, useJobs } from '../jobs-context';
@@ -333,6 +334,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   // The inbox reports a running import so closing cannot interrupt the batch.
   const [busy, setBusy] = useState(false);
   const shell = useShellState();
+  const backupFailure = backupFailureOf(useBackupState(true), workspace.id);
 
   function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames' | 'tagLabels'>) {
     shell.setAssetList({
@@ -360,6 +362,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         rootPath={workspace.rootPath}
         section={sectionOf(view)}
         busy={busy}
+        backupFailure={backupFailure}
         onNavigate={(section) =>
           void leaveTo({ current: view, confirmLeave, setError, setView }, viewOfSection(section))
         }

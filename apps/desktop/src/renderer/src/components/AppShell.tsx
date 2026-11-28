@@ -32,6 +32,7 @@ import {
 } from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 import { BUSY_TITLE } from './busy-title';
+import { BackupBanner } from './BackupBanner';
 import { PauseBanner } from './PauseBanner';
 
 export { BUSY_TITLE } from './busy-title';
@@ -67,6 +68,8 @@ interface Props {
   checkHosts?: ReadonlySet<string>;
   /** Opens the site check of one host (`sites:openCheck`); a rejection shows in its line. */
   onOpenCheck?(host: string): Promise<void>;
+  /** The reason of a failed last backup of the open workspace; null shows no backup line. */
+  backupFailure?: string | null;
   /** Opens one section. */
   onNavigate(section: Section): void;
   /** Closes the workspace. */
@@ -256,6 +259,7 @@ export function AppShell({
   onResumeHost = RESOLVED,
   checkHosts = NO_CHECK_HOSTS,
   onOpenCheck = RESOLVED,
+  backupFailure = null,
   onNavigate,
   onClose,
   children,
@@ -303,6 +307,9 @@ export function AppShell({
               onOpenCheck={onOpenCheck}
               onSettings={() => onNavigate('settings')}
             />
+          )}
+          {backupFailure !== null && (
+            <BackupBanner message={backupFailure} busy={busy} onSettings={() => onNavigate('settings')} />
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
             <StorageReturnContext.Provider value={reloadKey}>{children}</StorageReturnContext.Provider>{' '}
