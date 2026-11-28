@@ -31,7 +31,7 @@ export function startMockProvider(options?: {
   host?: string;
   /** Delays every chat answer, a scripted status failure included. */
   delayMs?: number;
-  /** Taken one per chat request that names a known model and carries an image, before it is answered. */
+  /** Taken one per chat request, before its model or image is checked (desktop tests count on this order). */
   failures?: MockFailure[];
   /** When non-empty, every request needs `Authorization: Bearer <apiKey>`, otherwise it gets 401. */
   apiKey?: string;

@@ -184,11 +184,10 @@ describe('mock provider', () => {
     expect(performance.now() - started).toBeGreaterThanOrEqual(45);
   });
 
-  it('keeps a scripted failure for the next chat that names a known model and carries an image', async () => {
+  it('takes a scripted failure before the model is checked', async () => {
     const { url } = await start({ failures: [503] });
+    expect((await chat(url, imageA, 'other')).status).toBe(503);
     expect((await chat(url, imageA, 'other')).status).toBe(404);
-    expect((await chat(url, null)).status).toBe(400);
-    expect((await chat(url, imageA)).status).toBe(503);
     expect((await chat(url, imageA)).status).toBe(200);
   });
 

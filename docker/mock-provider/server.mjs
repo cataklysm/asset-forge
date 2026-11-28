@@ -400,7 +400,7 @@ export async function startMockProvider(options = {}) {
   }
 
   /**
-   * Takes the next scripted failure for a well-formed chat and answers it: `hang` never answers, a status answers
+   * Takes the next scripted failure for a chat, before its model or image is checked, and answers it: `hang` never answers, a status answers
    * after `delayMs` like a real answer would.
    *
    * @param response the chat's response
@@ -416,8 +416,11 @@ export async function startMockProvider(options = {}) {
     return { failure, answered: false };
   }
 
-  /** `POST /v1/chat/completions`, after the key check; a well-formed chat consumes the shared failure queue. */
+  /** `POST /v1/chat/completions`, after the key check; every chat consumes the shared failure queue first. */
   function openAiChat(response, body) {
+    const { failure, answered } = takeFailure(response);
+    if (answered) return;
+
     const request = body && typeof body === 'object' ? body : {};
     if (!OPENAI_CHAT_MODELS.includes(request.model)) {
       return sendJson(response, 404, {
@@ -433,8 +436,6 @@ export async function startMockProvider(options = {}) {
     const image = openAiImageOf(Array.isArray(request.messages) ? request.messages : []);
     if (image === undefined)
       return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
-    const { failure, answered } = takeFailure(response);
-    if (answered) return;
 
     const bytes = Buffer.from(image, 'base64');
     // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets the JSON.
@@ -580,6 +581,9 @@ export async function startMockProvider(options = {}) {
         return;
       }
 
+      const { failure, answered } = takeFailure(response);
+      if (answered) return;
+
       const request = body && typeof body === 'object' ? body : {};
       if (request.model !== MOCK_MODEL) {
         sendJson(response, 404, { error: `model '${String(request.model)}' not found` });
@@ -593,8 +597,6 @@ export async function startMockProvider(options = {}) {
         sendJson(response, 400, { error: 'no image supplied' });
         return;
       }
-      const { failure, answered } = takeFailure(response);
-      if (answered) return;
 
       const bytes = Buffer.from(image, 'base64');
       const content =
