@@ -1,7 +1,9 @@
 import type { FileTarget, ImportProgress, ImportResult } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
-import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
+import { safeErrorMessage } from './errors.js';
+import { lastPathSegment } from './file-names.js';
+import { importFile, type ImportContext } from './import-file.js';
 import { isZipArchive } from './import-refusals.js';
 import type { ArchiveReader } from './ports/source-files.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
@@ -57,16 +59,6 @@ export function importSources(
   progress: ImportProgress,
 ): Promise<ImportResult[]> {
   return new SourceImport(host, session, target, options, progress).run(sourcePaths);
-}
-
-/**
- * The last segment of a source path, split on either separator.
- *
- * @param sourcePath a source path
- * @returns the file name; '' for a path that ends in a separator
- */
-function lastPathSegment(sourcePath: string): string {
-  return sourcePath.split(/[\\/]/).pop() ?? '';
 }
 
 /** One import run; its steps share the import context, the archive budget and the live progress. */
