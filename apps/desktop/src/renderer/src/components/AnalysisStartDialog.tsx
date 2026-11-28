@@ -131,7 +131,7 @@ async function startAnalysis(effects: StartEffects, request: StartRequest): Prom
     effects.onClose();
   } catch (error) {
     effects.setError(describeError(error));
-    recoverMissingPrompt(error, effects.prompts, effects.dropPromptChoice);
+    recoverMissingPrompt(error, effects.prompts, effects.providers, effects.dropPromptChoice);
   } finally {
     effects.startingRef.current = false;
     effects.setStarting(false);

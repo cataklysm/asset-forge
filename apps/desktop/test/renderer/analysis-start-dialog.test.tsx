@@ -682,6 +682,27 @@ it('a start refused with not_found shows the error and falls back to an existing
   expect(onClose).not.toHaveBeenCalled();
 });
 
+it('a start refused for a missing provider keeps the prompt choice and reads the providers again', async () => {
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  const api = install({
+    ...prompts.handlers,
+    'analysis:enqueue': () => {
+      throw fakeError('not_found', 'This provider does not exist');
+    },
+  });
+  renderDialog();
+  await previewShown();
+  await promptsListed();
+  await userEvent.selectOptions(promptSelect(), TAG_DETAIL.id);
+  const promptLists = callsOf(api, 'analysisPrompts:list').length;
+  const providerLists = callsOf(api, 'providers:list').length;
+  await userEvent.click(startButton());
+  await screen.findByRole('alert');
+  await waitFor(() => expect(callsOf(api, 'providers:list').length).toBeGreaterThan(providerLists));
+  expect(promptSelect().value).toBe(TAG_DETAIL.id);
+  expect(callsOf(api, 'analysisPrompts:list')).toHaveLength(promptLists);
+});
+
 describe('provider choice', () => {
   const RUNPOD = providerView({
     name: 'RunPod',

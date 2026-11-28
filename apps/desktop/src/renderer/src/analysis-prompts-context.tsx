@@ -236,21 +236,31 @@ export function defaultPromptId(
   return own.find((prompt) => prompt.id === last)?.id ?? own[0]?.id ?? null;
 }
 
+/** The forwarded message of a start that names a provider entry deleted meanwhile. */
+const PROVIDER_MISSING = 'This provider does not exist';
+
 /**
- * After a start refused with `not_found`: the prompt may have been deleted meanwhile, so the list is
- * read again and the dialog drops its choice to fall back to a prompt that exists. Any other error
- * changes nothing.
+ * After a start refused with `not_found`: the provider entry or the prompt may have been deleted
+ * meanwhile. A missing provider reloads the providers, so the provider choice falls back, and keeps
+ * the prompt choice; anything else reloads the prompts and the dialog drops its prompt choice to fall
+ * back to a prompt that exists. Any other error changes nothing.
  *
  * @param error what the start threw
  * @param prompts the reload of the analysis prompts
+ * @param providers the reload of the provider entries
  * @param dropChoice drops the dialog's prompt choice; it checks itself whether the dialog still wants it
  */
 export function recoverMissingPrompt(
   error: unknown,
   prompts: Pick<AnalysisPromptsState, 'reload'>,
+  providers: { reload(): Promise<void> },
   dropChoice: () => void,
 ): void {
   if (!(error instanceof ApiError) || error.code !== 'not_found') return;
+  if (error.message === PROVIDER_MISSING) {
+    void providers.reload().catch(() => {});
+    return;
+  }
   void prompts.reload().catch(() => {});
   dropChoice();
 }

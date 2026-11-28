@@ -99,6 +99,8 @@ interface ListLoading {
   list: MutableRefObject<ProviderList | null>;
   /** Only the newest reload may take its answer. */
   request: MutableRefObject<number>;
+  /** The number of list reads whose answer has not come yet. */
+  inFlight: MutableRefObject<number>;
   takeList(next: ProviderList | null): void;
   setLoading(loading: boolean): void;
   setFailed(failed: boolean): void;
@@ -232,9 +234,11 @@ async function reloadList(loading: ListLoading): Promise<void> {
   const request = ++loading.request.current;
   loading.setLoading(true);
   let next: ProviderList;
+  loading.inFlight.current += 1;
   try {
     next = await call('providers:list', {});
   } catch (error) {
+    loading.inFlight.current -= 1;
     if (request !== loading.request.current) return;
     // A list already held stays; only without one is the load a failure the screens show.
     if (!loading.disposed.current) {
@@ -243,6 +247,7 @@ async function reloadList(loading: ListLoading): Promise<void> {
     }
     throw error;
   }
+  loading.inFlight.current -= 1;
   if (loading.disposed.current || request !== loading.request.current) return;
   loading.takeList(next);
   loading.setFailed(false);
@@ -293,10 +298,26 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
 
   // Only the newest reload may take its answer; an older one arriving later is dropped.
   const reloadRequest = useRef(0);
+  const listReads = useRef(0);
   const reload = useCallback(
-    () => reloadList({ disposed, list: listRef, request: reloadRequest, takeList, setLoading, setFailed, loadModels }),
+    () =>
+      reloadList({
+        disposed,
+        list: listRef,
+        request: reloadRequest,
+        inFlight: listReads,
+        takeList,
+        setLoading,
+        setFailed,
+        loadModels,
+      }),
     [loadModels, takeList],
   );
+
+  // A list read before a save or a delete answered may predate it: a fresh reload supersedes it.
+  const supersedeStaleReload = useCallback(() => {
+    if (listReads.current > 0) void reload().catch(() => {});
+  }, [reload]);
 
   useEffect(() => {
     disposed.current = false;
@@ -317,10 +338,11 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
       if (!disposed.current) {
         takeList(upsert(listRef.current, view));
         void loadModels(view.id);
+        supersedeStaleReload();
       }
       return view;
     },
-    [loadModels, takeList],
+    [loadModels, takeList, supersedeStaleReload],
   );
 
   const remove = useCallback(
@@ -333,8 +355,9 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
       if (current !== null) takeList(withoutEntry(current, id));
       setModels((answers) => without(answers, id));
       setImageModels((answers) => without(answers, id));
+      supersedeStaleReload();
     },
-    [takeList],
+    [takeList, supersedeStaleReload],
   );
 
   const noteUsed = useCallback(
