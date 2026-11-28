@@ -232,6 +232,16 @@ describe('trashed files', () => {
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
   });
 
+  it('acceptProposal checks the trash before the stale branch, so a stale proposal of a trashed file stays', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    await trashForTest(c.session, [c.file.id]);
+    c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
+    const error = await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e);
+    expect((error as Error).message).toBe('The file is in the trash');
+    expect(await c.db.analyses.getProposal(c.file.id)).toMatchObject({ stale: true });
+  });
+
   it('discardProposal refuses a trashed file and keeps its proposal for a restore', async () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
