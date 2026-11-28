@@ -35,7 +35,8 @@ import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
 import type { IpcHandlers } from './ipc.js';
 import { DOWNLOAD_CLASSES, PROVIDER_CLASSES, type JobHost } from './job-host.js';
-import { CANNOT_ANALYSE, type ProviderStore } from './provider-store.js';
+import { CANNOT_ANALYSE } from './provider-entry.js';
+import type { ProviderStore } from './provider-store.js';
 
 const GENERATION_NOT_FOUND = 'This generation does not exist';
 

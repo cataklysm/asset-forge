@@ -6,7 +6,8 @@ import type { SaveProvider } from '@assetforge/contracts';
 import { DEFAULT_PROVIDER_OPTIONS } from '@assetforge/contracts';
 import { AssetForgeError } from '@assetforge/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProviderStore, encodeKeyPayload, UNUSABLE_ENV_BASE_URL } from '../src/main/provider-store.js';
+import { encodeKeyPayload } from '../src/main/provider-keys.js';
+import { createProviderStore, UNUSABLE_ENV_BASE_URL } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';

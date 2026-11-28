@@ -10,7 +10,8 @@ import {
   type VisionRequestOptions,
 } from '@assetforge/contracts';
 import { InvalidOperationError, JobError, NotFoundError, type ImageProvider, type VisionProvider } from '@assetforge/core';
-import { PROVIDER_NOT_FOUND, wrongKind, type ProviderEntry, type ProviderStore } from './provider-store.js';
+import { PROVIDER_NOT_FOUND, wrongKind, type ProviderEntry } from './provider-entry.js';
+import type { ProviderStore } from './provider-store.js';
 
 // One adapter per provider entry (vision for `ollama` and `openai`, image for `venice`), dropped when that entry
 // changes. Kept free of Electron imports.

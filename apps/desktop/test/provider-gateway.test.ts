@@ -14,7 +14,8 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createProviderGateway } from '../src/main/provider-gateway.js';
-import { createProviderStore, encodeKeyPayload, type ProviderStore } from '../src/main/provider-store.js';
+import { encodeKeyPayload } from '../src/main/provider-keys.js';
+import { createProviderStore, type ProviderStore } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';

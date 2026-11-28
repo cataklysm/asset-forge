@@ -18,7 +18,8 @@ import { createGenerationImageSource } from '../src/main/generation-image-source
 import { createGenerationHandlers, createImageProviderDirectory } from '../src/main/generation-handlers.js';
 import type { JobHost } from '../src/main/job-host.js';
 import type { ProviderGateway } from '../src/main/provider-gateway.js';
-import type { ProviderEntry, ProviderStore } from '../src/main/provider-store.js';
+import type { ProviderEntry } from '../src/main/provider-entry.js';
+import type { ProviderStore } from '../src/main/provider-store.js';
 import { createHarness, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 import { pngOf } from './png-fixture.js';
 
