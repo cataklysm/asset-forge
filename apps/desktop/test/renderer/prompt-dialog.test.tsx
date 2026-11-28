@@ -172,6 +172,18 @@ it('while running Generate is disabled and Cancel sends analysis:cancelDescribe;
   expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
 });
 
+it('the focus moves to Cancel while a request runs and back to Generate when it ends', async () => {
+  const user = userEvent.setup();
+  const pending = deferred<DescribeResult>();
+  install(CONFIGURED, MODELS, { 'analysis:describe': () => pending.promise });
+  render(ui({}));
+  await ready();
+  await user.click(button('Generate'));
+  expect(document.activeElement).toBe(button('Cancel'));
+  await user.click(button('Cancel'));
+  expect(document.activeElement).toBe(button('Generate'));
+});
+
 it('Cancel then Generate again: the late answer of the cancelled call does not touch the new one', async () => {
   const user = userEvent.setup();
   const first = deferred<DescribeResult>();

@@ -152,6 +152,47 @@ async function copyText(text: string, setError: Dispatch<SetStateAction<string |
 }
 
 /**
+ * Whether the focus has no place a user could act on: nothing, the body, or an element that was
+ * removed or disabled.
+ *
+ * @returns true when the focus is lost
+ */
+function focusLost(): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body || !active.isConnected) return true;
+  return active instanceof HTMLButtonElement && active.disabled;
+}
+
+/** The buttons the focus moves between while a request starts and ends. */
+interface RunningFocusTargets {
+  generate: MutableRefObject<HTMLButtonElement | null>;
+  cancel: MutableRefObject<HTMLButtonElement | null>;
+  /** Takes the focus when a request ends and Generate stays disabled. */
+  close: MutableRefObject<HTMLButtonElement | null>;
+}
+
+/**
+ * Keeps the focus inside the dialog when a request starts (Generate is disabled: Cancel takes it)
+ * and ends (Cancel is removed: Generate, or Close while Generate stays disabled, takes it). A focus
+ * the user moved elsewhere is left alone.
+ *
+ * @param running whether a request runs
+ * @param targets the buttons
+ */
+function useRunningFocus(running: boolean, targets: RunningFocusTargets): void {
+  const previous = useRef(running);
+  useEffect(() => {
+    if (previous.current === running) return;
+    previous.current = running;
+    if (!focusLost()) return;
+    const generate = targets.generate.current;
+    const fallback = generate !== null && !generate.disabled ? generate : targets.close.current;
+    const target = running ? targets.cancel.current : fallback;
+    target?.focus();
+  }, [running, targets]);
+}
+
+/**
  * The body of the dialog, mounted per opening and file.
  *
  * @param props the file and the handlers
@@ -169,6 +210,15 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   const [error, setError] = useState<string | null>(null);
   // The request whose answer is still wanted; any other answer is dropped.
   const request = useRef<string | null>(null);
+  const generateButton = useRef<HTMLButtonElement | null>(null);
+  const cancelButton = useRef<HTMLButtonElement | null>(null);
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  const focusTargets = useRef<RunningFocusTargets>({
+    generate: generateButton,
+    cancel: cancelButton,
+    close: closeButton,
+  });
+  useRunningFocus(running, focusTargets.current);
 
   const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
   const gate = providerGate(providers, providerId, model, 'prompt');
@@ -222,6 +272,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
       <PromptSelect purpose="image_prompt" value={promptId} onChange={setChosenPrompt} disabled={running} />
       <div className="flex gap-2">
         <button
+          ref={generateButton}
           type="button"
           className={BUTTON}
           disabled={!canGenerate}
@@ -231,7 +282,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
           {DESCRIBE_LABEL}
         </button>
         {running && (
-          <button type="button" className={BUTTON} onClick={cancel}>
+          <button ref={cancelButton} type="button" className={BUTTON} onClick={cancel}>
             {CANCEL_LABEL}
           </button>
         )}
@@ -260,7 +311,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
         >
           {COPY_LABEL}
         </button>
-        <button type="button" className={BUTTON} onClick={onClose}>
+        <button ref={closeButton} type="button" className={BUTTON} onClick={onClose}>
           {CLOSE_LABEL}
         </button>
       </div>
