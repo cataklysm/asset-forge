@@ -6,7 +6,9 @@ interface Tab<T extends string> {
   id: T;
   label: string;
   /** Shown beside the label unless null or absent. */
-  count?: number | null;
+  count?: number | string | null;
+  /** The tooltip of the count, if any. */
+  countTitle?: string;
 }
 
 /** The props of `Tabs`. */
@@ -98,7 +100,11 @@ export function Tabs<T extends string>({ tabs, active, onChange, label, children
             >
               {tab.label}
               {tab.count != null && ' '}
-              {tab.count != null && <span className="tabular-nums text-muted">{tab.count}</span>}
+              {tab.count != null && (
+                <span className="tabular-nums text-muted" title={tab.countTitle}>
+                  {tab.count}
+                </span>
+              )}
             </button>
           );
         })}

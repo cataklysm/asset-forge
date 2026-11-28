@@ -22,6 +22,8 @@ import { useChanges } from '../jobs-context';
 import {
   ASSET_SECTIONS_LABEL,
   ASSETS_BREADCRUMB_LINK,
+  FILE_COUNT_FAILED_TITLE,
+  FILE_COUNT_UNKNOWN,
   FILES_TAB_LABEL,
   LOADING_LABEL,
   PROJECTS_TAB_LABEL,
@@ -55,35 +57,61 @@ interface Props {
 /** The Files tab count and how it is read. */
 interface FileCount {
   /** The unfiltered number of the asset's files; null until read. */
-  fileCount: number | null;
-  /** Sets the count the Files tab reports. */
-  setFileCount(count: number | null): void;
+  count: number | null;
+  /** True while the last read of the count failed. */
+  failed: boolean;
+  /** Sets the count the Files tab reports, as read by the unfiltered list. */
+  setCount(count: number | null): void;
 }
 
 /**
  * The Files tab count: the unfiltered total, read again whenever a token changes. A failed read
- * keeps the last count: the file list beside it names the failure with its own Retry.
+ * keeps the last count and marks it as failed until a later read succeeds.
  *
  * @param id the asset's id
  * @param reloadToken changes after the user's own changes to the files
  * @param countToken changes when a job added a file to the asset
- * @returns the count and its setter
+ * @returns the count, whether its last read failed, and its setter
  */
 function useFileCount(id: string, reloadToken: number, countToken: number): FileCount {
-  const [fileCount, setFileCount] = useState<number | null>(null);
+  const [count, setStoredCount] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     call('files:list', { limit: 1, offset: 0, scope: { kind: 'asset', assetId: id } })
       .then((page) => {
-        if (!cancelled) setFileCount(page.total);
+        if (cancelled) return;
+        setStoredCount(page.total);
+        setFailed(false);
       })
-      // The list reads the same files and shows the failure; the count only waits for the next read.
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
     };
   }, [id, reloadToken, countToken]);
-  return { fileCount, setFileCount };
+  const setCount = (next: number | null) => {
+    setStoredCount(next);
+    if (next !== null) setFailed(false);
+  };
+  return { count, failed, setCount };
+}
+
+/**
+ * The Files tab: its count, or after a failed read the last count (`?` without one) with a tooltip.
+ *
+ * @param fileCount the Files tab count
+ * @returns the tab
+ */
+function filesTab(fileCount: FileCount) {
+  if (!fileCount.failed) return { id: 'files' as const, label: FILES_TAB_LABEL, count: fileCount.count };
+  return {
+    id: 'files' as const,
+    label: FILES_TAB_LABEL,
+    count: fileCount.count ?? FILE_COUNT_UNKNOWN,
+    countTitle: FILE_COUNT_FAILED_TITLE,
+  };
 }
 
 /** An asset as read, with the number of mutations seen when the read started. */
@@ -162,7 +190,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   }
 
   // The Files tab count: the unfiltered total, refreshed after every change to the files.
-  const { fileCount, setFileCount } = useFileCount(id, reloadToken, countToken);
+  const fileCount = useFileCount(id, reloadToken, countToken);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -297,7 +325,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         active={tab}
         onChange={onTabChange}
         tabs={[
-          { id: 'files', label: FILES_TAB_LABEL, count: fileCount },
+          filesTab(fileCount),
           { id: 'workflow', label: WORKFLOW_TAB_LABEL },
           { id: 'projects', label: PROJECTS_TAB_LABEL, count: assignments.data?.length ?? null },
           { id: 'relations', label: RELATIONS_TAB_LABEL, count: relations.data?.length ?? null },
@@ -309,7 +337,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             reloadToken={reloadToken + renameToken}
             onFilesChanged={filesChanged}
             onAssetChange={changeAsset}
-            onCountChange={setFileCount}
+            onCountChange={fileCount.setCount}
           />
         )}
         {tab === 'workflow' && (
