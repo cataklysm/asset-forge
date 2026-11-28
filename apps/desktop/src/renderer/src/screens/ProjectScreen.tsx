@@ -6,7 +6,18 @@ import { CommitInput } from '../components/CommitInput';
 import { Link } from '../components/Link';
 import { Pager } from '../components/Pager';
 import { useLoad } from '../hooks/useLoad';
-import { label } from '../labels';
+import {
+  ADD_ASSET_LABEL,
+  BREADCRUMB_LABEL,
+  label,
+  LOADING_LABEL,
+  NO_ASSETS_ASSIGNED,
+  PROJECT_DESCRIPTION_LABEL,
+  PROJECT_MEMBERS_SECTION,
+  PROJECT_NAME_FIELD,
+  PROJECT_STATUS_SELECT,
+  PROJECTS_BREADCRUMB_LINK,
+} from '../labels';
 import type { View } from '../nav';
 import { useTags } from '../tags-context';
 import { ALERT, LABEL, MUTED, PAGE_TITLE, SECTION_TITLE, SELECT } from '../ui';
@@ -89,7 +100,7 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {breadcrumb}
         <ErrorLines messages={loadErrors} />
-        {project.error === null && <p className={MUTED}>Loading…</p>}
+        {project.error === null && <p className={MUTED}>{LOADING_LABEL}</p>}
       </div>
     );
   }
@@ -99,10 +110,10 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
       {breadcrumb}
       <ProjectHeader project={data} errors={loadErrors} save={saveProject} />
 
-      <section className="space-y-3" aria-label="Assets">
-        <h2 className={SECTION_TITLE}>Assets</h2>
+      <section className="space-y-3" aria-label={PROJECT_MEMBERS_SECTION}>
+        <h2 className={SECTION_TITLE}>{PROJECT_MEMBERS_SECTION}</h2>
         {members.data !== null && members.data.total === 0 ? (
-          <p className={MUTED}>No assets assigned</p>
+          <p className={MUTED}>{NO_ASSETS_ASSIGNED}</p>
         ) : (
           <MembersTable
             items={members.data?.items ?? []}
@@ -124,7 +135,7 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
           <Pager offset={offset} limit={PAGE_SIZE} total={members.data.total} onChange={setOffset} />
         )}
         <div className="flex flex-col gap-2">
-          <h3 className={LABEL}>Add asset</h3>
+          <h3 className={LABEL}>{ADD_ASSET_LABEL}</h3>
           <AssetPicker
             excludeIds={(allMembers.data?.items ?? []).map((member) => member.assetId)}
             onPick={async (asset) => {
@@ -148,8 +159,8 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
  */
 function Breadcrumb({ projectName, onProjects }: { projectName: string | null; onProjects(): void }) {
   return (
-    <nav aria-label="Breadcrumb" className={`text-sm ${MUTED}`}>
-      <Link onFollow={onProjects}>Projects</Link>
+    <nav aria-label={BREADCRUMB_LABEL} className={`text-sm ${MUTED}`}>
+      <Link onFollow={onProjects}>{PROJECTS_BREADCRUMB_LINK}</Link>
       {projectName !== null && (
         <>
           <span> / </span>
@@ -199,7 +210,7 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
       <h1 className="sr-only">{project.name}</h1>
       <div className="flex flex-wrap items-center gap-2">
         <CommitInput
-          label="Name"
+          label={PROJECT_NAME_FIELD}
           variant="inline"
           className={`h-12 min-w-64 flex-1 ${PAGE_TITLE}`}
           value={project.name}
@@ -208,7 +219,7 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
         />
         <select
           className={SELECT}
-          aria-label="Status"
+          aria-label={PROJECT_STATUS_SELECT}
           value={project.status}
           onChange={(event) => void save({ status: ProjectStatusSchema.parse(event.target.value) })}
         >
@@ -220,10 +231,10 @@ function ProjectHeader({ project, errors, save }: HeaderProps) {
         </select>
       </div>
       <CommitInput
-        label="Description"
+        label={PROJECT_DESCRIPTION_LABEL}
         multiline
         variant="inline"
-        placeholder="Description"
+        placeholder={PROJECT_DESCRIPTION_LABEL}
         className="w-full"
         value={project.description}
         maxLength={5000}

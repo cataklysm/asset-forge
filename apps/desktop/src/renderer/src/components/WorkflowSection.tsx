@@ -1,6 +1,19 @@
 import { WorkflowStepStateSchema, type AssetWorkflow, type WorkflowTemplate } from '@assetforge/contracts';
 import { useWorkflow, type StepPatch } from '../hooks/useWorkflow';
-import { label } from '../labels';
+import {
+  label,
+  LOADING_LABEL,
+  NOTES_LABEL,
+  notesForLabel,
+  OPTIONAL_STEP_LABEL,
+  REMOVE_WORKFLOW_LABEL,
+  REMOVE_WORKFLOW_TITLE,
+  START_WORKFLOW_LABEL,
+  stepStateLabel,
+  WORKFLOW_PROGRESS_LABEL,
+  WORKFLOW_SECTION_LABEL,
+  WORKFLOW_TEMPLATE_LABEL,
+} from '../labels';
 import { formatProgress } from '../progress';
 import { ALERT, BORDER, BUTTON, MUTED, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
@@ -27,7 +40,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
   const { workflow, resolved, error } = state;
 
   return (
-    <section className="space-y-3" aria-label="Workflow">
+    <section className="space-y-3" aria-label={WORKFLOW_SECTION_LABEL}>
       {error !== null && (
         <p role="alert" className={ALERT}>
           {error}
@@ -43,7 +56,7 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
       {workflow ? (
         <RunningWorkflow workflow={workflow} updateStep={state.updateStep} remove={state.remove} />
       ) : (
-        !resolved && <p className={MUTED}>Loading…</p>
+        !resolved && <p className={MUTED}>{LOADING_LABEL}</p>
       )}
 
       {!workflow && resolved && state.loadError === null && (
@@ -80,20 +93,15 @@ function RunningWorkflow({ workflow, updateStep, remove }: RunningWorkflowProps)
         {formatProgress(workflow.progress)}
       </p>
       {workflow.progress.total > 0 && (
-        <progress aria-label="Workflow progress" value={workflow.progress.done} max={workflow.progress.total} />
+        <progress aria-label={WORKFLOW_PROGRESS_LABEL} value={workflow.progress.done} max={workflow.progress.total} />
       )}
       <ul className="space-y-2">
         {workflow.steps.map((step) => (
           <StepItem key={step.id} step={step} updateStep={updateStep} />
         ))}
       </ul>
-      <button
-        type="button"
-        className={BUTTON}
-        title="Step states and notes are deleted; asks first"
-        onClick={() => void remove()}
-      >
-        Remove workflow
+      <button type="button" className={BUTTON} title={REMOVE_WORKFLOW_TITLE} onClick={() => void remove()}>
+        {REMOVE_WORKFLOW_LABEL}
       </button>
     </>
   );
@@ -110,10 +118,10 @@ function StepItem({ step, updateStep }: { step: Step; updateStep: RunningWorkflo
   return (
     <li className={`flex flex-wrap items-center gap-2 border-b pb-2 ${BORDER}`}>
       <span>{step.name}</span>
-      {!step.mandatory && <span className={MUTED}>Optional</span>}
+      {!step.mandatory && <span className={MUTED}>{OPTIONAL_STEP_LABEL}</span>}
       <select
         className={SELECT}
-        aria-label={`State of ${step.name}`}
+        aria-label={stepStateLabel(step.name)}
         value={step.state}
         onChange={(event) =>
           void updateStep(step.id, {
@@ -130,10 +138,10 @@ function StepItem({ step, updateStep }: { step: Step; updateStep: RunningWorkflo
           ))}
       </select>
       <CommitInput
-        label={`Notes for ${step.name}`}
+        label={notesForLabel(step.name)}
         multiline
         variant="inline"
-        placeholder="Notes"
+        placeholder={NOTES_LABEL}
         className="min-w-64 flex-1"
         value={step.notes}
         maxLength={5000}
@@ -164,7 +172,7 @@ function StartWorkflow({ templates, effectiveTemplate, ready, choose, start }: S
     <div className="flex items-center gap-2">
       <select
         className={SELECT}
-        aria-label="Workflow template"
+        aria-label={WORKFLOW_TEMPLATE_LABEL}
         value={effectiveTemplate}
         disabled={!ready}
         onChange={(event) => choose(event.target.value)}
@@ -176,7 +184,7 @@ function StartWorkflow({ templates, effectiveTemplate, ready, choose, start }: S
         ))}
       </select>
       <button type="button" className={BUTTON} disabled={effectiveTemplate === ''} onClick={() => void start()}>
-        Start workflow
+        {START_WORKFLOW_LABEL}
       </button>
     </div>
   );
