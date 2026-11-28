@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { describeError } from '../api';
 
+// One load per dependency change, of which only the latest answer counts.
+
+/** How a tracked promise ended. */
 export interface LatestResult<T> {
+  /** Whether a later promise was registered meanwhile; then neither value nor error is set. */
   stale: boolean;
+  /** The value of a current promise that resolved. */
   value?: T;
+  /** The reason of a current promise that rejected. */
   error?: unknown;
 }
 
-/** Tracks promises so that only the most recently registered one is reported as current. */
+/**
+ * Tracks promises so that only the most recently registered one is reported as current.
+ *
+ * @returns the tracker: registers a promise and answers how it ended
+ */
 export function latestOnly<T>(): (promise: Promise<T>) => Promise<LatestResult<T>> {
   let latest = 0;
   return async (promise) => {
@@ -22,6 +32,14 @@ export function latestOnly<T>(): (promise: Promise<T>) => Promise<LatestResult<T
   };
 }
 
+/**
+ * Loads on mount, on every change of `deps` and on `reload()`; the data of the last success stays while a later
+ * load runs or fails.
+ *
+ * @param load the request; the one of the latest render is used
+ * @param deps the values that start a new load
+ * @returns the data, the error message of the latest load, whether one runs, and a reload
+ */
 export function useLoad<T>(
   load: () => Promise<T>,
   deps: readonly unknown[],
@@ -41,8 +59,8 @@ export function useLoad<T>(
     let promise: Promise<T>;
     try {
       promise = loadRef.current();
-    } catch (e) {
-      promise = Promise.reject(e);
+    } catch (caught) {
+      promise = Promise.reject(caught);
     }
     void track.current!(promise).then((result) => {
       if (!mounted || result.stale) return;
@@ -60,6 +78,6 @@ export function useLoad<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 
-  const reload = useCallback(() => setTick((n) => n + 1), []);
+  const reload = useCallback(() => setTick((count) => count + 1), []);
   return { data, error, loading, reload };
 }

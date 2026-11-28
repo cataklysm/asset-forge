@@ -25,10 +25,13 @@ export interface ViewerTracking {
   knownIndex: number | null;
   /** The target of the latest `show` whose page is not loaded yet. */
   pendingShow: { index: number } | null;
+  /** Sets or clears the pending `show`. */
   setPendingShow: Dispatch<SetStateAction<{ index: number } | null>>;
   /** The index range the film strip keeps loaded. */
   wantRange: WantRange | null;
+  /** Sets or clears the film strip's range. */
   setWantRange: Dispatch<SetStateAction<WantRange | null>>;
+  /** What the browser asked the host to show last. */
   asked: MutableRefObject<Asked>;
 }
 
@@ -52,13 +55,17 @@ export function useViewerTracking(state: PagedState<FileRecord>, viewedId: strin
 
 /** What `useViewerSync` works with. */
 export interface ViewerSyncOptions {
+  /** The state of `useViewerTracking`. */
   tracking: ViewerTracking;
   /** The values of the latest render. */
   latest: MutableRefObject<BrowserLatest>;
   /** The handle of the mounted view. */
   position: MutableRefObject<ViewHandle | null>;
+  /** The file the host's dialog shows; null when it is closed. */
   viewedId: string | null;
+  /** The displayed list. */
   state: PagedState<FileRecord>;
+  /** Whether a new key is still loading. */
   pending: boolean;
 }
 

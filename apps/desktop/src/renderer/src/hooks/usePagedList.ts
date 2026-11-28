@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PagedState } from '../paged-list';
 import { PagedLoader } from '../paged-loader';
 
+// The React side of `PagedLoader`: one loader per mounted list, re-rendered on every change of its state.
+
 /** A paged list as `usePagedList` offers it. */
 export interface PagedList<T> {
   /** The displayed pages and total. */

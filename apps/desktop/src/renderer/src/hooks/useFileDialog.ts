@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 
+// The file detail dialog of a file browser host: which file it shows and where the focus goes once it closed.
+
+/** The file the dialog was opened on or moved on to. */
 interface Opened {
+  /** The file's id. */
   id: string;
+  /** The element that had the focus when the dialog opened; null after it moved on. */
   trigger: HTMLElement | null;
   /** The dialog moved on to this file; the file browser brings its tile back into view. */
   followed: boolean;
@@ -14,6 +19,9 @@ interface Opened {
  * dialog was open), else the first tile inside `container`. Once the dialog moved on to another
  * file, the focus return targets that file's tile and the file browser reveals it, so the
  * first-tile fallback no longer applies.
+ *
+ * @param container the element holding the host's file tiles
+ * @returns the shown file and the actions open, show, close, update and setDimensions
  */
 export function useFileDialog(container: RefObject<HTMLElement | null>) {
   const [file, setFile] = useState<FileRecord | null>(null);
@@ -37,6 +45,7 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
     if (!target.followed) root?.querySelector<HTMLElement>('[data-file-tile]')?.focus();
   }, [file, container]);
 
+  /** Opens the dialog on a file and remembers the focused element as the opener. */
   function open(next: FileRecord) {
     const active = document.activeElement;
     opened.current = { id: next.id, trigger: active instanceof HTMLElement ? active : null, followed: false };
@@ -51,6 +60,7 @@ export function useFileDialog(container: RefObject<HTMLElement | null>) {
     setFile(next);
   }
 
+  /** Closes the dialog; the focus returns after the next render. */
   function close() {
     pendingFocus.current = opened.current;
     opened.current = null;
