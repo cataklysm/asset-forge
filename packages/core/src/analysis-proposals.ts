@@ -2,8 +2,19 @@ import { ANALYZE_FILE_JOB, analysisJobFields, normalizeTagName, type JobView, ty
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { Job } from './jobs.js';
+import type { Proposal } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
+/** A proposal as it is read, with whether its file changed since. */
+type StoredProposal = Proposal & { stale: boolean };
+
+/**
+ * The view of an analysis job.
+ *
+ * @param job the job
+ * @param fileName the name of its file; null when it is gone
+ * @returns the view with the analysis fields of its payload
+ */
 function viewOf(job: Job, fileName: string | null): JobView {
   return {
     id: job.id,
@@ -27,21 +38,31 @@ function viewOf(job: Job, fileName: string | null): JobView {
 }
 
 /**
- * The file's waiting proposal and its active, otherwise latest, `vision.analyze_file` job; null for
- * what does not exist.
+ * The view of a stored proposal.
+ *
+ * @param stored the stored proposal
+ * @returns its model, prompt name, time, staleness and tags
+ */
+function proposalViewOf(stored: StoredProposal): ProposalView {
+  return { model: stored.model, promptName: stored.promptName, createdAt: stored.createdAt, stale: stored.stale, tags: stored.tags };
+}
+
+/**
+ * The file's waiting proposal and its active, otherwise latest, `vision.analyze_file` job.
+ *
+ * @param session the open workspace
+ * @param fileId the file
+ * @returns the proposal and the job; null for what does not exist
  */
 export async function getProposal(
-  s: WorkspaceSession,
+  session: WorkspaceSession,
   fileId: string,
 ): Promise<{ proposal: ProposalView | null; job: JobView | null }> {
-  const stored = await s.database.analyses.getProposal(fileId);
-  const job = await s.database.jobs.latestForFile(fileId, ANALYZE_FILE_JOB);
-  const file = job === null ? null : await s.database.files.get(fileId);
+  const stored = await session.database.analyses.getProposal(fileId);
+  const job = await session.database.jobs.latestForFile(fileId, ANALYZE_FILE_JOB);
+  const file = job === null ? null : await session.database.files.get(fileId);
   return {
-    proposal:
-      stored === null
-        ? null
-        : { model: stored.model, promptName: stored.promptName, createdAt: stored.createdAt, stale: stored.stale, tags: stored.tags },
+    proposal: stored === null ? null : proposalViewOf(stored),
     job: job === null ? null : viewOf(job, file?.originalName ?? null),
   };
 }
@@ -49,38 +70,61 @@ export async function getProposal(
 /**
  * Applies the chosen tags of the file's proposal like an analysis in mode `apply` and records the
  * analysis. `names` must be a non-empty subset of the proposal's tags, compared normalised.
- * `not_found` without a proposal; `invalid_operation` for a foreign or empty choice and for a stale
- * proposal, which is deleted.
+ *
+ * @param session the open workspace
+ * @param request the file and the chosen tag names
+ * @returns resolves once the tags are applied
+ * @throws `NotFoundError` without a proposal; `InvalidOperationError` for a foreign or empty choice and for a
+ *   stale proposal, which is deleted
  */
-export async function acceptProposal(s: WorkspaceSession, r: { fileId: string; names: string[] }): Promise<void> {
-  const proposal = await s.database.analyses.getProposal(r.fileId);
+export async function acceptProposal(session: WorkspaceSession, request: { fileId: string; names: string[] }): Promise<void> {
+  const proposal = await session.database.analyses.getProposal(request.fileId);
   if (proposal === null) throw new NotFoundError('The file has no tag proposal');
   // Checked before the stale branch, so a trashed file keeps its proposal for a restore.
-  const file = await s.database.files.get(r.fileId);
+  const file = await session.database.files.get(request.fileId);
   if (file !== null) requireLiveFile(file);
   if (proposal.stale) {
-    await s.database.analyses.discardProposal(r.fileId);
+    await session.database.analyses.discardProposal(request.fileId);
     throw new InvalidOperationError('The tag proposal is out of date');
   }
+  const chosen = chosenNames(proposal, request.names);
+  const accepted = await session.database.analyses.acceptProposal({
+    fileId: request.fileId,
+    sha256: proposal.sha256,
+    tags: proposal.tags.filter((tag) => chosen.has(tag.name)).map((tag) => ({ ...tag, newId: session.newId() })),
+    now: session.now().toISOString(),
+  });
+  if (!accepted) throw new InvalidOperationError('The tag proposal is out of date');
+}
+
+/**
+ * The normalised names of a choice of proposal tags.
+ *
+ * @param proposal the stored proposal
+ * @param names the chosen names as typed
+ * @returns the distinct normalised names
+ * @throws `InvalidOperationError` for a name that is not a tag of the proposal, or for an empty choice
+ */
+function chosenNames(proposal: StoredProposal, names: string[]): Set<string> {
   const chosen = new Set<string>();
-  for (const raw of r.names) {
+  for (const raw of names) {
     const name = normalizeTagName(raw);
-    if (name === null || !proposal.tags.some((t) => t.name === name)) {
+    if (name === null || !proposal.tags.some((tag) => tag.name === name)) {
       throw new InvalidOperationError('Only tags of the proposal can be accepted');
     }
     chosen.add(name);
   }
   if (chosen.size === 0) throw new InvalidOperationError('Choose at least one tag of the proposal');
-  const accepted = await s.database.analyses.acceptProposal({
-    fileId: r.fileId,
-    sha256: proposal.sha256,
-    tags: proposal.tags.filter((t) => chosen.has(t.name)).map((t) => ({ ...t, newId: s.newId() })),
-    now: s.now().toISOString(),
-  });
-  if (!accepted) throw new InvalidOperationError('The tag proposal is out of date');
+  return chosen;
 }
 
-/** Deletes the file's proposal; no-op without one. */
-export async function discardProposal(s: WorkspaceSession, fileId: string): Promise<void> {
-  await s.database.analyses.discardProposal(fileId);
+/**
+ * Deletes the file's proposal; no-op without one.
+ *
+ * @param session the open workspace
+ * @param fileId the file
+ * @returns resolves once it is deleted
+ */
+export async function discardProposal(session: WorkspaceSession, fileId: string): Promise<void> {
+  await session.database.analyses.discardProposal(fileId);
 }

@@ -8,6 +8,7 @@ import {
 } from '@assetforge/contracts';
 import { isPreviewable } from './media-types.js';
 
+/** The version of the analysis request; part of the fingerprint, so a raise makes every file count as not analysed. */
 export const ANALYSIS_PROMPT_VERSION = 1;
 
 /** Sent verbatim by v1 and v2 jobs. Unchanged text. */
@@ -52,22 +53,36 @@ export const IMAGE_PROMPT =
 /** Longest Image2Prompt text handed back; longer answers are cut. */
 export const MAX_PROMPT_TEXT = 4000;
 
-/** The built-in content of a purpose: seed and reset target. `maxTags` is null for `image_prompt`. */
+/**
+ * The built-in content of a purpose: seed and reset target.
+ *
+ * @param purpose the purpose
+ * @returns the text and the tag limit; `maxTags` is null for `image_prompt`
+ */
 export function builtInAnalysisPrompt(purpose: AnalysisPromptPurpose): { text: string; maxTags: number | null } {
   return purpose === 'tagging'
     ? { text: BUILT_IN_TAGGING_TEXT, maxTags: ANALYSIS_TAG_LIMIT_DEFAULT }
     : { text: IMAGE_PROMPT, maxTags: null };
 }
 
-/** The request of a v3 tagging job: the owner's text, the limit line and the fixed format line. */
-export function composeTaggingRequest(p: { text: string; maxTags: number }): string {
-  return `${p.text}\nGive at most ${p.maxTags} tags.\n${ANALYSIS_FORMAT_LINE}`;
+/**
+ * The request of a v3 tagging job: the owner's text, the limit line and the fixed format line.
+ *
+ * @param prompt the text and the tag limit of the analysis prompt
+ * @returns the text sent to the provider
+ */
+export function composeTaggingRequest(prompt: { text: string; maxTags: number }): string {
+  return `${prompt.text}\nGive at most ${prompt.maxTags} tags.\n${ANALYSIS_FORMAT_LINE}`;
 }
 
 /**
  * The usable tags of a provider answer, in order, distinct by normalised name, at most `limit`; []
  * when the answer has no usable tag. The answer is untrusted: anything but an object with a `tags`
  * array yields []; entries that are not strings or not valid tags are dropped before counting.
+ *
+ * @param answer the provider's parsed answer
+ * @param limit the most tags kept
+ * @returns the normalised names with their display names
  */
 export function cleanAnalysisTags(answer: unknown, limit: number): { name: string; displayName: string }[] {
   if (typeof answer !== 'object' || answer === null || Array.isArray(answer)) return [];
@@ -86,7 +101,12 @@ export function cleanAnalysisTags(answer: unknown, limit: number): { name: strin
   return result;
 }
 
-/** Complete, not in the trash, of a previewable MIME type and with a checksum. */
+/**
+ * Whether a file can be analysed.
+ *
+ * @param file the file
+ * @returns true when it is complete, not in the trash, of a previewable MIME type and with a checksum
+ */
 export function isAnalysable(file: FileRecord): boolean {
   return (
     file.status === 'complete' && file.deletedAt === null && isPreviewable(file.mimeType) && file.sha256 !== null

@@ -6,24 +6,32 @@ import { AnalyzeFilePayloadSchema, type AnalyzeFilePayload } from '@assetforge/c
  * and a v1 or v2 row `prompt: null`, so it still runs with the legacy text and limit. A payload that does
  * not parse (for example one of a newer app version) is returned unchanged, so the moved job still fails
  * `internal_error` instead of running with the legacy request.
+ *
+ * @param payload the stored payload
+ * @param to the name and the chosen model of the provider the job moves to
+ * @returns the rewritten payload, or the stored one when it does not parse
  */
 export function rewriteForProvider(payload: unknown, to: { name: string; model: string }): AnalyzeFilePayload | unknown {
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
   if (!parsed.success) return payload;
-  const p = parsed.data;
+  const stored = parsed.data;
   return {
     version: 4,
     model: to.model,
-    mode: p.version === 1 ? 'apply' : p.mode,
-    prompt: p.version === 3 || p.version === 4 ? p.prompt : null,
+    mode: stored.version === 1 ? 'apply' : stored.mode,
+    prompt: stored.version === 3 || stored.version === 4 ? stored.prompt : null,
     providerName: to.name,
   };
 }
 
 /**
  * The payload of an analysis job without a provider assigned to `entry`: v4 with the payload's own model,
- * mode and prompt. A v1 row takes the entry's tagging model in mode `apply`; null (left as it is) when the
- * entry has none or the payload does not parse.
+ * mode and prompt. A v1 row takes the entry's tagging model in mode `apply`.
+ *
+ * @param payload the stored payload
+ * @param entry the name and the tagging model of the provider entry
+ * @returns the v4 payload; null (left as it is) when the entry has no tagging model for a v1 row or the payload
+ *   does not parse
  */
 export function adoptForProvider(
   payload: unknown,
@@ -31,16 +39,16 @@ export function adoptForProvider(
 ): AnalyzeFilePayload | null {
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
   if (!parsed.success) return null;
-  const p = parsed.data;
-  if (p.version === 1) {
+  const stored = parsed.data;
+  if (stored.version === 1) {
     if (entry.taggingModel === null) return null;
     return { version: 4, model: entry.taggingModel, mode: 'apply', prompt: null, providerName: entry.name };
   }
   return {
     version: 4,
-    model: p.model,
-    mode: p.mode,
-    prompt: p.version === 2 ? null : p.prompt,
+    model: stored.model,
+    mode: stored.mode,
+    prompt: stored.version === 2 ? null : stored.prompt,
     providerName: entry.name,
   };
 }
