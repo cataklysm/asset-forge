@@ -247,6 +247,7 @@ describe('assignment and relation views', () => {
     assignedAt: now,
     updatedAt: now,
     asset,
+    coverFileId: null,
   };
   const relation = {
     fromAssetId: uuid,
@@ -268,7 +269,7 @@ describe('assignment and relation views', () => {
   });
 
   it('AssetAssignmentSchema embeds the project', () => {
-    const { asset: _omit, ...base } = member;
+    const { asset: _omit, coverFileId: _cover, ...base } = member;
     expect(AssetAssignmentSchema.safeParse({ ...base, project }).success).toBe(true);
   });
 });
