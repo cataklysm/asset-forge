@@ -29,6 +29,8 @@ export interface StudioState {
    * in flight reports its own outcome.
    */
   upscale(file: FileRecord, scale: UpscaleScale): Promise<void>;
+  /** True while an upscale of the file `fileId` is being started. */
+  upscaling(fileId: string): boolean;
   /**
    * Shows the file with id `fileId` in the linked file dialog, which stacks over the dialog the link
    * was followed in and over the studio; while it is open it moves on to that file. Rejects when the
@@ -52,6 +54,7 @@ export interface StudioState {
 const EMPTY: StudioState = {
   open: () => {},
   upscale: () => Promise.reject(new Error(NO_IMAGE_PROVIDER_TITLE)),
+  upscaling: () => false,
   openFile: async () => {},
   openPrompt: () => {},
   blocked: null,
@@ -236,14 +239,16 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
     [guardStart, refresh, noteUsed],
   );
 
+  const upscaling = useCallback((fileId: string) => starting(fileId, 'upscale'), [starting]);
+
   const session = useMemo<StudioSession>(
     () => ({ starting, guardStart, draft, keepDraft, startError, setStartError }),
     [starting, guardStart, draft, keepDraft, startError, setStartError],
   );
 
   const value = useMemo<StudioState>(
-    () => ({ open, upscale, openFile, openPrompt, blocked, recallVariable, rememberVariables }),
-    [open, upscale, openFile, openPrompt, blocked, recallVariable, rememberVariables],
+    () => ({ open, upscale, upscaling, openFile, openPrompt, blocked, recallVariable, rememberVariables }),
+    [open, upscale, upscaling, openFile, openPrompt, blocked, recallVariable, rememberVariables],
   );
 
   const changeLinked = (fileId: string, change: (file: FileRecord) => FileRecord) =>

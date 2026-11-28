@@ -15,6 +15,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { GenerationStudio } from '../../src/renderer/src/components/GenerationStudio';
+import type { MenuItem } from '../../src/renderer/src/components/Menu';
+import { fileMenuItems } from '../../src/renderer/src/file-actions';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import {
   attachedPromptLabel,
@@ -41,6 +43,8 @@ import {
   SAFE_MODE_LABEL,
   TRASHED_MARK,
   UPSCALES_LABEL,
+  UPSCALE_TITLE,
+  upscaleLabel,
 } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
 import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
@@ -1345,6 +1349,43 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     await s.open();
     expect(promptBox().value).toBe('');
   });
+});
+
+it('the file menu shows both upscales disabled while an upscale of that file is being started', async () => {
+  const file = fileRecord({ originalName: 'file.png' });
+  const other = fileRecord({ originalName: 'other.png' });
+  const state = { results: [], byFile: {}, summary: IDLE };
+  const pending = deferred<{ ok: false; code: 'provider_unreachable' }>();
+  installFakeApi({ ...studioHandlers(file, {}, state), 'generations:start': () => pending.promise });
+  let menu: (target: FileRecord) => MenuItem[] = () => [];
+  let start = () => {};
+  function Host() {
+    const studio = useStudio();
+    menu = (target) => fileMenuItems(target, { cover: null, studio });
+    start = () => void studio.upscale(file, 2).catch(() => {});
+    return null;
+  }
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <TagsProvider>
+          <StudioProvider onOpenPrompt={async () => true}>
+            <Host />
+          </StudioProvider>
+        </TagsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  const upscales = (target: FileRecord) =>
+    menu(target).filter((item) => item.label === upscaleLabel(2) || item.label === upscaleLabel(4));
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([undefined, undefined]));
+  act(() => start());
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([true, true]));
+  expect(upscales(file).map((item) => item.title)).toEqual([UPSCALE_TITLE, UPSCALE_TITLE]);
+  // Another file is not affected.
+  expect(upscales(other).map((item) => item.disabled)).toEqual([undefined, undefined]);
+  await act(async () => pending.resolve({ ok: false, code: 'provider_unreachable' }));
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([undefined, undefined]));
 });
 
 it('an accepted upscale from outside the studio records the entry the main process chose', async () => {
