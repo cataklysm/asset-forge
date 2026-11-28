@@ -2,76 +2,155 @@ import type { Asset, AssetWorkflow, WorkflowStepState } from '@assetforge/contra
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import type { WorkspaceSession } from './session.js';
 
-async function requireAsset(s: WorkspaceSession, assetId: string): Promise<Asset> {
-  const asset = await s.database.assets.get(assetId);
+/** The fields of a step a change writes. */
+interface StepWrite {
+  /** The new state, when it changes. */
+  state?: WorkflowStepState;
+  /** The new notes, when they change. */
+  notes?: string;
+  /** The completion time; left out to keep the stored one. */
+  completedAt?: string | null;
+  /** The time of the change. */
+  updatedAt: string;
+}
+
+/**
+ * An asset that must exist.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @returns it
+ * @throws `NotFoundError` otherwise
+ */
+async function requireAsset(session: WorkspaceSession, assetId: string): Promise<Asset> {
+  const asset = await session.database.assets.get(assetId);
   if (asset === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
   return asset;
 }
 
-async function resolveTemplateId(s: WorkspaceSession, asset: Asset, templateId?: string): Promise<string> {
+/**
+ * The template a workflow starts from: the given one, else the default of the asset's type.
+ *
+ * @param session the open workspace
+ * @param asset the asset
+ * @param templateId the chosen template, if any
+ * @returns the template id
+ * @throws `NotFoundError` for an unknown chosen template, `InvalidOperationError` when the type has no default
+ */
+async function resolveTemplateId(session: WorkspaceSession, asset: Asset, templateId?: string): Promise<string> {
   if (templateId !== undefined) {
-    if ((await s.database.workflowTemplates.get(templateId)) === null) {
+    if ((await session.database.workflowTemplates.get(templateId)) === null) {
       throw new NotFoundError(`Workflow template ${templateId} does not exist`);
     }
     return templateId;
   }
-  const type = await s.database.assetTypes.get(asset.typeId);
+  const type = await session.database.assetTypes.get(asset.typeId);
   const defaultId = type?.defaultWorkflowTemplateId ?? null;
   if (defaultId === null) throw new InvalidOperationError('The asset type has no default workflow template');
   return defaultId;
 }
 
-/** Starts a workflow from the latest version of the given template or of the asset type's default. */
-export async function startWorkflow(s: WorkspaceSession, assetId: string, templateId?: string): Promise<AssetWorkflow> {
-  const asset = await requireAsset(s, assetId);
-  if ((await s.database.assetWorkflows.getByAsset(assetId)) !== null) {
+/**
+ * Starts a workflow from the latest version of the given template or of the asset type's default.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @param templateId the chosen template, if any
+ * @returns the new workflow
+ * @throws `NotFoundError` for an unknown asset or template, `InvalidOperationError` when the asset already has a
+ *   workflow, its type has no default or the template has no version
+ */
+export async function startWorkflow(
+  session: WorkspaceSession,
+  assetId: string,
+  templateId?: string,
+): Promise<AssetWorkflow> {
+  const asset = await requireAsset(session, assetId);
+  if ((await session.database.assetWorkflows.getByAsset(assetId)) !== null) {
     throw new InvalidOperationError(`Asset ${assetId} already has a workflow`);
   }
-  const resolvedId = await resolveTemplateId(s, asset, templateId);
-  const version = await s.database.workflowTemplates.latestVersion(resolvedId);
+  const resolvedId = await resolveTemplateId(session, asset, templateId);
+  const version = await session.database.workflowTemplates.latestVersion(resolvedId);
   if (version === null) throw new InvalidOperationError(`Workflow template ${resolvedId} has no version`);
 
-  const now = s.now().toISOString();
-  await s.database.assetWorkflows.insert(
-    { id: s.newId(), assetId, templateVersionId: version.id, createdAt: now },
-    version.steps.map((step) => ({ id: s.newId(), stepDefinitionId: step.id, updatedAt: now })),
+  const now = session.now().toISOString();
+  await session.database.assetWorkflows.insert(
+    { id: session.newId(), assetId, templateVersionId: version.id, createdAt: now },
+    version.steps.map((step) => ({ id: session.newId(), stepDefinitionId: step.id, updatedAt: now })),
   );
-  return (await s.database.assetWorkflows.getByAsset(assetId))!;
+  return (await session.database.assetWorkflows.getByAsset(assetId))!;
 }
 
-export async function getWorkflow(s: WorkspaceSession, assetId: string): Promise<AssetWorkflow | null> {
-  await requireAsset(s, assetId);
-  return s.database.assetWorkflows.getByAsset(assetId);
+/**
+ * The workflow of an asset.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @returns it; null when the asset has none
+ * @throws `NotFoundError` for an unknown asset
+ */
+export async function getWorkflow(session: WorkspaceSession, assetId: string): Promise<AssetWorkflow | null> {
+  await requireAsset(session, assetId);
+  return session.database.assetWorkflows.getByAsset(assetId);
 }
 
-/** The only way a step state changes; returns the whole workflow. */
+/**
+ * The only way a step state changes.
+ *
+ * @param session the open workspace
+ * @param stepId the step
+ * @param patch the new state and/or notes
+ * @returns the whole workflow
+ * @throws `NotFoundError` for an unknown step, `InvalidOperationError` for skipping a mandatory step
+ */
 export async function updateWorkflowStep(
-  s: WorkspaceSession,
+  session: WorkspaceSession,
   stepId: string,
   patch: { state?: WorkflowStepState; notes?: string },
 ): Promise<AssetWorkflow> {
-  const context = await s.database.assetWorkflows.getStepContext(stepId);
+  const context = await session.database.assetWorkflows.getStepContext(stepId);
   if (context === null) throw new NotFoundError(`Workflow step ${stepId} does not exist`);
   if (patch.state === 'skipped' && context.mandatory) {
     throw new InvalidOperationError('A mandatory step cannot be skipped');
   }
+  const now = session.now().toISOString();
+  await session.database.assetWorkflows.updateStep(stepId, stepWrite(patch, context.state, now));
+  return (await session.database.assetWorkflows.getByAsset(context.assetId))!;
+}
 
-  const now = s.now().toISOString();
-  const write: { state?: WorkflowStepState; notes?: string; completedAt?: string | null; updatedAt: string } = {
-    updatedAt: now,
-  };
+/**
+ * The fields a step change writes.
+ *
+ * @param patch the new state and/or notes
+ * @param previous the stored state of the step
+ * @param now the time of the change
+ * @returns the write
+ */
+function stepWrite(
+  patch: { state?: WorkflowStepState; notes?: string },
+  previous: WorkflowStepState,
+  now: string,
+): StepWrite {
+  const write: StepWrite = { updatedAt: now };
   if (patch.notes !== undefined) write.notes = patch.notes;
   if (patch.state !== undefined) {
     write.state = patch.state;
     // Staying `done` keeps the original completion time, so `completedAt` is left out of the write.
     if (patch.state !== 'done') write.completedAt = null;
-    else if (context.state !== 'done') write.completedAt = now;
+    else if (previous !== 'done') write.completedAt = now;
   }
-  await s.database.assetWorkflows.updateStep(stepId, write);
-  return (await s.database.assetWorkflows.getByAsset(context.assetId))!;
+  return write;
 }
 
-export async function removeWorkflow(s: WorkspaceSession, assetId: string): Promise<boolean> {
-  await requireAsset(s, assetId);
-  return s.database.assetWorkflows.remove(assetId);
+/**
+ * Removes the workflow of an asset.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @returns whether there was one
+ * @throws `NotFoundError` for an unknown asset
+ */
+export async function removeWorkflow(session: WorkspaceSession, assetId: string): Promise<boolean> {
+  await requireAsset(session, assetId);
+  return session.database.assetWorkflows.remove(assetId);
 }

@@ -70,7 +70,8 @@ export async function updateAssignment(
   key: AssignmentKey,
   patch: { priority?: AssignmentPriority; intendedUse?: string; approvalStatus?: ApprovalStatus; notes?: string },
 ): Promise<ProjectAssignment> {
-  const updated = await session.database.projectAssets.update(key, { ...patch, updatedAt: session.now().toISOString() });
+  const now = session.now().toISOString();
+  const updated = await session.database.projectAssets.update(key, { ...patch, updatedAt: now });
   if (updated === null) {
     throw new NotFoundError(`Asset ${key.assetId} is not assigned to project ${key.projectId}`);
   }
