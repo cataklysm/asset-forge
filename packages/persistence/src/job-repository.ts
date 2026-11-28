@@ -1,16 +1,10 @@
 import {
-  ACTIVE_JOB_STATUSES,
   FILE_DOWNLOAD_JOB,
   FINISHED_JOB_STATUSES,
   IMAGE_GENERATE_JOB,
-  JOB_ERROR_MESSAGES,
-  JobErrorCodeSchema,
-  JobResultSchema,
   JobStatusSchema,
   analysisJobFields,
   downloadJobFields,
-  type JobErrorCode,
-  type JobResult,
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
@@ -18,70 +12,20 @@ import type { Job, JobRepository, NewJob } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, min, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
+import {
+  errorCodeOf,
+  errorOf,
+  inLane,
+  isActive,
+  isWaiting,
+  keyHeld,
+  liveFile,
+  notInLanes,
+  notOfTrashedFile,
+  resultOf,
+  toJob,
+} from './job-rows.js';
 import { file, generation, job } from './schema.js';
-
-type JobRow = typeof job.$inferSelect;
-
-/** The stored code; a value outside the vocabulary (the column has no CHECK) reads as `internal_error`. */
-export const errorCodeOf = (value: string | null): JobErrorCode | null =>
-  value === null ? null : JobErrorCodeSchema.catch('internal_error').parse(value);
-
-const toJob = (row: JobRow): Job => ({
-  id: row.id,
-  type: row.type,
-  resourceClass: row.resourceClass,
-  status: row.status,
-  fileId: row.fileId,
-  lane: row.providerId,
-  payload: JSON.parse(row.payload) as unknown,
-  dedupeKey: row.dedupeKey,
-  attempt: row.attempt,
-  runAfter: row.runAfter,
-  errorCode: errorCodeOf(row.errorCode),
-  errorMessage: row.errorMessage,
-  createdAt: row.createdAt,
-  startedAt: row.startedAt,
-  finishedAt: row.finishedAt,
-  updatedAt: row.updatedAt,
-});
-
-/** The stored result; a value outside the vocabulary (the column has no CHECK) reads as null. */
-const resultOf = (value: string | null): JobResult | null => JobResultSchema.nullable().catch(null).parse(value);
-
-const errorOf = (code: JobErrorCode | null) => ({ errorCode: code, errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code] });
-
-const isActive = inArray(job.status, [...ACTIVE_JOB_STATUSES]);
-const isWaiting = inArray(job.status, ['queued', 'retry_wait']);
-
-/** The jobs of this lane; `null` is the jobs without one. */
-const inLane = (lane: string | null): SQL => (lane === null ? isNull(job.providerId) : eq(job.providerId, lane));
-
-/**
- * The jobs whose lane is not excluded. SQL's `NOT IN` never matches null, so the null lane is handled on its
- * own: excluded through `IS NOT NULL`, kept through `IS NULL` beside the string values.
- */
-function notInLanes(excludeLanes: readonly (string | null)[] | undefined): SQL | undefined {
-  if (excludeLanes === undefined || excludeLanes.length === 0) return undefined;
-  const values = excludeLanes.filter((l): l is string => l !== null);
-  const otherValue = values.length === 0 ? undefined : notInArray(job.providerId, values);
-  return excludeLanes.includes(null) ? and(isNotNull(job.providerId), otherValue) : or(isNull(job.providerId), otherValue);
-}
-
-/** True when an active job holds the key. */
-function keyHeld(tx: Pick<BetterSQLite3Database, 'select'>, dedupeKey: string): boolean {
-  return tx.select({ id: job.id }).from(job).where(and(eq(job.dedupeKey, dedupeKey), isActive)).limit(1).get() !== undefined;
-}
-
-/** True when the file exists and is not in the trash. */
-function liveFile(tx: Pick<BetterSQLite3Database, 'select'>, fileId: string): boolean {
-  return (
-    tx
-      .select({ id: file.id })
-      .from(file)
-      .where(and(eq(file.id, fileId), isNull(file.deletedAt)))
-      .get() !== undefined
-  );
-}
 
 /**
  * Inserts the job as `queued`, attempt 0, unless its file is unknown or in the trash or its dedupe key is held;
@@ -109,9 +53,6 @@ export function insertJob(tx: Pick<BetterSQLite3Database, 'select' | 'insert'>, 
     .run();
   return true;
 }
-
-/** A job without a file, or one whose file is not in the trash. */
-const notOfTrashedFile = sql`not exists (select 1 from ${file} where ${file.id} = ${job.fileId} and ${file.deletedAt} is not null)`;
 
 export function createJobRepository(db: BetterSQLite3Database): JobRepository {
   /** Applies `set` to the job if it is `running`; true when a row changed. */

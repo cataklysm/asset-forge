@@ -2,7 +2,8 @@ import { FINISHED_JOB_STATUSES, GenerationParametersSchema, GenerationSchema, ty
 import type { GenerationFileRef, GenerationRepository, GenerationRow, JobOutcome } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { errorCodeOf, insertJob } from './job-repository.js';
+import { insertJob } from './job-repository.js';
+import { errorCodeOf } from './job-rows.js';
 import { file, generation, generationInput, generationOutput, job, promptVersion } from './schema.js';
 
 type Tx = Pick<BetterSQLite3Database, 'select'>;
