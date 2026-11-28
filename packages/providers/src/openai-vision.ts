@@ -1,7 +1,8 @@
 import { ModelNameSchema, type VisionRequestOptions } from '@assetforge/contracts';
 import { JobError, type VisionProvider } from '@assetforge/core';
 import { createJsonRequester, statusOf, type JsonRequest } from './json-request.js';
-import { LIST_MODELS_TIMEOUT_MS, type OllamaVisionOptions } from './ollama-vision.js';
+import { listTimeoutOf } from './list-timeout.js';
+import type { OllamaVisionOptions } from './ollama-vision.js';
 import { composeBody, DEFAULT_REQUEST_OPTIONS, openAiFixedFields } from './request-options.js';
 
 /** The provider id of an OpenAI-compatible entry, part of the analysis fingerprint. */
@@ -153,7 +154,7 @@ class OpenAiVision {
    */
   constructor(private readonly options: OpenAiVisionOptions) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.listTimeoutMs = options.listTimeoutMs ?? Math.min(this.timeoutMs, LIST_MODELS_TIMEOUT_MS);
+    this.listTimeoutMs = listTimeoutOf(options.listTimeoutMs, this.timeoutMs);
     this.requestOptions = options.requestOptions ?? DEFAULT_REQUEST_OPTIONS;
     this.fixed = openAiFixedFields(this.requestOptions);
     this.request = createJsonRequester(options);

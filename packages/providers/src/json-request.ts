@@ -169,19 +169,19 @@ class JsonCall {
       // A redirect is never followed: the configured base URL is the only address the adapter talks to.
       if (isRedirect(response)) {
         await discard(response);
-        return this.fail('provider_rejected', response.status);
+        return this.fail('provider_rejected', undefined);
       }
 
       if (!response.ok) {
         // The body of a failed answer is only a discarded cause; it is never read.
         await discard(response);
-        return this.fail(failedStatusCode(response.status), response.status);
+        return this.fail(failedStatusCode(response.status), undefined);
       }
 
       const declared = Number(response.headers.get('content-length'));
       if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
         await discard(response);
-        return this.fail('invalid_response', declared);
+        return this.fail('invalid_response', undefined);
       }
 
       let text: string;
@@ -215,8 +215,8 @@ class JsonCall {
   }
 
   /**
-   * Throws the error of a failure. Every failure is mapped after the caller abort and the timeout have been ruled
-   * out.
+   * Throws the error of a failure. A caller abort always wins; the timeout only replaces a transport failure, which
+   * is what its abort causes, so an answer that arrived keeps the code it earned even when the timer fired since.
    *
    * @param code the failure's code
    * @param cause kept as the error's cause; never a value that may quote the request
@@ -225,7 +225,9 @@ class JsonCall {
   private fail(code: JobErrorCode, cause: unknown): never {
     const request = this.request;
     if (request.signal.aborted) throw request.signal.reason;
-    if (this.timeout.signal.aborted) throw new JobError('provider_timeout', { cause });
+    if (code === 'provider_unreachable' && this.timeout.signal.aborted) {
+      throw new JobError('provider_timeout', { cause });
+    }
     const error = new JobError(code, { cause });
     if (this.status !== null) statuses.set(error, this.status);
     throw error;

@@ -1,6 +1,6 @@
 import type { ImageModel, JobErrorCode } from '@assetforge/contracts';
 import { JobError } from '@assetforge/core';
-import { LIST_MODELS_TIMEOUT_MS } from './ollama-vision.js';
+import { LIST_MODELS_TIMEOUT_MS } from './list-timeout.js';
 import { discard, readCapped, ResponseTooLarge } from './response-body.js';
 import { listCode } from './venice-answers.js';
 import { authorizationHeaders, type VeniceConnection } from './venice-connection.js';
