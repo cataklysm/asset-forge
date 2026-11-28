@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addAssetSource,
   createAsset,
@@ -145,6 +145,14 @@ describe('removeAssetSource', () => {
     const detail = await removeAssetSource(session, { assetId: ctx.asset.id, sourceId: added.sources[0]!.id });
     expect(detail.sources).toEqual([]);
     expect(detail.updatedAt).toBe(now.toISOString());
+  });
+
+  it('leaves the touch of the asset to the repository write, for adding and removing', async () => {
+    const ctx = await setup();
+    const update = vi.spyOn(ctx.db.assets, 'update');
+    const added = await addAssetSource(ctx.session, { assetId: ctx.asset.id, url: 'https://example.org/' });
+    await removeAssetSource(ctx.session, { assetId: ctx.asset.id, sourceId: added.sources[0]!.id });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('answers not_found for an unknown source and for a source of another asset', async () => {

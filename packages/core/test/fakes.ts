@@ -1638,12 +1638,20 @@ class InMemoryAssetSources implements AssetSourceRepository {
   async insert(row: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean> {
     if ([...this.rows.values()].some((r) => r.assetId === row.assetId && r.url === row.url)) return false;
     this.rows.set(row.id, { ...row });
+    this.touch(row.assetId, row.createdAt);
     return true;
   }
 
-  async remove(id: string): Promise<boolean> {
-    return this.rows.delete(id);
+  async remove(id: string, updatedAt: string): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (row === undefined) return false;
+    this.rows.delete(id);
+    this.touch(row.assetId, updatedAt);
+    return true;
   }
+
+  /** Set by the database: moves an asset's `updatedAt`, as the repository's transaction does. */
+  touch: (assetId: string, updatedAt: string) => void = () => {};
 }
 
 /** Origins by id; one URL per file and at most MAX_FILE_ORIGINS, like the database. Rows go with their file. */
@@ -1753,6 +1761,10 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
     this.assetWorkflows.assetExists = (assetId) => this.assets.rows.has(assetId);
+    this.assetSources.touch = (assetId, updatedAt) => {
+      const row = this.assets.rows.get(assetId);
+      if (row !== undefined) this.assets.rows.set(assetId, { ...row, updatedAt });
+    };
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     this.files.hasRunningGeneration = (fileId) =>
       this.jobs.rows.some((j) => j.fileId === fileId && j.type === IMAGE_GENERATE_JOB && j.status === 'running');

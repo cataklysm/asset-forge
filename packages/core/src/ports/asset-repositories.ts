@@ -190,17 +190,18 @@ export interface AssetSourceRepository {
    */
   countByAsset(assetId: string): Promise<number>;
   /**
-   * Adds a source to an asset.
+   * One transaction: adds a source to an asset and sets the asset's `updatedAt` to the source's `createdAt`.
    *
    * @param source the new row; the URL already normalised
    * @returns false, writing nothing, when the asset already has this URL
    */
   insert(source: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean>;
   /**
-   * Deletes a source.
+   * One transaction: deletes a source and sets the `updatedAt` of the asset it belonged to.
    *
    * @param id the source
-   * @returns false when no row has this id
+   * @param updatedAt the asset's new `updatedAt`
+   * @returns false, writing nothing, when no row has this id
    */
-  remove(id: string): Promise<boolean>;
+  remove(id: string, updatedAt: string): Promise<boolean>;
 }
