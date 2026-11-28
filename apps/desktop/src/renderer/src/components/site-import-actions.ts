@@ -3,7 +3,8 @@ import type { FileTarget } from '@assetforge/contracts';
 import { call, messageOf } from '../api';
 
 /** Only short IPC actions lock the form, independently of running extraction jobs. */
-export type SiteImportBusy = 'save' | 'delete' | 'queue' | 'import' | 'cancel' | 'retry' | 'login' | null;
+export type SiteImportBusy =
+  'save' | 'delete' | 'queue' | 'import' | 'cancel' | 'retry' | 'login' | 'remove' | 'edit' | null;
 
 /** Mounted request owner; a completed request never updates a disposed dialog. */
 export interface SiteActionOwner {

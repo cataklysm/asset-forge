@@ -113,6 +113,11 @@ function setup(seed: SiteCrawlTask[] = [], target: FileTarget | null = null, ext
     },
     'sites:cancelCrawl': () => ({ cancelling: true }),
     'sites:retryCrawl': () => ({ retried: true }),
+    'sites:removeCrawl': ({ crawlId }) => {
+      const before = state.tasks.length;
+      state.tasks = state.tasks.filter((task) => task.crawlId !== crawlId);
+      return { removed: state.tasks.length < before };
+    },
     'sites:openLogin': () => ({}),
     'sites:import': () => urlImportResultOf({ queued: 1 }),
     ...extra,
@@ -140,8 +145,13 @@ it('offers a deliberate way to remove an imported extraction without cancelling 
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Remove extraction' }));
   const confirmation = await screen.findByRole('dialog', { name: 'Remove extraction?' });
-  expect(within(confirmation).getByText('Only saved extraction results are removed. Queued downloads continue in Jobs.')).toBeTruthy();
+  expect(
+    within(confirmation).getByText('Only saved extraction results are removed. Queued downloads continue in Jobs.'),
+  ).toBeTruthy();
   expect(requests(api, 'sites:cancelCrawl')).toEqual([]);
+  expect(requests(api, 'sites:removeCrawl')).toEqual([]);
+  await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+  expect(within(taskList()).getAllByRole('listitem')).toHaveLength(1);
   expect(requests(api, 'sites:removeCrawl')).toEqual([]);
 });
 
@@ -150,12 +160,16 @@ it('loads the selected extraction live profile for editing instead of the first 
   const liveProfile = { ...profileOf(), name: 'Live gallery', file: '//a/@href' };
   const task = taskOf(liveProfile, { profileName: 'Name when extracted', status: 'imported' });
   const { user } = setup([task], null, { 'sites:list': () => ({ profiles: [unrelated, liveProfile] }) });
-  await waitFor(() => expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Other profile'));
+  await waitFor(() =>
+    expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Other profile'),
+  );
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
   expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Live gallery');
   expect((screen.getByRole('textbox', { name: 'File XPath' }) as HTMLInputElement).value).toBe('//a/@href');
-  expect(screen.getByText('Profile changes apply to future extractions. Saved results keep their captured settings.')).toBeTruthy();
+  expect(
+    screen.getByText('Profile changes apply to future extractions. Saved results keep their captured settings.'),
+  ).toBeTruthy();
 });
 
 it('extracts again using the saved profile and captured destination rather than current asset navigation', async () => {
@@ -167,9 +181,111 @@ it('extracts again using the saved profile and captured destination rather than 
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Extract again' }));
   await waitFor(() => expect(requests(api, 'sites:enqueueCrawl')).toHaveLength(1));
-  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({ profileId: task.profileId, url: task.galleryUrl, target: captured });
+  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({
+    profileId: task.profileId,
+    url: task.galleryUrl,
+    target: captured,
+  });
   expect(state.tasks.some((entry) => entry.crawlId === task.crawlId && entry.status === 'imported')).toBe(true);
   expect(state.tasks).toHaveLength(2);
+});
+
+it('removes only confirmed extraction history and leaves downloads and profile alone', async () => {
+  const task = taskOf(profileOf(), { status: 'imported' });
+  const { api, state, user } = setup([task]);
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Remove extraction' }));
+  const confirmation = await screen.findByRole('dialog', { name: 'Remove extraction?' });
+  await user.click(within(confirmation).getByRole('button', { name: 'Remove extraction' }));
+  await waitFor(() => expect(within(taskList()).queryAllByRole('listitem')).toHaveLength(0));
+  expect(state.tasks).toEqual([]);
+  expect(requests(api, 'sites:removeCrawl')).toEqual([{ crawlId: task.crawlId }]);
+  expect(requests(api, 'sites:cancelCrawl')).toEqual([]);
+  expect(requests(api, 'sites:delete')).toEqual([]);
+  expect(requests(api, 'jobs:cancel')).toEqual([]);
+});
+
+it('requires cancellation before removing an active extraction but keeps profile editing available', async () => {
+  const profile = profileOf();
+  const task = taskOf(profile, { status: 'running', result: null, candidates: [] });
+  const { user } = setup([task], null, { 'sites:list': () => ({ profiles: [profile] }) });
+  await user.click(await within(taskList()).findByRole('button'));
+  const remove = (await screen.findByRole('button', { name: 'Remove extraction' })) as HTMLButtonElement;
+  expect(remove.disabled).toBe(true);
+  expect(remove.title).toBe('Cancel this extraction before removing its saved results');
+  expect((screen.getByRole('button', { name: 'Extract again' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Edit profile' }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Profile' })));
+  expect((screen.getByRole('textbox', { name: 'File XPath' }) as HTMLInputElement).readOnly).toBe(false);
+  expect((screen.getByRole('button', { name: 'Log in' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('requires saving edits to the task profile before explicitly extracting again', async () => {
+  let live = profileOf();
+  const task = taskOf(live, { status: 'imported' });
+  const { api, user } = setup([task], null, {
+    'sites:list': () => ({ profiles: [live] }),
+    'sites:save': (request) => {
+      live = { ...live, ...request };
+      return live;
+    },
+  });
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+  const file = screen.getByRole('textbox', { name: 'File XPath' });
+  await user.clear(file);
+  await user.type(file, '//a/@href');
+  const again = screen.getByRole('button', { name: 'Extract again' }) as HTMLButtonElement;
+  expect(again.disabled).toBe(true);
+  expect(screen.getByText('Save this profile before extracting again.')).toBeTruthy();
+  expect(requests(api, 'sites:enqueueCrawl')).toEqual([]);
+  await user.click(screen.getByRole('button', { name: 'Edit profile' }));
+  expect((file as HTMLInputElement).value).toBe('//a/@href');
+  await user.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(again.disabled).toBe(false));
+  expect(live.file).toBe('//a/@href');
+  await user.click(again);
+  await waitFor(() => expect(requests(api, 'sites:enqueueCrawl')).toHaveLength(1));
+  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({
+    profileId: live.id,
+    url: task.galleryUrl,
+    target: task.target,
+  });
+  expect(task.candidates).toHaveLength(2);
+});
+
+it('retains cancelled partial results after importing them and exposes edit, remove and explicit new extraction', async () => {
+  const profile = profileOf();
+  const task = taskOf(profile, { status: 'cancelled' });
+  task.result!.cancelled = true;
+  const { api, state, user } = setup([task], null, {
+    'sites:list': () => ({ profiles: [profile] }),
+    'sites:import': () => {
+      state.tasks[0] = { ...task, status: 'imported', updatedAt: '2026-11-28T12:03:00.000Z' };
+      return urlImportResultOf({ queued: 2 });
+    },
+  });
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Import selected' }));
+  await screen.findByText('Queued downloads are tracked in Jobs.');
+  expect(within(screen.getByRole('table', { name: 'Found files' })).getAllByRole('row')).toHaveLength(3);
+  expect((screen.getByRole('button', { name: 'Remove extraction' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Extract again' }) as HTMLButtonElement).disabled).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Edit profile' }));
+  expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe(profile.name);
+  expect(state.tasks[0]!.result!.cancelled).toBe(true);
+  expect(requests(api, 'sites:enqueueCrawl')).toEqual([]);
+  expect(requests(api, 'sites:retryCrawl')).toEqual([]);
+});
+
+it('explains when the saved task profile was deleted instead of editing another profile', async () => {
+  const deletedProfile = profileOf();
+  const task = taskOf(deletedProfile, { status: 'imported' });
+  const { user } = setup([task]);
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+  expect((await screen.findByRole('alert')).textContent).toBe('This extraction profile no longer exists.');
+  expect((screen.getByRole('button', { name: 'Extract again' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 async function readyForm() {

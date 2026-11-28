@@ -11,6 +11,13 @@ import {
   SITE_INBOX_TARGET_LABEL,
   SITE_PRESENT_LABEL,
   SITE_RESUME_LABEL,
+  SITE_REMOVE_EXTRACTION_LABEL,
+  SITE_REMOVE_ACTIVE_TITLE,
+  SITE_EDIT_PROFILE_LABEL,
+  SITE_EXTRACT_AGAIN_LABEL,
+  SITE_PROFILE_CHANGES_HINT,
+  SITE_SAVE_BEFORE_EXTRACT_HINT,
+  SITE_DOWNLOADS_HINT,
   SITE_RETRY_LABEL,
   SITE_SELECT_ALL_LABEL,
   SITE_SKIP_NAMES_LABEL,
@@ -64,6 +71,11 @@ interface Props {
   onCancel(): void;
   onLogIn(): void;
   onRetry(): void;
+  onRemove(): void;
+  onEditProfile(): void;
+  onExtractAgain(): void;
+  canExtractAgain: boolean;
+  profileHasUnsavedChanges: boolean;
 }
 
 /**
@@ -72,7 +84,19 @@ interface Props {
  * @param props the captured task and explicit actions
  * @returns its review panel
  */
-export function SiteCrawlReview({ task, busy, onImport, onCancel, onLogIn, onRetry }: Props) {
+export function SiteCrawlReview({
+  task,
+  busy,
+  onImport,
+  onCancel,
+  onLogIn,
+  onRetry,
+  onRemove,
+  onEditProfile,
+  onExtractAgain,
+  canExtractAgain,
+  profileHasUnsavedChanges,
+}: Props) {
   const [skipExistingNames, setSkipExistingNames] = useState(task.target !== null);
   const [selected, setSelected] = useState(() => eligibleUrls(task, task.target !== null));
   const [page, setPage] = useState(0);
@@ -122,6 +146,26 @@ export function SiteCrawlReview({ task, busy, onImport, onCancel, onLogIn, onRet
           {task.errorMessage}
         </p>
       )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={BUTTON} disabled={busy} onClick={onEditProfile}>
+          {SITE_EDIT_PROFILE_LABEL}
+        </button>
+        <button type="button" className={BUTTON} disabled={busy || active || !canExtractAgain} onClick={onExtractAgain}>
+          {SITE_EXTRACT_AGAIN_LABEL}
+        </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={busy || active}
+          title={active ? SITE_REMOVE_ACTIVE_TITLE : SITE_REMOVE_EXTRACTION_LABEL}
+          onClick={onRemove}
+        >
+          {SITE_REMOVE_EXTRACTION_LABEL}
+        </button>
+      </div>
+      <p className={`text-xs ${MUTED}`}>{SITE_PROFILE_CHANGES_HINT}</p>
+      {profileHasUnsavedChanges && <p className={`text-sm ${MUTED}`}>{SITE_SAVE_BEFORE_EXTRACT_HINT}</p>}
+      {task.status === 'imported' && <p className={`text-sm ${MUTED}`}>{SITE_DOWNLOADS_HINT}</p>}
       <div className="flex flex-wrap gap-2">
         {active && (
           <button type="button" className={BUTTON} disabled={busy || task.progress.cancelling} onClick={onCancel}>

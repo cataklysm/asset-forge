@@ -9,6 +9,8 @@ interface Props {
   open: boolean;
   /** The question, and the only text of the dialog (e.g. "Delete 2 files permanently?"). */
   title: string;
+  /** Optional explanation of exactly what confirmation changes. */
+  description?: string;
   /** The label of the confirm button. */
   confirmLabel: string;
   /** While the confirmed action runs: both buttons are disabled. */
@@ -25,10 +27,11 @@ interface Props {
  * @param props the question, the confirm label, the busy flag and the two callbacks
  * @returns the dialog
  */
-export function ConfirmDialog({ open, title, confirmLabel, busy, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ open, title, description, confirmLabel, busy, onConfirm, onCancel }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   return (
     <Dialog open={open} title={title} onClose={() => !busy && onCancel()} initialFocusRef={cancelRef}>
+      {description !== undefined && <p className="mb-4 text-sm text-muted">{description}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" className={BUTTON} disabled={busy} onClick={onConfirm}>
           {confirmLabel}

@@ -120,14 +120,52 @@ interface Props {
 }
 
 /**
+ * Keeps the profile's actions alongside its picker while the remaining fields scroll.
+ * @param props saved profile, validation state and actions
+ * @returns the persistent action row
+ */
+function SiteProfileActions({ locked, dirty, savable, saved, onSave, onDelete, onLogIn }: Props) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        className={BUTTON}
+        title={SAVE_SITE_PROFILE_TITLE}
+        disabled={locked || !dirty || !savable}
+        onClick={onSave}
+      >
+        {SAVE_LABEL}
+      </button>
+      <button
+        type="button"
+        className={BUTTON}
+        title={DELETE_SITE_PROFILE_TITLE}
+        disabled={locked || saved === null}
+        onClick={onDelete}
+      >
+        {DELETE_LABEL}
+      </button>
+      <button
+        type="button"
+        className={BUTTON}
+        title={LOG_IN_TITLE}
+        disabled={locked || saved === null}
+        onClick={onLogIn}
+      >
+        {LOG_IN_LABEL}
+      </button>
+    </div>
+  );
+}
+
+/**
  * The profile select, the profile's fields and Save, Delete and Log in.
  *
  * @param props the profiles, the form and its actions
  * @returns the form's section
  */
 export function SiteProfileForm(props: Props) {
-  const { selectId, selectRef, profiles, selectedId, saved, draft, locked, dirty, savable, onSelect, onDraftChange } =
-    props;
+  const { selectId, selectRef, profiles, selectedId, saved, draft, locked, onSelect, onDraftChange } = props;
 
   /** Adds or removes one kind, keeping the checkbox order. */
   function toggleKind(kind: FileKind, on: boolean) {
@@ -136,7 +174,7 @@ export function SiteProfileForm(props: Props) {
 
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex flex-col gap-1">
+      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-line bg-surface pb-3">
         <label htmlFor={selectId} className={LABEL}>
           {SITE_PROFILE_LABEL}
         </label>
@@ -166,6 +204,7 @@ export function SiteProfileForm(props: Props) {
             {NEW_SITE_PROFILE_LABEL}
           </button>
         </div>
+        <SiteProfileActions {...props} />
       </div>
       <Field
         label={SITE_PROFILE_NAME_LABEL}
@@ -281,35 +320,6 @@ export function SiteProfileForm(props: Props) {
           numeric
           onChange={(pageTimeoutSeconds) => onDraftChange({ pageTimeoutSeconds })}
         />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={BUTTON}
-          title={SAVE_SITE_PROFILE_TITLE}
-          disabled={locked || !dirty || !savable}
-          onClick={props.onSave}
-        >
-          {SAVE_LABEL}
-        </button>
-        <button
-          type="button"
-          className={BUTTON}
-          title={DELETE_SITE_PROFILE_TITLE}
-          disabled={locked || saved === null}
-          onClick={props.onDelete}
-        >
-          {DELETE_LABEL}
-        </button>
-        <button
-          type="button"
-          className={BUTTON}
-          title={LOG_IN_TITLE}
-          disabled={locked || saved === null}
-          onClick={props.onLogIn}
-        >
-          {LOG_IN_LABEL}
-        </button>
       </div>
     </section>
   );

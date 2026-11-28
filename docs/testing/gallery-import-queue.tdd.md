@@ -117,3 +117,16 @@ This visual regression is verified with real browser geometry, not jsdom class-n
 The fix uses a viewport-height workspace dialog with independently scrolling profile/content columns and a non-shrinking Close footer. The candidate table has its own keyboard-focusable scroll region, capped at the smaller of 40 dvh and 20 rem, with a sticky header. Existing form/wide dialog sizing is unchanged.
 
 Native GREEN measurements: at 1280 × 800, both 70 and 5,000 candidates keep the dialog at 752 px and the file viewport at 320 px. At 1024 × 640, they measure 592 px and 256 px. The dialog has no outer overflow, Close stays inside the viewport, and Import selected remains reachable after scrolling the content pane. All 1,059 renderer tests across 55 files passed, as did workspace typechecking and lint (zero errors).
+
+## Cancelled partial imports, history cleanup and profile editing
+
+The owner clarified that downloads run normally: after cancelling discovery and explicitly importing its partial result, the saved extraction stays at `Import queued`. The remaining issue was managing that saved result and editing its source profile.
+
+- Added `Remove extraction` with confirmation that only the saved review/checkpoint is removed. The repository checks active discovery jobs and removes metadata in one transaction; download jobs, files, profiles and sessions are untouched. Active extractions must be cancelled first.
+- Added `Edit profile`, which reloads and selects the task's current live profile, focuses the form and preserves existing unsaved edits. Profile selection and Save/Delete/Login stay at the top of the profile pane.
+- Removed the unnecessary profile-save lock while its login window or a legacy crawl is open. Site identity stays immutable, deletion guards remain, and existing crawls/downloads keep captured settings.
+- Added `Extract again` to create a new task using the saved profile, original gallery URL and captured target. Unsaved profile edits must first be saved. Old partial results are retained until explicitly removed, with no automatic retry or requeue.
+- The exact backend sequence cancellation -> partial import -> profile edit -> removal is covered, including preservation of queued downloads and their original filter payloads.
+- Runtime RED checkpoints: `eb73b73` (missing UI actions), `3ed9cf3` (missing removal and profile-save lock), `80eb521` (cancelled-partial sequence). Backend GREEN checkpoint: `8b86f1d`.
+- Final combined suite: **4,606 tests passed**, one pre-existing conditional E2E seed skipped. Typecheck, formatting, lint (zero errors), production dependency audit and isolated Electron build passed.
+- Native rendered validation with fake IPC passed cancelled partial import -> edit/save live profile -> new extraction with the captured target -> remove original review, with no cancellation request. Existing snapshots were displayed separately from the edited live profile.

@@ -58,6 +58,20 @@ export const SITE_CLEAR_SELECTION_LABEL = 'Clear selection';
 export const SITE_INBOX_TARGET_LABEL = 'Inbox';
 export const SITE_RESUME_LABEL = 'Resume extraction';
 export const SITE_RETRY_LABEL = 'Retry extraction';
+/** Saved extraction history can be removed independently of its download jobs. */
+export const SITE_REMOVE_EXTRACTION_LABEL = 'Remove extraction';
+export const SITE_REMOVE_EXTRACTION_TITLE = 'Remove extraction?';
+export const SITE_REMOVE_EXTRACTION_DESCRIPTION =
+  'Only saved extraction results are removed. Queued downloads continue in Jobs.';
+export const SITE_REMOVE_ACTIVE_TITLE = 'Cancel this extraction before removing its saved results';
+export const SITE_EDIT_PROFILE_LABEL = 'Edit profile';
+export const SITE_EXTRACT_AGAIN_LABEL = 'Extract again';
+export const SITE_PROFILE_CHANGES_HINT =
+  'Profile changes apply to future extractions. Saved results keep their captured settings.';
+export const SITE_SAVE_BEFORE_EXTRACT_HINT = 'Save this profile before extracting again.';
+export const SITE_SAVE_BEFORE_SWITCH_HINT = 'Save your profile changes before editing another profile.';
+export const SITE_PROFILE_UNAVAILABLE = 'This extraction profile no longer exists.';
+export const SITE_DOWNLOADS_HINT = 'Queued downloads are tracked in Jobs.';
 export const SITE_BACKGROUND_HINT = 'Extraction runs in the background. Review each result before importing.';
 export const SITE_PARALLEL_LABEL = 'Parallel detail pages';
 export const SITE_PARALLEL_TITLE = 'Independent browser pages used to resolve file URLs';

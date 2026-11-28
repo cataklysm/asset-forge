@@ -1,5 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { belongsToSite, type FileTarget, type SiteProfile, type UrlImportResult } from '@assetforge/contracts';
+import {
+  belongsToSite,
+  type FileTarget,
+  type SiteProfile,
+  type SiteCrawlTask,
+  type UrlImportResult,
+} from '@assetforge/contracts';
 import { call, messageOf } from '../api';
 import { useJobs } from '../jobs-context';
 import {
@@ -11,6 +17,11 @@ import {
   SITE_REVIEW_EMPTY,
   SITE_REVIEW_LABEL,
   siteImportOutcomeText,
+  SITE_REMOVE_EXTRACTION_LABEL,
+  SITE_REMOVE_EXTRACTION_TITLE,
+  SITE_REMOVE_EXTRACTION_DESCRIPTION,
+  SITE_PROFILE_UNAVAILABLE,
+  SITE_SAVE_BEFORE_SWITCH_HINT,
 } from '../labels';
 import { ALERT, BORDER, BUTTON, MUTED, PANEL_TITLE } from '../ui';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -38,6 +49,7 @@ interface Props {
 export function SiteImportDialog({ target, onClose, onImported }: Props) {
   const selectId = useId();
   const selectRef = useRef<HTMLSelectElement>(null);
+  const profileFormRef = useRef<HTMLDivElement>(null);
   const jobs = useJobs();
   const tasks = useCrawlTasks();
   const [profiles, setProfiles] = useState<SiteProfile[]>([]);
@@ -48,6 +60,8 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
   const [refreshToken, setRefreshToken] = useState(0);
   const [busy, setBusy] = useState<SiteImportBusy>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<SiteCrawlTask | null>(null);
+  const [profileFocusRequested, setProfileFocusRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<UrlImportResult | null>(null);
   const acting = useRef(false);
@@ -64,6 +78,13 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
           selectedSummary.progress,
         ]);
   const selected = useCrawlTask(selectedCrawlId, selectedRevision, refreshToken);
+
+  useEffect(() => {
+    if (!profileFocusRequested || busy !== null) return;
+    profileFormRef.current?.scrollTo({ top: 0 });
+    selectRef.current?.focus({ preventScroll: true });
+    setProfileFocusRequested(false);
+  }, [profileFocusRequested, busy]);
 
   useEffect(() => {
     disposed.current = false;
@@ -99,6 +120,9 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
     ),
   ];
   const queueable = saved !== null && !dirty && galleryUrls.length > 0 && !locked;
+  const profileHasUnsavedChanges = saved?.id === selected.task?.profileId && dirty;
+  const hasUnsavedChanges = saved === null ? !sameDraft(draft, newDraft()) : dirty;
+  const taskProfileExists = profiles.some((profile) => profile.id === selected.task?.profileId);
 
   /**
    * Selects a profile without changing saved extraction results.
@@ -201,6 +225,62 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
       return call('sites:retryCrawl', { crawlId: selected.task.crawlId }).then(refreshTask);
     });
 
+  const focusProfileForm = () => {
+    setProfileFocusRequested(true);
+  };
+
+  const editTaskProfile = () =>
+    run('edit', () => {
+      const task = selected.task;
+      if (task === null) return Promise.resolve();
+      if (profileHasUnsavedChanges) {
+        focusProfileForm();
+        return Promise.resolve();
+      }
+      if (hasUnsavedChanges) {
+        setError(SITE_SAVE_BEFORE_SWITCH_HINT);
+        return Promise.resolve();
+      }
+      return call('sites:list', {}).then(({ profiles: loaded }) => {
+        if (disposed.current) return;
+        const live = loaded.find((profile) => profile.id === task.profileId);
+        setProfiles(loaded);
+        select(live ?? null);
+        if (live === undefined) setError(SITE_PROFILE_UNAVAILABLE);
+        else focusProfileForm();
+      });
+    });
+
+  const extractAgain = () =>
+    run('queue', () => {
+      const task = selected.task;
+      if (task === null || profileHasUnsavedChanges || !taskProfileExists) return Promise.resolve();
+      return call('sites:enqueueCrawl', { profileId: task.profileId, url: task.galleryUrl, target: task.target }).then(
+        ({ crawlId }) => {
+          jobs.refresh();
+          if (disposed.current) return;
+          setSelectedCrawlId(crawlId);
+          setImportResult(null);
+          tasks.setPage(0);
+          return tasks.refresh();
+        },
+      );
+    });
+
+  const removeExtraction = () =>
+    run('remove', () => {
+      const task = confirmRemove;
+      if (task === null) return Promise.resolve();
+      setConfirmRemove(null);
+      return call('sites:removeCrawl', { crawlId: task.crawlId }).then(() => {
+        if (disposed.current) return;
+        setSelectedCrawlId((current) => (current === task.crawlId ? null : current));
+        setImportResult(null);
+        if (tasks.items.length === 1 && tasks.page > 0) tasks.setPage(tasks.page - 1);
+        return tasks.refresh();
+      });
+    });
+
   const shownError = error ?? tasks.error ?? selected.error;
   return (
     <>
@@ -208,7 +288,10 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
         <div className="flex h-full min-h-0 flex-col gap-4">
           <p className={`shrink-0 text-sm ${MUTED}`}>{SITE_BACKGROUND_HINT}</p>
           <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:overflow-hidden">
-            <div className={`min-h-0 overflow-y-auto overscroll-contain rounded-control border p-3 ${BORDER}`}>
+            <div
+              ref={profileFormRef}
+              className={`min-h-0 overflow-y-auto overscroll-contain rounded-control border p-3 ${BORDER}`}
+            >
               <SiteProfileForm
                 selectId={selectId}
                 selectRef={selectRef}
@@ -257,6 +340,11 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
                     onCancel={() => void cancel()}
                     onLogIn={() => void taskLogin()}
                     onRetry={() => void retry()}
+                    onRemove={() => setConfirmRemove(selected.task)}
+                    onEditProfile={() => void editTaskProfile()}
+                    onExtractAgain={() => void extractAgain()}
+                    canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
+                    profileHasUnsavedChanges={profileHasUnsavedChanges}
                   />
                 )}
                 {importResult !== null && (
@@ -297,6 +385,15 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
           onCancel={() => setConfirmDelete(false)}
         />
       )}
+      <ConfirmDialog
+        open={confirmRemove !== null}
+        title={SITE_REMOVE_EXTRACTION_TITLE}
+        description={SITE_REMOVE_EXTRACTION_DESCRIPTION}
+        confirmLabel={SITE_REMOVE_EXTRACTION_LABEL}
+        busy={busy === 'remove'}
+        onConfirm={() => void removeExtraction()}
+        onCancel={() => setConfirmRemove(null)}
+      />
     </>
   );
 }
