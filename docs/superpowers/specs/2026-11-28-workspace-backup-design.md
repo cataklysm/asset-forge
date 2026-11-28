@@ -1,6 +1,6 @@
 # Workspace backup and restore
 
-Status: draft for the owner's approval (2026-11-28), revised after the builder check.
+Status: approved by the owner (2026-11-28).
 
 ## Intent
 
