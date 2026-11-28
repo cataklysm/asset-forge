@@ -309,6 +309,21 @@ Known gaps:
 
 Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted. For the browser check (spec "Browser check"; the session download, `sites:openCheck` and the requeue are tested only with fakes, and whether the session's request filter applies to `net.request` is not verified): a real site answering `cf-mitigated: challenge`, the lane pausing with `Open site`, passing the check in the login window, Resume repeating the refused downloads, and those downloads arriving through the session. The owner's check is pending.
 
+## Workspace backup
+
+Deferred by design:
+
+- App-level settings are not in the backup: provider entries, analysis prompts and site profiles (never keys or cookies) are neither copied nor restored.
+- No "verify workspace" pass: nothing compares the checksums of the binaries with the database, and files in the folder without a row are not adopted.
+
+Known limits:
+
+- Quitting can take longer than the 30 s backup cap plus the scheduler deadline when another lifecycle step still waits in the workspace queue (a remove with its own final backup, an open or restore that first closes another workspace and then migrates).
+- Removing a workspace forgets its chosen backup place with the registry entry; its copies there are found again only through `Choose folder…` in the restore dialog.
+- A full local disk fails a backup as `backup_failed`, not `backup_no_space`: only the target place is checked for free space, not the local snapshot.
+
+Not covered by any automated check: a real NAS/SMB share as the backup place, and quitting with a slow or offline share (the 30 s cap of `BACKUP_QUIT_DEADLINE_MS`); a restore in the real app on a machine without the database (the reinstall case, `workspace_database_missing` on open); the native `Remove anyway` dialog after a failed final backup; the folder picker for the backup place (`backup:changeLocation`) and the one of `Choose folder…` in the restore dialog. The owner checks these by hand.
+
 ## Found while clearing the backlog (2026-11-28)
 
 - A ZIP entry whose declared size is wrong fails with the generic `Import failed`, not with the fixed `This archive could not be read to the end`; the size check fails while the entry is streamed, outside the mapping in `import-archive.ts`. `acceptance.test.ts` pins the current text.
@@ -338,7 +353,6 @@ Not covered by any automated check: the real windows. The hidden page window, th
 ## Found while building the data safety package (2026-11-28)
 
 - Database backup: there is no free-space check before the backup; on a nearly full disk the open is refused cleanly, but nothing tells the owner how much space is needed.
-- Database backup: a failed migration surfaces as `internal_error` with no hint that a backup exists; a restore path (UI or a documented manual step) does not exist.
 - Database backup: a backup is reused when one with the same applied count exists; if an older app version wrote to the database between two failed opens, the reused backup is older than the data.
 - The immediate resolve after a failed move commit retries once without a wait; an error that lasts a moment (`SQLITE_BUSY` beyond the busy timeout) still leaves the row for the next open.
 - `relocateFile` does not resolve an open move row of the file before it begins a new one, unlike restore and purge; a row left by a commit and a resolve that both failed makes the next relocate fail with "already being moved" until the workspace is opened again.
