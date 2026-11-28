@@ -119,6 +119,19 @@ describe('recoverFileMoves for the trash', () => {
     expect(result.discarded).toEqual([ID1]);
     expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
   });
+
+  it('keeps an open move row while the storage is not reachable', async () => {
+    const { storage, db } = await setup();
+    await complete(db, ID1, 'a.png');
+    await db.fileMoves.begin(trashMove(ID1, 'a.png'));
+    storage.reachable = false;
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result).toEqual({ completed: [], discarded: [] });
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: inboxPath(ID1, 'a.png'), deletedAt: null });
+  });
 });
 
 describe('recoverIncompleteImports', () => {

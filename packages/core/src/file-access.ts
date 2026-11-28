@@ -1,8 +1,9 @@
 import { ORIGINAL_MIME_TYPES, viewSource, type FileRecord } from '@assetforge/contracts';
 import { isOpenable, isPreviewable, isVideo, videoFormat, type VideoFormat } from './media-types.js';
-import { NotFoundError, StorageUnreachableError, ValidationFailedError } from './errors.js';
+import { NotFoundError, ValidationFailedError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { WorkspaceSession } from './session.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /** The source a preview is rendered from. */
 export interface PreviewSource {
@@ -102,9 +103,7 @@ export async function resolveFilePath(
   const file = await session.database.files.get(fileId);
   if (file === null || file.status !== 'complete') throw new NotFoundError('File not found');
   requireLiveFile(file);
-  if (!(await session.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
+  await requireReachableStorage(session.storage);
   if (purpose === 'open' && !isOpenable(file.relativePath)) {
     throw new ValidationFailedError('This file type is never opened by AssetForge');
   }

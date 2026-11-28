@@ -1,6 +1,6 @@
-import { StorageUnreachableError } from './errors.js';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /** What the recovery of moves reads and writes. */
 export interface MoveRecoveryDependencies {
@@ -44,7 +44,7 @@ export async function recoverFileMoves(
 
 /**
  * The recovery rule for one move row: commit when the target exists and the source is gone, else abort while the
- * storage is reachable.
+ * storage is still reachable after the checks.
  *
  * @param dependencies the storage, the files and the move rows of the workspace
  * @param move the open move row
@@ -57,14 +57,13 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
     file !== null &&
     (await dependencies.storage.exists(move.targetRelativePath)) &&
     !(await dependencies.storage.exists(file.relativePath));
+  // A target that answers "exists" is a positive observation no dropped share can fake, so a commit needs no check.
   if (isMoved) {
     await dependencies.fileMoves.commit(move.fileId);
     return 'completed';
   }
   // A share that dropped during the checks answers "missing"; never take that for a move that did not happen.
-  if (!(await dependencies.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
+  await requireReachableStorage(dependencies.storage);
   await dependencies.fileMoves.abort(move.fileId);
   return 'discarded';
 }

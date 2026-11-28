@@ -195,6 +195,40 @@ describe('manual wins', () => {
     });
     expect((await removeFileTag(ctx.session, { fileId: a, name: 'oak' })).tags).toEqual([]);
   });
+
+  it('adding by hand over an ai tag of an asset leaves one manual assignment', async () => {
+    const ctx = await setup();
+    const aiTag = (newId: number) =>
+      ctx.db.tags.addToAsset({
+        assetId: ctx.asset.id,
+        name: 'oak',
+        displayName: 'Oak',
+        origin: 'ai',
+        newId: uuid(newId),
+        now: T1,
+      });
+    await aiTag(900);
+    expect((await addAssetTag(ctx.session, { assetId: ctx.asset.id, name: 'Oak' })).tags).toEqual([
+      { name: 'oak', displayName: 'Oak', origin: 'manual' },
+    ]);
+    await aiTag(901);
+    expect((await getAssetDetail(ctx.session, ctx.asset.id)).tags).toEqual([
+      { name: 'oak', displayName: 'Oak', origin: 'manual' },
+    ]);
+  });
+
+  it('removing by hand removes an ai tag from an asset', async () => {
+    const ctx = await setup();
+    await ctx.db.tags.addToAsset({
+      assetId: ctx.asset.id,
+      name: 'oak',
+      displayName: 'Oak',
+      origin: 'ai',
+      newId: uuid(900),
+      now: T1,
+    });
+    expect((await removeAssetTag(ctx.session, { assetId: ctx.asset.id, name: 'oak' })).tags).toEqual([]);
+  });
 });
 
 describe('file tag batches', () => {
