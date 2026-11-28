@@ -1,7 +1,11 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { AssetForgeError, InvalidOperationError } from './errors.js';
 import { resolvePendingFileMove } from './file-move-recovery.js';
+import { errorLogLine, writeLine } from './log-line.js';
 import type { WorkspaceSession } from './session.js';
+
+/** The fixed event text of a resolve that failed right after a failed commit. */
+export const MOVE_RESOLVE_FAILED_EVENT = 'Resolving a file move after a failed commit failed';
 
 const MOVE_FAILED = 'The file could not be moved; it may be in use, missing, or the target already exists';
 
@@ -69,8 +73,9 @@ async function isCompletedByResolve(session: WorkspaceSession, fileId: string): 
       fileMoves: session.database.fileMoves,
     };
     return (await resolvePendingFileMove(dependencies, fileId)) === 'completed';
-  } catch {
-    // The row stays and is repaired by `recoverFileMoves` on the next open.
+  } catch (error) {
+    // The row stays and is repaired by `recoverFileMoves` on the next open; the line keeps the trace.
+    writeLine(session.log, errorLogLine(MOVE_RESOLVE_FAILED_EVENT, { operation: 'move', file: fileId }, error));
     return false;
   }
 }

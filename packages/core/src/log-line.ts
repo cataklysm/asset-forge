@@ -10,7 +10,11 @@ export type LineLog = (line: string) => void;
 /** The value of a field: an id, a count, a code or a fixed word; null leaves the field out. */
 export type LogFieldValue = string | number | null;
 
-/** A field value as it may appear in a line: letters, digits and the separators of ids, codes and channels. */
+/**
+ * A field value as it may appear in a line: letters, digits and the separators of ids, codes and channels. This is
+ * a shape check, not a filter for names or hosts: a file name or host name of the same shape would pass. Callers
+ * must pass only ids, counts and fixed words.
+ */
 const SAFE_VALUE = /^[A-Za-z0-9 _.:-]{0,100}$/;
 
 /** What a field value that fails `SAFE_VALUE` is written as. */

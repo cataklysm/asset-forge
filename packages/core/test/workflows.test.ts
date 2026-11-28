@@ -111,6 +111,20 @@ describe('starting workflows', () => {
     expect(ctx.db.assetWorkflows.workflows.has(UNKNOWN_ID)).toBe(false);
   });
 
+  it('the fake refuses an asset id that exists before writing, keeping the first asset', async () => {
+    const ctx = await setup();
+    const { asset } = await character(ctx);
+    const { templateVersionId } = ctx.db.assetWorkflows.workflows.get(asset.id)!;
+    const row = { id: UNKNOWN_ID, assetId: asset.id, templateVersionId, createdAt: 'x' };
+
+    await expect(
+      ctx.db.assets.insertWithWorkflow({ ...asset, name: 'Again' }, { workflow: row, steps: [] }),
+    ).rejects.toThrow(/UNIQUE/);
+
+    expect(ctx.db.assets.rows.get(asset.id)).toEqual(asset);
+    expect(ctx.db.assetWorkflows.workflows.has(asset.id)).toBe(true);
+  });
+
   it('can start one by naming a template', async () => {
     const ctx = await setup();
     ctx.db.assetTypes.setDefaultWorkflowTemplate('prop', null);

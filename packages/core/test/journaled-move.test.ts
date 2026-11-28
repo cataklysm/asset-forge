@@ -14,6 +14,7 @@ import {
   type JobControl,
   type WorkspaceSession,
 } from '../src/index.js';
+import { MOVE_RESOLVE_FAILED_EVENT } from '../src/journaled-move.js';
 import { createFakeHost } from './fakes.js';
 
 const ROOT = '/ws/a';
@@ -151,5 +152,59 @@ describe('a journaled move whose commit fails', () => {
     await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
     expect(db.files.records.get(file.id)!.relativePath).toBe(assetFilePath(asset.id, 'reference', file.id, 'pump.png'));
     await expect(db.fileMoves.list()).resolves.toEqual([]);
+  });
+});
+
+describe('the log of a failed immediate resolve', () => {
+  const MARKER = 'SECRET_PATH_MARKER';
+
+  /**
+   * A workspace under a marked root whose host log collects lines or throws.
+   *
+   * @param log the host log
+   * @returns the pieces a relocate test needs
+   */
+  async function setupWithLog(log: (line: string) => void) {
+    const fake = createFakeHost();
+    fake.host.log = log;
+    const manager = new WorkspaceManager(fake.host);
+    const summary = await manager.create({ name: 'Demo', rootPath: `/ws/${MARKER}` });
+    const storage = fake.storages.get(`/ws/${MARKER}`)!;
+    const db = fake.databases.get(summary.id)!;
+    const session: WorkspaceSession = await manager.read(async (s) => s);
+    const typeId = (await db.assetTypes.list())[0]!.id;
+    const asset = await createAsset(session, { name: 'Pump', typeId });
+    fake.sources.set('/src/pump.png', Buffer.from('pump'));
+    const [imported] = await manager.importFiles(['/src/pump.png']);
+    return { storage, db, session, asset, file: imported!.file! };
+  }
+
+  it('writes one line with the file id and no path', async () => {
+    const lines: string[] = [];
+    const { storage, db, session, asset, file } = await setupWithLog((line) => lines.push(line));
+    db.fileMoves.failCommits(1);
+    storage.failNext('exists', new Error(`EIO /data/${MARKER}/a.png`));
+
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow(
+      'database is locked',
+    );
+
+    const resolveLines = lines.filter((line) => line.startsWith(MOVE_RESOLVE_FAILED_EVENT));
+    expect(resolveLines).toHaveLength(1);
+    expect(resolveLines[0]).toContain(`file=${file.id}`);
+    for (const line of lines) expect(line).not.toContain(MARKER);
+  });
+
+  it('a log that throws does not change the outcome', async () => {
+    const { storage, db, session, asset, file } = await setupWithLog(() => {
+      throw new Error('log is broken');
+    });
+    db.fileMoves.failCommits(1);
+    storage.failNext('exists', new Error('EIO'));
+
+    await expect(relocateFile(session, file.id, { assetId: asset.id, role: 'reference' })).rejects.toThrow(
+      'database is locked',
+    );
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
   });
 });

@@ -1473,6 +1473,7 @@ class InMemoryAssets implements AssetRepository {
 
   /** Like the one transaction: the asset row goes again when the workflow cannot be inserted. */
   async insertWithWorkflow(asset: Asset, workflow: NewAssetWorkflow): Promise<void> {
+    if (this.rows.has(asset.id)) throw new Error(`UNIQUE constraint failed: asset.id (${asset.id})`);
     this.rows.set(asset.id, asset);
     try {
       await this.workflows.insert(workflow.workflow, workflow.steps);
