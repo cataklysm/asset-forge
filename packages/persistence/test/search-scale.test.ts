@@ -35,6 +35,16 @@ const INBOX_FILE_COUNT = 2_000;
 /** Files in the trash: no asset, like the inbox, so the inbox totals also prove they are excluded. */
 const TRASH_FILE_COUNT = 500;
 
+/**
+ * Prints the timings and query plans of this test, only when  is set, so a normal run stays
+ * quiet.
+ *
+ * @param text the line to print
+ */
+const report = (text: string): void => {
+  if (process.env.ASSETFORGE_SCALE_REPORT === '1') console.info(text);
+};
+
 const TS = '2026-01-01T00:00:00.000Z';
 const uuid = (prefix: number, n: number) =>
   `${String(prefix).padStart(8, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -341,14 +351,12 @@ beforeAll(async () => {
 
   const seedStart = performance.now();
   seed();
-  console.info(`seed of ${ASSET_COUNT} assets: ${Math.round(performance.now() - seedStart)} ms`);
+  report(`seed of ${ASSET_COUNT} assets: ${Math.round(performance.now() - seedStart)} ms`);
 
   sqlite.prepare('update workspace set derived_data_version = null').run();
   const rebuildStart = performance.now();
   await db.ensureDerivedData();
-  console.info(
-    `ensureDerivedData rebuild over ${ASSET_COUNT} assets: ${Math.round(performance.now() - rebuildStart)} ms`,
-  );
+  report(`ensureDerivedData rebuild over ${ASSET_COUNT} assets: ${Math.round(performance.now() - rebuildStart)} ms`);
   // No ANALYZE: production never collects statistics, so the plans are asserted without them.
 }, 120_000);
 
@@ -429,7 +437,7 @@ describe('search scale', () => {
       ],
     ] as const) {
       const lines = plan(statement);
-      console.info(`plan of ${name} for 60 assets:\n  ${lines.join('\n  ')}`);
+      report(`plan of ${name} for 60 assets:\n  ${lines.join('\n  ')}`);
       expect(violations(lines)).toEqual([]);
     }
   });
@@ -471,7 +479,7 @@ describe('search scale', () => {
       expect(statements).not.toBeNull();
       for (const [name, statement] of Object.entries(statements)) {
         const lines = plan(statement);
-        console.info(`plan of ${name} for ${label}:\n  ${lines.join('\n  ')}`);
+        report(`plan of ${name} for ${label}:\n  ${lines.join('\n  ')}`);
         expect(firstAccess(lines)).toMatch(FTS_MATCH_SCAN);
         expect(violations(lines)).toEqual([]);
       }
@@ -486,7 +494,7 @@ describe('search scale', () => {
       const listStart = performance.now();
       const result = await db.assets.list(q);
       const listMs = performance.now() - listStart;
-      console.info(
+      report(
         `search ${label} over ${ASSET_COUNT} assets: ${Math.round(listMs)} ms ` +
           `(page statement ${pageMs.toFixed(1)} ms, count statement ${countMs.toFixed(1)} ms, total ${result.total})`,
       );
@@ -603,7 +611,7 @@ describe('project list plans', () => {
       expect(statements).not.toBeNull();
       for (const [name, statement] of Object.entries(statements!)) {
         const lines = plan(statement);
-        console.info(`plan of the project list ${name} for ${JSON.stringify(q)}:\n  ${lines.join('\n  ')}`);
+        report(`plan of the project list ${name} for ${JSON.stringify(q)}:\n  ${lines.join('\n  ')}`);
         expect({ name, q, violations: violations(lines.filter((l) => !/^SCAN project\b/.test(l))) }).toEqual({
           name,
           q,
@@ -615,7 +623,7 @@ describe('project list plans', () => {
     }
     const pageIds = Array.from({ length: 60 }, (_, p) => uuid(6, p));
     const lines = plan(projectMatchedTagsSql(pageIds, [uuid(2, 0), uuid(2, ASSET_TAG_COUNT)]));
-    console.info(`plan of projectMatchedTagsSql for 60 projects:\n  ${lines.join('\n  ')}`);
+    report(`plan of projectMatchedTagsSql for 60 projects:\n  ${lines.join('\n  ')}`);
     expect(violations(lines)).toEqual([]);
   });
 

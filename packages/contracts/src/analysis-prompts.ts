@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IdSchema } from './ipc-shared';
 
 /** Longest name of an analysis prompt, after the trim. */
 export const ANALYSIS_PROMPT_NAME_MAX = 60;
@@ -28,14 +29,14 @@ export const AnalysisTagLimitSchema = z.number().int().min(ANALYSIS_TAG_LIMIT_MI
 /** Discriminated on `purpose`: only a tagging prompt has `maxTags`. */
 export const AnalysisPromptSchema = z.discriminatedUnion('purpose', [
   z.object({
-    id: z.uuid(),
+    id: IdSchema,
     purpose: z.literal('tagging'),
     name: AnalysisPromptNameSchema,
     text: AnalysisPromptTextSchema,
     maxTags: AnalysisTagLimitSchema,
   }),
   z.object({
-    id: z.uuid(),
+    id: IdSchema,
     purpose: z.literal('image_prompt'),
     name: AnalysisPromptNameSchema,
     text: AnalysisPromptTextSchema,
@@ -47,14 +48,14 @@ export type AnalysisPrompt = z.infer<typeof AnalysisPromptSchema>;
 /** The same two shapes as `AnalysisPromptSchema`; without an id the prompt is created. */
 export const SaveAnalysisPromptSchema = z.discriminatedUnion('purpose', [
   z.object({
-    id: z.uuid().optional(),
+    id: IdSchema.optional(),
     purpose: z.literal('tagging'),
     name: AnalysisPromptNameSchema,
     text: AnalysisPromptTextSchema,
     maxTags: AnalysisTagLimitSchema,
   }),
   z.object({
-    id: z.uuid().optional(),
+    id: IdSchema.optional(),
     purpose: z.literal('image_prompt'),
     name: AnalysisPromptNameSchema,
     text: AnalysisPromptTextSchema,
@@ -66,7 +67,7 @@ export type SaveAnalysisPrompt = z.infer<typeof SaveAnalysisPromptSchema>;
 /** All analysis prompts and, per purpose, the id of the one used last (null when none was used yet). */
 export const AnalysisPromptListSchema = z.object({
   prompts: z.array(AnalysisPromptSchema),
-  lastUsed: z.object({ tagging: z.uuid().nullable(), imagePrompt: z.uuid().nullable() }),
+  lastUsed: z.object({ tagging: IdSchema.nullable(), imagePrompt: IdSchema.nullable() }),
 });
 /** The answer of `analysisPrompts:list`. */
 export type AnalysisPromptList = z.infer<typeof AnalysisPromptListSchema>;

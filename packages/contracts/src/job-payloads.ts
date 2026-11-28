@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IdSchema } from './ipc-shared';
 import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
 import { FileTargetSchema } from './files';
 import { ModelNameSchema, ProviderNameSchema } from './provider-ref';
@@ -24,7 +25,7 @@ export const FileDownloadPayloadV1Schema = z.object({ v: z.literal(1), ...downlo
 export const FileDownloadPayloadV2Schema = z.object({
   v: z.literal(2),
   ...downloadFields,
-  siteProfileId: z.uuid(),
+  siteProfileId: IdSchema,
   filter: SiteFilterSchema,
 });
 /** The payload of a `file.download` job, by version. */
@@ -52,7 +53,7 @@ export function downloadJobFields(payload: unknown): { url: string | null; host:
 }
 
 /** An image generation job names its generation row; everything else lives on that row. */
-export const ImageGeneratePayloadSchema = z.object({ v: z.literal(1), generationId: z.uuid() });
+export const ImageGeneratePayloadSchema = z.object({ v: z.literal(1), generationId: IdSchema });
 /** The payload of an `image.generate` job. */
 export type ImageGeneratePayload = z.infer<typeof ImageGeneratePayloadSchema>;
 

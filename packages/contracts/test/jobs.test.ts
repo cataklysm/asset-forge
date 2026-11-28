@@ -51,6 +51,40 @@ describe('job contracts', () => {
       expect(JOB_ERROR_MESSAGES[code].toLowerCase()).not.toContain('analysis');
   });
 
+  test('every job error message has its fixed text', () => {
+    expect(JOB_ERROR_MESSAGES).toEqual({
+      provider_unreachable: 'The provider could not be reached',
+      provider_timeout: 'The provider did not answer in time',
+      provider_unavailable: 'The provider is temporarily unavailable',
+      provider_rejected: 'The provider rejected the request',
+      invalid_response: 'The provider returned an unusable answer',
+      file_unavailable: 'The file is not available',
+      internal_error: 'The job failed unexpectedly',
+      provider_unauthorized: 'The provider refused the API key',
+      provider_not_configured: 'No provider is configured',
+      provider_outcome_unknown: 'The provider may have processed this request; it was not repeated',
+      provider_insufficient_balance: 'The provider account has no balance left',
+      provider_content_refused: 'The provider refused this content',
+      generation_result_not_stored: 'The provider answered, but the result could not be stored',
+      download_unreachable: 'The address could not be reached',
+      download_unavailable: 'The server is temporarily unavailable',
+      download_throttled: 'The server asked to slow down',
+      download_blocked: 'The server refused access',
+      download_unauthorized: 'The server asked for a login (HTTP 401)',
+      download_forbidden: 'The server refused access (HTTP 403)',
+      download_not_found: 'The file was not found at this address',
+      download_rejected: 'The server rejected the request',
+      download_address_refused: 'This address is not allowed',
+      download_too_large: 'The file is larger than the download limit',
+      download_not_a_file: 'This address is a web page, not a file',
+      download_type_refused: 'This file type cannot be imported',
+      download_no_space: 'There is not enough free disk space',
+      download_profile_missing: 'The site profile of this download no longer exists',
+      download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
+      download_browser_check: 'The site asks for a browser check',
+    });
+  });
+
   test('the generation codes and the neutral messages', () => {
     expect(JOB_ERROR_MESSAGES.provider_outcome_unknown).toBe(
       'The provider may have processed this request; it was not repeated',

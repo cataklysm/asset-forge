@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IdSchema } from './ipc-shared';
 
 /** The id of the read-only entry built from the environment at start. */
 export const ENVIRONMENT_PROVIDER_ID = 'environment';
@@ -8,7 +9,7 @@ export const PROVIDER_NAME_MAX = 60;
 export const MAX_PROVIDERS = 10;
 
 /** A stored provider entry is named by a UUID; the environment entry by `environment`. */
-export const ProviderIdSchema = z.union([z.uuid(), z.literal(ENVIRONMENT_PROVIDER_ID)]);
+export const ProviderIdSchema = z.union([IdSchema, z.literal(ENVIRONMENT_PROVIDER_ID)]);
 /** The id of a provider entry. */
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { IpcErrorSchema } from './errors';
 import { FileRoleSchema } from './library';
 import { TagAssignmentSchema } from './tags';
+import { CountSchema, IdSchema } from './ipc-shared';
+import { pageOf } from './paging';
 
 /** `pending` while the import runs or awaits recovery, `complete` once committed, `failed` with `error` set. */
 export const ImportStatusSchema = z.enum(['pending', 'complete', 'failed']);
@@ -15,9 +17,9 @@ export type FileKind = z.infer<typeof FileKindSchema>;
 
 /** A file row as the renderer sees it. `relativePath` is relative to the storage named by `storageId`. */
 export const FileRecordSchema = z.object({
-  id: z.uuid(),
-  storageId: z.uuid(),
-  assetId: z.uuid().nullable(),
+  id: IdSchema,
+  storageId: IdSchema,
+  assetId: IdSchema.nullable(),
   role: FileRoleSchema.nullable(),
   originalName: z.string(),
   relativePath: z.string(),
@@ -48,7 +50,7 @@ export const FileRecordSchema = z.object({
   /** When the file was moved to the trash; null while it is not in the trash. */
   deletedAt: z.string().nullable(),
   /** The asset a trashed file came from (null for an inbox file, or when that asset is gone). */
-  trashedAssetId: z.uuid().nullable(),
+  trashedAssetId: IdSchema.nullable(),
   trashedAssetName: z.string().nullable(),
   /** The role a trashed file had in that asset. */
   trashedRole: FileRoleSchema.nullable(),
@@ -66,7 +68,7 @@ export const ImportResultSchema = z.object({
   entryName: z.string().nullable(),
   file: FileRecordSchema.nullable(),
   error: z.string().nullable(),
-  duplicateOf: z.array(z.uuid()),
+  duplicateOf: z.array(IdSchema),
 });
 /** One result of `files:import`. */
 export type ImportResult = z.infer<typeof ImportResultSchema>;
@@ -76,8 +78,8 @@ export type ImportResult = z.infer<typeof ImportResultSchema>;
  * entries once its directory is read), and the bytes written of the item in progress, with its size when known.
  */
 export const ImportProgressSchema = z.object({
-  done: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative(),
+  done: CountSchema,
+  total: CountSchema,
   currentBytes: z.number().int().nonnegative(),
   currentSize: z.number().int().nonnegative().nullable(),
   cancelling: z.boolean(),
@@ -89,28 +91,25 @@ export type ImportProgress = z.infer<typeof ImportProgressSchema>;
 export const FileScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('all') }),
   z.object({ kind: z.literal('inbox') }),
-  z.object({ kind: z.literal('asset'), assetId: z.uuid() }),
+  z.object({ kind: z.literal('asset'), assetId: IdSchema }),
   z.object({ kind: z.literal('trash') }),
 ]);
 /** Which files a list covers. */
 export type FileScope = z.infer<typeof FileScopeSchema>;
 
 /** Where a file is placed: an asset and the role the file plays for it. */
-export const FileTargetSchema = z.object({ assetId: z.uuid(), role: FileRoleSchema });
+export const FileTargetSchema = z.object({ assetId: IdSchema, role: FileRoleSchema });
 /** Where a file is placed. */
 export type FileTarget = z.infer<typeof FileTargetSchema>;
 
 /** One page of a file list and the number of files the whole list holds. */
-export const FileListSchema = z.object({
-  items: z.array(FileRecordSchema),
-  total: z.number().int().min(0),
-});
+export const FileListSchema = pageOf(FileRecordSchema);
 /** One page of a file list. */
 export type FileList = z.infer<typeof FileListSchema>;
 
 /** The files of a batch: 1 to 1000 distinct ids. */
 export const FileIdsSchema = z
-  .array(z.uuid())
+  .array(IdSchema)
   .min(1)
   .max(1000)
   .refine((ids) => new Set(ids).size === ids.length, { message: 'The file ids must be distinct' });
@@ -122,7 +121,7 @@ export const FileIdsSchema = z
 export const FileBatchResultSchema = z.object({
   items: z.array(
     z.object({
-      fileId: z.uuid(),
+      fileId: IdSchema,
       file: FileRecordSchema.nullable(),
       error: IpcErrorSchema.nullable(),
     }),
@@ -131,21 +130,16 @@ export const FileBatchResultSchema = z.object({
 /** The answer of a per-item file batch. */
 export type FileBatchResult = z.infer<typeof FileBatchResultSchema>;
 
-/** The result of `files:assignMany`; the same shape as every per-item file batch. */
-export const AssignManyResultSchema = FileBatchResultSchema;
-/** The answer of `files:assignMany`. */
-export type AssignManyResult = FileBatchResult;
-
 /** The outcome of emptying the trash. */
 export const EmptyTrashResultSchema = z.object({
-  purged: z.number().int().min(0),
-  failed: z.number().int().min(0),
+  purged: CountSchema,
+  failed: CountSchema,
 });
 /** The answer of `trash:empty`. */
 export type EmptyTrashResult = z.infer<typeof EmptyTrashResultSchema>;
 
 /** The number of files in the trash. */
-export const TrashSummarySchema = z.object({ count: z.number().int().min(0) });
+export const TrashSummarySchema = z.object({ count: CountSchema });
 /** The answer of `trash:summary`. */
 export type TrashSummary = z.infer<typeof TrashSummarySchema>;
 

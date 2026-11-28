@@ -48,10 +48,17 @@ describe('prompt schemas', () => {
   });
 
   test('defaults refuse 41 keys and a 2001-character value', () => {
-    const many = Object.fromEntries(Array.from({ length: 41 }, (_, i) => [`k${i}`, 'v']));
-    expect(PromptDefaultsSchema.safeParse(many).success).toBe(false);
+    const keys = (count: number) => Object.fromEntries(Array.from({ length: count }, (_, i) => [`k${i}`, 'v']));
+    expect(PromptDefaultsSchema.safeParse(keys(40)).success).toBe(true);
+    const many = PromptDefaultsSchema.safeParse(keys(41));
+    expect(many.success).toBe(false);
+    expect(many.error?.issues[0]?.message).toBe('At most 40 default values');
     expect(PromptDefaultsSchema.safeParse({ a: 'v'.repeat(2001) }).success).toBe(false);
     expect(PromptDefaultsSchema.safeParse({ a: 'v'.repeat(2000) }).success).toBe(true);
+  });
+
+  test('defaults carry keys that differ only by whitespace; the transport does not fold them', () => {
+    expect(PromptDefaultsSchema.parse({ view: 'a', ' view ': 'b' })).toEqual({ view: 'a', ' view ': 'b' });
   });
 
   test('the list limit is 1 to 200', () => {
