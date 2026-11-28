@@ -783,7 +783,15 @@ describe('library IPC', () => {
       const session = await manager.read(async (s) => s);
       vi.spyOn(session.database.files, 'purge').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
       const exclusive = vi.spyOn(manager, 'exclusive');
-      expect(await ok('trash:empty', {})).toEqual({ purged: 2, failed: 1 });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        expect(await ok('trash:empty', {})).toEqual({ purged: 2, failed: 1 });
+        // The left file by id and code only: neither the cause's message nor the path reaches the log.
+        const [left] = (await ok('files:list', { ...page, scope: { kind: 'trash' } })).items;
+        expect(warn.mock.calls).toEqual([[`Emptying the trash left file ${left!.id}: internal_error`]]);
+      } finally {
+        warn.mockRestore();
+      }
       expect(exclusive).toHaveBeenCalled();
       expect(await ok('trash:summary', {})).toEqual({ count: 1 });
       expect(await ok('trash:empty', {})).toEqual({ purged: 1, failed: 0 });

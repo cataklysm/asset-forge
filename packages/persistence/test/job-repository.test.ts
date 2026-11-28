@@ -735,6 +735,52 @@ describe('job lanes', () => {
     expect(await db.jobs.nextRunAfter([TYPE], ['a', 'b'])).toBe(T9);
   });
 
+  test('nextRunAfter with an empty exclusion list leaves out no lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, null));
+    setStatus(10, 'retry_wait', RA);
+    setStatus(11, 'retry_wait', T9);
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(await db.jobs.nextRunAfter([TYPE]));
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(T9);
+    setStatus(11, 'queued');
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(RA);
+  });
+
+  test('payloads are stored through JSON: undefined members drop and later mutations do not reach the row', async () => {
+    const payload = { version: 1, gone: undefined, nested: { n: 1 } };
+    await enqueueInOrder(laned(10, 'a', payload), laned(11, null, payload));
+    payload.nested.n = 2;
+    const read = await db.jobs.get(uuid(10));
+    expect(read?.payload).toEqual({ version: 1, nested: { n: 1 } });
+    expect(Object.keys(read?.payload as object)).not.toContain('gone');
+    (read?.payload as { nested: { n: number } }).nested.n = 3;
+    expect((await db.jobs.get(uuid(10)))?.payload).toEqual({ version: 1, nested: { n: 1 } });
+
+    // A rewrite gets its own copy: mutating the argument changes nothing, only the answer is stored.
+    await db.jobs.rerouteWaiting({
+      type: TYPE,
+      fromLane: 'a',
+      toLane: 'b',
+      rewrite: (p) => {
+        (p as { nested: { n: number } }).nested.n = 4;
+        return { moved: true, dropped: undefined };
+      },
+      now: LATER,
+    });
+    expect((await db.jobs.get(uuid(10)))?.payload).toEqual({ moved: true });
+    await db.jobs.assignLane({
+      type: TYPE,
+      lane: 'c',
+      rewrite: (p) => {
+        (p as { nested: { n: number } }).nested.n = 5;
+        return null;
+      },
+      now: LATER,
+    });
+    const untouched = await db.jobs.get(uuid(11));
+    expect(untouched?.lane).toBeNull();
+    expect(untouched?.payload).toEqual({ version: 1, nested: { n: 1 } });
+  });
+
   test('rerouteWaiting moves the queued and retry_wait jobs of a lane and leaves the others', async () => {
     await enqueueInOrder(
       laned(10, 'a', { n: 'q' }),
