@@ -106,6 +106,8 @@ interface PromptRowProps {
   markerId: string;
   selected: boolean;
   unsaved: boolean;
+  /** An action of the section runs. */
+  busy: boolean;
   select(id: string): void;
 }
 
@@ -115,13 +117,14 @@ interface PromptRowProps {
  * @param props the prompt, its state and the select handler
  * @returns the list item
  */
-function PromptRow({ prompt, markerId, selected, unsaved, select }: PromptRowProps) {
+function PromptRow({ prompt, markerId, selected, unsaved, busy, select }: PromptRowProps) {
   return (
     <li className="flex flex-col">
       <button
         type="button"
         className={BUTTON_INLINE}
         aria-pressed={selected}
+        disabled={busy}
         aria-describedby={unsaved ? markerId : undefined}
         onClick={() => select(prompt.id)}
       >
@@ -156,6 +159,7 @@ function PurposeGroup({ purpose, headingId, own, selectedId, drafts, busy, selec
             markerId={`${headingId}-${prompt.id}-unsaved`}
             selected={prompt.id === selectedId}
             unsaved={changed(prompt, drafts[prompt.id])}
+            busy={busy}
             select={select}
           />
         ))}
@@ -206,7 +210,7 @@ export function PromptSettings() {
   const selected = list.find((prompt) => prompt.id === selectedId) ?? list[0] ?? null;
 
   /**
-   * Saves the draft of the selected prompt; edits made while the save ran stay as a draft.
+   * Saves the draft of the selected prompt; the draft as sent goes once saved.
    *
    * @param prompt the selected prompt
    * @param draft the draft as sent
@@ -217,19 +221,13 @@ export function PromptSettings() {
   };
 
   /**
-   * Resets the selected prompt; edits made while the reset ran stay as a draft.
+   * Resets the selected prompt; its draft goes, so the editor shows the answer. The fields are read-only
+   * while the reset runs, so nothing typed meanwhile is lost.
    *
    * @param prompt the selected prompt
    * @returns when the reset ended
    */
-  const resetPrompt = (prompt: AnalysisPrompt) => {
-    const kept = drafts[prompt.id];
-    return run(() =>
-      reset(prompt.id).then(() => {
-        if (kept !== undefined) dropDraft(prompt.id, kept);
-      }),
-    );
-  };
+  const resetPrompt = (prompt: AnalysisPrompt) => run(() => reset(prompt.id).then(() => dropDraft(prompt.id)));
 
   /**
    * Selects a prompt; the message of an action on another prompt goes.

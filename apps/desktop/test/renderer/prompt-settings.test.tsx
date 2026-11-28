@@ -199,19 +199,46 @@ it('Reset calls the channel without asking and shows the returned text', async (
   expect(screen.queryByTitle('Unsaved changes')).toBeNull();
 });
 
-it('text typed while a reset runs stays as a draft', async () => {
+it('the fields are read-only while a reset runs, and the answer is shown afterwards', async () => {
   const pending = deferred<AnalysisPrompt>();
   const answer = { ...DETAILED, text: BUILT_IN_TAGGING_TEXT, maxTags: 15 };
   install({ 'analysisPrompts:reset': () => pending.promise });
   renderSection();
   await loaded();
   await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.type(field('Text'), ' edited');
+  await userEvent.clear(field('Tag limit'));
+  await userEvent.type(field('Tag limit'), '30');
   await userEvent.click(button('Reset'));
+  expect(field('Name').readOnly).toBe(true);
+  expect(field('Text').readOnly).toBe(true);
+  expect(field('Tag limit').readOnly).toBe(true);
   await userEvent.type(field('Text'), ' typed meanwhile');
+  expect(field('Text').value).toBe('Describe the person precisely edited');
   await act(async () => pending.resolve(answer));
   await waitFor(() => expect(button('Reset').disabled).toBe(false));
-  expect(field('Text').value).toBe('Describe the person precisely typed meanwhile');
-  expect(within(entry('Tagging', 'Detailed')).getByTitle('Unsaved changes')).toBeTruthy();
+  expect(field('Text').readOnly).toBe(false);
+  expect(field('Text').value).toBe(BUILT_IN_TAGGING_TEXT);
+  expect(field('Tag limit').value).toBe('15');
+  expect(within(entry('Tagging', 'Detailed')).queryByTitle('Unsaved changes')).toBeNull();
+});
+
+it('the entries and New are disabled while an action runs, so its failure shows with its prompt', async () => {
+  const pending = deferred<AnalysisPrompt>();
+  install({ 'analysisPrompts:save': () => pending.promise });
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.type(field('Text'), ' and more');
+  await userEvent.click(button('Save'));
+  expect(entry('Tagging', 'Default').disabled).toBe(true);
+  expect(entry('Image to prompt', 'Default').disabled).toBe(true);
+  expect((within(group('Tagging')).getByRole('button', { name: 'New' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(entry('Tagging', 'Default'));
+  await act(async () => pending.reject(fakeError('internal_error')));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(entry('Tagging', 'Detailed').getAttribute('aria-pressed')).toBe('true');
+  expect(entry('Tagging', 'Default').disabled).toBe(false);
 });
 
 it('the message of a refused action goes when another prompt is selected', async () => {
