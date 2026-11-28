@@ -72,6 +72,127 @@ describe('durable gallery discovery', () => {
     throw new Error('Discovery did not finish');
   }
 
+  it('reports import completion durably and clears completed reviews without touching profiles or files', async () => {
+    const saved = await open();
+    const fileId = await h!.importPng({ name: 'keep.png', width: 8, height: 8 });
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await ready(crawlId);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    await h!.ok('sites:import', { crawlId, selectedUrls: ['https://example.com/photo.jpg'] });
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({
+      status: 'imported',
+      downloads: { total: 1, queued: 1, succeeded: 0 },
+    });
+    const job = await h!.manager.read((session) =>
+      session.database.jobs.claimNext({
+        resourceClass: 'io',
+        types: ['file.download'],
+        now: session.now().toISOString(),
+      }),
+    );
+    expect(job).not.toBeNull();
+    await h!.manager.read((session) =>
+      session.database.jobs.finish(job!.id, { status: 'succeeded', errorCode: null, now: session.now().toISOString() }),
+    );
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({
+      status: 'completed',
+      downloads: { total: 1, succeeded: 1, running: 0, queued: 0 },
+    });
+    await h!.ok('jobs:clearFinished', {});
+    const rootPath = h!.manager.current()!.rootPath;
+    await h!.ok('workspace:close', {});
+    await h!.ok('workspace:open', { rootPath });
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({
+      status: 'completed',
+      downloads: { total: 1, succeeded: 1 },
+    });
+    expect(await h!.call('sites:clearCompletedCrawls', {})).toEqual({ ok: true, value: { removed: 1 } });
+    expect((await h!.ok('sites:listCrawls', {})).total).toBe(0);
+    expect(await h!.manager.read((session) => session.database.files.get(fileId))).not.toBeNull();
+    expect((await h!.ok('sites:list', {})).profiles).toHaveLength(1);
+  });
+
+  it('keeps failed imports for review and follows a download retry back to completion', async () => {
+    const saved = await open();
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await ready(crawlId);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    await h!.ok('sites:import', { crawlId, selectedUrls: ['https://example.com/photo.jpg'] });
+    const job = await h!.manager.read((session) =>
+      session.database.jobs.claimNext({
+        resourceClass: 'io',
+        types: ['file.download'],
+        now: session.now().toISOString(),
+      }),
+    );
+    await h!.manager.read((session) =>
+      session.database.jobs.finish(job!.id, {
+        status: 'failed',
+        errorCode: 'download_forbidden',
+        now: session.now().toISOString(),
+      }),
+    );
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({
+      status: 'import_failed',
+      downloads: { failed: 1, total: 1 },
+    });
+    expect(await h!.call('sites:clearCompletedCrawls', {})).toEqual({ ok: true, value: { removed: 0 } });
+    await h!.ok('jobs:retry', { jobId: job!.id });
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({
+      status: 'imported',
+      downloads: { queued: 1, failed: 0 },
+    });
+    const retried = await h!.manager.read((session) =>
+      session.database.jobs.claimNext({
+        resourceClass: 'io',
+        types: ['file.download'],
+        now: session.now().toISOString(),
+      }),
+    );
+    await h!.manager.read((session) =>
+      session.database.jobs.finish(retried!.id, {
+        status: 'succeeded',
+        errorCode: null,
+        now: session.now().toISOString(),
+      }),
+    );
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('completed');
+  });
+
+  it('tracks shared pending downloads for each extraction and leaves them independent of an in-place restart', async () => {
+    const saved = await open();
+    const first = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    const second = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: `${URL}/2`, target: null });
+    await ready(first.crawlId);
+    await ready(second.crawlId);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    await h!.ok('sites:import', { crawlId: first.crawlId, selectedUrls: ['https://example.com/photo.jpg'] });
+    expect(
+      (await h!.ok('sites:import', { crawlId: second.crawlId, selectedUrls: ['https://example.com/photo.jpg'] }))
+        .alreadyQueued,
+    ).toBe(1);
+    expect(await h!.ok('sites:getCrawl', { crawlId: second.crawlId })).toMatchObject({
+      downloads: { total: 1, queued: 1 },
+    });
+    await h!.ok('sites:restartCrawl', { crawlId: first.crawlId });
+    await ready(first.crawlId);
+    const job = await h!.manager.read((session) =>
+      session.database.jobs.claimNext({
+        resourceClass: 'io',
+        types: ['file.download'],
+        now: session.now().toISOString(),
+      }),
+    );
+    await h!.manager.read((session) =>
+      session.database.jobs.finish(job!.id, { status: 'succeeded', errorCode: null, now: session.now().toISOString() }),
+    );
+    expect(await h!.ok('sites:getCrawl', { crawlId: first.crawlId })).toMatchObject({
+      status: 'ready',
+      downloads: null,
+    });
+    expect((await h!.ok('sites:getCrawl', { crawlId: second.crawlId })).status).toBe('completed');
+  });
+
   it('queues five galleries separately and retains each result for review without downloads', async () => {
     const saved = await open();
     const tasks = [];

@@ -184,7 +184,7 @@ it('exposes status-appropriate actions through the keyboard context menu and can
   );
 });
 
-it('removes the requested card after confirmation without cancelling downloads or another extraction', async () => {
+it('clears the requested card immediately without a confirmation dialog or cancelling another extraction', async () => {
   const first = task('first');
   const second = task('remove');
   const tasks = [first, second];
@@ -198,15 +198,37 @@ it('removes the requested card after confirmation without cancelling downloads o
     },
   });
   await user.click(within(await menu(second)).getByRole('menuitem', { name: 'Remove extraction' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Remove extraction?' });
-  expect(api.calls.some((call) => call.channel === 'sites:removeCrawl')).toBe(false);
-  await user.click(within(dialog).getByRole('button', { name: 'Remove extraction' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
   await waitFor(() =>
     expect(screen.queryByRole('button', { name: `Select extraction ${second.galleryUrl}` })).toBeNull(),
   );
   expect(card(first)).toBeTruthy();
   expect(api.calls.find((call) => call.channel === 'sites:removeCrawl')?.request).toEqual({ crawlId: second.crawlId });
   expect(api.calls.some((call) => call.channel === 'sites:cancelCrawl')).toBe(false);
+});
+
+it('shows a completed import and clears completed entries in one click without a dialog', async () => {
+  const saved = task('done', 'completed');
+  Object.assign(saved, {
+    downloads: { total: 4, queued: 0, running: 0, waiting: 0, succeeded: 4, failed: 0, cancelled: 0 },
+  });
+  const tasks = [saved];
+  const { api, user } = setup(tasks, {
+    'sites:clearCompletedCrawls': () => {
+      tasks.splice(0);
+      return { removed: 1 };
+    },
+  });
+  await waitFor(() => expect(card(saved)).toBeTruthy());
+  await user.click(card(saved));
+  expect(await screen.findByText('Import complete')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Import selected' })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Clear completed' }));
+  await waitFor(() =>
+    expect(api.calls.filter((call) => call.channel === 'sites:clearCompletedCrawls')).toHaveLength(1),
+  );
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('button', { name: `Select extraction ${saved.galleryUrl}` })).toBeNull();
 });
 
 it('opens creation separately and submits new galleries to the inbox', async () => {
