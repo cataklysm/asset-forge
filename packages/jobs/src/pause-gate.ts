@@ -31,60 +31,157 @@ const FATAL: ReadonlySet<JobErrorCode> = new Set([
  * It belongs to the app session and outlives every scheduler that is handed it; it is not persisted.
  */
 export interface PauseGate {
-  /** The code that paused the lane of the class, or null while it may claim. */
+  /**
+   * The code that paused the lane of the class, or null while it may claim.
+   *
+   * @param resourceClass the class of the lane
+   * @param lane the lane
+   * @returns the code that paused the lane, or null
+   */
   reason(resourceClass: ResourceClass, lane: string | null): JobErrorCode | null;
-  /** The end of one run: 'ok' for a success, 'other' for a cancel, a release on stop or a non-provider error. */
+  /**
+   * The end of one run: 'ok' for a success, 'other' for a cancel, a release on stop or a non-provider error.
+   *
+   * @param resourceClass the class of the run
+   * @param lane the lane of the run
+   * @param outcome the run's error code, 'ok' or 'other'
+   */
   record(resourceClass: ResourceClass, lane: string | null, outcome: JobErrorCode | 'ok' | 'other'): void;
-  /** Ends the pause of the lane and clears its count. The caller wakes the scheduler. */
+  /**
+   * Ends the pause of the lane and clears its count. The caller wakes the scheduler.
+   *
+   * @param resourceClass the class of the lane
+   * @param lane the lane
+   */
   resume(resourceClass: ResourceClass, lane: string | null): void;
-  /** The paused lanes of the class with their reasons, in the order they paused. */
+  /**
+   * The paused lanes of the class with their reasons, in the order they paused.
+   *
+   * @param resourceClass the class
+   * @returns one entry per paused lane
+   */
   paused(resourceClass: ResourceClass): { lane: string | null; reason: JobErrorCode }[];
 }
 
+/** What `createPauseGate` is configured with. */
 export interface PauseGateOptions {
+  /** Consecutive provider-down runs after which a lane pauses. Default `DEFAULT_PAUSE_THRESHOLD`. */
   threshold?: number;
   /** Called when a lane pauses and when a paused lane resumes, never otherwise. */
   onChange?: () => void;
 }
 
+/**
+ * Creates the pause gate of an app session.
+ *
+ * @param options the threshold and the change listener
+ * @returns the gate, with no lane paused
+ */
 export function createPauseGate(options: PauseGateOptions): PauseGate {
-  const threshold = options.threshold ?? DEFAULT_PAUSE_THRESHOLD;
-  const counts = new Map<ResourceClass, Map<string | null, number>>();
-  const reasons = new Map<ResourceClass, Map<string | null, JobErrorCode>>();
-  const of = <T>(maps: Map<ResourceClass, Map<string | null, T>>, rc: ResourceClass): Map<string | null, T> => {
-    let map = maps.get(rc);
-    if (!map) maps.set(rc, (map = new Map()));
-    return map;
-  };
-
+  const gate = new LanePauses(options, options.threshold ?? DEFAULT_PAUSE_THRESHOLD);
   return {
-    reason: (rc, lane) => reasons.get(rc)?.get(lane) ?? null,
-
-    record(rc, lane, outcome) {
-      const laneReasons = of(reasons, rc);
-      // A paused lane keeps its first reason until resume; runs that were in flight do not change it.
-      if (laneReasons.has(lane)) return;
-      const laneCounts = of(counts, rc);
-      if (outcome === 'ok' || outcome === 'other' || !(DOWN.has(outcome) || FATAL.has(outcome))) {
-        laneCounts.delete(lane);
-        return;
-      }
-      const n = FATAL.has(outcome) ? threshold : (laneCounts.get(lane) ?? 0) + 1;
-      if (n < threshold) {
-        laneCounts.set(lane, n);
-        return;
-      }
-      laneCounts.delete(lane);
-      laneReasons.set(lane, outcome);
-      options.onChange?.();
-    },
-
-    resume(rc, lane) {
-      counts.get(rc)?.delete(lane);
-      if (!reasons.get(rc)?.delete(lane)) return;
-      options.onChange?.();
-    },
-
-    paused: (rc) => [...(reasons.get(rc) ?? [])].map(([lane, reason]) => ({ lane, reason })),
+    reason: (resourceClass, lane) => gate.reason(resourceClass, lane),
+    record: (resourceClass, lane, outcome) => gate.record(resourceClass, lane, outcome),
+    resume: (resourceClass, lane) => gate.resume(resourceClass, lane),
+    paused: (resourceClass) => gate.paused(resourceClass),
   };
+}
+
+/**
+ * Whether a run's outcome counts toward a pause.
+ *
+ * @param outcome the run's error code, 'ok' or 'other'
+ * @returns true for a provider-down or a fatal code
+ */
+function countsTowardPause(outcome: JobErrorCode | 'ok' | 'other'): outcome is JobErrorCode {
+  return outcome !== 'ok' && outcome !== 'other' && (DOWN.has(outcome) || FATAL.has(outcome));
+}
+
+/**
+ * The lane of `maps` for one class, created empty on first use.
+ *
+ * @param maps per class the values by lane
+ * @param resourceClass the class
+ * @returns the class's map of values by lane
+ */
+function lanesOf<T>(maps: Map<ResourceClass, Map<string | null, T>>, resourceClass: ResourceClass): Map<string | null, T> {
+  let map = maps.get(resourceClass);
+  if (!map) maps.set(resourceClass, (map = new Map()));
+  return map;
+}
+
+/** The counts and reasons of every class and lane; the methods are the gate's. */
+class LanePauses {
+  /** Consecutive provider-down runs per class and lane, for lanes not paused. */
+  private readonly counts = new Map<ResourceClass, Map<string | null, number>>();
+  /** The code that paused each paused lane, per class, in the order they paused. */
+  private readonly reasons = new Map<ResourceClass, Map<string | null, JobErrorCode>>();
+
+  /**
+   * @param options the options as passed; `onChange` is read at every use
+   * @param threshold consecutive provider-down runs after which a lane pauses
+   */
+  constructor(
+    private readonly options: PauseGateOptions,
+    private readonly threshold: number,
+  ) {}
+
+  /**
+   * See `PauseGate.reason`.
+   *
+   * @param resourceClass the class of the lane
+   * @param lane the lane
+   * @returns the code that paused the lane, or null
+   */
+  reason(resourceClass: ResourceClass, lane: string | null): JobErrorCode | null {
+    return this.reasons.get(resourceClass)?.get(lane) ?? null;
+  }
+
+  /**
+   * See `PauseGate.record`.
+   *
+   * @param resourceClass the class of the run
+   * @param lane the lane of the run
+   * @param outcome the run's error code, 'ok' or 'other'
+   */
+  record(resourceClass: ResourceClass, lane: string | null, outcome: JobErrorCode | 'ok' | 'other'): void {
+    const laneReasons = lanesOf(this.reasons, resourceClass);
+    // A paused lane keeps its first reason until resume; runs that were in flight do not change it.
+    if (laneReasons.has(lane)) return;
+    const laneCounts = lanesOf(this.counts, resourceClass);
+    if (!countsTowardPause(outcome)) {
+      laneCounts.delete(lane);
+      return;
+    }
+    const count = FATAL.has(outcome) ? this.threshold : (laneCounts.get(lane) ?? 0) + 1;
+    if (count < this.threshold) {
+      laneCounts.set(lane, count);
+      return;
+    }
+    laneCounts.delete(lane);
+    laneReasons.set(lane, outcome);
+    this.options.onChange?.();
+  }
+
+  /**
+   * See `PauseGate.resume`.
+   *
+   * @param resourceClass the class of the lane
+   * @param lane the lane
+   */
+  resume(resourceClass: ResourceClass, lane: string | null): void {
+    this.counts.get(resourceClass)?.delete(lane);
+    if (!this.reasons.get(resourceClass)?.delete(lane)) return;
+    this.options.onChange?.();
+  }
+
+  /**
+   * See `PauseGate.paused`.
+   *
+   * @param resourceClass the class
+   * @returns one entry per paused lane
+   */
+  paused(resourceClass: ResourceClass): { lane: string | null; reason: JobErrorCode }[] {
+    return [...(this.reasons.get(resourceClass) ?? [])].map(([lane, reason]) => ({ lane, reason }));
+  }
 }

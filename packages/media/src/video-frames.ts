@@ -2,28 +2,32 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { jpegDimensions } from './jpeg-dimensions.js';
+import { DiagnosticLines, DiagnosticsReader, type VideoInfo } from './video-diagnostics.js';
+import {
+  FRAME_AT_SECONDS,
+  frameArguments,
+  frameMatches,
+  isVideoFormat,
+  type VideoFormat,
+} from './video-frame-arguments.js';
 
-/** Container of a video; picks the demuxer, which is never guessed from the content. */
-export type VideoFormat = 'mp4' | 'webm';
-
-/** Displayed size (after rotation) and duration of a video. */
-export interface VideoInfo {
-  width: number;
-  height: number;
-  /** Positive whole milliseconds, or null when the container does not say. */
-  durationMs: number | null;
-}
-
+/** The frame tool: one ffmpeg process per call, bounded in number and time. */
 export interface VideoFrames {
   /**
-   * Extracts one frame as a JPEG at `targetPath`; null when the tool is missing, fails, times out
-   * or was closed. Never rejects and never leaves a partial target.
+   * Extracts one frame as a JPEG at `targetPath`. Never rejects and never leaves a partial target.
+   *
+   * @param sourcePath the video
+   * @param format its container
+   * @param targetPath where the JPEG ends up
+   * @returns the video's displayed size and duration; null when the tool is missing, fails, times out or was closed
    */
   extract(sourcePath: string, format: VideoFormat, targetPath: string): Promise<VideoInfo | null>;
   /** Kills running processes, answers queued calls with null and refuses new ones. */
   close(): void;
 }
 
+/** What `createVideoFrames` is configured with. */
 export interface VideoFramesOptions {
   /** Absolute path of the ffmpeg binary; null (or a promise of null) answers every call with null. */
   binaryPath: string | null | Promise<string | null>;
@@ -34,389 +38,312 @@ export interface VideoFramesOptions {
   /** Test hook: receives every started process. */
   onProcess?: (child: ChildProcess) => void;
   /** Test hook: starts the process instead of `child_process.spawn`. */
-  spawnProcess?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+  spawnProcess?: (command: string, commandArguments: string[], options: SpawnOptions) => ChildProcess;
   /** Test hook: replaces KILL_GRACE_MS. */
   killGraceMs?: number;
 }
 
+/** Processes at a time by default. */
 export const VIDEO_FRAME_CONCURRENCY = 2;
+/** Time limit of one call by default, both attempts together. */
 export const VIDEO_FRAME_TIMEOUT_MS = 20_000;
-/** Longer edge of an extracted frame; smaller frames are never enlarged. */
-export const FRAME_EDGE = 1024;
-/** The frame is taken at this second, and at 0 s when the video is shorter. */
-export const FRAME_AT_SECONDS = 1;
-/** The same decoder pixel limit as for images. */
-export const VIDEO_MAX_PIXELS = 100_000_000;
-
-const DEMUXERS: Record<VideoFormat, string> = { mp4: 'mov,mp4,m4a,3gp,3g2,mj2', webm: 'matroska,webm' };
-/** Video decoders the formats can carry; audio and anything else are never opened. */
-const DECODERS: Record<VideoFormat, string> = {
-  mp4: 'h264,hevc,mpeg4,av1,libdav1d,vp9',
-  webm: 'vp8,vp9,av1,libdav1d',
-};
-/** Diagnostic lines are read one by one; a longer line is cut to this many characters. */
-const MAX_LINE = 4096;
-
-/** Scale factor to the displayed size (square pixels), never above 1. */
-const FACTOR = `min(1,${FRAME_EDGE}/max(iw*sar,ih))`;
-/**
- * Scales to the displayed size with square pixels, longer edge at most FRAME_EDGE, never enlarged.
- * `sar` is 1 when the video does not say.
- */
-const SCALE =
-  `scale=w='max(1,trunc(iw*sar*${FACTOR}+0.5))'` + `:h='max(1,trunc(ih*${FACTOR}+0.5))',setsar=1`;
 
 /** A grace period after kill(): the attempt is given up when the process has not exited by then. */
 export const KILL_GRACE_MS = 2000;
 /** A written frame larger than this is not read back. */
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 
-/**
- * The argument list of one attempt. `showinfo` stands after the automatic rotation and before the
- * scale, so it prints the stored size and sample aspect ratio of the rotated frame. Both paths
- * carry the `file:` prefix, so nothing in a name can select another protocol.
- */
-export function frameArguments(sourcePath: string, format: VideoFormat, atSeconds: number, tmpPath: string): string[] {
-  return [
-    '-nostdin',
-    '-hide_banner',
-    '-nostats',
-    '-loglevel', 'info',
-    '-protocol_whitelist', 'file',
-    '-format_whitelist', DEMUXERS[format],
-    '-codec_whitelist', DECODERS[format],
-    '-max_pixels', String(VIDEO_MAX_PIXELS),
-    '-threads', '2',
-    '-f', DEMUXERS[format],
-    '-ss', String(atSeconds),
-    '-i', `file:${sourcePath}`,
-    '-map', '0:V:0',
-    '-an', '-sn', '-dn',
-    '-frames:v', '1',
-    '-vf', `showinfo,${SCALE}`,
-    '-c:v', 'mjpeg',
-    '-q:v', '3',
-    '-f', 'image2',
-    '-update', '1',
-    '-y',
-    `file:${tmpPath}`,
-  ];
-}
-
-/**
- * The duration of an input header line (`  Duration: 00:00:03.00, …`): milliseconds, null for
- * `N/A` or zero, undefined for any other line. Metadata values are indented further and never match.
- */
-export function durationFromLine(line: string): number | null | undefined {
-  const match = /^ {2}Duration: (?:(N\/A)|(\d+):(\d{2}):(\d{2}(?:\.\d+)?)),/.exec(line);
-  if (!match) return undefined;
-  if (match[1]) return null;
-  const ms = Math.round(
-    (Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4])) * 1000,
-  );
-  return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
-}
-
-interface Size {
-  width: number;
-  height: number;
-}
-
-/**
- * The displayed size of the first frame `showinfo` reports (the stored width times the sample
- * aspect ratio); null for such a line with an unusable size (beyond VIDEO_MAX_PIXELS, stored or
- * displayed), undefined for any other line.
- */
-function sizeFromLine(line: string): Size | null | undefined {
-  const match = /^\[Parsed_showinfo_0 @ [0-9a-fA-Fx]+\] n: +0 .* sar:(\d+)\/(\d+) s:(\d+)x(\d+) /.exec(line);
-  if (!match) return undefined;
-  const num = Number(match[1]);
-  const den = Number(match[2]);
-  const stored = Number(match[3]);
-  const height = Number(match[4]);
-  const width = num > 0 && den > 0 ? Math.round((stored * num) / den) : stored;
-  for (const value of [width, stored, height]) {
-    if (!Number.isSafeInteger(value) || value < 1) return null;
-  }
-  if (stored * height > VIDEO_MAX_PIXELS || width * height > VIDEO_MAX_PIXELS) return null;
-  return { width, height };
-}
-
-/** Reads the diagnostics line by line; keeps only what the result needs. */
-function createDiagnosticsReader(): { line(text: string): void; result(): VideoInfo | null } {
-  /** The first duration after the latest input header. */
-  let inputDuration: number | null = null;
-  let durationSeen = true;
-  let mapped = false;
-  let durationMs: number | null = null;
-  let size: Size | null | undefined;
-  return {
-    line(text) {
-      // The file can make ffmpeg print lines of its choosing (a CodecID with newlines, for one),
-      // but only while the input is opened, before ffmpeg prints the input header itself. The
-      // duration is the first one after the last input header, and the size the first frame
-      // after the last stream mapping, which ffmpeg prints after the header and before any frame.
-      if (text.startsWith('Input #0, ')) {
-        inputDuration = null;
-        durationSeen = false;
-        return;
-      }
-      if (text === 'Stream mapping:') {
-        mapped = true;
-        durationMs = inputDuration;
-        durationSeen = true;
-        size = undefined;
-        return;
-      }
-      const duration = durationFromLine(text);
-      if (duration !== undefined) {
-        if (!durationSeen) inputDuration = duration;
-        durationSeen = true;
-        return;
-      }
-      if (mapped && size === undefined) size = sizeFromLine(text);
-    },
-    result() {
-      return mapped && size ? { width: size.width, height: size.height, durationMs } : null;
-    },
-  };
-}
-
-/** The video info a complete diagnostic transcript gives; null without a mapped frame. */
-export function readDiagnostics(lines: Iterable<string>): VideoInfo | null {
-  const reader = createDiagnosticsReader();
-  for (const line of lines) reader.line(line);
-  return reader.result();
-}
-
-/** True when `frame` is the size the scale filter gives for a video of displayed size `video`. */
-export function frameMatches(video: Size, frame: Size): boolean {
-  const factor = Math.min(1, FRAME_EDGE / Math.max(video.width, video.height));
-  return (
-    Math.abs(Math.max(1, Math.round(video.width * factor)) - frame.width) <= 1 &&
-    Math.abs(Math.max(1, Math.round(video.height * factor)) - frame.height) <= 1
-  );
-}
-
-/** Width and height from the first start-of-frame marker of a JPEG; null for anything else. */
-export function jpegDimensions(bytes: Uint8Array): Size | null {
-  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
-  let offset = 2;
-  while (offset + 4 <= bytes.length) {
-    if (bytes[offset] !== 0xff) return null;
-    const marker = bytes[offset + 1] as number;
-    if (marker === 0xff) {
-      offset++;
-      continue;
-    }
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      offset += 2;
-      continue;
-    }
-    if (marker === 0xd9 || marker === 0xda) return null;
-    const length = ((bytes[offset + 2] as number) << 8) | (bytes[offset + 3] as number);
-    if (length < 2) return null;
-    const isFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    if (isFrame) {
-      if (offset + 9 > bytes.length) return null;
-      const height = ((bytes[offset + 5] as number) << 8) | (bytes[offset + 6] as number);
-      const width = ((bytes[offset + 7] as number) << 8) | (bytes[offset + 8] as number);
-      return width > 0 && height > 0 ? { width, height } : null;
-    }
-    offset += 2 + length;
-  }
-  return null;
-}
-
+/** How one process ended. */
 interface Attempt {
+  /** The info its diagnostics gave; null when it failed or was killed. */
   info: VideoInfo | null;
   /** True when the process was killed (timeout or close); no further attempt is made. */
-  killed: boolean;
+  isKilled: boolean;
 }
 
 /** A call waiting for a process slot; resolves false when the tool was closed meanwhile. */
 type Waiter = (granted: boolean) => void;
 
+/** The options with their defaults, as the extractor and its attempts use them. */
+interface FrameToolConfig {
+  /** Where the binary is, once known. */
+  binaryPath: string | null | Promise<string | null>;
+  /** Processes at a time. */
+  concurrency: number;
+  /** Time limit of one call. */
+  timeoutMs: number;
+  /** The grace period after a kill. */
+  killGraceMs: number;
+  /** Starts a process. */
+  startProcess: (command: string, commandArguments: string[], options: SpawnOptions) => ChildProcess;
+  /** Receives every started process. */
+  onProcess: ((child: ChildProcess) => void) | undefined;
+}
+
 /**
  * Runs ffmpeg as a bounded child process, one per call: no shell, an argument array, no window,
  * no stdin, the diagnostics read line by line and never kept whole. Calls beyond `concurrency`
  * wait and are served newest first, like the preview worker pool. Nothing is logged.
+ *
+ * @param options the binary, the limits and the test hooks
+ * @returns the frame tool
+ * @throws RangeError when `concurrency` is not a positive integer
  */
 export function createVideoFrames(options: VideoFramesOptions): VideoFrames {
-  const concurrency = options.concurrency ?? VIDEO_FRAME_CONCURRENCY;
-  const timeoutMs = options.timeoutMs ?? VIDEO_FRAME_TIMEOUT_MS;
-  const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
-  const startProcess = options.spawnProcess ?? spawn;
-  if (!Number.isInteger(concurrency) || concurrency < 1) {
+  const config: FrameToolConfig = {
+    binaryPath: options.binaryPath,
+    concurrency: options.concurrency ?? VIDEO_FRAME_CONCURRENCY,
+    timeoutMs: options.timeoutMs ?? VIDEO_FRAME_TIMEOUT_MS,
+    killGraceMs: options.killGraceMs ?? KILL_GRACE_MS,
+    startProcess: options.spawnProcess ?? spawn,
+    onProcess: options.onProcess,
+  };
+  if (!Number.isInteger(config.concurrency) || config.concurrency < 1) {
     throw new RangeError('The video frame concurrency must be a positive integer');
   }
-  const queue: Waiter[] = [];
+  const extractor = new FrameExtractor(config);
+  return {
+    extract: (sourcePath, format, targetPath) => extractor.extract(sourcePath, format, targetPath),
+    close: () => extractor.close(),
+  };
+}
+
+/**
+ * True when a frame was written and has the size the reported video size scales to; a log line
+ * alone is never trusted.
+ *
+ * @param path the written JPEG
+ * @param info the info the diagnostics gave
+ * @returns whether the file is a JPEG of the expected size, at most `MAX_FRAME_BYTES`
+ */
+async function frameWritten(path: string, info: VideoInfo): Promise<boolean> {
+  try {
+    const file = await stat(path);
+    if (!file.isFile() || file.size === 0 || file.size > MAX_FRAME_BYTES) return false;
+    const size = jpegDimensions(await readFile(path));
+    return size !== null && frameMatches(info, size);
+  } catch {
+    return false;
+  }
+}
+
+/** The process slots, the running processes and the calls of one frame tool. */
+class FrameExtractor {
+  /** Calls waiting for a slot; the newest is served first. */
+  private readonly queue: Waiter[] = [];
   /** Running processes with the function that kills them. */
-  const running = new Map<ChildProcess, () => void>();
-  let active = 0;
-  let closed = false;
+  private readonly running = new Map<ChildProcess, () => void>();
+  /** Slots in use. */
+  private active = 0;
+  /** `close` was called. */
+  private isClosed = false;
 
-  function pump(): void {
-    while (!closed && active < concurrency && queue.length > 0) {
-      active++;
-      (queue.pop() as Waiter)(true);
-    }
+  /** @param config the options with their defaults */
+  constructor(private readonly config: FrameToolConfig) {}
+
+  /**
+   * See `VideoFrames.extract`.
+   *
+   * @param sourcePath the video
+   * @param format its container
+   * @param targetPath where the JPEG ends up
+   * @returns the video's info, or null
+   */
+  extract(sourcePath: string, format: VideoFormat, targetPath: string): Promise<VideoInfo | null> {
+    if (this.isClosed || !isVideoFormat(format)) return Promise.resolve(null);
+    return this.run(sourcePath, format, targetPath).catch(() => null);
   }
 
-  /** Waits for a free slot; false when the tool was closed meanwhile. */
-  function slot(): Promise<boolean> {
-    if (closed) return Promise.resolve(false);
-    return new Promise((resolve) => {
-      queue.push(resolve);
-      pump();
-    });
-  }
-
-  function release(): void {
-    active--;
-    pump();
-  }
-
-  function attempt(
-    binary: string,
-    sourcePath: string,
-    format: VideoFormat,
-    atSeconds: number,
-    tmpPath: string,
-    deadline: number,
-  ): Promise<Attempt> {
-    return new Promise((resolve) => {
-      const remaining = deadline - Date.now();
-      if (closed || remaining <= 0) {
-        resolve({ info: null, killed: true });
-        return;
-      }
-      let child: ChildProcess;
-      try {
-        child = startProcess(binary, frameArguments(sourcePath, format, atSeconds, tmpPath), {
-          shell: false,
-          windowsHide: true,
-          stdio: ['ignore', 'ignore', 'pipe'],
-        });
-      } catch {
-        resolve({ info: null, killed: false });
-        return;
-      }
-      let killed = false;
-      let settled = false;
-      let grace: NodeJS.Timeout | undefined;
-      const reader = createDiagnosticsReader();
-      let pending = '';
-      let cut = false;
-
-      /** Ends the attempt once, from whichever comes first: close, error or the grace period. */
-      const settle = (result: Attempt) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        clearTimeout(grace);
-        running.delete(child);
-        resolve(result);
-      };
-      const kill = () => {
-        if (killed) return;
-        killed = true;
-        // A process that does not exit is given up: the slot is freed and the caller cleans up.
-        // Set before kill(), so an error emitted from inside it clears the timer.
-        grace = setTimeout(() => settle({ info: null, killed: true }), killGraceMs);
-        try {
-          child.kill();
-        } catch {
-          // Settled by the grace timer all the same.
-        }
-      };
-      const timer = setTimeout(kill, remaining);
-      running.set(child, kill);
-      options.onProcess?.(child);
-
-      const readLine = (line: string) => reader.line(line);
-
-      child.stderr?.setEncoding('latin1');
-      child.stderr?.on('data', (chunk: string) => {
-        const lines = chunk.split(/\r?\n|\r/);
-        for (let i = 0; i < lines.length; i++) {
-          const piece = lines[i] as string;
-          if (i < lines.length - 1) {
-            if (!cut) readLine(pending + piece);
-            pending = '';
-            cut = false;
-            continue;
-          }
-          // The unfinished last piece; a line beyond the cap is dropped, not kept.
-          if (cut || pending.length + piece.length > MAX_LINE) {
-            pending = '';
-            cut = true;
-          } else {
-            pending += piece;
-          }
-        }
-      });
-      child.stderr?.on('error', () => undefined);
-      // A failed start (EMFILE, for one) may never be followed by a close.
-      child.on('error', () => settle({ info: null, killed }));
-      child.once('close', (code) => {
-        if (!cut && pending) readLine(pending);
-        settle({ info: killed || code !== 0 ? null : reader.result(), killed });
-      });
-    });
+  /** See `VideoFrames.close`. */
+  close(): void {
+    this.isClosed = true;
+    for (const waiter of this.queue.splice(0)) waiter(false);
+    for (const kill of this.running.values()) kill();
   }
 
   /**
-   * True when a frame was written and has the size the reported video size scales to; a log line
-   * alone is never trusted.
+   * One call: waits for a slot, then tries the frame at `FRAME_AT_SECONDS` and at 0 s within one deadline. The
+   * temporary file is always removed and the slot always freed.
+   *
+   * @param sourcePath the video
+   * @param format its container
+   * @param targetPath where the JPEG ends up
+   * @returns the video's info once the frame is at `targetPath`; null otherwise
    */
-  async function frameWritten(path: string, info: VideoInfo): Promise<boolean> {
+  private async run(sourcePath: string, format: VideoFormat, targetPath: string): Promise<VideoInfo | null> {
+    const binary = await this.config.binaryPath;
+    if (!binary || this.isClosed) return null;
+    if (!(await this.slot())) return null;
+    const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
     try {
-      const file = await stat(path);
-      if (!file.isFile() || file.size === 0 || file.size > MAX_FRAME_BYTES) return false;
-      const size = jpegDimensions(await readFile(path));
-      return size !== null && frameMatches(info, size);
-    } catch {
-      return false;
-    }
-  }
-
-  async function run(sourcePath: string, format: VideoFormat, targetPath: string): Promise<VideoInfo | null> {
-    const binary = await options.binaryPath;
-    if (!binary || closed) return null;
-    if (!(await slot())) return null;
-    const tmpPath = `${targetPath}.${randomUUID()}.tmp`;
-    try {
-      const deadline = Date.now() + timeoutMs;
+      const deadline = Date.now() + this.config.timeoutMs;
       await mkdir(dirname(targetPath), { recursive: true });
       for (const atSeconds of [FRAME_AT_SECONDS, 0]) {
-        const result = await attempt(binary, sourcePath, format, atSeconds, tmpPath, deadline);
-        if (result.killed) return null;
-        if (result.info && (await frameWritten(tmpPath, result.info))) {
-          if (closed) return null;
-          await rename(tmpPath, targetPath);
+        const attempt = new FrameAttempt(this.config, this.running, () => this.isClosed);
+        const result = await attempt.run(binary, frameArguments(sourcePath, format, atSeconds, temporaryPath), deadline);
+        if (result.isKilled) return null;
+        if (result.info && (await frameWritten(temporaryPath, result.info))) {
+          if (this.isClosed) return null;
+          await rename(temporaryPath, targetPath);
           return result.info;
         }
-        await rm(tmpPath, { force: true });
+        await rm(temporaryPath, { force: true });
       }
       return null;
     } catch {
       return null;
     } finally {
-      await rm(tmpPath, { force: true, maxRetries: 3 }).catch(() => undefined);
-      release();
+      await rm(temporaryPath, { force: true, maxRetries: 3 }).catch(() => undefined);
+      this.release();
     }
   }
 
-  return {
-    extract(sourcePath, format, targetPath) {
-      if (closed || !Object.hasOwn(DEMUXERS, format)) return Promise.resolve(null);
-      return run(sourcePath, format, targetPath).catch(() => null);
-    },
-    close() {
-      closed = true;
-      for (const waiter of queue.splice(0)) waiter(false);
-      for (const kill of running.values()) kill();
-    },
-  };
+  /** Hands free slots to the newest waiting calls. */
+  private pump(): void {
+    while (!this.isClosed && this.active < this.config.concurrency && this.queue.length > 0) {
+      this.active++;
+      (this.queue.pop() as Waiter)(true);
+    }
+  }
+
+  /**
+   * Waits for a free slot.
+   *
+   * @returns true once a slot is taken; false when the tool was closed meanwhile
+   */
+  private slot(): Promise<boolean> {
+    if (this.isClosed) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.pump();
+    });
+  }
+
+  /** Frees a slot and hands it on. */
+  private release(): void {
+    this.active--;
+    this.pump();
+  }
+}
+
+/** One ffmpeg process: started, watched against the deadline, killed if need be, ended once. */
+class FrameAttempt {
+  /** The process, once started. */
+  private child: ChildProcess | undefined;
+  /** The process was killed (deadline or close). */
+  private isKilled = false;
+  /** The attempt has ended. */
+  private isSettled = false;
+  /** The deadline timer. */
+  private timer: NodeJS.Timeout | undefined;
+  /** The grace timer started by a kill. */
+  private grace: NodeJS.Timeout | undefined;
+  /** Keeps what the result needs from the diagnostics. */
+  private readonly reader = new DiagnosticsReader();
+  /** Cuts stderr into lines for the reader. */
+  private readonly lines = new DiagnosticLines((line) => this.reader.line(line));
+  /** Ends the attempt's promise. */
+  private resolve: (result: Attempt) => void = () => undefined;
+
+  /**
+   * @param config the options with their defaults
+   * @param running the tool's running processes; the attempt adds its process and removes it on its end
+   * @param isClosed whether the tool was closed
+   */
+  constructor(
+    private readonly config: FrameToolConfig,
+    private readonly running: Map<ChildProcess, () => void>,
+    private readonly isClosed: () => boolean,
+  ) {}
+
+  /**
+   * Starts the process and waits for its end.
+   *
+   * @param binary the ffmpeg binary
+   * @param commandArguments the arguments of the process
+   * @param deadline the call's deadline in milliseconds since the epoch
+   * @returns how the process ended; a closed tool or a passed deadline ends it as killed without a start
+   */
+  run(binary: string, commandArguments: string[], deadline: number): Promise<Attempt> {
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      this.start(binary, commandArguments, deadline);
+    });
+  }
+
+  /**
+   * The executor of `run`: starts the process, the deadline timer and the listeners.
+   *
+   * @param binary the ffmpeg binary
+   * @param commandArguments the arguments of the process
+   * @param deadline the call's deadline
+   */
+  private start(binary: string, commandArguments: string[], deadline: number): void {
+    const remaining = deadline - Date.now();
+    if (this.isClosed() || remaining <= 0) {
+      this.resolve({ info: null, isKilled: true });
+      return;
+    }
+    let child: ChildProcess;
+    try {
+      child = this.config.startProcess(binary, commandArguments, {
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+    } catch {
+      this.resolve({ info: null, isKilled: false });
+      return;
+    }
+    this.child = child;
+    this.timer = setTimeout(() => this.kill(), remaining);
+    this.running.set(child, () => this.kill());
+    this.config.onProcess?.(child);
+    this.listen(child);
+  }
+
+  /**
+   * Reads stderr and ends the attempt on the process's error or close.
+   *
+   * @param child the started process
+   */
+  private listen(child: ChildProcess): void {
+    child.stderr?.setEncoding('latin1');
+    child.stderr?.on('data', (chunk: string) => this.lines.push(chunk));
+    child.stderr?.on('error', () => undefined);
+    // A failed start (EMFILE, for one) may never be followed by a close.
+    child.on('error', () => this.settle({ info: null, isKilled: this.isKilled }));
+    child.once('close', (code) => {
+      this.lines.end();
+      this.settle({ info: this.isKilled || code !== 0 ? null : this.reader.result(), isKilled: this.isKilled });
+    });
+  }
+
+  /**
+   * Ends the attempt once, from whichever comes first: close, error or the grace period.
+   *
+   * @param result how the attempt ended
+   */
+  private settle(result: Attempt): void {
+    if (this.isSettled) return;
+    this.isSettled = true;
+    clearTimeout(this.timer);
+    clearTimeout(this.grace);
+    this.running.delete(this.child as ChildProcess);
+    this.resolve(result);
+  }
+
+  /** Kills the process once and starts the grace period. */
+  private kill(): void {
+    if (this.isKilled) return;
+    this.isKilled = true;
+    // A process that does not exit is given up: the slot is freed and the caller cleans up.
+    // Set before kill(), so an error emitted from inside it clears the timer.
+    this.grace = setTimeout(() => this.settle({ info: null, isKilled: true }), this.config.killGraceMs);
+    try {
+      this.child?.kill();
+    } catch {
+      // Settled by the grace timer all the same.
+    }
+  }
 }
