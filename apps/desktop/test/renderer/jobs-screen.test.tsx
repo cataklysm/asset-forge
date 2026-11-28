@@ -119,12 +119,12 @@ it('shows the seven columns of a running, a retrying and a failed job', async ()
     errorCode: 'provider_unreachable',
     errorMessage: 'The provider could not be reached',
   });
-  install({ 'jobs:list': listOf([running, retrying, failed]) });
+  install({ 'jobs:list': listOf([running, retrying, failed]) }, { ...IDLE, running: 1, waiting: 1, failed: 1 });
   renderScreen();
 
   expect(await screen.findByText('running.png')).toBeTruthy();
   expect(screen.getByRole('heading', { level: 2, name: /Jobs/ })).toBeTruthy();
-  expect(screen.getByTitle('Jobs in this workspace').textContent).toBe('3');
+  await waitFor(() => expect(screen.getByTitle('Jobs in this workspace').textContent).toBe('3'));
   expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
     'Job',
     'File',
@@ -629,6 +629,23 @@ it('an id read that answers after a filter change patches nothing and refetches 
   await waitFor(() => expect(listCalls(feed.api)).toHaveLength(requests + 1));
   expect(listCalls(feed.api).at(-1)?.request).toEqual({ offset: 0, limit: 60, status: 'queued' });
 });
+it('the title count is every job of the workspace, the filter bar counts the jobs the filter matches', async () => {
+  const failed = job({ status: 'failed', fileName: 'failed.png' });
+  install(
+    { 'jobs:list': listOf([job({ fileName: 'queued.png' }), failed]) },
+    { ...IDLE, queued: 1, running: 2, waiting: 3, failed: 1, cancelled: 4, succeeded: 5 },
+  );
+  renderScreen();
+  await screen.findByText('queued.png');
+  const count = await screen.findByTitle('Jobs in this workspace');
+  await waitFor(() => expect(count.textContent).toBe('16'));
+  expect(screen.getByText('2 jobs')).toBeTruthy();
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'failed' } });
+  expect(await screen.findByText('1 job')).toBeTruthy();
+  expect(screen.getByTitle('Jobs in this workspace').textContent).toBe('16');
+});
+
 it('an empty list shows No jobs', async () => {
   install({});
   renderScreen();

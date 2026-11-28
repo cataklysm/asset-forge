@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { MAX_CHOSEN_IDS, type Changes, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
+import {
+  MAX_CHOSEN_IDS,
+  type Changes,
+  type JobStatus,
+  type JobSummary,
+  type JobView,
+  type ProviderList,
+} from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { JobTable, type JobTableProps } from '../components/JobTable';
@@ -18,6 +25,7 @@ import {
   JOBS_PROVIDER_HEADER,
   JOBS_STATUS_LABEL,
   JOBS_TITLE,
+  jobCount,
   jobStatusLabel,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
@@ -238,6 +246,7 @@ export function JobsScreen() {
   );
   const toolbar = (
     <JobsToolbar
+      total={total}
       status={status}
       providerId={providerId}
       entries={entries}
@@ -257,7 +266,13 @@ export function JobsScreen() {
   };
 
   return (
-    <Page title={JOBS_TITLE} count={total} countTitle={JOBS_COUNT_TITLE} actions={actions} toolbar={toolbar}>
+    <Page
+      title={JOBS_TITLE}
+      count={summary === null ? null : workspaceTotal(summary)}
+      countTitle={JOBS_COUNT_TITLE}
+      actions={actions}
+      toolbar={toolbar}
+    >
       <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3" aria-busy={paged.pending || undefined}>
         {error !== null && (
           <p role="alert" className={ALERT}>
@@ -394,8 +409,20 @@ function useFocusReturn(
   };
 }
 
+/**
+ * Every job of the workspace, whatever the filters: the count beside the title says so in its tooltip.
+ *
+ * @param summary the polled summary
+ * @returns the number of jobs in all statuses
+ */
+function workspaceTotal(summary: JobSummary): number {
+  return summary.queued + summary.running + summary.waiting + summary.failed + summary.cancelled + summary.succeeded;
+}
+
 /** The props of {@link JobsToolbar}. */
 interface JobsToolbarProps {
+  /** The number of jobs the filters match; null while unknown. */
+  total: number | null;
   status: JobStatus | '';
   providerId: string;
   entries: readonly ProviderEntry[];
@@ -404,14 +431,14 @@ interface JobsToolbarProps {
 }
 
 /**
- * The filters: status and provider.
+ * The filters: status and provider, and the number of jobs they match.
  *
- * @param props the filter values, the entries and the callbacks
+ * @param props the matched count, the filter values, the entries and the callbacks
  * @returns the filter bar
  */
-function JobsToolbar({ status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
+function JobsToolbar({ total, status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
   return (
-    <FilterBar resultCount={null} onClear={null}>
+    <FilterBar resultCount={total === null ? null : jobCount(total)} onClear={null}>
       <select
         className={SELECT}
         aria-label={JOBS_STATUS_LABEL}
