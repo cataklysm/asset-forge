@@ -14,6 +14,7 @@ import {
   type PreviewService,
 } from '@assetforge/media';
 import { createAnalysisServices, type AnalysisServices } from './analysis-services.js';
+import { restrictAppPermissions } from './app-permissions.js';
 import { createWorkspaceManager } from './composition.js';
 import { ElectronDialogs } from './electron-dialogs.js';
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
@@ -163,6 +164,11 @@ function start(): void {
   app
     .whenReady()
     .then(() => {
+      // The main window's session grants only what the app page uses; site sessions are hardened on their own.
+      restrictAppPermissions(session.defaultSession, {
+        mainContents: () => state.mainWindow?.webContents ?? null,
+        isAppUrl: (url) => isAppUrl(url, appUrl),
+      });
       registerMediaProtocol(manager, previews);
       openMainWindow(state, siteSessions, windowOptions);
     })

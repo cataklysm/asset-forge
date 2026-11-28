@@ -149,6 +149,7 @@ describe('file shell IPC', () => {
       expect(message).not.toContain(root);
       expect(message).not.toContain(root.replaceAll('\\', '/'));
       expect(message).not.toContain(base);
+      expect(message).not.toContain(base.replaceAll('\\', '/'));
     }
   });
 

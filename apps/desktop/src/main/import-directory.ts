@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, posix, win32 } from 'node:path';
 import { writeAtomic } from './atomic-file.js';
 
 /** The file name of the remembered import directory under `userData`. */
@@ -51,6 +51,8 @@ export interface ImportDirectoryOptions {
   isDirectory?: (path: string) => Promise<boolean>;
   /** How long a check may take before the directory counts as gone. */
   timeoutMs?: number;
+  /** The platform whose path rules decide whether two spellings name the same directory. */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -67,10 +69,12 @@ export function createImportDirectoryMemory(
   const check: DirectoryCheck = {
     isDirectory: options.isDirectory ?? isDirectoryOnDisk,
     timeoutMs: options.timeoutMs ?? DIRECTORY_CHECK_TIMEOUT_MS,
+    inFlight: new Map(),
   };
+  const platform = options.platform ?? process.platform;
   return {
     current: () => currentDirectory(filePath, check),
-    remember: (filePaths) => rememberDirectory(filePath, filePaths),
+    remember: (filePaths) => rememberDirectory(filePath, filePaths, platform),
   };
 }
 
@@ -80,6 +84,11 @@ interface DirectoryCheck {
   isDirectory: (path: string) => Promise<boolean>;
   /** How long a check may take. */
   timeoutMs: number;
+  /**
+   * The check still running per directory. A check that outlived its limit stays here until it settles, so a hung
+   * share holds one file system request rather than one per opened picker.
+   */
+  inFlight: Map<string, Promise<boolean>>;
 }
 
 /**
@@ -117,32 +126,64 @@ async function currentDirectory(filePath: string, check: DirectoryCheck): Promis
  * @returns whether the directory exists, as far as the check could tell in time
  */
 function withinLimit(check: DirectoryCheck, directory: string): Promise<boolean> {
+  const running = sharedCheck(check, directory);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), check.timeoutMs);
-    const settle = (isDirectory: boolean) => {
+    void running.then((isDirectory) => {
       clearTimeout(timer);
       resolve(isDirectory);
-    };
-    Promise.resolve()
-      .then(() => check.isDirectory(directory))
-      .then(settle, () => settle(false));
+    });
   });
 }
 
 /**
- * Stores the directory of the first path unless it is already stored. Best effort, never throws.
+ * The running check of a directory, started when none runs. It never rejects and leaves the map when it settles.
+ *
+ * @param check the directory check and the checks in flight
+ * @param directory the directory to check
+ * @returns whether the directory exists; false for a rejection or a throw
+ */
+function sharedCheck(check: DirectoryCheck, directory: string): Promise<boolean> {
+  const existing = check.inFlight.get(directory);
+  if (existing) return existing;
+  const running = Promise.resolve()
+    .then(() => check.isDirectory(directory))
+    .catch(() => false)
+    .finally(() => check.inFlight.delete(directory));
+  check.inFlight.set(directory, running);
+  return running;
+}
+
+/**
+ * Stores the directory of the first path unless the same directory is already stored. Best effort, never throws.
  *
  * @param filePath the file it is kept in
  * @param filePaths the files chosen
+ * @param platform the platform whose path rules compare the spellings
  */
-function rememberDirectory(filePath: string, filePaths: readonly string[]): void {
+function rememberDirectory(filePath: string, filePaths: readonly string[], platform: NodeJS.Platform): void {
   const first = filePaths[0];
   if (first === undefined) return;
   try {
     const directory = dirname(first);
-    if (readStored(filePath) === directory) return;
+    const stored = readStored(filePath);
+    if (stored !== undefined && isSameDirectory(stored, directory, platform)) return;
     writeAtomic(filePath, JSON.stringify({ v: 1, directory }));
   } catch {
     // Best effort: a failed write only means the picker opens where it would have anyway.
   }
+}
+
+/**
+ * Whether two absolute spellings name the same directory: resolved, without a trailing separator and, on Windows,
+ * regardless of case and of the separator used.
+ *
+ * @param first one spelling
+ * @param second the other spelling
+ * @param platform the platform whose path rules apply
+ * @returns true when both name the same directory
+ */
+export function isSameDirectory(first: string, second: string, platform: NodeJS.Platform): boolean {
+  if (platform !== 'win32') return posix.resolve(first) === posix.resolve(second);
+  return win32.resolve(first).toLowerCase() === win32.resolve(second).toLowerCase();
 }

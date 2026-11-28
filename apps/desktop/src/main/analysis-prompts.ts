@@ -235,8 +235,23 @@ class AnalysisPrompts {
       if (!current.prompts.some((each) => each.id === prompt.id && each.purpose === prompt.purpose)) return;
       const key = lastUsedKey(prompt.purpose);
       if (current.lastUsed[key] === prompt.id) return;
-      this.commit({ ...current, lastUsed: { ...current.lastUsed, [key]: prompt.id } });
+      this.commitLastUsed({ ...current, lastUsed: { ...current.lastUsed, [key]: prompt.id } });
     } catch {
+      this.options.log(LAST_USED_WRITE_FAILED);
+    }
+  }
+
+  /**
+   * Writes a new prompt used last. Unlike every other change, a failed write still keeps it for this session, so the
+   * dialogs preselect the prompt the owner just chose; the next successful write stores it.
+   *
+   * @param next the state with the new prompt used last
+   */
+  private commitLastUsed(next: Stored): void {
+    try {
+      this.commit(next);
+    } catch {
+      this.state = next;
       this.options.log(LAST_USED_WRITE_FAILED);
     }
   }

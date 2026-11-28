@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { MAX_SETTLING_RUNS } from '../src/main/describe-controller.js';
-import { createHarness, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
+import { chatContents, createHarness, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 
 const ids = {
   a: '0a2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f',
@@ -40,12 +40,6 @@ async function chats(n: number): Promise<void> {
     if (Date.now() > deadline) throw new Error('The mock never got the request');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-}
-
-function chatContents(): string[] {
-  return mock.requests
-    .filter((r) => r.path === '/api/chat')
-    .map((r) => (r.body as { messages: { content: string }[] }).messages[0]!.content);
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -242,12 +236,12 @@ describe('analysis:describe', () => {
     expect(
       await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL, promptId: paint.id }),
     ).toMatchObject({ ok: true });
-    expect(chatContents().at(-1)).toBe('Paint it.');
+    expect(chatContents(mock).at(-1)).toBe('Paint it.');
     expect((await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt).toBe(paint.id);
 
     // Without an id the prompt used last runs.
     await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL });
-    expect(chatContents().at(-1)).toBe('Paint it.');
+    expect(chatContents(mock).at(-1)).toBe('Paint it.');
 
     const sketch = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Sketch', text: 'Sketch it.' });
     await h.provider({ url: mock.url, apiKey: TEST_KEY_2 });
@@ -266,6 +260,7 @@ describe('analysis:describe', () => {
     const paint = await h.ok('analysisPrompts:save', { purpose: 'image_prompt', name: 'Paint', text: 'Paint it.' });
     const tagging = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'tagging')!;
     const lastUsed = async () => (await h.ok('analysisPrompts:list', {})).lastUsed.imagePrompt;
+    const imageDefault = (await h.ok('analysisPrompts:list', {})).prompts.find((p) => p.purpose === 'image_prompt')!;
 
     for (const promptId of [paint.id, ids.d]) {
       expect(
@@ -287,7 +282,7 @@ describe('analysis:describe', () => {
         error: { code: 'not_found', message: 'The analysis prompt does not exist' },
       });
     }
-    expect(chatContents()).toEqual([]);
+    expect(chatContents(mock)).toEqual([]);
 
     const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
     await chats(1);
@@ -300,6 +295,10 @@ describe('analysis:describe', () => {
     expect(await lastUsed()).toBeNull();
     await h.ok('analysis:cancelDescribe', { requestId: ids.a });
     expect(await first).toEqual({ ok: false, code: 'cancelled' });
+    // Without an id and with no prompt used last, the first prompt of the purpose ran; a cancelled request counts as
+    // accepted and marks it.
+    expect(chatContents(mock)).toEqual([imageDefault.text]);
+    expect(await lastUsed()).toBe(imageDefault.id);
   });
 
   it('answers not configured without settings and file_unavailable for an unknown file', async () => {

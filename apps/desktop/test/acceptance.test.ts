@@ -201,28 +201,44 @@ interface WritableRawDatabase {
 }
 const WritableDatabase = createRequire(import.meta.url)('better-sqlite3') as new (path: string) => WritableRawDatabase;
 
+/**
+ * The channels as the app wires them, with an idle job host and dialogs that refuse.
+ *
+ * @param manager the workspace manager
+ * @returns `raw` answering the result as sent, and `call` answering the value or throwing on a failure
+ */
+function channelsFor(manager: WorkspaceManager) {
+  const handlers = createWorkspaceHandlers(
+    manager,
+    {
+      pickDirectory: async () => null,
+      pickFiles: async () => [],
+      confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWorkflow: async () => false,
+    },
+    noopHost,
+    idleJobHost,
+    idleServices,
+  );
+  const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
+  const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
+    const result = await raw(channel, request);
+    if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
+    return result.value as IpcResponse<C>;
+  };
+  return { call, raw };
+}
+
+/**
+ * @param manager the workspace manager
+ * @returns a call that answers the value or throws on a failure
+ */
+function handlersFor(manager: WorkspaceManager) {
+  return channelsFor(manager).call;
+}
+
 describe('phase 2a acceptance', () => {
   const page = { limit: 50, offset: 0 };
-
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await dispatch(handlers, channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-  }
 
   async function sha256Of(path: string): Promise<string> {
     return createHash('sha256')
@@ -421,26 +437,6 @@ describe('phase 2a acceptance', () => {
 });
 
 describe('phase 2b acceptance', () => {
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await dispatch(handlers, channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-  }
-
   it('traces production progress across a restart', async () => {
     const first = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     let before: IpcResponse<'workflows:get'>;
@@ -569,26 +565,6 @@ describe('phase 2b acceptance', () => {
 describe('phase 3b acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await dispatch(handlers, channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-  }
-
   it('finds an asset by name, file name, tags and file kind, also after a restart', async () => {
     const sources = join(base, 'sources');
     const swordPath = join(sources, 'sword.png');
@@ -654,26 +630,6 @@ describe('phase 3b acceptance', () => {
 
 describe('file trash acceptance', () => {
   const page = { limit: 50, offset: 0 };
-
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await dispatch(handlers, channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-  }
 
   async function sources(...names: string[]): Promise<string[]> {
     const dir = join(base, 'sources');
@@ -826,28 +782,6 @@ describe('file trash acceptance', () => {
 describe('tag rename and merge acceptance', () => {
   const page = { limit: 50, offset: 0 };
 
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    const raw = <C extends IpcChannel>(channel: C, request: IpcRequest<C>) => dispatch(handlers, channel, request);
-    const call = async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await raw(channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-    return { call, raw };
-  }
-
   it('merges a file tag into an asset tag everywhere, proposals included', async () => {
     const sources = join(base, 'sources');
     const leftPath = join(sources, 'left.png');
@@ -857,7 +791,7 @@ describe('tag rename and merge acceptance', () => {
 
     const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
-      const { call, raw } = handlersFor(manager);
+      const { call, raw } = channelsFor(manager);
       await call('workspace:create', { name: 'Gilded Hour', rootPath: workspaceRoot });
       const typeId = (await call('assetTypes:list', {}))[0]!.id;
       const asset = await call('assets:create', { name: 'Lantern', typeId });
@@ -937,26 +871,6 @@ describe('tag rename and merge acceptance', () => {
 
 describe('ZIP import acceptance', () => {
   const page = { limit: 50, offset: 0 };
-
-  function handlersFor(manager: WorkspaceManager) {
-    const handlers = createWorkspaceHandlers(
-      manager,
-      {
-        pickDirectory: async () => null,
-        pickFiles: async () => [],
-        confirmRemoveWorkspace: async () => 'cancel',
-        confirmRemoveWorkflow: async () => false,
-      },
-      noopHost,
-      idleJobHost,
-      idleServices,
-    );
-    return async <C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> => {
-      const result = await dispatch(handlers, channel, request);
-      if (!result.ok) throw new Error(`${channel} failed: ${result.error.code}`);
-      return result.value as IpcResponse<C>;
-    };
-  }
 
   async function buildArchive(path: string): Promise<void> {
     const zip = new yazl.ZipFile();
@@ -1086,7 +1000,8 @@ describe('ZIP import acceptance', () => {
         ['liar.png', 'failed'],
         ['honest.png', 'complete'],
       ]);
-      expect(results[0]!.error).toEqual(expect.any(String));
+      // The size check fails while the entry is streamed, which the import answers with its generic fixed text.
+      expect(results[0]!.error).toBe('Import failed');
       expect(results[0]!.error).not.toContain(base);
       expect(results[1]!.error).toBeNull();
       expect(await readFile(join(workspaceRoot, results[1]!.file!.relativePath), 'utf8')).toBe('honest pixels');

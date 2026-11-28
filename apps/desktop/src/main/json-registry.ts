@@ -6,14 +6,29 @@ import { WorkspaceSummarySchema, type WorkspaceSummary } from '@assetforge/contr
 
 const WorkspaceListSchema = WorkspaceSummarySchema.array();
 
-/** Workspace registry persisted as `{ "workspaces": [...] }` in a single JSON file. */
+/** The file's content: the workspaces and every other top-level key, which a write keeps as it found them. */
+interface RegistryContent {
+  /** The registered workspaces. */
+  workspaces: WorkspaceSummary[];
+  /** Top-level keys other than `workspaces`, kept unchanged. */
+  otherKeys: Record<string, unknown>;
+}
+
+/**
+ * Workspace registry persisted as `{ "workspaces": [...] }` in a single JSON file. Every operation runs after the
+ * previous one has finished, so two concurrent read-modify-write steps never lose an entry and an unreadable file is
+ * set aside only once.
+ */
 export class JsonWorkspaceRegistry implements WorkspaceRegistry {
+  /** The end of the queue of operations; it never rejects. */
+  private queue: Promise<unknown> = Promise.resolve();
+
   /** @param settingsFilePath the JSON file */
   constructor(private readonly settingsFilePath: string) {}
 
   /** @returns every registered workspace */
   async list(): Promise<WorkspaceSummary[]> {
-    return this.read();
+    return this.serially(async () => (await this.read()).workspaces);
   }
 
   /**
@@ -21,7 +36,8 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
    * @returns the workspace, or null
    */
   async get(id: string): Promise<WorkspaceSummary | null> {
-    return (await this.read()).find((workspace) => workspace.id === id) ?? null;
+    const workspaces = await this.list();
+    return workspaces.find((workspace) => workspace.id === id) ?? null;
   }
 
   /**
@@ -31,11 +47,7 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
    * @returns when it was written
    */
   async upsert(entry: WorkspaceSummary): Promise<void> {
-    const all = await this.read();
-    const index = all.findIndex((workspace) => workspace.id === entry.id);
-    if (index >= 0) all[index] = entry;
-    else all.push(entry);
-    await this.write(all);
+    return this.serially(() => this.upsertNow(entry));
   }
 
   /**
@@ -45,52 +57,93 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
    * @returns when it was written
    */
   async remove(id: string): Promise<void> {
-    const all = await this.read();
-    const kept = all.filter((workspace) => workspace.id !== id);
-    if (kept.length !== all.length) await this.write(kept);
+    return this.serially(() => this.removeNow(id));
+  }
+
+  /**
+   * Runs one operation after every earlier one has settled.
+   *
+   * @param operation the operation
+   * @returns what the operation resolves to
+   */
+  private serially<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(operation);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * The body of `upsert`, run inside the queue.
+   *
+   * @param entry the workspace
+   * @returns when it was written
+   */
+  private async upsertNow(entry: WorkspaceSummary): Promise<void> {
+    const content = await this.read();
+    const index = content.workspaces.findIndex((workspace) => workspace.id === entry.id);
+    if (index >= 0) content.workspaces[index] = entry;
+    else content.workspaces.push(entry);
+    await this.write(content);
+  }
+
+  /**
+   * The body of `remove`, run inside the queue.
+   *
+   * @param id the workspace
+   * @returns when it was written
+   */
+  private async removeNow(id: string): Promise<void> {
+    const content = await this.read();
+    const kept = content.workspaces.filter((workspace) => workspace.id !== id);
+    if (kept.length !== content.workspaces.length) await this.write({ ...content, workspaces: kept });
   }
 
   /**
    * Reads the file; a missing one reads as empty, an unreadable one is set aside and reads as empty.
    *
-   * @returns the workspaces
+   * @returns the content
    */
-  private async read(): Promise<WorkspaceSummary[]> {
+  private async read(): Promise<RegistryContent> {
     let text: string;
     try {
       text = await readFile(this.settingsFilePath, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyContent();
       throw error;
     }
-    const parsed = parseList(text);
+    const parsed = parseContent(text);
     if (parsed) return parsed;
     await this.quarantine();
-    return [];
+    return emptyContent();
   }
 
   /**
-   * Moves the unreadable file aside under a stamped name.
+   * Moves the unreadable file aside under a stamped name; a file that is already gone needs nothing.
    *
    * @returns when it was moved
    */
   private async quarantine(): Promise<void> {
     // ISO timestamp without ':' (invalid in Windows file names).
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    await rename(this.settingsFilePath, `${this.settingsFilePath}.corrupt-${stamp}`);
+    try {
+      await rename(this.settingsFilePath, `${this.settingsFilePath}.corrupt-${stamp}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
 
   /**
-   * Writes the list through a temporary file and a rename.
+   * Writes the content through a temporary file and a rename.
    *
-   * @param workspaces the list
+   * @param content the workspaces and the other keys
    * @returns when it was written
    */
-  private async write(workspaces: WorkspaceSummary[]): Promise<void> {
+  private async write(content: RegistryContent): Promise<void> {
     await mkdir(dirname(this.settingsFilePath), { recursive: true });
     const temporary = `${this.settingsFilePath}.${randomUUID()}.tmp`;
+    const json = { ...content.otherKeys, workspaces: content.workspaces };
     try {
-      await writeFile(temporary, `${JSON.stringify({ workspaces }, null, 2)}\n`, 'utf8');
+      await writeFile(temporary, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
       await rename(temporary, this.settingsFilePath);
     } catch (error) {
       await rm(temporary, { force: true });
@@ -99,20 +152,27 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
   }
 }
 
+/** @returns the content of a missing or unreadable file */
+function emptyContent(): RegistryContent {
+  return { workspaces: [], otherKeys: {} };
+}
+
 /**
  * Parses the file's text.
  *
  * @param text the text
- * @returns the workspaces, or null when the text is not a valid list
+ * @returns the content, or null when the text is not an object with a valid list
  */
-function parseList(text: string): WorkspaceSummary[] | null {
+function parseContent(text: string): RegistryContent | null {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
     return null;
   }
-  if (typeof json !== 'object' || json === null || !('workspaces' in json)) return null;
+  if (typeof json !== 'object' || json === null || Array.isArray(json) || !('workspaces' in json)) return null;
   const result = WorkspaceListSchema.safeParse(json.workspaces);
-  return result.success ? result.data : null;
+  if (!result.success) return null;
+  const otherKeys = Object.fromEntries(Object.entries(json).filter(([key]) => key !== 'workspaces'));
+  return { workspaces: result.data, otherKeys };
 }

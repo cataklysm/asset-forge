@@ -386,13 +386,12 @@ describe('generation studio end to end', () => {
     });
     const slow = await started(edit(sourceId, MOCK_PROMPT_SLOW));
     await h.until((s) => s.running === 1);
-    const deadline = Date.now() + 10_000;
-    while (mock!.imageRequests.length === 0 && Date.now() < deadline)
-      await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilMock(() => mock!.slowWaiting() === 1);
     expect(mock!.imageRequests).toHaveLength(1);
 
     await h.services.workspaceClosing();
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
+    // A repeated request would have no event to wait on; this pause gives one the chance to show up.
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     const [job] = (await h.ok('jobs:list', page)).items;
