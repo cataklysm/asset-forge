@@ -8,10 +8,13 @@ import { expect, it } from 'vitest';
 import {
   CHOOSE_MODEL,
   CHOOSE_PROMPT,
+  MODEL_NOT_DESCRIBE,
   MODEL_NOT_LISTED,
   MODEL_NOT_VISION,
+  NO_DESCRIBE_MODEL,
   NO_VISION_MODEL,
   PROMPTS_LOAD_FAILED,
+  PROMPTS_LOADING,
   PROVIDER_CHECKING,
   PROVIDER_STATE_LABELS,
   SETTINGS_LOAD_FAILED,
@@ -27,24 +30,30 @@ const IMAGE = imagePrompt();
 const LOADED = { prompts: [TAGGING, IMAGE], loading: false, failed: false };
 
 it('a failed load blocks with its own message', () => {
-  expect(promptGate({ prompts: null, loading: false, failed: true }, TAGGING.id)).toBe(PROMPTS_LOAD_FAILED);
-  expect(promptGate({ prompts: null, loading: true, failed: true }, null)).toBe(PROMPTS_LOAD_FAILED);
+  expect(promptGate({ prompts: null, loading: false, failed: true }, TAGGING.id, 'tagging')).toBe(PROMPTS_LOAD_FAILED);
+  expect(promptGate({ prompts: null, loading: true, failed: true }, null, 'tagging')).toBe(PROMPTS_LOAD_FAILED);
 });
 
-it('prompts not loaded yet block as loading', () => {
-  expect(promptGate({ prompts: null, loading: true, failed: false }, null)).toBe(START_LOADING);
-  expect(promptGate({ prompts: null, loading: false, failed: false }, TAGGING.id)).toBe(START_LOADING);
+it('prompts not loaded yet block with a text about the prompts', () => {
+  expect(promptGate({ prompts: null, loading: true, failed: false }, null, 'tagging')).toBe(PROMPTS_LOADING);
+  expect(promptGate({ prompts: null, loading: false, failed: false }, TAGGING.id, 'tagging')).toBe(PROMPTS_LOADING);
+  expect(PROMPTS_LOADING).toBe('The analysis prompts are loading');
 });
 
 it('no prompt, or one not in the list, asks for a choice', () => {
-  expect(promptGate(LOADED, null)).toBe(CHOOSE_PROMPT);
-  expect(promptGate(LOADED, '00000000-0000-4000-8000-00000000dead')).toBe(CHOOSE_PROMPT);
+  expect(promptGate(LOADED, null, 'tagging')).toBe(CHOOSE_PROMPT);
+  expect(promptGate(LOADED, '00000000-0000-4000-8000-00000000dead', 'tagging')).toBe(CHOOSE_PROMPT);
   expect(CHOOSE_PROMPT).toBe('Choose a prompt');
 });
 
+it('a prompt of the other purpose asks for a choice', () => {
+  expect(promptGate(LOADED, IMAGE.id, 'tagging')).toBe(CHOOSE_PROMPT);
+  expect(promptGate(LOADED, TAGGING.id, 'image_prompt')).toBe(CHOOSE_PROMPT);
+});
+
 it('a listed prompt lets the start go ahead', () => {
-  expect(promptGate(LOADED, TAGGING.id)).toBeNull();
-  expect(promptGate({ ...LOADED, loading: true }, IMAGE.id)).toBeNull();
+  expect(promptGate(LOADED, TAGGING.id, 'tagging')).toBeNull();
+  expect(promptGate({ ...LOADED, loading: true }, IMAGE.id, 'image_prompt')).toBeNull();
 });
 
 // --- provider gate, per selected entry ---
@@ -127,6 +136,21 @@ it('a model missing from the entry list, one without vision, or none blocks', ()
   expect(providerGate(s, LOCAL.id, 'gone-model')).toEqual({ blocked: MODEL_NOT_LISTED, offerSettings: false });
   expect(providerGate(s, LOCAL.id, 'text-only')).toEqual({ blocked: MODEL_NOT_VISION, offerSettings: false });
   expect(providerGate(s, LOCAL.id, null)).toEqual({ blocked: CHOOSE_MODEL, offerSettings: false });
+});
+
+it('for Image to prompt the vision reasons speak of describing images', () => {
+  const textOnly = gateState({ [LOCAL.id]: { ok: true, models: [{ name: 'text-only', vision: false }] } });
+  expect(providerGate(textOnly, LOCAL.id, 'text-only', 'prompt')).toEqual({
+    blocked: NO_DESCRIBE_MODEL,
+    offerSettings: true,
+  });
+  const listed = gateState({ [LOCAL.id]: LISTED });
+  expect(providerGate(listed, LOCAL.id, 'text-only', 'prompt')).toEqual({
+    blocked: MODEL_NOT_DESCRIBE,
+    offerSettings: false,
+  });
+  expect(NO_DESCRIBE_MODEL).not.toBe(NO_VISION_MODEL);
+  expect(MODEL_NOT_DESCRIBE).not.toBe(MODEL_NOT_VISION);
 });
 
 it('no entry selected, or one not listed, is the not-configured state with Settings', () => {

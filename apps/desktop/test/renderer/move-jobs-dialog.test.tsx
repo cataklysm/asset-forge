@@ -155,6 +155,47 @@ it('a fixed source missing from the lanes counts 0 and is named Removed provider
   expect(within(dialog).getByText('Removed provider')).toBeTruthy();
 });
 
+it('a fixed source that is not listed shows no name until the lanes give the stored one', async () => {
+  const dead = '00000000-0000-4000-8000-00000000dead';
+  const lanes = deferred<WaitingByProvider[]>();
+  install({ 'jobs:waitingByProvider': () => lanes.promise });
+  const { dialog } = renderDialog(dead);
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(LOCAL.id));
+  expect(within(dialog).queryByText('Removed provider')).toBeNull();
+  await act(async () => lanes.resolve([{ providerId: dead, providerName: 'Old box', waiting: 3 }]));
+  expect(within(dialog).getByText('Old box')).toBeTruthy();
+  expect(within(dialog).queryByText('Removed provider')).toBeNull();
+});
+
+it('a refusal goes when another source is chosen', async () => {
+  const user = userEvent.setup();
+  install({
+    'jobs:reroute': () => {
+      throw fakeError('invalid_operation', 'Jobs cannot be moved onto the same provider');
+    },
+  });
+  const { dialog } = renderDialog(undefined);
+  await waitFor(() => expect(moveButton(dialog).disabled).toBe(false));
+  await user.click(moveButton(dialog));
+  await within(dialog).findByRole('alert');
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'From' }), 'No provider');
+  expect(within(dialog).queryByRole('alert')).toBeNull();
+});
+
+it('a failed lane lookup gives the disabled Move its message as tooltip', async () => {
+  install({
+    'jobs:waitingByProvider': () => {
+      throw fakeError('internal_error', 'internal_error');
+    },
+  });
+  const { dialog } = renderDialog(LOCAL.id);
+  const alert = await within(dialog).findByRole('alert');
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(RUNPOD.id));
+  await waitFor(() => expect(moveButton(dialog).title).toBe(alert.textContent));
+  expect(moveButton(dialog).title).not.toBe('');
+  expect(moveButton(dialog).disabled).toBe(true);
+});
+
 it('without a source the From select lists the lanes and switches the count and the target', async () => {
   const user = userEvent.setup();
   const api = install();

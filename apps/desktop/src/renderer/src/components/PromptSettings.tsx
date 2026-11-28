@@ -99,6 +99,47 @@ interface PurposeGroupProps {
   onCreate(): void;
 }
 
+/** The props of `PromptRow`. */
+interface PromptRowProps {
+  prompt: AnalysisPrompt;
+  /** The id the unsaved marker takes. */
+  markerId: string;
+  selected: boolean;
+  unsaved: boolean;
+  /** An action of the section runs. */
+  busy: boolean;
+  select(id: string): void;
+}
+
+/**
+ * One prompt of a purpose, marked when it has unsaved changes.
+ *
+ * @param props the prompt, its state and the select handler
+ * @returns the list item
+ */
+function PromptRow({ prompt, markerId, selected, unsaved, busy, select }: PromptRowProps) {
+  return (
+    <li className="flex flex-col">
+      <button
+        type="button"
+        className={BUTTON_INLINE}
+        aria-pressed={selected}
+        disabled={busy}
+        aria-describedby={unsaved ? markerId : undefined}
+        onClick={() => select(prompt.id)}
+      >
+        <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
+        {unsaved && (
+          // Hidden from the name; the button is described by it.
+          <span id={markerId} title={UNSAVED_CHANGES} aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-accent">
+            <span className="sr-only">{UNSAVED_CHANGES}</span>
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 /**
  * The prompts of one purpose, each marked when it has unsaved changes, and the action that adds one.
  *
@@ -112,19 +153,15 @@ function PurposeGroup({ purpose, headingId, own, selectedId, drafts, busy, selec
       </h4>
       <ul className="flex flex-col gap-1">
         {own.map((prompt) => (
-          <li key={prompt.id} className="flex flex-col">
-            <button
-              type="button"
-              className={BUTTON_INLINE}
-              aria-pressed={prompt.id === selectedId}
-              onClick={() => select(prompt.id)}
-            >
-              <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
-              {changed(prompt, drafts[prompt.id]) && (
-                <span title={UNSAVED_CHANGES} aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-accent" />
-              )}
-            </button>
-          </li>
+          <PromptRow
+            key={prompt.id}
+            prompt={prompt}
+            markerId={`${headingId}-${prompt.id}-unsaved`}
+            selected={prompt.id === selectedId}
+            unsaved={changed(prompt, drafts[prompt.id])}
+            busy={busy}
+            select={select}
+          />
         ))}
       </ul>
       <div>
@@ -145,7 +182,7 @@ export function PromptSettings() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AnalysisPromptDraft>>({});
   const [confirming, setConfirming] = useState(false);
-  const { busy, error, run } = useExclusiveRun(describeError);
+  const { busy, error, setError, run } = useExclusiveRun(describeError);
   const headingId = useId();
 
   /**
@@ -173,7 +210,7 @@ export function PromptSettings() {
   const selected = list.find((prompt) => prompt.id === selectedId) ?? list[0] ?? null;
 
   /**
-   * Saves the draft of the selected prompt; edits made while the save ran stay as a draft.
+   * Saves the draft of the selected prompt; the draft as sent goes once saved.
    *
    * @param prompt the selected prompt
    * @param draft the draft as sent
@@ -181,6 +218,25 @@ export function PromptSettings() {
   const savePrompt = (prompt: AnalysisPrompt, draft: AnalysisPromptDraft) => {
     const kept = drafts[prompt.id];
     return run(() => save(saveInputOf(prompt, draft)).then(() => dropDraft(prompt.id, kept)));
+  };
+
+  /**
+   * Resets the selected prompt; its draft goes, so the editor shows the answer. The fields are read-only
+   * while the reset runs, so nothing typed meanwhile is lost.
+   *
+   * @param prompt the selected prompt
+   * @returns when the reset ended
+   */
+  const resetPrompt = (prompt: AnalysisPrompt) => run(() => reset(prompt.id).then(() => dropDraft(prompt.id)));
+
+  /**
+   * Selects a prompt; the message of an action on another prompt goes.
+   *
+   * @param id the prompt
+   */
+  const selectPrompt = (id: string) => {
+    if (id !== selected?.id) setError(null);
+    setSelectedId(id);
   };
 
   /**
@@ -223,7 +279,7 @@ export function PromptSettings() {
                 selectedId={selected?.id}
                 drafts={drafts}
                 busy={busy}
-                select={setSelectedId}
+                select={selectPrompt}
                 onCreate={() => void run(() => createPrompt({ save, reset }, list, purpose, setSelectedId))}
               />
             ))}
@@ -243,7 +299,7 @@ export function PromptSettings() {
                 }))
               }
               onSave={(draft) => savePrompt(selected, draft)}
-              onReset={() => run(() => reset(selected.id).then(() => dropDraft(selected.id)))}
+              onReset={() => resetPrompt(selected)}
               onDelete={() => setConfirming(true)}
             />
           )}

@@ -1,8 +1,9 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { ApiError, call, describeError } from './api';
-import { NOT_ANALYSABLE, PROPOSAL_CHANGED, namesOn, proposalKey, type Shown } from './analysis-result';
-import type { AnalysisPromptsState } from './analysis-prompts-context';
+import { namesOn, proposalKey, type Shown } from './analysis-result';
+import { recoverMissingPrompt, type AnalysisPromptsState } from './analysis-prompts-context';
 import type { ProposalReader } from './hooks/useResultOpening';
+import { NOT_ANALYSABLE, PROPOSAL_CHANGED } from './labels';
 import type { ProvidersState } from './provider-context';
 
 /** What every action of the result dialog works with. */
@@ -65,11 +66,9 @@ export async function analyseFile(
     await action.reader.read(id);
     if (action.live() && result.enqueued === 0 && result.skipped.alreadyQueued === 0) action.setError(NOT_ANALYSABLE);
   } catch (error) {
-    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-    if (error instanceof ApiError && error.code === 'not_found') {
-      void records.prompts.reload().catch(() => {});
+    recoverMissingPrompt(error, records.prompts, () => {
       if (action.live()) records.dropChosenPrompt();
-    }
+    });
     if (action.live()) action.setError(describeError(error));
   }
 }

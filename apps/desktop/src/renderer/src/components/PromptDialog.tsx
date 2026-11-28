@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
-import { ApiError, call, describeError } from '../api';
+import {
+  effectivePromptId,
+  recoverMissingPrompt,
+  useAnalysisPrompts,
+  type AnalysisPromptsState,
+} from '../analysis-prompts-context';
+import { call, describeError } from '../api';
+import {
+  CANCEL_LABEL,
+  CLOSE_LABEL,
+  COPY_FAILED_MESSAGE,
+  COPY_LABEL,
+  DESCRIBE_LABEL,
+  GENERATING_TITLE,
+  NO_FILE_TITLE,
+  PROMPT_BUSY_MESSAGE,
+  PROMPT_DIALOG_TITLE,
+  PROMPT_RESULT_LABEL,
+} from '../labels';
 import { useProviderChoice } from '../provider-choice';
 import { useProviders, type ProvidersState } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
@@ -24,16 +41,7 @@ interface Props {
   settingsBlocked?: string | null;
 }
 
-/** The title of the Image to prompt dialog. */
-export const PROMPT_DIALOG_TITLE = 'Image to prompt';
-/** Shown when the main process is already describing another image. */
-export const PROMPT_BUSY_MESSAGE = 'Another prompt is being generated';
-/** Shown when the clipboard refused the text. */
-const COPY_FAILED_MESSAGE = 'The text could not be copied';
-/** Tooltip of Generate while a request runs. */
-const GENERATING_TITLE = 'The prompt is being generated';
-/** Tooltip of Generate without a file. */
-const NO_FILE_TITLE = 'No image to describe';
+export { PROMPT_BUSY_MESSAGE } from '../labels';
 
 /**
  * Image2Prompt: describes one image with a chosen provider and model and shows the text to copy.
@@ -118,11 +126,9 @@ async function describeImage(effects: DescribeEffects, describe: DescribeRequest
     else if (result.code === 'busy') effects.setError(PROMPT_BUSY_MESSAGE);
     else if (result.code !== 'cancelled') effects.setError(JOB_ERROR_MESSAGES[result.code]);
   } catch (error) {
-    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-    if (error instanceof ApiError && error.code === 'not_found') {
-      void prompts.reload().catch(() => {});
+    recoverMissingPrompt(error, prompts, () => {
       if (request.current === requestId) effects.dropChosenPrompt();
-    }
+    });
     if (request.current === requestId) effects.setError(describeError(error));
   } finally {
     if (request.current === requestId) {
@@ -149,6 +155,48 @@ async function copyText(text: string, setError: Dispatch<SetStateAction<string |
 }
 
 /**
+ * Whether the focus has no place a user could act on: nothing, the body, or an element that was
+ * removed or disabled.
+ *
+ * @returns true when the focus is lost
+ */
+function focusLost(): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body || !active.isConnected) return true;
+  return active instanceof HTMLButtonElement && active.disabled;
+}
+
+/** The buttons the focus moves between while a request starts and ends. */
+interface RunningFocusTargets {
+  generate: MutableRefObject<HTMLButtonElement | null>;
+  cancel: MutableRefObject<HTMLButtonElement | null>;
+  /** Takes the focus when a request ends and Generate stays disabled. */
+  close: MutableRefObject<HTMLButtonElement | null>;
+}
+
+/**
+ * Keeps the focus inside the dialog when a request starts (Generate is disabled: Cancel takes it)
+ * and ends (Cancel is removed: Generate, or Close while Generate stays disabled, takes it). A focus
+ * the user moved elsewhere is left alone.
+ *
+ * @param running whether a request runs
+ * @param targets the buttons; read only inside the effect
+ */
+function useRunningFocus(running: boolean, targets: MutableRefObject<RunningFocusTargets>): void {
+  const previous = useRef(running);
+  useEffect(() => {
+    if (previous.current === running) return;
+    previous.current = running;
+    if (!focusLost()) return;
+    const buttons = targets.current;
+    const generate = buttons.generate.current;
+    const fallback = generate !== null && !generate.disabled ? generate : buttons.close.current;
+    const target = running ? buttons.cancel.current : fallback;
+    target?.focus();
+  }, [running, targets]);
+}
+
+/**
  * The body of the dialog, mounted per opening and file.
  *
  * @param props the file and the handlers
@@ -166,10 +214,19 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   const [error, setError] = useState<string | null>(null);
   // The request whose answer is still wanted; any other answer is dropped.
   const request = useRef<string | null>(null);
+  const generateButton = useRef<HTMLButtonElement | null>(null);
+  const cancelButton = useRef<HTMLButtonElement | null>(null);
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  const focusTargets = useRef<RunningFocusTargets>({
+    generate: generateButton,
+    cancel: cancelButton,
+    close: closeButton,
+  });
+  useRunningFocus(running, focusTargets);
 
-  const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
-  const gate = providerGate(providers, providerId, model);
-  const blocked = gate.blocked ?? promptGate(prompts, promptId);
+  const promptId = effectivePromptId(prompts, 'image_prompt', chosenPrompt);
+  const gate = providerGate(providers, providerId, model, 'prompt');
+  const blocked = gate.blocked ?? promptGate(prompts, promptId, 'image_prompt');
   const canGenerate =
     blocked === null && !running && file !== null && providerId !== null && model !== null && promptId !== null;
 
@@ -219,17 +276,18 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
       <PromptSelect purpose="image_prompt" value={promptId} onChange={setChosenPrompt} disabled={running} />
       <div className="flex gap-2">
         <button
+          ref={generateButton}
           type="button"
           className={BUTTON}
           disabled={!canGenerate}
           title={generateTitle(blocked, running, file !== null)}
           onClick={generate}
         >
-          Generate
+          {DESCRIBE_LABEL}
         </button>
         {running && (
-          <button type="button" className={BUTTON} onClick={cancel}>
-            Cancel
+          <button ref={cancelButton} type="button" className={BUTTON} onClick={cancel}>
+            {CANCEL_LABEL}
           </button>
         )}
         {gate.offerSettings && <SettingsButton blocked={settingsBlocked} onClick={openSettings} />}
@@ -240,7 +298,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
         </p>
       )}
       <textarea
-        aria-label="Prompt"
+        aria-label={PROMPT_RESULT_LABEL}
         readOnly
         aria-busy={running || undefined}
         value={text ?? ''}
@@ -255,10 +313,10 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
             if (text !== null) void copyText(text, setError);
           }}
         >
-          Copy
+          {COPY_LABEL}
         </button>
-        <button type="button" className={BUTTON} onClick={onClose}>
-          Close
+        <button ref={closeButton} type="button" className={BUTTON} onClick={onClose}>
+          {CLOSE_LABEL}
         </button>
       </div>
     </div>

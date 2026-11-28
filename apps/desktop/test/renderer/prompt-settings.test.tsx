@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IpcRequest } from '@assetforge/contracts';
+import type { AnalysisPrompt, IpcRequest } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { PromptSettings } from '../../src/renderer/src/components/PromptSettings';
@@ -8,6 +8,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import {
+  deferred,
   fakeAnalysisPrompts,
   fakeError,
   fakeProviders,
@@ -133,6 +134,29 @@ it('a draft survives switching entries, with the marker shown meanwhile', async 
   expect(screen.queryByTitle('Unsaved changes')).toBeNull();
 });
 
+it('a tag limit typed with a leading zero is not an unsaved change of the same number', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.clear(field('Tag limit'));
+  await userEvent.type(field('Tag limit'), '025');
+  expect(within(entry('Tagging', 'Detailed')).queryByTitle('Unsaved changes')).toBeNull();
+  expect(button('Save').disabled).toBe(true);
+});
+
+it('a list entry with unsaved changes is described as such for a screen reader', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  expect(entry('Tagging', 'Detailed').getAttribute('aria-describedby')).toBeNull();
+  await userEvent.type(field('Text'), ' and more');
+  const describedBy = entry('Tagging', 'Detailed').getAttribute('aria-describedby');
+  expect(describedBy).not.toBeNull();
+  expect(document.getElementById(describedBy!)!.textContent).toBe('Unsaved changes');
+});
+
 it('New creates "New prompt", then "New prompt 2", with the built-in content, and selects it', async () => {
   const { api } = install();
   renderSection();
@@ -173,6 +197,63 @@ it('Reset calls the channel without asking and shows the returned text', async (
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(requestsOf(api, 'analysisPrompts:reset')).toEqual([{ id: DETAILED.id }]);
   expect(screen.queryByTitle('Unsaved changes')).toBeNull();
+});
+
+it('the fields are read-only while a reset runs, and the answer is shown afterwards', async () => {
+  const pending = deferred<AnalysisPrompt>();
+  const answer = { ...DETAILED, text: BUILT_IN_TAGGING_TEXT, maxTags: 15 };
+  install({ 'analysisPrompts:reset': () => pending.promise });
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.type(field('Text'), ' edited');
+  await userEvent.clear(field('Tag limit'));
+  await userEvent.type(field('Tag limit'), '30');
+  await userEvent.click(button('Reset'));
+  expect(field('Name').readOnly).toBe(true);
+  expect(field('Text').readOnly).toBe(true);
+  expect(field('Tag limit').readOnly).toBe(true);
+  await userEvent.type(field('Text'), ' typed meanwhile');
+  expect(field('Text').value).toBe('Describe the person precisely edited');
+  await act(async () => pending.resolve(answer));
+  await waitFor(() => expect(button('Reset').disabled).toBe(false));
+  expect(field('Text').readOnly).toBe(false);
+  expect(field('Text').value).toBe(BUILT_IN_TAGGING_TEXT);
+  expect(field('Tag limit').value).toBe('15');
+  expect(within(entry('Tagging', 'Detailed')).queryByTitle('Unsaved changes')).toBeNull();
+});
+
+it('the entries and New are disabled while an action runs, so its failure shows with its prompt', async () => {
+  const pending = deferred<AnalysisPrompt>();
+  install({ 'analysisPrompts:save': () => pending.promise });
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.type(field('Text'), ' and more');
+  await userEvent.click(button('Save'));
+  expect(entry('Tagging', 'Default').disabled).toBe(true);
+  expect(entry('Image to prompt', 'Default').disabled).toBe(true);
+  expect((within(group('Tagging')).getByRole('button', { name: 'New' }) as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(entry('Tagging', 'Default'));
+  await act(async () => pending.reject(fakeError('internal_error')));
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(entry('Tagging', 'Detailed').getAttribute('aria-pressed')).toBe('true');
+  expect(entry('Tagging', 'Default').disabled).toBe(false);
+});
+
+it('the message of a refused action goes when another prompt is selected', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.clear(field('Name'));
+  await userEvent.type(field('Name'), 'default');
+  await userEvent.click(button('Save'));
+  await screen.findByRole('alert');
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  expect(screen.getByRole('alert')).toBeTruthy();
+  await userEvent.click(entry('Image to prompt', 'Default'));
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('Delete asks first, then calls the channel', async () => {

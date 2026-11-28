@@ -10,7 +10,7 @@ import {
 } from '@assetforge/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
-import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
+import { AnalysisPromptsProvider, useAnalysisPrompts } from '../../src/renderer/src/analysis-prompts-context';
 import {
   MODEL_NOT_LISTED,
   PROMPTS_LOAD_FAILED,
@@ -105,7 +105,7 @@ const FILE = fileRecord({ originalName: 'fox.png' });
 
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const modelSelect = () => screen.getByRole('combobox', { name: 'Prompt model' }) as HTMLSelectElement;
-const promptField = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+const promptField = () => screen.getByRole('textbox', { name: 'Generated prompt' }) as HTMLTextAreaElement;
 const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as HTMLSelectElement;
 
 async function ready() {
@@ -131,6 +131,14 @@ it('opens with the prompt default selected', async () => {
   expect(modelSelect().value).toBe('vision-a');
   expect(promptField().value).toBe('');
   expect(promptField().readOnly).toBe(true);
+});
+
+it('the prompt select and the result text carry different names', async () => {
+  install();
+  render(ui({}));
+  await ready();
+  expect(screen.getAllByLabelText('Prompt')).toEqual([promptSelect()]);
+  expect(promptField()).toBeTruthy();
 });
 
 it('Generate sends analysis:describe with a fresh request id, the file and the chosen model', async () => {
@@ -170,6 +178,18 @@ it('while running Generate is disabled and Cancel sends analysis:cancelDescribe;
   expect(promptField().value).toBe('');
   expect(button('Generate').disabled).toBe(false);
   expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+});
+
+it('the focus moves to Cancel while a request runs and back to Generate when it ends', async () => {
+  const user = userEvent.setup();
+  const pending = deferred<DescribeResult>();
+  install(CONFIGURED, MODELS, { 'analysis:describe': () => pending.promise });
+  render(ui({}));
+  await ready();
+  await user.click(button('Generate'));
+  expect(document.activeElement).toBe(button('Cancel'));
+  await user.click(button('Cancel'));
+  expect(document.activeElement).toBe(button('Generate'));
 });
 
 it('Cancel then Generate again: the late answer of the cancelled call does not touch the new one', async () => {
@@ -416,7 +436,7 @@ it('no selectable model: Generate is disabled with a title and Settings is offer
     ).toContain('text-only'),
   );
   expect(button('Generate').disabled).toBe(true);
-  expect(button('Generate').title).not.toBe('');
+  expect(button('Generate').title).toBe('The provider offers no model that can describe images');
   expect(button('Settings')).toBeTruthy();
 });
 
@@ -551,6 +571,31 @@ it('a Generate refused with not_found shows the error and falls back to an exist
       .getAllByRole('option')
       .map((o) => o.textContent),
   ).toEqual(['Describe']);
+});
+
+it('a chosen prompt that vanishes through a reload falls back to the default', async () => {
+  const user = userEvent.setup();
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  install(CONFIGURED, MODELS, prompts.handlers);
+  let reload: (() => Promise<void>) | null = null;
+  function PromptsProbe() {
+    reload = useAnalysisPrompts().reload;
+    return null;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <AnalysisPromptsProvider>
+        <PromptsProbe />
+        <PromptDialog open file={FILE} onClose={() => {}} onOpenSettings={() => {}} />
+      </AnalysisPromptsProvider>
+    </ProviderSettingsProvider>,
+  );
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  prompts.state.prompts = prompts.state.prompts.filter((p) => p.id !== IMAGE_SHORT.id);
+  await act(() => reload!());
+  expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
+  expect(button('Generate').disabled).toBe(false);
 });
 
 describe('provider choice', () => {

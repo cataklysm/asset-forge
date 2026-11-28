@@ -107,7 +107,7 @@ afterEach(() => {
 
 function Providers({
   children,
-  onOpenPrompt,
+  onOpenPrompt = async () => true,
 }: {
   children: ReactNode;
   onOpenPrompt?: (id: string) => Promise<boolean>;
@@ -257,6 +257,15 @@ it('opening the library prompt closes the studio and the linked dialog once the 
   await openPromptFromLinked(onOpenPrompt);
   expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('a rejected leave guard keeps the studio and the linked dialog open without an unhandled rejection', async () => {
+  const onOpenPrompt = vi.fn(() => Promise.reject(new Error('guard failed')));
+  await openPromptFromLinked(onOpenPrompt);
+  await waitFor(() => expect(onOpenPrompt).toHaveBeenCalledWith('prompt-1'));
+  await act(async () => {});
+  expect(studioDialog(SOURCE)).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: RESULT.originalName })).toBeTruthy();
 });
 
 it('a declined leave guard keeps the studio and the linked dialog open', async () => {

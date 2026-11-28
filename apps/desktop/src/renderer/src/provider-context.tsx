@@ -146,6 +146,21 @@ function without<T>(record: Record<string, T>, id: string): Record<string, T> {
 }
 
 /**
+ * `record` with only the keys in `ids`.
+ *
+ * @param record the record
+ * @param ids the keys to keep
+ * @returns the new record; the same object when every key is kept
+ */
+function onlyListed<T>(record: Record<string, T>, ids: ReadonlySet<string>): Record<string, T> {
+  const dropped = Object.keys(record).filter((id) => !ids.has(id));
+  if (dropped.length === 0) return record;
+  const rest = { ...record };
+  for (const id of dropped) delete rest[id];
+  return rest;
+}
+
+/**
  * The purpose of entry `id`; an entry that is not listed counts as a vision entry.
  *
  * @param list the held list
@@ -256,6 +271,14 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   const takeList = useCallback((next: ProviderList | null) => {
     listRef.current = next;
     setList(next);
+    if (next === null) return;
+    // Answers of entries that are no longer listed (deleted elsewhere) go, and a late one is dropped.
+    const ids = new Set(next.providers.map((entry) => entry.id));
+    for (const [id, request] of modelRequests.current) {
+      if (!ids.has(id)) modelRequests.current.set(id, request + 1);
+    }
+    setModels((answers) => onlyListed(answers, ids));
+    setImageModels((answers) => onlyListed(answers, ids));
   }, []);
 
   const loadModels = useCallback(

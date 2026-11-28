@@ -1,14 +1,23 @@
-import { JOB_ERROR_MESSAGES, purposeOf, type ProviderPurpose, type VisionModel } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  purposeOf,
+  type AnalysisPromptPurpose,
+  type ProviderPurpose,
+  type VisionModel,
+} from '@assetforge/contracts';
 import type { AnalysisPromptsState } from './analysis-prompts-context';
 import {
   CHOOSE_MODEL,
   CHOOSE_PROMPT,
+  MODEL_NOT_DESCRIBE,
   MODEL_NOT_LISTED,
   MODEL_NOT_VISION,
+  NO_DESCRIBE_MODEL,
   NO_VISION_MODEL,
   PROVIDER_CHECKING,
   PROVIDER_STATE_LABELS,
   PROMPTS_LOAD_FAILED,
+  PROMPTS_LOADING,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
 } from './labels';
@@ -20,15 +29,18 @@ import type { ProvidersState } from './provider-context';
  *
  * @param state the loaded analysis prompts
  * @param promptId the chosen prompt; null when none is chosen
+ * @param purpose the purpose of the dialog; a prompt of the other purpose cannot start
  * @returns the reason, null when a start can go ahead
  */
 export function promptGate(
   state: Pick<AnalysisPromptsState, 'prompts' | 'loading' | 'failed'>,
   promptId: string | null,
+  purpose: AnalysisPromptPurpose,
 ): string | null {
   if (state.failed) return PROMPTS_LOAD_FAILED;
-  if (state.prompts === null) return START_LOADING;
-  if (promptId === null || !state.prompts.some((prompt) => prompt.id === promptId)) return CHOOSE_PROMPT;
+  if (state.prompts === null) return PROMPTS_LOADING;
+  if (promptId === null || !state.prompts.some((prompt) => prompt.id === promptId && prompt.purpose === purpose))
+    return CHOOSE_PROMPT;
   return null;
 }
 
@@ -88,6 +100,15 @@ function entryGate(
   return { names: answer.models.map((entry) => entry.name) };
 }
 
+/** What a vision model is used for: tagging in the analysis dialogs, a prompt in Image to prompt. */
+export type VisionUse = 'tagging' | 'prompt';
+
+/** The texts of a missing vision model, worded for its use. */
+const VISION_TEXTS: Record<VisionUse, { noModel: string; notVision: string }> = {
+  tagging: { noModel: NO_VISION_MODEL, notVision: MODEL_NOT_VISION },
+  prompt: { noModel: NO_DESCRIBE_MODEL, notVision: MODEL_NOT_DESCRIBE },
+};
+
 /**
  * The provider side of the analysis and prompt dialogs, shared so all three agree, applied to the
  * selected vision entry (Ollama or OpenAI-compatible): on top of `entryGate`, an entry without vision models offers the
@@ -96,16 +117,22 @@ function entryGate(
  * @param state the provider state
  * @param providerId the selected entry; null when none is selected
  * @param model the chosen model; null when none is chosen
+ * @param use what the model is used for; it words the reasons about vision
  * @returns the gate
  */
-export function providerGate(state: GateState, providerId: string | null, model: string | null): ProviderGate {
+export function providerGate(
+  state: GateState,
+  providerId: string | null,
+  model: string | null,
+  use: VisionUse = 'tagging',
+): ProviderGate {
   const gate = entryGate(state, 'vision', providerId, model);
   if (!('names' in gate)) return gate;
   const answer = state.models[providerId!];
   const models = answer !== undefined && answer.ok ? answer.models : [];
   if (!models.some((entry) => entry.vision !== false))
-    return { blocked: NO_VISION_MODEL, offerSettings: !state.loading };
-  return { blocked: visionModelBlocked(gate.names, models, model), offerSettings: false };
+    return { blocked: VISION_TEXTS[use].noModel, offerSettings: !state.loading };
+  return { blocked: visionModelBlocked(gate.names, models, model, use), offerSettings: false };
 }
 
 /**
@@ -114,16 +141,18 @@ export function providerGate(state: GateState, providerId: string | null, model:
  * @param names the names in the entry's loaded list
  * @param models the entry's loaded models
  * @param model the chosen model; null when none is chosen
+ * @param use what the model is used for
  * @returns the reason, null when it can start
  */
 function visionModelBlocked(
   names: readonly string[],
   models: readonly VisionModel[],
   model: string | null,
+  use: VisionUse,
 ): string | null {
   if (model === null) return CHOOSE_MODEL;
   if (!names.includes(model)) return MODEL_NOT_LISTED;
-  if (models.some((entry) => entry.name === model && entry.vision === false)) return MODEL_NOT_VISION;
+  if (models.some((entry) => entry.name === model && entry.vision === false)) return VISION_TEXTS[use].notVision;
   return null;
 }
 

@@ -31,6 +31,7 @@ interface Props {
   dirty: boolean;
   /** The only prompt of its purpose: it cannot be deleted. */
   only: boolean;
+  /** An action of the section runs: the fields are read-only and the actions disabled. */
   busy: boolean;
   onChange(patch: Partial<AnalysisPromptDraft>): void;
   onSave(draft: AnalysisPromptDraft): void;
@@ -61,6 +62,7 @@ export function AnalysisPromptEditor({ prompt, draft, dirty, only, busy, onChang
           value={draft.name}
           maxLength={ANALYSIS_PROMPT_NAME_MAX}
           autoComplete="off"
+          readOnly={busy}
           onChange={(event) => onChange({ name: event.target.value })}
         />
       </label>
@@ -72,6 +74,7 @@ export function AnalysisPromptEditor({ prompt, draft, dirty, only, busy, onChang
           max={ANALYSIS_TAG_LIMIT_MAX}
           step={1}
           value={draft.maxTags}
+          readOnly={busy}
           invalid={tagLimitOf(draft.maxTags) === null}
           onChange={(maxTags) => onChange({ maxTags })}
         />
@@ -84,6 +87,7 @@ export function AnalysisPromptEditor({ prompt, draft, dirty, only, busy, onChang
           maxLength={ANALYSIS_PROMPT_TEXT_MAX}
           rows={8}
           spellCheck={false}
+          readOnly={busy}
           onChange={(event) => onChange({ text: event.target.value })}
         />
       </label>

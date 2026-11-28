@@ -221,6 +221,18 @@ it('Delete asks first, then sends providers:delete', async () => {
   expect(field('Name').value).toBe('RunPod');
 });
 
+it('after a delete the focus moves to the entry now selected', async () => {
+  const user = userEvent.setup();
+  install();
+  renderSection();
+  await loaded();
+  await user.click(button('Delete'));
+  const dialog = await screen.findByRole('dialog', { name: 'Delete the provider Local?' });
+  await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(entryNames()).toEqual(['RunPod']));
+  await waitFor(() => expect(document.activeElement).toBe(within(list()).getByRole('button', { name: 'RunPod' })));
+});
+
 it('Cancel in the delete question sends nothing', async () => {
   const user = userEvent.setup();
   const { api } = install();

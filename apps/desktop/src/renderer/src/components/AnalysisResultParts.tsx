@@ -1,6 +1,14 @@
 import type { ProposalView } from '@assetforge/contracts';
-import { STALE_TITLE } from '../analysis-result';
-import { PROMPT_SELECT_LABEL } from '../labels';
+import {
+  ACCEPT_LABEL,
+  DISCARD_LABEL,
+  OUT_OF_DATE_LABEL,
+  PROMPT_SELECT_LABEL,
+  PROPOSAL_MODEL_TITLE,
+  PROPOSED_TAG_TITLE,
+  PROPOSED_TAGS_LABEL,
+  STALE_TITLE,
+} from '../labels';
 import { AI_CHIP, BUTTON, FOCUS, MUTED } from '../ui';
 import { ModelSelect } from './ModelSelect';
 import { PromptSelect } from './PromptSelect';
@@ -23,13 +31,13 @@ interface ProposedTagsProps {
  */
 export function ProposedTags({ proposal, off, busy, onToggle }: ProposedTagsProps) {
   return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Proposed tags">
+    <div className="flex flex-wrap gap-2" role="group" aria-label={PROPOSED_TAGS_LABEL}>
       {proposal.tags.map((tag) => {
         const on = !off.has(tag.name);
         return (
           <label
             key={tag.name}
-            title="AI tag"
+            title={PROPOSED_TAG_TITLE}
             className={`${AI_CHIP} max-w-full cursor-pointer has-disabled:cursor-default ${on ? '' : 'line-through opacity-50'}`}
           >
             <input
@@ -55,7 +63,7 @@ export function ProposedTags({ proposal, off, busy, onToggle }: ProposedTagsProp
 export function ProposalFacts({ proposal }: { proposal: ProposalView }) {
   return (
     <div className="flex items-center gap-3 text-sm">
-      <span className={`${MUTED} truncate`} title="Model">
+      <span className={`${MUTED} truncate`} title={PROPOSAL_MODEL_TITLE}>
         {proposal.model}
       </span>
       {proposal.promptName !== null && (
@@ -65,7 +73,7 @@ export function ProposalFacts({ proposal }: { proposal: ProposalView }) {
       )}
       {proposal.stale && (
         <span className="text-warning" title={STALE_TITLE}>
-          Out of date
+          {OUT_OF_DATE_LABEL}
         </span>
       )}
     </div>
@@ -97,10 +105,10 @@ export function ProposalButtons({ proposal, onCount, busy, onAccept, onDiscard }
         title={proposal.stale ? STALE_TITLE : undefined}
         onClick={onAccept}
       >
-        Accept
+        {ACCEPT_LABEL}
       </button>
       <button type="button" className={BUTTON} disabled={busy} onClick={onDiscard}>
-        Discard
+        {DISCARD_LABEL}
       </button>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { MAX_PROVIDERS, type ProviderList, type ProviderView, type SaveProvider } from '@assetforge/contracts';
 import { ApiError, describeError } from '../api';
 import {
@@ -99,12 +99,42 @@ async function deleteEntry(
   clearSelection();
 }
 
+/**
+ * After a delete the Delete button that opened the confirmation is gone with its editor, so the
+ * focus would fall back to the page. Once the section is no longer busy, it moves to the selected
+ * entry of the list, else to New.
+ *
+ * @param pending whether a delete has ended and the focus is still to be placed
+ * @param busy whether an action runs (the entries are disabled meanwhile)
+ * @param column the entry column holding the list and New
+ * @param setPending the state setter of `pending`; stable, so the effect runs only on a change of `pending` or `busy`
+ */
+function useFocusAfterDelete(
+  pending: boolean,
+  busy: boolean,
+  column: RefObject<HTMLDivElement | null>,
+  setPending: (pending: boolean) => void,
+): void {
+  useEffect(() => {
+    if (!pending || busy) return;
+    setPending(false);
+    const element = column.current;
+    if (element === null) return;
+    const target =
+      element.querySelector<HTMLButtonElement>('button[aria-pressed="true"]:not(:disabled)') ??
+      element.querySelector<HTMLButtonElement>('button:not([aria-pressed]):not(:disabled)');
+    target?.focus();
+  }, [pending, busy, column, setPending]);
+}
+
 /** The props of `EntryColumn`. */
 interface EntryColumnProps {
   list: ProviderList;
   selection: Selection;
   busy: boolean;
   select(id: string): void;
+  /** The column element; the focus goes back into it after a delete. */
+  columnRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -112,11 +142,11 @@ interface EntryColumnProps {
  *
  * @param props the list, the selection and the select handler
  */
-function EntryColumn({ list, selection, busy, select }: EntryColumnProps) {
+function EntryColumn({ list, selection, busy, select, columnRef }: EntryColumnProps) {
   const locked = list.fromEnvironment;
   const atLimit = list.providers.length >= MAX_PROVIDERS;
   return (
-    <div className="flex w-64 shrink-0 flex-col gap-2">
+    <div ref={columnRef} className="flex w-64 shrink-0 flex-col gap-2">
       <ul className="flex flex-col gap-1" aria-label={PROVIDERS_LIST_LABEL}>
         {list.providers.map((entry) => (
           <li key={entry.id} className="flex flex-col">
@@ -156,6 +186,9 @@ export function ProviderSettings() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const { busy, error, setError, run } = useExclusiveRun(messageOf);
+  const columnRef = useRef<HTMLDivElement>(null);
+  const [focusPending, setFocusPending] = useState(false);
+  useFocusAfterDelete(focusPending, busy, columnRef, setFocusPending);
 
   /**
    * Shows the entry `id` (or `NEW`) in the editor and drops the last refusal.
@@ -180,7 +213,10 @@ export function ProviderSettings() {
         remove,
         target.id,
         () => setConfirming(false),
-        () => setSelectedId(null),
+        () => {
+          setSelectedId(null);
+          setFocusPending(true);
+        },
       ),
     );
   };
@@ -211,7 +247,7 @@ export function ProviderSettings() {
             </p>
           )}
           <div className="flex items-start gap-6">
-            <EntryColumn list={list} selection={selection} busy={busy} select={select} />
+            <EntryColumn list={list} selection={selection} busy={busy} select={select} columnRef={columnRef} />
             {(selection.selected !== null || selection.editingNew) && (
               <ProviderEditor
                 key={selection.editingNew ? NEW : selection.selected!.id}

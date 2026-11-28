@@ -62,6 +62,27 @@ export function laneName(list: ProviderList | null, id: string | null, stored: s
 }
 
 /**
+ * The name shown for the source lane. An entry that is not listed is named only once both the provider
+ * list and the lanes are there, so it never shows `Removed provider` before the stored name arrives.
+ *
+ * @param list the provider list; null while not loaded
+ * @param from the source lane; undefined when there is none yet
+ * @param lanes the lanes with waiting jobs; null while counting
+ * @returns the name; null while it is not known yet
+ */
+function sourceName(
+  list: ProviderList | null,
+  from: string | null | undefined,
+  lanes: readonly WaitingByProvider[] | null,
+): string | null {
+  if (from === undefined) return null;
+  const listed = from !== null && list?.providers.some((provider) => provider.id === from) === true;
+  if (!listed && (list === null || lanes === null)) return null;
+  const lane = lanes?.find((entry) => entry.providerId === from);
+  return laneName(list, from, lane?.providerName ?? null);
+}
+
+/**
  * The value of a lane in the From select.
  *
  * @param id the lane; null is the jobs without a provider
@@ -167,7 +188,7 @@ function blockedReason(
     if (entry === undefined) return MODEL_NOT_LISTED;
     if (entry.vision === false) return MODEL_NOT_VISION;
   }
-  if (waiting === null) return lanesError === null ? COUNTING_WAITING_JOBS : null;
+  if (waiting === null) return lanesError ?? COUNTING_WAITING_JOBS;
   if (waiting === 0 || from === undefined) return NO_WAITING_JOBS;
   return null;
 }
@@ -216,7 +237,7 @@ export function MoveJobsDialog({ source, onClose }: Props) {
   const from = fromLane(source, chosenSource, lanes);
   const lane = from === undefined ? undefined : lanes?.find((listed) => listed.providerId === from);
   const waiting = lanes === null ? null : (lane?.waiting ?? 0);
-  const fromName = from === undefined ? null : laneName(providers.list, from, lane?.providerName ?? null);
+  const fromName = sourceName(providers.list, from, lanes);
 
   const effective = effectiveChoice(providers, choice, from);
   const { target, model } = effective;
@@ -265,7 +286,10 @@ export function MoveJobsDialog({ source, onClose }: Props) {
               aria-busy={lanes === null || undefined}
               onChange={(event) => {
                 const next = lanes?.find((listed) => laneValue(listed.providerId) === event.target.value);
-                if (next !== undefined) setChosenSource(next.providerId);
+                if (next === undefined) return;
+                // A refusal was about the source chosen before.
+                setError(null);
+                setChosenSource(next.providerId);
               }}
             >
               {(lanes ?? []).map((listed) => (

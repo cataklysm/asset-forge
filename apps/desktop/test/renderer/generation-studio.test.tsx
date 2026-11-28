@@ -503,6 +503,84 @@ describe('GenerationStudio', () => {
     expect(callsOf(api, 'generations:retry')[0]!.request).toEqual({ generationId: failed.id });
   });
 
+  it('the upscales of the previously selected result do not show under a newly selected one', async () => {
+    const file = fileRecord();
+    const first = generation(file, { createdAt: '2026-01-02T00:00:00.000Z' });
+    first.outputs[0]!.name = 'first.png';
+    const second = generation(file);
+    second.outputs[0]!.name = 'second.png';
+    const firstOut = first.outputs[0]!;
+    const upscaled = generation(file, {
+      kind: 'upscale',
+      model: null,
+      prompt: null,
+      parameters: { v: 1, scale: 4 },
+      inputs: [firstOut],
+      outputs: [{ fileId: nextId(), name: 'first 4x.png', sha256: 'd'.repeat(64), trashed: false }],
+    });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setup({
+      results: [first, second],
+      handlers: {
+        'generations:forFile': async ({ fileId }) => {
+          if (fileId === second.outputs[0]!.fileId) await held;
+          // The source answers both results; an output's edits are no upscales and stay out.
+          return { madeBy: null, results: structuredClone(fileId === firstOut.fileId ? [upscaled] : [first, second]) };
+        },
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'first.png' }));
+    await within(await screen.findByRole('list', { name: UPSCALES_LABEL })).findByRole('listitem', {
+      name: 'first 4x.png',
+    });
+
+    await user.click(screen.getByRole('button', { name: 'second.png' }));
+    await act(async () => {});
+    expect(screen.queryByRole('listitem', { name: 'first 4x.png' })).toBeNull();
+    release();
+  });
+
+  it('a failed results read stays shown when the upscales read after it succeeds', async () => {
+    const ready = generation(fileRecord());
+    const outputId = ready.outputs[0]!.fileId!;
+    let failResults = false;
+    // Holds the upscales read after the change, so that it answers only after the results read failed.
+    let upscalesHeld: ReturnType<typeof deferred<void>> | null = null;
+    const { api, state } = setup({
+      results: [ready],
+      handlers: {
+        'generations:forFile': async ({ fileId }) => {
+          if (fileId === outputId) {
+            if (upscalesHeld !== null) await upscalesHeld.promise;
+            return { madeBy: null, results: [] };
+          }
+          if (failResults) throw fakeError('invalid_operation', 'Results unreadable');
+          return { madeBy: null, results: [structuredClone(ready)] };
+        },
+      },
+    });
+    const upscaleReads = () =>
+      callsOf(api, 'generations:forFile').filter((entry) => (entry.request as { fileId: string }).fileId === outputId)
+        .length;
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await waitFor(() => expect(button('Open')).toBeTruthy());
+    const readsBefore = upscaleReads();
+    const held = deferred<void>();
+    upscalesHeld = held;
+    failResults = true;
+    state.summary = { ...IDLE, changes: 1 };
+    await screen.findByText('Results unreadable', undefined, { timeout: 5000 });
+    expect(upscaleReads()).toBe(readsBefore + 1);
+    await act(async () => held.resolve());
+    await act(async () => {});
+    expect(screen.getByText('Results unreadable')).toBeTruthy();
+  });
+
   it('an upscale start shows the new upscale under the selected result', async () => {
     const file = fileRecord();
     const ready = generation(file);
@@ -763,7 +841,7 @@ describe('GenerationStudio with library prompts', () => {
       <JobsProvider>
         <ProviderSettingsProvider>
           <TagsProvider>
-            <StudioProvider>{children}</StudioProvider>
+            <StudioProvider onOpenPrompt={async () => true}>{children}</StudioProvider>
           </TagsProvider>
         </ProviderSettingsProvider>
       </JobsProvider>
@@ -838,6 +916,18 @@ describe('GenerationStudio with library prompts', () => {
     expect(textbox('view').value).toBe('front');
     expect(promptBox().readOnly).toBe(true);
     expect(promptBox().value).toBe('A front at night');
+  });
+
+  it('Save to library keeps the focus inside the dialog when the title field is disabled for a new version', async () => {
+    setup({ prompts: [hero()] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.click(button(EDIT_PROMPT_TEXT_LABEL));
+    await user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    const asVersion = await within(dialog).findByRole('radio', { name: newVersionOfLabel('Hero shot') });
+    await waitFor(() => expect(document.activeElement).toBe(asVersion));
   });
 
   it('Save to library of a typed prompt creates a prompt, shows a refusal inside the dialog and attaches the form', async () => {
@@ -1010,7 +1100,7 @@ describe('GenerationStudio raised over the linked file dialog', () => {
       <JobsProvider>
         <ProviderSettingsProvider>
           <TagsProvider>
-            <StudioProvider>
+            <StudioProvider onOpenPrompt={async () => true}>
               <Opener />
             </StudioProvider>
           </TagsProvider>

@@ -1,10 +1,10 @@
 import type { FileRecord } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { effectivePromptId, useAnalysisPrompts } from '../analysis-prompts-context';
 import { failedMessageOf, isActive, namesOn, type Shown } from '../analysis-result';
 import { acceptProposal, analyseFile, cancelJob, discardProposal, type ResultAction } from '../analysis-result-actions';
 import { useResultOpening } from '../hooks/useResultOpening';
 import { useJobs } from '../jobs-context';
-import { jobStatusLabel } from '../labels';
+import { ANALYSE_LABEL, CANCEL_LABEL, jobStatusLabel, START_FORCE_LABEL } from '../labels';
 import { useProviderChoice } from '../provider-choice';
 import { useProviders } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
@@ -25,8 +25,16 @@ interface Props {
   settingsBlocked?: string | null;
 }
 
-export { CHOOSE_MODEL, MODEL_NOT_LISTED, MODEL_NOT_VISION, NO_VISION_MODEL } from '../labels';
-export { NOT_ANALYSABLE, PROPOSAL_CHANGED, STALE_TITLE, proposalKey } from '../analysis-result';
+export {
+  CHOOSE_MODEL,
+  MODEL_NOT_LISTED,
+  MODEL_NOT_VISION,
+  NO_VISION_MODEL,
+  NOT_ANALYSABLE,
+  PROPOSAL_CHANGED,
+  STALE_TITLE,
+} from '../labels';
+export { proposalKey } from '../analysis-result';
 
 /** The props of `ResultBody`. */
 interface ResultBodyProps {
@@ -57,7 +65,7 @@ function ResultBody({ current, busy, analyseRow, onCancel, onToggle, onAccept, o
           {jobStatusLabel(job.status)}
         </p>
         <button type="button" className={BUTTON} disabled={busy} onClick={() => onCancel(job.id)}>
-          Cancel
+          {CANCEL_LABEL}
         </button>
       </div>
     );
@@ -72,7 +80,7 @@ function ResultBody({ current, busy, analyseRow, onCancel, onToggle, onAccept, o
     return (
       <>
         {failedAlert}
-        <AnalyseRow {...analyseRow} label="Analyse" />
+        <AnalyseRow {...analyseRow} label={ANALYSE_LABEL} />
       </>
     );
   }
@@ -88,7 +96,7 @@ function ResultBody({ current, busy, analyseRow, onCancel, onToggle, onAccept, o
         onAccept={onAccept}
         onDiscard={onDiscard}
       />
-      <AnalyseRow {...analyseRow} label="Analyse again" />
+      <AnalyseRow {...analyseRow} label={START_FORCE_LABEL} />
     </>
   );
 }
@@ -118,8 +126,8 @@ export function AnalysisResultDialog({
   const opening = useResultOpening(fileId, changeToken);
   const { shown, error, busy, chosenPrompt, run } = opening;
 
-  const promptId =
-    chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : defaultPromptId(prompts, 'tagging');
+  const chosenHere = chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : null;
+  const promptId = effectivePromptId(prompts, 'tagging', chosenHere);
 
   /**
    * The context of one action of the current opening.
@@ -146,7 +154,7 @@ export function AnalysisResultDialog({
 
   // Why Analyse cannot start, as its tooltip; null when it can.
   const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
-  const blocked = providerBlocked ?? promptGate(prompts, promptId);
+  const blocked = providerBlocked ?? promptGate(prompts, promptId, 'tagging');
   const current = shown !== null && shown.fileId === fileId ? shown : null;
 
   const analyseRow: AnalyseRowProps = {
