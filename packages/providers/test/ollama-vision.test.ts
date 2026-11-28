@@ -3,6 +3,7 @@ import { JobError } from '@assetforge/core';
 import type { JobErrorCode } from '@assetforge/contracts';
 import {
   MOCK_MODEL,
+  mockImageDigest,
   startMockProvider,
   type MockFailure,
   type MockProvider,
@@ -85,7 +86,8 @@ describe('ollama vision adapter', () => {
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0]).toMatchObject({ role: 'user', content: prompt });
     expect(body.messages[0]!.images).toHaveLength(1);
-    expect(new Uint8Array(Buffer.from(body.messages[0]!.images[0]!, 'base64'))).toEqual(image);
+    // The mock records the image as the digest of the bytes it decoded from the Base64.
+    expect(body.messages[0]!.images[0]).toBe(mockImageDigest(image));
   });
 
   it('accepts a base URL with a trailing slash', async () => {

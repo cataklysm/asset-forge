@@ -9,6 +9,7 @@ import {
   MOCK_SLASH_MODEL,
   MOCK_TEXT_MODEL,
   MOCK_THINKING_MODEL,
+  mockImageDigest,
   startMockProvider,
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
@@ -124,7 +125,8 @@ describe('openai vision adapter', () => {
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${Buffer.from(image).toString('base64')}` } },
+          // The mock records the data of the URL as the digest of the bytes it decoded from the Base64.
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${mockImageDigest(image)}` } },
         ],
       },
     ]);
