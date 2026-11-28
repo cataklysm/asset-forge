@@ -33,8 +33,9 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
           {error}
         </p>
       )}
-      {state.loadErrors.map((message) => (
-        <p key={message} role="alert" className={ALERT}>
+      {/* Two loads can fail with the same message, so the position is the key. */}
+      {state.loadErrors.map((message, index) => (
+        <p key={index} role="alert" className={ALERT}>
           {message}
         </p>
       ))}

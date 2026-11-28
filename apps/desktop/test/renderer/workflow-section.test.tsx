@@ -1,9 +1,9 @@
 import type { AssetWorkflow } from '@assetforge/contracts';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { WorkflowSection } from '../../src/renderer/src/components/WorkflowSection';
-import { deferred, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId } from './fixtures';
 
 const ASSET_ID = nextId();
@@ -92,4 +92,17 @@ it('of two saves in flight, the answer of the later one stays', async () => {
   await first.promise;
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(select.value).toBe('done');
+});
+
+it('two loads failing with the same message show two alert lines without a key clash', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const fail = () => {
+    throw fakeError('storage_unreachable');
+  };
+  install({ 'workflows:get': fail, 'workflowTemplates:list': fail });
+  render(<WorkflowSection assetId={ASSET_ID} assetTypeId={TYPE_ID} />);
+  await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+  const clash = errors.mock.calls.some((call) => String(call[0]).includes('same key'));
+  errors.mockRestore();
+  expect(clash).toBe(false);
 });
