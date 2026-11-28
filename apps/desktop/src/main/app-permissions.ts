@@ -12,6 +12,22 @@ export interface PermissionContents {
   getURL(): string;
 }
 
+/** The part of the details of a permission request the rule reads. */
+export interface PermissionRequestDetails {
+  /** Whether the main frame asks. */
+  isMainFrame: boolean;
+  /** The URL of the frame that asks. */
+  requestingUrl: string;
+}
+
+/** The part of the details of a permission check the rule reads. */
+export interface PermissionCheckDetails {
+  /** Whether the main frame checks. */
+  isMainFrame: boolean;
+  /** The last URL the checking frame loaded; absent when no document checks. */
+  requestingUrl?: string;
+}
+
 /** The part of a session the rule is installed on. */
 export interface PermissionSession {
   /**
@@ -20,14 +36,26 @@ export interface PermissionSession {
    * @param handler answers one request through its callback
    */
   setPermissionRequestHandler(
-    handler: (contents: PermissionContents, permission: string, callback: (isGranted: boolean) => void) => void,
+    handler: (
+      contents: PermissionContents,
+      permission: string,
+      callback: (isGranted: boolean) => void,
+      details: PermissionRequestDetails,
+    ) => void,
   ): void;
   /**
    * Installs the handler that answers permission checks.
    *
    * @param handler answers one check
    */
-  setPermissionCheckHandler(handler: (contents: PermissionContents | null, permission: string) => boolean): void;
+  setPermissionCheckHandler(
+    handler: (
+      contents: PermissionContents | null,
+      permission: string,
+      requestingOrigin: string,
+      details: PermissionCheckDetails,
+    ) => boolean,
+  ): void;
 }
 
 /** What the rule needs to know about the app. */
@@ -39,37 +67,77 @@ export interface AppPermissionContext {
    * @returns whether it is the app page
    */
   isAppUrl(url: string): boolean;
+  /**
+   * @param origin an origin as a permission check names it
+   * @returns whether it is the app's origin
+   */
+  isAppOrigin(origin: string): boolean;
+}
+
+/** The frame that asks, as far as the rule needs it. */
+export interface PermissionFrame {
+  /** Whether it is the main frame. */
+  isMainFrame: boolean;
+  /** Whether its URL, or its origin for a check, is the app's. */
+  isApp: boolean;
 }
 
 /**
- * Whether a permission is granted: only one the app page uses, only to the main window, and only while it shows the
- * app page.
+ * Whether a permission is granted: only one the app page uses, only to the main frame of the main window, and only
+ * while both the window and the asking frame show the app page.
  *
  * @param context the main window and the app URL rule
  * @param contents the web contents that asks, or null when Electron names none
  * @param permission the permission's name
+ * @param frame the frame that asks
  * @returns true when it is granted
  */
 export function isAppPermissionGranted(
   context: AppPermissionContext,
   contents: PermissionContents | null,
   permission: string,
+  frame: PermissionFrame,
 ): boolean {
-  if (!APP_PERMISSIONS.has(permission)) return false;
+  if (!APP_PERMISSIONS.has(permission) || !frame.isMainFrame || !frame.isApp) return false;
   const main = context.mainContents();
   if (contents === null || main === null || contents !== main) return false;
   return context.isAppUrl(contents.getURL());
 }
 
 /**
- * Installs the rule on the session of the main window for requests and checks alike.
+ * The asking frame of a permission check: its origin must be the app's, and so must its URL when Electron names one.
+ *
+ * @param context the app URL rules
+ * @param requestingOrigin the origin Electron names
+ * @param details the check's details
+ * @returns the frame for the rule
+ */
+function checkingFrame(
+  context: AppPermissionContext,
+  requestingOrigin: string,
+  details: PermissionCheckDetails,
+): PermissionFrame {
+  const urlIsApp = details.requestingUrl === undefined || context.isAppUrl(details.requestingUrl);
+  return { isMainFrame: details.isMainFrame, isApp: urlIsApp && context.isAppOrigin(requestingOrigin) };
+}
+
+/**
+ * Installs the rule on the session of the main window for requests and checks alike. It must be installed before the
+ * main window opens, so no request is ever answered by Electron's default (grant everything).
  *
  * @param session the default session
- * @param context the main window and the app URL rule
+ * @param context the main window and the app URL rules
  */
 export function restrictAppPermissions(session: PermissionSession, context: AppPermissionContext): void {
-  session.setPermissionRequestHandler((contents, permission, callback) =>
-    callback(isAppPermissionGranted(context, contents, permission)),
+  session.setPermissionRequestHandler((contents, permission, callback, details) =>
+    callback(
+      isAppPermissionGranted(context, contents, permission, {
+        isMainFrame: details.isMainFrame,
+        isApp: context.isAppUrl(details.requestingUrl),
+      }),
+    ),
   );
-  session.setPermissionCheckHandler((contents, permission) => isAppPermissionGranted(context, contents, permission));
+  session.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+    isAppPermissionGranted(context, contents, permission, checkingFrame(context, requestingOrigin, details)),
+  );
 }
