@@ -44,6 +44,10 @@ export const asset = sqliteTable(
   (table) => [
     index('asset_type_id_idx').on(table.typeId),
     index('asset_status_idx').on(table.status),
+    // The gallery order without a query (migration 0017), so a page reads no more than it shows.
+    index('asset_name_lower_id_idx').on(sql`lower(${table.name})`, table.id),
+    // Purging or trashing a file clears the cover that chose it.
+    index('asset_cover_file_id_idx').on(table.coverFileId),
     check('asset_status_check', oneOf(table.status, ASSET_STATUSES)),
   ],
 );

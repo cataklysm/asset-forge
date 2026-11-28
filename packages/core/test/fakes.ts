@@ -6,6 +6,7 @@ import type {
   AnalysisTarget,
   Asset,
   AssetAssignment,
+  AssetDetail,
   AssetList,
   AssetRelation,
   AssetRelationView,
@@ -52,6 +53,7 @@ import type {
   AnalysisTargetEntry,
   AnalysisTargetReader,
   Proposal,
+  ProposalAcceptance,
   FileAnalysis,
   FileAnalysisRepository,
 } from '../src/ports/analysis-repositories.js';
@@ -725,7 +727,7 @@ class InMemoryFiles implements FileRepository {
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }
 
-  async purge(id: string): Promise<boolean> {
+  async purge(id: string, _purgedAt: string): Promise<boolean> {
     const rec = this.records.get(id);
     if (!rec || (rec.deletedAt === null && rec.status !== 'failed')) return false;
     if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
@@ -840,16 +842,17 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     sha256: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
-  }): Promise<boolean> {
+  }): Promise<ProposalAcceptance> {
     const proposal = this.proposals.get(r.fileId);
-    if (!proposal) return false;
-    if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return false;
+    if (!proposal) return 'missing';
     // The proposal of a trashed file is kept for a restore; only a genuinely stale one is deleted.
-    if (this.files.isTrashed(r.fileId)) return false;
-    if (proposal.sha256 !== r.sha256 || !this.hasContent(r.fileId, r.sha256)) {
+    if (this.files.isTrashed(r.fileId)) return 'trashed';
+    if (!this.hasContent(r.fileId, proposal.sha256)) {
       this.proposals.delete(r.fileId);
-      return false;
+      return 'stale';
     }
+    if (proposal.sha256 !== r.sha256) return 'stale';
+    if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return 'stale';
     this.writeTags(r.fileId, r.tags);
     this.rows.set(r.fileId, {
       fileId: r.fileId,
@@ -861,7 +864,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       analysedAt: r.now,
     });
     this.proposals.delete(r.fileId);
-    return true;
+    return 'accepted';
   }
 
   async discardProposal(fileId: string): Promise<void> {
@@ -1409,6 +1412,7 @@ class InMemoryAssets implements AssetRepository {
     private readonly workflows: InMemoryAssetWorkflows,
     private readonly covers: CoverChoices,
     private readonly tags: InMemoryTags,
+    private readonly sources: InMemoryAssetSources,
   ) {}
 
   private coverOf(assetId: string): AssetCover {
@@ -1422,12 +1426,35 @@ class InMemoryAssets implements AssetRepository {
     return this.rows.has(assetId) ? this.coverOf(assetId) : null;
   }
 
-  async setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<void> {
+  async getDetail(assetId: string): Promise<AssetDetail | null> {
     const row = this.rows.get(assetId);
-    if (!row) return;
+    if (!row) return null;
+    return {
+      ...row,
+      ...this.coverOf(assetId),
+      tags: await this.tags.listForAsset(assetId),
+      sources: await this.sources.listByAsset(assetId),
+    };
+  }
+
+  /** Like the guarded UPDATE: a chosen file must be a complete, live file with a thumbnail of this asset. */
+  async setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<boolean> {
+    const row = this.rows.get(assetId);
+    if (!row) return false;
     if (fileId === null) this.covers.delete(assetId);
-    else this.covers.set(assetId, fileId);
+    else {
+      const file = this.files.records.get(fileId);
+      const usable =
+        file !== undefined &&
+        file.assetId === assetId &&
+        file.status === 'complete' &&
+        file.deletedAt === null &&
+        hasThumbnail(file.mimeType);
+      if (!usable) return false;
+      this.covers.set(assetId, fileId);
+    }
     this.rows.set(assetId, { ...row, updatedAt });
+    return true;
   }
 
   async insert(asset: Asset): Promise<void> {
@@ -1505,9 +1532,10 @@ class InMemoryProjectAssets implements ProjectAssetRepository {
     private readonly assets: InMemoryAssets,
   ) {}
 
-  async insert(a: ProjectAssignment): Promise<void> {
-    if (this.links.has(assignmentKey(a))) throw new Error('UNIQUE constraint failed: project_asset');
+  async insert(a: ProjectAssignment): Promise<boolean> {
+    if (this.links.has(assignmentKey(a))) return false;
     this.links.set(assignmentKey(a), a);
+    return true;
   }
 
   async get(key: AssignmentKey): Promise<ProjectAssignment | null> {
@@ -1610,12 +1638,20 @@ class InMemoryAssetSources implements AssetSourceRepository {
   async insert(row: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean> {
     if ([...this.rows.values()].some((r) => r.assetId === row.assetId && r.url === row.url)) return false;
     this.rows.set(row.id, { ...row });
+    this.touch(row.assetId, row.createdAt);
     return true;
   }
 
-  async remove(id: string): Promise<boolean> {
-    return this.rows.delete(id);
+  async remove(id: string, updatedAt: string): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (row === undefined) return false;
+    this.rows.delete(id);
+    this.touch(row.assetId, updatedAt);
+    return true;
   }
+
+  /** Set by the database: moves an asset's `updatedAt`, as the repository's transaction does. */
+  touch: (assetId: string, updatedAt: string) => void = () => {};
 }
 
 /** Origins by id; one URL per file and at most MAX_FILE_ORIGINS, like the database. Rows go with their file. */
@@ -1665,9 +1701,9 @@ class InMemoryFileOrigins implements FileOriginRepository {
   }
 
   async insert(row: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean> {
+    if (!this.records.has(row.fileId)) throw new NotFoundError(`File ${row.fileId} does not exist`);
     const existing = this.ofFile(row.fileId);
     if (existing.length >= MAX_FILE_ORIGINS || existing.some((r) => r.url === row.url)) return false;
-    if (!this.records.has(row.fileId)) throw new Error('FOREIGN KEY constraint failed');
     if (this.rows.has(row.id)) throw new Error('UNIQUE constraint failed: file_origin.id');
     this.rows.set(row.id, { ...row });
     return true;
@@ -1689,7 +1725,14 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projects = new InMemoryProjects(this.links, this.files, this.tags);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
+  readonly assets = new InMemoryAssets(
+    this.links,
+    this.files,
+    this.assetWorkflows,
+    this.covers,
+    this.tags,
+    this.assetSources,
+  );
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   readonly jobs = new InMemoryJobRepository(
@@ -1718,6 +1761,10 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
     this.assetWorkflows.assetExists = (assetId) => this.assets.rows.has(assetId);
+    this.assetSources.touch = (assetId, updatedAt) => {
+      const row = this.assets.rows.get(assetId);
+      if (row !== undefined) this.assets.rows.set(assetId, { ...row, updatedAt });
+    };
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     this.files.hasRunningGeneration = (fileId) =>
       this.jobs.rows.some((j) => j.fileId === fileId && j.type === IMAGE_GENERATE_JOB && j.status === 'running');

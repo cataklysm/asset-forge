@@ -3,9 +3,10 @@ export type PageLoadResult =
   /**
    * Absolute or relative strings as found, per query name. `baseUrl` is the document's base URL as the page
    * reported it (after redirects and any `<base href>`); the crawl resolves against it only when it is a URL of the
-   * profile's site, so any string may come here.
+   * profile's site, so any string may come here. `finalUrl` is the main frame's URL after the load (after
+   * redirects, without `<base href>`); the crawl counts it as a page seen when it is a URL of the profile's site.
    */
-  | { ok: true; results: Record<string, string[]>; baseUrl: string }
+  | { ok: true; results: Record<string, string[]>; baseUrl: string; finalUrl: string }
   /**
    * `no_match`: the document finished loading but the waited-for query matched nothing in time; `timeout`: it did
    * not finish loading in time; `failed`: a network or other failure, also a cancel.

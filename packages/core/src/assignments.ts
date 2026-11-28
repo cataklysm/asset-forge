@@ -34,8 +34,6 @@ async function requireProject(session: WorkspaceSession, id: string): Promise<vo
 export async function assignAsset(session: WorkspaceSession, key: AssignmentKey): Promise<ProjectAssignment> {
   await requireProject(session, key.projectId);
   await requireAsset(session, key.assetId);
-  const existing = await session.database.projectAssets.get(key);
-  if (existing !== null) return existing;
   const now = session.now().toISOString();
   const assignment: ProjectAssignment = {
     projectId: key.projectId,
@@ -47,8 +45,12 @@ export async function assignAsset(session: WorkspaceSession, key: AssignmentKey)
     assignedAt: now,
     updatedAt: now,
   };
-  await session.database.projectAssets.insert(assignment);
-  return assignment;
+  if (await session.database.projectAssets.insert(assignment)) return assignment;
+  const existing = await session.database.projectAssets.get(key);
+  if (existing === null) {
+    throw new NotFoundError(`Asset ${key.assetId} is not assigned to project ${key.projectId}`);
+  }
+  return existing;
 }
 
 /**

@@ -69,11 +69,12 @@ export interface AssignmentKey {
 /** The assignments of assets to projects; removing one never touches the asset or its files. */
 export interface ProjectAssetRepository {
   /**
-   * Inserts an assignment.
+   * Inserts an assignment in one statement unless the asset is already assigned to the project.
    *
    * @param assignment the row with its project-specific data
+   * @returns whether a row was written; false when the assignment already existed (it stays unchanged)
    */
-  insert(assignment: ProjectAssignment): Promise<void>;
+  insert(assignment: ProjectAssignment): Promise<boolean>;
   /**
    * One assignment.
    *

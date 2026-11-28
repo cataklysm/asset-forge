@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { IMAGE_GENERATE_JOB } from '@assetforge/contracts';
-import type { GenerationFileRef, NewGeneration, NewJob, WorkspaceDatabase } from '@assetforge/core';
+import {
+  NotFoundError,
+  type GenerationFileRef,
+  type NewGeneration,
+  type NewJob,
+  type WorkspaceDatabase,
+} from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T0 = '2026-11-27T10:00:00.000Z';
@@ -86,7 +92,7 @@ async function trash(id: string): Promise<void> {
 /** Trashes and purges a file. */
 async function purge(id: string): Promise<void> {
   await trash(id);
-  expect(await db.files.purge(id)).toBe(true);
+  expect(await db.files.purge(id, '2026-01-01T00:00:00.000Z')).toBe(true);
 }
 
 const create = (generation: NewGeneration, job = jobFor(Number(generation.id.slice(-12)))) =>
@@ -502,6 +508,16 @@ describe('generation prompt reference', () => {
       promptVariables: { Subject: 'oak' },
       prompt: 'Make it night',
     });
+  });
+
+  test('create with a prompt version deleted in between answers not found and writes nothing', async () => {
+    expect(await db.prompts.remove(PROMPT)).toBe(true);
+    const error = await create({ ...edit(1), promptRef }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect((error as Error).message).toBe('This prompt version does not exist');
+    expect(await db.generations.get(uuid(1))).toBeNull();
+    expect(handle.prepare('select count(*) as n from job').get()).toEqual({ n: 0 });
+    expect(handle.prepare('select count(*) as n from generation_input').get()).toEqual({ n: 0 });
   });
 
   test('requeue leaves the prompt reference', async () => {

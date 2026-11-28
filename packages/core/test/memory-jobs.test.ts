@@ -182,8 +182,19 @@ describe('InMemoryJobRepository lanes', () => {
     expect(waiting).toHaveLength(2);
     expect(waiting).toEqual(
       expect.arrayContaining([
-        { lane: 'a', waiting: 2 },
-        { lane: null, waiting: 1 },
+        { lane: 'a', waiting: 2, latestPayload: { version: 1 } },
+        { lane: null, waiting: 1, latestPayload: { version: 1 } },
+      ]),
+    );
+  });
+
+  it('waitingByLane carries the payload of the newest job of the lane in any status', async () => {
+    const repo = await repoWith([job('a1', 'a', { n: 1 }), job('a2', 'a', { n: 2 }), job('n1', null, { n: 3 })]);
+    setStatus(repo, 'a2', 'failed');
+    expect(await repo.waitingByLane(T)).toEqual(
+      expect.arrayContaining([
+        { lane: 'a', waiting: 1, latestPayload: { n: 2 } },
+        { lane: null, waiting: 1, latestPayload: { n: 3 } },
       ]),
     );
   });

@@ -119,10 +119,10 @@ describe('purging the source of a generation', () => {
     await trashForTest(t.session, [t.file.id]);
     // A generation of the file runs by the time the row goes: the purge transaction itself refuses.
     const purge = t.db.files.purge.bind(t.db.files);
-    t.db.files.purge = async (id) => {
+    t.db.files.purge = async (id, purgedAt) => {
       const ended = t.db.jobs.rows.find((r) => r.id === g.jobId)!;
       t.db.jobs.rows.push({ ...ended, id: 'late-generation', status: 'running', finishedAt: null });
-      return purge(id);
+      return purge(id, purgedAt);
     };
 
     const [item] = await purgeFiles(t.session, t.control, [t.file.id]);

@@ -1,11 +1,17 @@
 import { FINISHED_JOB_STATUSES } from '@assetforge/contracts';
-import type { GenerationRepository, GenerationRow, JobOutcome } from '@assetforge/core';
+import {
+  NotFoundError,
+  PROMPT_VERSION_MISSING_MESSAGE,
+  type GenerationRepository,
+  type GenerationRow,
+  type JobOutcome,
+} from '@assetforge/core';
 import { and, count, desc, eq, inArray, isNotNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { fileRefRow, loadGenerations, type GenerationReader } from './generation-rows.js';
 import { insertJob } from './job-repository.js';
 import { errorCodeOf } from './job-rows.js';
-import { generation, generationInput, generationOutput, job } from './schema.js';
+import { generation, generationInput, generationOutput, job, promptVersion } from './schema.js';
 
 /** The generations that may be removed or requeued: failed or cancelled. */
 const isRetired = inArray(generation.status, ['failed', 'cancelled']);
@@ -70,12 +76,17 @@ function firstGeneration(database: BetterSQLite3Database, where: SQL): Generatio
  * @param database the workspace database
  * @param input the generation, its input file and its job
  * @returns nothing; rejects when the job was not inserted, and then nothing is written
+ * @throws `NotFoundError` when the referenced prompt version was deleted in the meantime; nothing is written
  */
 async function createGeneration(
   database: BetterSQLite3Database,
   { generation: record, input, job: newJob }: Parameters<GenerationRepository['create']>[0],
 ): Promise<void> {
   database.transaction((transaction) => {
+    // Checked here rather than left to the foreign key, whose failure would reach the renderer as internal_error.
+    if (record.promptRef && !versionExists(transaction, record.promptRef.versionId)) {
+      throw new NotFoundError(PROMPT_VERSION_MISSING_MESSAGE);
+    }
     transaction
       .insert(generation)
       .values({
@@ -105,6 +116,20 @@ async function createGeneration(
     // A skipped job (file gone or trashed) rolls the whole transaction back.
     if (!insertJob(transaction, newJob, record.createdAt)) throw new Error('The generation job was not inserted');
   });
+}
+
+/**
+ * Whether a prompt version row exists.
+ *
+ * @param reader the caller's transaction
+ * @param versionId the prompt version
+ * @returns true when it exists
+ */
+function versionExists(reader: Pick<BetterSQLite3Database, 'select'>, versionId: string): boolean {
+  return (
+    reader.select({ id: promptVersion.id }).from(promptVersion).where(eq(promptVersion.id, versionId)).get() !==
+    undefined
+  );
 }
 
 /**

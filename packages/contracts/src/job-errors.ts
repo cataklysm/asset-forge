@@ -31,6 +31,7 @@ export const JobErrorCodeSchema = z.enum([
   'download_profile_missing',
   'download_login_not_sent',
   'download_browser_check',
+  'download_duplicate_gone',
 ]);
 /** Why a job failed. */
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
@@ -66,6 +67,7 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   download_profile_missing: 'The site profile of this download no longer exists',
   download_login_not_sent: "The server refused the file; the login is only sent to the profile's site",
   download_browser_check: 'The site asks for a browser check',
+  download_duplicate_gone: 'The file with the same content was deleted meanwhile',
 };
 
 /** The codes a job is run again for, while it has attempts left. */
@@ -77,6 +79,8 @@ const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
   'download_unreachable',
   'download_unavailable',
   'download_throttled',
+  // A duplicate purged during the download: another run imports the body as a new file.
+  'download_duplicate_gone',
 ]);
 
 /**

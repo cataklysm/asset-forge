@@ -56,7 +56,9 @@ export type GenerationRow = Generation;
  */
 export interface GenerationRepository {
   /**
-   * One transaction: the generation as `pending`, its input row and the job; `job_id` is the job's id.
+   * One transaction: the generation as `pending`, its input row and the job; `job_id` is the job's id. Rejects with
+   * NotFoundError (`PROMPT_VERSION_MISSING_MESSAGE`), writing nothing, when `promptRef` names a version that no
+   * longer exists.
    *
    * @param start the generation, its input file and its job
    */

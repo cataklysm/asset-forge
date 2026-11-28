@@ -756,7 +756,9 @@ describe('file trash acceptance', () => {
       survivor = b!;
 
       // The rows go, the process dies before the binary is removed.
-      expect(await first.exclusive((s) => s.database.files.purge(interrupted.id))).toBe(true);
+      expect(await first.exclusive((s) => s.database.files.purge(interrupted.id, '2026-01-01T00:00:00.000Z'))).toBe(
+        true,
+      );
       expect(existsSync(join(workspaceRoot, interrupted.path))).toBe(true);
     } finally {
       await first.close();

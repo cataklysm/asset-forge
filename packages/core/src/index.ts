@@ -27,6 +27,7 @@ export * from './import-file.js';
 export * from './import-refusals.js';
 export * from './job-lanes.js';
 export * from './job-types.js';
+export * from './job-view.js';
 export * from './jobs.js';
 export * from './paths.js';
 export * from './projects.js';

@@ -118,10 +118,32 @@ describe('asset source repository', () => {
     });
     expect(await db.assetSources.get(uuid(999))).toBeNull();
     expect(await db.assetSources.countByAsset(a.id)).toBe(2);
-    expect(await db.assetSources.remove(uuid(100))).toBe(true);
-    expect(await db.assetSources.remove(uuid(100))).toBe(false);
+    expect(await db.assetSources.remove(uuid(100), T2)).toBe(true);
+    expect(await db.assetSources.remove(uuid(100), T2)).toBe(false);
     expect(await db.assetSources.get(uuid(100))).toBeNull();
     expect(await db.assetSources.countByAsset(a.id)).toBe(1);
+  });
+
+  test('insert moves the asset updated_at to the created_at of the source; a refused insert leaves it', async () => {
+    const a = await addAsset(10);
+    const url = 'https://example.org/';
+    expect(await db.assetSources.insert({ id: uuid(100), assetId: a.id, url, createdAt: T2 })).toBe(true);
+    expect((await db.assets.get(a.id))?.updatedAt).toBe(T2);
+    const T3 = '2026-01-03T00:00:00.000Z';
+    expect(await db.assetSources.insert({ id: uuid(101), assetId: a.id, url, createdAt: T3 })).toBe(false);
+    expect((await db.assets.get(a.id))?.updatedAt).toBe(T2);
+  });
+
+  test('remove moves the updated_at of the source asset only, and not for an unknown source', async () => {
+    const a = await addAsset(10);
+    const b = await addAsset(11);
+    await db.assetSources.insert({ id: uuid(100), assetId: a.id, url: 'https://example.org/', createdAt: T1 });
+    const T3 = '2026-01-03T00:00:00.000Z';
+    expect(await db.assetSources.remove(uuid(100), T3)).toBe(true);
+    expect((await db.assets.get(a.id))?.updatedAt).toBe(T3);
+    expect((await db.assets.get(b.id))?.updatedAt).toBe(T1);
+    expect(await db.assetSources.remove(uuid(100), '2026-01-04T00:00:00.000Z')).toBe(false);
+    expect((await db.assets.get(a.id))?.updatedAt).toBe(T3);
   });
 });
 

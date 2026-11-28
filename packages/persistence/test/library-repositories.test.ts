@@ -187,10 +187,13 @@ describe('project assignments', () => {
     await expect(db.projectAssets.listByAsset(uuid(13))).resolves.toEqual([]);
   });
 
-  test('the same assignment cannot be inserted twice', async () => {
+  test('inserting the same assignment twice writes nothing the second time', async () => {
     await seed();
-    await db.projectAssets.insert(assignment(1, 11));
-    await expect(db.projectAssets.insert(assignment(1, 11))).rejects.toThrow(/UNIQUE|PRIMARY KEY/i);
+    await expect(db.projectAssets.insert(assignment(1, 11, { notes: 'first' }))).resolves.toBe(true);
+    await expect(db.projectAssets.insert(assignment(1, 11, { notes: 'second' }))).resolves.toBe(false);
+    await expect(db.projectAssets.get({ projectId: uuid(1), assetId: uuid(11) })).resolves.toMatchObject({
+      notes: 'first',
+    });
   });
 
   test('get and update change only the given fields and report a missing row', async () => {

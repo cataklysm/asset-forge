@@ -158,12 +158,13 @@ export interface JobRepository {
     ids?: readonly string[];
   }): Promise<{ items: JobView[]; total: number }>;
   /**
-   * Jobs of this type in `queued` or `retry_wait`, counted per lane; lanes without such a job are left out.
+   * Jobs of this type in `queued` or `retry_wait`, counted per lane, in one query; lanes without such a job are
+   * left out. Each lane carries the payload `latestPayloadOfLane` answers for it.
    *
    * @param type the job type
-   * @returns the lane and its number of waiting jobs, per lane
+   * @returns the lane, its number of waiting jobs and the raw payload of its newest job of the type, per lane
    */
-  waitingByLane(type: string): Promise<{ lane: string | null; waiting: number }[]>;
+  waitingByLane(type: string): Promise<{ lane: string | null; waiting: number; latestPayload: unknown }[]>;
   /**
    * The payload of the newest job (created_at, then id) of this type and lane in any status.
    *

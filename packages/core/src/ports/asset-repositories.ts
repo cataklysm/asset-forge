@@ -1,5 +1,6 @@
 import type {
   Asset,
+  AssetDetail,
   AssetList,
   AssetRelation,
   AssetRelationView,
@@ -112,13 +113,22 @@ export interface AssetRepository {
    */
   getCover(assetId: string): Promise<AssetCover | null>;
   /**
-   * Stores the chosen cover without validating it; no-op for an unknown asset.
+   * The asset with its effective cover, its own tags and its sources, read as one snapshot.
+   *
+   * @param assetId the asset
+   * @returns the detail; null when the asset does not exist
+   */
+  getDetail(assetId: string): Promise<AssetDetail | null>;
+  /**
+   * Stores the chosen cover in one guarded write: a chosen file must be attached to the asset, complete, outside
+   * the trash and have a thumbnail (a previewable image or a video).
    *
    * @param assetId the asset
    * @param fileId the chosen file; `null` returns to the automatic one
    * @param updatedAt the asset's new updated_at
+   * @returns whether the asset was written; false for an unknown asset or a file that cannot be the cover
    */
-  setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<void>;
+  setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<boolean>;
 }
 
 /** What identifies a relation: both ends and its kind. */
@@ -180,17 +190,18 @@ export interface AssetSourceRepository {
    */
   countByAsset(assetId: string): Promise<number>;
   /**
-   * Adds a source to an asset.
+   * One transaction: adds a source to an asset and sets the asset's `updatedAt` to the source's `createdAt`.
    *
    * @param source the new row; the URL already normalised
    * @returns false, writing nothing, when the asset already has this URL
    */
   insert(source: { id: string; assetId: string; url: string; createdAt: string }): Promise<boolean>;
   /**
-   * Deletes a source.
+   * One transaction: deletes a source and sets the `updatedAt` of the asset it belonged to.
    *
    * @param id the source
-   * @returns false when no row has this id
+   * @param updatedAt the asset's new `updatedAt`
+   * @returns false, writing nothing, when no row has this id
    */
-  remove(id: string): Promise<boolean>;
+  remove(id: string, updatedAt: string): Promise<boolean>;
 }

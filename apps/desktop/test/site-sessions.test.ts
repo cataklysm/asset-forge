@@ -158,6 +158,7 @@ describe('extraction answer', () => {
 function fakeView(o: {
   navigate?: (url: string, onParsed?: () => void) => Promise<'loaded' | 'aborted' | 'failed'>;
   evaluate?: (call: number) => unknown;
+  currentUrl?: string;
 }) {
   let left: ((url: string) => void) | null = null;
   let response: ((status: number) => void) | null = null;
@@ -166,6 +167,7 @@ function fakeView(o: {
     stops: 0,
     navigate: o.navigate ?? (async () => 'loaded'),
     evaluate: async () => o.evaluate?.(++calls),
+    currentUrl: () => o.currentUrl ?? '',
     stop() {
       view.stops++;
     },
@@ -202,8 +204,21 @@ describe('page loader', () => {
       ok: true,
       results: { thumbnails: ['/1.jpg'], pagination: ['?p=2'] },
       baseUrl: '',
+      finalUrl: '',
     });
     expect(view.calls()).toBe(3);
+  });
+
+  it("answers the main frame's URL after the load as the final URL", async () => {
+    const view = fakeView({
+      evaluate: () => ({ results: { thumbnails: ['/1.jpg'] }, counts: { thumbnails: 1 }, baseUrl: '' }),
+      currentUrl: 'https://example.com/g/',
+    });
+    const loader = createPageLoader(view, 'example.com', fast);
+    expect(await loader.load('https://example.com/g', request())).toMatchObject({
+      ok: true,
+      finalUrl: 'https://example.com/g/',
+    });
   });
 
   it('answers invalid_xpath with the query name', async () => {
@@ -316,6 +331,7 @@ describe('page loader', () => {
       ok: true,
       results: { thumbnails: ['/a'], pagination: [] },
       baseUrl: '',
+      finalUrl: '',
     });
   });
 
@@ -368,6 +384,7 @@ describe('page loader', () => {
       ok: true,
       results: { thumbnails: ['page2'], pagination: [] },
       baseUrl: 'https://example.com/g/',
+      finalUrl: '',
     });
   });
 
@@ -490,6 +507,8 @@ class FakeContents extends EventEmitter {
   openHandler: ((d: { url: string }) => { action: string }) | null = null;
   loaded: string[] = [];
   loadResult: () => Promise<void> = async () => {};
+  /** The URL after redirects; null answers the URL loaded last. */
+  finalUrl: string | null = null;
   destroyed = false;
   stopped = 0;
   setAudioMuted(value: boolean) {
@@ -507,6 +526,9 @@ class FakeContents extends EventEmitter {
     counts: { thumbnails: 1 },
     baseUrl: 'https://example.com/g/',
   }));
+  getURL() {
+    return this.finalUrl ?? this.loaded.at(-1) ?? '';
+  }
   isDestroyed() {
     return this.destroyed;
   }
@@ -702,12 +724,19 @@ describe('electron site sessions', () => {
     expect(w.webContents.openHandler!({ url: 'https://example.com/popup' })).toEqual({ action: 'deny' });
     expect(w.webContents.loaded).toEqual([]);
 
+    w.webContents.finalUrl = 'https://example.com/g/';
     const result = await page.loader.load('https://example.com/g', {
       queries: { thumbnails: '//a' },
       waitFor: 'thumbnails',
       signal: new AbortController().signal,
     });
-    expect(result).toEqual({ ok: true, results: { thumbnails: ['/1.jpg'] }, baseUrl: 'https://example.com/g/' });
+    expect(result).toEqual({
+      ok: true,
+      results: { thumbnails: ['/1.jpg'] },
+      baseUrl: 'https://example.com/g/',
+      finalUrl: 'https://example.com/g/',
+    });
+    w.webContents.finalUrl = null;
     const [world, scripts] = w.webContents.executeJavaScriptInIsolatedWorld.mock.calls[0]!;
     expect(world).not.toBe(0);
     expect(scripts[0]!.code).toBe(extractionCode({ thumbnails: '//a' }));

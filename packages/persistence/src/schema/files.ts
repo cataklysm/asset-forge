@@ -45,6 +45,8 @@ export const file = sqliteTable(
     index('file_asset_id_kind_idx').on(table.assetId, table.kind),
     // The complete files of one asset (search reindex); without it `file_status_idx` wins and reads every complete file.
     index('file_asset_id_status_idx').on(table.assetId, table.status),
+    // The inbox and the Files tab in their order, newest import first (migration 0017), without a temporary B-tree.
+    index('file_asset_id_imported_at_id_idx').on(table.assetId, table.importedAt, table.id),
     check('file_status_check', oneOf(table.status, IMPORT_STATUSES)),
     check('file_role_check', oneOf(table.role, FILE_ROLES)),
     check('file_asset_role_check', sql`(${table.assetId} is null) = (${table.role} is null)`),

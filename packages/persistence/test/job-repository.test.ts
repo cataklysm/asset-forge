@@ -967,11 +967,35 @@ describe('job lanes', () => {
     expect(waiting).toHaveLength(2);
     expect(waiting).toEqual(
       expect.arrayContaining([
-        { lane: 'a', waiting: 2 },
-        { lane: null, waiting: 1 },
+        { lane: 'a', waiting: 2, latestPayload: { version: 1 } },
+        { lane: null, waiting: 1, latestPayload: { version: 1 } },
       ]),
     );
     expect(await db.jobs.waitingByLane('none')).toEqual([]);
+  });
+
+  test('waitingByLane carries the payload of the newest job of the lane in any status, as latestPayloadOfLane', async () => {
+    await enqueueInOrder(
+      laned(10, 'a', { n: 1 }),
+      laned(11, 'a', { n: 2 }),
+      laned(12, null, { n: 3 }),
+      laned(13, null, { n: 4 }),
+      laned(14, 'a', { n: 5 }, 'other.type'),
+    );
+    await enqueue(T0, laned(15, 'b', { n: 6 }), laned(16, 'b', { n: 7 }));
+    setStatus(11, 'failed');
+    const waiting = await db.jobs.waitingByLane(TYPE);
+    expect(waiting).toEqual(
+      expect.arrayContaining([
+        { lane: 'a', waiting: 1, latestPayload: { n: 2 } },
+        { lane: null, waiting: 2, latestPayload: { n: 4 } },
+        { lane: 'b', waiting: 2, latestPayload: { n: 7 } },
+      ]),
+    );
+    expect(waiting).toHaveLength(3);
+    for (const { lane, latestPayload } of waiting) {
+      expect(latestPayload).toEqual(await db.jobs.latestPayloadOfLane(TYPE, lane));
+    }
   });
 
   test('countActiveInLane counts every active job of the lane', async () => {

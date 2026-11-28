@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ANALYZE_FILE_JOB, type JobStatus } from '@assetforge/contracts';
 import {
   assignUnroutedJobs,
@@ -178,6 +178,18 @@ describe('listWaitingLanes and laneName', () => {
       { lane: A, payloadName: 'RunPod', waiting: 2 },
       { lane: null, payloadName: null, waiting: 1 },
     ]);
+  });
+
+  it('reads every lane in one repository call, with no read per lane', async () => {
+    const c = await setup();
+    await addJob(c, { lane: A, payload: v4('RunPod') });
+    await addJob(c, { lane: B, payload: v4('Ollama') });
+    const perLane = vi.spyOn(c.db.jobs, 'latestPayloadOfLane');
+    const all = vi.spyOn(c.db.jobs, 'waitingByLane');
+    const lanes = await listWaitingLanes(c.session);
+    expect(lanes.map((lane) => lane.payloadName).sort()).toEqual(['Ollama', 'RunPod']);
+    expect(all).toHaveBeenCalledTimes(1);
+    expect(perLane).not.toHaveBeenCalled();
   });
 
   it('answers null for a lane with only v2 rows or without jobs', async () => {

@@ -60,6 +60,7 @@ function fakeSessions(): FakeSessions {
         ok: true,
         results: { thumbnails: ['/a.jpg', 'https://cdn.example.com/b.png'], pagination: [] },
         baseUrl: url,
+        finalUrl: url,
       }),
     },
     openLogin(profile, url) {

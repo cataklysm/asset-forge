@@ -737,6 +737,7 @@ A job error may carry a wait (`JobError` option `retryAfterMs`); only `download_
 | `download_not_a_file` ("This address is a web page, not a file") | an HTML answer | no | no |
 | `download_type_refused` ("This file type cannot be imported") | a type the import refuses | no | no |
 | `download_no_space` ("There is not enough free disk space") | the free-space check failed (§15.3) | no | no |
+| `download_duplicate_gone` ("The file with the same content was deleted meanwhile") | with `skipDuplicates`, the file of identical content was purged between the import step and writing the URL as its further origin | yes (the next run imports the body as a new file) | no |
 
 A message never carries a cause, a path or the URL. The **pause gate** (above) covers these lanes too: three consecutive runs of a host ending in a counting code pause that host for the application session; a success or any other outcome resets the count, so a single 403 only fails its job. `jobs:summary.pausedHosts` lists `{ host, reason }` of the paused hosts (beside `paused`, which stays the provider lanes), and `jobs:resumeHost { host }` resumes one and wakes the scheduler. The pause banner shows one line per paused host with the host and the reason and `Resume`, without Settings or Move jobs.
 

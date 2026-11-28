@@ -182,7 +182,7 @@ describe('tag proposals', () => {
       }),
     );
 
-    expect(await accept([t('rusty', 'Rusty'), t('metal')], { now: T3 })).toBe(true);
+    expect(await accept([t('rusty', 'Rusty'), t('metal')], { now: T3 })).toBe('accepted');
     expect(await tagsOf()).toEqual(['metal/ai', 'rusty/manual']);
     expect(await db.analyses.get(FILE_ID)).toEqual({
       fileId: FILE_ID,
@@ -222,29 +222,36 @@ describe('tag proposals', () => {
     });
     const before = snapshot();
     await db.analyses.propose(proposal());
-    expect(await accept([t('metal')])).toBe(true);
+    expect(await accept([t('metal')])).toBe('accepted');
     expect(snapshot()).toEqual(before);
   });
 
   test('accept of a stale proposal deletes it and changes nothing else', async () => {
     await db.analyses.propose(proposal());
     changeHash(OTHER_SHA);
-    expect(await accept([t('metal')])).toBe(false);
+    expect(await accept([t('metal')])).toBe('stale');
     expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
     expect(rowCount('file_tag')).toBe(0);
     expect(await db.analyses.get(FILE_ID)).toBeNull();
   });
 
-  test('accept with a hash other than the proposal deletes it', async () => {
+  test('accept with a hash other than the proposal answers stale and keeps the valid proposal', async () => {
     await db.analyses.propose(proposal());
-    expect(await accept([t('metal')], { sha256: OTHER_SHA })).toBe(false);
-    expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
+    expect(await accept([t('metal')], { sha256: OTHER_SHA })).toBe('stale');
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
     expect(rowCount('file_tag')).toBe(0);
+  });
+
+  test('accept of a proposal whose file is no longer complete deletes it and answers stale', async () => {
+    await db.analyses.propose(proposal());
+    await db.files.markFailed(FILE_ID, 'broken');
+    expect(await accept([t('metal')])).toBe('stale');
+    expect(await db.analyses.getProposal(FILE_ID)).toBeNull();
   });
 
   test('accept with a tag outside the stored proposal writes nothing and keeps the proposal', async () => {
     await db.analyses.propose(proposal());
-    expect(await accept([t('metal'), t('wood')])).toBe(false);
+    expect(await accept([t('metal'), t('wood')])).toBe('stale');
     expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
     expect(rowCount('file_tag')).toBe(0);
     expect(rowCount('tag')).toBe(0);
@@ -253,14 +260,14 @@ describe('tag proposals', () => {
 
   test('accept with no tags writes nothing and keeps the proposal', async () => {
     await db.analyses.propose(proposal());
-    expect(await accept([])).toBe(false);
+    expect(await accept([])).toBe('stale');
     expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
     expect(rowCount('file_tag')).toBe(0);
     expect(await db.analyses.get(FILE_ID)).toBeNull();
   });
 
-  test('accept without a proposal returns false', async () => {
-    expect(await accept([t('metal')])).toBe(false);
+  test('accept without a proposal answers missing', async () => {
+    expect(await accept([t('metal')])).toBe('missing');
     expect(rowCount('file_tag')).toBe(0);
     expect(await db.analyses.get(FILE_ID)).toBeNull();
   });
@@ -314,7 +321,7 @@ describe('tag proposals', () => {
     expect((await db.files.list({ limit: 10, offset: 0, scope: { kind: 'all' }, hasProposal: true })).total).toBe(1);
   });
 
-  test('acceptProposal on a trashed file returns false and keeps the proposal', async () => {
+  test('acceptProposal on a trashed file answers trashed and keeps the proposal', async () => {
     await db.analyses.propose(proposal());
     await db.fileMoves.begin({
       fileId: FILE_ID,
@@ -326,7 +333,7 @@ describe('tag proposals', () => {
     });
     await db.fileMoves.commit(FILE_ID);
 
-    expect(await accept([t('metal')], { now: T3 })).toBe(false);
+    expect(await accept([t('metal')], { now: T3 })).toBe('trashed');
     // The proposal waits for the file to come back from the trash.
     expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
     expect(rowCount('file_tag')).toBe(0);
@@ -429,8 +436,8 @@ describe('tag rename and waiting proposals', () => {
     await db.analyses.propose(proposal({ tags: pairs(['front view', 'Front View'], ['metal', 'metal']) }));
     await db.tags.rename({ from: 'front view', name: 'frontal', displayName: 'Frontal', merge: false });
 
-    expect(await accept([t('front view', 'Front View')])).toBe(false);
-    expect(await accept([t('frontal', 'Frontal')])).toBe(true);
+    expect(await accept([t('front view', 'Front View')])).toBe('stale');
+    expect(await accept([t('frontal', 'Frontal')])).toBe('accepted');
     expect(await tagsOf()).toEqual(['frontal/ai']);
   });
 });

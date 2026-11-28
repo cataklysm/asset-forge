@@ -415,7 +415,7 @@ describe('list item tags', () => {
       newId: newId(),
       now: TS,
     });
-    const chosen = await addFile(uuid(1), 'a.png');
+    const chosen = await addImage(uuid(1), 'a.png');
     await tagFile(chosen, 'bark');
     await tagFile(await addFile(uuid(1), 'b.png'), 'moss');
     await db.assets.setCover(uuid(1), chosen, TS);

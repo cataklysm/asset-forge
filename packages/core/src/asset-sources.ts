@@ -75,7 +75,6 @@ export async function addAssetSource(
     createdAt: now,
   });
   if (!inserted) throw new InvalidOperationError('This source already exists');
-  await session.database.assets.update(request.assetId, { updatedAt: now });
   return getAssetDetail(session, request.assetId);
 }
 
@@ -104,8 +103,7 @@ async function requireSource(session: WorkspaceSession, ref: SourceRef): Promise
 export async function removeAssetSource(session: WorkspaceSession, ref: SourceRef): Promise<AssetDetail> {
   await requireAsset(session, ref.assetId);
   await requireSource(session, ref);
-  await session.database.assetSources.remove(ref.sourceId);
-  await session.database.assets.update(ref.assetId, { updatedAt: session.now().toISOString() });
+  await session.database.assetSources.remove(ref.sourceId, session.now().toISOString());
   return getAssetDetail(session, ref.assetId);
 }
 

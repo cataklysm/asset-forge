@@ -1,5 +1,5 @@
 import { MAX_FILE_ORIGINS } from '@assetforge/contracts';
-import type { FileOriginRepository } from '@assetforge/core';
+import { NotFoundError, type FileOriginRepository } from '@assetforge/core';
 import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { file, fileOrigin } from './schema.js';
@@ -99,13 +99,15 @@ async function knownUrls(database: BetterSQLite3Database, urls: readonly string[
  *
  * @param database the workspace database
  * @param row the origin row
- * @returns false when nothing was inserted
+ * @returns false when nothing was inserted; rejects with NotFoundError when the file does not exist
  */
 async function insertOrigin(
   database: BetterSQLite3Database,
   row: Parameters<FileOriginRepository['insert']>[0],
 ): Promise<boolean> {
   return database.transaction((transaction) => {
+    const owner = transaction.select({ id: file.id }).from(file).where(eq(file.id, row.fileId)).get();
+    if (owner === undefined) throw new NotFoundError(`File ${row.fileId} does not exist`);
     const existing =
       transaction.select({ n: count() }).from(fileOrigin).where(eq(fileOrigin.fileId, row.fileId)).get()?.n ?? 0;
     if (existing >= MAX_FILE_ORIGINS) return false;

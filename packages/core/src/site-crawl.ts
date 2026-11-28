@@ -62,6 +62,23 @@ type FailedLoad = Exclude<PageLoadResult, { ok: true }>;
 const DECIDED_KINDS = new Set(['image', 'video', 'model', 'document']);
 
 /**
+ * The final URL of a loaded page as the crawl compares pages: normalised, and only when it belongs to the site.
+ *
+ * @param finalUrl the main frame's URL after the load, as the page loader reported it
+ * @param site the profile's site
+ * @returns the normalised URL; null when it is no URL or not on the site
+ */
+function finalPageOf(finalUrl: string, site: string): string | null {
+  let url: string;
+  try {
+    url = normalizeDownloadUrl(finalUrl);
+  } catch {
+    return null;
+  }
+  return belongsToSite(url, site) ? url : null;
+}
+
+/**
  * The file kind the name rule gives the last path segment of a URL.
  *
  * @param url a normalised URL
@@ -151,6 +168,8 @@ class SiteCrawl {
   private readonly robotsByOrigin = new Map<string, Promise<RobotsAnswer>>();
   private readonly seenFiles = new Set<string>();
   private readonly seenPages: Set<string>;
+  /** The final URLs of redirected gallery pages: seen like a loaded page, never counted against maxPages. */
+  private readonly redirectedPages = new Set<string>();
   /** Pagination targets robots refused: counted once, never against maxPages. */
   private readonly refusedPages = new Set<string>();
   private readonly seenDetails = new Set<string>();
@@ -229,6 +248,8 @@ class SiteCrawl {
       return;
     }
     this.answer.pages++;
+    const finalPage = finalPageOf(page.finalUrl, this.profile.site);
+    if (finalPage !== null && !this.seenPages.has(finalPage)) this.redirectedPages.add(finalPage);
 
     const thumbnails = this.resolveAll(page.results[SITE_QUERY.thumbnails], pageBase);
     if (this.profile.file === '') {
@@ -262,6 +283,8 @@ class SiteCrawl {
       this.progress();
       return;
     }
+    const finalDetail = finalPageOf(detail.finalUrl, this.profile.site);
+    if (finalDetail !== null) this.seenDetails.add(finalDetail);
     const detailBase = await this.baseOf(detail, detailUrl, 'detail');
     if (detailBase !== null) await this.addFiles(this.resolveAll(detail.results[SITE_QUERY.file], detailBase));
     this.progress();
@@ -273,7 +296,7 @@ class SiteCrawl {
    * @param next the target
    */
   private async queuePage(next: string): Promise<void> {
-    if (this.seenPages.has(next) || this.refusedPages.has(next)) return;
+    if (this.seenPages.has(next) || this.redirectedPages.has(next) || this.refusedPages.has(next)) return;
     if (!belongsToSite(next, this.profile.site)) {
       this.problem(next, 'gallery', 'off_site');
       return;

@@ -120,9 +120,10 @@ export interface FileRepository {
    * trashed file the same transaction writes a purge tombstone (`file_purge`).
    *
    * @param id the file
+   * @param purgedAt the time stamped on the tombstone
    * @returns false when the row is neither trashed nor failed, and for an unknown id
    */
-  purge(id: string): Promise<boolean>;
+  purge(id: string, purgedAt: string): Promise<boolean>;
   /**
    * The purged trashed files whose binary may still be on the storage.
    *
@@ -269,7 +270,8 @@ export interface FileOriginRepository {
    * Adds an origin to a file.
    *
    * @param origin the new row
-   * @returns false, writing nothing, when the file already has this URL or already carries MAX_FILE_ORIGINS
+   * @returns false, writing nothing, when the file already has this URL or already carries MAX_FILE_ORIGINS; rejects
+   *   with NotFoundError, writing nothing, when the file does not exist (purged in the meantime)
    */
   insert(origin: { id: string; fileId: string; url: string; createdAt: string }): Promise<boolean>;
 }

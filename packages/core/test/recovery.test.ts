@@ -371,7 +371,7 @@ describe('recovery on open', () => {
     await db.fileMoves.commit(ID1);
     storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
     // The purge transaction committed; the process died before the binary was removed.
-    await db.files.purge(ID1);
+    await db.files.purge(ID1, '2026-01-01T00:00:00.000Z');
     await manager.close();
 
     await manager.open({ rootPath: ROOT });

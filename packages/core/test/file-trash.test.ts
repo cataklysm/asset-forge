@@ -412,6 +412,7 @@ describe('purgeFiles', () => {
     const [trashed] = ok(await trashFiles(session, control, [file.id]));
     const purge = vi.spyOn(db.files, 'purge');
     const remove = vi.spyOn(storage, 'remove');
+    vi.spyOn(session, 'now').mockReturnValue(new Date('2030-01-01T00:00:00.000Z'));
 
     expect(await purgeFiles(session, control, [file.id])).toEqual([{ fileId: file.id, file: null, error: null }]);
 
@@ -419,6 +420,8 @@ describe('purgeFiles', () => {
     expect(db.tags.fileAssignments.filter((a) => a.fileId === file.id)).toEqual([]);
     expect(storage.files.has(trashed!.relativePath)).toBe(false);
     expect(remove).toHaveBeenCalledWith(trashed!.relativePath);
+    // The tombstone carries the session clock, not a time the repository reads itself.
+    expect(purge).toHaveBeenCalledWith(file.id, '2030-01-01T00:00:00.000Z');
     expect(purge.mock.invocationCallOrder[0]!).toBeLessThan(remove.mock.invocationCallOrder[0]!);
     expect(await trashCount(session)).toBe(0);
     // The tombstone written with the row deletion goes once the binary is gone.
@@ -462,7 +465,7 @@ describe('purgeFiles', () => {
     const cover = await importOne('a.png', { assetId: asset.id, role: 'reference' });
     await db.assets.setCover(asset.id, cover.id, 'x');
     await db.files.markFailed(cover.id, 'Import was interrupted');
-    expect(await db.files.purge(cover.id)).toBe(true);
+    expect(await db.files.purge(cover.id, '2026-01-01T00:00:00.000Z')).toBe(true);
     expect(await db.assets.getCover(asset.id)).toEqual({ coverFileId: null, coverIsChosen: false });
   });
 
@@ -561,9 +564,9 @@ describe('purgeFiles', () => {
     const file = await importOne('a.png');
     ok(await trashFiles(session, control, [file.id]));
     const purge = db.files.purge.bind(db.files);
-    vi.spyOn(db.files, 'purge').mockImplementationOnce(async (id) => {
+    vi.spyOn(db.files, 'purge').mockImplementationOnce(async (id, purgedAt) => {
       // The other purge deletes the row first.
-      await purge(id);
+      await purge(id, purgedAt);
       return false;
     });
 
@@ -597,9 +600,9 @@ describe('emptyTrash', () => {
     expect(await trashCount(session)).toBe(450);
     const failing = ids[123]!;
     const original = db.files.purge.bind(db.files);
-    vi.spyOn(db.files, 'purge').mockImplementation(async (id) => {
+    vi.spyOn(db.files, 'purge').mockImplementation(async (id, purgedAt) => {
       if (id === failing) throw new Error('database is locked');
-      return original(id);
+      return original(id, purgedAt);
     });
 
     expect(await emptyTrash(session, control)).toEqual({ purged: 449, failed: 1 });
@@ -614,11 +617,11 @@ describe('emptyTrash', () => {
     const kept = await importOne('ok.png');
     ok(await trashFiles(session, control, [failing.id, raced.id, kept.id]));
     const original = db.files.purge.bind(db.files);
-    vi.spyOn(db.files, 'purge').mockImplementation(async (id) => {
+    vi.spyOn(db.files, 'purge').mockImplementation(async (id, purgedAt) => {
       if (id === failing.id) throw new Error('database is locked');
-      if (id !== raced.id) return original(id);
+      if (id !== raced.id) return original(id, purgedAt);
       // Another purge won the race: the row is gone when this one runs.
-      await original(id);
+      await original(id, purgedAt);
       return false;
     });
     const failures: [string, string][] = [];
@@ -834,7 +837,9 @@ describe('an open move row before restore and purge', () => {
       createdAt: TS,
     });
 
-    await expect(db.files.purge(file.id)).rejects.toThrow(new InvalidOperationError('The file is being moved'));
+    await expect(db.files.purge(file.id, '2026-01-01T00:00:00.000Z')).rejects.toThrow(
+      new InvalidOperationError('The file is being moved'),
+    );
     expect(db.files.records.has(file.id)).toBe(true);
     await expect(db.fileMoves.list()).resolves.toHaveLength(1);
   });

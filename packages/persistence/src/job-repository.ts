@@ -31,6 +31,7 @@ import {
   notOfTrashedFile,
   toJob,
 } from './job-rows.js';
+import { qualified } from './qualified.js';
 import { file, job } from './schema.js';
 
 /** A handle that can read and insert: the database or a transaction on it. */
@@ -545,7 +546,8 @@ async function counts(database: BetterSQLite3Database): Promise<Record<JobStatus
 }
 
 /**
- * The number of waiting jobs of a type per lane.
+ * The number of waiting jobs of a type per lane, with the payload of the lane's newest job of the type, in one
+ * query.
  *
  * @param database the workspace database
  * @param type the job type
@@ -554,13 +556,27 @@ async function counts(database: BetterSQLite3Database): Promise<Record<JobStatus
 async function waitingByLane(
   database: BetterSQLite3Database,
   type: string,
-): Promise<{ lane: string | null; waiting: number }[]> {
-  return database
-    .select({ lane: job.providerId, waiting: count() })
+): Promise<{ lane: string | null; waiting: number; latestPayload: unknown }[]> {
+  const rows = database
+    .select({ lane: job.providerId, waiting: count(), latestPayload: newestPayloadOfLane(type) })
     .from(job)
     .where(and(eq(job.type, type), isWaiting))
     .groupBy(job.providerId)
     .all();
+  return rows.map((row) => ({ ...row, latestPayload: JSON.parse(row.latestPayload) as unknown }));
+}
+
+/**
+ * The correlated subquery of `waitingByLane`: the payload of the newest job of the type (created_at, then id, as
+ * `latestPayloadOfLane`) in the outer row's lane. `is` makes a null lane match the jobs without one.
+ *
+ * @param type the job type
+ * @returns the subquery
+ */
+function newestPayloadOfLane(type: string): SQL<string> {
+  const newest = sql.identifier('newest');
+  const column = (name: string) => sql`${newest}.${sql.identifier(name)}`;
+  return sql<string>`(select ${column(job.payload.name)} from ${job} as ${newest} where ${column(job.type.name)} = ${type} and ${column(job.providerId.name)} is ${qualified(job, job.providerId)} order by ${column(job.createdAt.name)} desc, ${column(job.id.name)} desc limit 1)`;
 }
 
 /**

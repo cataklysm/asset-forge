@@ -1,13 +1,22 @@
-import type { Asset, AssetList } from '@assetforge/contracts';
-import { searchWords, type AssetRepository } from '@assetforge/core';
-import { count, eq, inArray } from 'drizzle-orm';
+import type { Asset, AssetDetail, AssetList } from '@assetforge/contracts';
+import {
+  PREVIEWABLE_MIME_TYPES,
+  searchWords,
+  VIDEO_MIME_TYPES,
+  type AssetCover,
+  type AssetRepository,
+} from '@assetforge/core';
+import { and, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { assetFilter } from './asset-filters.js';
+import { assetFilter, outerAssetId } from './asset-filters.js';
 import { toAsset } from './asset-rows.js';
 import { searchAssets } from './asset-search.js';
+import { sourcesOfAsset } from './asset-source-repository.js';
 import { automaticCovers, summaries, withTags } from './asset-summaries.js';
-import { asset } from './schema.js';
+import { qualified } from './qualified.js';
+import { asset, file } from './schema.js';
 import { reindexAsset, type IndexTransaction } from './search-index.js';
+import { tagsOfAsset } from './tag-repository.js';
 
 /** The query of an asset list. */
 type AssetListQuery = Parameters<AssetRepository['list']>[0];
@@ -25,6 +34,7 @@ export function createAssetRepository(database: BetterSQLite3Database): AssetRep
     update: (id, patch) => updateAsset(database, id, patch),
     list: (query) => listAssets(database, query),
     getCover: (assetId) => getCover(database, assetId),
+    getDetail: (assetId) => getDetail(database, assetId),
     setCover: (assetId, fileId, updatedAt) => setCover(database, assetId, fileId, updatedAt),
   };
 }
@@ -160,31 +170,74 @@ function filteredPage(transaction: IndexTransaction, query: AssetListQuery): Ass
  */
 async function getCover(database: BetterSQLite3Database, assetId: string): ReturnType<AssetRepository['getCover']> {
   // One read transaction, so the chosen and the automatic cover describe the same snapshot.
+  return database.transaction((transaction) => coverOf(transaction, assetId), { behavior: 'deferred' });
+}
+
+/**
+ * The effective cover of the asset inside an open read.
+ *
+ * @param reader the open transaction
+ * @param assetId the asset
+ * @returns the cover and whether it was chosen; null for an unknown asset
+ */
+function coverOf(reader: Pick<BetterSQLite3Database, 'select'>, assetId: string): AssetCover | null {
+  const row = reader.select({ chosen: asset.coverFileId }).from(asset).where(eq(asset.id, assetId)).get();
+  if (!row) return null;
+  if (row.chosen !== null) return { coverFileId: row.chosen, coverIsChosen: true };
+  return { coverFileId: automaticCovers(reader, [assetId]).get(assetId) ?? null, coverIsChosen: false };
+}
+
+/**
+ * The asset with its cover, its own tags and its sources, read in one read transaction.
+ *
+ * @param database the workspace database
+ * @param assetId the asset
+ * @returns the detail; null for an unknown asset
+ */
+async function getDetail(database: BetterSQLite3Database, assetId: string): Promise<AssetDetail | null> {
   return database.transaction(
     (transaction) => {
-      const row = transaction.select({ chosen: asset.coverFileId }).from(asset).where(eq(asset.id, assetId)).get();
-      if (!row) return null;
-      if (row.chosen !== null) return { coverFileId: row.chosen, coverIsChosen: true };
-      return { coverFileId: automaticCovers(transaction, [assetId]).get(assetId) ?? null, coverIsChosen: false };
+      const row = transaction.select().from(asset).where(eq(asset.id, assetId)).get();
+      const cover = row ? coverOf(transaction, assetId) : null;
+      if (!row || cover === null) return null;
+      return {
+        ...toAsset(row),
+        ...cover,
+        tags: tagsOfAsset(transaction, assetId),
+        sources: sourcesOfAsset(transaction, assetId),
+      };
     },
     { behavior: 'deferred' },
   );
 }
 
 /**
- * Sets or clears the chosen cover.
+ * Sets or clears the chosen cover in one guarded statement: a chosen file must be attached to the asset, complete,
+ * outside the trash and have a thumbnail (a previewable image or a video).
  *
  * @param database the workspace database
  * @param assetId the asset
  * @param fileId the cover file; null for the automatic cover
  * @param updatedAt the update time
- * @returns nothing
+ * @returns whether the asset was written; false for an unknown asset or a file that cannot be the cover
  */
 async function setCover(
   database: BetterSQLite3Database,
   assetId: string,
   fileId: string | null,
   updatedAt: string,
-): Promise<void> {
-  database.update(asset).set({ coverFileId: fileId, updatedAt }).where(eq(asset.id, assetId)).run();
+): Promise<boolean> {
+  const guard = fileId === null ? eq(asset.id, assetId) : and(eq(asset.id, assetId), coverCandidate(fileId));
+  return database.update(asset).set({ coverFileId: fileId, updatedAt }).where(guard).run().changes > 0;
+}
+
+/**
+ * The condition that a file can be the cover of the outer asset row.
+ *
+ * @param fileId the chosen file
+ * @returns the SQL condition
+ */
+function coverCandidate(fileId: string): SQL {
+  const thumbnailTypes = inArray(file.mimeType, [...PREVIEWABLE_MIME_TYPES, ...VIDEO_MIME_TYPES]);
+  return sql`exists (select 1 from ${file} where ${qualified(file, file.id)} = ${fileId} and ${qualified(file, file.assetId)} = ${outerAssetId} and ${qualified(file, file.status)} = 'complete' and ${qualified(file, file.deletedAt)} is null and ${thumbnailTypes})`;
 }

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MAX_FILE_ORIGINS } from '@assetforge/contracts';
-import type { WorkspaceDatabase } from '@assetforge/core';
+import { NotFoundError, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T1 = '2026-01-01T00:00:00.000Z';
@@ -88,6 +88,11 @@ describe('file origin repository', () => {
     expect(await db.fileOrigins.insert(origin(102, g, URL_A))).toBe(true);
   });
 
+  test('rejects with NotFoundError, writing nothing, for a file that does not exist', async () => {
+    await expect(db.fileOrigins.insert(origin(100, uuid(9), URL_A))).rejects.toBeInstanceOf(NotFoundError);
+    expect(await db.fileOrigins.get(uuid(100))).toBeNull();
+  });
+
   test(`a file takes at most ${MAX_FILE_ORIGINS} origins`, async () => {
     const f = await addFile(10);
     for (let i = 0; i < MAX_FILE_ORIGINS; i++) {
@@ -138,7 +143,7 @@ describe('file origin repository', () => {
     await db.fileMoves.commit(f);
     expect(await db.fileOrigins.listByFile(f)).toHaveLength(1);
     await trash(f);
-    expect(await db.files.purge(f)).toBe(true);
+    expect(await db.files.purge(f, '2026-01-01T00:00:00.000Z')).toBe(true);
     expect(await db.fileOrigins.listByFile(f)).toEqual([]);
     expect(await db.fileOrigins.get(uuid(100))).toBeNull();
   });
@@ -146,7 +151,7 @@ describe('file origin repository', () => {
   test('purging a failed file removes its origins', async () => {
     const f = await addFile(10, 'failed');
     await db.fileOrigins.insert(origin(100, f, URL_A));
-    expect(await db.files.purge(f)).toBe(true);
+    expect(await db.files.purge(f, '2026-01-01T00:00:00.000Z')).toBe(true);
     expect(await db.fileOrigins.get(uuid(100))).toBeNull();
   });
 });

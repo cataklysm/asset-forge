@@ -47,6 +47,7 @@ export function createPageView(window: BrowserWindow, site: string): PageView {
   return {
     navigate: (url, onParsed) => navigatePage(contents, url, onParsed),
     evaluate: (code) => contents.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code }]),
+    currentUrl: () => (contents.isDestroyed() ? '' : contents.getURL()),
     stop: () => {
       if (!contents.isDestroyed()) contents.stop();
     },

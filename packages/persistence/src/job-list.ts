@@ -1,14 +1,8 @@
-import {
-  FILE_DOWNLOAD_JOB,
-  IMAGE_GENERATE_JOB,
-  analysisJobFields,
-  downloadJobFields,
-  type JobView,
-} from '@assetforge/contracts';
-import type { JobRepository } from '@assetforge/core';
+import { IMAGE_GENERATE_JOB, type JobView } from '@assetforge/contracts';
+import { jobViewOf, type JobRepository } from '@assetforge/core';
 import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { inLane, storedErrorOf, resultOf, type JobReader, type JobRow } from './job-rows.js';
+import { inLane, resultOf, toJob, type JobReader, type JobRow } from './job-rows.js';
 import { file, generation, job } from './schema.js';
 
 // The job list of the Jobs screen: one page of jobs with what each row shows besides the job itself.
@@ -105,41 +99,9 @@ function selectJobPage(reader: JobReader, where: SQL | undefined, page: JobListF
  * @returns the view; throws when the payload is not JSON
  */
 function toJobView(entry: JobListEntry): JobView {
-  const row = entry.job;
-  const payload = JSON.parse(row.payload) as unknown;
-  const isDownload = row.type === FILE_DOWNLOAD_JOB;
-  return {
-    ...providerFieldsOf(entry, payload),
-    id: row.id,
-    type: row.type,
-    status: row.status,
-    attempt: row.attempt,
-    fileId: row.fileId,
+  return jobViewOf(toJob(entry.job), {
     fileName: entry.fileName,
-    ...storedErrorOf(row.errorCode),
-    createdAt: row.createdAt,
-    startedAt: row.startedAt,
-    finishedAt: row.finishedAt,
-    runAfter: row.runAfter,
-    // A download's lane is its host, not a provider.
-    providerId: isDownload ? null : row.providerId,
-    ...(isDownload ? downloadJobFields(payload) : { url: null, host: null }),
-    result: resultOf(row.result),
-  };
-}
-
-/**
- * The provider name and model a row shows: a generation's from its record, none for a download, an analysis job's
- * from its payload.
- *
- * @param entry the job with its joined columns
- * @param payload the parsed payload
- * @returns the provider name and the model
- */
-function providerFieldsOf(entry: JobListEntry, payload: unknown) {
-  if (entry.job.type === IMAGE_GENERATE_JOB) {
-    return { providerName: entry.generationProviderName, model: entry.generationModel };
-  }
-  if (entry.job.type === FILE_DOWNLOAD_JOB) return { providerName: null, model: null };
-  return analysisJobFields(payload);
+    generation: { providerName: entry.generationProviderName, model: entry.generationModel },
+    result: resultOf(entry.job.result),
+  });
 }

@@ -21,6 +21,8 @@ interface RestorePlacement {
 const EMPTY_CHUNK = 200;
 /** The refusal of a purge while a generation of the file runs. */
 export const RUNNING_GENERATION_MESSAGE = 'This file still has a running generation';
+/** The refusal of an action on a file in the trash. */
+export const TRASHED_FILE_MESSAGE = 'The file is in the trash';
 const NOT_IN_TRASH = 'The file is not in the trash';
 
 /**
@@ -44,7 +46,7 @@ async function requireFile(session: WorkspaceSession, fileId: string): Promise<F
  * @throws InvalidOperationError for a file in the trash
  */
 export function requireLiveFile(file: FileRecord): void {
-  if (file.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
+  if (file.deletedAt !== null) throw new InvalidOperationError(TRASHED_FILE_MESSAGE);
 }
 
 /**
@@ -189,7 +191,8 @@ async function trashFile(session: WorkspaceSession, control: JobControl, fileId:
 async function removeFailedImport(session: WorkspaceSession, file: FileRecord): Promise<void> {
   await session.storage.remove(stagingPath(file.id));
   await session.storage.remove(file.relativePath);
-  if (!(await session.database.files.purge(file.id))) throw new NotFoundError(`File ${file.id} does not exist`);
+  const purged = await session.database.files.purge(file.id, session.now().toISOString());
+  if (!purged) throw new NotFoundError(`File ${file.id} does not exist`);
 }
 
 /**
@@ -322,8 +325,9 @@ async function purgeFile(session: WorkspaceSession, control: JobControl, fileId:
   // An earlier restore whose commit failed has just been completed: the file is live again.
   if (file.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
   await cancelJobsOnPurge(session, control, file.id);
-  if (!(await session.database.files.purge(file.id))) await refuseUnpurged(session, file.id);
-  else await removePurgedBinary(session, file);
+  const purged = await session.database.files.purge(file.id, session.now().toISOString());
+  if (purged) await removePurgedBinary(session, file);
+  else await refuseUnpurged(session, file.id);
   return null;
 }
 

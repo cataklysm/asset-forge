@@ -34,6 +34,8 @@ export interface GenerationDependencies {
 
 const NOT_USABLE = 'Only a complete image outside the trash can be used';
 const NOT_FOUND = 'This generation does not exist';
+/** The refusal of a start or a lookup naming a prompt version that does not exist (any more). */
+export const PROMPT_VERSION_MISSING_MESSAGE = 'This prompt version does not exist';
 
 const RESOLVE_REFUSALS = {
   missing: 'Every variable needs a value',
@@ -88,7 +90,7 @@ async function editPrompt(
 ): Promise<{ text: string; promptRef: GenerationPromptRef | null }> {
   if (input.promptVersionId === undefined) return { text: input.prompt ?? '', promptRef: null };
   const found = await session.database.prompts.getVersion(input.promptVersionId);
-  if (found === null) throw new NotFoundError('This prompt version does not exist');
+  if (found === null) throw new NotFoundError(PROMPT_VERSION_MISSING_MESSAGE);
   const { version } = found;
   const result = resolvePromptText(version.content, version.variables, input.variables ?? {});
   if (!result.ok) throw new ValidationFailedError(RESOLVE_REFUSALS[result.reason]);
@@ -266,7 +268,7 @@ async function requireVersionStillExists(
 ): Promise<void> {
   if (promptRef === null) return;
   const found = await session.database.prompts.getVersion(promptRef.versionId);
-  if (found === null) throw new NotFoundError('This prompt version does not exist');
+  if (found === null) throw new NotFoundError(PROMPT_VERSION_MISSING_MESSAGE);
 }
 
 /**

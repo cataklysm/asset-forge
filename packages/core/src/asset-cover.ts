@@ -47,15 +47,9 @@ function isBetterCover(file: CoverCandidate, best: CoverCandidate): boolean {
  * @throws `NotFoundError` when the asset does not exist
  */
 export async function getAssetDetail(session: WorkspaceSession, id: string): Promise<AssetDetail> {
-  const asset = await session.database.assets.get(id);
-  const cover = asset === null ? null : await session.database.assets.getCover(id);
-  if (asset === null || cover === null) throw new NotFoundError(`Asset ${id} does not exist`);
-  return {
-    ...asset,
-    ...cover,
-    tags: await session.database.tags.listForAsset(id),
-    sources: await session.database.assetSources.listByAsset(id),
-  };
+  const detail = await session.database.assets.getDetail(id);
+  if (detail === null) throw new NotFoundError(`Asset ${id} does not exist`);
+  return detail;
 }
 
 /**
@@ -73,10 +67,27 @@ export async function setAssetCover(
   request: { assetId: string; fileId: string | null },
 ): Promise<AssetDetail> {
   const { assetId, fileId } = request;
+  if (!(await session.database.assets.setCover(assetId, fileId, session.now().toISOString()))) {
+    await refuseCover(session, assetId, fileId);
+  }
+  return getAssetDetail(session, assetId);
+}
+
+/**
+ * Explains why the guarded cover write wrote nothing; it always throws.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @param fileId the chosen file; null for the automatic cover
+ * @returns never resolves
+ * @throws `NotFoundError` for an unknown asset; the trash refusal for a trashed file; `ValidationFailedError` for a
+ *   file of another asset, an incomplete file or one without a preview
+ */
+async function refuseCover(session: WorkspaceSession, assetId: string, fileId: string | null): Promise<never> {
   if ((await session.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
   if (fileId !== null) await requireCoverFile(session, assetId, fileId);
-  await session.database.assets.setCover(assetId, fileId, session.now().toISOString());
-  return getAssetDetail(session, assetId);
+  // The file changed between the write and this read.
+  throw new ValidationFailedError(`File ${fileId} cannot be the cover of asset ${assetId}`);
 }
 
 /**
