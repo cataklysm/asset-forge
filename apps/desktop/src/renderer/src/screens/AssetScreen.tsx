@@ -1,25 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  AssetStatusSchema,
-  FileRoleSchema,
-  RelationKindSchema,
-  type AssetDetail,
-  type FileRole,
-  type FileTarget,
-  type RelationKind,
-} from '@assetforge/contracts';
+import type { AssetDetail, FileRole, FileTarget } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
-import { ApiError, call, describeError } from '../api';
+import { call, describeError } from '../api';
+import { attempt } from '../attempt';
 import { useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetFilesTab } from '../components/AssetFilesTab';
-import { AssetPicker } from '../components/AssetPicker';
-import { AssignmentFields } from '../components/AssignmentFields';
-import { CommitInput } from '../components/CommitInput';
-import { ImportProgressView } from '../components/ImportProgressView';
+import { AssetHeader, type AssetPatch } from '../components/AssetHeader';
+import { IMPORT_BUSY, ProjectsPanel, RelationsPanel } from '../components/AssetPanels';
 import { Link } from '../components/Link';
-import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
-import { SourceList } from '../components/SourceList';
-import { TagRow } from '../components/TagRow';
+import { importFailures, ResultStrip, type BatchResult } from '../components/ResultStrip';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
 import { SiteImportDialog } from '../components/SiteImportDialog';
@@ -29,47 +18,75 @@ import { useLoad } from '../hooks/useLoad';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useChanges } from '../jobs-context';
-import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, relationLabel, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
-import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
+import { ALERT, MUTED } from '../ui';
 
-const ROLES = FileRoleSchema.options;
-const IMPORT_BUSY = 'Import in progress';
+// The asset screen: the header, the import, and the Files, Workflow, Projects and Relations tabs.
 
-type Patch = Parameters<typeof call<'assets:update'>>[1]['patch'];
-
+/** The props of the asset screen. */
 interface Props {
+  /** The shown asset's id. */
   id: string;
+  /** The open tab; kept by the shell. */
   tab: AssetTab;
+  /** Opens another tab. */
   onTabChange(tab: AssetTab): void;
+  /** Back to the asset gallery. */
   onBack(): void;
+  /** Opens another asset (a relation). */
   onOpenAsset(id: string): void;
+  /** Opens a project (an assignment). */
   onOpenProject(id: string): void;
+  /** True while an import runs; the shell blocks navigation meanwhile. */
   onBusyChange(busy: boolean): void;
 }
 
-/** Runs a mutation and reports its error through `setError`; resolves to whether it succeeded. */
-async function attempt(
-  setError: (message: string | null) => void,
-  action: () => Promise<unknown>,
-  describe: (error: unknown) => string = describeError,
-): Promise<boolean> {
-  setError(null);
-  try {
-    await action();
-    return true;
-  } catch (e) {
-    setError(describe(e));
-    return false;
-  }
+/** The Files tab count and how it is read. */
+interface FileCount {
+  /** The unfiltered number of the asset's files; null until read. */
+  fileCount: number | null;
+  /** Sets the count the Files tab reports. */
+  setFileCount(count: number | null): void;
+  /** The failure of the last read; null without one. */
+  fileCountError: string | null;
 }
 
-/** An unusable address is refused with its own fixed message, which the generic one would hide. */
-function describeSourceError(error: unknown): string {
-  return error instanceof ApiError && error.code === 'validation_failed' ? error.message : describeError(error);
+/**
+ * The Files tab count: the unfiltered total, read again whenever a token changes.
+ *
+ * @param id the asset's id
+ * @param reloadToken changes after the user's own changes to the files
+ * @param countToken changes when a job added a file to the asset
+ * @returns the count, its setter and the read's failure
+ */
+function useFileCount(id: string, reloadToken: number, countToken: number): FileCount {
+  const [fileCount, setFileCount] = useState<number | null>(null);
+  const [fileCountError, setFileCountError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    call('files:list', { limit: 1, offset: 0, scope: { kind: 'asset', assetId: id } })
+      .then((page) => {
+        if (cancelled) return;
+        setFileCount(page.total);
+        setFileCountError(null);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setFileCountError(describeError(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadToken, countToken]);
+  return { fileCount, setFileCount, fileCountError };
 }
 
+/**
+ * One asset with its header, import and tabs.
+ *
+ * @param props the asset id, the open tab and the shell's callbacks
+ * @returns the screen
+ */
 export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenProject, onBusyChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [importRole, setImportRole] = useState<FileRole>('reference');
@@ -78,21 +95,19 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [urlImportTarget, setUrlImportTarget] = useState<FileTarget | null>(null);
   // The same for the open site import dialog.
   const [siteImportTarget, setSiteImportTarget] = useState<FileTarget | null>(null);
-  const [importResult, setImportResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
+  const [importResult, setImportResult] = useState<BatchResult | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [fileCount, setFileCount] = useState<number | null>(null);
-  const [fileCountError, setFileCountError] = useState<string | null>(null);
   // A file a job added to this asset (or a reset of the change feed) changes the Files tab count; the
   // tab's list follows the change feed itself.
   const [countToken, setCountToken] = useState(0);
   useChanges((changes) => {
-    if (changes.reset || changes.added.some((place) => place.assetId === id)) setCountToken((t) => t + 1);
+    if (changes.reset || changes.added.some((place) => place.assetId === id)) setCountToken((token) => token + 1);
   });
   // A tag rename re-reads the asset (its tags) and reloads the Files tab.
   const { renameToken } = useTags();
   const analysis = useAnalysisDialogs({
     onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
-    onChanged: () => setReloadToken((t) => t + 1),
+    onChanged: () => setReloadToken((token) => token + 1),
   });
   const zipChoice = useZipChoice();
 
@@ -105,29 +120,16 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   useEffect(() => setAsset(loaded.data), [loaded.data]);
 
   // The Files tab count: the unfiltered total, refreshed after every change to the files.
-  useEffect(() => {
-    let cancelled = false;
-    call('files:list', { limit: 1, offset: 0, scope: { kind: 'asset', assetId: id } })
-      .then((page) => {
-        if (cancelled) return;
-        setFileCount(page.total);
-        setFileCountError(null);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setFileCountError(describeError(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, reloadToken, countToken]);
+  const { fileCount, setFileCount, fileCountError } = useFileCount(id, reloadToken, countToken);
 
   useEffect(() => {
     onBusyChange(importing);
     return () => onBusyChange(false);
   }, [importing, onBusyChange]);
 
+  /** The user changed files: the Files tab and its count reload, and the asset is read again. */
   function filesChanged() {
-    setReloadToken((t) => t + 1);
+    setReloadToken((token) => token + 1);
     loaded.reload();
   }
 
@@ -137,9 +139,9 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const importProgress = useImportProgress(running);
   const cancelRequested = useRef(false);
   cancelRequested.current = importProgress.cancelRequested;
-  useImportReload(running, importProgress.progress, () => setReloadToken((t) => t + 1));
+  useImportReload(running, importProgress.progress, () => setReloadToken((token) => token + 1));
 
-  const saveAsset = (patch: Patch) =>
+  const saveAsset = (patch: AssetPatch) =>
     attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
 
   /** Like `attempt`, but rejects after reporting, so that the source list keeps the typed text. */
@@ -147,6 +149,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     if (!(await attempt(setError, action, describe))) throw new Error('reported');
   }
 
+  /** Picks files, asks about archives, imports them into the asset with the chosen role and shows the result. */
   async function importFiles() {
     setError(null);
     setImporting(true);
@@ -162,8 +165,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       const cancelled = cancelRequested.current;
       setImportResult({ title: importTitle(results, { duplicates: false, cancelled }), failures: importFailures(results) });
       filesChanged();
-    } catch (e) {
-      setError(describeError(e));
+    } catch (caught) {
+      setError(describeError(caught));
     } finally {
       setRunning(false);
       setImporting(false);
@@ -193,135 +196,29 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     );
   }
 
-  const headerErrors = [error, loaded.error, types.error].filter((e): e is string => e !== null);
+  const headerErrors = [error, loaded.error, types.error].filter((message): message is string => message !== null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
       {breadcrumb}
-      <header className="space-y-2">
-        <h1 className="sr-only">{asset.name}</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <CommitInput
-            label="Name"
-            variant="inline"
-            className={`h-12 min-w-64 flex-1 ${PAGE_TITLE}`}
-            value={asset.name}
-            maxLength={200}
-            onCommit={(name) => saveAsset({ name })}
-          />
-          <select
-            className={SELECT}
-            aria-label="Type"
-            value={asset.typeId}
-            onChange={(e) => void saveAsset({ typeId: e.target.value })}
-          >
-            {(types.data ?? []).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className={SELECT}
-            aria-label="Status"
-            value={asset.status}
-            onChange={(e) => void saveAsset({ status: AssetStatusSchema.parse(e.target.value) })}
-          >
-            {AssetStatusSchema.options.map((s) => (
-              <option key={s} value={s}>
-                {label(s)}
-              </option>
-            ))}
-          </select>
-          <div className="ml-auto flex items-center gap-2">
-            <select
-              className={SELECT}
-              aria-label="Role for imported files"
-              title="Import as"
-              value={importRole}
-              onChange={(e) => setImportRole(FileRoleSchema.parse(e.target.value))}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {label(r)}
-                </option>
-              ))}
-            </select>
-            <button type="button" className={BUTTON} disabled={importing} onClick={() => void importFiles()}>
-              Import files
-            </button>
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={importing}
-              onClick={() => setUrlImportTarget({ assetId: id, role: importRole })}
-            >
-              {URL_IMPORT_LABEL}
-            </button>
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={importing}
-              onClick={() => setSiteImportTarget({ assetId: id, role: importRole })}
-            >
-              {SITE_IMPORT_LABEL}
-            </button>
-            {importProgress.progress !== null ? (
-              <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
-            ) : (
-              importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
-            )}
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={analysis.blocked !== null}
-              title={analysis.blocked ?? ANALYSE_ASSET_TITLE}
-              onClick={() => analysis.start({ kind: 'asset', assetId: id })}
-            >
-              {ANALYSE_LABEL}
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-start gap-4">
-          <CommitInput
-            label="Description"
-            multiline
-            variant="inline"
-            placeholder="Description"
-            className="min-w-64 flex-1"
-            value={asset.description}
-            maxLength={5000}
-            onCommit={(description) => saveAsset({ description })}
-          />
-          <div className="min-w-64 flex-1">
-            <TagRow
-              label="Asset tags"
-              kind="asset"
-              tags={asset.tags}
-              onAdd={async (name) => setAsset(await call('assets:addTag', { assetId: id, name }))}
-              onRemove={async (name) => setAsset(await call('assets:removeTag', { assetId: id, name }))}
-            />
-          </div>
-          <div className="min-w-64 flex-1">
-            <SourceList
-              sources={asset.sources}
-              disabled={importing}
-              onAdd={(url) =>
-                reported(async () => setAsset(await call('assets:addSource', { assetId: id, url })), describeSourceError)
-              }
-              onRemove={(sourceId) =>
-                reported(async () => setAsset(await call('assets:removeSource', { assetId: id, sourceId })))
-              }
-              onOpen={(sourceId) => reported(() => call('assets:openSource', { assetId: id, sourceId }))}
-            />
-          </div>
-        </div>
-        {headerErrors.map((message) => (
-          <p key={message} role="alert" className={ALERT}>
-            {message}
-          </p>
-        ))}
-      </header>
+      <AssetHeader
+        assetId={id}
+        asset={asset}
+        types={types.data}
+        onSave={saveAsset}
+        onAssetChange={setAsset}
+        reported={reported}
+        errors={headerErrors}
+        importRole={importRole}
+        onImportRoleChange={setImportRole}
+        importing={importing}
+        importProgress={importProgress}
+        onImportFiles={() => void importFiles()}
+        onUrlImport={() => setUrlImportTarget({ assetId: id, role: importRole })}
+        onSiteImport={() => setSiteImportTarget({ assetId: id, role: importRole })}
+        analysisBlocked={analysis.blocked}
+        onAnalyse={() => analysis.start({ kind: 'asset', assetId: id })}
+      />
 
       {importResult !== null && (
         <ResultStrip
@@ -379,173 +276,6 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       {siteImportTarget !== null && (
         <SiteImportDialog target={siteImportTarget} onClose={() => setSiteImportTarget(null)} onImported={() => loaded.reload()} />
       )}
-    </div>
-  );
-}
-
-type Loaded<T> = { data: T | null; error: string | null; reload(): void };
-
-interface ProjectsPanelProps {
-  asset: AssetDetail;
-  assignments: Loaded<Awaited<ReturnType<typeof call<'assignments:listByAsset'>>>>;
-  disabled: boolean;
-  onOpenProject(id: string): void;
-}
-
-function ProjectsPanel({ asset, assignments, disabled, onOpenProject }: ProjectsPanelProps) {
-  const [error, setError] = useState<string | null>(null);
-  const [projectToAdd, setProjectToAdd] = useState('');
-  const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
-
-  const assigned = assignments.data ?? [];
-  const assignedIds = new Set(assigned.map((a) => a.projectId));
-  const unassigned = (projects.data?.items ?? []).filter((p) => !assignedIds.has(p.id));
-  const effectiveProject = unassigned.some((p) => p.id === projectToAdd) ? projectToAdd : (unassigned[0]?.id ?? '');
-  const errors = [error, assignments.error, projects.error].filter((e): e is string => e !== null);
-
-  return (
-    <div className="space-y-3 pt-4">
-      {errors.map((message) => (
-        <p key={message} role="alert" className={ALERT}>
-          {message}
-        </p>
-      ))}
-      {assignments.data !== null && assigned.length === 0 && <p className={MUTED}>Not assigned to any project</p>}
-      <ul className="space-y-2">
-        {assigned.map((a) => (
-          <li key={a.projectId} className={`space-y-2 border-b pb-2 ${BORDER}`}>
-            <div className="flex items-center gap-2">
-              <Link
-                onFollow={() => onOpenProject(a.projectId)}
-                disabled={disabled}
-                title={disabled ? IMPORT_BUSY : undefined}
-              >
-                {a.project.name}
-              </Link>
-              <button
-                type="button"
-                className={BUTTON}
-                aria-label={`Remove ${asset.name} from ${a.project.name}`}
-                title="Removes the assignment only; the asset and its files are kept"
-                onClick={() =>
-                  void attempt(setError, async () => {
-                    await call('assignments:remove', { projectId: a.projectId, assetId: asset.id });
-                    assignments.reload();
-                  })
-                }
-              >
-                Remove
-              </button>
-            </div>
-            <AssignmentFields assignment={a} onChanged={() => assignments.reload()} />
-          </li>
-        ))}
-      </ul>
-      <div className="flex items-center gap-2">
-        <select
-          className={SELECT}
-          aria-label="Project to add"
-          value={effectiveProject}
-          onChange={(e) => setProjectToAdd(e.target.value)}
-        >
-          {unassigned.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={effectiveProject === ''}
-          onClick={() =>
-            void attempt(setError, async () => {
-              await call('assignments:assign', { projectId: effectiveProject, assetId: asset.id });
-              assignments.reload();
-            })
-          }
-        >
-          Add to project
-        </button>
-      </div>
-    </div>
-  );
-}
-
-interface RelationsPanelProps {
-  assetId: string;
-  relations: Loaded<Awaited<ReturnType<typeof call<'relations:list'>>>>;
-  disabled: boolean;
-  onOpenAsset(id: string): void;
-}
-
-function RelationsPanel({ assetId, relations, disabled, onOpenAsset }: RelationsPanelProps) {
-  const [error, setError] = useState<string | null>(null);
-  const [kind, setKind] = useState<RelationKind>('uses');
-  const errors = [error, relations.error].filter((e): e is string => e !== null);
-
-  return (
-    <div className="space-y-3 pt-4">
-      {errors.map((message) => (
-        <p key={message} role="alert" className={ALERT}>
-          {message}
-        </p>
-      ))}
-      {relations.data !== null && relations.data.length === 0 && <p className={MUTED}>No relations</p>}
-      <ul className="space-y-1">
-        {(relations.data ?? []).map((r) => {
-          const relation = relationLabel(r.kind, r.direction);
-          return (
-            <li key={`${r.fromAssetId}:${r.toAssetId}:${r.kind}`} className="flex items-center gap-2">
-              <span className={MUTED}>{relation}</span>
-              <Link
-                onFollow={() => onOpenAsset(r.other.id)}
-                disabled={disabled}
-                title={disabled ? IMPORT_BUSY : undefined}
-              >
-                {r.other.name}
-              </Link>
-              <button
-                type="button"
-                className={BUTTON}
-                aria-label={`Remove relation ${relation} ${r.other.name}`}
-                title="Removes the relation only; both assets and their files are kept"
-                onClick={() =>
-                  void attempt(setError, async () => {
-                    await call('relations:remove', { fromAssetId: r.fromAssetId, toAssetId: r.toAssetId, kind: r.kind });
-                    relations.reload();
-                  })
-                }
-              >
-                Remove
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="flex flex-wrap items-start gap-2">
-        <select
-          className={SELECT}
-          aria-label="Relation kind"
-          value={kind}
-          onChange={(e) => setKind(RelationKindSchema.parse(e.target.value))}
-        >
-          {RelationKindSchema.options.map((k) => (
-            <option key={k} value={k}>
-              {relationLabel(k, 'outgoing')}
-            </option>
-          ))}
-        </select>
-        <AssetPicker
-          excludeIds={[assetId]}
-          onPick={async (other) => {
-            await attempt(setError, async () => {
-              await call('relations:add', { fromAssetId: assetId, toAssetId: other.id, kind });
-              relations.reload();
-            });
-          }}
-        />
-      </div>
     </div>
   );
 }
