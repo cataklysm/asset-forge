@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { FileRecord, IpcRequest } from '@assetforge/contracts';
@@ -7,7 +7,7 @@ import { NO_FILE_FILTERS } from '../../src/renderer/src/list-state';
 import { TrashScreen, type TrashListState } from '../../src/renderer/src/screens/TrashScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { TrashProvider } from '../../src/renderer/src/trash-context';
-import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog, RenameTrigger } from './rename-flow';
 
@@ -216,6 +216,37 @@ it('Empty trash asks with the total and calls trash:empty', async () => {
   await waitFor(() => expect(callsOf(api, 'trash:empty')).toEqual([{}]));
   expect(await screen.findByText('Trash is empty')).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('the Empty trash confirmation follows a count reload that answers while it is open', async () => {
+  const user = userEvent.setup();
+  const { hero, loose, third } = files();
+  let items = [hero, loose, third];
+  const held = deferred<void>();
+  let holdCount = false;
+  install(items, {
+    handlers: {
+      'files:list': async (r: ListRequest) => {
+        // The title's count read after the restore is held back.
+        if (holdCount && r.limit === 1) await held.promise;
+        return pageOf(items.slice(r.offset, r.offset + r.limit), items.length);
+      },
+      'files:restoreMany': (r) => {
+        items = items.filter((f) => !r.fileIds.includes(f.id));
+        return { items: r.fileIds.map((fileId) => ({ fileId, file: null, error: null })) };
+      },
+    },
+  });
+  render(<Harness />);
+  await waitFor(() => expect(title()).toBe('Trash3'));
+  holdCount = true;
+  await openMenu(user, 'hero.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Restore' }));
+  await waitFor(() => expect(screen.queryByText('hero.png')).toBeNull());
+  await user.click(screen.getByRole('button', { name: 'Empty trash' }));
+  expect(await screen.findByRole('dialog', { name: 'Delete 3 files permanently?' })).toBeTruthy();
+  await act(async () => held.resolve());
+  expect(await screen.findByRole('dialog', { name: 'Delete 2 files permanently?' })).toBeTruthy();
 });
 
 it('Empty trash reports failures by count only', async () => {

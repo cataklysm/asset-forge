@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
@@ -30,6 +30,11 @@ afterEach(() => {
 });
 
 const ACTIONS: FileActionContext = { cover: null, onDetails: () => {} };
+
+/** Lets every answer and render that is already queued run, without waiting real time. */
+async function settleQueued(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) await act(async () => {});
+}
 
 function Harness(props: {
   file: FileRecord;
@@ -251,7 +256,7 @@ it('a video whose measurement fails or finds nothing is not measured again and s
   const { rerender } = render(<Harness file={file} />);
   await waitFor(() => expect(api.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1));
   rerender(<Harness file={{ ...file }} />);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settleQueued();
   expect(api.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
   expect(detailValue('Dimensions')).toBe('–');
@@ -264,7 +269,7 @@ it('a video whose measurement fails or finds nothing is not measured again and s
   });
   render(<Harness file={other} />);
   await waitFor(() => expect(failing.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1));
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settleQueued();
   expect(failing.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
 });

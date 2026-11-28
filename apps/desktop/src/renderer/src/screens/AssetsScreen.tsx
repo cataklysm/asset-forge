@@ -270,7 +270,15 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
       count={library.data?.total ?? null}
       countTitle="Assets in the library"
       actions={
-        <button type="button" className={BUTTON} onClick={() => setCreating(true)}>
+        <button
+          type="button"
+          className={BUTTON}
+          onClick={() => {
+            // A failed load of the types would leave the form's type select empty: it is tried again.
+            if (types.error !== null) types.reload();
+            setCreating(true);
+          }}
+        >
           <Plus size={16} aria-hidden />
           New asset
         </button>
@@ -310,6 +318,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
       <NewAssetDialog
         open={creating}
         types={typeItems}
+        typesError={types.error}
+        onRetryTypes={types.reload}
         onClose={() => setCreating(false)}
         onCreated={(id) => {
           setCreating(false);

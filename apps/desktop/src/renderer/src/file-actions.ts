@@ -157,12 +157,12 @@ function busyFlag(context: FileActionContext): { disabled?: true } {
 }
 
 /**
- * The actions of one file's "…" menu. Details comes first wherever the host offers it. A trashed file offers
- * only Restore and Delete permanently besides it. A live file offers Open externally and Show in folder for completely
- * imported files (opening only when the type may be opened); Analyse, Review tags (with a
- * proposal) and Image to prompt for analysable images when the host offers them; Generate from
- * image and the upscales for complete previewable files when the host offers the studio; the cover choice
- * where the file belongs to an asset; Detach when the host offers it; Delete last.
+ * The actions of one file's "…" menu. Details comes first wherever the host offers it. A trashed file offers only
+ * Restore and Delete permanently besides it. A live file offers Open externally and Show in folder for completely
+ * imported files (opening only when the type may be opened); Analyse, Review tags (with a proposal) and Image to
+ * prompt for analysable images when the host offers them; Generate from image and the upscales for complete
+ * previewable files when the host offers the studio; the cover choice where the file belongs to an asset; Detach
+ * when the host offers it; Delete last.
  *
  * @param file the file
  * @param context what the host offers
