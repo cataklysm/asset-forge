@@ -196,4 +196,33 @@ describe('backup before migrations', () => {
     expect(appliedCount(join(dir, 'assetforge.sqlite.backup-19-20261128100000'))).toBe(19);
     expect(appliedCount(dbPath)).toBe(19);
   });
+
+  test('a migration that keeps failing reuses its backup instead of piling up copies', async () => {
+    await createDatabaseWith(19);
+    const folder = await migrationsUpTo(19, [{ tag: '0019_broken', sql: 'CREATE TABLE broken (;' }]);
+
+    for (const time of ['2026-11-28T10:00:00Z', '2026-11-28T10:05:00Z', '2026-11-28T10:10:00Z']) {
+      await expect(openWorkspaceDatabase(dbPath, folder, { backup: { now: clock(time) } })).rejects.toThrow();
+    }
+
+    expect(await backups()).toEqual(['assetforge.sqlite.backup-19-20261128100000']);
+  });
+
+  test('retention never deletes the backup of this migration, even with a clock set back', async () => {
+    await createDatabaseWith(18);
+    for (const stamp of ['20990101000001', '20990101000002', '20990101000003']) {
+      await writeFile(join(dir, `assetforge.sqlite.backup-17-${stamp}`), 'older');
+    }
+
+    const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER, {
+      backup: { now: clock('2026-11-28T10:00:00Z') },
+    });
+    await db.close();
+
+    expect(await backups()).toEqual([
+      'assetforge.sqlite.backup-17-20990101000002',
+      'assetforge.sqlite.backup-17-20990101000003',
+      'assetforge.sqlite.backup-18-20261128100000',
+    ]);
+  });
 });

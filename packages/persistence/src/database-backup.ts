@@ -1,4 +1,4 @@
-import { readdir, rename, rm } from 'node:fs/promises';
+import { readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { InvalidOperationError } from '@assetforge/core';
 import type Database from 'better-sqlite3';
@@ -12,8 +12,11 @@ import type Database from 'better-sqlite3';
  * through SQLite's online backup, so it is consistent with WAL, and renamed to the final name only once complete.
  * Two backups of the same state in the same second share a name; the later one replaces the earlier one.
  *
- * Retention: after a successful migration the newest `BACKUP_KEEP_COUNT` backups of the database are kept (newest
- * by stamp, then by applied count) and the older ones are deleted, best effort. The `.tmp` files of an
+ * Reuse: when a finished backup of the same applied count exists (a migration that keeps failing), it is used again
+ * instead of copying the database once more on every open.
+ *
+ * Retention: after a successful migration the backup of that migration and the newest others, `BACKUP_KEEP_COUNT`
+ * in all (newest by stamp, then by applied count), are kept and the rest is deleted, best effort. The `.tmp` files of an
  * interrupted backup (with their `-journal`, `-wal` and `-shm` side files) are removed on every open, best effort.
  */
 
@@ -183,16 +186,48 @@ async function finishedBackups(databaseFilePath: string): Promise<BackupEntry[]>
 }
 
 /**
- * Deletes the backups of this database beyond the newest `BACKUP_KEEP_COUNT`, with their side files. Never
- * throws; a backup that cannot be deleted stays until a later update.
+ * Whether a path is a regular file; false when it is missing or anything else.
+ *
+ * @param path the path
+ * @returns true for a regular file
+ */
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The finished backup of this database for a schema state, when one exists; the newest by stamp if several do.
  *
  * @param databaseFilePath the database file
+ * @param appliedCount the number of migrations applied before the update
+ * @returns the path of the backup; null when there is none
+ */
+export async function findBackup(databaseFilePath: string, appliedCount: number): Promise<string | null> {
+  for (const entry of await finishedBackups(databaseFilePath)) {
+    const path = join(dirname(databaseFilePath), entry.name);
+    if (entry.appliedCount === appliedCount && (await isFile(path))) return path;
+  }
+  return null;
+}
+
+/**
+ * Deletes the backups of this database beyond `BACKUP_KEEP_COUNT`, with their side files. The protected backup (the
+ * one of the migration that just ran) is always kept, whatever its stamp, so a clock set back cannot delete it; the
+ * remaining slots go to the newest others. Never throws; a backup that cannot be deleted stays until a later update.
+ *
+ * @param databaseFilePath the database file
+ * @param protectedPath the path of the backup that must survive
  * @returns resolves once every old backup was tried
  */
-export async function pruneBackups(databaseFilePath: string): Promise<void> {
+export async function pruneBackups(databaseFilePath: string, protectedPath: string): Promise<void> {
   const directory = dirname(databaseFilePath);
-  const old = (await finishedBackups(databaseFilePath)).slice(BACKUP_KEEP_COUNT);
-  for (const entry of old) {
+  const protectedName = basename(protectedPath);
+  const others = (await finishedBackups(databaseFilePath)).filter((entry) => entry.name !== protectedName);
+  for (const entry of others.slice(BACKUP_KEEP_COUNT - 1)) {
     for (const suffix of ['', ...SIDE_FILE_SUFFIXES]) await removeQuietly(join(directory, entry.name + suffix));
   }
 }
