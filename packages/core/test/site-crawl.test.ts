@@ -206,6 +206,28 @@ describe('crawlSite', () => {
     expect(d.loads.map((l) => l.url)).toEqual([`${G}/g`, `${G}/g?p=2`, `${G}/g?p=3`]);
   });
 
+  it.each(['https://other.example/x', 'not a url'])(
+    'a final URL %j is not seen, not followed and not reported, on a gallery and a detail page',
+    async (finalUrl) => {
+      const d = deps({
+        [`${G}/g`]: ok({ thumbnails: ['/d/1', '/d/2'], pagination: ['/g?p=2'] }, '', finalUrl),
+        [`${G}/g?p=2`]: ok({ thumbnails: [], pagination: [] }),
+        [`${G}/d/1`]: ok({ file: ['/f/1.jpg'] }, '', finalUrl),
+        [`${G}/d/2`]: ok({ file: ['/f/2.jpg'] }, '', finalUrl),
+      });
+      const result = await run(d, profile({ pagination: '//p', file: '//img', maxPages: 2 }));
+      expect(d.loads.map((l) => l.url)).toEqual([`${G}/g`, `${G}/d/1`, `${G}/d/2`, `${G}/g?p=2`]);
+      expect(result).toMatchObject({
+        files: [`${G}/f/1.jpg`, `${G}/f/2.jpg`],
+        pages: 2,
+        pageFailures: 0,
+        invalid: 0,
+        truncated: null,
+        problems: [],
+      });
+    },
+  );
+
   it('loads a detail page once when a thumbnail links to the final URL of another', async () => {
     const d = deps({
       [`${G}/g`]: ok({ thumbnails: ['/d/1', '/d/1/'] }),

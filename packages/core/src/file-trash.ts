@@ -191,8 +191,8 @@ async function trashFile(session: WorkspaceSession, control: JobControl, fileId:
 async function removeFailedImport(session: WorkspaceSession, file: FileRecord): Promise<void> {
   await session.storage.remove(stagingPath(file.id));
   await session.storage.remove(file.relativePath);
-  if (!(await session.database.files.purge(file.id, session.now().toISOString())))
-    throw new NotFoundError(`File ${file.id} does not exist`);
+  const purged = await session.database.files.purge(file.id, session.now().toISOString());
+  if (!purged) throw new NotFoundError(`File ${file.id} does not exist`);
 }
 
 /**
@@ -325,9 +325,9 @@ async function purgeFile(session: WorkspaceSession, control: JobControl, fileId:
   // An earlier restore whose commit failed has just been completed: the file is live again.
   if (file.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
   await cancelJobsOnPurge(session, control, file.id);
-  if (!(await session.database.files.purge(file.id, session.now().toISOString())))
-    await refuseUnpurged(session, file.id);
-  else await removePurgedBinary(session, file);
+  const purged = await session.database.files.purge(file.id, session.now().toISOString());
+  if (purged) await removePurgedBinary(session, file);
+  else await refuseUnpurged(session, file.id);
   return null;
 }
 

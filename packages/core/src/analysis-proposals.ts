@@ -62,7 +62,7 @@ export async function acceptProposal(
   if (proposal === null) throw new NotFoundError('The file has no tag proposal');
   // A stale proposal is handed over with no tags, so the repository's trash and stale checks answer before the
   // choice is looked at.
-  const chosen = proposal.stale ? new Set<string>() : chosenNames(proposal, request.names);
+  const chosen = proposal.stale ? new Set<string>() : await choiceOf(session, proposal, request);
   const outcome = await session.database.analyses.acceptProposal({
     fileId: request.fileId,
     sha256: proposal.sha256,
@@ -70,6 +70,30 @@ export async function acceptProposal(
     now: session.now().toISOString(),
   });
   refuseUnaccepted(outcome);
+}
+
+/**
+ * The chosen names; a refused choice of a file in the trash answers the trash refusal instead, so the trash wins
+ * as the repository's check would. A valid choice reads no file record: the repository checks the trash then.
+ *
+ * @param session the open workspace
+ * @param proposal the stored proposal
+ * @param request the file and the chosen tag names
+ * @returns the distinct normalised names
+ * @throws `InvalidOperationError` for a file in the trash, or for a foreign or empty choice
+ */
+async function choiceOf(
+  session: WorkspaceSession,
+  proposal: StoredProposal,
+  request: { fileId: string; names: string[] },
+): Promise<Set<string>> {
+  try {
+    return chosenNames(proposal, request.names);
+  } catch (error) {
+    const file = await session.database.files.get(request.fileId);
+    if (file !== null && file.deletedAt !== null) throw new InvalidOperationError(TRASHED_FILE_MESSAGE);
+    throw error;
+  }
 }
 
 /**
