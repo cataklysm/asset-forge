@@ -33,7 +33,7 @@ export function createFileRepository(database: BetterSQLite3Database): FileRepos
     get: (id) => getFile(database, id),
     setPlacement: (id, placement) => setPlacement(database, id, placement),
     list: (query) => listFiles(database, query),
-    purge: (id) => purge(database, id),
+    purge: (id, purgedAt) => purge(database, id, purgedAt),
     listPurgedIds: () => listPurgedIds(database),
     forgetPurge: (id) => forgetPurge(database, id),
     countTrashed: () => countTrashed(database),
@@ -309,10 +309,11 @@ async function listFiles(database: BetterSQLite3Database, query: FileQuery): Pro
  *
  * @param database the workspace database
  * @param id the file
+ * @param purgedAt the time stamped on the tombstone
  * @returns true when it was deleted; false for an unknown file or one neither trashed nor failed; rejects with
  *   `InvalidOperationError` while it is being moved or a generation of it runs
  */
-async function purge(database: BetterSQLite3Database, id: string): Promise<boolean> {
+async function purge(database: BetterSQLite3Database, id: string, purgedAt: string): Promise<boolean> {
   return database.transaction((transaction) => {
     const row = transaction
       .select({ deletedAt: file.deletedAt, status: file.status })
@@ -342,11 +343,7 @@ async function purge(database: BetterSQLite3Database, id: string): Promise<boole
     transaction.delete(file).where(eq(file.id, id)).run();
     // The tombstone tells the trash sweep that a leftover binary of this id may go.
     if (row.deletedAt !== null) {
-      transaction
-        .insert(filePurge)
-        .values({ fileId: id, purgedAt: new Date().toISOString() })
-        .onConflictDoNothing()
-        .run();
+      transaction.insert(filePurge).values({ fileId: id, purgedAt }).onConflictDoNothing().run();
     }
     reindexAssets(transaction, [left]);
     return true;

@@ -326,7 +326,7 @@ describe('file trash repository', () => {
     await seedDependents(kept);
     await trash(doomed);
 
-    await expect(db.files.purge(doomed)).resolves.toBe(true);
+    await expect(db.files.purge(doomed, '2026-01-01T00:00:00.000Z')).resolves.toBe(true);
     await expect(db.files.get(doomed)).resolves.toBeNull();
     for (const table of ['file_tag', 'file_analysis', 'file_analysis_proposal', 'job']) {
       expect({ table, n: countOf(table, doomed) }).toEqual({ table, n: 0 });
@@ -368,7 +368,7 @@ describe('file trash repository', () => {
     handle.prepare("update job set status = 'running' where id = ?").run(running);
     await trash(f);
 
-    await expect(db.files.purge(f)).rejects.toMatchObject({
+    await expect(db.files.purge(f, '2026-01-01T00:00:00.000Z')).rejects.toMatchObject({
       code: 'invalid_operation',
       message: 'This file still has a running generation',
     });
@@ -378,7 +378,7 @@ describe('file trash repository', () => {
 
     // A generation that is only queued does not hold the purge.
     handle.prepare("update job set status = 'failed' where id = ?").run(running);
-    await expect(db.files.purge(f)).resolves.toBe(true);
+    await expect(db.files.purge(f, '2026-01-01T00:00:00.000Z')).resolves.toBe(true);
   });
 
   test('purge of a trashed file writes a tombstone that forgetPurge deletes', async () => {
@@ -388,11 +388,11 @@ describe('file trash repository', () => {
     await trash(b);
     await expect(db.files.listPurgedIds()).resolves.toEqual([]);
 
-    await db.files.purge(b);
-    await db.files.purge(a);
+    await db.files.purge(b, TS);
+    await db.files.purge(a, '2026-03-04T05:06:07.890Z');
     await expect(db.files.listPurgedIds()).resolves.toEqual([a, b].sort());
     expect(rows('select file_id, purged_at from file_purge where file_id = ?', a)).toEqual([
-      { file_id: a, purged_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) },
+      { file_id: a, purged_at: '2026-03-04T05:06:07.890Z' },
     ]);
 
     await db.files.forgetPurge(a);
@@ -403,13 +403,15 @@ describe('file trash repository', () => {
   test('purge writes no tombstone for a failed file, a refused purge or a live file', async () => {
     const failed = await addFile('broken.png', undefined, { complete: false });
     await db.files.markFailed(failed, 'The file could not be imported');
-    await db.files.purge(failed);
+    await db.files.purge(failed, '2026-01-01T00:00:00.000Z');
     const live = await addFile('live.png');
-    await db.files.purge(live);
+    await db.files.purge(live, '2026-01-01T00:00:00.000Z');
     const moving = await addFile('moving.png');
     await trash(moving);
     await db.fileMoves.begin({ ...trashMove(moving), kind: 'restore' });
-    await expect(db.files.purge(moving)).rejects.toMatchObject({ code: 'invalid_operation' });
+    await expect(db.files.purge(moving, '2026-01-01T00:00:00.000Z')).rejects.toMatchObject({
+      code: 'invalid_operation',
+    });
 
     await expect(db.files.listPurgedIds()).resolves.toEqual([]);
   });
@@ -421,7 +423,7 @@ describe('file trash repository', () => {
     // A move row left behind by a restore whose commit failed.
     await db.fileMoves.begin({ ...trashMove(f), kind: 'restore' });
 
-    await expect(db.files.purge(f)).rejects.toMatchObject({
+    await expect(db.files.purge(f, '2026-01-01T00:00:00.000Z')).rejects.toMatchObject({
       code: 'invalid_operation',
       message: 'The file is being moved',
     });
@@ -434,9 +436,9 @@ describe('file trash repository', () => {
     const live = await addFile('live.png', { assetId: PUMP, role: 'reference' });
     const pending = await addFile('pending.png', undefined, { complete: false });
     await tagFile(live, 'metal');
-    await expect(db.files.purge(live)).resolves.toBe(false);
-    await expect(db.files.purge(pending)).resolves.toBe(false);
-    await expect(db.files.purge(uuid(999))).resolves.toBe(false);
+    await expect(db.files.purge(live, '2026-01-01T00:00:00.000Z')).resolves.toBe(false);
+    await expect(db.files.purge(pending, '2026-01-01T00:00:00.000Z')).resolves.toBe(false);
+    await expect(db.files.purge(uuid(999), '2026-01-01T00:00:00.000Z')).resolves.toBe(false);
     await expect(db.files.get(live)).resolves.toMatchObject({ tags: [{ name: 'metal' }] });
     await expect(db.files.get(pending)).resolves.toMatchObject({ status: 'pending' });
   });
@@ -444,7 +446,7 @@ describe('file trash repository', () => {
   test('purge removes a failed file that was never trashed', async () => {
     const f = await addFile('broken.png', undefined, { complete: false });
     await db.files.markFailed(f, 'The file could not be imported');
-    await expect(db.files.purge(f)).resolves.toBe(true);
+    await expect(db.files.purge(f, '2026-01-01T00:00:00.000Z')).resolves.toBe(true);
     await expect(db.files.get(f)).resolves.toBeNull();
   });
 

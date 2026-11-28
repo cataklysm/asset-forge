@@ -726,7 +726,7 @@ class InMemoryFiles implements FileRepository {
     return { items: sorted.slice(q.offset, q.offset + q.limit).map((r) => this.withTags(r)), total: sorted.length };
   }
 
-  async purge(id: string): Promise<boolean> {
+  async purge(id: string, _purgedAt: string): Promise<boolean> {
     const rec = this.records.get(id);
     if (!rec || (rec.deletedAt === null && rec.status !== 'failed')) return false;
     if (this.hasMove(id)) throw new InvalidOperationError('The file is being moved');
@@ -1715,7 +1715,14 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projects = new InMemoryProjects(this.links, this.files, this.tags);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags, this.assetSources);
+  readonly assets = new InMemoryAssets(
+    this.links,
+    this.files,
+    this.assetWorkflows,
+    this.covers,
+    this.tags,
+    this.assetSources,
+  );
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   readonly jobs = new InMemoryJobRepository(

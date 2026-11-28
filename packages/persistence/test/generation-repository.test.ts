@@ -86,7 +86,7 @@ async function trash(id: string): Promise<void> {
 /** Trashes and purges a file. */
 async function purge(id: string): Promise<void> {
   await trash(id);
-  expect(await db.files.purge(id)).toBe(true);
+  expect(await db.files.purge(id, '2026-01-01T00:00:00.000Z')).toBe(true);
 }
 
 const create = (generation: NewGeneration, job = jobFor(Number(generation.id.slice(-12)))) =>

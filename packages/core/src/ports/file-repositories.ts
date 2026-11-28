@@ -120,9 +120,10 @@ export interface FileRepository {
    * trashed file the same transaction writes a purge tombstone (`file_purge`).
    *
    * @param id the file
+   * @param purgedAt the time stamped on the tombstone
    * @returns false when the row is neither trashed nor failed, and for an unknown id
    */
-  purge(id: string): Promise<boolean>;
+  purge(id: string, purgedAt: string): Promise<boolean>;
   /**
    * The purged trashed files whose binary may still be on the storage.
    *
