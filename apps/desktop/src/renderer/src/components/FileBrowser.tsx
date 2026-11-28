@@ -26,22 +26,32 @@ import { FileTable } from './FileTable';
 import type { FileViewProps } from './FileTile';
 import type { MenuItem } from './Menu';
 
+// The file list of the asset Files tab, the inbox and the trash.
+
+/** The number of placeholder tiles before the first page arrives. */
 const SKELETON_TILES = 6;
 
 /** What the host of a file browser gives it. */
 export interface FileBrowserProps {
+  /** The files listed: an asset's, the inbox or the trash. */
   scope: FileScope;
+  /** The filters as the host keeps them. */
   filters: FileFilters;
+  /** Receives changed filters. */
   onFiltersChange(filters: FileFilters): void;
   /** The Role filter: asset files yes, inbox no. */
   showRoleFilter: boolean;
+  /** Grid or table. */
   view: AssetView;
+  /** Receives another view. */
   onViewChange(view: AssetView): void;
   /** Where the first mounted view starts; read once on mount. */
   restore?: ViewRestore;
   /** Receives the current position (on row changes, before opening a file and on unmount). */
   positionRef?: MutableRefObject<ViewPosition | null>;
+  /** The selected files as the host keeps them. */
   selection: FileSelection;
+  /** Receives a changed selection. */
   onSelectionChange(selection: FileSelection): void;
   /**
    * Part of the list key; bump after a mutation to refetch. The position is kept. Background changes
@@ -60,13 +70,16 @@ export interface FileBrowserProps {
   emptyText: string;
   /** Shown below `emptyText` (e.g. the inbox's "Import files"). */
   emptyAction?: ReactNode;
+  /** Receives the number of listed files; null while unknown. */
   onTotal?(total: number | null): void;
   /**
    * The proposal filter and "Analyse all" in the toolbar. `onAnalyseAll` receives the filter the
    * list shows; `blocked` disables it with that tooltip (e.g. the provider is not configured).
    */
   analysis?: {
+    /** Starts the analysis for the shown filter. */
     onAnalyseAll(filter: FileListFilter): void;
+    /** Why "Analyse all" is disabled; null when it is not. */
     blocked: string | null;
   };
   /** The host's file detail dialog, which browses this list. */
@@ -75,15 +88,18 @@ export interface FileBrowserProps {
     fileId: string | null;
     /** The dialog must show this file now; null closes it. */
     onView(file: FileRecord | null): void;
+    /** Renders the dialog over this list. */
     render(list: ViewerList): ReactNode;
   };
 }
 
 /** The displayed list as the viewer sees it. */
 export interface ViewerList {
+  /** The number of listed files. */
   total: number;
   /** Position of the viewed file in the list. */
   index: number;
+  /** What the list holds at an index. */
   slot(index: number): Slot<FileRecord>;
   /** Shows the file at `index`: loads its page when needed, then calls `onView(file)`. Clamped to 0 … total − 1; the latest call wins. */
   show(index: number): void;

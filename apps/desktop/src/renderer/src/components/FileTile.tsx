@@ -10,6 +10,9 @@ import { FOCUS, MUTED } from '../ui';
 import { CoverImage } from './CoverImage';
 import type { MenuItem } from './Menu';
 
+// The parts the grid and the table view of the file browser share: the picture, the meta line,
+// the props and the pointer and keyboard handling of an item.
+
 /**
  * The picture of a file: its thumbnail, its format label, or the import status while not complete.
  *
