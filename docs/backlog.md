@@ -516,7 +516,7 @@ Found in the final review and not fixed:
 - `promptTitleKey` (`packages/core/src/prompts.ts`) and `variableKey` (`packages/contracts/src/prompt-template.ts`) do not NFC-normalise, unlike tags (`cleanTagText`): a title or variable typed once composed and once decomposed counts as two.
 - `PromptDefaultsSchema` (`packages/contracts/src/prompts.ts`) has a `.refine` without a message; it is a transport bound only. Tests are missing for a defaults record of 40 keys, for a value of exactly 2000 characters and for a key that differs only by whitespace.
 - The list search (`prompts:list`) does not cap the number of query words: a query of 200 characters can produce about 100 `instr` terms. A cap (for example 20 words) would bound the query.
-- The correlated subqueries in `packages/persistence/src/prompt-repository.ts` (`isCurrent`, `matchesWord`, `carriesTag`) use plain Drizzle column references instead of `qualified()`; this works but departs from the convention.
+- The correlated subqueries in `packages/persistence/src/prompt-rows.ts` (`isCurrent`, `matchesWord`, `carriesTag`) use plain Drizzle column references instead of `qualified()`; this works but departs from the convention.
 - `generation.prompt_version_id` has no index, so deleting a prompt scans the generations.
 - `migration-0013.test.ts` checks the latest schema, not the state at `0013`.
 - `generations:start` with a library version reads the version, then loads the model list, then writes the record. A prompt deleted in between fails the foreign key and answers `internal_error` instead of `not_found`; nothing is written. `startGeneration` has an overlong doc comment line, and core has no test for two value keys that name one variable.
