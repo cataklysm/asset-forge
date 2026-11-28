@@ -129,6 +129,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Contracts: `AssignManyResultSchema` is only an alias of `FileBatchResultSchema`.
 - Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
 - Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
+- Core file readability pass (2026-11-28): the journaled move exists twice, as `moveJournaled` in `asset-files.ts` and `moveAndCommit` in `file-trash.ts` (begin, move, abort on failure, commit), and `assignFiles` repeats the per-item batch loop that `eachFile` in `file-trash.ts` holds; merging them needs one shared module both use. The URL rule's import (`normalizeDownloadUrl`) lives in `url-import.ts`, so `file-origins.ts` and `site-crawl.ts` depend on the queueing module for a pure rule. `ImportRun` in `import-file.ts` and `ArchiveRun` in `import-archive.ts` are plain mutable records passed between steps rather than classes; turning them into classes would move the journaled order into methods, which this pass avoided.
 
 ## Tooling and tests
 
@@ -291,7 +292,7 @@ Found during the build — core and persistence:
 - The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).
 - A purge that loses a race to another purge answers "The file is not in the trash" although the file is gone.
 - `purgeFiles` (`packages/core/src/file-trash.ts`) deletes the tombstone after `remove` returned, but `remove` also returns without error when the storage dropped just before. The binary then stays in the trash directory with neither a row nor a tombstone and no sweep removes it (leaked disk space, no data loss). Delete the tombstone only when the storage is still reachable afterwards, as the sweep does.
-- `resolveFileMove` (`packages/core/src/asset-files.ts`) treats a storage that drops between the reachability check and its `exists` calls as "target missing" and aborts the move row. A purge that follows can then leave a restored binary outside the trash without a row. Re-check reachability before the abort, or after a discarded row in restore and purge.
+- `resolveFileMove` (`packages/core/src/file-move-recovery.ts`) treats a storage that drops between the reachability check and its `exists` calls as "target missing" and aborts the move row. A purge that follows can then leave a restored binary outside the trash without a row. Re-check reachability before the abort, or after a discarded row in restore and purge.
 - Binaries left in `.assetforge/trash/` by a purge before migration `0009` have no tombstone and are never swept.
 
 Found during the build — main process and jobs:

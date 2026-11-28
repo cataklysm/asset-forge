@@ -12,13 +12,14 @@ import { streamFailure } from './download-errors.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { openRemote, siteLoginOf } from './download-open.js';
 import { SourceNotReadableError } from './errors.js';
-import { importStream, isRefusedImportName, type ImportContext } from './import-file.js';
+import { importStream, type ImportContext } from './import-file.js';
+import { isRefusedImportName } from './import-refusals.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
 import { fileKind } from './media-types.js';
 import type { RemoteFile, RemoteFileSource } from './ports/remote-files.js';
 import type { SiteAccess } from './ports/site-access.js';
 import type { WorkspaceSession } from './session.js';
-import { DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
+import { DOWNLOAD_FREE_SPACE_RESERVE } from './download-limits.js';
 
 /** What the `file.download` job needs. */
 export interface FileDownloadHandlerDependencies {

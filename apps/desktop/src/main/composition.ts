@@ -7,7 +7,7 @@ import {
   createRobotsReader,
   InvalidOperationError,
   WorkspaceManager,
-  type SiteCrawlDeps,
+  type SiteCrawlDependencies,
   type GenerationImageSource,
   type ImageProbe,
   type VideoProbe,
@@ -182,7 +182,7 @@ export function createAnalysisServices(o: {
    */
   siteSessions?: SiteSessions;
   /** Tests only: the pause between two page loads of a crawl; a real, abortable timer without it. */
-  siteWait?: SiteCrawlDeps['wait'];
+  siteWait?: SiteCrawlDependencies['wait'];
 }): AnalysisServices {
   const store = createProviderStore({ userData: o.userDataPath, secrets: o.secrets, env: o.env });
   // Registers its change listener first, so the entry's adapter is dropped before its lane resumes.

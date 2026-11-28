@@ -9,7 +9,7 @@ import {
   ValidationFailedError,
   type PageLoadResult,
   type RobotsAnswer,
-  type SiteCrawlDeps,
+  type SiteCrawlDependencies,
 } from '../src/index.js';
 
 const SITE = 'gallery.test';
@@ -41,7 +41,7 @@ const ok = (results: Record<string, string[]>, baseUrl = ''): PageLoadResult => 
 function deps(
   pages: Record<string, Page>,
   robots: Record<string, RobotsAnswer | string> = {},
-): SiteCrawlDeps & { loads: Load[]; waits: number[]; robotsAsked: string[]; events: string[] } {
+): SiteCrawlDependencies & { loads: Load[]; waits: number[]; robotsAsked: string[]; events: string[] } {
   const loads: Load[] = [];
   const waits: number[] = [];
   const robotsAsked: string[] = [];
@@ -102,7 +102,7 @@ function problemOf(url: string, stage: 'gallery' | 'detail', page: PageLoadResul
   }
 }
 
-const run = (d: SiteCrawlDeps, p: SiteProfile, url = `${G}/g`, signal = new AbortController().signal) =>
+const run = (d: SiteCrawlDependencies, p: SiteProfile, url = `${G}/g`, signal = new AbortController().signal) =>
   crawlSite(d, { profile: p, url, signal });
 
 describe('crawlSite', () => {
