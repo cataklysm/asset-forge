@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import type { IpcRequest, PromptDetail } from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
+import { LeaveGuardProvider, useConfirmLeave } from '../../src/renderer/src/leave-guard';
 import { PromptsScreen } from '../../src/renderer/src/screens/PromptsScreen';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { fakeError, fakePrompts, installFakeApi, promptDetail, type FakeHandlers } from './fake-api';
@@ -338,7 +339,7 @@ it('while a new prompt is being created the fields take no typing, so no edit is
   expect(field('Text').value).toBe('A cat');
 });
 
-it('a late answer of a create does not replace the prompt chosen in the meantime', async () => {
+it('while a create runs another prompt and New are ignored without asking; its answer then opens the new prompt', async () => {
   const user = userEvent.setup();
   const store = fakePrompts([promptDetail({ title: 'Other' })]);
   const hold = gate();
@@ -359,16 +360,57 @@ it('a late answer of a create does not replace the prompt chosen in the meantime
   await waitFor(() => expect(requests(api, 'prompts:create')).toHaveLength(1));
 
   await user.click(await option('Other'));
-  const discard = await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' });
-  await user.click(within(discard).getByRole('button', { name: 'Discard' }));
-  await waitFor(() => expect(title().value).toBe('Other'));
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'New' }).disabled).toBe(true);
+  await act(async () => {});
+  expect(screen.queryByRole('dialog', { name: 'Discard the unsaved changes?' })).toBeNull();
+  expect(title().value).toBe('Hero');
 
   hold.release();
-  // The created prompt still reaches the list.
-  await waitFor(() => expect(requests(api, 'prompts:list')).toHaveLength(2));
-  await act(async () => {});
-  expect(title().value).toBe('Other');
-  expect(api.calls.filter((c) => c.channel === 'prompts:get')).toHaveLength(1);
+  await option('Hero');
+  await waitFor(() => expect(api.calls.filter((c) => c.channel === 'prompts:get')).toHaveLength(1));
+  await waitFor(() => expect(title().value).toBe('Hero'));
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'New' }).disabled).toBe(false);
+});
+
+it('while a save runs the main navigation is held back without asking, and leaves again once it settled', async () => {
+  const user = userEvent.setup();
+  const store = fakePrompts([promptDetail({ title: 'Hero', content: 'A hero' })]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:update': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:update']!(request as never);
+    },
+  });
+  const answers: boolean[] = [];
+  function Leave() {
+    const confirm = useConfirmLeave();
+    return (
+      <button type="button" onClick={() => void confirm().then((answer) => answers.push(answer))}>
+        Leave
+      </button>
+    );
+  }
+  render(
+    <LeaveGuardProvider>
+      <Leave />
+      <PromptsScreen busy={false} />
+    </LeaveGuardProvider>,
+  );
+  await openPrompt(user, 'Hero');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Title' }), ' shot');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:update')).toHaveLength(1));
+
+  await user.click(screen.getByRole('button', { name: 'Leave' }));
+  await waitFor(() => expect(answers).toEqual([false]));
+  expect(screen.queryByRole('dialog', { name: 'Discard the unsaved changes?' })).toBeNull();
+
+  hold.release();
+  await waitFor(() => expect(saveButton().disabled).toBe(true));
+  await user.click(screen.getByRole('button', { name: 'Leave' }));
+  await waitFor(() => expect(answers).toEqual([false, true]));
 });
 
 it('a failed saveVersion shows the message and keeps the draft', async () => {
