@@ -104,12 +104,12 @@ export class WorkspaceManager {
    * The backups a workspace can be restored from: the copies before pending migrations and the regular backups.
    *
    * @param request the workspace by id or folder, and a further directory the user picked
-   * @returns the backups, newest first, and whether the backup place could not be listed
+   * @returns the id of the workspace, its backups, newest first, and whether the backup place could not be listed
    */
   listBackups(request: {
     workspace: { id: string } | { rootPath: string };
     extraDirectory: string | null;
-  }): Promise<{ backups: ListedBackup[]; unreachable: boolean }> {
+  }): Promise<{ workspaceId: string; backups: ListedBackup[]; unreachable: boolean }> {
     void request;
     return Promise.reject(notImplemented());
   }
