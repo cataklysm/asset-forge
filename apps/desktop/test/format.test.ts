@@ -8,6 +8,11 @@ describe('formatBytes', () => {
     [1023, '1023 B'],
     [1024, '1.0 KiB'],
     [1572864, '1.5 MiB'],
+    [1048575, '1.0 MiB'],
+    [1048524, '1023.9 KiB'],
+    [Number.NaN, '–'],
+    [-1, '–'],
+    [Number.POSITIVE_INFINITY, '–'],
   ])('formats %s as %s', (input, expected) => {
     expect(formatBytes(input)).toBe(expected);
   });
