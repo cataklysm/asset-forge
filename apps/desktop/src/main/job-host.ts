@@ -38,7 +38,7 @@ import {
 } from '@assetforge/jobs';
 import type { ChangeFeed } from './change-feed.js';
 import { createSiteDiscoveryHandler, type SiteDiscoveryRuntime } from './site-discovery.js';
-import { consoleLog, jobRecoveryLine, schedulerLogLine, type JobRecoveryCounts } from './main-log.js';
+import { mainLog, jobRecoveryLine, schedulerLogLine, type JobRecoveryCounts } from './main-log.js';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
@@ -186,7 +186,7 @@ class JobHostRunner {
 
   /** @param dependencies what the schedulers run with */
   constructor(private readonly dependencies: JobHostDependencies) {
-    this.log = dependencies.log ?? consoleLog;
+    this.log = dependencies.log ?? mainLog;
   }
 
   /** Tells the feed that jobs changed. */

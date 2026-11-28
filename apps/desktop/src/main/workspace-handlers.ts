@@ -18,7 +18,7 @@ import type { IpcHandlers, IpcRequest, IpcResponse } from './ipc.js';
 import { createJobHandlers } from './job-handlers.js';
 import type { JobHost } from './job-host.js';
 import { createLibraryHandlers } from './library-handlers.js';
-import { consoleLog } from './main-log.js';
+import { mainLog } from './main-log.js';
 import { createPromptHandlers } from './prompt-handlers.js';
 import type { ProviderHandlers } from './provider-handlers.js';
 import type { ProviderStore } from './provider-store.js';
@@ -186,6 +186,6 @@ async function notify(host: HostActions, hook: 'workspaceOpened' | 'workspaceClo
   try {
     await host[hook]();
   } catch (error) {
-    writeLine(consoleLog, errorLogLine('Workspace lifecycle hook failed', { hook }, error));
+    writeLine(mainLog, errorLogLine('Workspace lifecycle hook failed', { hook }, error));
   }
 }

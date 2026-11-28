@@ -2,7 +2,8 @@ import { errorLogLine, logLine, type LineLog } from '@assetforge/core';
 
 // The lines the main process writes about its own failures and about the job recovery on open. Every line is built
 // by `logLine` or `errorLogLine`, so it carries a fixed text, ids, counts and codes, never a path, a name, a URL or
-// a message. Kept free of Electron imports.
+// a message. Kept free of Electron imports. Every line goes to the console and, once attached, to the log file
+// (`log-file.ts`), so a line must stay safe to keep on disk.
 
 /** The event of an IPC handler that threw something other than a domain error. */
 export const IPC_FAILED_EVENT = 'IPC handler failed';
@@ -25,14 +26,55 @@ export interface JobRecoveryCounts {
   generationsEnded: number;
 }
 
+/** Where the main log writes besides the console: the log file, once the host attached it. */
+export interface MainLogFile {
+  /**
+   * Queues one line; never throws.
+   *
+   * @param line the line
+   */
+  write(line: string): void;
+  /**
+   * Waits a bounded time for the queued lines.
+   *
+   * @returns resolves when they are written or the deadline passed; never rejects
+   */
+  flush(): Promise<void>;
+}
+
+/** The destinations of the main log beyond the console; one per app process. */
+const destinations: { file: MainLogFile | null } = { file: null };
+
 /**
- * The main console as the one log of the main process: one line per call, written with `console.warn` because
- * these are diagnostic lines, not crashes.
+ * Makes the main log also write to a file, or stops it; called once by the host at start. Lines written before are
+ * on the console only.
+ *
+ * @param file the log file; null detaches it
+ */
+export function attachLogFile(file: MainLogFile | null): void {
+  destinations.file = file;
+}
+
+/**
+ * Waits for the log file to write the queued lines, called on quit. Bounded by the file's deadline.
+ *
+ * @returns resolves when the lines are written, the deadline passed or no file is attached; never rejects
+ */
+export function flushMainLog(): Promise<void> {
+  const file = destinations.file;
+  return file === null ? Promise.resolve() : file.flush().catch(() => {});
+}
+
+/**
+ * The one log of the main process: one line per call on the console, written with `console.warn` because these are
+ * diagnostic lines, not crashes, and in the log file once one is attached. The only `console` call of the main
+ * process.
  *
  * @param line the line
  */
-export const consoleLog: LineLog = (line: string): void => {
+export const mainLog: LineLog = (line: string): void => {
   console.warn(line);
+  destinations.file?.write(line);
 };
 
 /**

@@ -25,6 +25,7 @@ function recordingParts(calls: string[], failing: string[] = []): ShutdownParts 
     services: { workspaceClosing: step('services.workspaceClosing') },
     previews: { close: step('previews.close') },
     logError: (message) => void calls.push(`log ${message}`),
+    flushLog: async () => void calls.push('log.flush'),
   };
 }
 
@@ -38,6 +39,7 @@ describe('closing the app', () => {
       'services.workspaceClosing',
       'manager.close',
       'previews.close',
+      'log.flush',
     ]);
   });
 
@@ -51,12 +53,13 @@ describe('closing the app', () => {
       'manager.close',
       'log Closing the workspace failed',
       'previews.close',
+      'log.flush',
     ]);
   });
 
   it('never rejects when closing the preview service failed', async () => {
     const calls: string[] = [];
     await expect(closeApp(recordingParts(calls, ['previews.close']))).resolves.toBeUndefined();
-    expect(calls.at(-1)).toBe('log Closing the preview service failed');
+    expect(calls.slice(-2)).toEqual(['log Closing the preview service failed', 'log.flush']);
   });
 });

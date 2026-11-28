@@ -18,11 +18,13 @@ import {
   trashFiles,
   type FileBatchItem,
   type WorkspaceManager,
+  writeLine,
 } from '@assetforge/core';
 import type { FileBatchResult, IpcChannel } from '@assetforge/contracts';
 import { openStoredUrl, type HostActions } from './host-actions.js';
 import { toIpcError, type IpcHandlers, type IpcRequest, type IpcResponse } from './ipc.js';
 import type { JobHost } from './job-host.js';
+import { mainLog } from './main-log.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
@@ -73,7 +75,7 @@ export interface FileHandlerDependencies {
  */
 function logPurgeFailure(fileId: string, error: Error): void {
   const code = error instanceof AssetForgeError ? error.code : 'internal_error';
-  console.warn(`Emptying the trash left file ${fileId}: ${code}`);
+  writeLine(mainLog, `Emptying the trash left file ${fileId}: ${code}`);
 }
 
 /**

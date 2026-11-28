@@ -24,7 +24,9 @@ import {
   InvalidOperationError,
   NotFoundError,
   ValidationFailedError,
+  writeLine,
 } from '@assetforge/core';
+import { mainLog } from './main-log.js';
 import {
   isSameKeyOrigin,
   KIND_CHANGED,
@@ -176,7 +178,7 @@ class SettingsProviderStore {
     this.fromEnvironment = options.env[ENV_BASE_URL] !== undefined;
     // Once per store, i.e. per app start; the value itself is never logged.
     if (this.fromEnvironment && usableBaseUrl(options.env[ENV_BASE_URL] ?? '') === null)
-      console.warn(UNUSABLE_ENV_BASE_URL);
+      writeLine(mainLog, UNUSABLE_ENV_BASE_URL);
     this.environmentEntry = this.fromEnvironment ? environmentEntryOf(options.env) : null;
   }
 

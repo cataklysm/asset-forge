@@ -22,7 +22,8 @@ import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
 import { dispatch, type IpcHandlers } from './ipc.js';
-import { consoleLog } from './main-log.js';
+import { createLogFile, LOG_DIRECTORY } from './log-file.js';
+import { attachLogFile, flushMainLog, mainLog } from './main-log.js';
 import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
@@ -79,11 +80,15 @@ interface AppParts {
 function start(): void {
   const state: AppState = { mainWindow: null, shutdown: 'running' };
 
+  // First, so every later line of the main log also lands in the bounded log file; only this instance writes it.
+  attachLogFile(createLogFile({ directory: join(app.getPath('userData'), LOG_DIRECTORY) }));
+
   // One pool serves previews and measuring; closing the preview service closes it.
   const pool = createWorkerPool({
     workerUrl: new URL('./preview-worker.js', import.meta.url),
     size: POOL_SIZE,
     timeoutMs: JOB_TIMEOUT_MS,
+    log: mainLog,
   });
   // The binary is hashed once per start, off the hot path: frame requests made before the check has
   // finished wait for it. Closing the preview service closes the frame tool.
@@ -91,7 +96,7 @@ function start(): void {
     packagePath: ffmpegPath,
     platform: process.platform,
     arch: process.arch,
-    warn: consoleLog,
+    warn: mainLog,
     runDir: join(app.getPath('userData'), 'bin'),
   });
   const frames = createVideoFrames({ binaryPath: ffmpegBinary });
@@ -103,7 +108,7 @@ function start(): void {
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
     imageProbe: { measure: (path) => pool.measure(path) },
     videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
-    log: consoleLog,
+    log: mainLog,
   });
 
   const importDirectory = createImportDirectoryMemory(join(app.getPath('userData'), IMPORT_DIRECTORY_FILE));
@@ -125,7 +130,7 @@ function start(): void {
     createWindow: (options) => new BrowserWindow(options),
     // Electron's IncomingMessage is a Readable at run time; its typings only declare the events.
     netRequest: (options) => net.request(options) as unknown as SessionNetRequest,
-    log: consoleLog,
+    log: mainLog,
   });
 
   // The vision settings store is the only source of the provider, its key and the default models.
@@ -136,7 +141,7 @@ function start(): void {
     env: process.env,
     images: { jpeg: (path, signal) => pool.jpeg(path, signal) },
     generationImages: createGenerationImageSource(previews),
-    log: consoleLog,
+    log: mainLog,
     appVersion: app.getVersion(),
     siteSessions,
   });
@@ -245,7 +250,7 @@ function beforeQuit(parts: AppParts, event: Electron.Event): void {
   event.preventDefault();
   if (state.shutdown === 'closing') return;
   state.shutdown = 'closing';
-  void closeApp({ ...parts, logError }).finally(() => {
+  void closeApp({ ...parts, logError, flushLog: flushMainLog }).finally(() => {
     state.shutdown = 'closed';
     app.quit();
   });
@@ -294,7 +299,8 @@ function openMainWindow(parts: AppParts, windowOptions: MainWindowOptions): void
  */
 function failStartup(error: unknown): void {
   logError('AssetForge failed to start', error);
-  app.exit(1);
+  // The flush is bounded by the log file's deadline and never rejects.
+  void flushMainLog().finally(() => app.exit(1));
 }
 
 /**
@@ -305,5 +311,5 @@ function failStartup(error: unknown): void {
  * @param error what failed
  */
 function logError(message: string, error: unknown): void {
-  writeLine(consoleLog, errorLogLine(message, {}, error));
+  writeLine(mainLog, errorLogLine(message, {}, error));
 }

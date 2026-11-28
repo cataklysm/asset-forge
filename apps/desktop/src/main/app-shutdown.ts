@@ -4,7 +4,8 @@ import type { AnalysisServices } from './analysis-services.js';
 import type { ElectronSiteSessions } from './site-sessions.js';
 
 // The steps of quitting, free of Electron so they can be tested: the site windows close, a running import stops
-// after the item in progress, the jobs stop, then the workspace and the preview service close.
+// after the item in progress, the jobs stop, then the workspace and the preview service close, and the log file
+// writes its last lines.
 
 /** What quitting closes. */
 export interface ShutdownParts {
@@ -18,6 +19,8 @@ export interface ShutdownParts {
   previews: Pick<PreviewService, 'close'>;
   /** Reports a failed step. */
   logError: (message: string, error: unknown) => void;
+  /** Writes the queued log lines, bounded by the log file's deadline; never rejects. */
+  flushLog: () => Promise<void>;
 }
 
 /**
@@ -42,4 +45,6 @@ export async function closeApp(parts: ShutdownParts): Promise<void> {
   } catch (error) {
     parts.logError('Closing the preview service failed', error);
   }
+  // Last, so the lines of the steps above reach the log file; bounded, so quitting is never held up for long.
+  await parts.flushLog();
 }
