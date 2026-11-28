@@ -1028,7 +1028,9 @@ it('files tab: the debounced search reaches Analyse all', async () => {
   renderWithProvider(asset.id);
   await screen.findByText('leaf.png');
   await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'leaf');
-  await waitFor(() => expect(callsOf(api, 'files:list').some((r) => r.query === 'leaf')).toBe(true));
+  await waitFor(() =>
+    expect(callsOf(api, 'files:list').some((r) => (r as { query?: string }).query === 'leaf')).toBe(true),
+  );
   await user.click(screen.getByRole('button', { name: 'Analyse all' }));
   await screen.findByRole('dialog', { name: 'Analyse' });
   await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
@@ -1061,7 +1063,7 @@ it('files tab: the Proposals toggle lists only files with a proposal and blocks 
   await waitFor(() => expect(screen.queryByText('plain.png')).toBeNull());
   expect(toggle.getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByText('proposed.png')).toBeTruthy();
-  expect(callsOf(api, 'files:list').some((r) => r.hasProposal === true)).toBe(true);
+  expect(callsOf(api, 'files:list').some((r) => (r as { hasProposal?: boolean }).hasProposal === true)).toBe(true);
   const all = screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement;
   expect(all.disabled).toBe(true);
   expect(all.title).toBe('Turn off the proposal filter to analyse all');
