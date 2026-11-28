@@ -665,6 +665,31 @@ it('a measured file keeps its dimensions when the viewer steps away and back', a
   expect(measureCalls(api).map((c) => c.request)).toEqual([{ fileId: a.id }]);
 });
 
+it('the dialog header is no banner landmark', async () => {
+  install();
+  render(<Browsing files={[fileRecord({ originalName: 'a.png', width: 10, height: 10 })]} />);
+  await openDialog();
+  expect(within(screen.getByRole('dialog')).queryByRole('banner')).toBeNull();
+});
+
+it('a focused Next that becomes disabled at the end hands the focus to the stage, so the keys keep working', async () => {
+  const a = fileRecord({ originalName: 'a.png', width: 10, height: 10 });
+  const b = fileRecord({ originalName: 'b.png', width: 10, height: 10 });
+  install();
+  render(<Browsing files={[a, b]} />);
+  const user = await openDialog();
+  for (const name of ['Next file (→)', 'Next file']) {
+    await user.click(screen.getByRole('button', { name }));
+    expect(screen.getByRole('heading', { name: 'b.png' })).toBeTruthy();
+    const active = document.activeElement;
+    expect(active === null || active === document.body).toBe(false);
+    expect(screen.getByRole('dialog').contains(active)).toBe(true);
+    expect((active as HTMLButtonElement).disabled ?? false).toBe(false);
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('heading', { name: 'a.png' })).toBeTruthy();
+  }
+});
+
 /** A succeeded upscale of `source` with one output, as `generations:forFile` lists it among the results. */
 function resultGeneration(source: FileRecord): Generation {
   return {
