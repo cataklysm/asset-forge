@@ -1,88 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, type Stats } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform, type Readable } from 'node:stream';
-import {
-  LAYOUT_DIRS,
-  PathEscapeError,
-  StorageAccessDeniedError,
-  StorageFullError,
-  type Storage,
-} from '@assetforge/core';
-
-function isNotFound(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-}
-
-const ACCESS_DENIED_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
-
-/**
- * Maps permission and disk-full failures to domain errors that the UI can explain.
- * Node's own messages contain absolute paths, so the message names only the relative
- * path; the original error stays available as `cause`. Everything else is returned as is.
- */
-function translateFsError(err: unknown, relPath: string): unknown {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  const target = relPath === '' ? 'the workspace folder' : relPath;
-  if (code !== undefined && ACCESS_DENIED_CODES.has(code)) {
-    return new StorageAccessDeniedError(`No permission to access ${target}`, { cause: err });
-  }
-  if (code === 'ENOSPC') {
-    return new StorageFullError(`Not enough free space to write ${target}`, { cause: err });
-  }
-  return err;
-}
-
-const WINDOWS = process.platform === 'win32';
-
-function isInside(root: string, target: string): boolean {
-  const rel = path.relative(WINDOWS ? root.toLowerCase() : root, WINDOWS ? target.toLowerCase() : target);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-}
-
-/** How often an entry that exists but could not be resolved is looked at again before it counts as dangling. */
-const MAX_LOOKS_AGAIN = 3;
-
-/**
- * Resolves the real path of `p` by following links on the deepest existing
- * ancestor and re-appending the not-yet-existing remainder. A dangling link
- * is treated as an escape because creating through it would write to its
- * target. An entry that another writer created between the two looks (a
- * directory made by a concurrent move) is looked at again, a few times at most.
- */
-async function realpathOfDeepestAncestor(p: string): Promise<string> {
-  const remainder: string[] = [];
-  let current = p;
-  let lookedAgain = 0;
-  for (;;) {
-    try {
-      const real = await fs.realpath(current);
-      return path.join(real, ...remainder);
-    } catch (err) {
-      if (!isNotFound(err)) throw err;
-      let found: Stats | null = null;
-      try {
-        found = await fs.lstat(current);
-      } catch (lstatErr) {
-        if (!isNotFound(lstatErr)) throw lstatErr;
-      }
-      if (found !== null) {
-        if (found.isSymbolicLink() || lookedAgain >= MAX_LOOKS_AGAIN) {
-          throw new PathEscapeError('Path crosses a dangling link');
-        }
-        lookedAgain += 1;
-        continue;
-      }
-      const parent = path.dirname(current);
-      if (parent === current) throw err;
-      remainder.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
+import { LAYOUT_DIRS, PathEscapeError, type Storage } from '@assetforge/core';
+import { isNotFound, translateFsError } from './fs-errors.js';
+import { isInside, realpathOfDeepestAncestor } from './workspace-paths.js';
 
 export class LocalFileSystemStorage implements Storage {
   private readonly root: string;
