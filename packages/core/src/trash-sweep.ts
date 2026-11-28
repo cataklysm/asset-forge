@@ -1,11 +1,14 @@
 import { TRASH_DIR } from './paths.js';
 import type { FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
+import { reportRecoveryFailure, type RecoveryFailureReport } from './recovery-log.js';
 
 /** What the sweep of the trash directory reads and writes. */
 export interface TrashSweepDependencies {
   storage: Storage;
   files: Pick<FileRepository, 'get' | 'listPurgedIds' | 'forgetPurge'>;
+  /** Told about the listing, a binary or a tombstone that could not be removed. */
+  onFailure?: RecoveryFailureReport;
 }
 
 /** The outcome of a sweep: the relative paths removed and those that could not be removed. */
@@ -46,7 +49,8 @@ async function readSweepInput(
     const purged = new Set(await dependencies.files.listPurgedIds());
     if (purged.size === 0) return null;
     return { purged, entries: await dependencies.storage.list(TRASH_DIR) };
-  } catch {
+  } catch (error) {
+    reportRecoveryFailure(dependencies.onFailure, 'trash list', null, error);
     return null;
   }
 }
@@ -78,9 +82,11 @@ async function removeLeftBinaries(
       }
       await dependencies.storage.remove(path);
       result.removed.push(path);
-    } catch {
+    } catch (error) {
       left.add(id);
       result.skipped.push(path);
+      // The id passed the UUID check, so it is safe to name.
+      reportRecoveryFailure(dependencies.onFailure, 'trash binary', id, error);
     }
   }
   return left;
@@ -105,8 +111,9 @@ async function forgetTombstones(
       // A share that dropped while sweeping lists nothing; never take that for "already gone".
       if (!(await dependencies.storage.isReachable())) return;
       await dependencies.files.forgetPurge(id);
-    } catch {
+    } catch (error) {
       // The tombstone stays for the next sweep.
+      reportRecoveryFailure(dependencies.onFailure, 'tombstone', id, error);
     }
   }
 }

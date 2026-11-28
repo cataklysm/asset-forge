@@ -2,6 +2,7 @@ import type { FileRecord } from '@assetforge/contracts';
 import { STAGING_DIR, stagingPath } from './paths.js';
 import type { FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
+import { reportRecoveryFailure, type RecoveryFailureReport } from './recovery-log.js';
 
 /** The error stored on a pending row that recovery marks failed. */
 export const INTERRUPTED_IMPORT_MESSAGE = 'Import was interrupted';
@@ -10,6 +11,8 @@ export const INTERRUPTED_IMPORT_MESSAGE = 'Import was interrupted';
 export interface ImportRecoveryDependencies {
   storage: Storage;
   files: FileRepository;
+  /** Told about the listing, a row or a staging entry that could not be cleaned up. */
+  onFailure?: RecoveryFailureReport;
 }
 
 /** What the recovery of imports did. */
@@ -44,7 +47,8 @@ export async function recoverIncompleteImports(dependencies: ImportRecoveryDepen
     rows = await dependencies.files.listByStatus('pending');
     // Without this list a download row could be failed and left in the inbox; leave every row for the next open.
     downloads = new Set(await dependencies.files.listPendingDownloadIds());
-  } catch {
+  } catch (error) {
+    reportRecoveryFailure(dependencies.onFailure, 'import list', null, error);
     return result;
   }
 
@@ -76,8 +80,9 @@ async function recoverPendingRow(
     if (hadStaging) result.removedStagingFiles.push(staging);
     current = row.relativePath;
     await dependencies.storage.remove(row.relativePath);
-  } catch {
+  } catch (error) {
     result.skippedPaths.push(current);
+    reportRecoveryFailure(dependencies.onFailure, 'import', row.id, error);
     return;
   }
   try {
@@ -87,8 +92,9 @@ async function recoverPendingRow(
       await dependencies.files.markFailed(row.id, INTERRUPTED_IMPORT_MESSAGE);
       result.failedIds.push(row.id);
     }
-  } catch {
+  } catch (error) {
     // The row stays pending and is retried on the next open.
+    reportRecoveryFailure(dependencies.onFailure, 'import', row.id, error);
   }
 }
 
@@ -103,7 +109,8 @@ async function removeOrphanedStaging(dependencies: ImportRecoveryDependencies, r
   let entries: string[];
   try {
     entries = await dependencies.storage.list(STAGING_DIR);
-  } catch {
+  } catch (error) {
+    reportRecoveryFailure(dependencies.onFailure, 'staging list', null, error);
     return;
   }
   for (const entry of entries) {
@@ -111,8 +118,10 @@ async function removeOrphanedStaging(dependencies: ImportRecoveryDependencies, r
     try {
       await dependencies.storage.remove(path);
       result.removedStagingFiles.push(path);
-    } catch {
+    } catch (error) {
       result.skippedPaths.push(path);
+      // The entry's name comes from disk, so the report carries no id.
+      reportRecoveryFailure(dependencies.onFailure, 'staging entry', null, error);
     }
   }
 }

@@ -18,6 +18,7 @@ export * from './errors.js';
 export * from './error-description.js';
 export * from './log-line.js';
 export * from './import-log.js';
+export * from './recovery-log.js';
 export * from './file-access.js';
 export * from './file-names.js';
 export * from './generation-handler.js';

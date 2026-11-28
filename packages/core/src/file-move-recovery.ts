@@ -2,6 +2,7 @@ import { InvalidOperationError } from './errors.js';
 import type { FileRecord } from '@assetforge/contracts';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
+import { reportRecoveryFailure, type RecoveryFailureReport } from './recovery-log.js';
 import { requireReachableStorage } from './storage-reachability.js';
 
 /** What the recovery of moves reads and writes. */
@@ -9,6 +10,8 @@ export interface MoveRecoveryDependencies {
   storage: Storage;
   files: Pick<FileRepository, 'get'>;
   fileMoves: FileMoveRepository;
+  /** Told about the listing or a move row that could not be resolved. */
+  onFailure?: RecoveryFailureReport;
 }
 
 /** How one move row was resolved. */
@@ -30,15 +33,17 @@ export async function recoverFileMoves(
   let moves;
   try {
     moves = await dependencies.fileMoves.list();
-  } catch {
+  } catch (error) {
+    reportRecoveryFailure(dependencies.onFailure, 'move list', null, error);
     return result;
   }
   for (const move of moves) {
     try {
       if ((await resolveFileMove(dependencies, move)) === 'completed') result.completed.push(move.fileId);
       else result.discarded.push(move.fileId);
-    } catch {
+    } catch (error) {
       // The row stays and is retried on the next open.
+      reportRecoveryFailure(dependencies.onFailure, 'file move', move.fileId, error);
     }
   }
   return result;
