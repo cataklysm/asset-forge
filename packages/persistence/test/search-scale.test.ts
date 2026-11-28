@@ -369,7 +369,7 @@ afterAll(async () => {
 
 describe('search scale', () => {
   test('the plan checker rejects a table scan and lookups not keyed on the owner', () => {
-    expect(violations(plan(sql`select id from asset where lower(name) = 'x'`))).toEqual(['SCAN asset']);
+    expect(violations(plan(sql`select id from asset where upper(name) = 'x'`))).toEqual(['SCAN asset']);
     expect(violations(plan(sql`select count(*) from file where original_name = 'x'`))).not.toEqual([]);
     const notKeyed = [
       sql`select 1 from file where status = 'complete'`,
