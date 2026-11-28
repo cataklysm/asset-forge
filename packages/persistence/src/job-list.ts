@@ -8,7 +8,7 @@ import {
 import type { JobRepository } from '@assetforge/core';
 import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { errorCodeOf, resultOf, type JobReader, type JobRow } from './job-rows.js';
+import { errorCodeOf, inLane, resultOf, type JobReader, type JobRow } from './job-rows.js';
 import { file, generation, job } from './schema.js';
 
 // The job list of the Jobs screen: one page of jobs with what each row shows besides the job itself.
@@ -60,7 +60,8 @@ export async function listJobs(
 function jobListWhere({ status, lane, ids }: JobListFilter): SQL | undefined {
   return and(
     status === undefined ? undefined : eq(job.status, status),
-    lane === undefined ? undefined : eq(job.providerId, lane),
+    // `inLane`, so a null lane matches the jobs without one instead of no row (`= NULL` is never true).
+    lane === undefined ? undefined : inLane(lane),
     ids === undefined ? undefined : inArray(job.id, [...ids]),
   );
 }

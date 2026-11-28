@@ -79,6 +79,8 @@ export interface ProjectListState {
   filters: ProjectFilters;
   /** The scroll offset of the list. */
   scrollOffset: number;
+  /** The index of the project opened last; null when the list was left another way. */
+  openedIndex: number | null;
   /** The project shown in the details. */
   selectedId: string | null;
 }

@@ -195,6 +195,41 @@ it('a partially failed assign lists the failure and drops the moved files', asyn
   expect(within(names).getByText('Failed').getAttribute('title')).toBe('This item no longer exists.');
 });
 
+it('the assign failure strip goes once no failed file is selected any more', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const c3 = fileRecord({ originalName: 'c3.png' });
+  const api = install([c1, c2, c3], {
+    'files:assignMany': () => {
+      api.setFiles([c2, c3]);
+      return {
+        items: [
+          { fileId: c1.id, file: { ...c1, assetId: OAK.id, role: 'reference' }, error: null },
+          { fileId: c2.id, file: null, error: { code: 'not_found', message: 'not_found' } },
+        ],
+      };
+    },
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  await pickAsset(user);
+  await user.click(within(column()).getByRole('button', { name: 'Assign 2 files' }));
+  expect((await within(column()).findByRole('alert')).textContent).toContain('c2.png');
+  await waitFor(() => expect(screen.getByText('1 selected')).toBeTruthy());
+
+  await user.click(tile('c3.png'));
+  await waitFor(() =>
+    expect(within(within(column()).getByRole('list', { name: 'Selected files' })).getByText('c3.png')).toBeTruthy(),
+  );
+  expect(within(column()).queryByRole('alert')).toBeNull();
+  // Selecting the failed file again does not bring the old strip back.
+  await user.click(tile('c2.png'));
+  await waitFor(() =>
+    expect(within(within(column()).getByRole('list', { name: 'Selected files' })).getByText('c2.png')).toBeTruthy(),
+  );
+  expect(within(column()).queryByRole('alert')).toBeNull();
+});
+
 it('shared image tags show only tags every eligible file carries; removing one removes it from all', async () => {
   const user = userEvent.setup();
   const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('oak'), tagOf('bark')] });
@@ -342,7 +377,8 @@ it('import results list imported, failed and duplicates', async () => {
   render(<Harness onBusyChange={onBusyChange} />);
   await screen.findByText('Inbox is empty');
   await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
-  expect(screen.getByText('Importing…')).toBeTruthy();
+  // The file picker is open: busy, but nothing is imported yet.
+  expect(screen.queryByText('Importing…')).toBeNull();
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   picked.resolve(['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe']);
 
@@ -968,6 +1004,58 @@ it('deleting a failed file from its menu removes it', async () => {
   await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
   await waitFor(() => expect(screen.queryByText('f1.png')).toBeNull());
   expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [f1.id] }]);
+});
+
+it.each([
+  ['succeeds', false],
+  ['fails', true],
+])('the selection Delete is disabled while a single delete runs and enabled once it %s', async (_, failing) => {
+  const user = userEvent.setup();
+  const { c1, c2, f1 } = files();
+  const api = install([c1, c2, f1]);
+  const pending = deferred<{ items: { fileId: string; file: null; error: null }[] }>();
+  api.set('files:trashMany', () => pending.promise);
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  const selectionDelete = () =>
+    within(screen.getByText('2 selected').parentElement!).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+  expect(selectionDelete().disabled).toBe(false);
+  await user.click(within(tile('f1.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(selectionDelete().disabled).toBe(true));
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [f1.id] }]);
+  await act(async () =>
+    failing
+      ? pending.reject(new Error('boom'))
+      : pending.resolve({ items: [{ fileId: f1.id, file: null, error: null }] }),
+  );
+  await waitFor(() => expect(selectionDelete().disabled).toBe(false));
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [f1.id] }]);
+});
+
+it('the tile menu Delete is disabled while the selection Delete runs', async () => {
+  const user = userEvent.setup();
+  const { c1, c2, f1 } = files();
+  const api = install([c1, c2, f1]);
+  const pending = deferred<{ items: { fileId: string; file: null; error: null }[] }>();
+  api.set('files:trashMany', () => pending.promise);
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  const bar = screen.getByText('2 selected').parentElement!;
+  await user.click(within(bar).getByRole('button', { name: 'Delete' }));
+  await user.click(within(tile('f1.png')).getByRole('button', { name: 'File actions' }));
+  expect(screen.getByRole('menuitem', { name: 'Delete' }).getAttribute('aria-disabled')).toBe('true');
+  await user.keyboard('{Escape}');
+  await act(async () =>
+    pending.resolve({
+      items: [
+        { fileId: c1.id, file: null, error: null },
+        { fileId: c2.id, file: null, error: null },
+      ],
+    }),
+  );
+  await user.click(within(tile('f1.png')).getByRole('button', { name: 'File actions' }));
+  expect(screen.getByRole('menuitem', { name: 'Delete' }).getAttribute('aria-disabled')).toBeNull();
 });
 
 it('the Delete key deletes the selection', async () => {

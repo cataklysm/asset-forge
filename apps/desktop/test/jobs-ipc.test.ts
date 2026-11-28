@@ -536,6 +536,21 @@ describe('analysis:enqueue with an analysis prompt', () => {
     });
   });
 
+  it('raises the change counter on a resume only when the lane was paused', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+
+    const idle = jobHost.changes();
+    expect(await ok('jobs:resume', { providerId: entryId })).toEqual({});
+    expect(await ok('jobs:resumeHost', { host: 'example.org' })).toEqual({});
+    expect(jobHost.changes()).toBe(idle);
+
+    pause.record('local_gpu', entryId, 'provider_unauthorized');
+    const paused = jobHost.changes();
+    expect(await ok('jobs:resume', { providerId: entryId })).toEqual({});
+    expect(jobHost.changes()).toBeGreaterThan(paused);
+  });
+
   /** An `openai` entry on the mock's OpenAI-compatible API, without a key. */
   const openAiEntry = () =>
     store.save({

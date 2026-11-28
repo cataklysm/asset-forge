@@ -190,6 +190,19 @@ describe('analysis target reader', () => {
     });
   });
 
+  test('a filter tag name that does not normalise is refused like the lists refuse it', async () => {
+    const inbox = { kind: 'inbox' } as const;
+    for (const name of ['!!!', 'x'.repeat(200)]) {
+      for (const target of [
+        { kind: 'fileFilter', filter: { scope: inbox, tagNames: [name] } },
+        { kind: 'assetFilter', filter: { tagNames: ['hero', name] } },
+      ] as AnalysisTarget[]) {
+        await expect(page(target)).rejects.toMatchObject({ code: 'validation_failed' });
+        await expect(count(target)).rejects.toMatchObject({ code: 'validation_failed' });
+      }
+    }
+  });
+
   test('an asset target lists every file of the asset', async () => {
     expect(await ids({ kind: 'asset', assetId: ASSET_A })).toEqual([A_REF, A_CONCEPT]);
     expect(await ids({ kind: 'asset', assetId: uuid(998) })).toEqual([]);

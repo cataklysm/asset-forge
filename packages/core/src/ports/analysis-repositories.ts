@@ -55,7 +55,8 @@ export interface FileAnalysisRepository {
    */
   get(fileId: string): Promise<FileAnalysis | null>;
   /**
-   * One transaction. Writes nothing unless the file exists, is complete and has this sha256. Otherwise: deletes every
+   * One transaction. Writes nothing unless the file exists, is complete, is not in the trash and has this sha256.
+   * Otherwise: deletes every
    * `ai` assignment of the file, inserts an `ai` assignment for each tag the file does not carry manually (creating
    * missing tags), upserts the analysis row, deletes a waiting proposal of the file and reindexes the file's asset.
    *
@@ -75,7 +76,8 @@ export interface FileAnalysisRepository {
     now: string;
   }): Promise<boolean>;
   /**
-   * One transaction. Writes nothing unless the file exists, is complete and has this sha256; otherwise stores the
+   * One transaction. Writes nothing unless the file exists, is complete, is not in the trash and has this sha256;
+   * otherwise stores the
    * proposal, replacing an older one. Tags and the analysis row stay untouched.
    *
    * @param proposal the proposal
@@ -91,7 +93,8 @@ export interface FileAnalysisRepository {
   getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null>;
   /**
    * One transaction. False when there is no proposal or it is stale (the file is gone, not complete
-   * or its sha256 differs from `sha256` / the proposal's; a stale proposal is deleted). Otherwise applies
+   * or its sha256 differs from `sha256` / the proposal's; a stale proposal is deleted). False without writing
+   * anything for a file in the trash, which keeps its proposal for a restore. Otherwise applies
    * exactly `tags` as `apply` does, writes the analysis row from the proposal's fingerprint and prompt name with
    * `analysedAt = now`, deletes the proposal and returns true.
    *
@@ -117,7 +120,7 @@ export interface FileAnalysisRepository {
 export interface AnalysisTargetEntry {
   /** The file. */
   fileId: string;
-  /** Complete, of one of the given MIME types, with a checksum (core's `isAnalysable`). */
+  /** Complete, not in the trash, of one of the given MIME types, with a checksum (core's `isAnalysable`). */
   analysable: boolean;
   /** The fingerprint and the file's current sha256 equal its analysis row or its waiting proposal. */
   analysed: boolean;

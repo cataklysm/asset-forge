@@ -12,7 +12,7 @@ import type { PageLoader, PageLoadResult } from './ports/page-loader.js';
 import type { RobotsAnswer } from './robots-reader.js';
 import { robotsAllows } from './robots.js';
 import { cutValue, safeHost } from './site-crawl-problems.js';
-import { normalizeDownloadUrl } from './url-import.js';
+import { normalizeDownloadUrl } from './download-url.js';
 
 /** What a crawl needs from its host. */
 export interface SiteCrawlDependencies {

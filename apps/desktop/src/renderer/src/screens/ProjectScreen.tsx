@@ -169,8 +169,9 @@ function Breadcrumb({ projectName, onProjects }: { projectName: string | null; o
 function ErrorLines({ messages }: { messages: readonly string[] }) {
   return (
     <>
-      {messages.map((message) => (
-        <p key={message} role="alert" className={ALERT}>
+      {/* Two loads can fail with the same message, so the position is the key. */}
+      {messages.map((message, index) => (
+        <p key={index} role="alert" className={ALERT}>
           {message}
         </p>
       ))}

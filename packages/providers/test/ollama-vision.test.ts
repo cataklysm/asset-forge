@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createServer } from 'node:net';
 import { JobError } from '@assetforge/core';
 import type { JobErrorCode } from '@assetforge/contracts';
 import {
@@ -9,6 +8,7 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createOllamaVision, OLLAMA_PROVIDER } from '../src/index.js';
+import { refusedUrl, releaseRefusedPorts } from './refused-port.js';
 
 const image = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x10, 0x7f, 0x80, 0xfe]);
 const schema = {
@@ -26,6 +26,7 @@ async function start(failures?: MockFailure[]): Promise<MockProvider> {
 }
 
 afterEach(async () => {
+  await releaseRefusedPorts();
   await provider?.close();
   provider = undefined;
 });
@@ -56,15 +57,6 @@ async function expectCode(promise: Promise<unknown>, code: JobErrorCode, baseUrl
 
 function answering(status: number, body: string): typeof fetch {
   return async () => new Response(body, { status, headers: { 'content-type': 'application/json' } });
-}
-
-async function closedPortUrl(): Promise<string> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return `http://127.0.0.1:${port}`;
 }
 
 describe('ollama vision adapter', () => {
@@ -148,7 +140,7 @@ describe('ollama vision adapter', () => {
   });
 
   it('maps a closed port to provider_unreachable', async () => {
-    const url = await closedPortUrl();
+    const url = await refusedUrl();
     await expectCode(analyze({ baseUrl: url, model: MOCK_MODEL }), 'provider_unreachable', url);
   });
 

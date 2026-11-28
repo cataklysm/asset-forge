@@ -123,9 +123,9 @@ export function TrashScreen({ state, onStateChange }: Props) {
   /** One file back (menu, dialog). A failure rejects for the caller to show. */
   const restoreOne = (file: FileRecord) =>
     exclusive(async () => {
-      const { doneIds, failures } = await runFileBatch('files:restoreMany', [file]);
+      const { doneIds, firstError } = await runFileBatch('files:restoreMany', [file]);
       left(doneIds);
-      throwFirst(failures);
+      throwFirst(firstError);
     });
 
   const restoreSelected = () =>
@@ -169,10 +169,10 @@ export function TrashScreen({ state, onStateChange }: Props) {
       left([]);
       return;
     }
-    const { doneIds, failures } = await runFileBatch('files:purgeMany', action.files);
+    const { doneIds, failures, firstError } = await runFileBatch('files:purgeMany', action.files);
     if (action.settle !== undefined) {
       left(doneIds);
-      throwFirst(failures);
+      throwFirst(firstError);
       action.settle.resolve();
     } else {
       setResult(batchResult(doneIds.length, 'deleted', failures));
@@ -285,7 +285,6 @@ export function TrashScreen({ state, onStateChange }: Props) {
                   asset={null}
                   actions={{
                     cover: null,
-                    onDetails: () => {},
                     onRestore: () => restoreOne(shown),
                     onPurge: () => askPurgeFromDialog(shown),
                     onError: setError,

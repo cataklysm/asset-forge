@@ -1,4 +1,5 @@
 import { Search } from 'lucide-react';
+import { SEARCH_SHORTCUT_TITLE } from '../labels';
 import { INPUT } from '../ui';
 
 /** The props of `SearchField`. */
@@ -32,7 +33,7 @@ export function SearchField({ value, onChange, placeholder, label }: Props) {
         data-search-field=""
         aria-label={label}
         placeholder={placeholder}
-        title="Ctrl+F"
+        title={SEARCH_SHORTCUT_TITLE}
         maxLength={200}
         value={value}
         onChange={(event) => onChange(event.target.value)}

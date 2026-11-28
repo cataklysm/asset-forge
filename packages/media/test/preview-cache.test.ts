@@ -22,6 +22,7 @@ import {
   type PreviewService,
 } from '../src/preview-cache.js';
 import { evictLeastRecentlyUsed } from '../src/cache-eviction.js';
+import { FailureMemory, MAX_REMEMBERED_FAILURES } from '../src/failure-memory.js';
 import type { VideoInfo } from '../src/video-diagnostics.js';
 import type { VideoFormat } from '../src/video-frame-arguments.js';
 import { createVideoFrames, type VideoFrames } from '../src/video-frames.js';
@@ -646,5 +647,27 @@ describe('preview cache', () => {
     const info = await sharp(await readFile(path as string)).metadata();
     expect(info.format).toBe('webp');
     expect(Math.max(info.width ?? 0, info.height ?? 0)).toBeLessThanOrEqual(256);
+  });
+});
+
+describe('FailureMemory', () => {
+  it('keeps at most its limit, forgetting the oldest key first', () => {
+    const memory = new FailureMemory(2);
+    memory.add('a');
+    memory.add('b');
+    memory.add('a');
+    memory.add('c');
+    expect(memory.size).toBe(2);
+    expect(memory.has('b')).toBe(false);
+    expect(memory.has('a')).toBe(true);
+    expect(memory.has('c')).toBe(true);
+  });
+
+  it('is bounded by default and refuses a limit below 1', () => {
+    const memory = new FailureMemory();
+    for (let i = 0; i <= MAX_REMEMBERED_FAILURES; i++) memory.add(`key-${i}`);
+    expect(memory.size).toBe(MAX_REMEMBERED_FAILURES);
+    expect(memory.has('key-0')).toBe(false);
+    expect(() => new FailureMemory(0)).toThrow(RangeError);
   });
 });

@@ -107,3 +107,18 @@ export class CredentialStoreUnavailableError extends AssetForgeError {
     super('credential_store_unavailable', CREDENTIAL_STORE_UNAVAILABLE_MESSAGE, options);
   }
 }
+
+/**
+ * The text stored in `file.error` and returned to the renderer, for an import or a file move. Domain errors carry a
+ * message written for that purpose; any other error (typically a Node fs error) may contain absolute paths, so only
+ * its short error code survives.
+ *
+ * @param error the error that ended the step
+ * @param fallback the text for an error that is not a domain error
+ * @returns the message to store and show
+ */
+export function safeErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof AssetForgeError) return error.message;
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${fallback} (${code})` : fallback;
+}

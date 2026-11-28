@@ -7,11 +7,11 @@ import {
   type Generation,
 } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
-import { SourceNotReadableError } from './errors.js';
 import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generation-names.js';
 import { settleGenerationOfJob } from './generations.js';
+import { streamImportContextOf } from './import-context.js';
 import { importStream, type ImportContext } from './import-file.js';
-import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './job-types.js';
 import type {
   GenerationImageSource,
   ImageInput,
@@ -81,7 +81,8 @@ interface StreamState {
  */
 export function createImageGenerateHandler(dependencies: ImageGenerateHandlerDependencies): JobHandler {
   const { session } = dependencies;
-  const context = generationImportContext(session);
+  // A generation never opens a source file; the answer stream is handed to `importStream` directly.
+  const context = streamImportContextOf(session);
   return {
     resourceClass: 'remote_api',
     onInterrupted: 'fail',
@@ -94,25 +95,6 @@ export function createImageGenerateHandler(dependencies: ImageGenerateHandlerDep
     settled(job: Job, outcome): void {
       settleGenerationOfJob(session, job, outcome);
     },
-  };
-}
-
-/**
- * The import context of generation results.
- *
- * @param session the open workspace
- * @returns a context whose source files cannot be opened
- */
-function generationImportContext(session: WorkspaceSession): ImportContext {
-  // A generation never opens a source file; the answer stream is handed to `importStream` directly.
-  return {
-    storage: session.storage,
-    storageId: session.storageId,
-    files: session.database.files,
-    sources: { open: () => Promise.reject(new SourceNotReadableError()) },
-    probe: session.imageProbe,
-    newId: () => session.newId(),
-    now: () => session.now(),
   };
 }
 

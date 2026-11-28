@@ -1,5 +1,5 @@
 import type { Generation, GenerationKind, GenerationParameters, ProviderKind } from '@assetforge/contracts';
-import type { JobOutcome, NewJob } from '../jobs.js';
+import type { JobOutcome, NewJob } from '../job-types.js';
 
 /** A file a generation read or wrote, as it was then. */
 export interface GenerationFileRef {

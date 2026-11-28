@@ -11,7 +11,7 @@ import {
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
-import type { Job, NewJob } from '../src/jobs.js';
+import type { Job, NewJob } from '../src/job-types.js';
 import type { JobRepository } from '../src/ports/job-repository.js';
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

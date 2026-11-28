@@ -49,6 +49,16 @@ function sectionOf(view: View): Section {
   return view.name;
 }
 
+/**
+ * The view a navigation entry opens: its list, without an item.
+ *
+ * @param section the chosen navigation entry
+ * @returns the view
+ */
+function viewOfSection(section: Section): View {
+  return { name: section };
+}
+
 /** The answers while the job summary has not loaded yet. */
 const NOTHING_PAUSED: PausedProvider[] = [];
 const NO_PAUSED_HOSTS: PausedHost[] = [];
@@ -310,7 +320,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         rootPath={workspace.rootPath}
         section={sectionOf(view)}
         busy={busy}
-        onNavigate={(section) => void leaveTo({ confirmLeave, setError, setView }, { name: section } as View)}
+        onNavigate={(section) => void leaveTo({ confirmLeave, setError, setView }, viewOfSection(section))}
         onClose={() => void closeWorkspace({ confirmLeave, setError }, onClosed)}
       >
         {/* The screens bring their own padding. */}

@@ -529,6 +529,40 @@ describe('purgeFiles', () => {
     expect(storage.files.has(trashed!.relativePath)).toBe(false);
     await expect(db.files.listPurgedIds()).resolves.toEqual([]);
   });
+
+  it('a storage that drops inside remove keeps the tombstone for the sweep', async () => {
+    const { session, storage, db, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    const [trashed] = ok(await trashFiles(session, control, [file.id]));
+    // A dropped share answers remove without an error and without removing anything.
+    vi.spyOn(storage, 'remove').mockImplementationOnce(async () => {
+      storage.reachable = false;
+    });
+
+    expect(await purgeFiles(session, control, [file.id])).toEqual([{ fileId: file.id, file: null, error: null }]);
+    expect(storage.files.has(trashed!.relativePath)).toBe(true);
+    await expect(db.files.listPurgedIds()).resolves.toEqual([file.id]);
+
+    storage.reachable = true;
+    expect(await sweepTrash({ storage, files: db.files })).toEqual({ removed: [trashed!.relativePath], skipped: [] });
+  });
+
+  it('a purge that loses a race to another purge answers not_found', async () => {
+    const { session, db, importOne, control } = await setup();
+    const file = await importOne('a.png');
+    ok(await trashFiles(session, control, [file.id]));
+    const purge = db.files.purge.bind(db.files);
+    vi.spyOn(db.files, 'purge').mockImplementationOnce(async (id) => {
+      // The other purge deletes the row first.
+      await purge(id);
+      return false;
+    });
+
+    const [item] = await purgeFiles(session, control, [file.id]);
+
+    expect(item!.error).toBeInstanceOf(NotFoundError);
+    expect(db.files.records.has(file.id)).toBe(false);
+  });
 });
 
 describe('emptyTrash', () => {
@@ -720,6 +754,25 @@ describe('an open move row before restore and purge', () => {
     expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
     await expect(db.fileMoves.list()).resolves.toHaveLength(1);
 
+    await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+    expect(db.files.records.get(file.id)).toMatchObject({ relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
+  });
+
+  it('a storage that drops while the move row is resolved keeps the row and refuses the purge', async () => {
+    const { session, storage, db, file, control } = await failedRestoreCommit();
+    vi.spyOn(storage, 'exists').mockImplementationOnce(async () => {
+      storage.reachable = false;
+      return false;
+    });
+
+    const [item] = await purgeFiles(session, control, [file.id]);
+
+    expect(item!.error).toBeInstanceOf(StorageUnreachableError);
+    expect(db.files.records.get(file.id)!.deletedAt).not.toBeNull();
+    expect(storage.files.has(inboxPath(file.id, 'a.png'))).toBe(true);
+    await expect(db.fileMoves.list()).resolves.toHaveLength(1);
+
+    storage.reachable = true;
     await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
     expect(db.files.records.get(file.id)).toMatchObject({ relativePath: inboxPath(file.id, 'a.png'), deletedAt: null });
   });

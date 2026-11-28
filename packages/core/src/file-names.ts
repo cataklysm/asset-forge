@@ -6,6 +6,16 @@ const MAX_EXTENSION_LENGTH = 10;
 const PLACEHOLDER_STEM = 'file';
 
 /**
+ * The last segment of a source path or an archive entry name, split on either `/` or `\`.
+ *
+ * @param path a source path or entry name
+ * @returns the file name; '' for a path that ends in a separator
+ */
+export function lastPathSegment(path: string): string {
+  return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+}
+
+/**
  * Turns an arbitrary source name into a single safe path segment: Unicode letters and
  * digits plus `.`, `_` and `-` survive, everything else becomes `_`. Trailing dots and
  * spaces are dropped because Windows drops them when creating the file, which would make
@@ -15,8 +25,9 @@ const PLACEHOLDER_STEM = 'file';
  * @returns the safe file name
  */
 export function sanitizeFileName(name: string): string {
-  const base = name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
-  const replaced = base.replace(/[. ]+$/, '').replace(/[^\p{L}\p{N}._-]+/gu, '_');
+  const replaced = lastPathSegment(name)
+    .replace(/[. ]+$/, '')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '_');
   const cleaned = cleanStem(replaced);
   if (cleaned === '') return PLACEHOLDER_STEM;
   return truncateKeepingExtension(cleaned);

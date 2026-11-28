@@ -219,6 +219,19 @@ describe('openFile', () => {
     expect(await settled(handle)).toBe(-1);
   });
 
+  it('closes the handle once when the close for an unsatisfiable range throws', async () => {
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    const handle = await actual.open(originalPath, 'r');
+    const realClose = handle.close.bind(handle);
+    const close = vi.spyOn(handle, 'close').mockImplementation(async () => {
+      await realClose();
+      throw new Error('close failed');
+    });
+    vi.mocked(open).mockResolvedValueOnce(handle);
+    await expect(openFile(originalPath, { start: ORIGINAL.byteLength, end: null })).rejects.toThrow('close failed');
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects for a directory and leaves no handle open', async () => {
     const directory = join(base, 'folder');
     await mkdir(directory);

@@ -11,7 +11,10 @@ export interface VideoInfo {
   durationMs: number | null;
 }
 
-/** Diagnostic lines are read one by one; a longer line is cut to this many characters. */
+/**
+ * How long the unfinished piece of a line kept between chunks may grow; a line that spans chunks and grows beyond
+ * it is dropped whole. A line complete within one chunk is handed on whatever its length.
+ */
 const MAX_LINE = 4096;
 
 /**
@@ -111,7 +114,8 @@ export class DiagnosticsReader {
 
 /**
  * Cuts the stderr stream of a process into lines and hands each one on. Only the unfinished last piece of a chunk
- * is kept between chunks; when it grows beyond `MAX_LINE`, that line is dropped, never kept.
+ * is kept between chunks; when it grows beyond `MAX_LINE`, that line is dropped, never kept. A line complete within
+ * one chunk is handed on whatever its length, since it is never kept.
  */
 export class DiagnosticLines {
   /** The unfinished last piece of the chunks so far. */

@@ -317,24 +317,26 @@ async function resumeHost(
   request: IpcRequest<'jobs:resumeHost'>,
 ): Promise<IpcResponse<'jobs:resumeHost'>> {
   const { manager, jobs, isSiteLane } = dependencies;
+  let requeued = 0;
   // The lane of a site profile: the owner passed the site's check by hand, so the downloads it refused run again.
   if (isSiteLane?.(request.host) === true && manager.current() !== null) {
     try {
-      await manager.read((session) => retryBrowserCheckFailures(session, request.host));
+      requeued = await manager.read((session) => retryBrowserCheckFailures(session, request.host));
     } catch (error) {
       // Closed meanwhile: nothing to queue again.
       if (!(error instanceof NoWorkspaceOpenError)) throw error;
     }
   }
-  // Raises the change counter and wakes the scheduler.
+  // Raises the change counter when the host was paused, and wakes the scheduler.
   jobs.resume(request.host, DOWNLOAD_CLASSES);
+  if (requeued > 0) jobs.changed();
   return {};
 }
 
 /**
  * Moves the waiting analysis jobs of one provider to another entry and model.
  * The target's pause is not lifted: the moved jobs wait in its lane until it is resumed. The source lane
- * has no waiting jobs left, so its pause ends; resume already raises the counter and wakes the scheduler.
+ * has no waiting jobs left, so its pause ends; the moved jobs raise the counter and resume wakes the scheduler.
  *
  * @param dependencies what the channel works with
  * @param request the source, the target and the model
@@ -345,7 +347,10 @@ async function reroute(
   request: IpcRequest<'jobs:reroute'>,
 ): Promise<IpcResponse<'jobs:reroute'>> {
   const result = await dependencies.manager.read((session) => rerouteIn(dependencies.providers, session, request));
-  if (result.moved > 0) dependencies.jobs.resume(request.fromProviderId, PROVIDER_CLASSES);
+  if (result.moved > 0) {
+    dependencies.jobs.resume(request.fromProviderId, PROVIDER_CLASSES);
+    dependencies.jobs.changed();
+  }
   return result;
 }
 

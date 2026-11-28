@@ -521,6 +521,112 @@ describe('createScheduler', () => {
     expect(s.row(cancelled).status).toBe('cancelled');
   });
 
+  it('ends a run cancelled during stop as cancelled instead of putting it back', async () => {
+    const h = controlled('cpu');
+    const s = setup({ handlers: { t: h.handler } });
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.scheduler.start();
+    const stopping = s.scheduler.stop();
+    await s.scheduler.cancel(id);
+    h.runOf(id).reject(new JobError('provider_unreachable'));
+    await stopping;
+    expect(s.row(id).status).toBe('cancelled');
+  });
+
+  it('logs a foreign error of a run during stop, but not the abort reason', async () => {
+    const h = controlled('cpu');
+    const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 2 } });
+    const [a, b] = (await s.enqueue('t', 'cpu', 2)) as [string, string];
+    await s.scheduler.start();
+    const stopping = s.scheduler.stop();
+    const cause = new Error('handler fault');
+    h.runOf(a).reject(cause);
+    h.runOf(b).reject(h.runOf(b).signal.reason);
+    await stopping;
+    expect(s.logged.map((entry) => entry.cause)).toEqual([cause]);
+    expect(s.row(a).status).toBe('queued');
+    expect(s.row(b).status).toBe('queued');
+  });
+
+  it('aborts a job a pass claimed while its cancel was being written', async () => {
+    const h = controlled('cpu');
+    let openClaim: (() => void) | null = null;
+    let openCancel: (() => void) | null = null;
+    const s = setup({
+      handlers: { t: h.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            const job = await fake.claimNext(request);
+            if (job) await new Promise<void>((resolve) => (openClaim = resolve));
+            return job;
+          },
+          async cancelPending(request: Parameters<JobRepository['cancelPending']>[0]) {
+            const count = await fake.cancelPending(request);
+            await new Promise<void>((resolve) => (openCancel = resolve));
+            return count;
+          },
+        }),
+    });
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    void s.scheduler.start();
+    await flush();
+    expect(openClaim).not.toBeNull();
+
+    const cancelling = s.scheduler.cancel(id);
+    await flush();
+    openClaim!();
+    await flush();
+    expect(h.runOf(id).signal.aborted).toBe(false);
+    openCancel!();
+    await cancelling;
+    expect(h.runOf(id).signal.aborted).toBe(true);
+    h.runOf(id).resolve();
+    await flush();
+    expect(s.row(id).status).toBe('cancelled');
+  });
+
+  it('serves the other classes when one fails and tries the failed one again after the first delay', async () => {
+    const cpu = controlled('cpu');
+    const io = controlled('io');
+    const s = setup({
+      handlers: { c: cpu.handler, i: io.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            if (request.resourceClass === 'cpu') throw new Error('corrupt payload');
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    const [ioJob] = (await s.enqueue('i', 'io')) as [string];
+    await s.enqueue('c', 'cpu');
+    await s.scheduler.start();
+    expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+    expect(s.timers.map((timer) => timer.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+  });
+
+  it('serves the other classes when the pause gate throws for one', async () => {
+    const cpu = controlled('cpu');
+    const io = controlled('io');
+    const gate = createPauseGate({});
+    const pause: PauseGate = {
+      ...gate,
+      paused: (resourceClass) => {
+        if (resourceClass === 'cpu') throw new Error('gate fault');
+        return gate.paused(resourceClass);
+      },
+    };
+    const s = setup({ handlers: { c: cpu.handler, i: io.handler }, pause });
+    const [ioJob] = (await s.enqueue('i', 'io')) as [string];
+    await s.enqueue('c', 'cpu');
+    await s.scheduler.start();
+    expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
+    expect(cpu.runs).toHaveLength(0);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+  });
+
   it('makes no repository call after stop resolves', async () => {
     const h = controlled('cpu');
     const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 3 } });

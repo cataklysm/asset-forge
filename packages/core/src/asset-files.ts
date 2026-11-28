@@ -1,7 +1,10 @@
 import type { FileRecord, FileRole, FileTarget } from '@assetforge/contracts';
-import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
+import { InvalidOperationError, NotFoundError } from './errors.js';
+import { eachFile, type FileBatchItem } from './file-batch.js';
 import { requireLiveFile } from './file-trash.js';
+import { moveAndCommit } from './journaled-move.js';
 import { assetFilePath, inboxPath } from './paths.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /** Where a file is placed: its relative path, and its asset and role (both null in the inbox). */
@@ -10,9 +13,6 @@ interface Placement {
   assetId: string | null;
   role: FileRole | null;
 }
-
-/** The outcome of one file of `assignFiles`: the placed file or the error. */
-type AssignResult = { fileId: string; file: FileRecord | null; error: Error | null };
 
 /**
  * Attaches a complete file to an asset with a role (`target`), or detaches it back to the
@@ -62,9 +62,7 @@ async function requirePlaceableFile(
   if (file.status !== 'complete') {
     throw new InvalidOperationError(`File ${fileId} is not completely imported`);
   }
-  if (target !== null && (await session.database.assets.get(target.assetId)) === null) {
-    throw new NotFoundError(`Asset ${target.assetId} does not exist`);
-  }
+  if (target !== null) await requireAsset(session, target.assetId);
   return file;
 }
 
@@ -84,7 +82,7 @@ function placementOf(file: FileRecord, target: FileTarget | null): Placement {
 }
 
 /**
- * The journaled move: begins the move row, moves the binary, aborts the row when that fails, then commits.
+ * The journaled move: begins the move row, then moves the binary and commits through `moveAndCommit`.
  *
  * @param session the open workspace
  * @param file the file to move
@@ -101,22 +99,7 @@ async function moveJournaled(session: WorkspaceSession, file: FileRecord, placem
     targetRole: placement.role,
     createdAt: session.now().toISOString(),
   });
-  try {
-    await session.storage.move(file.relativePath, placement.relativePath);
-  } catch (error) {
-    try {
-      await session.database.fileMoves.abort(file.id);
-    } catch {
-      // The source is still in place, so recovery discards the row on the next open.
-    }
-    if (error instanceof AssetForgeError) throw error;
-    throw new InvalidOperationError(
-      'The file could not be moved; it may be in use, missing, or the target already exists',
-      { cause: error },
-    );
-  }
-  // If the commit fails, the move row stays and recovery completes it on the next open.
-  return session.database.fileMoves.commit(file.id);
+  return moveAndCommit(session, file, placement.relativePath);
 }
 
 /**
@@ -128,22 +111,10 @@ async function moveJournaled(session: WorkspaceSession, file: FileRecord, placem
  * @param request the files, the asset and the role
  * @returns one result per file, in request order
  */
-export async function assignFiles(
+export function assignFiles(
   session: WorkspaceSession,
   request: { fileIds: readonly string[]; assetId: string; role: FileRole },
-): Promise<AssignResult[]> {
+): Promise<FileBatchItem[]> {
   const target: FileTarget = { assetId: request.assetId, role: request.role };
-  const results: AssignResult[] = [];
-  for (const fileId of request.fileIds) {
-    try {
-      results.push({ fileId, file: await relocateFile(session, fileId, target), error: null });
-    } catch (error) {
-      results.push({
-        fileId,
-        file: null,
-        error: error instanceof Error ? error : new Error('Unexpected error', { cause: error }),
-      });
-    }
-  }
-  return results;
+  return eachFile(request.fileIds, (fileId) => relocateFile(session, fileId, target));
 }

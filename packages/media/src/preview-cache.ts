@@ -2,6 +2,7 @@ import { rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { evictLeastRecentlyUsed } from './cache-eviction.js';
+import { FailureMemory } from './failure-memory.js';
 import type { VideoInfo } from './video-diagnostics.js';
 import type { VideoFormat } from './video-frame-arguments.js';
 import type { VideoFrames } from './video-frames.js';
@@ -171,13 +172,13 @@ class PreviewCache {
   private readonly frames: VideoFrames | undefined;
   private readonly limitBytes: number;
   private readonly cleanupEvery: number;
-  /** Keys (`<sha256>:<size>` or `<sha256>:frame`) whose source gave no preview this session. */
-  private readonly failed = new Set<string>();
+  /** Keys (`<sha256>:<size>` or `<sha256>:frame`) whose source gave no preview this session, the newest kept. */
+  private readonly failed = new FailureMemory();
   /** Running generations by key. */
   private readonly inflight = new Map<string, Promise<string | null>>();
   /** Video measurements by format and source path: the running ones, and those that failed this session. */
   private readonly measuring = new Map<string, Promise<VideoInfo | null>>();
-  private readonly failedMeasurements = new Set<string>();
+  private readonly failedMeasurements = new FailureMemory();
   /** New entries since the last cleanup. */
   private readonly newEntries = { thumb: 0, full: 0 };
   /** The running cleanup, shared by concurrent calls. */

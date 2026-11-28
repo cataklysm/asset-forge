@@ -52,7 +52,8 @@ export function parsePromptVariables(content: string): string[] {
 }
 
 /**
- * The items core stores: one per parsed name; a default is matched regardless of case, others are dropped; missing becomes ''.
+ * The items core stores: one per parsed name; a default is matched regardless of case, others are dropped; missing
+ * becomes ''.
  *
  * @param content the prompt text
  * @param defaults default values by variable name in any spelling

@@ -1,10 +1,11 @@
 import type { MatchedTag, ProjectList, ProjectSummary } from '@assetforge/contracts';
 import { foldSearchWord, type ProjectQuery } from '@assetforge/core';
-import { and, asc, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { carriesTag, hasAssetTag, hasFileTag } from './asset-filters.js';
 import { qualified } from './qualified.js';
-import { file, project, projectAsset, tag } from './schema.js';
+import { file, project, projectAsset } from './schema.js';
+import { filterTags, type NamedTag } from './tag-lookup.js';
 
 // The project list: its filter, its statements and the matched tags of a tag filter.
 
@@ -12,11 +13,7 @@ import { file, project, projectAsset, tag } from './schema.js';
 export type ListTransaction = Pick<BetterSQLite3Database, 'select' | 'all'>;
 
 /** A requested tag of the filter. */
-interface FilterTag {
-  id: string;
-  name: string;
-  displayName: string;
-}
+type FilterTag = NamedTag;
 
 /** One row of `projectMatchedTagsSql`. */
 type MatchRow = { projectId: string; tagId: string; onAsset: number; onFiles: number };
@@ -37,26 +34,6 @@ const hasMember = (tagIds: readonly string[], extra?: SQL): SQL =>
     ...tagIds.map((id) => carriesTag(memberAssetId, id)),
     extra,
   )})`;
-
-/**
- * The requested tags in request order; null when one does not exist, so nothing can match. Run it
- * in the list's read transaction.
- *
- * @param transaction the list's read transaction
- * @param names the normalised names
- * @returns the tags; null when one does not exist
- */
-function filterTags(transaction: ListTransaction, names: readonly string[]): FilterTag[] | null {
-  if (names.length === 0) return [];
-  const rows = transaction
-    .select({ id: tag.id, name: tag.name, displayName: tag.displayName })
-    .from(tag)
-    .where(inArray(tag.name, [...names]))
-    .all();
-  const byName = new Map(rows.map((row) => [row.name, row]));
-  const tags = [...new Set(names)].map((name) => byName.get(name));
-  return tags.every((filterTag) => filterTag !== undefined) ? tags : null;
-}
 
 /**
  * The WHERE of a project list: status, the query as a folded substring of name or description

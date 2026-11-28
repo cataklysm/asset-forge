@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isAppUrl as isRealAppUrl } from '../src/main/app-url.js';
-import { isTrustedSender, type SenderEvent, type SenderWindow } from '../src/main/sender.js';
+import { ipcRefusal, isTrustedSender, type SenderEvent, type SenderWindow } from '../src/main/sender.js';
 
 const APP_URL = 'http://localhost:5173/';
 const isAppUrl = (url: string) => url === APP_URL;
@@ -53,5 +53,32 @@ describe('isTrustedSender', () => {
     expect(isTrustedSender(same.event, same.window, rule)).toBe(true);
     const foreign = setup('http://localhost:5174/');
     expect(isTrustedSender(foreign.event, foreign.window, rule)).toBe(false);
+  });
+});
+
+describe('ipcRefusal', () => {
+  it('serves a trusted sender while running', () => {
+    const { window, event } = setup();
+    expect(ipcRefusal(event, window, isAppUrl, false)).toBeNull();
+  });
+
+  it('refuses a trusted sender while quitting', () => {
+    const { window, event } = setup();
+    expect(ipcRefusal(event, window, isAppUrl, true)).toEqual({
+      ok: false,
+      error: { code: 'shutting_down', message: 'The application is shutting down' },
+    });
+  });
+
+  it('checks the sender before telling anyone that the app is quitting', () => {
+    const { window } = setup();
+    const foreignFrame = { url: APP_URL };
+    const event: SenderEvent = { sender: { mainFrame: foreignFrame }, senderFrame: foreignFrame };
+    for (const isShuttingDown of [false, true]) {
+      expect(ipcRefusal(event, window, isAppUrl, isShuttingDown)).toEqual({
+        ok: false,
+        error: { code: 'forbidden_sender', message: 'IPC sender is not the main window' },
+      });
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { NEXT_PAGE_LABEL, pageRange, PAGINATION_LABEL, PREVIOUS_PAGE_LABEL } from '../labels';
 import { clampOffset } from '../paging';
 import { BUTTON } from '../ui';
 
@@ -28,25 +29,23 @@ export function Pager({ offset, limit, total, onChange }: Props) {
   }, [clamped, offset, onChange]);
 
   return (
-    <nav className="flex items-center gap-3 text-sm" aria-label="Pagination">
+    <nav className="flex items-center gap-3 text-sm" aria-label={PAGINATION_LABEL}>
       <button
         type="button"
         className={BUTTON}
         disabled={offset === 0}
         onClick={() => onChange(Math.max(0, offset - limit))}
       >
-        Previous
+        {PREVIOUS_PAGE_LABEL}
       </button>
-      <span>
-        {total === 0 ? 0 : offset + 1}–{Math.min(offset + limit, total)} of {total}
-      </span>
+      <span>{pageRange(total === 0 ? 0 : offset + 1, Math.min(offset + limit, total), total)}</span>
       <button
         type="button"
         className={BUTTON}
         disabled={offset + limit >= total}
         onClick={() => onChange(offset + limit)}
       >
-        Next
+        {NEXT_PAGE_LABEL}
       </button>
     </nav>
   );

@@ -6,10 +6,10 @@ import {
   type SiteFilter,
   type UrlImportResult,
 } from '@assetforge/contracts';
-import { normalizeSourceUrl } from './asset-sources.js';
-import type { NewJob } from './jobs.js';
+import { normalizeDownloadUrl } from './download-url.js';
+import type { NewJob } from './job-types.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
-import { requireAsset } from './tags.js';
 
 /** The text of an invalid line in the answer. */
 const INVALID_TEXT_MAX = 200;
@@ -25,20 +25,6 @@ export interface UrlImportRequest {
    * one queue.
    */
   site?: { profileId: string; site: string; filter: SiteFilter };
-}
-
-/**
- * The URL rule of the import: the rule of asset sources (`normalizeSourceUrl`), then the fragment dropped,
- * since it is never sent. The answer is the identity of a URL everywhere. Throws `validation_failed`.
- *
- * @param input the URL as typed or stored
- * @returns the normalised URL
- * @throws ValidationFailedError for a URL the rule refuses
- */
-export function normalizeDownloadUrl(input: string): string {
-  const url = new URL(normalizeSourceUrl(input));
-  url.hash = '';
-  return url.href;
 }
 
 /**

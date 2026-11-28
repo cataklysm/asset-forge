@@ -32,7 +32,7 @@ const TYPE: AssetType = {
   defaultWorkflowTemplateId: null,
 };
 
-const INITIAL: ProjectListState = { filters: NO_PROJECT_FILTERS, scrollOffset: 0, selectedId: null };
+const INITIAL: ProjectListState = { filters: NO_PROJECT_FILTERS, scrollOffset: 0, openedIndex: null, selectedId: null };
 
 type ListRequest = IpcRequest<'projects:list'>;
 
@@ -271,6 +271,17 @@ it('Matching content shows only the answer for the current selection and reports
   expect(within(details()).getByText('Desert')).toBeTruthy();
 });
 
+it('a failed asset-type load is reported in Project details', async () => {
+  install({
+    'projects:list': listOf([projectSummary({ name: 'Forest' })]),
+    'assetTypes:list': () => {
+      throw fakeError('storage_unreachable');
+    },
+  });
+  render(<Harness />);
+  expect((await within(details()).findByRole('alert')).textContent).toContain('cannot be reached');
+});
+
 it('Show all opens the gallery filtered by project and tags', async () => {
   const user = userEvent.setup();
   const onShowAssets = vi.fn();
@@ -342,6 +353,7 @@ it('list state round trip keeps filters, scroll offset and selection', async () 
   expect(saved).toEqual({
     filters: { query: 'oak', tagNames: ['bark'], status: 'active' },
     scrollOffset: 4800,
+    openedIndex: null,
     selectedId: items[2]!.id,
   });
 
@@ -367,8 +379,13 @@ it('opening a project keeps the scroll offset and the selection', async () => {
   expect(onOpen).toHaveBeenCalledWith(items[7]!.id);
   const saved = onState.mock.lastCall![0] as ProjectListState;
   expect(saved.selectedId).toBe(items[7]!.id);
+  expect(saved.openedIndex).toBe(7);
   unmount();
   expect(onState.mock.lastCall![0]).toEqual(saved);
+
+  // Back on the list, the opened row has the focus.
+  render(<Harness initial={saved} />);
+  await waitFor(() => expect(document.activeElement).toBe(rowOf('Project 7')));
 });
 
 it('empty and no-result states', async () => {

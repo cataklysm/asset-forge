@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { pageOf } from './paging';
 import { MatchedTagSchema, TagAssignmentSchema } from './tags';
 import { WorkflowProgressSchema } from './workflows';
+import { CountSchema } from './ipc-shared';
 
 const id = z.uuid();
 const timestamp = z.iso.datetime();
-const count = z.number().int().min(0);
 
 // Vocabularies
 
@@ -95,9 +95,9 @@ export type Project = z.infer<typeof ProjectSchema>;
 
 /** A project as the project list shows it. */
 export const ProjectSummarySchema = ProjectSchema.extend({
-  assetCount: count,
+  assetCount: CountSchema,
   /** Complete image files over all member assets. */
-  imageCount: count,
+  imageCount: CountSchema,
   /** One per requested filter tag, over the members that carry all of them; only when the list filtered by tags. */
   matchedTags: z.array(MatchedTagSchema).optional(),
 });
@@ -119,8 +119,8 @@ export type Asset = z.infer<typeof AssetSchema>;
 
 /** An asset as the gallery shows it. */
 export const AssetSummarySchema = AssetSchema.extend({
-  projectCount: count,
-  fileCount: count,
+  projectCount: CountSchema,
+  fileCount: CountSchema,
   /** Null when the asset has no workflow. */
   workflowProgress: WorkflowProgressSchema.nullable(),
   /** The effective cover: the chosen one, else the first previewable image, else the first video. */

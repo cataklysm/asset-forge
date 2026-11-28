@@ -12,7 +12,10 @@ import { type ChannelContracts, EmptyRequestSchema, IdRequestSchema, IdSchema } 
 
 /** The site import channels: site profiles, the login window, the crawl and the import of its answer. */
 export const siteChannels = {
-  /** App-level site profiles; the site channels need no open workspace except `sites:import`. No channel carries a cookie. */
+  /**
+   * App-level site profiles; the site channels need no open workspace except `sites:import`. No channel carries a
+   * cookie.
+   */
   'sites:list': {
     request: EmptyRequestSchema,
     response: z.object({ profiles: z.array(SiteProfileSchema).max(MAX_SITE_PROFILES) }),

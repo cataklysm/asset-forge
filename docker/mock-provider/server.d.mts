@@ -7,6 +7,7 @@ export interface MockProvider {
   releaseSlow(): void;
   /** How many `MOCK_PROMPT_SLOW` requests are waiting for their answer. */
   slowWaiting(): number;
+  /** The latest requests, at most `maxRecorded`; the array stays the same while the oldest entries are dropped. */
   requests: {
     method: string;
     path: string;
@@ -36,7 +37,12 @@ export function startMockProvider(options?: {
    * gets the tag JSON (standing for a caller's retry without `response_format`).
    */
   refuseResponseFormat?: boolean;
+  /** How many entries `requests` and `imageRequests` each keep, the oldest dropped first; default `MOCK_MAX_RECORDED`. */
+  maxRecorded?: number;
 }): Promise<MockProvider>;
+
+/** The default of `maxRecorded`. */
+export const MOCK_MAX_RECORDED: number;
 
 export const MOCK_MODEL = 'mock-vision';
 export const MOCK_TEXT_MODEL = 'mock-text';

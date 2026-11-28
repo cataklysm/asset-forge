@@ -1,6 +1,6 @@
 import { belongsToSite } from '@assetforge/contracts';
 import { jobErrorOf } from './download-errors.js';
-import { JobError } from './jobs.js';
+import { JobError } from './job-types.js';
 import {
   RemoteFileError,
   type RemoteFile,

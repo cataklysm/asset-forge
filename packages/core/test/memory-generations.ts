@@ -1,5 +1,5 @@
 import type { GenerationFile, GenerationStatus, JobErrorCode } from '@assetforge/contracts';
-import type { JobOutcome, NewJob } from '../src/jobs.js';
+import type { JobOutcome, NewJob } from '../src/job-types.js';
 import type {
   GenerationFileRef,
   GenerationRepository,

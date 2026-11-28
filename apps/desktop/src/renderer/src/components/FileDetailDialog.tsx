@@ -1,8 +1,8 @@
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { fileMenuItems, type FileActionContext } from '../file-actions';
+import { fileMenuItems, showsProposal, type FileActionContext } from '../file-actions';
 import { label } from '../labels';
 import { formatLabel } from '../media-url';
 import { BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
@@ -73,7 +73,8 @@ function guarded<A extends unknown[]>(
 }
 
 /**
- * The action of the Delete key: Delete permanently for a trashed file, nothing for a pending one, else Delete.
+ * The action of the Delete key: Delete permanently for a trashed file, nothing for a pending one or while the
+ * host's guarded actions are busy (as the More menu's Delete is disabled then), else Delete.
  *
  * @param file the shown record
  * @param actions the dialog's actions
@@ -81,7 +82,7 @@ function guarded<A extends unknown[]>(
  */
 function removeActionOf(file: FileRecord, actions: FileActionContext): (() => void) | undefined {
   if (file.deletedAt !== null) return actions.onPurge;
-  return file.status !== 'pending' ? actions.onDelete : undefined;
+  return file.status !== 'pending' && actions.actionBusy !== true ? actions.onDelete : undefined;
 }
 
 /**
@@ -158,15 +159,17 @@ export function FileDetailDialog({
   };
   const guard = <A extends unknown[]>(action: ((...args: A) => unknown) | undefined) =>
     guarded(action, setError, report);
+  // The dialog is the details: its More menu has no Details entry.
   const items = fileMenuItems(file, {
     ...actions,
+    onDetails: undefined,
     onSetCover: guard(actions.onSetCover),
     onDetach: guard(actions.onDetach),
     onDelete: guard(actions.onDelete),
     onRestore: guard(actions.onRestore),
     onPurge: guard(actions.onPurge),
     onError: report,
-  }).filter((item) => item.label !== 'Details');
+  });
 
   // The same action and rule as Open externally in the More menu.
   const canOpenExternally = complete && file.openable && !trashed;
@@ -190,6 +193,7 @@ export function FileDetailDialog({
           title={title}
           list={list}
           closeRef={closeRef}
+          stageRef={stageFocus.areaRef}
           onClose={close}
         />
         <div className="flex min-h-0 flex-1">
@@ -239,12 +243,14 @@ export function FileDetailDialog({
                     direction={-1}
                     className={`absolute left-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`}
                     name="Previous file"
+                    fallbackRef={stageFocus.areaRef}
                   />
                   <StepButton
                     list={browsing}
                     direction={1}
                     className={`absolute right-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`}
                     name="Next file"
+                    fallbackRef={stageFocus.areaRef}
                   />
                 </>
               )}
@@ -273,6 +279,8 @@ interface DetailHeaderProps {
   list: ViewerList | null;
   /** The Close button, which takes the initial focus. */
   closeRef: RefObject<HTMLButtonElement | null>;
+  /** The stage area; it takes the focus from a step button that becomes disabled. */
+  stageRef: RefObject<HTMLElement | null>;
   /** Closes the dialog, leaving fullscreen first. */
   onClose(): void;
 }
@@ -281,15 +289,16 @@ interface DetailHeaderProps {
  * The header: the file name with the proposal marker and the asset's name, the position in the list, the step
  * buttons and Close.
  *
- * @param props the file, the asset's name, the title, the list, the Close ref and the close action
+ * @param props the file, the asset's name, the title, the list, the Close and stage refs and the close action
  * @returns the header
  */
-function DetailHeader({ file, assetName, title, list, closeRef, onClose }: DetailHeaderProps) {
+function DetailHeader({ file, assetName, title, list, closeRef, stageRef, onClose }: DetailHeaderProps) {
   return (
-    <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
+    // A plain block: a <header> here would count as the page's banner landmark.
+    <div className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
       <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
         <span className="truncate">{file.originalName}</span>
-        {file.hasProposal && <ProposalMarker />}
+        {showsProposal(file) && <ProposalMarker />}
         {assetName !== null && (
           <>
             <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />
@@ -303,8 +312,8 @@ function DetailHeader({ file, assetName, title, list, closeRef, onClose }: Detai
             <span className={`mr-2 text-sm tabular-nums ${MUTED}`}>
               {list.index + 1} / {list.total}
             </span>
-            <StepButton list={list} direction={-1} className={ICON_BUTTON} />
-            <StepButton list={list} direction={1} className={ICON_BUTTON} />
+            <StepButton list={list} direction={-1} className={ICON_BUTTON} fallbackRef={stageRef} />
+            <StepButton list={list} direction={1} className={ICON_BUTTON} fallbackRef={stageRef} />
           </>
         )}
         <button
@@ -318,7 +327,7 @@ function DetailHeader({ file, assetName, title, list, closeRef, onClose }: Detai
           <X size={18} aria-hidden />
         </button>
       </div>
-    </header>
+    </div>
   );
 }
 
@@ -332,24 +341,35 @@ interface StepButtonProps {
   className: string;
   /** The accessible name; absent uses the tooltip. */
   name?: string;
+  /** Takes the focus when the focused button becomes disabled. */
+  fallbackRef: RefObject<HTMLElement | null>;
 }
 
 /**
  * Previous or Next file. The header pair and the on-stage pair have the same behaviour and tooltips and distinct
  * accessible names.
  *
- * @param props the list, the direction, the classes and the accessible name
+ * @param props the list, the direction, the classes, the accessible name and the element that takes the focus at
+ *   the end of the list
  * @returns the button
  */
-function StepButton({ list, direction, className, name }: StepButtonProps) {
+function StepButton({ list, direction, className, name, fallbackRef }: StepButtonProps) {
   const tooltip = direction < 0 ? 'Previous file (←)' : 'Next file (→)';
+  const disabled = direction < 0 ? list.index <= 0 : list.index >= list.total - 1;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // A focused button that becomes disabled would drop the focus to the body, out of reach of the viewer keys.
+  useLayoutEffect(() => {
+    if (disabled && buttonRef.current !== null && buttonRef.current === document.activeElement)
+      fallbackRef.current?.focus({ preventScroll: true });
+  }, [disabled, fallbackRef]);
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={name ?? tooltip}
       title={tooltip}
       className={className}
-      disabled={direction < 0 ? list.index <= 0 : list.index >= list.total - 1}
+      disabled={disabled}
       onClick={() => list.show(list.index + direction)}
     >
       {direction < 0 ? <ChevronLeft size={18} aria-hidden /> : <ChevronRight size={18} aria-hidden />}

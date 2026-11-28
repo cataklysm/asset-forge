@@ -1,8 +1,9 @@
 import type { AssetQuery } from '@assetforge/core';
-import { and, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
-import { asset, assetTag, file, fileTag, projectAsset, tag } from './schema.js';
+import { asset, assetTag, file, fileTag, projectAsset } from './schema.js';
+import { filterTags } from './tag-lookup.js';
 
 /** `"asset"."id"`, the asset the list statement iterates over. */
 export const outerAssetId = qualified(asset, asset.id);
@@ -74,11 +75,8 @@ export function assetFilter(
     conditions.push(hasCompleteFile(sql`${qualified(file, file.role)} = ${query.fileRole}`));
   if (query.fileKind !== undefined)
     conditions.push(hasCompleteFile(sql`${qualified(file, file.kind)} = ${query.fileKind}`));
-  const names = [...new Set(query.tagNames ?? [])];
-  if (names.length > 0) {
-    const tagIds = transaction.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
-    if (tagIds.length < names.length) return null;
-    conditions.push(...tagIds.map(({ id }) => carriesTag(outerAssetId, id)));
-  }
+  const tags = filterTags(transaction, query.tagNames ?? []);
+  if (tags === null) return null;
+  conditions.push(...tags.map(({ id }) => carriesTag(outerAssetId, id)));
   return { where: and(...conditions) };
 }

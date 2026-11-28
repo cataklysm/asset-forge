@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
-import { AssetForgeError, ChecksumMismatchError } from './errors.js';
+import { ChecksumMismatchError, safeErrorMessage } from './errors.js';
+import { lastPathSegment } from './file-names.js';
 import { isRefusedImportName, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
 import { fileKind, hasThumbnail, isOpenable, isPreviewable, mimeFromFileName } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
@@ -28,21 +29,6 @@ export interface ImportContext {
    * @returns the time
    */
   now(): Date;
-}
-
-/**
- * The text stored in `file.error` and returned to the renderer. Domain errors carry a
- * message written for that purpose; any other error (typically a Node fs error) may
- * contain absolute paths, so only its short error code survives.
- *
- * @param error the error that ended the step
- * @param fallback the text for an error that is not a domain error
- * @returns the message to store and show
- */
-export function safeErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof AssetForgeError) return error.message;
-  const code = (error as { code?: unknown } | null | undefined)?.code;
-  return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${fallback} (${code})` : fallback;
 }
 
 /**
@@ -153,7 +139,7 @@ export async function importFile(
   sourcePath: string,
   hooks: ImportFileHooks = {},
 ): Promise<ImportResult> {
-  if (isRefusedImportName(baseNameOf(sourcePath))) {
+  if (isRefusedImportName(lastPathSegment(sourcePath))) {
     return { sourcePath, entryName: null, file: null, error: REFUSED_IMPORT_MESSAGE, duplicateOf: [] };
   }
 
@@ -166,16 +152,6 @@ export async function importFile(
   if (opened.sizeBytes !== undefined) hooks.onSize?.(opened.sizeBytes);
   const options: ImportOptions = hooks.onProgress === undefined ? {} : { onProgress: hooks.onProgress };
   return importStream(context, { sourcePath, entryName: null, name: opened.name, stream: opened.stream }, options);
-}
-
-/**
- * The last segment of a path with `/` or `\` separators.
- *
- * @param sourcePath the path
- * @returns the file name
- */
-function baseNameOf(sourcePath: string): string {
-  return sourcePath.slice(Math.max(sourcePath.lastIndexOf('/'), sourcePath.lastIndexOf('\\')) + 1);
 }
 
 /**

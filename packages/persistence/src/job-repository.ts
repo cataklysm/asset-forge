@@ -36,8 +36,22 @@ import { file, job } from './schema.js';
 /** A handle that can read and insert: the database or a transaction on it. */
 type JobWriter = Pick<BetterSQLite3Database, 'select' | 'insert'>;
 
+/** A handle that can update: the database or a transaction on it. */
+type JobUpdater = Pick<BetterSQLite3Database, 'update'>;
+
 /** The statuses a job waits in before it runs; only these are cancelled as pending. */
 const PENDING_STATUSES = ['queued', 'retry_wait', 'waiting_remote'] as const;
+
+/**
+ * The columns a cancel of a pending job writes. A job cancelled while it waited for a retry no longer waits and
+ * ends without the error of its earlier run, like a cancelled running job.
+ *
+ * @param now the time
+ * @returns the columns to write
+ */
+function cancelledColumns(now: string): SQLiteUpdateSetSource<typeof job> {
+  return { status: 'cancelled', runAfter: null, ...errorOf(null), finishedAt: now, updatedAt: now };
+}
 
 /**
  * Inserts the job as `queued`, attempt 0, unless its file is unknown or in the trash or its dedupe key is held.
@@ -109,14 +123,14 @@ export function createJobRepository(database: BetterSQLite3Database): JobReposit
 /**
  * Applies `set` to the job if it is `running`.
  *
- * @param database the workspace database; inside a transaction it is the same connection
+ * @param writer the database, or the caller's transaction
  * @param id the job
  * @param set the columns to write
  * @returns true when a row changed
  */
-function fromRunning(database: BetterSQLite3Database, id: string, set: SQLiteUpdateSetSource<typeof job>): boolean {
+function fromRunning(writer: JobUpdater, id: string, set: SQLiteUpdateSetSource<typeof job>): boolean {
   return (
-    database
+    writer
       .update(job)
       .set(set)
       .where(and(eq(job.id, id), eq(job.status, 'running')))
@@ -311,8 +325,8 @@ async function finish(
   { status, errorCode, now, settled }: Parameters<JobRepository['finish']>[1],
 ): Promise<boolean> {
   // `settled` runs on the same connection inside this transaction; a throw rolls the end back.
-  return database.transaction(() => {
-    const changed = fromRunning(database, id, { status, ...errorOf(errorCode), finishedAt: now, updatedAt: now });
+  return database.transaction((transaction) => {
+    const changed = fromRunning(transaction, id, { status, ...errorOf(errorCode), finishedAt: now, updatedAt: now });
     if (changed) settled?.();
     return changed;
   });
@@ -353,7 +367,7 @@ async function setOutcome(
       transaction.select({ id: file.id }).from(file).where(eq(file.id, fileId)).get() === undefined
     )
       return false;
-    return fromRunning(database, id, { fileId, result, updatedAt: now });
+    return fromRunning(transaction, id, { fileId, result, updatedAt: now });
   });
 }
 
@@ -410,7 +424,7 @@ async function cancelPending(
   return database.transaction((transaction) => {
     const rows = transaction
       .update(job)
-      .set({ status: 'cancelled', finishedAt: now, updatedAt: now })
+      .set(cancelledColumns(now))
       .where(and(oneJob(id), inArray(job.status, [...PENDING_STATUSES])))
       .returning()
       .all();
@@ -443,7 +457,7 @@ async function cancelPendingOfFile(
     }
     const rows = transaction
       .update(job)
-      .set({ status: 'cancelled', finishedAt: now, updatedAt: now })
+      .set(cancelledColumns(now))
       .where(and(eq(job.fileId, fileId), inArray(job.status, [...PENDING_STATUSES])))
       .returning()
       .all();

@@ -3,6 +3,7 @@ import { searchWords, type AssetRepository } from '@assetforge/core';
 import { count, eq, inArray } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { assetFilter } from './asset-filters.js';
+import { toAsset } from './asset-rows.js';
 import { searchAssets } from './asset-search.js';
 import { automaticCovers, summaries, withTags } from './asset-summaries.js';
 import { asset } from './schema.js';
@@ -10,22 +11,6 @@ import { reindexAsset, type IndexTransaction } from './search-index.js';
 
 /** The query of an asset list. */
 type AssetListQuery = Parameters<AssetRepository['list']>[0];
-
-/**
- * The asset of a row.
- *
- * @param row the asset row
- * @returns the asset
- */
-const toAsset = (row: typeof asset.$inferSelect): Asset => ({
-  id: row.id,
-  name: row.name,
-  typeId: row.typeId,
-  description: row.description,
-  status: row.status,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-});
 
 /**
  * The asset repository over the workspace database.

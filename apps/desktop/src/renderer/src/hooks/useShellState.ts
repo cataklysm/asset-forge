@@ -24,7 +24,7 @@ export interface ShellState {
 /** The state of a newly opened workspace. */
 const INITIAL_SHELL: ShellState = {
   assetList: { filters: NO_FILTERS, scrollOffset: 0, openedIndex: null, selectedId: null },
-  projectList: { filters: NO_PROJECT_FILTERS, scrollOffset: 0, selectedId: null },
+  projectList: { filters: NO_PROJECT_FILTERS, scrollOffset: 0, openedIndex: null, selectedId: null },
   inboxList: { filters: NO_FILE_FILTERS, scrollOffset: 0 },
   trashList: { filters: NO_FILE_FILTERS, scrollOffset: 0 },
   assetTab: 'files',

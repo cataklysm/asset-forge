@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FileKindSchema } from './files';
+import { CountSchema } from './ipc-shared';
 
 /** At most this many site profiles at app level. */
 export const MAX_SITE_PROFILES = 50;
@@ -17,8 +18,6 @@ export const SITE_PROFILE_NAME_MAX = 60;
 export const SITE_DEFAULT_KINDS = ['image', 'video'] as const;
 /** The largest `minBytes`: the download limit of the URL import (500 MiB). */
 export const SITE_MIN_BYTES_MAX = 500 * 1024 * 1024;
-
-const count = z.number().int().nonnegative();
 
 /** Which downloaded files a site import keeps: a kind in `kinds` and at least `minBytes`. */
 export const SiteFilterSchema = z.object({
@@ -125,21 +124,21 @@ export type SiteCrawlProblem = z.infer<typeof SiteCrawlProblemSchema>;
 export const SiteCrawlResultSchema = z.object({
   crawlId: z.uuid(),
   files: z.array(z.string()).max(SITE_MAX_FILES.max),
-  pages: count,
-  duplicates: count,
-  filtered: count,
-  disallowed: count,
-  invalid: count,
-  pageFailures: count,
+  pages: CountSchema,
+  duplicates: CountSchema,
+  filtered: CountSchema,
+  disallowed: CountSchema,
+  invalid: CountSchema,
+  pageFailures: CountSchema,
   truncated: z.enum(['pages', 'files']).nullable(),
   cancelled: z.boolean(),
   problems: z.array(SiteCrawlProblemSchema).max(SITE_MAX_PROBLEMS),
-  problemsDropped: count,
+  problemsDropped: CountSchema,
 });
 /** The answer of `sites:crawl`. */
 export type SiteCrawlResult = z.infer<typeof SiteCrawlResultSchema>;
 
 /** The progress of the running crawl: pages loaded and file URLs found so far. */
-export const SiteCrawlProgressSchema = z.object({ pages: count, files: count, cancelling: z.boolean() });
+export const SiteCrawlProgressSchema = z.object({ pages: CountSchema, files: CountSchema, cancelling: z.boolean() });
 /** The progress of the running crawl. */
 export type SiteCrawlProgress = z.infer<typeof SiteCrawlProgressSchema>;

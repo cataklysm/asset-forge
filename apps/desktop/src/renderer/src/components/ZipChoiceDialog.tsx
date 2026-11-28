@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { baseName, isZipPath } from '../import-result';
 import {
   archiveCountLabel,
@@ -27,6 +27,18 @@ interface Pending {
 }
 
 /**
+ * Ends the open question, if any, with `answer`.
+ *
+ * @param pendingRef the open question; cleared
+ * @param answer the answer its caller receives
+ */
+function settle(pendingRef: { current: Pending | null }, answer: Answer): void {
+  const open = pendingRef.current;
+  pendingRef.current = null;
+  open?.resolve(answer);
+}
+
+/**
  * Asks whether picked ZIP archives are unpacked or imported as files, before an import starts.
  * The screen renders `dialog` and awaits `choose`; Unpack has the initial focus, Esc cancels.
  *
@@ -39,39 +51,62 @@ export function useZipChoice(): {
   dialog: ReactNode;
 } {
   const [pending, setPending] = useState<Pending | null>(null);
-  const unpackRef = useRef<HTMLButtonElement>(null);
+  // The open question outside the render, so that a second `choose` and the unmount can end it.
+  const pendingRef = useRef<Pending | null>(null);
+  useEffect(() => () => settle(pendingRef, null), []);
 
   function choose(sourcePaths: readonly string[]): Promise<Answer> {
     const zipPaths = sourcePaths.filter(isZipPath);
     if (zipPaths.length === 0) return Promise.resolve(false);
-    return new Promise<Answer>((resolve) => setPending({ zipPaths, resolve }));
+    // A question still open is cancelled; its caller must not wait forever.
+    settle(pendingRef, null);
+    return new Promise<Answer>((resolve) => {
+      const next = { zipPaths, resolve };
+      pendingRef.current = next;
+      setPending(next);
+    });
   }
 
   function answer(value: Answer) {
-    pending?.resolve(value);
+    settle(pendingRef, value);
     setPending(null);
   }
 
+  return { choose, dialog: <ZipChoiceDialog pending={pending} onAnswer={answer} /> };
+}
+
+/**
+ * The question's dialog: Cancel, Import as file and Unpack, which has the initial focus.
+ *
+ * @param props the open question (null: closed) and the answer's receiver
+ * @returns the dialog
+ */
+function ZipChoiceDialog({ pending, onAnswer }: { pending: Pending | null; onAnswer(value: Answer): void }) {
+  const unpackRef = useRef<HTMLButtonElement>(null);
   const zipPaths = pending?.zipPaths ?? [];
-  const dialog = (
-    <Dialog open={pending !== null} title={ZIP_ARCHIVE_TITLE} onClose={() => answer(null)} initialFocusRef={unpackRef}>
+  return (
+    <Dialog
+      open={pending !== null}
+      title={ZIP_ARCHIVE_TITLE}
+      onClose={() => onAnswer(null)}
+      initialFocusRef={unpackRef}
+    >
       <div className="space-y-4">
         <p className="break-words">
           {zipPaths.length === 1 ? baseName(zipPaths[0]!) : archiveCountLabel(zipPaths.length)}
         </p>
         <div className="flex justify-end gap-2">
-          <button type="button" className={BUTTON} title={ZIP_CANCEL_TITLE} onClick={() => answer(null)}>
+          <button type="button" className={BUTTON} title={ZIP_CANCEL_TITLE} onClick={() => onAnswer(null)}>
             {CANCEL_LABEL}
           </button>
-          <button type="button" className={BUTTON} title={IMPORT_AS_FILE_TITLE} onClick={() => answer(false)}>
+          <button type="button" className={BUTTON} title={IMPORT_AS_FILE_TITLE} onClick={() => onAnswer(false)}>
             {IMPORT_AS_FILE_LABEL}
           </button>
-          <button ref={unpackRef} type="button" className={BUTTON} title={UNPACK_TITLE} onClick={() => answer(true)}>
+          <button ref={unpackRef} type="button" className={BUTTON} title={UNPACK_TITLE} onClick={() => onAnswer(true)}>
             {UNPACK_LABEL}
           </button>
         </div>
       </div>
     </Dialog>
   );
-  return { choose, dialog };
 }

@@ -6,7 +6,7 @@ import { SelectionAnalysisButtons, useAnalysisDialogs } from '../components/Anal
 import { FileBrowser } from '../components/FileBrowser';
 import { FileDetailDialog } from '../components/FileDetailDialog';
 import { AssignFileControl } from '../components/FileRoleControls';
-import { ImportProgressView } from '../components/ImportProgressView';
+import { ImportStatus } from '../components/ImportProgressView';
 import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
 import { batchResult, importFailures, ResultStrip, type BatchResult } from '../components/ResultStrip';
@@ -18,6 +18,7 @@ import { runExclusive } from '../exclusive';
 import { fileMenuItems } from '../file-actions';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
+import { useExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useKeptScrollOffset } from '../hooks/useKeptScrollOffset';
 import { useLoad } from '../hooks/useLoad';
@@ -38,7 +39,7 @@ import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
-import { ALERT, BUTTON, MUTED } from '../ui';
+import { ALERT, BUTTON } from '../ui';
 
 // The inbox screen: import, the inbox file list with multi-select, and the batch actions on the selection.
 
@@ -64,7 +65,7 @@ interface Props {
  */
 export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<BatchResult | null>(null);
+  const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<AssetView>('grid');
   const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
@@ -75,10 +76,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const detail = useFileDialog(containerRef);
   // Synchronous guard: a second activation before the re-render must not start a second import.
   const importingRef = useRef(false);
-  // The same for a single delete and for the selection's delete.
-  const acting = useRef(false);
-  const deleting = useRef(false);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  // The same for the deletes: one guard for a single delete and the selection's delete, so that they never overlap;
+  // its busy flag disables the controls of both while either runs.
+  const acting = useExclusiveGuard();
   const trash = useTrash();
   const zipChoice = useZipChoice();
   const [urlImportOpen, setUrlImportOpen] = useState(false);
@@ -121,7 +121,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   const studio = useStudio();
   const analysis = useAnalysisDialogs({
-    onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
+    onStarted: (counts) => setResult({ title: enqueueTitle(counts), failures: [] }),
     onChanged: reload,
     onLeave: () => detail.close(),
   });
@@ -145,7 +145,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           setRunning(true);
           const results = await call('files:import', { sourcePaths, unpackArchives });
           const cancelled = cancelRequested.current;
-          setImportResult({
+          setResult({
             title: importTitle(results, { duplicates: true, cancelled }),
             failures: importFailures(results),
           });
@@ -187,9 +187,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   /** One file to the trash (menu, dialog); one at a time. A failure rejects for the caller to show. */
   function remove(file: FileRecord): Promise<void> {
-    return runExclusive(acting, async () => {
-      const { failures } = await runFileBatch('files:trashMany', [file]);
-      throwFirst(failures);
+    return acting.run(async () => {
+      const { firstError } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(firstError);
       moved([file.id]);
       trash.refresh();
     });
@@ -199,25 +199,18 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   function deleteSelected(): Promise<void> {
     const files = [...selection.selected.values()];
     if (files.length === 0) return Promise.resolve();
-    return runExclusive(
-      deleting,
+    return acting.run(
       async () => {
         try {
           const { doneIds, failures } = await runFileBatch('files:trashMany', files);
-          setImportResult(batchResult(doneIds.length, 'deleted', failures));
+          setResult(batchResult(doneIds.length, 'deleted', failures));
           moved(doneIds);
           trash.refresh();
         } catch (caught) {
           setError(describeError(caught));
         }
       },
-      {
-        onStart: () => {
-          setDeleteBusy(true);
-          setError(null);
-        },
-        onEnd: () => setDeleteBusy(false),
-      },
+      { onStart: () => setError(null) },
     );
   }
 
@@ -243,11 +236,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
       countTitle="Files in the inbox"
       actions={
         <>
-          {importProgress.progress !== null ? (
-            <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
-          ) : (
-            importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
-          )}
+          <ImportStatus state={importProgress} />
           {importButton}
           <button type="button" className={BUTTON} disabled={importing} onClick={() => setUrlImportOpen(true)}>
             {URL_IMPORT_LABEL}
@@ -277,12 +266,8 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
               </p>
             ),
         )}
-        {importResult !== null && (
-          <ResultStrip
-            title={importResult.title}
-            failures={importResult.failures}
-            onDismiss={() => setImportResult(null)}
-          />
+        {result !== null && (
+          <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
         )}
         <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>
           <button
@@ -298,7 +283,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           <button
             type="button"
             className={BUTTON}
-            disabled={deleteBusy}
+            disabled={acting.busy}
             title={DELETE_SELECTION_TITLE}
             onClick={() => void deleteSelected()}
           >
@@ -324,6 +309,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
               onDetails: () => detail.open(file),
               ...fileActions(file),
               onError: setError,
+              actionBusy: acting.busy,
               onDelete: () => {
                 setError(null);
                 remove(file).catch((caught: unknown) => setError(describeError(caught)));
@@ -347,9 +333,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                   asset={null}
                   actions={{
                     cover: null,
-                    onDetails: () => {},
                     ...fileActions(shown),
                     onError: setError,
+                    actionBusy: acting.busy,
                     onDelete: () => remove(shown),
                   }}
                   roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}

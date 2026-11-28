@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
-import { runExclusive } from '../exclusive';
 import { fileMenuItems } from '../file-actions';
 import { useStudio } from '../studio-context';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, renameInFilters, type AssetView, type FileFilters } from '../list-state';
@@ -67,6 +67,18 @@ async function unassignEach(files: readonly FileRecord[]): Promise<{ detached: s
 }
 
 /**
+ * The name a batch failure shows: the file's name in the selection as it is now, else as it was sent.
+ *
+ * @param selection the current selection
+ * @param sent the names of the files sent with the batch, by id
+ * @param fileId the failed file
+ * @returns its name; the id only when neither knows it
+ */
+function nameOf(selection: FileSelection, sent: ReadonlyMap<string, string>, fileId: string): string {
+  return selection.selected.get(fileId)?.originalName ?? sent.get(fileId) ?? fileId;
+}
+
+/**
  * The asset's files: the file browser with its own filters, view and selection (none of them
  * persisted), the selection bar (Add tags, Analyse, Set role, Detach, Delete) and the file detail
  * dialog.
@@ -80,7 +92,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
   const [dialog, setDialog] = useState<'tags' | 'role' | null>(null);
   const [batchRole, setBatchRole] = useState<FileRole>('reference');
-  const [batchBusy, setBatchBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,9 +104,11 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onChanged: onFilesChanged,
     onLeave: () => detailDialog.close(),
   });
-  // Synchronous guards: a second activation before the re-render must not send a second request.
-  const acting = useRef(false);
-  const batching = useRef(false);
+  // Synchronous guard: a second activation before the re-render must not send a second request. One guard for
+  // the single actions and the batches, so that a single delete and the selection's delete never overlap; its busy
+  // flag disables the batch buttons and the single-file actions while any of them runs.
+  const acting = useExclusiveGuard();
+  const actingBusy = acting.busy;
   const trash = useTrash();
 
   // The filter follows a rename in the render that raises `reloadToken`, so the browser never
@@ -133,13 +146,13 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   // One cover, detach or delete action at a time; later activations while it runs are ignored.
   const setCover = (fileId: string | null) =>
-    runExclusive(acting, async () => {
+    acting.run(async () => {
       onAssetChange(await call('assets:setCover', { assetId: asset.id, fileId }));
       onFilesChanged();
     });
 
   const detach = (file: FileRecord) =>
-    runExclusive(acting, async () => {
+    acting.run(async () => {
       await call('files:unassign', { fileId: file.id });
       setSelection((current) => dropSelected(current, [file.id]));
       // The reload moves the dialog on to the file that follows (FileBrowser `viewer`).
@@ -147,9 +160,9 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     });
 
   const remove = (file: FileRecord) =>
-    runExclusive(acting, async () => {
-      const { failures } = await runFileBatch('files:trashMany', [file]);
-      throwFirst(failures);
+    acting.run(async () => {
+      const { firstError } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(firstError);
       setSelection((current) => dropSelected(current, [file.id]));
       // As with Detach, the reload moves the dialog on.
       onFilesChanged();
@@ -170,19 +183,23 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   /** Runs one batch at a time; it clears both errors and disables the batch buttons while it runs. */
   const batch = (action: () => Promise<void>) =>
-    runExclusive(batching, action, {
+    acting.run(action, {
       onStart: () => {
-        setBatchBusy(true);
         setError(null);
         setDialogError(null);
       },
-      onEnd: () => setBatchBusy(false),
     });
 
-  const nameOf = (fileId: string) => selection.selected.get(fileId)?.originalName ?? fileId;
+  // Batch answers arrive later; names come from the selection as it is then (as in the inbox), else from the files
+  // that were sent.
+  const latestSelection = useRef(selection);
+  useLayoutEffect(() => {
+    latestSelection.current = selection;
+  }, [selection]);
 
   const applyRole = () =>
     batch(async () => {
+      const sent = new Map(eligible.map((file) => [file.id, file.originalName]));
       let items;
       try {
         ({ items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role: batchRole }));
@@ -190,7 +207,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         setDialogError(describeError(caught));
         return;
       }
-      const failures = assignFailures(items, nameOf);
+      const failures = assignFailures(items, (fileId) => nameOf(latestSelection.current, sent, fileId));
       const changed = items.flatMap((item) => (item.file === null ? [] : [item.file]));
       setSelection((current) => refreshSelected(current, changed));
       setResult(batchResult(changed.length, 'updated', failures));
@@ -231,6 +248,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onImageToPrompt: () => analysis.prompt(file),
     analysisBlocked: analysis.blocked,
     studio,
+    actionBusy: actingBusy,
   });
 
   const coverOf = (file: FileRecord) => ({
@@ -258,7 +276,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         <button
           type="button"
           className={BUTTON}
-          disabled={noneEligible || batchBusy}
+          disabled={noneEligible || actingBusy}
           title={noneEligible ? NONE_ELIGIBLE : undefined}
           onClick={() => openDialog('tags')}
         >
@@ -268,7 +286,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         <button
           type="button"
           className={BUTTON}
-          disabled={noneEligible || batchBusy}
+          disabled={noneEligible || actingBusy}
           title={noneEligible ? NONE_ELIGIBLE : undefined}
           onClick={() => openDialog('role')}
         >
@@ -277,7 +295,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         <button
           type="button"
           className={BUTTON}
-          disabled={noneEligible || batchBusy}
+          disabled={noneEligible || actingBusy}
           title="The files are kept and move to the inbox"
           onClick={() => void detachSelected()}
         >
@@ -286,7 +304,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         <button
           type="button"
           className={BUTTON}
-          disabled={batchBusy}
+          disabled={actingBusy}
           title={DELETE_SELECTION_TITLE}
           onClick={() => void deleteSelected()}
         >
@@ -337,7 +355,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                 asset={{ id: asset.id, name: asset.name, tags: asset.tags }}
                 actions={{
                   cover: coverOf(detail),
-                  onDetails: () => {},
                   onSetCover: setCover,
                   onDetach: () => detach(detail),
                   ...fileActions(detail),
@@ -366,7 +383,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         open={dialog === 'role'}
         role={batchRole}
         onRoleChange={setBatchRole}
-        busy={batchBusy}
+        busy={actingBusy}
         error={dialogError}
         onApply={() => void applyRole()}
         onClose={() => setDialog(null)}
