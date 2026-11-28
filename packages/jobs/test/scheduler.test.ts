@@ -1827,6 +1827,19 @@ describe('total limit per class', () => {
     expect(h.runs).toHaveLength(4);
   });
 
+  it('lets the lanes of a class with a total take turns instead of serving the oldest job first', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, totals: { io: 1 }, laneLimit: () => 4 });
+    const a = await s.enqueue('dl', 'io', 4, 'a');
+    const b = await s.enqueue('dl', 'io', 2, 'b');
+    await s.scheduler.start();
+    for (let index = 0; index < 5; index++) {
+      h.runs.at(-1)!.resolve();
+      await flush();
+    }
+    expect(h.runs.map((r) => r.job.id)).toEqual([a[0], b[0], a[1], b[1], a[2], a[3]]);
+  });
+
   it('leaves classes without a total unbounded across lanes', async () => {
     const h = controlled('local_gpu');
     const s = setup({ handlers: { t: h.handler } });

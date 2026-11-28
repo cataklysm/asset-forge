@@ -15,6 +15,7 @@ import {
   type JobRepository,
 } from '@assetforge/core';
 import { LaneHolds } from './lane-holds.js';
+import { LaneRotation } from './lane-rotation.js';
 import { LeftoverRows } from './recovery-steps.js';
 import type { PauseGate } from './pause-gate.js';
 
@@ -276,6 +277,8 @@ class JobScheduler {
   private readonly laneHolds = new LaneHolds();
   /** The rows this scheduler left `running` itself, so the recovery knows whether they ran. */
   private readonly leftovers = new LeftoverRows();
+  /** The order the lanes of a class with a total were served in. */
+  private readonly rotation = new LaneRotation();
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -529,12 +532,7 @@ class JobScheduler {
       if (this.stopping) return null;
       // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
       if (this.atTotal(resourceClass)) return null;
-      const job = await this.config.jobs.claimNext({
-        resourceClass,
-        types,
-        now: this.iso(),
-        excludeLanes: this.excludedLanes(resourceClass),
-      });
+      const job = await this.claim(resourceClass, types);
       if (!job) break;
       if (this.stopping) {
         await this.putBack(job);
@@ -543,6 +541,7 @@ class JobScheduler {
       // A run that ended during the claim may have paused the lane; its job goes back without spending a run.
       if (await this.releaseIfBarred(job)) continue;
       this.launch(job);
+      this.rotation.record(resourceClass, job.lane);
       this.changed(job.id);
     }
     if (this.stopping) return null;
@@ -553,6 +552,29 @@ class JobScheduler {
     const holdEnd = this.laneHolds.earliestEnd(resourceClass, this.config.now().getTime());
     const candidates = [next === null ? null : Date.parse(next), holdEnd].filter((time) => time !== null);
     return candidates.length === 0 ? null : Math.min(...candidates);
+  }
+
+  /**
+   * Claims the next job of a class. Under a class total the lanes take turns: the lanes served recently are left out
+   * as long as another lane has a claimable job, the one served longest ago given back first.
+   *
+   * @param resourceClass the class
+   * @param types the job types of the class
+   * @returns the claimed job; null when no lane that may claim has one
+   */
+  private async claim(resourceClass: ResourceClass, types: string[]): Promise<Job | null> {
+    const excluded = this.excludedLanes(resourceClass);
+    const rotating = this.config.totals[resourceClass] !== undefined;
+    for (const served of rotating ? this.rotation.preferences(resourceClass) : [[]]) {
+      const job = await this.config.jobs.claimNext({
+        resourceClass,
+        types,
+        now: this.iso(),
+        excludeLanes: [...excluded, ...served],
+      });
+      if (job || this.stopping) return job;
+    }
+    return null;
   }
 
   /**
