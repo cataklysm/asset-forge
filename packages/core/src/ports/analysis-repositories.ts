@@ -154,9 +154,10 @@ export interface AnalysisTargetReader {
   }): Promise<AnalysisTargetEntry[]>;
   /**
    * Disjoint counts over the whole target, for `analysis:preview`: `notAnalysable` the files that are
-   * not analysable; of the analysable ones `alreadyAnalysed` those analysed with the fingerprint,
-   * `alreadyQueued` the rest with an active `vision.analyze_file` job, `analysable` the remainder
-   * (what an enqueue without `force` would queue). Unknown ids of a `files` target are not counted.
+   * not analysable; of the analysable ones `alreadyQueued` those with an active `vision.analyze_file` job (also
+   * when they are analysed, as an enqueue with `force` answers them), `alreadyAnalysed` the rest analysed with the
+   * fingerprint, `analysable` the remainder (what an enqueue without `force` would queue). Unknown ids of a `files`
+   * target are not counted.
    *
    * @param request the target, the fingerprint and the analysable MIME types
    * @returns the four counts

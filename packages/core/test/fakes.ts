@@ -975,8 +975,8 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
     );
     for (const e of await this.entries(r)) {
       if (!e.analysable) result.notAnalysable++;
-      else if (e.analysed) result.alreadyAnalysed++;
       else if (queued.has(e.fileId)) result.alreadyQueued++;
+      else if (e.analysed) result.alreadyAnalysed++;
       else result.analysable++;
     }
     return result;

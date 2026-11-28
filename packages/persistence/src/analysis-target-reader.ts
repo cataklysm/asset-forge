@@ -187,8 +187,9 @@ async function targetCount(
       const row = transaction
         .select({
           notAnalysable: sql<number>`coalesce(sum(not ${analysable}), 0)`,
-          alreadyAnalysed: sql<number>`coalesce(sum(${analysable} and ${analysed}), 0)`,
-          alreadyQueued: sql<number>`coalesce(sum(${analysable} and not ${analysed} and ${queuedSql}), 0)`,
+          // A queued file counts as queued even when it is analysed: a forced enqueue answers it so.
+          alreadyAnalysed: sql<number>`coalesce(sum(${analysable} and ${analysed} and not ${queuedSql}), 0)`,
+          alreadyQueued: sql<number>`coalesce(sum(${analysable} and ${queuedSql}), 0)`,
           analysable: sql<number>`coalesce(sum(${analysable} and not ${analysed} and not ${queuedSql}), 0)`,
         })
         .from(file)
