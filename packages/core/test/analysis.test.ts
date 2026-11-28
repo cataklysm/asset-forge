@@ -615,6 +615,19 @@ describe('trashed files in the handler', () => {
     });
   }
 
+  it('a file trashed while its image is read is not read again from the trash and ends file_unavailable', async () => {
+    const { session, file, vision, images, handler } = await setup();
+    const paths: string[] = [];
+    images.jpeg = async (absolutePath) => {
+      paths.push(absolutePath);
+      await trashForTest(session, [file.id]);
+      return null;
+    };
+    await rejectsWith(handler.run(jobFor(file.id), new AbortController().signal), 'file_unavailable');
+    expect(paths).toHaveLength(1);
+    expect(vision.calls).toEqual([]);
+  });
+
   it('a job started for an already trashed file ends file_unavailable', async () => {
     const { session, file, vision, images, handler } = await setup();
     await trashForTest(session, [file.id]);
