@@ -130,8 +130,12 @@ async function openThroughSession(
     signal.throwIfAborted();
     if (!belongsToSite(current.href, site)) return config.remote.open(current.href, signal, options);
     const hopDeadline = Math.min(deadline, Date.now() + limits.headerTimeoutMs);
-    await vetHost(current, config, signal, hopDeadline);
-    await askHeaders(current, options, signal, hopDeadline);
+    // The rule of the Node source: an IP literal or every resolved address must pass `isPublicAddress`. The session
+    // request itself is not pinned to the vetted address; the session's request filter vets it a second time.
+    await vetHopHost(current, { lookup: config.lookup, allowAddress: isPublicAddress }, signal, hopDeadline);
+    // Asked only so the caller records the hop; the answer is dropped because the session sends its own cookies and
+    // its own user agent, and nothing is set by hand.
+    await askHopHeaders(current, options.headersFor, signal, hopDeadline);
     const outcome = await sessionHop(
       { url: current, profileId, request: config.request },
       { limits, signal, deadline, hopDeadline },
@@ -140,33 +144,4 @@ async function openThroughSession(
     if (hop >= limits.maxRedirects || outcome.location === undefined) throw failure('rejected');
     current = parseHop(outcome.location, current);
   }
-}
-
-/**
- * Vets the host of a session hop with the rule of the Node source: an IP literal or every resolved address must pass
- * `isPublicAddress`. The session request itself is not pinned to the vetted address; the session's request filter
- * vets it a second time.
- *
- * @param url the hop
- * @param config supplies the resolver
- * @param signal aborts the lookup with its reason
- * @param until the hop's deadline
- * @returns nothing; throws `address_refused`, or `unreachable` when the host does not resolve
- */
-async function vetHost(url: URL, config: SessionDownloadConfig, signal: AbortSignal, until: number): Promise<void> {
-  await vetHopHost(url, { lookup: config.lookup, allowAddress: isPublicAddress }, signal, until);
-}
-
-/**
- * Asks `headersFor` for an on-site hop so the caller records it. The answer is dropped: the session sends its own
- * cookies and its own user agent, and nothing is set by hand.
- *
- * @param url the hop
- * @param options carries the callback
- * @param signal aborts the wait with its reason
- * @param until the hop's deadline
- * @returns nothing; a rejecting callback fails the hop `unreachable`
- */
-async function askHeaders(url: URL, options: RemoteOpenOptions, signal: AbortSignal, until: number): Promise<void> {
-  await askHopHeaders(url, options.headersFor, signal, until);
 }
