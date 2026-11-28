@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { FileRoleSchema, type Asset, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import type { ExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { label } from '../labels';
 import { roleOptions } from '../role-options';
 import { eligibleFiles, NONE_ELIGIBLE, sharedTags, type FileSelection } from '../selection';
@@ -16,6 +17,11 @@ interface Props {
   selection: FileSelection;
   /** The shared tag input; the selection bar's "Add tags" focuses it. */
   tagInputRef: RefObject<HTMLInputElement | null>;
+  /**
+   * The host's guard of the batch assign. It lives in the host because the column unmounts when the selection
+   * empties, and a remounted column must still see an assign that runs.
+   */
+  assignGuard: ExclusiveGuard;
   /** After an assign: the files that moved to the asset. The host drops them and reloads. */
   onAssigned(movedIds: string[]): void;
   /**
@@ -70,14 +76,11 @@ function markerOf(file: FileRecord, assignError: string | undefined): Marker | n
  * @param props the selection, the tag input and the callbacks
  * @returns the column
  */
-export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChanged }: Props) {
+export function InboxSelection({ selection, tagInputRef, assignGuard, onAssigned, onFilesChanged }: Props) {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [role, setRole] = useState<FileRole>('reference');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
-  // Synchronous guard: a second activation before the re-render must not send a second request.
-  const assigning = useRef(false);
   const assignId = useId();
   // Assign answers arrive later; names come from the selection as it is then.
   const latest = useRef(selection);
@@ -102,26 +105,26 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
   }
 
   /** Assigns every eligible file to the picked asset, once at a time, and reports per-file failures. */
-  async function assign() {
-    if (assigning.current || asset === null || eligibleIds.length === 0) return;
-    assigning.current = true;
-    setBusy(true);
-    setError(null);
-    const nameOf = (fileId: string) => latest.current.selected.get(fileId)?.originalName ?? fileId;
-    try {
-      const { items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role });
-      const failures = assignFailures(items, nameOf);
-      const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
-      setResult(
-        failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
-      );
-      onAssigned(moved);
-    } catch (caught) {
-      setError(describeError(caught));
-    } finally {
-      assigning.current = false;
-      setBusy(false);
-    }
+  function assign(): Promise<void> {
+    if (asset === null || eligibleIds.length === 0) return Promise.resolve();
+    const request = { fileIds: eligibleIds, assetId: asset.id, role };
+    return assignGuard.run(
+      async () => {
+        const nameOf = (fileId: string) => latest.current.selected.get(fileId)?.originalName ?? fileId;
+        try {
+          const { items } = await call('files:assignMany', request);
+          const failures = assignFailures(items, nameOf);
+          const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
+          setResult(
+            failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
+          );
+          onAssigned(moved);
+        } catch (caught) {
+          setError(describeError(caught));
+        }
+      },
+      { onStart: () => setError(null) },
+    );
   }
 
   const noneEligible = eligible.length === 0;
@@ -165,7 +168,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
           <button
             type="button"
             className={BUTTON}
-            disabled={noneEligible || asset === null || busy}
+            disabled={noneEligible || asset === null || assignGuard.busy}
             title={noneEligible ? NONE_ELIGIBLE : asset === null ? 'Pick an asset first' : undefined}
             onClick={() => void assign()}
           >

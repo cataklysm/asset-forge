@@ -230,6 +230,32 @@ it('the assign failure strip goes once no failed file is selected any more', asy
   expect(within(column()).queryByRole('alert')).toBeNull();
 });
 
+it('an assign that runs still blocks the Assign button after the column was closed and opened again', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const answer = deferred<IpcResponse<'files:assignMany'>>();
+  const api = install([c1], { 'files:assignMany': () => answer.promise });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await pickAsset(user);
+  await user.click(within(column()).getByRole('button', { name: 'Assign 1 file' }));
+  // Clearing the selection unmounts the column; selecting again mounts a new one.
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+  await user.click(tile('c1.png'));
+  await pickAsset(user);
+  const again = within(column()).getByRole('button', { name: 'Assign 1 file' }) as HTMLButtonElement;
+  expect(again.disabled).toBe(true);
+  fireEvent.click(again);
+  expect(callsOf(api, 'files:assignMany')).toHaveLength(1);
+
+  await act(async () =>
+    answer.resolve({ items: [{ fileId: c1.id, file: { ...c1, assetId: OAK.id, role: 'reference' }, error: null }] }),
+  );
+  expect(callsOf(api, 'files:assignMany')).toHaveLength(1);
+});
+
 it('shared image tags show only tags every eligible file carries; removing one removes it from all', async () => {
   const user = userEvent.setup();
   const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('oak'), tagOf('bark')] });
