@@ -115,7 +115,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - The asset row mapper is duplicated in three repositories.
 - `safeErrorMessage` lives in `import-file.ts` although file moves use it too.
 - The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
-- The session and the import context are built from near-identical lambdas in the workspace manager.
+- The session and the import context are built from near-identical lambdas in the workspace manager (`workspace-manager.ts` builds the session, `workspace-import.ts` the import context).
 - "Details" is removed from the dialog menu by its label, with dummy `onDetails` handlers in both hosts.
 - `ROLES = FileRoleSchema.options` is declared six times in the renderer; `{ name: section } as View` in `WorkspaceShell`.
 - The tag-id lookup is triplicated in persistence; `ipc.ts` and `library-handlers.ts` import each other.
@@ -124,6 +124,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
 - The preview worker pool doc comments still say "none" for failed jobs.
 - Core ports split (2026-11-28, `packages/core/src/ports/`): the type names `StorageRef`, `GenerationFileRef`, `GenerationPromptRef` and `WorkspaceMeta` (and the field `NewGeneration.promptRef`) keep the short forms `Ref` and `Meta`, which the style file does not list as established; renaming them touches persistence, desktop and the core bodies. `GenerationRow` is a plain alias of the contracts type `Generation` and could go. `RemoteFileError` takes `retryAfterMs` as a positional parameter beside an options object holding `cause` and `status`. The repository methods still take their arguments as inline object types (one per method) rather than named request types, so implementers repeat them. `JobRepository` documents `FILE_DOWNLOAD_JOB` and `analysisJobFields`/`downloadJobFields` behaviour, so the persistence port knows two job types by name.
+- Core domain readability pass (2026-11-28): the asset check exists four times, exported from `tags.ts` (used by `asset-sources.ts`) and as private copies in `assignments.ts`, `relations.ts` and `workflows.ts` (the last one returns the asset). The import context for `importStream` is built in three places with small differences (`SourceImport` in `workspace-import.ts` passes `session.newId` unbound, `generationImportContext` in `generation-handler.ts` and `importContextOf` in `download-handler.ts` wrap it in a lambda). `jobs.ts` holds both the job port types and the job use cases but stays one file because `url-import.ts`, `file-trash.ts` and the three download files, which this pass leaves alone, import from it. `settleGenerationOfJob` stays in `generations.ts` because `file-trash.ts` imports it. `errors.ts` keeps `CREDENTIAL_STORE_UNAVAILABLE_MESSAGE` on one line of 131 characters.
 
 ## Tooling and tests
 
