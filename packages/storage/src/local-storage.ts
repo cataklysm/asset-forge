@@ -154,6 +154,10 @@ export class LocalFileSystemStorage implements Storage {
   /**
    * Moves a file within the workspace; the target must not exist.
    *
+   * The check for the target and the rename are two steps, so a target created between them could be replaced.
+   * That is accepted because one writing client per workspace is an invariant: nothing else creates files in the
+   * workspace while this call runs.
+   *
    * @param from the workspace path of the file
    * @param to the workspace path it moves to
    * @returns resolves once it moved; rejects with an `EEXIST` error when the target exists. A failed rename removes

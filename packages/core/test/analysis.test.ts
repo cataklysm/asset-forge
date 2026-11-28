@@ -262,8 +262,10 @@ describe('the analyze file handler', () => {
         storage.failNext('absolutePath', new Error('/secret/path broke'));
         return file.id;
       },
-      async ({ storage, file }) => {
+      async ({ storage, images, file }) => {
+        // An unreachable storage still answers the path; reading it is what fails.
         storage.reachable = false;
+        images.script = [new Error('read failed')];
         return file.id;
       },
       async ({ images, file }) => {

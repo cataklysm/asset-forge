@@ -44,10 +44,12 @@ describe('resolvePreviewSource', () => {
     expect(await resolvePreviewSource(session, UNKNOWN_ID)).toBeNull();
   });
 
-  it('propagates StorageUnreachableError when the storage is unreachable', async () => {
+  it('answers the source while the storage is unreachable, so a cached preview is still served', async () => {
     const { session, storage, file } = await setup();
     storage.reachable = false;
-    await expect(resolvePreviewSource(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+    expect(await resolvePreviewSource(session, file.id)).toMatchObject({
+      absolutePath: `/memory/${file.relativePath}`,
+    });
   });
 
   it('ignores non-previewable files and rows without a checksum', async () => {
@@ -277,9 +279,9 @@ describe('videos', () => {
     });
   });
 
-  it('resolveVideoSource propagates StorageUnreachableError', async () => {
+  it('resolveVideoSource answers the source while the storage is unreachable; the read then fails', async () => {
     const { session, storage, file } = await setup('clip.mp4');
     storage.reachable = false;
-    await expect(resolveVideoSource(session, file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+    expect(await resolveVideoSource(session, file.id)).toMatchObject({ absolutePath: `/memory/${file.relativePath}` });
   });
 });

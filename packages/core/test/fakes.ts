@@ -45,7 +45,6 @@ import {
   InvalidOperationError,
   NotFoundError,
   SourceNotReadableError,
-  StorageUnreachableError,
   ValidationFailedError,
 } from '../src/errors.js';
 import type {
@@ -218,7 +217,6 @@ export class InMemoryStorage implements Storage {
 
   async absolutePath(relPath: string): Promise<string> {
     await this.guard('absolutePath');
-    if (!this.reachable) throw new StorageUnreachableError('The storage is not reachable');
     return `/memory/${relPath}`;
   }
 
