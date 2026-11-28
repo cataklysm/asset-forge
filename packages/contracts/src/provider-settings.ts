@@ -32,15 +32,24 @@ export const PARALLEL_REQUESTS_DEFAULT = 1;
 /** The analysis requests a vision entry gets at the same time: 1 to 64. */
 export const ParallelRequestsSchema = z.number().int().min(PARALLEL_REQUESTS_MIN).max(PARALLEL_REQUESTS_MAX);
 
+/** The sampling temperature of a vision request: the lowest. */
+export const TEMPERATURE_MIN = 0;
+/** The sampling temperature of a vision request: the highest. */
+export const TEMPERATURE_MAX = 2;
+/** The answer token limit of a vision request: the lowest that can be set. */
+export const MAX_TOKENS_MIN = 1;
+/** The answer token limit of a vision request: the highest that can be set. */
+export const MAX_TOKENS_MAX = 100_000;
+
 /**
  * The request options of a vision entry. `maxTokens` null is not sent; `extra` is the JSON text as
  * typed, empty or a JSON object (see `parseExtraParameters`). `parallelRequests` bounds the analysis jobs of the
  * entry that run at once; it is never part of a request.
  */
 export const ProviderOptionsSchema = z.object({
-  temperature: z.number().min(0).max(2),
+  temperature: z.number().min(TEMPERATURE_MIN).max(TEMPERATURE_MAX),
   thinking: ThinkingSchema,
-  maxTokens: z.number().int().min(1).max(100_000).nullable(),
+  maxTokens: z.number().int().min(MAX_TOKENS_MIN).max(MAX_TOKENS_MAX).nullable(),
   extra: z.string().max(PROVIDER_EXTRA_MAX),
   parallelRequests: ParallelRequestsSchema,
 });
