@@ -7,6 +7,12 @@ import type { Storage } from './ports/storage.js';
 import type { WorkspaceDatabase } from './ports/workspace-database.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 import { recoverIncompleteImports } from './recover-imports.js';
+import {
+  createRecoveryFailureLog,
+  logRecoverySummary,
+  reportRecoveryFailure,
+  type RecoveryFailureReport,
+} from './recovery-log.js';
 import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { holdsWorkspace, isSameRoot } from './workspace-manifest.js';
 
@@ -111,9 +117,7 @@ async function prepareWorkspace(
   });
   await database.ensureDerivedData();
   await storage.ensureLayout();
-  await recoverIncompleteImports({ storage, files: database.files });
-  await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves });
-  await sweepTrashQuietly(storage, database);
+  await recoverInterruptedWork(host, storage, database, manifest.id);
   const summary: WorkspaceSummary = {
     id: manifest.id,
     name: manifest.name,
@@ -144,17 +148,58 @@ async function claimDatabase(database: WorkspaceDatabase, manifest: WorkspaceMan
 }
 
 /**
- * Removes the trash binaries that are left over; a failure is ignored.
+ * The recovery of interrupted imports and moves and the trash sweep, followed by one summary line when any of them
+ * did something; each item left as it was gets its own line.
+ *
+ * @param host gives the log
+ * @param storage the storage of the workspace folder
+ * @param database the open database
+ * @param workspaceId the workspace being opened
+ * @returns resolves once the steps ended
+ */
+async function recoverInterruptedWork(
+  host: WorkspaceHost,
+  storage: Storage,
+  database: WorkspaceDatabase,
+  workspaceId: string,
+): Promise<void> {
+  const failures = createRecoveryFailureLog(host.log, workspaceId);
+  const onFailure = failures.report;
+  const imports = await recoverIncompleteImports({ storage, files: database.files, onFailure });
+  const moves = await recoverFileMoves({ storage, files: database.files, fileMoves: database.fileMoves, onFailure });
+  const trash = await sweepTrashQuietly(storage, database, onFailure);
+  logRecoverySummary(host.log, workspaceId, {
+    importsFailed: imports.failedIds.length,
+    importsDiscarded: imports.discardedIds.length,
+    stagingRemoved: imports.removedStagingFiles.length,
+    pathsSkipped: imports.skippedPaths.length,
+    movesCompleted: moves.completed.length,
+    movesDiscarded: moves.discarded.length,
+    trashRemoved: trash.removed.length,
+    trashSkipped: trash.skipped.length,
+    unrepaired: failures.count(),
+  });
+}
+
+/**
+ * Removes the trash binaries that are left over; a failure is reported and otherwise ignored.
  *
  * @param storage the storage of the workspace folder
  * @param database the open database
- * @returns resolves once the sweep ended either way
+ * @param onFailure told about what could not be removed
+ * @returns the paths removed and skipped; both empty after a failure of the sweep itself
  */
-async function sweepTrashQuietly(storage: Storage, database: WorkspaceDatabase): Promise<void> {
+async function sweepTrashQuietly(
+  storage: Storage,
+  database: WorkspaceDatabase,
+  onFailure: RecoveryFailureReport,
+): Promise<{ removed: string[]; skipped: string[] }> {
   try {
-    await sweepTrash({ storage, files: database.files });
-  } catch {
+    return await sweepTrash({ storage, files: database.files, onFailure });
+  } catch (error) {
     // Best effort: leftover trash binaries are swept on the next open.
+    reportRecoveryFailure(onFailure, 'trash list', null, error);
+    return { removed: [], skipped: [] };
   }
 }
 

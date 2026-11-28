@@ -8,7 +8,7 @@
 
 Agreed follow-ups cover the optional filename prefilter, queued background parsing with saved results, accessible profile deletion, and a clearer site-import dialog. The architecture recommendations remain proposals to evaluate during that work.
 
-Implementation and validation are recorded in [gallery-import-queue.tdd.md](docs/testing/gallery-import-queue.tdd.md). The branch reuses the existing queue, SQLite persistence, browser sessions and download/import path. It has not been merged. Download-performance settings and broader source-adapter proposals remain follow-up work.
+Implementation and validation are recorded in [gallery-import-queue.tdd.md](docs/testing/gallery-import-queue.tdd.md). The implementation reuses the existing queue, SQLite persistence, browser sessions and download/import path. After the initial unmerged handoff, the owner authorized integration with the intervening `main` changes and push on 2026-11-28. Download-performance settings and broader source-adapter proposals remain follow-up work.
 
 ## Agreed improvement: optional filename prefilter
 

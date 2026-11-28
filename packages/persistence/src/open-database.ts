@@ -1,10 +1,10 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { WorkspaceDatabase } from '@assetforge/core';
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { migrateWithBackup, type BackupOptions } from './migrate-with-backup.js';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetSourceRepository } from './asset-source-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
@@ -31,20 +31,31 @@ import { createWorkflowTemplateRepository } from './workflow-template-repository
 /** The migrations shipped with this package. */
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url));
 
+/** The options of `openWorkspaceDatabase`. */
+export interface OpenWorkspaceDatabaseOptions {
+  /** The options of the derived data step. */
+  derivedData?: DerivedDataOptions;
+  /** The options of the backup before pending migrations. */
+  backup?: BackupOptions;
+}
+
 /**
- * Opens (and creates) the workspace database: WAL, foreign keys, the SQL functions and the migrations,
- * then wires every repository. A failure closes the connection again.
+ * Opens (and creates) the workspace database: WAL, foreign keys, the SQL functions, a backup when an existing
+ * database has pending migrations, and the migrations; then wires every repository. A failure closes the
+ * connection again.
  *
  * @param databaseFilePath the database file; its directory is created
  * @param migrationsFolder the migrations to apply
- * @param options the options of the derived data step
+ * @param options the options of the derived data step and of the backup
  * @returns the workspace database
+ * @throws InvalidOperationError when the backup before pending migrations cannot be made; nothing is migrated then
  */
 export async function openWorkspaceDatabase(
   databaseFilePath: string,
   migrationsFolder: string,
-  options: { derivedData?: DerivedDataOptions } = {},
+  options: OpenWorkspaceDatabaseOptions = {},
 ): Promise<WorkspaceDatabase> {
+  const existed = existsSync(databaseFilePath);
   mkdirSync(dirname(databaseFilePath), { recursive: true });
   const sqlite = new Database(databaseFilePath);
   try {
@@ -52,7 +63,7 @@ export async function openWorkspaceDatabase(
     sqlite.pragma('foreign_keys = ON');
     registerSqlFunctions(sqlite);
     const database = drizzle(sqlite);
-    migrate(database, { migrationsFolder });
+    await migrateWithBackup(sqlite, database, { databaseFilePath, migrationsFolder, existed, backup: options.backup });
     return workspaceDatabase(sqlite, database, options);
   } catch (error) {
     closeQuietly(sqlite);
@@ -85,7 +96,7 @@ function closeQuietly(sqlite: Database.Database): void {
 function workspaceDatabase(
   sqlite: Database.Database,
   database: BetterSQLite3Database,
-  options: { derivedData?: DerivedDataOptions },
+  options: OpenWorkspaceDatabaseOptions,
 ): WorkspaceDatabase {
   return {
     meta: createMetaRepository(database),

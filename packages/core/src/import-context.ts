@@ -23,6 +23,7 @@ export function importContextOf(session: WorkspaceSession, sources: SourceFiles)
     probe: session.imageProbe,
     newId: () => session.newId(),
     now: () => session.now(),
+    log: session.log,
   };
 }
 

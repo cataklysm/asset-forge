@@ -2,6 +2,7 @@ import type { ImportResult } from '@assetforge/contracts';
 import { ArchiveTooLargeError, safeErrorMessage, ValidationFailedError } from './errors.js';
 import { lastPathSegment } from './file-names.js';
 import { importStream, type ImportContext, type ImportOptions } from './import-file.js';
+import { logImportFailure } from './import-log.js';
 import { isRefusedImportName, isZipArchive, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
 import type { ArchiveEntry, ArchiveReader, OpenArchive } from './ports/source-files.js';
 
@@ -136,6 +137,7 @@ export async function importArchive(
   try {
     archive = await context.archives.open(sourcePath, { maxEntries: budget.entries });
   } catch (error) {
+    logImportFailure(context.log, 'archive', {}, error);
     return [failedResult(sourcePath, null, safeErrorMessage(error, 'Import failed'))];
   }
 
@@ -210,8 +212,9 @@ async function importEntry(run: ArchiveRun, index: number, entry: ArchiveEntry):
   let stream;
   try {
     stream = await run.archive.openEntry(index);
-  } catch {
+  } catch (error) {
     // Only this entry fails; a later one may still be readable, so each is tried.
+    logImportFailure(run.context.log, 'archive entry', { entry: index }, error);
     return failedResult(sourcePath, entryName, ARCHIVE_TRUNCATED_MESSAGE);
   }
   const imported = await importStream(run.context, { sourcePath, entryName, name: fileName, stream }, run.options);

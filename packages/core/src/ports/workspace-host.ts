@@ -1,4 +1,5 @@
 import type { WorkspaceSummary } from '@assetforge/contracts';
+import type { LineLog } from '../log-line.js';
 import type { ImageProbe, VideoProbe } from './media-probes.js';
 import type { ArchiveReader, SourceFiles } from './source-files.js';
 import type { Storage } from './storage.js';
@@ -85,4 +86,9 @@ export interface WorkspaceHost {
    * @returns now
    */
   now(): Date;
+  /**
+   * Writes one log line made by `logLine` or `errorLogLine` (the main console in the app); nothing is logged
+   * without it. A line holds ids, counts and codes only, never a path, a name, a URL or a message.
+   */
+  log?: LineLog;
 }

@@ -5,6 +5,7 @@ import { safeErrorMessage } from './errors.js';
 import { lastPathSegment } from './file-names.js';
 import { importContextOf } from './import-context.js';
 import { importFile, type ImportContext } from './import-file.js';
+import { logImportFailure } from './import-log.js';
 import { isZipArchive } from './import-refusals.js';
 import type { ArchiveReader } from './ports/source-files.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
@@ -158,6 +159,7 @@ class SourceImport {
       result.file = await relocateFile(this.session, result.file.id, this.target);
     } catch (error) {
       // The file stays in the inbox; the result reports why it was not placed.
+      logImportFailure(this.session.log, 'placement', { file: result.file.id }, error);
       result.error = safeErrorMessage(error, 'Placing the file failed');
     }
   }

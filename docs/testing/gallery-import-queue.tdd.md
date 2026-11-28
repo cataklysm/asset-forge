@@ -1,8 +1,8 @@
 # Gallery discovery queue implementation
 
-Branch: `feat/gallery-import-queue`. Do not merge automatically.
+Branch: `feat/gallery-import-queue`. Initially delivered unmerged; the owner subsequently authorized integration into `main`, commit and push on 2026-11-28.
 
-Starting base: `8ed6bc7`. During implementation `main` advanced independently (observed at `354d127`). Those later changes were not merged or rebased into this branch; validation below applies to this feature branch's recorded implementation.
+Starting base: `8ed6bc7`. During implementation `main` advanced independently to `354d127`. The initial feature validation below predates integration; the final section records validation of the combined feature and safety changes.
 
 ## Scope and acceptance
 
@@ -27,7 +27,7 @@ Use the existing implementation and the decisions in `scraping-review-and-backlo
 | Queue, review and profile UI | discovery_ui | Review | Renderer interaction tests and native rendered smoke passed |
 | Integration, review and branch handoff | root | Review | Typecheck, lint, full tests, isolated build and diff review passed |
 
-All agents share the feature branch with explicit file ownership. Local commits are coordinated by root. No merge or remote push is authorized by this work item.
+All agents shared the feature branch with explicit file ownership. Local commits were coordinated by root. The original implementation scope stopped before merge/push; the owner's subsequent explicit instruction authorized those steps.
 
 ## TDD evidence
 
@@ -94,4 +94,16 @@ Browser plugin was unavailable. The Playwright connector also failed because its
 - Review-stage requests, results and checkpoints contain URL metadata; they do not contain copied session cookies or API credentials. The existing streaming, integrity and public-address checks remain active.
 - The original untracked `gallery-import-konzept.md` was preserved. The implementation follows the current code and the later agreed scope, rather than adding its proposed external queue/database stack.
 
-All implementation commits are local to `feat/gallery-import-queue`. No merge or push was performed.
+## Authorized main integration
+
+The owner explicitly authorized merge, commit and push after reviewing the initial feature handoff. Integration incorporates `main` at `354d127` and preserves its data-safety work.
+
+- Resolved the `job-host.ts` conflict by registering discovery through the new `workspaceHandlers` helper while retaining safe scheduler logging and recovery reports. Discovery keeps its existing concurrency/pause configuration.
+- Verified the automatic merge of pre-migration backups, atomic asset/workflow changes, safe diagnostics, recovery handling and the new crawl repository wiring.
+- Extended migration 0019's upgrade test to open the backup read-only, verify its integrity, confirm it precedes the crawl table, and check the original queued download job survives in both backup and upgraded database.
+- Updated the existing backup test to compare the migrated database against the shipped journal rather than a fixed count of 19 migrations.
+- Combined full suite: **4,594 tests passed**, one pre-existing conditional E2E seed test skipped. Counts: contracts 310, media 149, core 965, jobs 129, providers 252, storage 220, persistence 443, desktop 2,126.
+- Combined typecheck and lint passed (zero lint errors; rule warnings remain), production dependency audit reported zero known vulnerabilities, and main/preload/renderer/media-worker production bundles built in a temporary directory.
+- Repeated the native Electron smoke with three independent pages and delayed URL attributes: passed.
+
+The merge history and remote `main` identify the final integration commits; no force push or history rewrite is part of this integration.

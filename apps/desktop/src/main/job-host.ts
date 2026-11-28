@@ -12,11 +12,15 @@ import {
   createAnalyzeFileHandler,
   createFileDownloadHandler,
   createImageGenerateHandler,
+  errorLogLine,
   reconcileGenerations,
   settleGenerationOfJob,
+  writeLine,
   type GenerationImageSource,
   type ImageProviderDirectory,
   type JobControl,
+  type JobHandler,
+  type LineLog,
   type ModelImageSource,
   type RemoteFileSource,
   type SiteAccess,
@@ -24,9 +28,17 @@ import {
   type WorkspaceManager,
   type WorkspaceSession,
 } from '@assetforge/core';
-import { createScheduler, DEFAULT_LIMITS, DEFAULT_TOTALS, type PauseGate, type Scheduler } from '@assetforge/jobs';
+import {
+  createScheduler,
+  DEFAULT_LIMITS,
+  DEFAULT_TOTALS,
+  type PauseGate,
+  type RecoveredJobs,
+  type Scheduler,
+} from '@assetforge/jobs';
 import type { ChangeFeed } from './change-feed.js';
 import { createSiteDiscoveryHandler, type SiteDiscoveryRuntime } from './site-discovery.js';
+import { consoleLog, jobRecoveryLine, schedulerLogLine, type JobRecoveryCounts } from './main-log.js';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
@@ -120,6 +132,11 @@ export interface JobHostDependencies {
    * lane, anything else keeps it. Without it every lane runs the class limit.
    */
   laneLimit?: (resourceClass: ResourceClass, lane: string | null) => number | undefined;
+  /**
+   * Takes the lines of the host and its schedulers: fixed texts, ids, counts and safe error descriptions only. The
+   * main console without it.
+   */
+  log?: LineLog;
 }
 
 /** The resource class of the analysis queue. */
@@ -164,8 +181,13 @@ class JobHostRunner {
   // Opening and closing run one after the other, so a stop never overlaps the start of the next scheduler.
   private lifecycle: Promise<void> = Promise.resolve();
 
+  /** Where the host and its schedulers write their lines. */
+  private readonly log: LineLog;
+
   /** @param dependencies what the schedulers run with */
-  constructor(private readonly dependencies: JobHostDependencies) {}
+  constructor(private readonly dependencies: JobHostDependencies) {
+    this.log = dependencies.log ?? consoleLog;
+  }
 
   /** Tells the feed that jobs changed. */
   changed(): void {
@@ -241,7 +263,7 @@ class JobHostRunner {
       try {
         hasEnded = this.resumeOne(resourceClass, lane) || hasEnded;
       } catch (cause) {
-        console.error('The job pause could not be ended', cause);
+        writeLine(this.log, errorLogLine('The job pause could not be ended', {}, cause));
       }
     }
     if (hasEnded) this.changed();
@@ -269,7 +291,9 @@ class JobHostRunner {
    * @returns when it ended
    */
   private serial(step: () => Promise<void>): Promise<void> {
-    const next = this.lifecycle.then(step).catch((error: unknown) => console.error('The job scheduler failed', error));
+    const next = this.lifecycle
+      .then(step)
+      .catch((error: unknown) => writeLine(this.log, errorLogLine('The job scheduler failed', {}, error)));
     this.lifecycle = next;
     return next;
   }
@@ -286,10 +310,32 @@ class JobHostRunner {
     if (this.scheduler !== null || manager.current() === null) return;
     // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
     const session = await manager.read(async (current) => current);
-    await this.prepareJobs(session);
-    const created = createWorkspaceScheduler(this.dependencies, session);
+    const counts: JobRecoveryCounts = { released: 0, retried: 0, failed: 0, ...(await this.prepareJobs(session)) };
+    // The recovery of the start adds to the line of this open; a later one (after a failed listing) gets its own.
+    const recovery = { duringStart: true };
+    const onRecovered = (recovered: RecoveredJobs): void => {
+      if (recovery.duringStart) addRecovered(counts, recovered);
+      else this.writeRecovery(session, { ...recovered, unroutedAssigned: 0, generationsEnded: 0 });
+    };
+    const created = createWorkspaceScheduler(this.dependencies, session, { log: this.log, onRecovered });
     this.scheduler = created;
-    await created.start();
+    try {
+      await created.start();
+    } finally {
+      recovery.duringStart = false;
+      this.writeRecovery(session, counts);
+    }
+  }
+
+  /**
+   * Writes the job recovery line of an open when it did something.
+   *
+   * @param session the open workspace
+   * @param counts what was done
+   */
+  private writeRecovery(session: WorkspaceSession, counts: JobRecoveryCounts): void {
+    const line = jobRecoveryLine(session.summary.id, counts);
+    if (line !== null) writeLine(this.log, line);
   }
 
   /**
@@ -297,24 +343,31 @@ class JobHostRunner {
    * logged and does not keep the scheduler from starting.
    *
    * @param session the open workspace
-   * @returns when both ran
+   * @returns how many jobs were assigned and how many generations were closed
    */
-  private async prepareJobs(session: WorkspaceSession): Promise<void> {
+  private async prepareJobs(
+    session: WorkspaceSession,
+  ): Promise<Pick<JobRecoveryCounts, 'unroutedAssigned' | 'generationsEnded'>> {
+    const workspace = session.summary.id;
+    const counts = { unroutedAssigned: 0, generationsEnded: 0 };
     // Before the scheduler claims, so every waiting job runs in the lane the list shows.
     // A failure here must not keep the scheduler from starting: the jobs that already have a lane still run.
     try {
       const entry = await this.dependencies.firstEntry();
-      if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) this.changed();
-    } catch {
-      console.error('Jobs without a provider could not be assigned');
+      if (entry !== null) counts.unroutedAssigned = await assignUnroutedJobs(session, entry);
+      if (counts.unroutedAssigned > 0) this.changed();
+    } catch (error) {
+      writeLine(this.log, errorLogLine('Jobs without a provider could not be assigned', { workspace }, error));
     }
     // Before every start, never after: a pending generation whose job already ended is closed. A failure
     // leaves it pending until the next open, and the jobs still run.
     try {
-      if ((await reconcileGenerations(session)) > 0) this.changed();
-    } catch {
-      console.error('Pending generations could not be reconciled');
+      counts.generationsEnded = await reconcileGenerations(session);
+      if (counts.generationsEnded > 0) this.changed();
+    } catch (error) {
+      writeLine(this.log, errorLogLine('Pending generations could not be reconciled', { workspace }, error));
     }
+    return counts;
   }
 
   /**
@@ -360,42 +413,80 @@ class JobHostRunner {
 }
 
 /**
- * Creates the scheduler of one open workspace with the handlers of the three job types.
+ * Adds the counts of a scheduler recovery to the counts of an open.
+ *
+ * @param counts the counts of the open, changed in place
+ * @param recovered what the scheduler recovered
+ */
+function addRecovered(counts: JobRecoveryCounts, recovered: RecoveredJobs): void {
+  counts.released += recovered.released;
+  counts.retried += recovered.retried;
+  counts.failed += recovered.failed;
+}
+
+/** Where a scheduler reports its lines and its recoveries. */
+interface SchedulerReports {
+  /** Takes the scheduler's lines, made safe by `schedulerLogLine`. */
+  log: LineLog;
+  /** Takes the counts of each recovery that changed a row. */
+  onRecovered: (counts: RecoveredJobs) => void;
+}
+
+/**
+ * The handlers of one open workspace, including discovery when configured.
+ *
+ * @param dependencies what the handlers run with
+ * @param session the open workspace
+ * @returns the handlers by job type
+ */
+function workspaceHandlers(dependencies: JobHostDependencies, session: WorkspaceSession): Record<string, JobHandler> {
+  const { feed } = dependencies;
+  return {
+    ...(dependencies.discovery === undefined
+      ? {}
+      : { [SITE_CRAWL_JOB]: createSiteDiscoveryHandler(session, dependencies.discovery, dependencies.pause) }),
+    [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
+      session,
+      vision: dependencies.vision,
+      images: dependencies.images,
+      provider: dependencies.provider,
+      effects: feed,
+    }),
+    [IMAGE_GENERATE_JOB]: createImageGenerateHandler({
+      session,
+      providers: dependencies.imageProviders,
+      images: dependencies.generationImages,
+      effects: feed,
+    }),
+    [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({
+      session,
+      remote: dependencies.remote,
+      effects: feed,
+      ...(dependencies.sites === undefined ? {} : { sites: dependencies.sites }),
+    }),
+  };
+}
+
+/**
+ * Creates the scheduler of one open workspace with its configured job handlers.
  *
  * @param dependencies what the scheduler runs with
  * @param session the open workspace
+ * @param reports where it reports its lines and recoveries
  * @returns the scheduler, not yet started
  */
-function createWorkspaceScheduler(dependencies: JobHostDependencies, session: WorkspaceSession): Scheduler {
+function createWorkspaceScheduler(
+  dependencies: JobHostDependencies,
+  session: WorkspaceSession,
+  reports: SchedulerReports,
+): Scheduler {
   const { feed, clock } = dependencies;
   return createScheduler({
+    // The scheduler's default writes the raw cause; its message and stack carry paths.
+    log: (message, cause) => writeLine(reports.log, schedulerLogLine(message, cause)),
+    onRecovered: reports.onRecovered,
     jobs: session.database.jobs,
-    handlers: {
-      ...(dependencies.discovery === undefined
-        ? {}
-        : {
-            [SITE_CRAWL_JOB]: createSiteDiscoveryHandler(session, dependencies.discovery, dependencies.pause),
-          }),
-      [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
-        session,
-        vision: dependencies.vision,
-        images: dependencies.images,
-        provider: dependencies.provider,
-        effects: feed,
-      }),
-      [IMAGE_GENERATE_JOB]: createImageGenerateHandler({
-        session,
-        providers: dependencies.imageProviders,
-        images: dependencies.generationImages,
-        effects: feed,
-      }),
-      [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({
-        session,
-        remote: dependencies.remote,
-        effects: feed,
-        ...(dependencies.sites === undefined ? {} : { sites: dependencies.sites }),
-      }),
-    },
+    handlers: workspaceHandlers(dependencies, session),
     limits: dependencies.limits ?? DEFAULT_LIMITS,
     totals: { ...(dependencies.totals ?? DEFAULT_TOTALS), ...(dependencies.discovery === undefined ? {} : { cpu: 1 }) },
     // A cancel of several rows at once names no job.

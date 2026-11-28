@@ -11,15 +11,12 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 ## Correctness and robustness
 
-- A file move whose commit fails leaves the file row pointing at the old path until the workspace is opened again.
 - Reads are not ordered against `close`.
 - File names are truncated by code points, so long non-ASCII names can exceed a 255-byte limit (ext4, Samba).
 - The same folder reached through a drive letter and a UNC path is reported as `workspace_duplicate`.
 - `EPERM` from a locked file is reported as `storage_access_denied`.
-- Non-domain import errors are not logged anywhere; the recovery results (imports and file moves) are not logged either.
-- Pre-migration database backup; migrations path for the packaged app.
+- Migrations path for the packaged app.
 - Hashing moves off the main event loop once jobs exist.
-- `createAsset` inserts the asset and then starts its default workflow; the two are not atomic, so a failure in between leaves an asset without the workflow of its type.
 - A built-in template whose version row is missing is only repaired the next time the workspace is opened.
 - Preview requests are not cancelled when a tile scrolls away; that needs a cancel signal from the renderer.
 - The session failure memory of the preview service also remembers worker timeouts and crashes (the pool reports every failure as the same `none`/`null`); it now keeps at most `MAX_REMEMBERED_FAILURES` (10 000) keys per memory, the oldest forgotten first.
@@ -432,6 +429,22 @@ Not covered by any automated check: the real windows. The hidden page window, th
 - Generation studio: the per-source form draft is read only when the studio is mounted while the session still keeps the form; since a raise no longer remounts it is practically unused. Drop it or keep the form after a real close (needs a decision).
 - Generation studio: scroll positions inside the studio and the look of the re-show on a raise (`close()` then `showModal()`) are tested only in jsdom; needs a manual check.
 - `analysis:enqueue` without `force` still counts a file that is analysed and also queued as `alreadyAnalysed`, while the preview counts it as queued; making them agree needs `queued` on `AnalysisTargetEntry`.
+
+## Found while building the data safety package (2026-11-28)
+
+- Database backup: an existing database file without a `__drizzle_migrations` table (a 0-byte file left by an interrupted first open) gets a useless but harmless backup of an empty database.
+- Database backup: there is no free-space check before the backup; on a nearly full disk the open is refused cleanly, but nothing tells the owner how much space is needed.
+- Database backup: `workspace:remove` leaves the database directory and therefore its backups; whether removal deletes them is not decided.
+- Database backup: a failed migration surfaces as `internal_error` with no hint that a backup exists; a restore path (UI or a documented manual step) does not exist.
+- Database backup: a backup is reused when one with the same applied count exists; if an older app version wrote to the database between two failed opens, the reused backup is older than the data.
+- The immediate resolve after a failed move commit retries once without a wait; an error that lasts a moment (`SQLITE_BUSY` beyond the busy timeout) still leaves the row for the next open.
+- `relocateFile` does not resolve an open move row of the file before it begins a new one, unlike restore and purge; a row left by a commit and a resolve that both failed makes the next relocate fail with "already being moved" until the workspace is opened again.
+- `commitMove` reports a failed commit whose journal row is already gone as a failure; unreachable while a commit is one transaction.
+- Logging: lines go only to the console; a packaged Windows app has no visible console. A bounded log file in `userData` needs a decision and a rotation rule.
+- Logging: a startup failure writes only the safe description, so its stack is lost in development too (a development-only switch could be considered).
+- Logging: scheduler messages embed the job id, type or class in the event text instead of checked fields; the values are code constants or UUIDs today. The field value rule in `log-line.ts` is a shape check, not a filter for names or hosts.
+- Logging: the import of a generation result is logged as operation `import`, not as a generation with its id.
+- Possibly flaky: `packages/storage`, "fails the stream past the total time" failed once under full load and passed on the rerun.
 
 ## Not covered by any automated check
 

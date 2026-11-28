@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -17,7 +17,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test('adds durable crawl storage to an existing workspace without changing its queued jobs', async () => {
+test('backs up an existing workspace before adding crawl storage and preserves its queued jobs', async () => {
   const folder = join(dir, 'legacy-migrations');
   await mkdir(join(folder, 'meta'), { recursive: true });
   const journal = JSON.parse(await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')) as {
@@ -56,6 +56,20 @@ test('adds durable crawl storage to an existing workspace without changing its q
     expect(await upgraded.siteCrawls.list({ limit: 20, offset: 0 })).toEqual({ items: [], total: 0 });
   } finally {
     await upgraded.close();
+  }
+  const backups = (await readdir(dir)).filter((name) => name.startsWith('workspace.db.backup-'));
+  expect(backups).toHaveLength(1);
+  const backup = new Database(join(dir, backups[0]!), { readonly: true });
+  try {
+    expect(backup.pragma('integrity_check', { simple: true })).toBe('ok');
+    expect(backup.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'site_crawl'").all()).toEqual(
+      [],
+    );
+    expect(backup.prepare('SELECT id, type, status FROM job').all()).toEqual([
+      { id: ID, type: 'file.download', status: 'queued' },
+    ]);
+  } finally {
+    backup.close();
   }
   const sqlite = new Database(path);
   try {

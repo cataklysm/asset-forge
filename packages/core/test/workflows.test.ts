@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BUILT_IN_WORKFLOW_TEMPLATES,
   InvalidOperationError,
@@ -65,6 +65,64 @@ describe('starting workflows', () => {
     ctx.db.assetTypes.setDefaultWorkflowTemplate('prop', null);
     const asset = await createAsset(ctx.session, { name: 'Crate', typeId: ctx.typeId('prop') });
     expect(await getWorkflow(ctx.session, asset.id)).toBeNull();
+  });
+
+  it('an asset whose workflow cannot be written is not created either', async () => {
+    const ctx = await setup();
+    vi.spyOn(ctx.db.assetWorkflows, 'insert').mockRejectedValueOnce(new Error('disk I/O error'));
+
+    await expect(createAsset(ctx.session, { name: 'Hero', typeId: ctx.typeId('character') })).rejects.toThrow(
+      'disk I/O error',
+    );
+
+    expect(ctx.db.assets.rows.size).toBe(0);
+    expect(ctx.db.assetWorkflows.workflows.size).toBe(0);
+    expect(ctx.db.assetWorkflows.steps.size).toBe(0);
+  });
+
+  it('an asset whose default template has no version is not created', async () => {
+    const ctx = await setup();
+    vi.spyOn(ctx.db.workflowTemplates, 'latestVersion').mockResolvedValueOnce(null);
+
+    await expect(createAsset(ctx.session, { name: 'Hero', typeId: ctx.typeId('character') })).rejects.toBeInstanceOf(
+      InvalidOperationError,
+    );
+
+    expect(ctx.db.assets.rows.size).toBe(0);
+    expect(ctx.db.assetWorkflows.workflows.size).toBe(0);
+  });
+
+  it('the fake writes the asset with its workflow as one, keeping nothing when a step row is refused', async () => {
+    const ctx = await setup();
+    const { asset } = await character(ctx);
+    const { templateVersionId } = ctx.db.assetWorkflows.workflows.get(asset.id)!;
+    const taken = [...ctx.db.assetWorkflows.steps.values()][0]!;
+    const row = { id: UNKNOWN_ID, assetId: UNKNOWN_ID, templateVersionId, createdAt: 'x' };
+    const second = { ...asset, id: UNKNOWN_ID, name: 'Second' };
+
+    await expect(
+      ctx.db.assets.insertWithWorkflow(second, {
+        workflow: row,
+        steps: [{ id: taken.id, stepDefinitionId: taken.stepDefinitionId, updatedAt: 'x' }],
+      }),
+    ).rejects.toThrow(/UNIQUE/);
+
+    expect(ctx.db.assets.rows.has(UNKNOWN_ID)).toBe(false);
+    expect(ctx.db.assetWorkflows.workflows.has(UNKNOWN_ID)).toBe(false);
+  });
+
+  it('the fake refuses an asset id that exists before writing, keeping the first asset', async () => {
+    const ctx = await setup();
+    const { asset } = await character(ctx);
+    const { templateVersionId } = ctx.db.assetWorkflows.workflows.get(asset.id)!;
+    const row = { id: UNKNOWN_ID, assetId: asset.id, templateVersionId, createdAt: 'x' };
+
+    await expect(
+      ctx.db.assets.insertWithWorkflow({ ...asset, name: 'Again' }, { workflow: row, steps: [] }),
+    ).rejects.toThrow(/UNIQUE/);
+
+    expect(ctx.db.assets.rows.get(asset.id)).toEqual(asset);
+    expect(ctx.db.assetWorkflows.workflows.has(asset.id)).toBe(true);
   });
 
   it('can start one by naming a template', async () => {
