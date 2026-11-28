@@ -1,3 +1,4 @@
+/** How the loading of one page of a site crawl ended. */
 export type PageLoadResult =
   /**
    * Absolute or relative strings as found, per query name. `baseUrl` is the document's base URL as the page
@@ -14,10 +15,21 @@ export type PageLoadResult =
   | { ok: false; reason: 'left_site'; host: string }
   /** The main frame answered `status` (400 or more) and the waited-for query did not match. */
   | { ok: false; reason: 'http_error'; status: number }
+  /** The XPath of the query named `query` could not be evaluated. */
   | { ok: false; reason: 'invalid_xpath'; query: string };
 
-/** Reads pages of a site in a browser session of its profile. */
+/** Reads pages of a site in a browser session of its profile. Implemented outside core. */
 export interface PageLoader {
-  /** Loads `url`, waits until the query named `waitFor` matches, then answers every query. */
-  load(url: string, r: { queries: Record<string, string>; waitFor: string; signal: AbortSignal }): Promise<PageLoadResult>;
+  /**
+   * Loads `url`, waits until the query named `waitFor` matches, then answers every query.
+   *
+   * @param url the page
+   * @param options `queries` the XPath expressions by name, `waitFor` the name of the one to wait for, `signal`
+   *   cancels the load
+   * @returns the strings found per query, or why the page gave none
+   */
+  load(
+    url: string,
+    options: { queries: Record<string, string>; waitFor: string; signal: AbortSignal },
+  ): Promise<PageLoadResult>;
 }

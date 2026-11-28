@@ -123,6 +123,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
 - `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
 - The preview worker pool doc comments still say "none" for failed jobs.
+- Core ports split (2026-11-28, `packages/core/src/ports/`): the type names `StorageRef`, `GenerationFileRef`, `GenerationPromptRef` and `WorkspaceMeta` (and the field `NewGeneration.promptRef`) keep the short forms `Ref` and `Meta`, which the style file does not list as established; renaming them touches persistence, desktop and the core bodies. `GenerationRow` is a plain alias of the contracts type `Generation` and could go. `RemoteFileError` takes `retryAfterMs` as a positional parameter beside an options object holding `cause` and `status`. The repository methods still take their arguments as inline object types (one per method) rather than named request types, so implementers repeat them. `JobRepository` documents `FILE_DOWNLOAD_JOB` and `analysisJobFields`/`downloadJobFields` behaviour, so the persistence port knows two job types by name.
 
 ## Tooling and tests
 
