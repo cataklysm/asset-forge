@@ -1,24 +1,21 @@
-import {
-  WORKSPACE_FORMAT_VERSION,
-  type FileList,
-  type FileRecord,
-  type FileTarget,
-  type ImportProgress,
-  type ImportResult,
-  type WorkspaceManifest,
-  type WorkspaceSummary,
+import type {
+  FileList,
+  FileRecord,
+  FileTarget,
+  ImportProgress,
+  ImportResult,
+  WorkspaceSummary,
 } from '@assetforge/contracts';
-import { DirectoryNotEmptyError, NoWorkspaceOpenError, StorageUnreachableError, TrashFailedError } from './errors.js';
+import { DirectoryNotEmptyError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
 import { listFiles } from './asset-files.js';
 import { planMeasurement, probeMeasurement, storeMeasurement } from './measure-file.js';
-import { MANIFEST_PATH } from './paths.js';
 import type { FileQuery } from './ports/file-repositories.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
-import { importSources } from './workspace-import.js';
-import { holdsWorkspace, readManifest } from './workspace-manifest.js';
-import { openWorkspaceDatabase, rejectCopy, type OpenWorkspace } from './workspace-open.js';
+import { importSources, newImportProgress, requireTargetAsset, type ImportSourcesOptions } from './workspace-import.js';
+import { holdsWorkspace, newManifest, readManifest, writeManifest } from './workspace-manifest.js';
+import { openWorkspaceDatabase, rejectCopy, requireReachable, type OpenWorkspace } from './workspace-open.js';
 
 /**
  * Lifecycle and mutating operations (`create`, `open`, `close`, `remove`, `importFiles`,
@@ -32,24 +29,54 @@ export class WorkspaceManager {
   /** The live progress of the running `importFiles`; set from the start of the work until it settles. */
   private importProgress_: ImportProgress | null = null;
 
+  /**
+   * @param host the host services the workspaces are built on
+   */
   constructor(private readonly host: WorkspaceHost) {}
 
+  /**
+   * The known workspaces. Does not queue.
+   *
+   * @returns the registry entries
+   */
   list(): Promise<WorkspaceSummary[]> {
     return this.host.registry.list();
   }
 
+  /**
+   * The open workspace. Does not queue.
+   *
+   * @returns its registry entry; null when none is open
+   */
   current(): WorkspaceSummary | null {
     return this.open_?.summary ?? null;
   }
 
+  /**
+   * Creates a workspace in an empty or missing folder and opens it.
+   *
+   * @param input the workspace name and the folder
+   * @returns the opened workspace
+   */
   create(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
     return this.queue.run(() => this.doCreate(input));
   }
 
+  /**
+   * Opens the workspace in a folder; the open one is closed first.
+   *
+   * @param input the folder
+   * @returns the opened workspace
+   */
   open(input: { rootPath: string }): Promise<WorkspaceSummary> {
     return this.queue.run(() => this.doOpen(input));
   }
 
+  /**
+   * Closes the open workspace; no-op when none is open.
+   *
+   * @returns resolves once it is closed
+   */
   close(): Promise<void> {
     return this.queue.run(() => this.doClose());
   }
@@ -58,6 +85,9 @@ export class WorkspaceManager {
    * Forgets a workspace: its registry entry and its local database. With `trashFolder` the
    * workspace folder goes to the operating system's trash first, so a failure there leaves
    * everything untouched. A folder that no longer holds this workspace is never trashed.
+   *
+   * @param input the workspace id and whether its folder goes to the trash
+   * @returns whether the folder was trashed
    */
   remove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
     return this.queue.run(() => this.doRemove(input));
@@ -66,23 +96,33 @@ export class WorkspaceManager {
   /**
    * Imports into the inbox, or with `target` into that asset (which must exist before anything is imported).
    * With `unpackArchives` every `.zip` source is unpacked into its entries instead of imported as a file.
+   *
+   * @param sourcePaths the absolute paths of the sources
+   * @param target the asset and role to import into; null for the inbox
+   * @param options whether archives are unpacked
+   * @returns one result per source, or per archive entry for an unpacked archive
    */
   importFiles(
     sourcePaths: string[],
     target: FileTarget | null = null,
-    options: { unpackArchives?: boolean } = {},
+    options: ImportSourcesOptions = {},
   ): Promise<ImportResult[]> {
     return this.queue.run(() => this.doImportFiles(sourcePaths, target, options));
   }
 
-  /** A copy of the running import's progress, or null when none runs. Does not queue. */
+  /**
+   * The running import's progress. Does not queue.
+   *
+   * @returns a copy of it, or null when none runs
+   */
   importProgress(): ImportProgress | null {
     return this.importProgress_ === null ? null : { ...this.importProgress_ };
   }
 
   /**
    * Marks the running import to stop after the item in progress; what is imported stays. Does not queue.
-   * False when no import runs.
+   *
+   * @returns false when no import runs
    */
   cancelImport(): boolean {
     if (this.importProgress_ === null) return false;
@@ -90,14 +130,23 @@ export class WorkspaceManager {
     return true;
   }
 
-  listFiles(q: FileQuery): Promise<FileList> {
-    return this.read((s) => listFiles(s, q));
+  /**
+   * One page of files of the open workspace. Does not queue.
+   *
+   * @param query the filter and the page
+   * @returns the page
+   */
+  listFiles(query: FileQuery): Promise<FileList> {
+    return this.read((session) => listFiles(session, query));
   }
 
   /**
    * Measures a file like `measureFile`, but reads and probes outside the queue, so a slow probe never holds up
    * queued operations; only storing the result is queued. When the workspace that was read is no longer the open
    * one by then, nothing is written and the record as read is answered.
+   *
+   * @param fileId the file
+   * @returns the file record, with the measured size when it was stored
    */
   async measureFile(fileId: string): Promise<FileRecord> {
     const session = this.session();
@@ -111,16 +160,31 @@ export class WorkspaceManager {
     });
   }
 
-  /** Runs `fn` with the open workspace's session, without waiting for queued operations. */
-  async read<T>(fn: (session: WorkspaceSession) => Promise<T>): Promise<T> {
-    return fn(this.session());
+  /**
+   * Runs `work` with the open workspace's session, without waiting for queued operations.
+   *
+   * @param work the use case
+   * @returns what `work` resolves to
+   */
+  async read<T>(work: (session: WorkspaceSession) => Promise<T>): Promise<T> {
+    return work(this.session());
   }
 
-  /** Runs `fn` with the open workspace's session once every earlier queued operation has settled. */
-  exclusive<T>(fn: (session: WorkspaceSession) => Promise<T>): Promise<T> {
-    return this.queue.run(() => fn(this.session()));
+  /**
+   * Runs `work` with the open workspace's session once every earlier queued operation has settled.
+   *
+   * @param work the use case
+   * @returns what `work` resolves to
+   */
+  exclusive<T>(work: (session: WorkspaceSession) => Promise<T>): Promise<T> {
+    return this.queue.run(() => work(this.session()));
   }
 
+  /**
+   * The session handed to use cases.
+   *
+   * @returns the session of the open workspace; throws `NoWorkspaceOpenError` when none is open
+   */
   private session(): WorkspaceSession {
     const { summary, storage, storageId, database } = this.requireOpen();
     return {
@@ -135,37 +199,44 @@ export class WorkspaceManager {
     };
   }
 
+  /**
+   * Writes the layout and the manifest of a new workspace, then opens it.
+   *
+   * @param input the workspace name and the folder
+   * @returns the opened workspace
+   */
   private async doCreate(input: { name: string; rootPath: string }): Promise<WorkspaceSummary> {
     const storage = this.host.createStorage(input.rootPath);
-    if (!(await storage.isReachable())) {
-      throw new StorageUnreachableError('Storage is not reachable');
-    }
+    await requireReachable(storage);
     if (!(await storage.isEmptyOrMissing())) {
       throw new DirectoryNotEmptyError('Directory is not empty');
     }
     await storage.ensureLayout();
-    const manifest: WorkspaceManifest = {
-      id: this.host.newId(),
-      formatVersion: WORKSPACE_FORMAT_VERSION,
-      name: input.name,
-      createdAt: this.host.now().toISOString(),
-    };
-    await storage.writeText(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+    await writeManifest(storage, newManifest(this.host, input.name));
     return this.doOpen({ rootPath: input.rootPath });
   }
 
+  /**
+   * Closes the open workspace, then opens the one in the folder.
+   *
+   * @param input the folder
+   * @returns the opened workspace
+   */
   private async doOpen(input: { rootPath: string }): Promise<WorkspaceSummary> {
     await this.doClose();
     const storage = this.host.createStorage(input.rootPath);
-    if (!(await storage.isReachable())) {
-      throw new StorageUnreachableError('Storage is not reachable');
-    }
+    await requireReachable(storage);
     const manifest = await readManifest(storage);
     await rejectCopy(this.host, manifest.id, input.rootPath);
     this.open_ = await openWorkspaceDatabase(this.host, storage, manifest, input.rootPath);
     return this.open_.summary;
   }
 
+  /**
+   * Closes the open workspace; no-op when none is open.
+   *
+   * @returns resolves once its database is closed
+   */
   private async doClose(): Promise<void> {
     const open = this.open_;
     if (!open) return;
@@ -173,35 +244,70 @@ export class WorkspaceManager {
     await open.database.close();
   }
 
+  /**
+   * Forgets a workspace, closing it first when it is the open one.
+   *
+   * @param input the workspace id and whether its folder goes to the trash
+   * @returns whether the folder was trashed
+   */
   private async doRemove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
     const entry = await this.host.registry.get(input.id);
     if (entry === null) return { folderTrashed: false };
     if (this.open_?.summary.id === input.id) await this.doClose();
 
-    let folderTrashed = false;
-    if (input.trashFolder && (await holdsWorkspace(this.host, entry.rootPath, input.id))) {
-      try {
-        await this.host.moveToTrash(entry.rootPath);
-      } catch (cause) {
-        throw new TrashFailedError('The workspace folder could not be moved to the trash', { cause });
-      }
-      folderTrashed = true;
-    }
+    const folderTrashed = input.trashFolder && (await this.trashFolder(entry.rootPath, input.id));
     await this.host.deleteDatabase(input.id);
     await this.host.registry.remove(input.id);
     return { folderTrashed };
   }
 
+  /**
+   * Moves a workspace folder to the operating system's trash, but only while it still holds this workspace.
+   *
+   * @param rootPath the folder
+   * @param id the workspace id
+   * @returns true when the folder was trashed, false when it no longer holds the workspace
+   * @throws `TrashFailedError` when the move fails
+   */
+  private async trashFolder(rootPath: string, id: string): Promise<boolean> {
+    if (!(await holdsWorkspace(this.host, rootPath, id))) return false;
+    try {
+      await this.host.moveToTrash(rootPath);
+    } catch (cause) {
+      throw new TrashFailedError('The workspace folder could not be moved to the trash', { cause });
+    }
+    return true;
+  }
+
+  /**
+   * Runs an import and keeps its live progress until it settles.
+   *
+   * @param sourcePaths the absolute paths of the sources
+   * @param target the asset and role to import into; null for the inbox
+   * @param options whether archives are unpacked
+   * @returns the results of the import
+   */
   private async doImportFiles(
     sourcePaths: string[],
     target: FileTarget | null,
-    options: { unpackArchives?: boolean },
+    options: ImportSourcesOptions,
   ): Promise<ImportResult[]> {
-    return importSources(this.host, this.session(), sourcePaths, target, options, (progress) => {
-      this.importProgress_ = progress;
-    });
+    const session = this.session();
+    await requireTargetAsset(session, target);
+    const progress = newImportProgress(sourcePaths.length);
+    this.importProgress_ = progress;
+    try {
+      return await importSources(this.host, session, sourcePaths, target, options, progress);
+    } finally {
+      this.importProgress_ = null;
+    }
   }
 
+  /**
+   * The open workspace.
+   *
+   * @returns it; throws `NoWorkspaceOpenError` when none is open
+   */
   private requireOpen(): OpenWorkspace {
     if (!this.open_) throw new NoWorkspaceOpenError('No workspace is open');
     return this.open_;
