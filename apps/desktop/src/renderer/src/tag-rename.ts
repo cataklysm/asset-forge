@@ -3,8 +3,11 @@ import type { FileSelection } from './selection';
 
 /** A finished rename or merge: the tag `from` is now `name`, spelled `displayName`. */
 export interface TagRename {
+  /** The normalised name before the rename. */
   from: string;
+  /** The normalised name after it. */
   name: string;
+  /** The display name the kept tag carries. */
   displayName: string;
 }
 
@@ -12,6 +15,10 @@ export interface TagRename {
  * `from` becomes the new tag; an entry already named `name` gets the display name; two entries
  * collapse to one at the first position, manual when either was manual. The same array when
  * nothing changes.
+ *
+ * @param tags the tags of one owner
+ * @param change the finished rename
+ * @returns the renamed tags, or `tags` itself when nothing changes
  */
 export function renameInTags(tags: readonly TagAssignment[], change: TagRename): readonly TagAssignment[] {
   const touched = (tag: TagAssignment) => tag.name === change.from || tag.name === change.name;
@@ -28,26 +35,44 @@ export function renameInTags(tags: readonly TagAssignment[], change: TagRename):
   return tags.flatMap((tag, index) => (index === first ? [merged] : touched(tag) ? [] : [tag]));
 }
 
-/** The same record when its tags are unchanged. */
+/**
+ * Applies a rename to the tags of one file record.
+ *
+ * @param file the record
+ * @param change the finished rename
+ * @returns a copy with renamed tags, or the same record when its tags are unchanged
+ */
 export function renameInRecord(file: FileRecord, change: TagRename): FileRecord {
   const tags = renameInTags(file.tags, change);
   return tags === file.tags ? file : { ...file, tags: [...tags] };
 }
 
-/** The same selection when no record changes. */
-export function renameInSelection(sel: FileSelection, change: TagRename): FileSelection {
+/**
+ * Applies a rename to the records of a file selection.
+ *
+ * @param selection the selection
+ * @param change the finished rename
+ * @returns a copy with renamed records, or the same selection when no record changes
+ */
+export function renameInSelection(selection: FileSelection, change: TagRename): FileSelection {
   let selected: Map<string, FileRecord> | null = null;
-  for (const [id, record] of sel.selected) {
+  for (const [id, record] of selection.selected) {
     const next = renameInRecord(record, change);
     if (next === record) continue;
-    selected ??= new Map(sel.selected);
+    selected ??= new Map(selection.selected);
     // Replacing an existing key keeps its position in the map.
     selected.set(id, next);
   }
-  return selected === null ? sel : { ...sel, selected };
+  return selected === null ? selection : { ...selection, selected };
 }
 
-/** Filter names: `from` replaced by `name` in place, no duplicate. The same array when `from` is absent. */
+/**
+ * Filter names: `from` replaced by `name` in place, no duplicate. The same array when `from` is absent.
+ *
+ * @param names the tag names of a filter
+ * @param change the finished rename
+ * @returns the renamed names, or `names` itself when nothing changes
+ */
 export function renameInNames(names: readonly string[], change: TagRename): readonly string[] {
   if (!names.includes(change.from) || change.from === change.name) return names;
   const replaced = names.map((name) => (name === change.from ? change.name : name));

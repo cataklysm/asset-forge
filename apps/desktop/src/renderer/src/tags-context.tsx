@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { RenameTagDialog } from './components/RenameTagDialog';
 import type { TagRename } from './tag-rename';
 
+/** What `useTags` hands out: the rename signal and the opener of the shared rename dialog. */
 export interface TagsState {
   /** Raised after every successful rename or merge. */
   renameToken: number;
@@ -14,12 +15,27 @@ export interface TagsState {
   openRename: ((tag: { name: string; displayName: string }, onRenamed?: (change: TagRename) => void) => void) | null;
 }
 
+/** The state outside a provider: no dialog and no renames. */
 const INERT: TagsState = { renameToken: 0, lastRename: null, openRename: null };
 
+/** Carries the state of the nearest `TagsProvider`. */
 const TagsContext = createContext<TagsState>(INERT);
 
-/** Holds the one rename tag dialog of the workspace and announces every rename or merge. */
-export function TagsProvider({ children, onRenamed }: { children: ReactNode; onRenamed?(change: TagRename): void }) {
+/** The props of `TagsProvider`. */
+interface TagsProviderProps {
+  /** The part of the UI that may rename tags. */
+  children: ReactNode;
+  /** Called after every rename or merge, after the opener's own callback. */
+  onRenamed?(change: TagRename): void;
+}
+
+/**
+ * Holds the one rename tag dialog of the workspace and announces every rename or merge.
+ *
+ * @param props the children and the optional rename callback
+ * @returns the children with the context and the dialog
+ */
+export function TagsProvider({ children, onRenamed }: TagsProviderProps) {
   const [tag, setTag] = useState<{ name: string; displayName: string } | null>(null);
   const [renamed, setRenamed] = useState<{ token: number; last: TagRename | null }>({ token: 0, last: null });
   const onRenamedRef = useRef(onRenamed);
@@ -56,7 +72,11 @@ export function TagsProvider({ children, onRenamed }: { children: ReactNode; onR
   );
 }
 
-/** The rename state of the surrounding `TagsProvider`; outside one no dialog and no renames. */
+/**
+ * The rename state of the surrounding `TagsProvider`; outside one no dialog and no renames.
+ *
+ * @returns the state of the nearest provider
+ */
 export function useTags(): TagsState {
   return useContext(TagsContext);
 }
@@ -64,6 +84,8 @@ export function useTags(): TagsState {
 /**
  * Calls `apply` once for every rename that happens while the caller is mounted; a rename from
  * before the mount is not applied.
+ *
+ * @param apply called with each rename; the latest function is used
  */
 export function useRenamed(apply: (change: TagRename) => void): void {
   const { lastRename } = useTags();

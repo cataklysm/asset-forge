@@ -1,8 +1,14 @@
 import type { ErrorCode, IpcChannel, IpcRequest, IpcResponse } from '@assetforge/contracts';
 
+/** A failed IPC call, carrying the error code and message the main process forwarded. */
 export class ApiError extends Error {
+  /** The error code of the failed call. */
   readonly code: ErrorCode;
 
+  /**
+   * @param code the error code of the failed call
+   * @param message the forwarded message, safe to show
+   */
   constructor(code: ErrorCode, message: string) {
     super(message);
     this.name = 'ApiError';
@@ -10,9 +16,15 @@ export class ApiError extends Error {
   }
 }
 
+/** The listeners told about every call that fails with `storage_unreachable`. */
 const unreachableListeners = new Set<() => void>();
 
-/** Subscribes to every call that fails with `storage_unreachable`; returns the unsubscribe function. */
+/**
+ * Subscribes to every call that fails with `storage_unreachable`.
+ *
+ * @param listener called once per such failure
+ * @returns the unsubscribe function
+ */
 export function onStorageUnreachable(listener: () => void): () => void {
   unreachableListeners.add(listener);
   return () => {
@@ -20,7 +32,14 @@ export function onStorageUnreachable(listener: () => void): () => void {
   };
 }
 
-/** Calls an IPC channel, unwrapping the result: failures (including a rejected invoke) throw `ApiError`. */
+/**
+ * Calls an IPC channel, unwrapping the result: failures (including a rejected invoke) throw `ApiError`.
+ *
+ * @param channel the IPC channel
+ * @param request the channel's request
+ * @returns resolves to the channel's answer
+ * @throws ApiError with the forwarded code, or `internal_error` when the invoke itself failed
+ */
 export async function call<C extends IpcChannel>(
   channel: C,
   request: IpcRequest<C>,
@@ -38,6 +57,7 @@ export async function call<C extends IpcChannel>(
   return result.value;
 }
 
+/** The texts shown in place of the forwarded message for these codes. */
 const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   not_found: 'This item no longer exists.',
   directory_not_empty: 'The folder is not empty. Choose an empty folder for a new workspace.',
@@ -55,6 +75,12 @@ const ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
     'The folder could not be moved to the trash, so nothing was removed. Close programs that use it and try again.',
 };
 
+/**
+ * The text to show for a failure.
+ *
+ * @param error whatever was thrown
+ * @returns the fixed text of its code, else its message, else 'Unexpected error'
+ */
 export function describeError(error: unknown): string {
   if (error instanceof ApiError) return ERROR_MESSAGES[error.code] ?? error.message;
   return error instanceof Error ? error.message : 'Unexpected error';
