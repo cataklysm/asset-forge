@@ -1,23 +1,29 @@
-import { belongsToSite, FileDownloadPayloadSchema, type JobErrorCode, type JobResult } from '@assetforge/contracts';
+import {
+  FileDownloadPayloadSchema,
+  type FileDownloadPayload,
+  type FileTarget,
+  type ImportResult,
+  type JobErrorCode,
+  type JobResult,
+  type SiteFilter,
+} from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
+import { streamFailure } from './download-errors.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
+import { openRemote, siteLoginOf } from './download-open.js';
 import { SourceNotReadableError } from './errors.js';
 import { importStream, isRefusedImportName, type ImportContext } from './import-file.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
 import { fileKind } from './media-types.js';
-import {
-  RemoteFileError,
-  type RemoteFile,
-  type RemoteFileFailure,
-  type RemoteFileSource,
-  type RemoteOpenOptions,
-  type SiteAccess,
-} from './ports.js';
+import type { RemoteFile, RemoteFileSource, SiteAccess } from './ports.js';
 import type { WorkspaceSession } from './session.js';
-import { clampRetryAfterMs, DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
+import { DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
 
-export interface FileDownloadHandlerDeps {
+/** What the `file.download` job needs. */
+export interface FileDownloadHandlerDependencies {
+  /** The open workspace the file is imported into. */
   session: WorkspaceSession;
+  /** The plain network source. */
   remote: RemoteFileSource;
   /** Told where a downloaded file was added; never for one that was already present. */
   effects?: JobEffects;
@@ -25,64 +31,9 @@ export interface FileDownloadHandlerDeps {
   sites?: SiteAccess;
 }
 
-const FAILURE_CODES: Readonly<Record<RemoteFileFailure, JobErrorCode>> = {
-  challenge: 'download_browser_check',
-  unreachable: 'download_unreachable',
-  unavailable: 'download_unavailable',
-  throttled: 'download_throttled',
-  blocked: 'download_blocked',
-  not_found: 'download_not_found',
-  rejected: 'download_rejected',
-  address_refused: 'download_address_refused',
-  too_large: 'download_too_large',
-};
-
-/**
- * The job error code of a source failure. A refusal names its HTTP status where that tells the user what to do:
- * 401 means the login is missing or expired, 403 that the server will not hand the file to this request.
- *
- * @param error the failure of the remote source
- * @returns the code stored on the job
- */
-function codeOf(error: RemoteFileError): JobErrorCode {
-  if (error.failure === 'blocked' && error.status === 401) return 'download_unauthorized';
-  if (error.failure === 'blocked' && error.status === 403) return 'download_forbidden';
-  return FAILURE_CODES[error.failure];
-}
-
-/** The job error of a source failure; only a throttled one carries a wait, and always one. No cause: it could hold the URL. */
-function jobErrorOf(error: RemoteFileError): JobError {
-  const retryAfterMs = error.failure === 'throttled' ? clampRetryAfterMs(error.retryAfterMs) : null;
-  return new JobError(codeOf(error), { retryAfterMs });
-}
-
-/** The job error of whatever ended the source stream: a source failure keeps its code, anything else is internal. */
-function streamFailure(error: unknown): JobError {
-  return error instanceof RemoteFileError ? jobErrorOf(error) : new JobError('internal_error');
-}
-
-/**
- * Opens a site download: through the profile's browser session when `viaSession` names one, else through the
- * plain remote source.
- *
- * @param remote the plain network source
- * @param viaSession the site access with a session and the profile to use; null for the plain source
- * @param url the address of the file
- * @param signal aborts the request
- * @param options the per-hop headers of the profile's login
- * @returns the opened remote file
- */
-function openWith(
-  remote: RemoteFileSource,
-  viaSession: { sites: SiteAccess; profileId: string } | null,
-  url: string,
-  signal: AbortSignal,
-  options: RemoteOpenOptions,
-): Promise<RemoteFile> {
-  const open = viaSession?.sites.open;
-  return viaSession !== null && open !== undefined
-    ? open.call(viaSession.sites, viaSession.profileId, url, signal, options)
-    : remote.open(url, signal, options);
+/** The first error the source stream failed with; null while it failed with none. */
+interface StreamErrors {
+  first: unknown;
 }
 
 /**
@@ -91,192 +42,352 @@ function openWith(
  * With `skipDuplicates` a content that is already there is not stored again; the oldest such file takes the URL
  * as a further origin. Placing a new file in the target asset is best effort and leaves it in the inbox when it
  * fails. Nothing here logs the URL or puts it, a path or a cause message into an error.
+ *
+ * @param dependencies the workspace, the network source, and the optional effects and site logins
+ * @returns the job handler
  */
-export function createFileDownloadHandler(deps: FileDownloadHandlerDeps): JobHandler {
-  const s = deps.session;
-  const ctx: ImportContext = {
-    storage: s.storage,
-    storageId: s.storageId,
-    files: s.database.files,
-    sources: { open: () => Promise.reject(new SourceNotReadableError()) },
-    probe: s.imageProbe,
-    newId: () => s.newId(),
-    now: () => s.now(),
-  };
-
-  /** Records what the job produced. False only when the job is no longer running, which is not a failure. */
-  const setOutcome = (job: Job, fileId: string | null, result: JobResult | null) =>
-    s.database.jobs.setOutcome(job.id, { fileId, result, now: s.now().toISOString() });
-
-  /** Refuses when the storage reports too little free space for the reserve plus `length`. */
-  async function requireSpace(length: number): Promise<void> {
-    const free = await s.storage.freeBytes();
-    if (free !== null && free <= DOWNLOAD_FREE_SPACE_RESERVE + length) throw new JobError('download_no_space');
-  }
-
-  async function download(job: Job, signal: AbortSignal): Promise<void> {
-    const parsed = FileDownloadPayloadSchema.safeParse(job.payload);
-    if (!parsed.success) throw new JobError('internal_error');
-    const payload = parsed.data;
-    const { url, target, skipDuplicates } = payload;
-
-    // A site download goes out with its profile's login and keeps only what passes the profile's filter.
-    let openOptions: RemoteOpenOptions | undefined;
-    /** The profile whose browser session opens a v2 job's URL; null where no session exists, and for v1. */
-    let viaSession: { sites: SiteAccess; profileId: string } | null = null;
-    const filter = payload.v === 2 ? payload.filter : null;
-    // Whether the hop asked last went out without the login because it left the profile's site.
-    let lastHopOffSite = false;
-    if (payload.v === 2) {
-      const sites = deps.sites;
-      const profileId = payload.siteProfileId;
-      const profileSite = sites === undefined ? null : await sites.siteOf(profileId);
-      if (sites === undefined || profileSite === null) throw new JobError('download_profile_missing');
-      openOptions = {
-        headersFor: async (hopUrl) => {
-          const headers = await sites.headersFor(profileId, hopUrl);
-          lastHopOffSite = !belongsToSite(hopUrl, profileSite);
-          return headers;
-        },
-      };
-      if (sites.open !== undefined) viaSession = { sites, profileId };
-    }
-
-    const present = await s.database.fileOrigins.findCompleteFileByUrl(url);
-    if (present !== null) {
-      await setOutcome(job, present, 'already_present');
-      return;
-    }
-
-    await requireSpace(0);
-    signal.throwIfAborted();
-    let remote: RemoteFile;
-    try {
-      remote =
-        openOptions === undefined
-          ? await deps.remote.open(url, signal)
-          : await openWith(deps.remote, viaSession, url, signal, openOptions);
-    } catch (error) {
-      if (error instanceof RemoteFileError) {
-        // A refusal of a hop that went out without the login: the login was the likely miss, not the address.
-        if (error.failure === 'blocked' && lastHopOffSite) throw new JobError('download_login_not_sent');
-        throw jobErrorOf(error);
-      }
-      throw error;
-    }
-    // The stream is ours from here. Listen before any await: an adapter that destroys it with an error (cancel,
-    // lost connection) must never find it without a listener, which would be an uncaught error in the main process.
-    let streamError: unknown = null;
-    remote.stream.on('error', (error: unknown) => {
-      streamError ??= error;
-    });
-    const refuse = (code: JobErrorCode): never => {
-      remote.stream.destroy();
-      throw new JobError(code);
-    };
-    if (signal.aborted) {
-      remote.stream.destroy();
-      signal.throwIfAborted();
-    }
-    if (isWebPage(remote.contentType)) refuse('download_not_a_file');
-    const name = downloadFileName(remote);
-    if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse('download_type_refused');
-    if (filter !== null) {
-      // The kind wins over the size: it is known for certain, an announced length may be wrong.
-      const filtered: JobResult | null = !filter.kinds.includes(fileKind(name))
-        ? 'filtered_kind'
-        : remote.contentLength !== null && remote.contentLength < filter.minBytes
-          ? 'filtered_size'
-          : null;
-      if (filtered !== null) {
-        remote.stream.destroy();
-        await setOutcome(job, null, filtered);
-        return;
-      }
-    }
-    try {
-      await requireSpace(remote.contentLength ?? 0);
-    } catch (error) {
-      remote.stream.destroy();
-      throw error;
-    }
-    // A failure while the space was checked; `run` turns it into the abort when the signal fired.
-    const early = streamError ?? remote.stream.errored;
-    if (early != null || signal.aborted) {
-      remote.stream.destroy();
-      signal.throwIfAborted();
-      throw streamFailure(early);
-    }
-
-    // An unknown length is checked once the body is staged; the import then discards it and leaves no file row.
-    let filteredOut = false;
-    const minBytes = filter?.minBytes ?? 0;
-    const imported = await importStream(
-      ctx,
-      { sourcePath: '', entryName: null, name, stream: remote.stream },
-      {
-        origin: { id: s.newId(), url },
-        skipDuplicate: skipDuplicates,
-        discardOnFailure: true,
-        ...(minBytes > 0
-          ? {
-              keepStaged: ({ sizeBytes }: { sizeBytes: number }) => {
-                filteredOut = sizeBytes < minBytes;
-                return !filteredOut;
-              },
-            }
-          : {}),
-        onStreamError: (error) => {
-          streamError ??= error;
-        },
-      },
-    );
-    // On a cancel or a stop the failed import has already discarded what it wrote; `run` turns the failure below
-    // into the abort. A complete file is kept and recorded even then.
-    if (filteredOut && imported.file === null && imported.error === null) {
-      await setOutcome(job, null, 'filtered_size');
-      return;
-    }
-    const existing = imported.file === null && imported.error === null ? imported.duplicateOf[0] : undefined;
-    if (existing !== undefined) {
-      // A file already carrying this URL or 50 origins answers false; the job still points at it.
-      await s.database.fileOrigins.insert({ id: s.newId(), fileId: existing, url, createdAt: s.now().toISOString() });
-      await setOutcome(job, existing, 'already_present');
-      return;
-    }
-    const file = imported.file;
-    if (imported.error !== null || file === null || file.status !== 'complete') {
-      throw streamFailure(streamError);
-    }
-
-    // Nothing after this point fails the run: a later retry would keep a stale outcome.
-    await setOutcome(job, file.id, null);
-    let placedIn: string | null = null;
-    if (target !== null) {
-      try {
-        placedIn = (await relocateFile(s, file.id, target)).assetId;
-      } catch {
-        // Best effort: the file stays in the inbox.
-      }
-    }
-    reportEffect(deps.effects, (e) => e.fileAdded(placedIn));
-    // The file passed through the inbox, so an inbox page read meanwhile may still hold it.
-    if (placedIn !== null) reportEffect(deps.effects, (e) => e.fileAdded(null));
-  }
-
+export function createFileDownloadHandler(dependencies: FileDownloadHandlerDependencies): JobHandler {
+  const context = importContextOf(dependencies.session);
   return {
     resourceClass: 'io',
     onInterrupted: 'requeue',
-
-    async run(job: Job, signal: AbortSignal): Promise<void> {
-      try {
-        await download(job, signal);
-      } catch (error) {
-        if (signal.aborted) throw signal.reason;
-        if (error instanceof JobError) throw error;
-        // Unexpected: no cause, since its message could hold the URL and the scheduler logs a foreign error.
-        throw new JobError('internal_error');
-      }
+    run(job: Job, signal: AbortSignal): Promise<void> {
+      return runDownload(dependencies, context, job, signal);
     },
   };
+}
+
+/**
+ * The import context of downloads: the workspace's storage and files, and no source files, since a download hands
+ * its body as a stream.
+ *
+ * @param session the open workspace
+ * @returns the import context
+ */
+function importContextOf(session: WorkspaceSession): ImportContext {
+  return {
+    storage: session.storage,
+    storageId: session.storageId,
+    files: session.database.files,
+    sources: { open: () => Promise.reject(new SourceNotReadableError()) },
+    probe: session.imageProbe,
+    newId: () => session.newId(),
+    now: () => session.now(),
+  };
+}
+
+/**
+ * Runs one download and turns whatever it throws into what the scheduler expects.
+ *
+ * @param dependencies the handler's dependencies
+ * @param context the import context
+ * @param job the download job
+ * @param signal aborts the download
+ * @returns resolves once the job's outcome is recorded; rejects with the abort reason once `signal` aborted, else
+ *   with a `JobError`
+ */
+async function runDownload(
+  dependencies: FileDownloadHandlerDependencies,
+  context: ImportContext,
+  job: Job,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    await download(dependencies, context, job, signal);
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    if (error instanceof JobError) throw error;
+    // Unexpected: no cause, since its message could hold the URL and the scheduler logs a foreign error.
+    throw new JobError('internal_error');
+  }
+}
+
+/**
+ * The steps of one download: the site login, the check for a file that already has the URL, opening the URL,
+ * the checks of the answer, the import and the placement of the new file.
+ *
+ * @param dependencies the handler's dependencies
+ * @param context the import context
+ * @param job the download job
+ * @param signal aborts the download
+ * @returns resolves once the job's outcome is recorded
+ */
+async function download(
+  dependencies: FileDownloadHandlerDependencies,
+  context: ImportContext,
+  job: Job,
+  signal: AbortSignal,
+): Promise<void> {
+  const { session } = dependencies;
+  const payload = parsePayload(job);
+  // A site download goes out with its profile's login and keeps only what passes the profile's filter.
+  const login = payload.v === 2 ? await siteLoginOf(dependencies.sites, payload.siteProfileId) : null;
+  const filter = payload.v === 2 ? payload.filter : null;
+
+  const present = await session.database.fileOrigins.findCompleteFileByUrl(payload.url);
+  if (present !== null) {
+    await setOutcome(session, job, present, 'already_present');
+    return;
+  }
+
+  await requireSpace(session, 0);
+  signal.throwIfAborted();
+  const remote = await openRemote(dependencies.remote, login, payload.url, signal);
+  // The stream is ours from here. Listen before any await: an adapter that destroys it with an error (cancel,
+  // lost connection) must never find it without a listener, which would be an uncaught error in the main process.
+  const streamErrors = watchStreamErrors(remote);
+  if (signal.aborted) {
+    remote.stream.destroy();
+    signal.throwIfAborted();
+  }
+  const name = acceptedName(remote);
+  const filtered = filter === null ? null : filterResultOf(filter, name, remote.contentLength);
+  if (filtered !== null) {
+    remote.stream.destroy();
+    await setOutcome(session, job, null, filtered);
+    return;
+  }
+  await requireSpaceFor(session, remote);
+  throwIfFailedEarly(remote, streamErrors, signal);
+
+  const { imported, isFilteredOut } = await importDownload(context, session, remote, name, payload, filter, streamErrors);
+  await recordImport(dependencies, job, payload, imported, isFilteredOut, streamErrors);
+}
+
+/**
+ * The payload of a download job.
+ *
+ * @param job the download job
+ * @returns the parsed payload; throws `internal_error` for one that does not parse
+ */
+function parsePayload(job: Job): FileDownloadPayload {
+  const parsed = FileDownloadPayloadSchema.safeParse(job.payload);
+  if (!parsed.success) throw new JobError('internal_error');
+  return parsed.data;
+}
+
+/**
+ * Starts collecting the errors of the source stream.
+ *
+ * @param remote the opened file
+ * @returns the state that holds the first error
+ */
+function watchStreamErrors(remote: RemoteFile): StreamErrors {
+  const streamErrors: StreamErrors = { first: null };
+  remote.stream.on('error', (error: unknown) => {
+    streamErrors.first ??= error;
+  });
+  return streamErrors;
+}
+
+/**
+ * Ends the download with a job error, destroying its stream first.
+ *
+ * @param remote the opened file
+ * @param code the job error code
+ * @returns never; always throws the job error
+ */
+function refuse(remote: RemoteFile, code: JobErrorCode): never {
+  remote.stream.destroy();
+  throw new JobError(code);
+}
+
+/**
+ * The file name of the download, after the checks of what the answer is.
+ *
+ * @param remote the opened file
+ * @returns the file name; throws `download_not_a_file` for a web page and `download_type_refused` for a refused
+ *   type, after destroying the stream
+ */
+function acceptedName(remote: RemoteFile): string {
+  if (isWebPage(remote.contentType)) refuse(remote, 'download_not_a_file');
+  const name = downloadFileName(remote);
+  if (isRefusedImportName(downloadBaseName(remote)) || isRefusedImportName(name)) refuse(remote, 'download_type_refused');
+  return name;
+}
+
+/**
+ * What the profile's filter leaves out before the body is read. The kind wins over the size: it is known for
+ * certain, an announced length may be wrong.
+ *
+ * @param filter the filter of the site profile
+ * @param name the file name of the download
+ * @param contentLength the announced length; null when unknown
+ * @returns `filtered_kind`, `filtered_size`, or null when the download passes for now
+ */
+function filterResultOf(filter: SiteFilter, name: string, contentLength: number | null): JobResult | null {
+  if (!filter.kinds.includes(fileKind(name))) return 'filtered_kind';
+  if (contentLength !== null && contentLength < filter.minBytes) return 'filtered_size';
+  return null;
+}
+
+/**
+ * Refuses when the storage reports too little free space for the reserve plus `length`.
+ *
+ * @param session the open workspace
+ * @param length the bytes still to be written
+ * @returns resolves when there is room; throws `download_no_space` otherwise
+ */
+async function requireSpace(session: WorkspaceSession, length: number): Promise<void> {
+  const free = await session.storage.freeBytes();
+  if (free !== null && free <= DOWNLOAD_FREE_SPACE_RESERVE + length) throw new JobError('download_no_space');
+}
+
+/**
+ * Refuses when the storage has too little room for the announced length; destroys the stream then.
+ *
+ * @param session the open workspace
+ * @param remote the opened file
+ * @returns resolves when there is room; rejects with the failure of the check otherwise
+ */
+async function requireSpaceFor(session: WorkspaceSession, remote: RemoteFile): Promise<void> {
+  try {
+    await requireSpace(session, remote.contentLength ?? 0);
+  } catch (error) {
+    remote.stream.destroy();
+    throw error;
+  }
+}
+
+/**
+ * Ends the download when the stream failed or the job was aborted while the space was checked; `run` turns the
+ * failure into the abort when the signal fired.
+ *
+ * @param remote the opened file
+ * @param streamErrors the errors of the stream so far
+ * @param signal the job's abort signal
+ */
+function throwIfFailedEarly(remote: RemoteFile, streamErrors: StreamErrors, signal: AbortSignal): void {
+  const early = streamErrors.first ?? remote.stream.errored;
+  if (early == null && !signal.aborted) return;
+  remote.stream.destroy();
+  signal.throwIfAborted();
+  throw streamFailure(early);
+}
+
+/**
+ * Hands the body to the import steps. An unknown length is checked once the body is staged against the filter's
+ * minimum size; the import then discards it and leaves no file row.
+ *
+ * @param context the import context
+ * @param session the open workspace
+ * @param remote the opened file
+ * @param name the file name
+ * @param payload the job's payload
+ * @param filter the profile's filter; null for a plain download
+ * @param streamErrors collects the stream error the import reports
+ * @returns the import's result, and whether the minimum size left the body out
+ */
+async function importDownload(
+  context: ImportContext,
+  session: WorkspaceSession,
+  remote: RemoteFile,
+  name: string,
+  payload: FileDownloadPayload,
+  filter: SiteFilter | null,
+  streamErrors: StreamErrors,
+): Promise<{ imported: ImportResult; isFilteredOut: boolean }> {
+  let isFilteredOut = false;
+  const minBytes = filter?.minBytes ?? 0;
+  const imported = await importStream(
+    context,
+    { sourcePath: '', entryName: null, name, stream: remote.stream },
+    {
+      origin: { id: session.newId(), url: payload.url },
+      skipDuplicate: payload.skipDuplicates,
+      discardOnFailure: true,
+      ...(minBytes > 0
+        ? {
+            keepStaged: ({ sizeBytes }: { sizeBytes: number }) => {
+              isFilteredOut = sizeBytes < minBytes;
+              return !isFilteredOut;
+            },
+          }
+        : {}),
+      onStreamError: (error) => {
+        streamErrors.first ??= error;
+      },
+    },
+  );
+  return { imported, isFilteredOut };
+}
+
+/**
+ * Records what the import produced: a body left out by size, a duplicate that takes the URL as a further origin,
+ * or the new file, which is then placed in the target asset.
+ *
+ * @param dependencies the handler's dependencies
+ * @param job the download job
+ * @param payload the job's payload
+ * @param imported the import's result
+ * @param isFilteredOut whether the minimum size left the body out
+ * @param streamErrors the errors of the stream
+ * @returns resolves once the outcome is recorded; throws the stream's job error when no complete file came of it
+ */
+async function recordImport(
+  dependencies: FileDownloadHandlerDependencies,
+  job: Job,
+  payload: FileDownloadPayload,
+  imported: ImportResult,
+  isFilteredOut: boolean,
+  streamErrors: StreamErrors,
+): Promise<void> {
+  const { session } = dependencies;
+  // On a cancel or a stop the failed import has already discarded what it wrote; `run` turns the failure below
+  // into the abort. A complete file is kept and recorded even then.
+  const isWithoutFile = imported.file === null && imported.error === null;
+  if (isFilteredOut && isWithoutFile) {
+    await setOutcome(session, job, null, 'filtered_size');
+    return;
+  }
+  const existing = isWithoutFile ? imported.duplicateOf[0] : undefined;
+  if (existing !== undefined) {
+    // A file already carrying this URL or 50 origins answers false; the job still points at it.
+    await session.database.fileOrigins.insert({ id: session.newId(), fileId: existing, url: payload.url, createdAt: session.now().toISOString() });
+    await setOutcome(session, job, existing, 'already_present');
+    return;
+  }
+  const file = imported.file;
+  if (imported.error !== null || file === null || file.status !== 'complete') {
+    throw streamFailure(streamErrors.first);
+  }
+
+  // Nothing after this point fails the run: a later retry would keep a stale outcome.
+  await setOutcome(session, job, file.id, null);
+  await placeNewFile(dependencies, file.id, payload.target);
+}
+
+/**
+ * Moves a new file into the target asset, best effort, and reports where it was added.
+ *
+ * @param dependencies supplies the workspace and the effects
+ * @param fileId the new file
+ * @param target the asset and role; null leaves the file in the inbox
+ * @returns resolves once the effects are reported; never rejects
+ */
+async function placeNewFile(dependencies: FileDownloadHandlerDependencies, fileId: string, target: FileTarget | null): Promise<void> {
+  let placedIn: string | null = null;
+  if (target !== null) {
+    try {
+      placedIn = (await relocateFile(dependencies.session, fileId, target)).assetId;
+    } catch {
+      // Best effort: the file stays in the inbox.
+    }
+  }
+  reportEffect(dependencies.effects, (effects) => effects.fileAdded(placedIn));
+  // The file passed through the inbox, so an inbox page read meanwhile may still hold it.
+  if (placedIn !== null) reportEffect(dependencies.effects, (effects) => effects.fileAdded(null));
+}
+
+/**
+ * Records what the job produced. False only when the job is no longer running, which is not a failure.
+ *
+ * @param session the open workspace
+ * @param job the download job
+ * @param fileId the file the job points at; null for none
+ * @param result what it produced besides the file; null on an ordinary result
+ * @returns whether the job was still running
+ */
+function setOutcome(session: WorkspaceSession, job: Job, fileId: string | null, result: JobResult | null): Promise<boolean> {
+  return session.database.jobs.setOutcome(job.id, { fileId, result, now: session.now().toISOString() });
 }
