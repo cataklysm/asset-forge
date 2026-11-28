@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import { MAX_SETTLING_RUNS } from '../src/main/describe-controller.js';
 import { createHarness, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 
 const ids = {
@@ -141,6 +142,46 @@ describe('analysis:describe', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(mock.requests.filter((r) => r.path === '/api/chat')).toHaveLength(1);
     expect(await h.ok('analysis:describe', { requestId: ids.c, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({
+      ok: true,
+    });
+  });
+
+  it('answers busy once too many cancelled runs still settle', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked = 0;
+    await h.close();
+    h = await createHarness({
+      images: {
+        jpeg: async (path) => {
+          asked++;
+          await held;
+          return readFile(path);
+        },
+      },
+    });
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+
+    const requestIds = Array.from({ length: MAX_SETTLING_RUNS }, (_, i) => `${i}a2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e70`);
+    const cancelled: Promise<unknown>[] = [];
+    for (const requestId of requestIds) {
+      cancelled.push(h.ok('analysis:describe', { requestId, fileId: fileId!, model: MOCK_MODEL }));
+      await until(() => asked === cancelled.length);
+      await h.ok('analysis:cancelDescribe', { requestId });
+    }
+    expect(await h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL })).toEqual({
+      ok: false,
+      code: 'busy',
+    });
+    expect(asked).toBe(MAX_SETTLING_RUNS);
+
+    release();
+    for (const result of cancelled) expect(await result).toEqual({ ok: false, code: 'cancelled' });
+    await h.services.describe.cancelAll();
+    expect(await h.ok('analysis:describe', { requestId: ids.b, fileId: fileId!, model: MOCK_MODEL })).toMatchObject({
       ok: true,
     });
   });

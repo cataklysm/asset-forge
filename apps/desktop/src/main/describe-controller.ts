@@ -27,8 +27,9 @@ export interface DescribeRequest {
 /** Runs the Image2Prompt requests one at a time. */
 export interface DescribeController {
   /**
-   * `busy` while another request runs; `cancelled` once it was cancelled, and while a workspace
-   * lifecycle step is under way (between `block` and `unblock`). Rejects with `no_workspace_open`.
+   * `busy` while another request runs or `MAX_SETTLING_RUNS` cancelled runs still settle; `cancelled` once it
+   * was cancelled, and while a workspace lifecycle step is under way (between `block` and `unblock`). Rejects
+   * with `no_workspace_open`.
    *
    * @param request the request
    * @returns the text or the failure code
@@ -61,6 +62,13 @@ export interface DescribeControllerDependencies {
   /** Reads the JPEG sent to the model. */
   images: ModelImageSource;
 }
+
+/**
+ * How many cancelled runs may still be settling before a new request answers `busy`. A cancelled run keeps
+ * its media worker busy until the model JPEG is made, so repeated Generate and Cancel would otherwise pile
+ * them up without bound.
+ */
+export const MAX_SETTLING_RUNS = 4;
 
 /** The running request. */
 interface ActiveRequest {
@@ -106,7 +114,7 @@ class DescribeRequests {
     const { manager, vision, images } = this.dependencies;
     // Without a workspace the read below answers no_workspace_open.
     if (this.blocked && manager.current() !== null) return { ok: false, code: 'cancelled' };
-    if (this.active !== null) return { ok: false, code: 'busy' };
+    if (this.active !== null || this.settling.size >= MAX_SETTLING_RUNS) return { ok: false, code: 'busy' };
     const controller = new AbortController();
     const { signal } = controller;
     const run = manager.read((session) =>
