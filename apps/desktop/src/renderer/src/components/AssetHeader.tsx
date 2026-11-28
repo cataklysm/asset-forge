@@ -3,6 +3,7 @@ import { ApiError, call, describeError } from '../api';
 import { distinct } from '../format';
 import type { ImportProgressState } from '../import-progress';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
+import { roleOptions } from '../role-options';
 import { ALERT, BUTTON, PAGE_TITLE, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 import { ImportStatus } from './ImportProgressView';
@@ -10,8 +11,6 @@ import { SourceList } from './SourceList';
 import { TagRow } from './TagRow';
 
 // The header of the asset screen: name, type, status, the import and analysis controls, description, tags and sources.
-
-const ROLES = FileRoleSchema.options;
 
 /** The patch of `assets:update`. */
 export type AssetPatch = Parameters<typeof call<'assets:update'>>[1]['patch'];
@@ -142,11 +141,7 @@ function ImportControls(props: ImportControlsProps) {
         value={importRole}
         onChange={(event) => props.onImportRoleChange(FileRoleSchema.parse(event.target.value))}
       >
-        {ROLES.map((role) => (
-          <option key={role} value={role}>
-            {label(role)}
-          </option>
-        ))}
+        {roleOptions()}
       </select>
       <button type="button" className={BUTTON} disabled={importing} onClick={props.onImportFiles}>
         Import files

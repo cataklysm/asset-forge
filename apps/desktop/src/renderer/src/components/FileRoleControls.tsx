@@ -1,27 +1,11 @@
 import { useRef, useState } from 'react';
 import { FileRoleSchema, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { label } from '../labels';
+import { roleOptions } from '../role-options';
 import { ALERT, BUTTON, SELECT } from '../ui';
 import { AssetPicker } from './AssetPicker';
 
 // The role select of an asset's file and the assign control of an inbox file.
-
-/** Every file role, in the order of the schema. */
-const ROLES = FileRoleSchema.options;
-
-/**
- * One option per file role.
- *
- * @returns the options
- */
-function roleOptions() {
-  return ROLES.map((option) => (
-    <option key={option} value={option}>
-      {label(option)}
-    </option>
-  ));
-}
 
 /**
  * The role select of a file that belongs to an asset; a change goes through `files:assign`.

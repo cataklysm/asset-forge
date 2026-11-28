@@ -1,7 +1,7 @@
 import { LayoutGrid, List, Sparkles, type LucideIcon } from 'lucide-react';
-import { FileRoleSchema } from '@assetforge/contracts';
-import { FILE_KIND_OPTIONS, label, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
+import { FILE_KIND_OPTIONS, PROPOSALS_BLOCK_ANALYSE_ALL, PROPOSALS_LABEL, PROPOSALS_TITLE } from '../labels';
 import type { AssetView, FileFilters } from '../list-state';
+import { ROLES, roleOptions } from '../role-options';
 import { MAX_SELECTION } from '../selection';
 import { BUTTON, ICON_BUTTON, SELECT } from '../ui';
 import { AnalyseAllButton } from './AnalysisDialogs';
@@ -12,7 +12,6 @@ import { TagFilter } from './TagFilter';
 // The filter bar of the file browser: search, role, file type, the proposal filter, "Analyse all", the view switch
 // and the image tag filter.
 
-const ROLES = FileRoleSchema.options;
 const KINDS = FILE_KIND_OPTIONS;
 
 const VIEWS = [
@@ -128,11 +127,7 @@ function RoleSelect({ filters, onFilter }: FilterSelectProps) {
       onChange={(event) => onFilter({ role: ROLES.find((role) => role === event.target.value) ?? '' })}
     >
       <option value="">All roles</option>
-      {ROLES.map((role) => (
-        <option key={role} value={role}>
-          {label(role)}
-        </option>
-      ))}
+      {roleOptions()}
     </select>
   );
 }
