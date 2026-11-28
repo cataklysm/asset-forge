@@ -1,7 +1,14 @@
 import { Fragment, type ReactNode, type RefObject } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { formatBytes, formatDateTime, formatDuration } from '../format';
-import { DELETED_LABEL, DURATION_LABEL, label, ORIGIN_LABEL } from '../labels';
+import {
+  ASSIGN_TO_ASSET_HEADING,
+  DELETED_LABEL,
+  DURATION_LABEL,
+  label,
+  ORIGIN_LABEL,
+  ROLE_HEADING,
+} from '../labels';
 import { firstControlIn, useKeptFocus } from '../hooks/useStageFocus';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, LABEL, PANEL_TITLE } from '../ui';
@@ -78,7 +85,7 @@ export function FileDetailsPanel({
         {/* The inbox's assign control shows only for complete files. */}
         {!trashed && roleControl !== null && (asset !== null || complete) && (
           <section className="space-y-2">
-            <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
+            <h3 className={PANEL_TITLE}>{asset !== null ? ROLE_HEADING : ASSIGN_TO_ASSET_HEADING}</h3>
             {/* Keyed by file: stepping on starts the controls afresh. */}
             <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
           </section>
