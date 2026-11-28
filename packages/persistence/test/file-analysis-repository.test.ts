@@ -134,6 +134,15 @@ describe('file analysis repository', () => {
     expect(rowCount('file_analysis')).toBe(0);
   });
 
+  test('apply on an inbox file writes its tags and analysis row without an asset to reindex', async () => {
+    const inbox = uuid(41);
+    await addFile(inbox);
+    expect(await apply({ fileId: inbox, tags: [t('rusty')] })).toBe(true);
+    expect(await tagsOf(inbox)).toEqual(['rusty/ai']);
+    expect(await db.analyses.get(inbox)).toMatchObject({ fileId: inbox, sha256: SHA, analysedAt: T1 });
+    expect(await tagsOf()).toEqual([]);
+  });
+
   test('a second apply replaces the earlier ai assignments and the analysis row', async () => {
     await apply({ tags: [t('rusty'), t('metal')] });
     expect(await apply({ tags: [t('metal'), t('blue')], model: 'llava', now: T2 })).toBe(true);

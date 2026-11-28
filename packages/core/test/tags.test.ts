@@ -291,6 +291,17 @@ describe('file tag batches', () => {
     expect((await ctx.session.database.files.get(a))!.tags).toHaveLength(1);
   });
 
+  it('a batch answers an unknown file before an incomplete one, whatever their order', async () => {
+    const ctx = await setup();
+    const pending = await addFile(ctx, 2, 'pending');
+    await expect(addFileTags(ctx.session, { fileIds: [pending, UNKNOWN_ID], name: 'oak' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(removeFileTags(ctx.session, { fileIds: [pending, UNKNOWN_ID], name: 'oak' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
   it('an invalid tag name fails with validation_failed before any lookup', async () => {
     const ctx = await setup();
     const get = vi.spyOn(ctx.db.files, 'get');

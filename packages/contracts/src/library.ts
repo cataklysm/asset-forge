@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { pageOf } from './paging';
 import { MatchedTagSchema, TagAssignmentSchema } from './tags';
 import { WorkflowProgressSchema } from './workflows';
-import { CountSchema } from './ipc-shared';
+import { CountSchema, IdSchema } from './ipc-shared';
 
-const id = z.uuid();
+const id = IdSchema;
 const timestamp = z.iso.datetime();
 
 // Vocabularies

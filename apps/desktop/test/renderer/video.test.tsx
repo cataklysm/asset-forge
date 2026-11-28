@@ -12,6 +12,7 @@ import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/fi
 import { formatDuration } from '../../src/renderer/src/format';
 import { previewUrl, videoUrl } from '../../src/renderer/src/media-url';
 import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { settleQueued } from './settle';
 import { fileRecord, trashedRecord, videoRecord } from './fixtures';
 
 // jsdom has no media playback; the stage only needs play and pause to exist.
@@ -251,7 +252,7 @@ it('a video whose measurement fails or finds nothing is not measured again and s
   const { rerender } = render(<Harness file={file} />);
   await waitFor(() => expect(api.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1));
   rerender(<Harness file={{ ...file }} />);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settleQueued();
   expect(api.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
   expect(detailValue('Dimensions')).toBe('–');
@@ -264,7 +265,7 @@ it('a video whose measurement fails or finds nothing is not measured again and s
   });
   render(<Harness file={other} />);
   await waitFor(() => expect(failing.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1));
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settleQueued();
   expect(failing.calls.filter((c) => c.channel === 'files:measure')).toHaveLength(1);
   expect(screen.queryByRole('alert')).toBeNull();
 });

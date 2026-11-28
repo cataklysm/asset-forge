@@ -3,7 +3,7 @@ import { FileIdsSchema, FileKindSchema, FileScopeSchema } from './files';
 import { JobErrorCodeSchema } from './job-errors';
 import { AssetStatusSchema, FileRoleSchema } from './library';
 import { ModelNameSchema } from './provider-ref';
-import { CountSchema } from './ipc-shared';
+import { CountSchema, IdSchema } from './ipc-shared';
 
 const TagNameSchema = z.string().max(200);
 
@@ -20,9 +20,9 @@ export type FileListFilter = z.infer<typeof FileListFilterSchema>;
 
 /** The filter part of `assets:list`: which assets the gallery shows, without paging. */
 export const AssetListFilterSchema = z.object({
-  typeId: z.uuid().optional(),
+  typeId: IdSchema.optional(),
   status: AssetStatusSchema.optional(),
-  projectId: z.uuid().optional(),
+  projectId: IdSchema.optional(),
   query: z.string().max(200).optional(),
   tagNames: z.array(TagNameSchema).max(10).optional(),
   fileRole: FileRoleSchema.optional(),
@@ -38,7 +38,7 @@ export type AssetListFilter = z.infer<typeof AssetListFilterSchema>;
 export const AnalysisTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('files'), fileIds: FileIdsSchema }),
   z.object({ kind: z.literal('fileFilter'), filter: FileListFilterSchema }),
-  z.object({ kind: z.literal('asset'), assetId: z.uuid() }),
+  z.object({ kind: z.literal('asset'), assetId: IdSchema }),
   z.object({ kind: z.literal('assetFilter'), filter: AssetListFilterSchema }),
 ]);
 /** What an analysis covers. */

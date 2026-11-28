@@ -214,7 +214,11 @@ class PreviewCache {
     const key = `${request.sha256}:${request.size}`;
     if (this.failed.has(key)) return Promise.resolve(null);
     const running = this.inflight.get(key);
-    if (running) return running;
+    if (running) {
+      // Asked for again (a tile scrolled back into view): a render still waiting for a worker moves to the front.
+      this.pool.prioritize(join(this.cacheDir, previewRelativePath(request.sha256, request.size)));
+      return running;
+    }
     const promise = this.resolvePreview(key, request)
       .catch(() => null)
       .finally(() => this.inflight.delete(key));

@@ -263,8 +263,18 @@ describe('file tag batches', () => {
       [{ name: 'oak', displayName: 'Oak', origin: 'manual' }],
     ]);
     // Repeating the batch leaves the existing assignments alone.
-    expect((await addMany([a])).map((r) => r.tags)).toHaveLength(1);
+    expect((await addMany([a])).map((r) => r.tags)).toEqual([[{ name: 'oak', displayName: 'Oak', origin: 'manual' }]]);
     expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 2 });
+  });
+
+  test('a batch answers the first failure by kind, not by position: unknown, then incomplete', async () => {
+    const a = await addFile(20);
+    const pending = await addPendingFile(22);
+    const before = counts();
+    // The pending file comes first, yet the unknown one decides.
+    await expect(addMany([pending, a, uuid(999)])).rejects.toMatchObject({ code: 'not_found' });
+    await expect(removeMany([pending, uuid(999)])).rejects.toMatchObject({ code: 'not_found' });
+    expect(counts()).toEqual(before);
   });
 
   test('addToFiles lets manual win per file and ai yield', async () => {
@@ -292,7 +302,7 @@ describe('file tag batches', () => {
     const records = await removeMany([c, a, b]);
     expect(records.map((r) => r.id)).toEqual([c, a, b]);
     expect(records.map((r) => r.tags.map((t) => t.origin))).toEqual([[], [], []]);
-    expect((await removeMany([a], 'unknown')).map((r) => r.tags)).toHaveLength(1);
+    expect((await removeMany([a], 'unknown')).map((r) => r.tags)).toEqual([[]]);
   });
 
   test('a tag batch over 300 files of one asset reindexes the asset once', async () => {

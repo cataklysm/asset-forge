@@ -108,6 +108,19 @@ describe('starting workflows', () => {
     await expect(getWorkflow(ctx.session, UNKNOWN_ID)).rejects.toBeInstanceOf(NotFoundError);
     await expect(removeWorkflow(ctx.session, UNKNOWN_ID)).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it('the fake repository checks the foreign keys of the workflow row like SQLite', async () => {
+    const ctx = await setup();
+    const { asset } = await character(ctx);
+    const { templateVersionId } = ctx.db.assetWorkflows.workflows.get(asset.id)!;
+    await removeWorkflow(ctx.session, asset.id);
+    const row = { id: UNKNOWN_ID, assetId: asset.id, templateVersionId, createdAt: 'x' };
+    await expect(ctx.db.assetWorkflows.insert({ ...row, assetId: UNKNOWN_ID }, [])).rejects.toThrow(/FOREIGN KEY/);
+    await expect(ctx.db.assetWorkflows.insert({ ...row, templateVersionId: UNKNOWN_ID }, [])).rejects.toThrow(
+      /FOREIGN KEY/,
+    );
+    await ctx.db.assetWorkflows.insert(row, []);
+  });
 });
 
 describe('updating steps', () => {

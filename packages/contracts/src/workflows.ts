@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { CountSchema, IdSchema } from './ipc-shared';
 
-const id = z.uuid();
+const id = IdSchema;
 const timestamp = z.iso.datetime();
 
 /** The state of one workflow step; independent of the asset status and of any job status. */
@@ -10,8 +11,8 @@ export type WorkflowStepState = z.infer<typeof WorkflowStepStateSchema>;
 
 /** `done` mandatory steps out of `total` mandatory steps. */
 export const WorkflowProgressSchema = z.object({
-  done: z.number().int().min(0),
-  total: z.number().int().min(0),
+  done: CountSchema,
+  total: CountSchema,
 });
 /** The progress of a workflow. */
 export type WorkflowProgress = z.infer<typeof WorkflowProgressSchema>;

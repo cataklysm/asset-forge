@@ -146,6 +146,18 @@ describe('job use cases', () => {
     await expect(retryJob(session, failed)).rejects.toBeInstanceOf(InvalidOperationError);
   });
 
+  it('names the trash when the file is trashed between the check and the retry', async () => {
+    const { db, session, addJob } = await setup();
+    const failed = await addJob('failed');
+    const fileId = db.jobs.rows.find((r) => r.id === failed)!.fileId!;
+    const retry = db.jobs.retry.bind(db.jobs);
+    db.jobs.retry = async (request) => {
+      await trashForTest(session, [fileId]);
+      return retry(request);
+    };
+    await expect(retryJob(session, failed)).rejects.toThrow('The file of this job is in the trash');
+  });
+
   it('retries every failed or cancelled job and clears the finished ones', async () => {
     const { db, session, addJob } = await setup();
     await addJob('failed');

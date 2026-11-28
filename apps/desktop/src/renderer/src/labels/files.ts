@@ -15,3 +15,5 @@ export const VIDEO_LABEL = 'Video';
 export const VIDEO_UNPLAYABLE_TEXT = 'This video cannot be played here';
 export const OPEN_EXTERNALLY_LABEL = 'Open externally';
 export const DURATION_LABEL = 'Duration';
+/** The empty text of a file list whose filters match nothing. */
+export const NO_MATCHING_FILES_TEXT = 'No matching files';

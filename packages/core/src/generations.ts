@@ -251,6 +251,25 @@ function planUpscale(source: SizedInput, input: UpscaleStart): GenerationPlan {
 }
 
 /**
+ * Looks the library version up again after the model list, which waits on the provider: a prompt deleted in the
+ * meantime answers not_found instead of a foreign key failure. A delete between this look and the insert still
+ * reaches the repository.
+ *
+ * @param session the open workspace
+ * @param promptRef the version reference of the plan; null for a free prompt or an upscale
+ * @returns nothing
+ * @throws `NotFoundError` when the version no longer exists
+ */
+async function requireVersionStillExists(
+  session: WorkspaceSession,
+  promptRef: GenerationPromptRef | null,
+): Promise<void> {
+  if (promptRef === null) return;
+  const found = await session.database.prompts.getVersion(promptRef.versionId);
+  if (found === null) throw new NotFoundError('This prompt version does not exist');
+}
+
+/**
  * Starts an edit or an upscale of one image. Checks in this order: the file, its pixel size, the provider,
  * then for an edit the prompt (a library version is looked up and resolved here) and the model's offer (the
  * only step that asks the provider), for an upscale the result size. A model list that cannot be loaded is
@@ -273,6 +292,7 @@ export async function startGeneration(
   const plan =
     input.kind === 'edit' ? await planEdit(session, dependencies, entry.id, input) : planUpscale(source, input);
   if ('ok' in plan) return plan;
+  await requireVersionStillExists(session, plan.promptRef);
 
   const { file } = source;
   const id = session.newId();

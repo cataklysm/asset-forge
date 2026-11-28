@@ -15,21 +15,23 @@ export const PROMPT_VARIABLE_VALUE_MAX = 2000;
 const VARIABLE_NAME = new RegExp(`^[\\p{L}\\p{N} _-]{1,${PROMPT_VARIABLE_NAME_MAX}}$`, 'u');
 
 /**
- * Variables are matched regardless of case.
+ * Variables are matched regardless of case and of Unicode composition: NFC, lower-cased, NFC again (lower-casing can
+ * produce a composable sequence), the same folding as tag names.
  *
  * @param name a variable name in any spelling
  * @returns the key two spellings of the same variable share
  */
-export const variableKey = (name: string): string => name.toLowerCase();
+export const variableKey = (name: string): string => name.normalize('NFC').toLowerCase().normalize('NFC');
 
 /**
- * The variable name inside a placeholder.
+ * The variable name inside a placeholder. The name is taken in NFC, so a letter typed as a base letter plus a
+ * combining mark (which the name rule alone would refuse) is the same variable as its composed spelling.
  *
  * @param inside the text between `{{` and `}}`
- * @returns the trimmed name, or `null` when the placeholder is not a variable
+ * @returns the trimmed name in NFC, or `null` when the placeholder is not a variable
  */
 function nameOf(inside: string): string | null {
-  const name = inside.trim();
+  const name = inside.trim().normalize('NFC');
   return VARIABLE_NAME.test(name) ? name : null;
 }
 

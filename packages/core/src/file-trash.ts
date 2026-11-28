@@ -48,17 +48,6 @@ export function requireLiveFile(file: FileRecord): void {
 }
 
 /**
- * Refuses while the storage of the workspace cannot be reached.
- *
- * @param session the open workspace
- * @returns resolves when the storage is reachable
- * @throws StorageUnreachableError otherwise
- */
-function requireReachable(session: WorkspaceSession): Promise<void> {
-  return requireReachableStorage(session.storage);
-}
-
-/**
  * Resolves an open move row of the file left by an earlier failed commit (see `recoverFileMoves`).
  *
  * @param session the open workspace
@@ -168,7 +157,7 @@ async function trashFile(session: WorkspaceSession, control: JobControl, fileId:
   const file = await requireFile(session, fileId);
   if (file.status === 'pending') throw new InvalidOperationError('The file is still being imported');
   if (file.deletedAt !== null) throw new InvalidOperationError('The file is already in the trash');
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
 
   if (file.status === 'failed') {
     await removeFailedImport(session, file);
@@ -215,7 +204,7 @@ async function isBinaryPresent(session: WorkspaceSession, file: FileRecord): Pro
   try {
     const exists = await session.storage.exists(file.relativePath);
     // A share that dropped after the first check also answers "missing": never trash as missing then.
-    if (!exists) await requireReachable(session);
+    if (!exists) await requireReachableStorage(session.storage);
     return exists;
   } catch (error) {
     await session.database.fileMoves.abort(file.id).catch(() => undefined);
@@ -244,7 +233,7 @@ export function restoreFiles(session: WorkspaceSession, fileIds: readonly string
 async function restoreFile(session: WorkspaceSession, fileId: string): Promise<FileRecord> {
   const trashed = await requireFile(session, fileId);
   if (trashed.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   const file = await afterPendingMove(session, trashed);
   // An earlier restore whose commit failed has just been completed.
   if (file.deletedAt === null) return file;
@@ -273,7 +262,7 @@ async function restoreFile(session: WorkspaceSession, fileId: string): Promise<F
 async function requireBinaryToRestore(session: WorkspaceSession, file: FileRecord): Promise<void> {
   if (await session.storage.exists(file.relativePath)) return;
   // A storage that dropped after the first check answers the storage error, not "missing".
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   throw new InvalidOperationError('The file is missing on disk and cannot be restored');
 }
 
@@ -327,7 +316,7 @@ export function purgeFiles(
 async function purgeFile(session: WorkspaceSession, control: JobControl, fileId: string): Promise<null> {
   const trashed = await requireFile(session, fileId);
   if (trashed.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   await refuseRunningGeneration(session, trashed.id);
   const file = await afterPendingMove(session, trashed);
   // An earlier restore whose commit failed has just been completed: the file is live again.

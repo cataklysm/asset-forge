@@ -1,7 +1,8 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ReactNode, type RefObject } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { formatBytes, formatDateTime, formatDuration } from '../format';
 import { DELETED_LABEL, DURATION_LABEL, label, ORIGIN_LABEL } from '../labels';
+import { firstControlIn, useKeptFocus } from '../hooks/useStageFocus';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, LABEL, PANEL_TITLE } from '../ui';
 import { FileOrigins } from './FileOrigins';
@@ -41,6 +42,8 @@ interface FileDetailsPanelProps {
   onChangeTag(channel: 'files:addTag' | 'files:removeTag', name: string): Promise<void>;
   /** Opens the asset; absent shows its name as plain text. */
   onOpenAsset?(assetId: string): void;
+  /** Takes the focus from a removed role or assign control when the next file shows none. */
+  focusFallbackRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -57,7 +60,11 @@ export function FileDetailsPanel({
   items,
   onChangeTag,
   onOpenAsset,
+  focusFallbackRef,
 }: FileDetailsPanelProps) {
+  // Stepping on (also after an assign moved the file out of the list) starts the control afresh; the focus it held
+  // goes to the new control instead of the body.
+  const roleFocus = useKeptFocus<HTMLDivElement>((area) => firstControlIn(area, focusFallbackRef.current));
   const complete = file.status === 'complete';
   // A file in the trash: read-only, without a role or assign control.
   const trashed = file.deletedAt !== null;
@@ -66,14 +73,17 @@ export function FileDetailsPanel({
   return (
     <div className={`flex w-88 shrink-0 flex-col gap-6 overflow-y-auto border-r p-5 ${BORDER}`}>
       <FileFacts file={file} />
-      {/* The inbox's assign control shows only for complete files. */}
-      {!trashed && roleControl !== null && (asset !== null || complete) && (
-        <section className="space-y-2">
-          <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
-          {/* Keyed by file: stepping on starts the controls afresh. */}
-          <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
-        </section>
-      )}
+      {/* Always present and without a box of its own, so it still sees the focus leave when the section goes. */}
+      <div ref={roleFocus.areaRef} className="contents" onFocus={roleFocus.onFocus} onBlur={roleFocus.onBlur}>
+        {/* The inbox's assign control shows only for complete files. */}
+        {!trashed && roleControl !== null && (asset !== null || complete) && (
+          <section className="space-y-2">
+            <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
+            {/* Keyed by file: stepping on starts the controls afresh. */}
+            <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
+          </section>
+        )}
+      </div>
       {/* In the trash the tags are kept but cannot be changed. */}
       {trashed && file.tags.length > 0 && (
         <section aria-label={tagsLabel} className="space-y-2">

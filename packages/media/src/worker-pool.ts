@@ -37,6 +37,13 @@ export interface WorkerPool {
    */
   jpeg(sourcePath: string): Promise<Uint8Array | null>;
   /**
+   * Moves a render that is still waiting for a worker to the newest place of the queue, so a tile asked for again is
+   * served next; a render already running or not queued is left alone.
+   *
+   * @param targetPath the target path of the waiting render
+   */
+  prioritize(targetPath: string): void;
+  /**
    * Terminates all workers; queued and running jobs resolve their failure value (`none` for a render, `null` for a
    * measurement or a JPEG).
    *
@@ -139,6 +146,7 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
     run: (job) => pool.submit({ kind: 'render', job }, 'none') as Promise<PreviewResult>,
     measure: (sourcePath) => pool.submit({ kind: 'measure', sourcePath }, null) as Promise<ImageSize | null>,
     jpeg: (sourcePath) => pool.submit({ kind: 'jpeg', sourcePath }, null) as Promise<Uint8Array | null>,
+    prioritize: (targetPath) => pool.prioritize(targetPath),
     close: () => pool.close(),
   };
 }
@@ -180,6 +188,20 @@ class PreviewWorkers {
       this.queue.push({ work, failure, resolve });
       this.pump();
     });
+  }
+
+  /**
+   * See `WorkerPool.prioritize`.
+   *
+   * @param targetPath the target path of the waiting render
+   */
+  prioritize(targetPath: string): void {
+    const index = this.queue.findIndex(
+      (task) => task.work.kind === 'render' && task.work.job.targetPath === targetPath,
+    );
+    if (index < 0) return;
+    const [task] = this.queue.splice(index, 1);
+    this.queue.push(task!);
   }
 
   /**

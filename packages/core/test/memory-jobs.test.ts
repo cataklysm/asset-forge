@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { InvalidOperationError } from '../src/errors.js';
 import type { NewJob } from '../src/job-types.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 
@@ -267,14 +268,22 @@ describe('InMemoryJobRepository as the SQLite repository behaves', () => {
     expect(Object.keys(row(repo, 'a1').payload as object)).toEqual(['kept']);
   });
 
-  it('a rewrite answering undefined keeps the stored payload in rerouteWaiting and assignLane', async () => {
-    const repo = await repoWith([job('a1', 'a', { n: 1 }), job('n1', null, { n: 2 })]);
-    expect(
-      await repo.rerouteWaiting({ type: T, fromLane: 'a', toLane: 'b', rewrite: () => undefined, now: LATER }),
-    ).toBe(1);
-    expect(row(repo, 'a1')).toMatchObject({ lane: 'b', payload: { n: 1 } });
-    expect(await repo.assignLane({ type: T, lane: 'c', rewrite: () => undefined, now: LATER })).toBe(1);
-    expect(row(repo, 'n1')).toMatchObject({ lane: 'c', payload: { n: 2 } });
+  it('a rewrite answering undefined refuses rerouteWaiting and is skipped by assignLane', async () => {
+    const repo = await repoWith([job('a1', 'a', { n: 1 }), job('a2', 'a', { n: 3 }), job('n1', null, { n: 2 })]);
+    const rewrite = (payload: unknown) => ((payload as { n: number }).n === 3 ? undefined : payload);
+    await expect(repo.rerouteWaiting({ type: T, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).rejects.toThrow(
+      'A job payload must be JSON',
+    );
+    expect(row(repo, 'a1')).toMatchObject({ lane: 'a', payload: { n: 1 } });
+    expect(await repo.assignLane({ type: T, lane: 'c', rewrite: () => undefined, now: LATER })).toBe(0);
+    expect(row(repo, 'n1')).toMatchObject({ lane: null, payload: { n: 2 } });
+  });
+
+  it('rerouteWaiting refuses the same lane', async () => {
+    const repo = await repoWith([job('a1', 'a')]);
+    await expect(
+      repo.rerouteWaiting({ type: T, fromLane: 'a', toLane: 'a', rewrite: (p) => p, now: LATER }),
+    ).rejects.toThrow(new InvalidOperationError('Jobs cannot be moved onto the same lane'));
   });
 
   it('nextRunAfter with an empty exclusion list excludes no lane', async () => {
