@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { SiteCrawlProgress, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
-import type { WorkspaceDatabase } from '@assetforge/core';
+import type { NewJob, WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T0 = '2026-11-28T12:00:00.000Z';
@@ -68,6 +68,40 @@ afterEach(async () => {
 });
 
 describe('durable site crawl results', () => {
+  test('captures a discovery request and enqueues its job atomically', async () => {
+    const row = record(10);
+    const queued: NewJob = {
+      id: row.id,
+      type: 'site.crawl',
+      resourceClass: 'cpu',
+      fileId: null,
+      lane: 'example.com',
+      payload: { v: 1 },
+      dedupeKey: null,
+    };
+    await db.siteCrawls.insert(row, queued);
+    expect(await db.siteCrawls.get(row.id)).toEqual(row);
+    expect(await db.jobs.get(row.id)).toMatchObject({ id: row.id, type: 'site.crawl', status: 'queued' });
+    expect(await db.siteCrawls.hasActiveProfile(profile.id)).toBe(true);
+  });
+
+  test('rolls the captured request back when the associated job cannot be queued', async () => {
+    const queued: NewJob = {
+      id: uuid(10),
+      type: 'site.crawl',
+      resourceClass: 'cpu',
+      fileId: null,
+      lane: 'example.com',
+      payload: { v: 1 },
+      dedupeKey: 'existing-discovery',
+    };
+    await db.jobs.enqueue({ jobs: [queued], now: T0 });
+    await expect(db.siteCrawls.insert(record(11), { ...queued, id: uuid(11) })).rejects.toThrow();
+    expect(await db.siteCrawls.get(uuid(11))).toBeNull();
+    expect((await db.siteCrawls.list({ limit: 20, offset: 0 })).total).toBe(0);
+    expect(await db.jobs.get(uuid(11))).toBeNull();
+  });
+
   test('retains five independent snapshots and paginates newest first', async () => {
     for (const n of [10, 11, 12, 13, 14]) await db.siteCrawls.insert(record(n));
 
