@@ -232,6 +232,19 @@ describe('file-system error mapping', () => {
     expect((await fs.stat(path.join(root, 'assets', 'existing'))).isDirectory()).toBe(true);
   });
 
+  it('creates the parent again when a parallel failed move removed it before the rename', async () => {
+    await storage.writeText('inbox/a.txt', 'A');
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementationOnce(async (_from, to) => {
+      // The other move's cleanup takes the directory both moves created.
+      await fs.rmdir(path.dirname(String(to)));
+      await rename(path.join(root, 'inbox', 'missing.txt'), String(to));
+    });
+    await storage.move('inbox/a.txt', 'assets/shared/a.txt');
+    expect(await storage.readText('assets/shared/a.txt')).toBe('A');
+    expect(await storage.exists('inbox/a.txt')).toBe(false);
+  });
+
   it('passes other errors through unchanged', async () => {
     const cause = errno('EBUSY', path.join(root, 'inbox', 'a.txt'));
     await storage.writeText('inbox/a.txt', 'A');
@@ -285,6 +298,9 @@ describe('file-system error mapping', () => {
       failDestination('EACCES');
       const error = await storage.writeStream('inbox/a.txt', pushing('hello')).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(StorageAccessDeniedError);
+      expect((error as Error).message).not.toContain(tmp);
+      vi.restoreAllMocks();
+      expect(await storage.exists('inbox/a.txt')).toBe(false);
     });
 
     it("still rejects with the source's own error when the source fails", async () => {

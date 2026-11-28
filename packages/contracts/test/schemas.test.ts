@@ -5,6 +5,7 @@ import {
   AssetRelationViewSchema,
   AssetSummarySchema,
   AssetWorkflowSchema,
+  cleanTagText,
   FileBatchResultSchema,
   FileRecordSchema,
   FileScopeSchema,
@@ -526,6 +527,15 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName('c++')).toBe('c++');
     expect(normalizeTagName('3d')).toBe('3d');
     expect(normalizeTagName('ÄÖ')).toBe('äö');
+  });
+
+  it('keeps control and format characters as they are (stripping them needs a derived-data step)', () => {
+    // Pins the current rule, so a change to it is a deliberate one: NUL, zero-width space, right-to-left override.
+    for (const code of [0x0, 0x200b, 0x202e]) {
+      const text = `a${String.fromCodePoint(code)}b`;
+      expect(cleanTagText(` ${text} `)).toBe(text);
+      expect(normalizeTagName(text)).toBe(text);
+    }
   });
 });
 

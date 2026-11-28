@@ -12,6 +12,8 @@ interface RegistryContent {
   workspaces: WorkspaceSummary[];
   /** Top-level keys other than `workspaces`, kept unchanged. */
   otherKeys: Record<string, unknown>;
+  /** Per workspace id, the keys of its entry that the schema does not know, kept while the entry stays. */
+  entryKeys: Map<string, Record<string, unknown>>;
 }
 
 /**
@@ -141,7 +143,11 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
   private async write(content: RegistryContent): Promise<void> {
     await mkdir(dirname(this.settingsFilePath), { recursive: true });
     const temporary = `${this.settingsFilePath}.${randomUUID()}.tmp`;
-    const json = { ...content.otherKeys, workspaces: content.workspaces };
+    const workspaces = content.workspaces.map((workspace) => ({
+      ...content.entryKeys.get(workspace.id),
+      ...workspace,
+    }));
+    const json = { ...content.otherKeys, workspaces };
     try {
       await writeFile(temporary, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
       await rename(temporary, this.settingsFilePath);
@@ -154,7 +160,25 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
 
 /** @returns the content of a missing or unreadable file */
 function emptyContent(): RegistryContent {
-  return { workspaces: [], otherKeys: {} };
+  return { workspaces: [], otherKeys: {}, entryKeys: new Map() };
+}
+
+/**
+ * Collects the keys of each raw entry that its parsed summary does not carry.
+ *
+ * @param raw the entries as stored
+ * @param workspaces the parsed entries, in the same order
+ * @returns per workspace id, its unknown keys
+ */
+function unknownEntryKeys(raw: unknown[], workspaces: WorkspaceSummary[]): Map<string, Record<string, unknown>> {
+  const keys = new Map<string, Record<string, unknown>>();
+  workspaces.forEach((workspace, index) => {
+    const stored = raw[index] as Record<string, unknown>;
+    // `__proto__` would set the prototype of the entry when spread back on write, so it is never kept.
+    const unknown = Object.entries(stored).filter(([key]) => key !== '__proto__' && !Object.hasOwn(workspace, key));
+    if (unknown.length > 0) keys.set(workspace.id, Object.fromEntries(unknown));
+  });
+  return keys;
 }
 
 /**
@@ -174,5 +198,5 @@ function parseContent(text: string): RegistryContent | null {
   const result = WorkspaceListSchema.safeParse(json.workspaces);
   if (!result.success) return null;
   const otherKeys = Object.fromEntries(Object.entries(json).filter(([key]) => key !== 'workspaces'));
-  return { workspaces: result.data, otherKeys };
+  return { workspaces: result.data, otherKeys, entryKeys: unknownEntryKeys(json.workspaces as unknown[], result.data) };
 }

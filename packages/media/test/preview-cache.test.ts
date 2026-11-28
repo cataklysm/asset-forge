@@ -72,6 +72,10 @@ afterEach(async () => {
 function fakePool() {
   const fake = {
     calls: [] as PreviewJob[],
+    prioritized: [] as string[],
+    prioritize(targetPath: string) {
+      fake.prioritized.push(targetPath);
+    },
     async run(job: PreviewJob): Promise<PreviewResult> {
       fake.calls.push(job);
       if (job.sourcePath.includes('broken')) return 'none';
@@ -252,6 +256,38 @@ describe('preview cache', () => {
     expect(pool.calls[0]?.longestEdge).toBe(1024);
   });
 
+  it('a request joining a running render moves that render to the front of the pool queue', async () => {
+    const pool = fakePool();
+    const s = service(pool);
+    const sourcePath = await source('a.png');
+    const first = s.get({ sha256: A, sourcePath, size: 'thumb' });
+    const second = s.get({ sha256: A, sourcePath, size: 'thumb' });
+    await Promise.all([first, second]);
+    expect(pool.prioritized).toEqual([join(cacheDir, previewRelativePath(A, 'thumb'))]);
+  });
+
+  it('limits thumbnails without touching full', async () => {
+    const thumbnails = await fillShards(join(cacheDir, 'thumbnails'));
+    const fullPath = join(cacheDir, 'full', 'aa', 'x.png');
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, Buffer.alloc(500));
+    await service(fakePool(), { limitBytes: 600 }).cleanup();
+    // Only thumbnails exceed the limit and shrink to at most 540 bytes; full is under its own budget.
+    expect(await Promise.all(thumbnails.map(exists))).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(await exists(fullPath)).toBe(true);
+  });
+
   it('two files with the same content share one entry', async () => {
     const pool = fakePool();
     const s = service(pool);
@@ -299,6 +335,7 @@ describe('preview cache', () => {
       },
       measure: (path) => real.measure(path),
       jpeg: (path) => real.jpeg(path),
+      prioritize: (targetPath) => real.prioritize(targetPath),
       close: () => real.close(),
     };
     const s = service(counting);

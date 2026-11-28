@@ -36,10 +36,11 @@ const INBOX_FILE_COUNT = 2_000;
 const TRASH_FILE_COUNT = 500;
 
 /**
- * Prints the timings and query plans of this test, only when  is set, so a normal run stays
- * quiet.
+ * Prints the timings and query plans of this test, only when `ASSETFORGE_SCALE_REPORT=1` is set, so a normal run
+ * stays quiet.
  *
  * @param text the line to print
+ * @returns nothing
  */
 const report = (text: string): void => {
   if (process.env.ASSETFORGE_SCALE_REPORT === '1') console.info(text);

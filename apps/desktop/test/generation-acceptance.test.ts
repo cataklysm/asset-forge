@@ -261,8 +261,8 @@ describe('generation studio end to end', () => {
       target: { assetId, role: 'reference' },
     });
     const started500 = await started(edit(sourceId, MOCK_PROMPT_FAIL));
+    // With no job active nothing is left that could send the request again.
     await h.until((s) => s.failed === 1 && active(s) === 0);
-    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(mock!.imageRequests).toHaveLength(1);
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({
@@ -376,6 +376,42 @@ describe('generation studio end to end', () => {
     );
   });
 
+  it('fails a generation found running after a crash as provider_outcome_unknown and never sends it', async () => {
+    let isSchedulerHeld = true;
+    const { assetId } = await setup({
+      host: { workspaceOpened: () => (isSchedulerHeld ? Promise.resolve() : h.services.workspaceOpened()) },
+    });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
+    const crashed = await started(edit(sourceId, 'Make it night'));
+    // Claimed as a run would claim it; the app then stops without settling the row.
+    const claimed = await h.manager.exclusive((s) =>
+      s.database.jobs.claimNext({
+        resourceClass: 'remote_api',
+        types: [IMAGE_GENERATE_JOB],
+        now: new Date().toISOString(),
+      }),
+    );
+    expect(claimed).toMatchObject({ id: crashed.jobId, status: 'running' });
+    await h.ok('workspace:close', {});
+
+    isSchedulerHeld = false;
+    await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
+    await h.until((s) => s.failed === 1 && active(s) === 0);
+    const [job] = (await h.ok('jobs:list', page)).items;
+    expect(job).toMatchObject({ id: crashed.jobId, status: 'failed', errorCode: 'provider_outcome_unknown' });
+    expect(await generation(sourceId, crashed.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+    });
+    expect(mock!.imageRequests).toHaveLength(0);
+    expect((await filesOf(assetId)).map((f) => f.id)).toEqual([sourceId]);
+  });
+
   it('fails a slow edit interrupted by closing as provider_outcome_unknown and sends it only once', async () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({
@@ -391,8 +427,8 @@ describe('generation studio end to end', () => {
 
     await h.services.workspaceClosing();
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
-    // A repeated request would have no event to wait on; this pause gives one the chance to show up.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // The open settled the interrupted job; with no job active nothing is left that could repeat the request.
+    expect(active(await h.ok('jobs:summary', {}))).toBe(0);
 
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });

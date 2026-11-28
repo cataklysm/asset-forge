@@ -190,6 +190,7 @@ describe('search index triggers', () => {
     await expect(found('drawing')).resolves.toEqual(['Alpha']);
     const storage = {
       exists: async (path: string) => path === target(second).targetRelativePath,
+      isReachable: async () => true,
     } as unknown as Storage;
     const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
     expect(result.completed).toEqual([second]);

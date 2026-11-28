@@ -31,6 +31,40 @@ describe('statusOf', () => {
     expect((error as JobError).cause).toBeUndefined();
   });
 
+  it('keeps no cause for an answer that is not JSON or that the interpreter refuses', async () => {
+    const parse = await failureOf(request(answering(200, 'secret-answer-text')));
+    expect((parse as JobError).code).toBe('invalid_response');
+    expect((parse as JobError).cause).toBeUndefined();
+
+    const refused = await failureOf(
+      createJsonRequester({ baseUrl: 'http://127.0.0.1:1/', fetch: answering(200, '{}') })(
+        { path: '/x', signal: new AbortController().signal, timeoutMs: 5_000 },
+        () => {
+          throw new TypeError('secret-answer-text');
+        },
+      ),
+    );
+    expect((refused as JobError).code).toBe('invalid_response');
+    expect((refused as JobError).cause).toBeUndefined();
+  });
+
+  it('answers a caller abort rather than provider_unauthorized when the key cannot be sent', async () => {
+    const controller = new AbortController();
+    const reason = new Error('aborted by the caller');
+    const error = await failureOf(
+      createJsonRequester({
+        baseUrl: 'http://127.0.0.1:1/',
+        fetch: answering(200, '{}'),
+        apiKey: () => {
+          // The caller gives up while the key is read; the key itself cannot go into a header.
+          controller.abort(reason);
+          return 'bad\nkey';
+        },
+      })({ path: '/x', signal: controller.signal, timeoutMs: 5_000 }, (body) => body),
+    );
+    expect(error).toBe(reason);
+  });
+
   it('is null for a request that never got an answer and for foreign errors', async () => {
     const error = await failureOf(
       request(async () => {
