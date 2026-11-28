@@ -1,6 +1,7 @@
 import {
   addFileTag,
   addFileTags,
+  AssetForgeError,
   assignFiles,
   emptyTrash,
   enqueueUrlImport,
@@ -64,6 +65,18 @@ export interface FileHandlerDependencies {
 }
 
 /**
+ * Logs one file that emptying the trash could not purge: its id and the error code, never the message, which may
+ * carry a cause or a path.
+ *
+ * @param fileId the file that stayed in the trash
+ * @param error why it could not be purged
+ */
+function logPurgeFailure(fileId: string, error: Error): void {
+  const code = error instanceof AssetForgeError ? error.code : 'internal_error';
+  console.warn(`Emptying the trash left file ${fileId}: ${code}`);
+}
+
+/**
  * Builds the `files:*` and `trash:*` channels.
  *
  * @param dependencies what the channels work with
@@ -93,7 +106,8 @@ export function createFileHandlers(dependencies: FileHandlerDependencies): FileH
     'files:trashMany': (request) => touchingJobs(jobs, () => trashMany(dependencies, request)),
     'files:restoreMany': (request) => touchingJobs(jobs, () => restoreMany(manager, request)),
     'files:purgeMany': (request) => touchingJobs(jobs, () => purgeMany(dependencies, request)),
-    'trash:empty': () => touchingJobs(jobs, () => manager.exclusive((session) => emptyTrash(session, jobs))),
+    'trash:empty': () =>
+      touchingJobs(jobs, () => manager.exclusive((session) => emptyTrash(session, jobs, logPurgeFailure))),
     'trash:summary': async () => ({ count: await manager.read((session) => trashCount(session)) }),
 
     'files:addTag': (request) => manager.exclusive((session) => addFileTag(session, request)),
