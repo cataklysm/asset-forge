@@ -96,52 +96,20 @@ interface MemberRowsProps {
  * @param props the member, its names, whether the notes show, and the callbacks
  * @returns one or two table rows
  */
-function MemberRows({
-  member,
-  projectName,
-  typeName,
-  notesOpen,
-  onToggleNotes,
-  onOpenAsset,
-  onChanged,
-  onRemove,
-}: MemberRowsProps) {
-  const name = member.asset.name;
-  const Chevron = notesOpen ? ChevronDown : ChevronRight;
+function MemberRows(props: MemberRowsProps) {
+  const { member, typeName, notesOpen, onOpenAsset, onChanged } = props;
   return (
     <Fragment>
       <tr className={notesOpen ? '' : `border-b ${BORDER}`}>
         <td className="py-2 pr-3">
-          <Link onFollow={onOpenAsset}>{name}</Link>
+          <Link onFollow={onOpenAsset}>{member.asset.name}</Link>
         </td>
         <td className="py-2 pr-3">{typeName}</td>
         <td className="py-2 pr-3">{label(member.asset.status)}</td>
         <td className="py-2 pr-3">
           <AssignmentFields assignment={member} fields="main" onChanged={onChanged} />
         </td>
-        <td className="py-2 pr-3">
-          <button
-            type="button"
-            className={ICON_BUTTON_INLINE}
-            aria-label={notesForLabel(name)}
-            aria-expanded={notesOpen}
-            title={member.notes === '' ? MEMBER_NOTES_TITLE : member.notes}
-            onClick={onToggleNotes}
-          >
-            <Chevron size={16} aria-hidden />
-          </button>
-        </td>
-        <td className="py-2 text-right">
-          <button
-            type="button"
-            className={BUTTON_INLINE}
-            aria-label={removeMemberLabel(name, projectName)}
-            title={REMOVE_MEMBER_TITLE}
-            onClick={onRemove}
-          >
-            {REMOVE_MEMBER_LABEL}
-          </button>
-        </td>
+        <MemberActionCells {...props} />
       </tr>
       {notesOpen && (
         <tr className={`border-b ${BORDER}`}>
@@ -151,5 +119,43 @@ function MemberRows({
         </tr>
       )}
     </Fragment>
+  );
+}
+
+/**
+ * The last two cells of a member's main row: the notes toggle and Remove.
+ *
+ * @param props the member, the project name, whether the notes show, and the callbacks
+ * @returns two table cells
+ */
+function MemberActionCells({ member, projectName, notesOpen, onToggleNotes, onRemove }: MemberRowsProps) {
+  const name = member.asset.name;
+  const Chevron = notesOpen ? ChevronDown : ChevronRight;
+  return (
+    <>
+      <td className="py-2 pr-3">
+        <button
+          type="button"
+          className={ICON_BUTTON_INLINE}
+          aria-label={notesForLabel(name)}
+          aria-expanded={notesOpen}
+          title={member.notes === '' ? MEMBER_NOTES_TITLE : member.notes}
+          onClick={onToggleNotes}
+        >
+          <Chevron size={16} aria-hidden />
+        </button>
+      </td>
+      <td className="py-2 text-right">
+        <button
+          type="button"
+          className={BUTTON_INLINE}
+          aria-label={removeMemberLabel(name, projectName)}
+          title={REMOVE_MEMBER_TITLE}
+          onClick={onRemove}
+        >
+          {REMOVE_MEMBER_LABEL}
+        </button>
+      </td>
+    </>
   );
 }
