@@ -21,6 +21,9 @@ export const ResourceClassSchema = z.enum(['cpu', 'io', 'local_gpu', 'remote_api
 /** The resource a job needs. */
 export type ResourceClass = z.infer<typeof ResourceClassSchema>;
 
+/** Runs per job, the first one included; the scheduler's limit and the denominator of the Jobs screen's attempts. */
+export const MAX_ATTEMPTS = 3;
+
 /** The statuses of a job that has not ended yet. */
 export const ACTIVE_JOB_STATUSES = ['queued', 'running', 'waiting_remote', 'retry_wait'] as const;
 /** The statuses of a job that has ended. */

@@ -5,6 +5,7 @@ import {
   ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
+  MAX_ATTEMPTS,
   type JobStatus,
   type JobView,
   type ProviderList,
@@ -41,8 +42,6 @@ import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ICON_BUTTON, ITEM_HOVER, MUTED } from '../ui';
 import { laneName } from './MoveJobsDialog';
 
-/** The scheduler's `MAX_ATTEMPTS` (packages/jobs), which the renderer does not import. */
-const MAX_ATTEMPTS = 3;
 /** The statuses a job can be cancelled in. */
 const CANCELLABLE: ReadonlySet<JobStatus> = new Set(ACTIVE_JOB_STATUSES);
 /** The statuses a job can be retried in. */
