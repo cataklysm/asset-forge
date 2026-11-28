@@ -266,6 +266,8 @@ class JobScheduler {
   private passAgain = false;
   /** The timer of the earliest `run_after`, if one is pending. */
   private timer: TimerSlot | null = null;
+  /** A recovery or a stored outcome failed, so rows may be left `running`; the next pass recovers them. */
+  private recoveryPending = false;
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -379,6 +381,7 @@ class JobScheduler {
     try {
       await this.recover();
     } catch (cause) {
+      this.recoveryPending = true;
       this.config.log('Interrupted jobs could not be recovered', cause);
     }
     if (this.stopping) return;
@@ -388,14 +391,33 @@ class JobScheduler {
   }
 
   /**
-   * Puts every job found `running` back to `queued`, or fails it with the interrupted code under
-   * `onInterrupted: 'fail'`.
+   * Recovers the rows a failed recovery or a failed store of an outcome left `running`, when there are any. A failure
+   * is logged and tried again on the next pass.
+   *
+   * @returns resolves once the recovery is done or its failure logged
+   */
+  private async recoverLeftovers(): Promise<void> {
+    if (!this.recoveryPending) return;
+    this.recoveryPending = false;
+    try {
+      await this.recover();
+    } catch (cause) {
+      this.recoveryPending = true;
+      this.config.log('Interrupted jobs could not be recovered', cause);
+    }
+  }
+
+  /**
+   * Puts every job found `running` that this scheduler is not running back to `queued`, or fails it with the
+   * interrupted code under `onInterrupted: 'fail'`.
    *
    * @returns resolves once every such job is handled or a stop began
    */
   private async recover(): Promise<void> {
     for (const job of await this.config.jobs.listByStatus('running')) {
       if (this.stopping) break;
+      // A launched run stores its own outcome.
+      if (this.active.has(job.id)) continue;
       const changedRow =
         this.config.handlers[job.type]?.onInterrupted === 'fail'
           ? await this.finishJob(job, { status: 'failed', errorCode: this.interruptedCodeOf(job) })
@@ -414,6 +436,7 @@ class JobScheduler {
     try {
       do {
         this.passAgain = false;
+        await this.recoverLeftovers();
         try {
           await this.pass();
         } catch (cause) {
@@ -446,6 +469,8 @@ class JobScheduler {
       if (this.stopping) return;
       if (next !== null) earliest = Math.min(earliest ?? Infinity, next);
     }
+    // A recovery that failed again is tried after the first retry delay, even when nothing else wakes the scheduler.
+    if (this.recoveryPending) earliest = Math.min(earliest ?? Infinity, this.config.now().getTime() + RETRY_DELAYS_MS[0]);
     this.cancelTimer();
     if (earliest !== null) this.armTimer(earliest);
   }
@@ -570,6 +595,8 @@ class JobScheduler {
     try {
       await this.settle(job, run, outcome);
     } catch (cause) {
+      // The row may still be `running`; the next pass recovers it as a restart would.
+      this.recoveryPending = true;
       this.config.log('Job outcome could not be stored', cause);
     }
     this.active.delete(job.id);

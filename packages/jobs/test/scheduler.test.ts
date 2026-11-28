@@ -627,6 +627,73 @@ describe('createScheduler', () => {
     expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
   });
 
+  it('recovers on the next pass the job whose outcome could not be stored', async () => {
+    for (const policy of ['requeue', 'fail'] as const) {
+      const h = controlled('cpu', policy, { interruptedCode: 'provider_outcome_unknown' });
+      const failure = new Error('disk');
+      let failures = 1;
+      const s = setup({
+        handlers: { t: h.handler },
+        repo: (fake) =>
+          Object.assign(Object.create(fake) as InMemoryJobRepository, {
+            async finish(id: string, end: Parameters<JobRepository['finish']>[1]) {
+              if (failures-- > 0) throw failure;
+              return fake.finish(id, end);
+            },
+          }),
+      });
+      const [a] = (await s.enqueue('t', 'cpu')) as [string];
+      await s.scheduler.start();
+      h.runOf(a).resolve();
+      await flush();
+
+      expect(s.logged).toEqual([{ message: 'Job outcome could not be stored', cause: failure }]);
+      if (policy === 'requeue') {
+        // Put back as a restart would, and run again.
+        expect(h.runs).toHaveLength(2);
+        expect(s.row(a)).toMatchObject({ status: 'running', attempt: 1 });
+        h.runOf(a).resolve();
+      } else {
+        // Never repeated: it ends with the interrupted code.
+        expect(h.runs).toHaveLength(1);
+        expect(s.row(a)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+      }
+      await s.scheduler.stop();
+    }
+  });
+
+  it('tries a failed recovery again on the next pass and after the first delay', async () => {
+    const h = controlled('cpu');
+    const failure = new Error('locked');
+    let failures = 2;
+    const s = setup({
+      handlers: { t: h.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async listByStatus(status: Parameters<JobRepository['listByStatus']>[0]) {
+            if (failures-- > 0) throw failure;
+            return fake.listByStatus(status);
+          },
+        }),
+    });
+    const [a] = (await s.enqueue('t', 'cpu')) as [string];
+    // Left `running` by an earlier session.
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso(), excludeLanes: [] });
+    await s.scheduler.start();
+    expect(s.logged.map((entry) => entry.message)).toEqual([
+      'Interrupted jobs could not be recovered',
+      'Interrupted jobs could not be recovered',
+    ]);
+    expect(h.runs).toHaveLength(0);
+    expect(s.timers.map((timer) => timer.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    expect(h.runs.map((run) => run.job.id)).toEqual([a]);
+    expect(s.row(a)).toMatchObject({ status: 'running', attempt: 1 });
+    expect(s.logged).toHaveLength(2);
+  });
+
   it('makes no repository call after stop resolves', async () => {
     const h = controlled('cpu');
     const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 3 } });
