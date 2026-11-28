@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
@@ -338,7 +338,6 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                   asset={null}
                   actions={{
                     cover: null,
-                    onDetails: () => {},
                     ...fileActions(shown),
                     onError: setError,
                     onDelete: () => remove(shown),

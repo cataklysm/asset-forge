@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
@@ -340,7 +340,6 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
                 asset={{ id: asset.id, name: asset.name, tags: asset.tags }}
                 actions={{
                   cover: coverOf(detail),
-                  onDetails: () => {},
                   onSetCover: setCover,
                   onDetach: () => detach(detail),
                   ...fileActions(detail),

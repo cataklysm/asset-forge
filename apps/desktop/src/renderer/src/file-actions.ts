@@ -38,8 +38,8 @@ export function showsProposal(file: FileRecord): boolean {
 export interface FileActionContext {
   /** The file's cover state within its asset; null where there is no asset (the inbox). */
   cover: { isEffective: boolean; isChosen: boolean } | null;
-  /** Opens the file detail dialog. */
-  onDetails(): void;
+  /** Opens the file detail dialog; Details is offered only with it (the dialog itself has none). */
+  onDetails?(): void;
   /** A file id makes it the chosen cover, null returns to the automatic cover. */
   onSetCover?(fileId: string | null): void;
   /** Moves the file out of its asset into the inbox. */
@@ -143,8 +143,8 @@ function coverItems(file: FileRecord, context: FileActionContext): MenuItem[] {
 }
 
 /**
- * The actions of one file's "…" menu. A trashed file offers only Details, Restore and Delete
- * permanently. A live file offers Details; Open externally and Show in folder for completely
+ * The actions of one file's "…" menu. Details comes first wherever the host offers it. A trashed file offers
+ * only Restore and Delete permanently besides it. A live file offers Open externally and Show in folder for completely
  * imported files (opening only when the type may be opened); Analyse, Review tags (with a
  * proposal) and Image to prompt for analysable images when the host offers them; Generate from
  * image and the upscales for complete previewable files when the host offers the studio; the cover choice
@@ -159,7 +159,7 @@ export function fileMenuItems(file: FileRecord, context: FileActionContext): Men
   const shell = (channel: 'files:openExternal' | 'files:showInFolder') => () => {
     call(channel, { fileId: file.id }).catch((error: unknown) => context.onError?.(describeError(error)));
   };
-  const items: MenuItem[] = [{ label: 'Details', onSelect: context.onDetails }];
+  const items: MenuItem[] = context.onDetails === undefined ? [] : [{ label: 'Details', onSelect: context.onDetails }];
   if (file.deletedAt !== null) {
     if (context.onRestore !== undefined)
       items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: context.onRestore });

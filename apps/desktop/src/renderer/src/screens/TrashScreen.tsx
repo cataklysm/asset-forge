@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -285,7 +285,6 @@ export function TrashScreen({ state, onStateChange }: Props) {
                   asset={null}
                   actions={{
                     cover: null,
-                    onDetails: () => {},
                     onRestore: () => restoreOne(shown),
                     onPurge: () => askPurgeFromDialog(shown),
                     onError: setError,

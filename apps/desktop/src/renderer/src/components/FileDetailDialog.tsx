@@ -158,15 +158,17 @@ export function FileDetailDialog({
   };
   const guard = <A extends unknown[]>(action: ((...args: A) => unknown) | undefined) =>
     guarded(action, setError, report);
+  // The dialog is the details: its More menu has no Details entry.
   const items = fileMenuItems(file, {
     ...actions,
+    onDetails: undefined,
     onSetCover: guard(actions.onSetCover),
     onDetach: guard(actions.onDetach),
     onDelete: guard(actions.onDelete),
     onRestore: guard(actions.onRestore),
     onPurge: guard(actions.onPurge),
     onError: report,
-  }).filter((item) => item.label !== 'Details');
+  });
 
   // The same action and rule as Open externally in the More menu.
   const canOpenExternally = complete && file.openable && !trashed;
