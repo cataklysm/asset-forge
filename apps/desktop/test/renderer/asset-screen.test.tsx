@@ -747,9 +747,28 @@ it('projects tab: links, remove with tooltip and add to project', async () => {
   expect(remove.getAttribute('title')).toBe('Removes the assignment only; the asset and its files are kept');
   await user.click(remove);
   expect(callsOf(api, 'assignments:remove')).toEqual([{ projectId: forest.projectId, assetId: asset.id }]);
-  expect((screen.getByRole('combobox', { name: 'Project to add' }) as HTMLSelectElement).value).toBe(city.id);
-  await user.click(screen.getByRole('button', { name: 'Add to project' }));
-  expect(callsOf(api, 'assignments:assign')).toEqual([{ projectId: city.id, assetId: asset.id }]);
+  await user.click(screen.getByRole('combobox', { name: 'Add to project' }));
+  // The assigned project is never offered.
+  expect(await screen.findByRole('option', { name: 'City' })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Forest' })).toBeNull();
+  await user.click(screen.getByRole('option', { name: 'City' }));
+  await waitFor(() => expect(callsOf(api, 'assignments:assign')).toEqual([{ projectId: city.id, assetId: asset.id }]));
+});
+
+it('projects tab: the project picker searches by the typed text instead of loading every project', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const city = project('City');
+  const api = install(asset, {
+    'assignments:listByAsset': () => [],
+    'projects:list': ({ query }) => pageOf(query === 'ci' ? [{ ...city, assetCount: 0, imageCount: 0 }] : []),
+  });
+  render(<Harness id={asset.id} initialTab="projects" />);
+  await user.type(await screen.findByRole('combobox', { name: 'Add to project' }), 'ci');
+  expect(await screen.findByRole('option', { name: 'City' })).toBeTruthy();
+  const requests = callsOf(api, 'projects:list') as { query?: string; limit: number }[];
+  expect(requests.map((request) => request.query ?? '')).toEqual(['', 'ci']);
+  expect(requests.every((request) => request.limit < 200)).toBe(true);
 });
 
 it('relations tab: remove with tooltip and add through the asset picker without self', async () => {
