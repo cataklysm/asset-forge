@@ -567,7 +567,8 @@ class JobScheduler {
   private async claim(resourceClass: ResourceClass, types: string[]): Promise<Job | null> {
     const excluded = this.excludedLanes(resourceClass);
     const rotating = this.config.totals[resourceClass] !== undefined;
-    for (const served of rotating ? this.rotation.preferences(resourceClass) : [[]]) {
+    const attempts = rotating ? this.rotation.preferences(resourceClass) : [[]];
+    for (const [index, served] of attempts.entries()) {
       const job = await this.config.jobs.claimNext({
         resourceClass,
         types,
@@ -575,8 +576,22 @@ class JobScheduler {
         excludeLanes: [...excluded, ...served],
       });
       if (job || this.stopping) return job;
+      if (index > 0) this.forgetIdleLane(resourceClass, attempts[index - 1]!);
     }
     return null;
+  }
+
+  /**
+   * Drops from the rotation the lane that a claim finding nothing gave back, when it has no running job: it has
+   * nothing to claim, so leaving it out of later claims would only cost queries.
+   *
+   * @param resourceClass the class of the claim
+   * @param previous the lanes the claim before left out; its last lane is the one given back
+   */
+  private forgetIdleLane(resourceClass: ResourceClass, previous: (string | null)[]): void {
+    if (previous.length === 0) return;
+    const lane = previous[previous.length - 1] as string | null;
+    if (!this.runningOf(resourceClass).has(lane)) this.rotation.forget(resourceClass, lane);
   }
 
   /**

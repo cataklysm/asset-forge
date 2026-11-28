@@ -25,6 +25,22 @@ export class LaneRotation {
   }
 
   /**
+   * Drops a lane from the rotation, so that claims stop leaving it out; used for a lane with nothing to claim and no
+   * running job, which keeps the claims of an idle class cheap.
+   *
+   * @param resourceClass the class of the lane
+   * @param lane the lane
+   */
+  forget(resourceClass: ResourceClass, lane: string | null): void {
+    const lanes = this.served.get(resourceClass);
+    if (lanes)
+      this.served.set(
+        resourceClass,
+        lanes.filter((candidate) => candidate !== lane),
+      );
+  }
+
+  /**
    * The lane sets to leave out of a claim, tried in order until a claim finds a job: first every lane served
    * recently, then one lane fewer each time, the one served longest ago first, and last none of them.
    *

@@ -1890,6 +1890,34 @@ describe('total limit per class', () => {
     expect(h.runs.map((r) => r.job.id)).toEqual([a[0], b[0], a[1], b[1], a[2], a[3]]);
   });
 
+  it('drops idle lanes from the rotation, so a claim in an idle class costs one query', async () => {
+    const h = controlled('io');
+    let claims = 0;
+    const s = setup({
+      handlers: { dl: h.handler },
+      totals: { io: 4 },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            claims += 1;
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    const ids: string[] = [];
+    for (const lane of ['a', 'b', 'c', 'd', 'e', 'f']) ids.push(...(await s.enqueue('dl', 'io', 1, lane)));
+    await s.scheduler.start();
+    for (const id of ids) {
+      h.runOf(id).resolve();
+      await flush();
+    }
+    expect(h.runs).toHaveLength(6);
+    claims = 0;
+    s.scheduler.wake();
+    await flush();
+    expect(claims).toBe(1);
+  });
+
   it('leaves classes without a total unbounded across lanes', async () => {
     const h = controlled('local_gpu');
     const s = setup({ handlers: { t: h.handler } });
