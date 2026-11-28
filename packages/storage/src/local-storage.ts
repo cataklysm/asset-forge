@@ -3,196 +3,231 @@ import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { Transform, type Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import { LAYOUT_DIRS, PathEscapeError, type Storage } from '@assetforge/core';
 import { isNotFound, translateFsError } from './fs-errors.js';
-import { isInside, realpathOfDeepestAncestor } from './workspace-paths.js';
+import { StreamWrite, type WrittenFile } from './stream-write.js';
+import { isInside, realpathOfDeepestAncestor, workspaceSegments } from './workspace-paths.js';
 
+/** What `writeStream` is asked with besides the path and the source. */
+interface WriteStreamOptions {
+  /** Told the cumulative bytes written after every chunk; a throw is ignored. */
+  onProgress?(bytesWritten: number): void;
+}
+
+/**
+ * The `Storage` of a workspace folder on a local disk or a mounted share. Every path goes through one gate that
+ * keeps it inside the workspace, and every file-system failure is translated in one place.
+ */
 export class LocalFileSystemStorage implements Storage {
+  /** The workspace folder as an absolute path. */
   private readonly root: string;
 
+  /**
+   * @param rootPath the workspace folder
+   */
   constructor(rootPath: string) {
     this.root = path.resolve(rootPath);
   }
 
+  /**
+   * Whether the storage can be reached: the root, or while it does not exist yet its parent, is a directory.
+   *
+   * @returns true when reachable; false for any failure other than a missing root
+   */
   async isReachable(): Promise<boolean> {
     for (const candidate of [this.root, path.dirname(this.root)]) {
       try {
         return (await fs.stat(candidate)).isDirectory();
-      } catch (err) {
-        if (!isNotFound(err)) return false;
+      } catch (error) {
+        if (!isNotFound(error)) return false;
         if (candidate === this.root) continue;
       }
     }
     return false;
   }
 
+  /**
+   * Whether the root holds nothing.
+   *
+   * @returns true for an empty or missing root
+   */
   isEmptyOrMissing(): Promise<boolean> {
     return this.guarded('', async () => {
       try {
         return (await fs.readdir(this.root)).length === 0;
-      } catch (err) {
-        if (isNotFound(err)) return true;
-        throw err;
+      } catch (error) {
+        if (isNotFound(error)) return true;
+        throw error;
       }
     });
   }
 
+  /**
+   * Creates the root and the directories of `LAYOUT_DIRS`.
+   *
+   * @returns resolves once they exist
+   */
   ensureLayout(): Promise<void> {
     return this.guarded('', async () => {
       await fs.mkdir(this.root, { recursive: true });
-      for (const dir of LAYOUT_DIRS) {
-        await fs.mkdir(await this.resolve(dir), { recursive: true });
+      for (const directory of LAYOUT_DIRS) {
+        await fs.mkdir(await this.resolve(directory), { recursive: true });
       }
     });
   }
 
-  readText(relPath: string): Promise<string | null> {
-    return this.guarded(relPath, async () => {
-      const abs = await this.resolve(relPath);
+  /**
+   * Reads a text file as UTF-8.
+   *
+   * @param relativePath the workspace path
+   * @returns the text; null when the file does not exist
+   */
+  readText(relativePath: string): Promise<string | null> {
+    return this.guarded(relativePath, async () => {
+      const absolutePath = await this.resolve(relativePath);
       try {
-        return await fs.readFile(abs, 'utf8');
-      } catch (err) {
-        if (isNotFound(err)) return null;
-        throw err;
+        return await fs.readFile(absolutePath, 'utf8');
+      } catch (error) {
+        if (isNotFound(error)) return null;
+        throw error;
       }
     });
   }
 
-  writeText(relPath: string, text: string): Promise<void> {
-    return this.guarded(relPath, async () => {
-      const abs = await this.resolve(relPath);
-      await fs.mkdir(path.dirname(abs), { recursive: true });
-      const tmp = path.join(path.dirname(abs), `${path.basename(abs)}.${randomUUID()}.tmp`);
+  /**
+   * Replaces a text file atomically: written to a temporary file beside it, flushed, then renamed over it.
+   *
+   * @param relativePath the workspace path
+   * @param text the content
+   * @returns resolves once the file holds the text
+   */
+  writeText(relativePath: string, text: string): Promise<void> {
+    return this.guarded(relativePath, async () => {
+      const absolutePath = await this.resolve(relativePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      const temporaryPath = path.join(
+        path.dirname(absolutePath),
+        `${path.basename(absolutePath)}.${randomUUID()}.tmp`,
+      );
       try {
         // Flush before the rename: otherwise a crash can leave the renamed file
         // (e.g. workspace.json) truncated or zeroed.
-        await fs.writeFile(tmp, text, { encoding: 'utf8', flag: 'wx', flush: true });
-        await fs.rename(tmp, abs);
-      } catch (err) {
-        await fs.rm(tmp, { force: true }).catch(() => undefined);
-        throw err;
+        await fs.writeFile(temporaryPath, text, { encoding: 'utf8', flag: 'wx', flush: true });
+        await fs.rename(temporaryPath, absolutePath);
+      } catch (error) {
+        await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+        throw error;
       }
     });
   }
 
-  writeStream(
-    relPath: string,
-    source: Readable,
-    options: { onProgress?(bytesWritten: number): void } = {},
-  ): Promise<{ sizeBytes: number; sha256: string }> {
-    const { onProgress } = options;
-    // A failing source is the source's problem, not the workspace storage's: pass it through.
-    // A destination failure makes the pipeline destroy the source with that same error, so the
-    // destination's error is recorded separately and never counts as the source's.
-    let sourceError: unknown;
-    let destinationError: unknown;
-    source.once('error', (err) => {
-      sourceError = err;
-    });
+  /**
+   * Writes a stream into a new file, hashing it on the way. An existing file is never touched.
+   *
+   * @param relativePath the workspace path of the new file
+   * @param source the bytes; destroyed when the file cannot be opened
+   * @param options the progress observer
+   * @returns the size and checksum; a failing source rejects with the source's own error
+   */
+  writeStream(relativePath: string, source: Readable, options: WriteStreamOptions = {}): Promise<WrittenFile> {
+    const write = new StreamWrite(source, options.onProgress);
     return this.guarded(
-      relPath,
-      async () => {
-        let handle: fs.FileHandle;
-        let abs: string;
-        try {
-          abs = await this.resolve(relPath);
-          await fs.mkdir(path.dirname(abs), { recursive: true });
-          // 'wx' fails if the target exists, so an existing file is never touched
-          // (and never removed by the cleanup below).
-          handle = await fs.open(abs, 'wx');
-        } catch (err) {
-          source.destroy();
-          throw err;
-        }
-        const hash = createHash('sha256');
-        let sizeBytes = 0;
-        const hasher = new Transform({
-          transform(chunk: Buffer, _enc, cb) {
-            hash.update(chunk);
-            sizeBytes += chunk.length;
-            if (onProgress !== undefined) {
-              try {
-                onProgress(sizeBytes);
-              } catch {
-                // A progress observer never fails the write.
-              }
-            }
-            cb(null, chunk);
-          },
-        });
-        try {
-          // `flush` fsyncs before the handle closes. The caller verifies, moves and marks
-          // the file complete right after this resolves; without the flush a power loss
-          // could leave a `complete` row pointing at a truncated or zeroed file.
-          const out = handle.createWriteStream({ flush: true });
-          out.once('error', (err) => {
-            // The pipeline also destroys `out` with the source's error; only an error that
-            // arrives before any source error is the destination's own.
-            if (sourceError === undefined) destinationError = err;
-          });
-          await pipeline(source, hasher, out);
-        } catch (err) {
-          await handle.close().catch(() => undefined);
-          await fs.rm(abs, { force: true }).catch(() => undefined);
-          throw err;
-        }
-        return { sizeBytes, sha256: hash.digest('hex') };
-      },
-      (err) => err === sourceError && err !== destinationError,
+      relativePath,
+      () => this.writeNewFile(relativePath, write),
+      (error) => write.isSourceFailure(error),
     );
   }
 
-  hashFile(relPath: string): Promise<string> {
-    return this.guarded(relPath, async () => {
-      const abs = await this.resolve(relPath);
+  /**
+   * The SHA-256 of a file.
+   *
+   * @param relativePath the workspace path
+   * @returns the checksum as lower-case hex
+   */
+  hashFile(relativePath: string): Promise<string> {
+    return this.guarded(relativePath, async () => {
+      const absolutePath = await this.resolve(relativePath);
       const hash = createHash('sha256');
-      await pipeline(createReadStream(abs), hash);
+      await pipeline(createReadStream(absolutePath), hash);
       return hash.digest('hex');
     });
   }
 
+  /**
+   * Moves a file within the workspace; the target must not exist.
+   *
+   * @param from the workspace path of the file
+   * @param to the workspace path it moves to
+   * @returns resolves once it moved; rejects with an `EEXIST` error when the target exists
+   */
   move(from: string, to: string): Promise<void> {
     return this.guarded(to, async () => {
-      const src = await this.resolve(from);
-      const dst = await this.resolve(to);
-      if (await this.pathExists(dst)) {
+      const sourcePath = await this.resolve(from);
+      const targetPath = await this.resolve(to);
+      if (await this.pathExists(targetPath)) {
         throw Object.assign(new Error(`Target already exists: ${to}`), { code: 'EEXIST' });
       }
-      await fs.mkdir(path.dirname(dst), { recursive: true });
-      await fs.rename(src, dst);
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.rename(sourcePath, targetPath);
     });
   }
 
-  exists(relPath: string): Promise<boolean> {
-    return this.guarded(relPath, async () => this.pathExists(await this.resolve(relPath, true)));
+  /**
+   * Whether an entry exists, a dangling link included.
+   *
+   * @param relativePath the workspace path; the root is accepted
+   * @returns true when it exists
+   */
+  exists(relativePath: string): Promise<boolean> {
+    return this.guarded(relativePath, async () => this.pathExists(await this.resolve(relativePath, true)));
   }
 
-  remove(relPath: string): Promise<void> {
-    return this.guarded(relPath, async () => {
-      await fs.rm(await this.resolve(relPath), { force: true });
+  /**
+   * Removes a file; a missing one is no failure.
+   *
+   * @param relativePath the workspace path
+   * @returns resolves once it is gone
+   */
+  remove(relativePath: string): Promise<void> {
+    return this.guarded(relativePath, async () => {
+      await fs.rm(await this.resolve(relativePath), { force: true });
     });
   }
 
-  list(relDir: string): Promise<string[]> {
-    return this.guarded(relDir, async () => {
-      const abs = await this.resolve(relDir, true);
+  /**
+   * The names in a directory.
+   *
+   * @param relativeDirectory the workspace path; the root is accepted
+   * @returns the names; empty for a missing directory
+   */
+  list(relativeDirectory: string): Promise<string[]> {
+    return this.guarded(relativeDirectory, async () => {
+      const absolutePath = await this.resolve(relativeDirectory, true);
       try {
-        return await fs.readdir(abs);
-      } catch (err) {
-        if (isNotFound(err)) return [];
-        throw err;
+        return await fs.readdir(absolutePath);
+      } catch (error) {
+        if (isNotFound(error)) return [];
+        throw error;
       }
     });
   }
 
-  absolutePath(relPath: string): Promise<string> {
-    return this.guarded(relPath, () => this.resolve(relPath, false));
+  /**
+   * The absolute path of a workspace path, after the gate.
+   *
+   * @param relativePath the workspace path
+   * @returns the absolute path
+   */
+  absolutePath(relativePath: string): Promise<string> {
+    return this.guarded(relativePath, () => this.resolve(relativePath, false));
   }
 
   /**
    * Free bytes for this user on the volume of the root, measured on the root or its nearest existing parent.
    * Null when nothing can be measured: a storage that cannot tell never blocks a download.
+   *
+   * @returns the free bytes, or null
    */
   async freeBytes(): Promise<number | null> {
     let candidate = this.root;
@@ -200,34 +235,84 @@ export class LocalFileSystemStorage implements Storage {
       try {
         const stats = await fs.statfs(candidate);
         return Number(stats.bavail) * Number(stats.bsize);
-      } catch (err) {
+      } catch (error) {
         const parent = path.dirname(candidate);
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || parent === candidate) return null;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === candidate) return null;
         candidate = parent;
       }
     }
   }
 
-  /** The single place where file-system failures are translated (see `translateFsError`). */
+  /**
+   * The body of `writeStream`: opens the new file, pipes the source through the hasher into it and removes the
+   * file again when the pipe fails.
+   *
+   * @param relativePath the workspace path of the new file
+   * @param write the source and its hashing state
+   * @returns the size and checksum
+   */
+  private async writeNewFile(relativePath: string, write: StreamWrite): Promise<WrittenFile> {
+    let handle: fs.FileHandle;
+    let absolutePath: string;
+    try {
+      absolutePath = await this.resolve(relativePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      // 'wx' fails if the target exists, so an existing file is never touched
+      // (and never removed by the cleanup below).
+      handle = await fs.open(absolutePath, 'wx');
+    } catch (error) {
+      write.source.destroy();
+      throw error;
+    }
+    const hasher = write.hasher();
+    try {
+      // `flush` fsyncs before the handle closes. The caller verifies, moves and marks
+      // the file complete right after this resolves; without the flush a power loss
+      // could leave a `complete` row pointing at a truncated or zeroed file.
+      const out = handle.createWriteStream({ flush: true });
+      write.watchDestination(out);
+      await pipeline(write.source, hasher, out);
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      await fs.rm(absolutePath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    return write.written();
+  }
+
+  /**
+   * The single place where file-system failures are translated (see `translateFsError`).
+   *
+   * @param relativePath the workspace path named in a translated message
+   * @param operation the work
+   * @param passThrough errors for which it answers true are rethrown untranslated
+   * @returns what the work resolved with
+   */
   private async guarded<T>(
-    relPath: string,
-    op: () => Promise<T>,
-    passThrough: (err: unknown) => boolean = () => false,
+    relativePath: string,
+    operation: () => Promise<T>,
+    passThrough: (error: unknown) => boolean = () => false,
   ): Promise<T> {
     try {
-      return await op();
-    } catch (err) {
-      throw passThrough(err) ? err : translateFsError(err, relPath);
+      return await operation();
+    } catch (error) {
+      throw passThrough(error) ? error : translateFsError(error, relativePath);
     }
   }
 
-  private async pathExists(abs: string): Promise<boolean> {
+  /**
+   * Whether an entry exists, without following a link.
+   *
+   * @param absolutePath the path
+   * @returns true when it exists
+   */
+  private async pathExists(absolutePath: string): Promise<boolean> {
     try {
-      await fs.lstat(abs);
+      await fs.lstat(absolutePath);
       return true;
-    } catch (err) {
-      if (isNotFound(err)) return false;
-      throw err;
+    } catch (error) {
+      if (isNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -236,23 +321,14 @@ export class LocalFileSystemStorage implements Storage {
    * segments lexically, then verifies via realpath of the deepest existing
    * ancestor that links/junctions do not lead outside the real root. Paths that
    * reduce to the root itself are only accepted with `allowRoot` (list, exists).
+   *
+   * @param relativePath the workspace path
+   * @param allowRoot whether a path that reduces to the root is accepted
+   * @returns the absolute path below the root
+   * @throws PathEscapeError when the path leaves the workspace
    */
-  private async resolve(relPath: string, allowRoot = false): Promise<string> {
-    if (
-      relPath.includes('\0') ||
-      relPath.startsWith('/') ||
-      relPath.startsWith('\\') ||
-      /^[a-zA-Z]:/.test(relPath)
-    ) {
-      throw new PathEscapeError('Absolute path not allowed');
-    }
-    const segments = relPath.split(/[\\/]/).filter((s) => s !== '' && s !== '.');
-    if (segments.includes('..')) {
-      throw new PathEscapeError('Path escapes the workspace');
-    }
-    if (segments.length === 0 && !allowRoot) {
-      throw new PathEscapeError('Path resolves to the workspace root');
-    }
+  private async resolve(relativePath: string, allowRoot = false): Promise<string> {
+    const segments = workspaceSegments(relativePath, allowRoot);
     const target = path.join(this.root, ...segments);
     const realRoot = await realpathOfDeepestAncestor(this.root);
     const realTarget = await realpathOfDeepestAncestor(target);
