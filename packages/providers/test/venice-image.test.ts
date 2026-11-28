@@ -18,6 +18,7 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createVeniceImage } from '../src/index.js';
+import { refusedUrl, releaseRefusedPorts } from './refused-port.js';
 
 const KEY = 'test-key-not-real';
 const signal = () => new AbortController().signal;
@@ -27,6 +28,7 @@ const servers: Server[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
+  await releaseRefusedPorts();
   await Promise.all(providers.splice(0).map((provider) => provider.close()));
   await Promise.all(
     servers.splice(0).map(
@@ -53,13 +55,9 @@ async function serve(handler: Parameters<typeof createServer>[1]): Promise<strin
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-/** A port nothing listens on: a server is started and closed again. */
-async function closedPort(): Promise<string> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return `http://127.0.0.1:${port}/api/v1`;
+/** A base URL whose connection is refused for the whole test. */
+function closedPort(): Promise<string> {
+  return refusedUrl('/api/v1');
 }
 
 function png(width: number, height: number): Uint8Array {
