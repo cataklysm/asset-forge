@@ -376,6 +376,42 @@ describe('generation studio end to end', () => {
     );
   });
 
+  it('fails a generation found running after a crash as provider_outcome_unknown and never sends it', async () => {
+    let isSchedulerHeld = true;
+    const { assetId } = await setup({
+      host: { workspaceOpened: () => (isSchedulerHeld ? Promise.resolve() : h.services.workspaceOpened()) },
+    });
+    const sourceId = await h.importPng({
+      name: 'oak.png',
+      width: 256,
+      height: 256,
+      target: { assetId, role: 'reference' },
+    });
+    const crashed = await started(edit(sourceId, 'Make it night'));
+    // Claimed as a run would claim it; the app then stops without settling the row.
+    const claimed = await h.manager.read((s) =>
+      s.database.jobs.claimNext({
+        resourceClass: 'remote_api',
+        types: [IMAGE_GENERATE_JOB],
+        now: new Date().toISOString(),
+      }),
+    );
+    expect(claimed).toMatchObject({ id: crashed.jobId, status: 'running' });
+    await h.ok('workspace:close', {});
+
+    isSchedulerHeld = false;
+    await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
+    await h.until((s) => s.failed === 1 && active(s) === 0);
+    const [job] = (await h.ok('jobs:list', page)).items;
+    expect(job).toMatchObject({ id: crashed.jobId, status: 'failed', errorCode: 'provider_outcome_unknown' });
+    expect(await generation(sourceId, crashed.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_outcome_unknown',
+    });
+    expect(mock!.imageRequests).toHaveLength(0);
+    expect((await filesOf(assetId)).map((f) => f.id)).toEqual([sourceId]);
+  });
+
   it('fails a slow edit interrupted by closing as provider_outcome_unknown and sends it only once', async () => {
     const { assetId } = await setup();
     const sourceId = await h.importPng({
