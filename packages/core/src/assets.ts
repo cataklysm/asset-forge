@@ -4,7 +4,7 @@ import type { AssetQuery } from './ports/asset-repositories.js';
 import type { WorkspaceSession } from './session.js';
 import { searchWords } from './search.js';
 import { tagName } from './tags.js';
-import { startWorkflow } from './workflows.js';
+import { newWorkflowOf } from './workflows.js';
 
 /**
  * An asset type that must exist.
@@ -21,12 +21,14 @@ async function requireType(session: WorkspaceSession, typeId: string): Promise<A
 }
 
 /**
- * Creates a draft asset and starts the default workflow of its type, when the type has one.
+ * Creates a draft asset and starts the default workflow of its type, when the type has one. The asset, its search
+ * entry and the workflow with its steps are written in one transaction, so a failure leaves no asset behind.
  *
  * @param session the open workspace
  * @param input the name, the asset type and the optional description
  * @returns the new asset
- * @throws `NotFoundError` for an unknown asset type
+ * @throws `NotFoundError` for an unknown asset type or default template, `InvalidOperationError` when the default
+ *   template has no version
  */
 export async function createAsset(
   session: WorkspaceSession,
@@ -43,8 +45,8 @@ export async function createAsset(
     createdAt: now,
     updatedAt: now,
   };
-  await session.database.assets.insert(asset);
-  if (type.defaultWorkflowTemplateId !== null) await startWorkflow(session, asset.id);
+  if (type.defaultWorkflowTemplateId === null) await session.database.assets.insert(asset);
+  else await session.database.assets.insertWithWorkflow(asset, await newWorkflowOf(session, asset));
   return asset;
 }
 

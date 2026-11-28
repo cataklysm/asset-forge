@@ -87,6 +87,7 @@ import type { TagRepository } from '../src/ports/tag-repository.js';
 import type { ModelImageSource, VisionProvider } from '../src/ports/vision-provider.js';
 import type {
   AssetWorkflowRepository,
+  NewAssetWorkflow,
   NewWorkflowStep,
   StepContext,
   StepDefinitionInput,
@@ -1468,6 +1469,17 @@ class InMemoryAssets implements AssetRepository {
 
   async insert(asset: Asset): Promise<void> {
     this.rows.set(asset.id, asset);
+  }
+
+  /** Like the one transaction: the asset row goes again when the workflow cannot be inserted. */
+  async insertWithWorkflow(asset: Asset, workflow: NewAssetWorkflow): Promise<void> {
+    this.rows.set(asset.id, asset);
+    try {
+      await this.workflows.insert(workflow.workflow, workflow.steps);
+    } catch (error) {
+      this.rows.delete(asset.id);
+      throw error;
+    }
   }
 
   async get(id: string): Promise<Asset | null> {

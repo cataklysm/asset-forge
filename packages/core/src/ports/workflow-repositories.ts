@@ -95,6 +95,26 @@ export interface NewWorkflowStep {
   updatedAt: string;
 }
 
+/** The workflow row of a new workflow instance. */
+export interface NewWorkflow {
+  /** The id of the workflow row. */
+  id: string;
+  /** The asset the workflow belongs to. */
+  assetId: string;
+  /** The template version the workflow follows. */
+  templateVersionId: string;
+  /** When the workflow started. */
+  createdAt: string;
+}
+
+/** A new workflow instance: its row and one step row per step of the template version. */
+export interface NewAssetWorkflow {
+  /** The workflow row. */
+  workflow: NewWorkflow;
+  /** One entry per step of the template version. */
+  steps: NewWorkflowStep[];
+}
+
 /** What a change of one step has to know about it. */
 export interface StepContext {
   /** The step row. */
@@ -115,10 +135,7 @@ export interface AssetWorkflowRepository {
    * @param workflow the workflow row
    * @param steps one entry per step of the template version
    */
-  insert(
-    workflow: { id: string; assetId: string; templateVersionId: string; createdAt: string },
-    steps: NewWorkflowStep[],
-  ): Promise<void>;
+  insert(workflow: NewWorkflow, steps: NewWorkflowStep[]): Promise<void>;
   /**
    * The workflow of an asset.
    *
