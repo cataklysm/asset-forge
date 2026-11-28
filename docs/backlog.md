@@ -2,6 +2,12 @@
 
 Findings from the phase 1, phase 2, phase 3a, phase 3b, UI redesign, image viewer, phase 4a, phase 4b, file trash, editable prompts, tag rename and merge, ZIP import, asset sources, several vision providers, generation studio and video playback reviews that were deliberately not fixed. Nothing here blocks the next phase; triage the list whenever a plan touches the area.
 
+## What belongs here
+
+An entry belongs here only if it (a) can affect a person using the app (a wrong result, lost data, a confusing or broken screen, a real performance or security problem), (b) needs a decision of the owner, (c) is a deliberately deferred feature or scope item, or (d) is a manual check the owner still has to do.
+Notes that are unreachable, harmless, theoretical or code-only, missing tests for low-risk behaviour that otherwise works, and duplicates do not belong here.
+Small findings in code that is being changed anyway are fixed in the same change instead of being written down.
+
 ## Requested features
 
 Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each needs a design before a plan.
@@ -22,7 +28,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - The session failure memory of the preview service also remembers worker timeouts and crashes (the pool reports every failure as the same `none`/`null`); it now keeps at most `MAX_REMEMBERED_FAILURES` (10 000) keys per memory, the oldest forgotten first.
 - The derived-data rebuild still runs on the main process while a workspace opens (about 1.7 s at 10 000 assets); it yields to the event loop between batches of 500, but each batch blocks it. The step also runs on every new workspace.
 - `asset_search_map` rowids: once assets can be deleted, the FTS row and the map row must be deleted together; otherwise rowid reuse attaches a stale index row to a new asset.
-- The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
 - `files:assignMany` holds the exclusive workspace queue for the whole batch.
 - Decoder byte limit of 256 MiB: an uncompressed 16-bit RGBA 8K TIFF (about 265 MB) gets neither dimensions nor a preview. Raising the limit is an owner decision.
 
@@ -46,7 +51,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Candidate, not verified: the tile menu in the last visible row and the "More" menu at the bottom of the file dialog panel may be clipped.
 - Image viewer, left out on purpose: neighbouring files are not preloaded; 16-bit and wide-gamut TIFF are converted to 8-bit sRGB in the PNG rendition; the viewer cannot be opened from the asset gallery (only from file lists).
 - Image viewer zoom: a fast Ctrl+wheel can lose zoom steps; a `reduced` rendition at 100 % is upscaled by a non-integer factor.
-- Image viewer browsing: `ViewerList.want` has a new identity on every render.
 - Image viewer layout: Fit uses the whole-number `clientWidth`/`clientHeight` of the frame, so at a fractional `devicePixelRatio` the fitted box can be up to half a CSS pixel larger than the real stage and loses an edge pixel (measure with `getBoundingClientRect` and floor to the device grid); a rotated layer can sit half a device pixel off the box; the stage's own position on screen may be off the device grid; Ctrl+wheel over an on-stage arrow does not zoom; the tag input is named "Add image tag" for non-image files too; a horizontal film-strip scrollbar clips the tiles; the toolbar is cut off in very narrow windows. Untested: Fit ignoring a client area shrunk by scrollbars; no on-stage arrows for a list of one file.
 
 ## Code structure
@@ -61,17 +65,15 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Core file readability pass (2026-11-28): `ImportRun` in `import-file.ts` and `ArchiveRun` in `import-archive.ts` are plain mutable records passed between steps rather than classes; turning them into classes would move the journaled order into methods, which this pass avoided.
 - Core domain readability pass (2026-11-28): `settleGenerationOfJob` stays in `generations.ts` because `file-trash.ts` imports it.
 - Renderer files lane readability pass (2026-11-28): the component bodies of `FileBrowser`, `FileDetailDialog`, `AssetScreen`, `AssetsScreen`, `InboxScreen` and `SiteImportDialog` and the `Stage` of `ImageStage` stay over 40 lines, because they are hook wiring in a fixed order plus flat JSX; `useVirtualRows` is about 95 lines for the same reason. The nested JSX ternaries in `FileListBody`, the stage of `FileDetailDialog` and the body of `AssetsScreen` stay. The `disposed` ref of `UrlImportDialog` and the `live`/`active` flags of `FileOrigins` and `AssetSelection` could become one small hook. Splitting a hook body into smaller hooks moved `useState` slots (React state order inside the same component), which is invisible but not literally the same fiber layout; the `useId` strings of the inputs moved into `SiteProfileForm` differ from before.
+- Scheduler: `scheduler.ts` is still over the file guide.
+- `AssetScreen` is still 191 lines with nested async functions (`run`, `importFiles`); it needs the same treatment as `ProjectScreen`.
+- `packages/core/src/site-crawl.ts` is over the file guide (about 330 code lines); `finalPageOf` and `kindOfUrl` could move into their own file.
 
 ## Tooling and tests
 
-- Split the desktop `tsconfig` into DOM (renderer) and Node (main, preload) configurations.
 - Crash-recovery test on the real adapters (currently only on the fakes).
 - Tests for the "ignore removal errors" branch of `importFile` (core). Storage: a real non-junction symlink (needs the symlink privilege on Windows; the dangling-link tests use junctions) and real case folding on a case-insensitive file system of another OS are not covered.
-- The in-memory fakes approximate BM25 by a two-bucket rule (name matches first, then the rest).
-- `check-sharp.mjs` is a manual gate and not part of `pnpm test`; it has no worker `exit` listener.
-- The test setup emulates Esc; some tests assert class substrings.
-- Flaky jsdom test under load (pre-existing, timing-sensitive): inbox "filters and scroll offset survive navigation". The assets and projects "list state round trip" tests, which failed the same way, were hardened in phase 4b: they now wait until the list has settled (no `aria-busy` left) before the click and wait for `aria-selected` after it. Their failure was not reproduced, so the root cause is unconfirmed.
-- Image viewer tests: no tests for the anchored scroll offsets and for Fit following a stage resize; `show(125)` alone and a file shifting across a page boundary are untested; the rejected-fullscreen test would pass without the `catch`; no end-to-end test "import stores oriented dimensions" through the real composition.
+- Possibly flaky under full load, passing alone or on the rerun: the inbox jsdom test "filters and scroll offset survive navigation" (timing-sensitive; the assets and projects "list state round trip" tests, which failed the same way, were hardened in phase 4b by waiting until no `aria-busy` is left and for `aria-selected`, root cause unconfirmed); the list-state round trip in `assets.test.tsx`; `packages/media` `video-frames.test.ts > runs at most 1 processes at a time`; `packages/storage` "fails the stream past the total time".
 
 ## Phase 4a
 
@@ -84,15 +86,7 @@ Deferred by design:
 Found during the build:
 
 - `pool.jpeg` is not abortable (up to 30 s), so a workspace close during an analysis can wait that long.
-- Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - Inbox and asset screen: the counts of a start replace an import failure list in the shared strip even when it was not read yet.
-- Jobs screen: an action reloads the list twice (its own reload token, then the poll that sees `changes` move). A clean fix needs an immediate feed read in the jobs context after an action.
-
-Tests:
-
-- Mock provider: scripted failures are consumed before the model and image checks; `apps/desktop/test/providers-acceptance.test.ts` counts on that order (a scripted `hang` is used up even for a chat with an unknown model).
-- A real 50 ms sleep before a negative assertion remains in `jobs-ipc.test.ts` (there is no event to wait on).
-- The Compose service of the `mock` profile and the environment configuration through a real `pnpm dev` start are not covered by any automated check.
 
 ## Phase 4b
 
@@ -104,8 +98,6 @@ Deferred by design:
 - A file has one AI tag set, not one per model, and there is no proposal history.
 - `providers:listModels` has no cancel channel (`provider-handlers.ts`); a slow server holds the request until its timeout.
 - The Settings screen is reachable only inside an open workspace, although the settings are app-level.
-- The two "Before paid providers" entries of phase 4a still apply.
-- `jobs:resume { providerId }` is app-level: it works without an open workspace and resumes one lane of the app session's pause gate.
 - The "Proposals" toggle of the file lists is local to `FileBrowser` and does not survive navigation (the list state assumes string filter values, and "Analyse all" would have to leave the toggle out of its filter).
 - The pause banner sits in the shell behind the backdrop of a modal dialog: behind a form-size dialog it stays faintly visible but cannot be used, and the file detail dialog covers it almost completely.
 - With a selection, the asset Files tab shows two Analyse buttons (the asset's in the header and the selection's), told apart only by their tooltips.
@@ -117,31 +109,6 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
 - A direct save that breaks the schema answers `invalid_operation` rather than `validation_failed`.
-
-Main process (`apps/desktop/src/main`):
-
-
-Mock provider (`docker/mock-provider/server.mjs`):
-
-
-Scheduler and pause gate (`packages/jobs`):
-
-
-Persistence:
-
-- No test pins that the renderer's `analysable` (`file.previewable`, without the checksum) agrees with `isAnalysable` in core; the reader's SQL predicate is pinned against core.
-
-Renderer:
-
-- The result dialog's busy state can flicker for one frame after a file switch.
-
-Renderer tests:
-
-- The settings route of `AssetFilesTab` (closing the file detail dialog before Settings opens) has no dedicated test, only the inbox's; the result dialog's disabled Settings during an import is covered only by a shell test.
-
-Core tests:
-
-- The core fingerprint tests do not cover every field separately for a waiting proposal (checksum, prompt version); the SQL side is pinned.
 
 ## File trash
 
@@ -155,22 +122,13 @@ Found during the build — core and persistence:
 
 - Binaries left in `.assetforge/trash/` by a purge before migration `0009` have no tombstone and are never swept.
 
-Found during the build — main process and jobs:
-
-- `trash:empty` counts an unexpected per-item error as failed without logging it.
-- `touchingJobs` in `apps/desktop/src/main/library-handlers.ts` raises the job change counter after every trash, restore and purge, even when no job was touched.
-
 Found during the build — renderer:
 
 - The nine-column trash table may be too wide; the Confirm/Cancel order differs between the confirm dialog and other dialogs.
-- Import order in the touched renderer files is not consistent.
 
 Tests:
 
-- Not tested: a file trashed while the analysis handler re-reads the image; the order of the trash check and the stale check when accepting a proposal; the `retryJob` race in which the file is trashed between the check and the retry and the caller gets the "active job" message.
 - Core and jobs: the open test cannot detect a swapped order of move recovery and sweep; the fake `onPurge` does not clear a chosen cover; the scheduler test does not pin the purge order (cancel, then row removal); the proposal-accept refusal for a trashed file is pinned only at core level.
-- Renderer: no tests for Delete from the asset-tab detail dialog, the trash count refresh after an asset-tab or single delete and after restore, purge and Empty trash, a partial failure and a double Delete in the inbox, focus after a delete, the double-submit guard, Esc while busy; the search-field Delete test is weak; the selection-bar tests do not pin the absence of other actions.
-- The acceptance test's "images" are text files named `.png`; its comment does not say so.
 
 ## Editable prompts
 
@@ -181,17 +139,9 @@ Deferred by design:
 - A file already queued with another prompt counts as `alreadyQueued` and keeps the prompt it was queued with.
 - The Jobs screen shows neither model nor prompt.
 
-Found during the build — main process:
-
-
 Found during the build — renderer:
 
 - Reset in the Prompts settings overwrites a saved text without confirmation, while Delete confirms (owner's call).
-- A hand-edited `analysis-prompts.json` with more than 50 prompts per purpose or duplicate names is accepted on load; only ids are checked for uniqueness.
-
-Tests:
-
-- `installFakeApi` consumes two ids per call for the seeded default prompts (harmless; changing it would shift ids in existing tests).
 
 ## Tag rename and merge
 
@@ -202,10 +152,6 @@ Deferred by design:
 - No undo of a rename or merge.
 - An open proposal review dialog keeps the names it loaded: after a rename of one of them, Accept is refused and the dialog must be reopened.
 - A merge target without any assignment (an unused tag row) is offered as a merge with zero counts.
-
-Left from the reviews:
-
-- Renderer: the restore-capture block on a rename reload is repeated in `AssetsScreen`, `ProjectsScreen` and `FileBrowser`, and the `useRenamed` bodies of the inbox, the trash and the asset Files tab are near-identical; both want one shared helper.
 
 ## ZIP import
 
@@ -222,7 +168,6 @@ Deferred by design:
 Found in the final review and not fixed:
 
 - A stored entry with a wrong declared size and an archive with strong encryption fail the whole archive (`This file is not a readable ZIP archive`) instead of one entry.
-- Test gaps: `openEntry` racing `close()` in the ZIP import is untested (main).
 
 ## Asset sources
 
@@ -237,7 +182,6 @@ Deferred by design:
 
 Found in the final review and not fixed:
 
-- Test gaps: the scroll threshold of the list and the double-Enter guard are tested only through class names and `disabled` (jsdom cannot measure layout).
 - How Windows treats `^`, `|`, `&` and a backtick in a query string handed to `shell.openExternal` is unverified.
 
 ## Vision providers
@@ -271,10 +215,7 @@ Found in the final review and not fixed:
 - A `.corrupt-*` copy beside `provider-settings.json` blocks the key-file sweep until someone removes the copy by hand; there is no cleanup of old copies and no hint in Settings that entries were left out.
 - A settings file with a newer version number is set aside like an unreadable one; after a downgrade the entries are gone from the list (the keys stay).
 - A key file in the old form is bound to the origin its entry has at the first start with the new code; an edit of the base URL by hand before that start is trusted once.
-- Windows DPAPI is per user: the origin binding does not protect against code running as the same user.
 - The API key is decrypted on every `providers:list` (for `hasApiKey`), not only per request.
-- The acceptance test pins one job at a time per provider only through a fixed 100 ms pause (parallel-requests test).
-- `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
 
 ## Generation studio
 
@@ -299,9 +240,6 @@ Found in the final review and not fixed:
 - There is no trash for prompts: `prompts:delete` removes the prompt and all its versions at once (generations keep the copies).
 - Prompts cannot be exported or imported, and not shared between workspaces.
 - `promptTitleKey` (`packages/core/src/prompts.ts`) does not NFC-normalise, unlike tags; changing it changes the stored `title_key` of existing prompts.
-- Prompts screen: a second guard question overwrites the resolver of the first; this cannot be reached while the modal question is open, the first promise just stays pending.
-- Some `aria-label` literals outside `labels.ts` remain in other lanes' components; the analysis constants keep their `ANALYSIS_` prefix (renaming is churn without a behaviour change). The screen's list code is copied from `ProjectsScreen`.
-- No test follows the details link with a dirty Prompts draft.
 
 ## URL import
 
@@ -321,7 +259,6 @@ Known gaps:
 
 - A lane hold covers only claims: a second job of the lane that is already running is unaffected, and the hold lives in memory, so it ends with the app session, a scheduler restart or a workspace close and reopen.
 - After a crash between the completed import and the job outcome, the rerun finds its own file and reports `already_present`.
-- Fixed pauses still come before negative assertions in `providers-acceptance` (parallel-requests test), in `analysis-acceptance` 'pauses on a wrong key' (100 ms, twice) and in the url-import `pause(100)` with a fake clock; the dialog refresh assertion belongs to the renderer.
 
 ## Import progress
 
@@ -341,14 +278,9 @@ Deferred by design:
 - No analysis, Image to prompt or generation studio for videos.
 - No choice of the frame, no preview on hover, no scrubbing over a tile, no chapters or subtitles, no loop or speed control of our own, no picture-in-picture.
 - Packaging: no packager exists yet. The ffmpeg binary must be shipped outside the archive (an executable cannot run from inside `app.asar`), with the GPL licence notice and the source offer of the build, before the app is distributed; the bundled build may also have to be replaced by an LGPL one. Concretely: unpack the binary from the asar (`asarUnpack`) and swap its path to `app.asar.unpacked` before it is hashed, because a process cannot be spawned from inside an asar.
-- The ffmpeg binary is verified against its checksum once per start, not before every spawn. Accepted: whoever can write there can change the app's code as well.
-- The checksum of the ffmpeg binary is computed on the main process as a stream; a worker would be stricter.
 - The first open of a video runs ffmpeg twice (poster frame and measurement); the measurement could be derived from the frame extraction.
 - The bundled ffmpeg is 6.1.1 (from `ffmpeg-static@5.3.0`, built in 2023) and should be replaced by a current build. Only `win32-x64` has a recorded checksum; on every other platform the tool stays disabled and videos have no picture.
 - A frame that failed is remembered as failed for the app session (the same `failed` memory as image previews): a video whose frame could not be made shows the placeholder until the app is restarted, even when the cause is gone.
-
-Found while building:
-
 
 Not covered by any automated check: real playback (decoding in Chromium), seeking through the `video/` route of the media protocol, the poster and the arrow, `Shift`+arrow and `Space` keys against the element's own key handling, fullscreen of the stage with a playing video, and volume and mute carried over between videos. The owner checks these by hand.
 
@@ -372,59 +304,32 @@ Deferred by design:
 
 Known gaps:
 
-- Deleting a profile clears the partition's storage, cache and auth cache, but the partition directory stays on disk.
 - `download_login_not_sent` also covers HTTP 407 and 451 from a host outside the site, because the downloader reports them as one refusal.
 - A crawl and its kept answer live in memory only; nothing survives a restart, and one crawl runs at a time for the whole app.
 
 Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted. For the browser check (spec "Browser check"; the session download, `sites:openCheck` and the requeue are tested only with fakes, and whether the session's request filter applies to `net.request` is not verified): a real site answering `cf-mitigated: challenge`, the lane pausing with `Open site`, passing the check in the login window, Resume repeating the refused downloads, and those downloads arriving through the session. The owner's check is pending.
 
-## Found while clearing the small items (2026-11-28)
-
-- Scheduler: `scheduler.ts` is still over the file guide.
-- The detail dialog's menu items and Delete key being disabled while the action guard is set have no dialog-level test.
-
 ## Found while clearing the backlog (2026-11-28)
 
-- Prompt variables: `variableKey` now folds names through NFC; a stored version whose variable names differ only in their normalisation form (exotic, older data) reads as one variable.
-- `enqueue` in `job-repository.ts` silently skips a job whose `fileId` is unknown or trashed (it returns no id), so the foreign key on `job.file_id` is reached only by raw SQL; callers count the inserted ids, not the request.
 - A ZIP entry whose declared size is wrong fails with the generic `Import failed`, not with the fixed `This archive could not be read to the end`; the size check fails while the entry is streamed, outside the mapping in `import-archive.ts`. `acceptance.test.ts` pins the current text.
 - Image viewer: the device pixel ratio listener (`useDevicePixelRatio`) is tested only with a fake `matchMedia`; whether Electron fires the resolution query on a monitor move needs a manual check.
-- `WorkerPool.prioritize` matches a queued render by its target path; a render with the same target queued twice (not possible today because of the in-flight dedup) would move only the first one.
-- Persistence: without `page`, `summaries` passes every matching id through `inArray` (`workflowProgresses`, `automaticCovers`); bounded by SQLite's variable limit (32766) if a caller ever lists everything unpaged.
 - Scheduler: a claimed row whose put-back failed is known as never launched only in memory. If the app ends before the next pass recovers it, the recovery at the next start ends an `onInterrupted: 'fail'` job as `provider_outcome_unknown`, although nothing was sent.
-- Scheduler: the lane rotation remembers at most 8 lanes per class (`ROTATION_MEMORY`), so with more than 8 busy hosts the rotation is only approximate.
 - Scheduler: the leftover recovery gives the attempt back (`release`); a requeue job whose `finish` keeps failing while `release` succeeds reruns without limit.
-- Test gaps: jsdom has no `scrollWidth`, so a virtualizer scroll test must stub it (see `film-strip.test.tsx`); the same applies to a test of `useVirtualRows` keeping the focused row in view.
-- Flaky under full load, passing alone: `packages/media` `video-frames.test.ts > runs at most 1 processes at a time`.
-- Paged screens (`JobsScreen`, `paged-view.ts` `wantedPages`, `AssetsScreen`): after a filter change the wanted pages of the old list carry over to the new key, so page 1 of the new list is fetched once before the new table reports its rows.
-- Model refresh: `ModelSelect` disables Refresh while a list loads, so the superseding rule for two overlapping requests of one entry is tested only through the context.
-- `useModalDialog` declares `restoreFocus` inside the hook and reads `initialFocusRef` only on open; `exhaustive-deps` is disabled there.
-- `AssetScreen` is still 191 lines with nested async functions (`run`, `importFiles`); it needs the same treatment as `ProjectScreen`.
-- Renderer tests waiting with `findByRole('alert')` get flaky as soon as a second alert can appear later; tests that expect exactly one alert should assert on `getAllByRole` after the loads have settled.
 - File browser: Ctrl+A is ignored while a key change loads, and gives no feedback when the page that still fails is off-screen.
 - URL import: a purge between the origin insert of a duplicate download and its `setOutcome` is still a window; the origin row is removed with the file and the job's result then names a file that no longer exists.
-- `packages/core/src/site-crawl.ts` is over the file guide (about 330 code lines); `finalPageOf` and `kindOfUrl` could move into their own file.
-- Prompts screen: the remount on `openPrompt` of a prompt already opened by link (the `visit` counter in `WorkspaceFrame`) is not covered by a test; nothing in the UI reaches it while the Prompts screen is shown.
-- No test pins the progress of a workflow that has only optional steps (`{ done: 0, total: 0 }`).
-- The persistence test `search.test.ts > a committed file move reindexes both assets` builds a `Storage` stub without `isReachable`; it breaks as soon as `recoverFileMoves` checks reachability on the commit path.
 - `unboundOrigins` in `apps/desktop/src/main/provider-keys.ts` and the legacy marker comparison in `provider-settings-load.ts` still compare origins strictly; they do not use `isSameKeyOrigin`, so the trailing-dot equivalence does not reach them.
 - A tag name that only a waiting proposal holds has no tag row any more, so `tags:rename` answers `not_found` for it; the proposal is rewritten only when its tag exists somewhere.
 - Migrations that rebuild a table referenced by `ON DELETE CASCADE` must park and recreate the child tables (`PRAGMA foreign_keys=OFF` is a no-op inside the single migration transaction; see migration `0018`). This is not written down outside that migration.
 - Tag cleaning removes every format character, also ZWJ and ZWNJ: emoji joined by ZWJ fall apart and two tags that differ only in such a character were merged by the derived-data step of version 3.
-- The tag cleaning of derived-data version 3 removes a stored tag without a letter or digit together with its links; such a tag could only come from the hour before the letter-or-digit rule existed.
-- A dangling foreign key in a generation child row would make migration `0018` fail on every start (`internal_error`); unreachable while `foreign_keys = ON` was always set.
-- Stop deadline: a handler abandoned at the deadline can still call `JobEffects` and reach the change feed of the next workspace (a harmless refresh); its database writes throw on the closed database.
 - Stop deadline: a requeued job abandoned at the deadline could run twice if the same workspace is reopened while the old handler still runs.
 - Site partitions: Chromium keeps the partition directory after `clearStorageData`, so an ownerless partition is cleared again on every start; deleting the directory itself is open.
 - Site partitions: the on-disk mapping `persist:site-<id>` to `Partitions/site-<id>` is assumed and not checked against a real Electron; needs a manual check.
-- Structured output: the option is stored on `ollama` entries too, where it stays `true` and is ignored.
 - Structured output: nothing detects a server that refuses `response_format`; every tagging job on it fails as `provider_rejected` until the owner turns the option off.
 - Provider settings: switching to another entry drops a pending key removal without asking.
 - `StorageReturnContext` changes only on the storage banner's Retry, which already remounts the page; a storage that comes back without Retry leaves `CoverImage` on the format tile.
 - An image that fails without a failing IPC call (a broken cached preview) raises no storage banner, so nothing signals its return.
 - `ProjectFilter`: a filter naming a project deleted meanwhile shows an empty chip (`projects:get` fails and the error is not shown); the chip can still be removed.
 - `SearchPicker` shows only the first 10 matches and has no hint that there are more.
-- Possibly flaky: `assets.test.tsx`, the list-state round trip failed once and passed on the rerun.
 - Other places that put listeners on a `<dialog>` element should be checked for events passed on from a nested dialog (`Dialog` now compares `event.target` with `event.currentTarget`).
 - Generation studio: the per-source form draft is read only when the studio is mounted while the session still keeps the form; since a raise no longer remounts it is practically unused. Drop it or keep the form after a real close (needs a decision).
 - Generation studio: scroll positions inside the studio and the look of the re-show on a raise (`close()` then `showModal()`) are tested only in jsdom; needs a manual check.
@@ -432,19 +337,12 @@ Not covered by any automated check: the real windows. The hidden page window, th
 
 ## Found while building the data safety package (2026-11-28)
 
-- Database backup: an existing database file without a `__drizzle_migrations` table (a 0-byte file left by an interrupted first open) gets a useless but harmless backup of an empty database.
 - Database backup: there is no free-space check before the backup; on a nearly full disk the open is refused cleanly, but nothing tells the owner how much space is needed.
-- Database backup: `workspace:remove` leaves the database directory and therefore its backups; whether removal deletes them is not decided.
 - Database backup: a failed migration surfaces as `internal_error` with no hint that a backup exists; a restore path (UI or a documented manual step) does not exist.
 - Database backup: a backup is reused when one with the same applied count exists; if an older app version wrote to the database between two failed opens, the reused backup is older than the data.
 - The immediate resolve after a failed move commit retries once without a wait; an error that lasts a moment (`SQLITE_BUSY` beyond the busy timeout) still leaves the row for the next open.
 - `relocateFile` does not resolve an open move row of the file before it begins a new one, unlike restore and purge; a row left by a commit and a resolve that both failed makes the next relocate fail with "already being moved" until the workspace is opened again.
-- `commitMove` reports a failed commit whose journal row is already gone as a failure; unreachable while a commit is one transaction.
 - Logging: lines go only to the console; a packaged Windows app has no visible console. A bounded log file in `userData` needs a decision and a rotation rule.
-- Logging: a startup failure writes only the safe description, so its stack is lost in development too (a development-only switch could be considered).
-- Logging: scheduler messages embed the job id, type or class in the event text instead of checked fields; the values are code constants or UUIDs today. The field value rule in `log-line.ts` is a shape check, not a filter for names or hosts.
-- Logging: the import of a generation result is logged as operation `import`, not as a generation with its id.
-- Possibly flaky: `packages/storage`, "fails the stream past the total time" failed once under full load and passed on the rerun.
 
 ## Not covered by any automated check
 
