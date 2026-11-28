@@ -16,13 +16,21 @@ export const FFMPEG_CHECKSUMS: Readonly<Record<string, string>> = Object.freeze(
 /** The one line logged when the binary cannot be used; never names a path or a cause. */
 export const FFMPEG_UNAVAILABLE_WARNING = 'The video frame tool is not available; videos get no picture';
 
-export interface FfmpegBinaryDeps {
+/** What the ffmpeg binary is resolved with. */
+export interface FfmpegBinaryDependencies {
   /** What the `ffmpeg-static` package answers: an absolute path, or null without a build for this platform. */
   packagePath: string | null;
+  /** `process.platform`. */
   platform: string;
+  /** `process.arch`. */
   arch: string;
   /** Defaults to `FFMPEG_CHECKSUMS`. */
   checksums?: Readonly<Record<string, string>>;
+  /**
+   * Logs the one fixed warning.
+   *
+   * @param line the warning
+   */
   warn(line: string): void;
   /** Defaults to `hashFile`. */
   hash?: (path: string) => Promise<string>;
@@ -39,7 +47,12 @@ export interface FfmpegBinaryDeps {
  */
 export const FFMPEG_RUN_NAME = 'assetforge-frames';
 
-/** SHA-256 of a file as lower-case hex, read as a stream. */
+/**
+ * SHA-256 of a file as lower-case hex, read as a stream.
+ *
+ * @param path the file
+ * @returns the hash
+ */
 export async function hashFile(path: string): Promise<string> {
   const hash = createHash('sha256');
   await pipeline(createReadStream(path), hash);
@@ -50,47 +63,85 @@ export async function hashFile(path: string): Promise<string> {
  * The verified path of the ffmpeg binary, or null (with `FFMPEG_UNAVAILABLE_WARNING` logged once) when the
  * package has no build here, the platform has no recorded checksum, the file cannot be read or does not
  * match. Never rejects.
+ *
+ * @param dependencies what the binary is resolved with
+ * @returns the path, or null
  */
-export async function resolveFfmpegBinary(deps: FfmpegBinaryDeps): Promise<string | null> {
-  const path = await verify(deps).catch(() => null);
+export async function resolveFfmpegBinary(dependencies: FfmpegBinaryDependencies): Promise<string | null> {
+  const path = await verify(dependencies).catch(() => null);
   if (path !== null) return path;
   try {
-    deps.warn(FFMPEG_UNAVAILABLE_WARNING);
+    dependencies.warn(FFMPEG_UNAVAILABLE_WARNING);
   } catch {
     // A broken log must not break the start.
   }
   return null;
 }
 
-async function verify(deps: FfmpegBinaryDeps): Promise<string | null> {
-  const { packagePath } = deps;
+/**
+ * The verified path: the run copy when it matches or can be made, else the package file when it matches.
+ *
+ * @param dependencies what the binary is resolved with
+ * @returns the path, or null when nothing matches
+ */
+async function verify(dependencies: FfmpegBinaryDependencies): Promise<string | null> {
+  const { packagePath } = dependencies;
   if (typeof packagePath !== 'string' || !isAbsolute(packagePath)) return null;
-  const checksums = deps.checksums ?? FFMPEG_CHECKSUMS;
-  const key = `${deps.platform}-${deps.arch}`;
+  const checksums = dependencies.checksums ?? FFMPEG_CHECKSUMS;
+  const key = `${dependencies.platform}-${dependencies.arch}`;
   if (!Object.hasOwn(checksums, key)) return null;
-  const expected = checksums[key]!.toLowerCase();
-  const hash = deps.hash ?? hashFile;
-  const matches = async (path: string): Promise<boolean> => (await hash(path)) === expected;
+  const check: Check = { expected: checksums[key]!.toLowerCase(), hash: dependencies.hash ?? hashFile };
 
-  if (deps.runDir === undefined) return (await matches(packagePath)) ? packagePath : null;
+  if (dependencies.runDir === undefined) return (await matches(check, packagePath)) ? packagePath : null;
 
-  const copy = join(deps.runDir, `${FFMPEG_RUN_NAME}${extname(packagePath)}`);
-  if (await matches(copy).catch(() => false)) return copy;
-  if (!(await matches(packagePath))) return null;
+  const copy = join(dependencies.runDir, `${FFMPEG_RUN_NAME}${extname(packagePath)}`);
+  if (await matches(check, copy).catch(() => false)) return copy;
+  if (!(await matches(check, packagePath))) return null;
   try {
-    const staged = `${copy}.${process.pid}.tmp`;
-    await mkdir(deps.runDir, { recursive: true });
-    await copyFile(packagePath, staged);
-    try {
-      await chmod(staged, 0o755);
-      await rename(staged, copy);
-    } catch (error) {
-      await rm(staged, { force: true });
-      throw error;
-    }
-    if (await matches(copy)) return copy;
+    await makeRunCopy(dependencies.runDir, packagePath, copy);
+    if (await matches(check, copy)) return copy;
   } catch {
     // Without the copy the verified package file runs under its own name.
   }
   return packagePath;
+}
+
+/** The expected hash and how to hash a file. */
+interface Check {
+  /** The expected hash in lower case. */
+  expected: string;
+  /** Hashes a file. */
+  hash: (path: string) => Promise<string>;
+}
+
+/**
+ * Whether a file has the expected hash.
+ *
+ * @param check the expected hash and the hash function
+ * @param path the file
+ * @returns true when it matches
+ */
+async function matches(check: Check, path: string): Promise<boolean> {
+  return (await check.hash(path)) === check.expected;
+}
+
+/**
+ * Copies the package file into the run directory through a staged file.
+ *
+ * @param runDir the run directory
+ * @param packagePath the package file
+ * @param copy the path of the copy
+ * @returns when the copy is in place
+ */
+async function makeRunCopy(runDir: string, packagePath: string, copy: string): Promise<void> {
+  const staged = `${copy}.${process.pid}.tmp`;
+  await mkdir(runDir, { recursive: true });
+  await copyFile(packagePath, staged);
+  try {
+    await chmod(staged, 0o755);
+    await rename(staged, copy);
+  } catch (error) {
+    await rm(staged, { force: true });
+    throw error;
+  }
 }

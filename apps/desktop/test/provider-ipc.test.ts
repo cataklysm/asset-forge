@@ -9,7 +9,8 @@ import { MOCK_EDIT_BASIC_MODEL, MOCK_EDIT_MODEL, MOCK_MODEL, startMockProvider, 
 import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createProviderGateway } from '../src/main/provider-gateway.js';
 import { createProviderHandlers } from '../src/main/provider-handlers.js';
-import { createProviderStore, PROVIDER_SETTINGS_FILE } from '../src/main/provider-store.js';
+import { PROVIDER_SETTINGS_FILE } from '../src/main/provider-settings-file.js';
+import { createProviderStore } from '../src/main/provider-store.js';
 import { FakeCodec } from './fake-codec.js';
 
 const KEY = 'test-key-not-real';

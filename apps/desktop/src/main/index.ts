@@ -1,19 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  net,
-  protocol,
-  session,
-  shell,
-  type MessageBoxOptions,
-  type OpenDialogOptions,
-} from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
+import type { WorkspaceManager } from '@assetforge/core';
 import ffmpegPath from 'ffmpeg-static';
 import {
   createPreviewService,
@@ -21,25 +11,28 @@ import {
   createWorkerPool,
   JOB_TIMEOUT_MS,
   POOL_SIZE,
+  type PreviewService,
 } from '@assetforge/media';
-import { createAnalysisServices, createWorkspaceManager } from './composition.js';
+import { createAnalysisServices, type AnalysisServices } from './analysis-services.js';
+import { createWorkspaceManager } from './composition.js';
+import { ElectronDialogs } from './electron-dialogs.js';
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
-import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
+import { dispatch, type IpcHandlers } from './ipc.js';
+import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
-import { createElectronSiteSessions } from './site-sessions.js';
+import { createElectronSiteSessions, type ElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
 import {
   findOriginalIn,
   findSourceIn,
   findVideoIn,
   handleMediaRequest,
-  MEDIA_SCHEME,
-  MEDIA_SCHEME_PRIVILEGES,
-  openFile,
 } from './media-protocol.js';
+import { openFile } from './media-file.js';
+import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from './media-routes.js';
 import { isTrustedSender } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 
@@ -61,9 +54,31 @@ if (!app.requestSingleInstanceLock()) {
   start();
 }
 
+/** The state the event handlers of the running app share. */
+interface AppState {
+  /** The main window, or null while there is none. */
+  mainWindow: BrowserWindow | null;
+  /** How far quitting has come. */
+  shutdown: 'running' | 'closing' | 'closed';
+}
+
+/** The parts of the running app that the event handlers work on. */
+interface AppParts {
+  /** The shared state. */
+  state: AppState;
+  /** The preview service and its worker pool. */
+  previews: PreviewService;
+  /** The workspace manager. */
+  manager: WorkspaceManager;
+  /** The site windows and sessions. */
+  siteSessions: ElectronSiteSessions;
+  /** The analysis services and the job host. */
+  services: AnalysisServices;
+}
+
+/** Wires the app together and registers its event handlers. */
 function start(): void {
-  let mainWindow: BrowserWindow | null = null;
-  let shutdown: 'running' | 'closing' | 'closed' = 'running';
+  const state: AppState = { mainWindow: null, shutdown: 'running' };
 
   // One pool serves previews and measuring; closing the preview service closes it.
   const pool = createWorkerPool({
@@ -91,60 +106,8 @@ function start(): void {
     videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
   });
 
-
   const importDirectory = createImportDirectoryMemory(join(app.getPath('userData'), IMPORT_DIRECTORY_FILE));
-
-  const dialogs: Dialogs = {
-    async pickDirectory() {
-      const result = await showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
-      return result.canceled ? null : (result.filePaths[0] ?? null);
-    },
-    async pickFiles() {
-      const defaultPath = importDirectory.current();
-      const result = await showOpenDialog({
-        properties: ['openFile', 'multiSelections'],
-        ...(defaultPath === undefined ? {} : { defaultPath }),
-      });
-      if (result.canceled) return [];
-      importDirectory.remember(result.filePaths);
-      return result.filePaths;
-    },
-    async confirmRemoveWorkspace(workspace) {
-      const options: MessageBoxOptions = {
-        type: 'warning',
-        title: 'Remove workspace',
-        message: `Remove the workspace "${workspace.name}"?`,
-        detail: `${workspace.rootPath}\n\nRemoving it deletes its catalog in AssetForge. The files in the folder stay where they are unless you also move the folder to the trash.`,
-        buttons: ['Cancel', 'Remove from AssetForge', 'Remove and move folder to trash'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      };
-      const { response } = mainWindow
-        ? await dialog.showMessageBox(mainWindow, options)
-        : await dialog.showMessageBox(options);
-      return (['cancel', 'forget', 'forget_and_trash_folder'] as const)[response] ?? 'cancel';
-    },
-    async confirmRemoveWorkflow(assetName) {
-      const options: MessageBoxOptions = {
-        type: 'warning',
-        title: 'Remove workflow',
-        message: `Remove the workflow from "${assetName}"?`,
-        detail: 'Step states and notes are deleted. The asset and its files are kept.',
-        buttons: ['Remove workflow', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-      };
-      const { response } = mainWindow
-        ? await dialog.showMessageBox(mainWindow, options)
-        : await dialog.showMessageBox(options);
-      return response === 0;
-    },
-  };
-  function showOpenDialog(options: OpenDialogOptions) {
-    return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options);
-  }
+  const dialogs = new ElectronDialogs(() => state.mainWindow, importDirectory);
 
   const windowOptions: MainWindowOptions = {
     preloadPath: join(outMainDir, '../preload/index.cjs'),
@@ -177,6 +140,7 @@ function start(): void {
     appVersion: app.getVersion(),
     siteSessions,
   });
+  const parts: AppParts = { state, previews, manager, siteSessions, services };
 
   const handlers = createWorkspaceHandlers(
     manager,
@@ -185,85 +149,154 @@ function start(): void {
       openPath: (path) => shell.openPath(path),
       showItemInFolder: (path) => shell.showItemInFolder(path),
       openExternal: (url) => shell.openExternal(url),
-      workspaceOpened: async () => {
-        // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
-        void previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
-        // A channel that was already running when quitting began must not start jobs on a closing database.
-        if (shutdown === 'running') await services.workspaceOpened();
-      },
+      workspaceOpened: () => workspaceOpened(parts),
       workspaceClosing: () => services.workspaceClosing(),
     },
     services.jobHost,
     services,
   );
   for (const channel of Object.keys(ipcContract)) {
-    ipcMain.handle(channel, (event, request: unknown): Promise<IpcResult<unknown>> => {
-      if (shutdown !== 'running') {
-        return Promise.resolve({
-          ok: false,
-          error: { code: 'shutting_down', message: 'The application is shutting down' },
-        });
-      }
-      if (!isTrustedSender(event, mainWindow, (url) => isAppUrl(url, appUrl))) {
-        return Promise.resolve({
-          ok: false,
-          error: { code: 'forbidden_sender', message: 'IPC sender is not the main window' },
-        });
-      }
-      return dispatch(handlers, channel, request);
-    });
+    ipcMain.handle(channel, (event, request: unknown) => handleIpc(state, handlers, appUrl, channel, event, request));
   }
 
-  app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  });
+  app.on('second-instance', () => focusMainWindow(state));
 
   app.on('window-all-closed', () => app.quit());
 
-  app.on('before-quit', (event) => {
-    if (shutdown === 'closed') return;
-    event.preventDefault();
-    if (shutdown === 'closing') return;
-    shutdown = 'closing';
-    siteSessions.shutdown();
-    // A describe request is cancelled and jobs stop before their database closes; workspaceClosing never rejects.
-    services
-      .workspaceClosing()
-      .then(() => manager.close())
-      .catch((error: unknown) => console.error('Closing the workspace failed', error))
-      .then(() => previews.close())
-      .catch((error: unknown) => console.error('Closing the preview service failed', error))
-      .finally(() => {
-        shutdown = 'closed';
-        app.quit();
-      });
-  });
+  app.on('before-quit', (event) => beforeQuit(parts, event));
 
   app
     .whenReady()
     .then(() => {
-      protocol.handle(MEDIA_SCHEME, (request) =>
-        handleMediaRequest(request, {
-          findSource: findSourceIn(manager),
-          findOriginal: findOriginalIn(manager),
-          findVideo: findVideoIn(manager),
-          previews,
-          readFile,
-          openFile,
-        }),
-      );
-      mainWindow = createMainWindow(windowOptions);
-      mainWindow.on('closed', () => {
-        mainWindow = null;
-        siteSessions.shutdown();
-      });
+      registerMediaProtocol(manager, previews);
+      openMainWindow(state, siteSessions, windowOptions);
     })
     .catch(failStartup);
 }
 
-/** A failed start must not leave an invisible process holding the single-instance lock. */
+/**
+ * Runs after a workspace was opened: cleans the preview cache and starts the jobs.
+ *
+ * @param parts the parts of the running app
+ */
+async function workspaceOpened(parts: AppParts): Promise<void> {
+  // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
+  void parts.previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
+  // A channel that was already running when quitting began must not start jobs on a closing database.
+  if (parts.state.shutdown === 'running') await parts.services.workspaceOpened();
+}
+
+/**
+ * Answers one IPC request, refusing it while quitting and from any sender but the main window.
+ *
+ * @param state the shared state
+ * @param handlers the IPC handlers
+ * @param appUrl the URL the main window's page is loaded from
+ * @param channel the channel the request came in on
+ * @param event the IPC event, naming the sender
+ * @param request the request as sent
+ * @returns the result for the renderer
+ */
+function handleIpc(
+  state: AppState,
+  handlers: IpcHandlers,
+  appUrl: string,
+  channel: string,
+  event: IpcMainInvokeEvent,
+  request: unknown,
+): Promise<IpcResult<unknown>> {
+  if (state.shutdown !== 'running') {
+    return Promise.resolve({
+      ok: false,
+      error: { code: 'shutting_down', message: 'The application is shutting down' },
+    });
+  }
+  if (!isTrustedSender(event, state.mainWindow, (url) => isAppUrl(url, appUrl))) {
+    return Promise.resolve({
+      ok: false,
+      error: { code: 'forbidden_sender', message: 'IPC sender is not the main window' },
+    });
+  }
+  return dispatch(handlers, channel, request);
+}
+
+/**
+ * Brings the main window to the front, for a second instance that handed over.
+ *
+ * @param state the shared state
+ */
+function focusMainWindow(state: AppState): void {
+  const mainWindow = state.mainWindow;
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+}
+
+/**
+ * Holds the first quit back until the jobs, the workspace and the preview service are closed, then quits.
+ *
+ * @param parts the parts of the running app
+ * @param event the quit event, prevented until everything is closed
+ */
+function beforeQuit(parts: AppParts, event: Electron.Event): void {
+  const { state } = parts;
+  if (state.shutdown === 'closed') return;
+  event.preventDefault();
+  if (state.shutdown === 'closing') return;
+  state.shutdown = 'closing';
+  parts.siteSessions.shutdown();
+  // A describe request is cancelled and jobs stop before their database closes; workspaceClosing never rejects.
+  parts.services
+    .workspaceClosing()
+    .then(() => parts.manager.close())
+    .catch((error: unknown) => console.error('Closing the workspace failed', error))
+    .then(() => parts.previews.close())
+    .catch((error: unknown) => console.error('Closing the preview service failed', error))
+    .finally(() => {
+      state.shutdown = 'closed';
+      app.quit();
+    });
+}
+
+/**
+ * Serves the media protocol from the open workspace and the preview cache.
+ *
+ * @param manager the workspace manager
+ * @param previews the preview service
+ */
+function registerMediaProtocol(manager: WorkspaceManager, previews: PreviewService): void {
+  protocol.handle(MEDIA_SCHEME, (request) =>
+    handleMediaRequest(request, {
+      findSource: findSourceIn(manager),
+      findOriginal: findOriginalIn(manager),
+      findVideo: findVideoIn(manager),
+      previews,
+      readFile,
+      openFile,
+    }),
+  );
+}
+
+/**
+ * Opens the main window; closing it ends a running crawl and closes the login window.
+ *
+ * @param state the shared state
+ * @param siteSessions the site windows and sessions
+ * @param windowOptions how the main window loads
+ */
+function openMainWindow(state: AppState, siteSessions: ElectronSiteSessions, windowOptions: MainWindowOptions): void {
+  state.mainWindow = createMainWindow(windowOptions);
+  state.mainWindow.on('closed', () => {
+    state.mainWindow = null;
+    siteSessions.shutdown();
+  });
+}
+
+/**
+ * A failed start must not leave an invisible process holding the single-instance lock.
+ *
+ * @param error why the start failed
+ */
 function failStartup(error: unknown): void {
   console.error('AssetForge failed to start', error);
   app.exit(1);

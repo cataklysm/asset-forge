@@ -8,9 +8,12 @@ import type { GenerationImageSource, ImageProbe, ModelImageSource, RemoteFileSou
 import { DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { startMockProvider, type MockFailure, type MockProvider } from '../../../docker/mock-provider/server.mjs';
-import { createAnalysisServices, createWorkspaceManager, type AnalysisServices } from '../src/main/composition.js';
+import { createAnalysisServices, type AnalysisServices } from '../src/main/analysis-services.js';
+import { createWorkspaceManager } from '../src/main/composition.js';
 import { createGenerationImageSource } from '../src/main/generation-image-source.js';
-import { createWorkspaceHandlers, dispatch, type HostActions, type IpcHandlers } from '../src/main/ipc.js';
+import type { HostActions } from '../src/main/host-actions.js';
+import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
 import type { SchedulerClock } from '../src/main/job-host.js';
 import type { SiteSessions } from '../src/main/site-sessions.js';
 import { FakeCodec } from './fake-codec.js';

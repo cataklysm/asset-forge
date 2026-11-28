@@ -10,7 +10,8 @@ import {
 import { createOllamaVision, createOpenAiVision, createVeniceImage } from '@assetforge/providers';
 import { createAnalysisPromptHandlers } from '../src/main/analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from '../src/main/analysis-prompts.js';
-import type { AppServices, HostActions } from '../src/main/ipc.js';
+import type { HostActions } from '../src/main/host-actions.js';
+import type { AppServices } from '../src/main/workspace-handlers.js';
 import type { JobHost } from '../src/main/job-host.js';
 import { createProviderGateway } from '../src/main/provider-gateway.js';
 import { createProviderStore, type ProviderStore } from '../src/main/provider-store.js';

@@ -25,12 +25,10 @@ import {
   findSourceIn,
   findVideoIn,
   handleMediaRequest,
-  MEDIA_SCHEME,
-  openFile,
-  parseOriginalUrl,
-  parsePreviewUrl,
-  type MediaProtocolDeps,
+  type MediaProtocolDependencies,
 } from '../src/main/media-protocol.js';
+import { openFile } from '../src/main/media-file.js';
+import { MEDIA_SCHEME, parseOriginalUrl, parsePreviewUrl } from '../src/main/media-routes.js';
 
 const ID = '0b6c2f0e-3f7a-4c1d-9e2b-5a8d7c6b4e3f';
 const SHA = 'a'.repeat(64);
@@ -75,7 +73,7 @@ function originalUrl(fileId: string): string {
   return `${MEDIA_SCHEME}://original/${fileId}`;
 }
 
-function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps {
+function fakeDeps(overrides: Partial<MediaProtocolDependencies> = {}): MediaProtocolDependencies {
   return {
     findSource: async (): Promise<PreviewSource> => ({ sha256: SHA, absolutePath: join(root, 'x.png'), video: null }),
     findOriginal: async (): Promise<OriginalSource> => ({ absolutePath: originalPath, mimeType: 'image/png' }),
@@ -87,7 +85,7 @@ function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps
   };
 }
 
-function realDeps(): MediaProtocolDeps {
+function realDeps(): MediaProtocolDependencies {
   return {
     findSource: findSourceIn(manager),
     findOriginal: findOriginalIn(manager),
@@ -500,7 +498,7 @@ describe('media protocol', () => {
     const failingOpen = async (path: string): Promise<never> => {
       throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
     };
-    const cases: [{ url: string; method: string }, MediaProtocolDeps][] = [
+    const cases: [{ url: string; method: string }, MediaProtocolDependencies][] = [
       [{ url: url(file.id), method: 'GET' }, realDeps()],
       [{ url: url(ID), method: 'GET' }, realDeps()],
       [{ url: url(file.id), method: 'POST' }, realDeps()],
