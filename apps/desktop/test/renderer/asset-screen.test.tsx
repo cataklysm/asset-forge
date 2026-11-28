@@ -388,16 +388,22 @@ it('Import as file in the asset screen sends unpackArchives false', async () => 
   ]);
 });
 
-it('Cancel in the ZIP dialog of the asset screen imports nothing and ends the busy state', async () => {
+it.each([
+  [
+    'Cancel',
+    async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) =>
+      user.click(within(dialog).getByRole('button', { name: 'Cancel' })),
+  ],
+  ['Esc', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+])('%s in the ZIP dialog of the asset screen imports nothing and ends the busy state', async (_name, dismiss) => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const api = install(asset, { 'dialog:pickFiles': () => ['C:\\in\\pack.zip'], 'files:import': () => [] });
   const onBusyChange = vi.fn();
   render(<Harness id={asset.id} onBusyChange={onBusyChange} />);
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
-  await user.click(
-    within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Cancel' }),
-  );
+  await dismiss(user, await screen.findByRole('dialog', { name: 'ZIP archive' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ZIP archive' })).toBeNull());
   await waitFor(() =>
     expect((screen.getByRole('button', { name: 'Import files' }) as HTMLButtonElement).disabled).toBe(false),
   );
