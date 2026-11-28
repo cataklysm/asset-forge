@@ -389,7 +389,7 @@ describe('generation studio end to end', () => {
     });
     const crashed = await started(edit(sourceId, 'Make it night'));
     // Claimed as a run would claim it; the app then stops without settling the row.
-    const claimed = await h.manager.read((s) =>
+    const claimed = await h.manager.exclusive((s) =>
       s.database.jobs.claimNext({
         resourceClass: 'remote_api',
         types: [IMAGE_GENERATE_JOB],
