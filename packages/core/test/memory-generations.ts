@@ -1,6 +1,11 @@
 import type { GenerationFile, GenerationStatus, JobErrorCode } from '@assetforge/contracts';
 import type { JobOutcome, NewJob } from '../src/jobs.js';
-import type { GenerationFileRef, GenerationRepository, GenerationRow, NewGeneration } from '../src/ports.js';
+import type {
+  GenerationFileRef,
+  GenerationRepository,
+  GenerationRow,
+  NewGeneration,
+} from '../src/ports/generation-repository.js';
 import { restoreInPlace, type InMemoryJobRepository } from './memory-jobs.js';
 
 interface StoredGeneration extends NewGeneration {

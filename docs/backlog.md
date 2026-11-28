@@ -279,7 +279,7 @@ Deferred by design:
 
 Found during the build — core and persistence:
 
-- The port doc comments in `packages/core/src/ports.ts` do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
+- The port doc comments in `packages/core/src/ports/` (`file-repositories.ts`, `tag-repository.ts`, `analysis-repositories.ts`) do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
 - A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open, and a restore or purge of that file that resolves it fails with the same refusal.
 - `analysis:discardProposal` has no trash guard (`packages/core/src/analysis-proposals.ts`, `discardProposal`): it deletes the waiting proposal of a trashed file, which a restore should bring back. The renderer does not offer it in the trash.
 - The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).

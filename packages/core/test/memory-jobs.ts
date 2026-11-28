@@ -12,7 +12,7 @@ import {
   type JobView,
 } from '@assetforge/contracts';
 import type { Job, NewJob } from '../src/jobs.js';
-import type { JobRepository } from '../src/ports.js';
+import type { JobRepository } from '../src/ports/job-repository.js';
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Oldest created_at first, then id. */

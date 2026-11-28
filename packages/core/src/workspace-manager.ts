@@ -32,7 +32,11 @@ import { isZipArchive } from './media-types.js';
 import { planMeasurement, probeMeasurement, storeMeasurement } from './measure-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';
-import type { ArchiveReader, FileQuery, Storage, WorkspaceDatabase, WorkspaceHost } from './ports.js';
+import type { FileQuery } from './ports/file-repositories.js';
+import type { ArchiveReader } from './ports/source-files.js';
+import type { Storage } from './ports/storage.js';
+import type { WorkspaceDatabase } from './ports/workspace-database.js';
+import type { WorkspaceHost } from './ports/workspace-host.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
 

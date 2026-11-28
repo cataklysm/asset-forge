@@ -4,7 +4,10 @@ import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from '.
 import { mimeFromFileName, sanitizeFileName } from './file-names.js';
 import { fileKind, hasThumbnail, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
-import type { FileRepository, ImageProbe, SourceFiles, Storage } from './ports.js';
+import type { FileRepository } from './ports/file-repositories.js';
+import type { ImageProbe } from './ports/media-probes.js';
+import type { SourceFiles } from './ports/source-files.js';
+import type { Storage } from './ports/storage.js';
 
 export interface ImportContext {
   storage: Storage;

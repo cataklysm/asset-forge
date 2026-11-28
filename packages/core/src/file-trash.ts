@@ -4,7 +4,8 @@ import { AssetForgeError, InvalidOperationError, NotFoundError, StorageUnreachab
 import { settleGenerationOfJob } from './generations.js';
 import { cancelJob, type JobControl } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
-import type { FileRepository, Storage } from './ports.js';
+import type { FileRepository } from './ports/file-repositories.js';
+import type { Storage } from './ports/storage.js';
 import type { WorkspaceSession } from './session.js';
 
 /** The outcome of one file of a batch: the file afterwards (null once it is gone) or the error. */

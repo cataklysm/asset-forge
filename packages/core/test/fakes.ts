@@ -50,51 +50,55 @@ import type {
   AnalysisFingerprint,
   AnalysisTargetEntry,
   AnalysisTargetReader,
-  ArchiveReader,
+  Proposal,
+  FileAnalysis,
+  FileAnalysisRepository,
+} from '../src/ports/analysis-repositories.js';
+import type {
   AssetCover,
   AssetQuery,
-  Proposal,
   AssetRelationRepository,
   AssetRepository,
   AssetSourceRepository,
-  AssignmentKey,
   AssetTypeRepository,
-  AssetWorkflowRepository,
-  FileAnalysis,
-  FileAnalysisRepository,
-  NewWorkflowStep,
-  StepContext,
-  StepDefinitionInput,
-  TemplateVersion,
-  WorkflowTemplateRepository,
+  RelationKey,
+} from '../src/ports/asset-repositories.js';
+import type {
   FileMove,
   FileMoveRepository,
   FileOriginRepository,
   FilePlacement,
   FileQuery,
   FileRepository,
-  ImageProbe,
-  VideoInfo,
-  VideoProbe,
-  ModelImageSource,
-  OpenArchive,
-  Page,
+} from '../src/ports/file-repositories.js';
+import type { ImageProbe, VideoInfo, VideoProbe } from '../src/ports/media-probes.js';
+import type { Page } from '../src/ports/page.js';
+import type {
+  AssignmentKey,
   ProjectAssetRepository,
   ProjectQuery,
   ProjectRepository,
-  RelationKey,
-  SourceFiles,
-  Storage,
+} from '../src/ports/project-repositories.js';
+import type { ArchiveReader, OpenArchive, SourceFiles } from '../src/ports/source-files.js';
+import type { Storage } from '../src/ports/storage.js';
+import type { TagRepository } from '../src/ports/tag-repository.js';
+import type { ModelImageSource, VisionProvider } from '../src/ports/vision-provider.js';
+import type {
+  AssetWorkflowRepository,
+  NewWorkflowStep,
+  StepContext,
+  StepDefinitionInput,
+  TemplateVersion,
+  WorkflowTemplateRepository,
+} from '../src/ports/workflow-repositories.js';
+import type {
   StorageRef,
   StorageRepository,
-  TagRepository,
-  VisionProvider,
   WorkspaceDatabase,
-  WorkspaceHost,
   WorkspaceMeta,
   WorkspaceMetaRepository,
-  WorkspaceRegistry,
-} from '../src/ports.js';
+} from '../src/ports/workspace-database.js';
+import type { WorkspaceHost, WorkspaceRegistry } from '../src/ports/workspace-host.js';
 import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 import { InMemoryPromptRepository, type PromptTagLink } from './memory-prompts.js';

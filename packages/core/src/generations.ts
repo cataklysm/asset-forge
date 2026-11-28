@@ -19,7 +19,8 @@ import { InvalidOperationError, NotFoundError, ProviderNotConfiguredError, Valid
 import type { Job, JobControl, JobOutcome, NewJob } from './jobs.js';
 import { measureFile } from './measure-file.js';
 import { isPreviewable } from './media-types.js';
-import type { GenerationPromptRef, ImageProviderDirectory } from './ports.js';
+import type { GenerationPromptRef } from './ports/generation-repository.js';
+import type { ImageProviderDirectory } from './ports/image-provider.js';
 import type { WorkspaceSession } from './session.js';
 
 /** What the generation use cases need beyond the session. */

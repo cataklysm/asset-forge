@@ -11,7 +11,7 @@ import { ANALYSIS_PROMPT_VERSION } from './analysis.js';
 import { InvalidOperationError } from './errors.js';
 import type { NewJob } from './jobs.js';
 import { PREVIEWABLE_MIME_TYPES } from './media-types.js';
-import type { AnalysisFingerprint } from './ports.js';
+import type { AnalysisFingerprint } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
 /** Most jobs inserted by one `jobs.enqueue` call (one transaction), and the page size of the target. */

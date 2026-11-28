@@ -1,6 +1,6 @@
 import type { AssetRelation, AssetRelationView } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
-import type { RelationKey } from './ports.js';
+import type { RelationKey } from './ports/asset-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
 async function requireAsset(s: WorkspaceSession, id: string): Promise<void> {

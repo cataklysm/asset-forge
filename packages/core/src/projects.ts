@@ -1,6 +1,6 @@
 import type { Project, ProjectList, ProjectStatus } from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
-import type { ProjectQuery } from './ports.js';
+import type { ProjectQuery } from './ports/project-repositories.js';
 import type { WorkspaceSession } from './session.js';
 import { tagName } from './tags.js';
 

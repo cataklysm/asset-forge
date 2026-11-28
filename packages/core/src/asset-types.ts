@@ -1,5 +1,5 @@
 import type { AssetType } from '@assetforge/contracts';
-import type { WorkspaceDatabase } from './ports.js';
+import type { WorkspaceDatabase } from './ports/workspace-database.js';
 import type { WorkspaceSession } from './session.js';
 
 /** The asset types every workspace starts with; the index is the sort order. */

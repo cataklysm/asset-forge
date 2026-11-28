@@ -5,7 +5,7 @@ import { SourceNotReadableError } from './errors.js';
 import { GENERATION_RESULT_EXTENSIONS, generationNames, settleGenerationOfJob } from './generations.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
-import type { GenerationImageSource, ImageInput, ImageProviderDirectory } from './ports.js';
+import type { GenerationImageSource, ImageInput, ImageProviderDirectory } from './ports/image-provider.js';
 import type { WorkspaceSession } from './session.js';
 
 export interface ImageGenerateHandlerDeps {

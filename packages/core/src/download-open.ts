@@ -7,8 +7,8 @@ import {
   type RemoteFileSource,
   type RemoteOpenOptions,
   type RemoteRequestHeaders,
-  type SiteAccess,
-} from './ports.js';
+} from './ports/remote-files.js';
+import type { SiteAccess } from './ports/site-access.js';
 
 // Opening the URL of a `file.download` job: a plain download through the remote source, a site download (payload
 // v2) with its profile's login, through the profile's browser session where one exists.

@@ -1,6 +1,6 @@
 import type { Asset, AssetList, AssetStatus, AssetType } from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
-import type { AssetQuery } from './ports.js';
+import type { AssetQuery } from './ports/asset-repositories.js';
 import type { WorkspaceSession } from './session.js';
 import { searchWords } from './search.js';
 import { tagName } from './tags.js';

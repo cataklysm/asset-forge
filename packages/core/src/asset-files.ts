@@ -2,7 +2,8 @@ import type { FileList, FileRecord, FileRole, FileTarget } from '@assetforge/con
 import { AssetForgeError, InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import { assetFilePath, inboxPath } from './paths.js';
-import type { FileMove, FileMoveRepository, FileQuery, FileRepository, Storage } from './ports.js';
+import type { FileMove, FileMoveRepository, FileQuery, FileRepository } from './ports/file-repositories.js';
+import type { Storage } from './ports/storage.js';
 import { searchWords } from './search.js';
 import { tagName } from './tags.js';
 import type { WorkspaceSession } from './session.js';

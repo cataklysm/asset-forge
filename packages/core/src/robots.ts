@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream';
-import { RemoteFileError, type RemoteFileSource } from './ports.js';
+import { RemoteFileError, type RemoteFileSource } from './ports/remote-files.js';
 
 /** The product token the crawl obeys before the `*` group. */
 export const ROBOTS_PRODUCT_TOKEN = 'assetforge';

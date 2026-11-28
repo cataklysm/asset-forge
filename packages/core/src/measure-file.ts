@@ -1,7 +1,7 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { NotFoundError, StorageUnreachableError } from './errors.js';
 import { isPreviewable, type VideoFormat, videoFormat } from './media-types.js';
-import type { VideoInfo } from './ports.js';
+import type { VideoInfo } from './ports/media-probes.js';
 import type { WorkspaceSession } from './session.js';
 
 const isPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0;

@@ -9,7 +9,7 @@ import {
   type ImportOptions,
 } from './import-file.js';
 import { isZipArchive } from './media-types.js';
-import type { ArchiveEntry, ArchiveReader } from './ports.js';
+import type { ArchiveEntry, ArchiveReader } from './ports/source-files.js';
 
 /** At most this many entries (directories included) per `files:import` call, over all its archives. */
 export const MAX_ARCHIVE_ENTRIES = 5000;

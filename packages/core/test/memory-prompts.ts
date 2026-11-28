@@ -1,5 +1,5 @@
 import type { PromptDetail, PromptSummary, PromptVersion, TagAssignment } from '@assetforge/contracts';
-import type { NewPromptVersion, PromptRepository } from '../src/ports.js';
+import type { NewPromptVersion, PromptRepository } from '../src/ports/prompt-repository.js';
 import { foldSearchWord } from '../src/search.js';
 
 /** A prompt tag link; the tag fake renames and merges these with its other links. */

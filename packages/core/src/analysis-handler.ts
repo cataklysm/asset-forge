@@ -10,7 +10,7 @@ import {
   MAX_PROMPT_TEXT,
 } from './analysis.js';
 import { JobError, reportEffect, type JobEffects, type JobHandler } from './jobs.js';
-import type { ModelImageSource, VisionProvider } from './ports.js';
+import type { ModelImageSource, VisionProvider } from './ports/vision-provider.js';
 import type { WorkspaceSession } from './session.js';
 
 /**

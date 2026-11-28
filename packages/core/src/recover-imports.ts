@@ -1,5 +1,6 @@
 import { STAGING_DIR, stagingPath } from './paths.js';
-import type { FileRepository, Storage } from './ports.js';
+import type { FileRepository } from './ports/file-repositories.js';
+import type { Storage } from './ports/storage.js';
 
 export const INTERRUPTED_IMPORT_MESSAGE = 'Import was interrupted';
 

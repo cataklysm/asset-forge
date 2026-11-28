@@ -9,7 +9,7 @@ import {
 } from '@assetforge/contracts';
 import { InvalidOperationError, ValidationFailedError } from './errors.js';
 import { fileKind } from './media-types.js';
-import type { PageLoader, PageLoadResult } from './ports.js';
+import type { PageLoader, PageLoadResult } from './ports/page-loader.js';
 import { robotsAllows, type RobotsAnswer } from './robots.js';
 import { normalizeDownloadUrl } from './url-import.js';
 
