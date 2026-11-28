@@ -1,9 +1,8 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import { purposeOf, type Generation, type PromptDetail, type PromptVersion } from '@assetforge/contracts';
-import { call } from '../api';
+import { call, messageOf } from '../api';
 import type { ProviderChoice } from '../provider-choice';
 import type { ProvidersState } from '../provider-context';
-import { messageOf } from '../studio-actions';
 import { withVariable, type StudioFields } from '../studio-fields';
 import { attach, preview } from '../studio-prompt';
 import { formFromGeneration, writeSafeMode, type StudioForm } from '../studio-state';

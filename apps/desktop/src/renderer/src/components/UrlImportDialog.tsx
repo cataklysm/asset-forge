@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, type FileTarget, type UrlImportResult } from '@assetforge/contracts';
-import { ApiError, call, describeError } from '../api';
+import { call, messageOf } from '../api';
 import { useJobs } from '../jobs-context';
 import {
   CANCEL_LABEL,
@@ -24,16 +24,6 @@ interface Props {
   target: FileTarget | null;
   /** Closes the dialog. */
   onClose(): void;
-}
-
-/**
- * A message of a failed call: fixed main-process messages as sent, anything else described.
- *
- * @param error what the call threw
- * @returns the message to show
- */
-export function messageOf(error: unknown): string {
-  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
 }
 
 /** Whether a line holds nothing but white space. */
