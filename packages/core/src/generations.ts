@@ -260,7 +260,10 @@ function planUpscale(source: SizedInput, input: UpscaleStart): GenerationPlan {
  * @returns nothing
  * @throws `NotFoundError` when the version no longer exists
  */
-async function requireVersionStill(session: WorkspaceSession, promptRef: GenerationPromptRef | null): Promise<void> {
+async function requireVersionStillExists(
+  session: WorkspaceSession,
+  promptRef: GenerationPromptRef | null,
+): Promise<void> {
   if (promptRef === null) return;
   const found = await session.database.prompts.getVersion(promptRef.versionId);
   if (found === null) throw new NotFoundError('This prompt version does not exist');
@@ -289,7 +292,7 @@ export async function startGeneration(
   const plan =
     input.kind === 'edit' ? await planEdit(session, dependencies, entry.id, input) : planUpscale(source, input);
   if ('ok' in plan) return plan;
-  await requireVersionStill(session, plan.promptRef);
+  await requireVersionStillExists(session, plan.promptRef);
 
   const { file } = source;
   const id = session.newId();

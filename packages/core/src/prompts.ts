@@ -120,7 +120,10 @@ export async function getPrompt(session: WorkspaceSession, promptId: string): Pr
   return prompt;
 }
 
-/** At most this many query words reach the repository, each one search term per searched column. */
+/**
+ * At most this many query words reach the repository, each one search term per searched column. Words beyond the
+ * cap (the shortest ones) are ignored.
+ */
 export const MAX_PROMPT_QUERY_WORDS = 20;
 
 /**
