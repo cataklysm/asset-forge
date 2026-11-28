@@ -23,34 +23,57 @@ import {
   NO_THUMBNAILS_HEADLINE,
   refusedPageHeadline,
 } from '../labels';
+import { startPolling } from '../poller';
 
+// The state of the site import dialog: the profile draft and its save request, the test's answer, and the
+// crawl progress polled while a test runs.
+
+/** How often the progress is asked for while a test runs. */
 export const CRAWL_POLL_MS = 500;
 /** Min. size is typed in KB and sent as bytes. */
 export const BYTES_PER_KB = 1024;
 
 /** The profile form as typed: numbers stay text until they are sent. */
 export interface ProfileDraft {
+  /** The profile's name. */
   name: string;
   /** Only used for a new profile; an existing one keeps its site. */
   siteAddress: string;
+  /** The XPath of the thumbnails on a gallery page. */
   thumbnails: string;
+  /** The XPath of the next gallery page; empty for one page. */
   pagination: string;
+  /** The XPath of the file on a detail page; empty when the thumbnail links the file. */
   file: string;
   /** Always in the order of `FILE_KIND_OPTIONS`. */
   kinds: FileKind[];
+  /** The minimum size in KB. */
   minKb: string;
+  /** Text a file URL must contain; empty for any. */
   urlContains: string;
+  /** The most gallery pages read. */
   maxPages: string;
+  /** The most files found. */
   maxFiles: string;
 }
 
 const KIND_ORDER = FILE_KIND_OPTIONS.map((option) => option.kind);
 
-/** The kinds in the order of the checkboxes, each once. */
+/**
+ * The kinds in the order of the checkboxes, each once.
+ *
+ * @param kinds the kinds in any order
+ * @returns the kinds in checkbox order
+ */
 export function orderedKinds(kinds: readonly FileKind[]): FileKind[] {
   return KIND_ORDER.filter((kind) => kinds.includes(kind));
 }
 
+/**
+ * The form of a new profile.
+ *
+ * @returns empty texts, the default kinds and the default limits
+ */
 export function newDraft(): ProfileDraft {
   return {
     name: '',
@@ -66,6 +89,12 @@ export function newDraft(): ProfileDraft {
   };
 }
 
+/**
+ * The form of a saved profile.
+ *
+ * @param profile the profile
+ * @returns its fields as text
+ */
 export function draftOf(profile: SiteProfile): ProfileDraft {
   return {
     name: profile.name,
@@ -81,17 +110,37 @@ export function draftOf(profile: SiteProfile): ProfileDraft {
   };
 }
 
-export function sameDraft(a: ProfileDraft, b: ProfileDraft): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Whether two forms hold the same values.
+ *
+ * @param first one form
+ * @param second the other form
+ * @returns true when every field is equal
+ */
+export function sameDraft(first: ProfileDraft, second: ProfileDraft): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
 }
 
+/**
+ * A typed whole number within bounds.
+ *
+ * @param text the typed text
+ * @param min the least value taken
+ * @param max the greatest value taken
+ * @returns the number, or null when the text is no whole number within the bounds
+ */
 function integerIn(text: string, min: number, max: number): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
   const value = Number(text.trim());
   return value >= min && value <= max ? value : null;
 }
 
-/** Bytes of a typed KB value (decimals allowed), or null when it is not a size the profile takes. */
+/**
+ * Bytes of a typed KB value (decimals allowed).
+ *
+ * @param text the typed value
+ * @returns the bytes, or null when it is not a size the profile takes
+ */
 export function bytesOfKb(text: string): number | null {
   if (!/^\d+(\.\d+)?$/.test(text.trim())) return null;
   const bytes = Math.round(Number(text.trim()) * BYTES_PER_KB);
@@ -101,6 +150,10 @@ export function bytesOfKb(text: string): number | null {
 /**
  * The `sites:save` request of a draft, or null while a field holds what the schema refuses. `id` null
  * creates a profile with the site of the typed site address; otherwise the profile keeps its site.
+ *
+ * @param draft the form
+ * @param id the saved profile's id; null for a new one
+ * @returns the request, or null while the form cannot be saved
  */
 export function saveRequestOf(draft: ProfileDraft, id: string | null): SaveSiteProfile | null {
   const name = draft.name.trim();
@@ -131,14 +184,23 @@ export function saveRequestOf(draft: ProfileDraft, id: string | null): SaveSiteP
 
 /** The answer of a test, with the saved profile and the gallery URL it ran for. */
 export interface CrawlAnswer {
+  /** The tested profile. */
   profileId: string;
+  /** The gallery URL as typed when the test started. */
   url: string;
+  /** The crawl's answer. */
   result: SiteCrawlResult;
 }
 
 /**
  * `Import` needs a saved profile without unsaved changes and a test of exactly that profile and gallery
  * URL that found at least one file.
+ *
+ * @param crawl the last test's answer
+ * @param profileId the selected saved profile; null for a new one
+ * @param dirty whether the form has unsaved changes
+ * @param url the gallery URL as typed now
+ * @returns whether Import may start
  */
 export function canImport(crawl: CrawlAnswer | null, profileId: string | null, dirty: boolean, url: string): boolean {
   return (
@@ -151,7 +213,12 @@ export function canImport(crawl: CrawlAnswer | null, profileId: string | null, d
   );
 }
 
-/** The line of one problem: the fixed text of its reason, filled with its detail. */
+/**
+ * The line of one problem: the fixed text of its reason, filled with its detail.
+ *
+ * @param problem the problem's reason and detail
+ * @returns the line
+ */
 export function problemText(problem: Pick<SiteCrawlProblem, 'reason' | 'detail'>): string {
   return CRAWL_PROBLEM_TEXTS[problem.reason](problem.detail ?? '');
 }
@@ -159,6 +226,9 @@ export function problemText(problem: Pick<SiteCrawlProblem, 'reason' | 'detail'>
 /**
  * The one line above the problems of a test that found no file, or null when it found some. Problems keep the
  * crawl's order, so the first one belongs to the first gallery page whenever that page gave nothing.
+ *
+ * @param result the test's files, problems and whether it was cancelled
+ * @returns the headline, or null
  */
 export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problems' | 'cancelled'>): string | null {
   if (result.files.length > 0 || result.cancelled) return null;
@@ -172,17 +242,22 @@ export function noFilesHeadline(result: Pick<SiteCrawlResult, 'files' | 'problem
   return problemText(first);
 }
 
+/** What the dialog shows of a running test. */
 export interface CrawlProgressState {
   /** The last known progress; null while inactive and until the first answer that holds one. */
   progress: SiteCrawlProgress | null;
   /** True once a cancel was asked for the running crawl. */
   cancelling: boolean;
+  /** Asks the main process to stop the running crawl. */
   cancel(): void;
 }
 
 /**
  * While `active` (the dialog's `sites:crawl` call is pending), asks `sites:crawlProgress` every
  * `CRAWL_POLL_MS`, one request at a time. A failed request keeps the last value; inactive resets.
+ *
+ * @param active whether the dialog's crawl call is pending
+ * @returns the progress, whether a cancel was asked, and the cancel
  */
 export function useCrawlProgress(active: boolean): CrawlProgressState {
   const [progress, setProgress] = useState<SiteCrawlProgress | null>(null);
@@ -196,27 +271,8 @@ export function useCrawlProgress(active: boolean): CrawlProgressState {
       setProgress(null);
       return;
     }
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    function poll() {
-      timer = null;
-      call('sites:crawlProgress', {})
-        .then(
-          (next) => {
-            if (!disposed) setProgress(next);
-          },
-          // The last value stays; the next tick asks again.
-          () => {},
-        )
-        .finally(() => {
-          if (!disposed) timer = setTimeout(poll, CRAWL_POLL_MS);
-        });
-    }
-    timer = setTimeout(poll, CRAWL_POLL_MS);
-    return () => {
-      disposed = true;
-      if (timer !== null) clearTimeout(timer);
-    };
+    // A failed request keeps the last value; the next tick asks again.
+    return startPolling(() => call('sites:crawlProgress', {}), setProgress, CRAWL_POLL_MS);
   }, [active]);
 
   const cancel = useCallback(() => {
