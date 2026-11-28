@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
@@ -180,7 +180,9 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   // Batch answers arrive later; names come from the selection as it is then (as in the inbox).
   const latestSelection = useRef(selection);
-  latestSelection.current = selection;
+  useLayoutEffect(() => {
+    latestSelection.current = selection;
+  }, [selection]);
   const nameOf = (fileId: string) => latestSelection.current.selected.get(fileId)?.originalName ?? fileId;
 
   const applyRole = () =>
