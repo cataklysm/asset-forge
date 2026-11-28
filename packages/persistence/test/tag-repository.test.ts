@@ -267,6 +267,16 @@ describe('file tag batches', () => {
     expect(handle.prepare('select count(*) as n from file_tag').get()).toEqual({ n: 2 });
   });
 
+  test('a batch answers the first failure by kind, not by position: unknown, then incomplete', async () => {
+    const a = await addFile(20);
+    const pending = await addPendingFile(22);
+    const before = counts();
+    // The pending file comes first, yet the unknown one decides.
+    await expect(addMany([pending, a, uuid(999)])).rejects.toMatchObject({ code: 'not_found' });
+    await expect(removeMany([pending, uuid(999)])).rejects.toMatchObject({ code: 'not_found' });
+    expect(counts()).toEqual(before);
+  });
+
   test('addToFiles lets manual win per file and ai yield', async () => {
     const a = await addFile(20);
     const b = await addFile(21);
