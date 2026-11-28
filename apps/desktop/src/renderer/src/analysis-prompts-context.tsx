@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { AnalysisPrompt, AnalysisPromptPurpose, SaveAnalysisPrompt } from '@assetforge/contracts';
-import { call } from './api';
+import { ApiError, call } from './api';
 
 /** The prompt used last per purpose. */
 type LastUsed = { tagging: string | null; imagePrompt: string | null };
@@ -234,6 +234,25 @@ export function defaultPromptId(
   const own = state.prompts.filter((prompt) => prompt.purpose === purpose);
   const last = state.lastUsed[lastUsedKey(purpose)];
   return own.find((prompt) => prompt.id === last)?.id ?? own[0]?.id ?? null;
+}
+
+/**
+ * After a start refused with `not_found`: the prompt may have been deleted meanwhile, so the list is
+ * read again and the dialog drops its choice to fall back to a prompt that exists. Any other error
+ * changes nothing.
+ *
+ * @param error what the start threw
+ * @param prompts the reload of the analysis prompts
+ * @param dropChoice drops the dialog's prompt choice; it checks itself whether the dialog still wants it
+ */
+export function recoverMissingPrompt(
+  error: unknown,
+  prompts: Pick<AnalysisPromptsState, 'reload'>,
+  dropChoice: () => void,
+): void {
+  if (!(error instanceof ApiError) || error.code !== 'not_found') return;
+  void prompts.reload().catch(() => {});
+  dropChoice();
 }
 
 /**

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
-import { effectivePromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
-import { ApiError, call, describeError } from '../api';
+import {
+  effectivePromptId,
+  recoverMissingPrompt,
+  useAnalysisPrompts,
+  type AnalysisPromptsState,
+} from '../analysis-prompts-context';
+import { call, describeError } from '../api';
 import {
   CANCEL_LABEL,
   CLOSE_LABEL,
@@ -121,11 +126,9 @@ async function describeImage(effects: DescribeEffects, describe: DescribeRequest
     else if (result.code === 'busy') effects.setError(PROMPT_BUSY_MESSAGE);
     else if (result.code !== 'cancelled') effects.setError(JOB_ERROR_MESSAGES[result.code]);
   } catch (error) {
-    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-    if (error instanceof ApiError && error.code === 'not_found') {
-      void prompts.reload().catch(() => {});
+    recoverMissingPrompt(error, prompts, () => {
       if (request.current === requestId) effects.dropChosenPrompt();
-    }
+    });
     if (request.current === requestId) effects.setError(describeError(error));
   } finally {
     if (request.current === requestId) {

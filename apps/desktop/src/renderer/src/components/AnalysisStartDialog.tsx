@@ -1,8 +1,13 @@
 import { RotateCw } from 'lucide-react';
 import { useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
-import { effectivePromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
-import { ApiError, call, describeError } from '../api';
+import {
+  effectivePromptId,
+  recoverMissingPrompt,
+  useAnalysisPrompts,
+  type AnalysisPromptsState,
+} from '../analysis-prompts-context';
+import { call, describeError } from '../api';
 import { useAnalysisPreview } from '../hooks/useAnalysisPreview';
 import { useJobs } from '../jobs-context';
 import {
@@ -126,11 +131,7 @@ async function startAnalysis(effects: StartEffects, request: StartRequest): Prom
     effects.onClose();
   } catch (error) {
     effects.setError(describeError(error));
-    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-    if (error instanceof ApiError && error.code === 'not_found') {
-      effects.dropPromptChoice();
-      void effects.prompts.reload().catch(() => {});
-    }
+    recoverMissingPrompt(error, effects.prompts, effects.dropPromptChoice);
   } finally {
     effects.startingRef.current = false;
     effects.setStarting(false);
