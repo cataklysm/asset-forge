@@ -166,19 +166,17 @@ function MadeBy({ generation }: { generation: Generation }) {
 function AttachedPrompt({ generation }: { generation: Generation }) {
   const studio = useStudio();
   if (generation.promptTitle === null || generation.promptVersionNumber === null) return null;
+  const promptId = generation.promptId;
   return (
     <>
       <dt className={LABEL}>{ATTACHED_PROMPT_LABEL}</dt>
       <dd className="break-words">
-        {generation.promptId === null ? (
+        {promptId === null ? (
           <span title={promptValuesTitle(generation.promptVariables)}>
             {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
           </span>
         ) : (
-          <Link
-            title={promptValuesTitle(generation.promptVariables)}
-            onFollow={() => studio.openPrompt(generation.promptId!)}
-          >
+          <Link title={promptValuesTitle(generation.promptVariables)} onFollow={() => studio.openPrompt(promptId)}>
             {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
           </Link>
         )}
