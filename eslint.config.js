@@ -109,6 +109,9 @@ export default [
   {
     ignores: [
       '**/node_modules/**',
+      '.claude/**',
+      '.worktrees/**',
+      '.superpowers/**',
       '**/out/**',
       '**/dist/**',
       '**/test/**',
