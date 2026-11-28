@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { PromptDetail } from '@assetforge/contracts';
-import { ApiError, call, describeError } from '../api';
+import { call, messageOf } from '../api';
 import {
   CANCEL_LABEL,
   NEW_LIBRARY_PROMPT_LABEL,
@@ -25,16 +25,6 @@ interface Props {
 
 /** How the text is saved: as a new version of the origin, or as a new prompt. */
 type SaveMode = 'version' | 'new';
-
-/**
- * A message of a failed call: fixed main-process messages as sent, anything else described.
- *
- * @param error what the call threw
- * @returns the message to show
- */
-function messageOf(error: unknown): string {
-  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
-}
 
 /**
  * Stores the text: as a new version of the origin, keeping its defaults, or as a new prompt with the title.

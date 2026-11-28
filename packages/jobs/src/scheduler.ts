@@ -1,4 +1,10 @@
-import { ResourceClassSchema, isRetryableJobError, type JobErrorCode, type ResourceClass } from '@assetforge/contracts';
+import {
+  MAX_ATTEMPTS,
+  ResourceClassSchema,
+  isRetryableJobError,
+  type JobErrorCode,
+  type ResourceClass,
+} from '@assetforge/contracts';
 import {
   JobError,
   type CancelOptions,
@@ -14,8 +20,7 @@ import type { PauseGate } from './pause-gate.js';
 export const DEFAULT_LIMITS: Record<ResourceClass, number> = { cpu: 2, io: 2, local_gpu: 1, remote_api: 2 };
 /** Running jobs per class across all its lanes; a class without an entry is bounded only per lane. */
 export const DEFAULT_TOTALS: Partial<Record<ResourceClass, number>> = { io: 4 };
-/** Runs per job, the first one included. */
-export const MAX_ATTEMPTS = 3;
+export { MAX_ATTEMPTS };
 /** Delay before the second and before the third run. */
 export const RETRY_DELAYS_MS = [5_000, 30_000] as const;
 

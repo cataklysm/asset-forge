@@ -1,21 +1,11 @@
 import type { MutableRefObject } from 'react';
 import { JOB_ERROR_MESSAGES, type Generation, type IpcRequest, type UpscaleScale } from '@assetforge/contracts';
-import { ApiError, call, describeError } from './api';
+import { call, messageOf } from './api';
 import type { StudioSession } from './studio-context';
 import type { StudioForm } from './studio-state';
 
 /** The request of `generations:start`. */
 type StartRequest = IpcRequest<'generations:start'>;
-
-/**
- * A message of a failed call: fixed main-process messages as sent, anything else described.
- *
- * @param error the failure
- * @returns the message
- */
-export function messageOf(error: unknown): string {
-  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
-}
 
 /**
  * Orders generations newest first, the higher id first at the same time.

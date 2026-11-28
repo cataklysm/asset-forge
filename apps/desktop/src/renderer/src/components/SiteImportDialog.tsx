@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { belongsToSite, type FileTarget, type SiteProfile, type UrlImportResult } from '@assetforge/contracts';
-import { call } from '../api';
+import { call, messageOf } from '../api';
 import { useJobs } from '../jobs-context';
 import {
   CLOSE_LABEL,
@@ -25,7 +25,7 @@ import {
 } from './site-import-state';
 import { SiteCrawlPanel } from './SiteCrawlPanel';
 import { SiteProfileForm } from './SiteProfileForm';
-import { messageOf, UrlImportResultView } from './UrlImportDialog';
+import { UrlImportResultView } from './UrlImportDialog';
 
 // The site import dialog: a profile form, a test of a gallery URL through it, and the import of what the test found.
 

@@ -142,7 +142,7 @@ export interface JobRepository {
    */
   counts(): Promise<Record<JobStatus, number>>;
   /**
-   * Newest created_at first, then id descending; with `lane` only the jobs of that lane. `fileName` is the file's
+   * Newest created_at first, then id descending; with `lane` only the jobs of that lane (null: the jobs without one). `fileName` is the file's
    * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload,
    * `url` and `host` from `downloadJobFields`, `result` from the stored column. A `FILE_DOWNLOAD_JOB` answers
    * `providerId`, `providerName` and `model` null. `ids` narrows the list to those jobs within the other filters.
@@ -154,7 +154,7 @@ export interface JobRepository {
     limit: number;
     offset: number;
     status?: JobStatus;
-    lane?: string;
+    lane?: string | null;
     ids?: readonly string[];
   }): Promise<{ items: JobView[]; total: number }>;
   /**

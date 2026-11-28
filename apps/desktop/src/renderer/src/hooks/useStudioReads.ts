@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import type { Generation } from '@assetforge/contracts';
-import { call } from '../api';
-import { messageOf, newestFirst } from '../studio-actions';
+import { call, messageOf } from '../api';
+import { newestFirst } from '../studio-actions';
 import { tileState } from '../studio-state';
 
 /** What the studio reads work with. */

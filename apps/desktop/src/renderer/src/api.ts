@@ -81,3 +81,13 @@ export function describeError(error: unknown): string {
   if (error instanceof ApiError) return ERROR_MESSAGES[error.code] ?? error.message;
   return error instanceof Error ? error.message : 'Unexpected error';
 }
+
+/**
+ * A message of a failed call: fixed main-process messages as sent, anything else described.
+ *
+ * @param error the failure
+ * @returns the forwarded message unless the code is `internal_error`, else what `describeError` puts
+ */
+export function messageOf(error: unknown): string {
+  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
+}

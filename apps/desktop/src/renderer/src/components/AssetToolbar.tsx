@@ -1,8 +1,9 @@
 import { LayoutGrid, List, type LucideIcon } from 'lucide-react';
-import { AssetStatusSchema, FileRoleSchema, type AssetType, type ProjectSummary } from '@assetforge/contracts';
+import { AssetStatusSchema, type AssetType, type ProjectSummary } from '@assetforge/contracts';
 import { distinct } from '../format';
 import { ANALYSE_ASSETS_TITLE, FILE_KIND_OPTIONS, label } from '../labels';
 import { hasFilters, NO_FILTERS, type AssetFilters, type AssetView } from '../list-state';
+import { ROLES, roleOptions } from '../role-options';
 import { ALERT, ICON_BUTTON, SELECT } from '../ui';
 import { AnalyseAllButton } from './AnalysisDialogs';
 import { FilterBar } from './FilterBar';
@@ -13,7 +14,6 @@ import { TagFilter } from './TagFilter';
 // The toolbar of the asset gallery: the two filter rows, Analyse all, the view switch, errors and the start strip.
 
 const STATUSES = AssetStatusSchema.options;
-const ROLES = FileRoleSchema.options;
 const KINDS = FILE_KIND_OPTIONS;
 
 const VIEWS = [
@@ -185,11 +185,7 @@ function FileRow({ filters, onFilterChange }: Pick<SearchRowProps, 'filters' | '
         onChange={(event) => onFilterChange({ fileRole: ROLES.find((role) => role === event.target.value) ?? '' })}
       >
         <option value="">All roles</option>
-        {ROLES.map((role) => (
-          <option key={role} value={role}>
-            {label(role)}
-          </option>
-        ))}
+        {roleOptions()}
       </select>
       <select
         className={SELECT}

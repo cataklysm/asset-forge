@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { FileRoleSchema, type Asset, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
+import { roleOptions } from '../role-options';
 import { eligibleFiles, NONE_ELIGIBLE, sharedTags, type FileSelection } from '../selection';
 import { ALERT, BUTTON, LABEL, MUTED, SECTION_TITLE, SELECT } from '../ui';
 import { AssetPicker } from './AssetPicker';
@@ -9,9 +10,6 @@ import { assignFailures, ResultStrip, type ResultFailure } from './ResultStrip';
 import { TagRow } from './TagRow';
 
 // The Selection column of the inbox.
-
-/** Every file role, in the order of the schema. */
-const ROLES = FileRoleSchema.options;
 
 interface Props {
   /** The selected files. */
@@ -161,11 +159,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
           value={role}
           onChange={(event) => setRole(FileRoleSchema.parse(event.target.value))}
         >
-          {ROLES.map((option) => (
-            <option key={option} value={option}>
-              {label(option)}
-            </option>
-          ))}
+          {roleOptions()}
         </select>
         <div>
           <button

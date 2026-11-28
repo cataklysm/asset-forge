@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { PROMPT_DESCRIPTION_MAX, PROMPT_TITLE_MAX, type PromptDetail, type PromptVersion } from '@assetforge/contracts';
-import { ApiError, call, describeError } from '../api';
+import { call, messageOf } from '../api';
 import {
   DELETE_LABEL,
   DELETE_PROMPT_TITLE,
@@ -48,16 +48,6 @@ interface Props {
 
 /** A setter of React state. */
 type Setter<T> = (value: T | ((current: T) => T)) => void;
-
-/**
- * The library's fixed messages reach the user as they are; only unexpected errors become the generic text.
- *
- * @param error what the call threw
- * @returns the message to show
- */
-function messageOf(error: unknown): string {
-  return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
-}
 
 /**
  * Whether the editor holds changes that are not saved: never while the prompt loads.

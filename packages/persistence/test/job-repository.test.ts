@@ -933,8 +933,8 @@ describe('job lanes', () => {
   test('list with a null lane lists the jobs without a lane', async () => {
     await enqueueInOrder(laned(10, 'a'), laned(11, null));
 
-    // The port types the filter as a string; a null that reaches the repository must still match by `IS NULL`.
-    const withoutLane = await db.jobs.list({ limit: 10, offset: 0, lane: null as unknown as string });
+    // A null lane must match by `IS NULL`, not by `= NULL`.
+    const withoutLane = await db.jobs.list({ limit: 10, offset: 0, lane: null });
     expect(withoutLane.total).toBe(1);
     expect(withoutLane.items.map((i) => i.id)).toEqual([uuid(11)]);
   });

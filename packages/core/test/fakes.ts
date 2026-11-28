@@ -37,6 +37,7 @@ import type { WorkspaceSession } from '../src/session.js';
 import { fileKind, hasThumbnail, isOpenable, isPreviewable, type VideoFormat } from '../src/media-types.js';
 import { LAYOUT_DIRS } from '../src/paths.js';
 import { foldSearchWord, searchWords, textWords } from '../src/search.js';
+import { tagName } from '../src/tags.js';
 import {
   ArchiveNotReadableError,
   ArchiveTooLargeError,
@@ -876,6 +877,15 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   }
 }
 
+/**
+ * A target filter with its tag names normalised and distinct, as the SQLite reader does; throws
+ * `ValidationFailedError` for a name that does not normalise.
+ */
+function normalisedTagFilter<F extends { tagNames?: string[] }>(filter: F): F {
+  if (filter.tagNames === undefined) return filter;
+  return { ...filter, tagNames: [...new Set(filter.tagNames.map((typed) => tagName(typed).name))] };
+}
+
 /** Resolves analysis targets over the fake's rows, following the contract of the SQLite reader. */
 class InMemoryAnalysisTargets implements AnalysisTargetReader {
   constructor(
@@ -894,12 +904,13 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
       case 'files':
         return target.fileIds.filter((id) => this.files.records.has(id));
       case 'fileFilter':
-        return (await this.files.list({ ...target.filter, ...all })).items.map((f) => f.id);
+        return (await this.files.list({ ...normalisedTagFilter(target.filter), ...all })).items.map((f) => f.id);
       case 'asset':
         return [...this.files.records.values()].filter((f) => f.assetId === target.assetId).map((f) => f.id);
       case 'assetFilter': {
         const { fileRole, fileKind } = target.filter;
-        const assetIds = new Set((await this.assets.list({ ...target.filter, ...all })).items.map((a) => a.id));
+        const filter = normalisedTagFilter(target.filter);
+        const assetIds = new Set((await this.assets.list({ ...filter, ...all })).items.map((a) => a.id));
         return [...this.files.records.values()]
           .filter((f) => f.assetId !== null && assetIds.has(f.assetId))
           .filter(

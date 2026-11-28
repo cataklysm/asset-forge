@@ -24,6 +24,14 @@ const errorOf = (code: JobErrorCode | null) => ({
   errorCode: code,
   errorMessage: code === null ? null : JOB_ERROR_MESSAGES[code],
 });
+/** The fields a cancel of a waiting job writes, as the SQLite repository's `cancelledColumns`. */
+const cancelledFields = (now: string) => ({
+  status: 'cancelled' as const,
+  runAfter: null,
+  ...errorOf(null),
+  finishedAt: now,
+  updatedAt: now,
+});
 const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) =>
   !(excludeLanes ?? []).includes(r.lane);
 
@@ -254,7 +262,7 @@ export class InMemoryJobRepository implements JobRepository {
       for (const row of this.rows) {
         if (id !== undefined && row.id !== id) continue;
         if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
-        Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
+        Object.assign(row, cancelledFields(now));
         settled?.(structuredClone(row));
         n++;
       }
@@ -280,7 +288,7 @@ export class InMemoryJobRepository implements JobRepository {
       let cancelled = 0;
       for (const row of ofFile) {
         if (row.status !== 'queued' && row.status !== 'retry_wait' && row.status !== 'waiting_remote') continue;
-        Object.assign(row, { status: 'cancelled', finishedAt: now, updatedAt: now });
+        Object.assign(row, cancelledFields(now));
         settled?.(structuredClone(row));
         cancelled++;
       }
@@ -339,7 +347,7 @@ export class InMemoryJobRepository implements JobRepository {
     limit: number;
     offset: number;
     status?: JobStatus;
-    lane?: string;
+    lane?: string | null;
   }): Promise<{ items: JobView[]; total: number }> {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))

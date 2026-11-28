@@ -1,13 +1,11 @@
 import { FileRoleSchema, type FileRecord, type FileRole } from '@assetforge/contracts';
-import { label } from '../labels';
+import { roleOptions } from '../role-options';
 import { sharedTags } from '../selection';
 import { ALERT, BUTTON, SELECT } from '../ui';
 import { Dialog } from './Dialog';
 import { TagRow } from './TagRow';
 
 // The dialogs of the asset Files tab's selection bar: Add tags and Set role.
-
-const ROLES = FileRoleSchema.options;
 
 /** The props of the Add tags dialog. */
 interface AddTagsDialogProps {
@@ -83,11 +81,7 @@ export function SetRoleDialog({ open, role, onRoleChange, busy, error, onApply, 
             value={role}
             onChange={(event) => onRoleChange(FileRoleSchema.parse(event.target.value))}
           >
-            {ROLES.map((option) => (
-              <option key={option} value={option}>
-                {label(option)}
-              </option>
-            ))}
+            {roleOptions()}
           </select>
           <button type="button" className={BUTTON} disabled={busy} onClick={onApply}>
             Apply

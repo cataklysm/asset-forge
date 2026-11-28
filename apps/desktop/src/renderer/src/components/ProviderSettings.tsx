@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { MAX_PROVIDERS, type ProviderList, type ProviderView, type SaveProvider } from '@assetforge/contracts';
-import { ApiError, describeError } from '../api';
+import { messageOf } from '../api';
 import {
   DELETE_LABEL,
   FROM_ENVIRONMENT,
@@ -22,16 +22,6 @@ import { SettingsLoadState } from './SettingsLoadState';
 
 /** The selection of the editor for an entry that is not saved yet; never a provider id. */
 const NEW = 'new';
-
-/**
- * The host's fixed message of a refusal; other failures as `describeError` puts them.
- *
- * @param error the failure
- * @returns the message
- */
-function messageOf(error: unknown): string {
-  return error instanceof ApiError ? error.message : describeError(error);
-}
 
 /** The entry the editor shows. */
 interface Selection {

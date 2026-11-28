@@ -1,7 +1,11 @@
 import {
   DEFAULT_PROVIDER_OPTIONS,
+  MAX_TOKENS_MAX,
+  MAX_TOKENS_MIN,
   PARALLEL_REQUESTS_MAX,
   PARALLEL_REQUESTS_MIN,
+  TEMPERATURE_MAX,
+  TEMPERATURE_MIN,
   VENICE_DEFAULT_BASE_URL,
   VISION_TIMEOUT_DEFAULT_SECONDS,
   VISION_TIMEOUT_MAX_SECONDS,
@@ -52,9 +56,6 @@ export const KINDS: readonly ProviderKind[] = ['ollama', 'openai', 'venice'];
 
 /** The thinking choices, in the order the select offers them. */
 export const THINKING: readonly Thinking[] = ['default', 'off', 'on'];
-
-/** The highest answer token limit. */
-export const MAX_TOKENS_MAX = 100_000;
 
 /**
  * The base URL a new entry of `kind` starts with.
@@ -124,7 +125,7 @@ export function temperatureOf(text: string): number | null {
   const trimmed = text.trim();
   if (trimmed === '') return null;
   const value = Number(trimmed);
-  return Number.isFinite(value) && value >= 0 && value <= 2 ? value : null;
+  return Number.isFinite(value) && value >= TEMPERATURE_MIN && value <= TEMPERATURE_MAX ? value : null;
 }
 
 /**
@@ -138,7 +139,7 @@ export function maxTokensOf(text: string): number | null | undefined {
   if (trimmed === '') return null;
   if (!/^\d+$/.test(trimmed)) return undefined;
   const value = Number(trimmed);
-  return value >= 1 && value <= MAX_TOKENS_MAX ? value : undefined;
+  return value >= MAX_TOKENS_MIN && value <= MAX_TOKENS_MAX ? value : undefined;
 }
 
 /**
