@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { SerialQueue, workspaceFolderName, type ImageProviderDirectory, type WorkspaceManager } from '@assetforge/core';
+import { createAnalysisHandlers } from './analysis-handlers.js';
 import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
@@ -64,7 +65,20 @@ export function createWorkspaceHandlers(
     'workspace:remove': (request) => lifecycle.remove(request),
     'workspace:close': () => lifecycle.close(),
     ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders, services.isSiteLane),
+    ...createAnalysisHandlers({
+      manager,
+      jobs,
+      describe: services.describe,
+      prompts: services.prompts,
+      providers: services.providerStore,
+    }),
+    ...createJobHandlers({
+      manager,
+      jobs,
+      providers: services.providerStore,
+      imageProviders: services.imageProviders,
+      ...(services.isSiteLane === undefined ? {} : { isSiteLane: services.isSiteLane }),
+    }),
     ...createGenerationHandlers(manager, jobs, services.imageProviders),
     ...createPromptHandlers(manager),
     'dialog:pickDirectory': () => dialogs.pickDirectory(),
