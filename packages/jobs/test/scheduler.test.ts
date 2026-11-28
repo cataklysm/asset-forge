@@ -1011,6 +1011,56 @@ describe('createScheduler with a pause gate', () => {
     expect(s.row(b)).toMatchObject({ status: 'queued', attempt: 0, errorCode: null });
   });
 
+  it('forgets the never-launched mark of a row once it is launched, so a run without a stored outcome ends failed', async () => {
+    const gpu = controlled('local_gpu', 'fail', { interruptedCode: 'provider_outcome_unknown' });
+    const pause = createPauseGate({});
+    const failure = new Error('locked');
+    let openClaim: (() => void) | null = null;
+    let claims = 0;
+    let releaseFailures = 1;
+    const s = setup({
+      handlers: { gpu: gpu.handler },
+      limits: { ...DEFAULT_LIMITS, local_gpu: 2 },
+      pause,
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            if (++claims === 2) await new Promise<void>((resolve) => (openClaim = resolve));
+            return fake.claimNext(request);
+          },
+          async release(id: string, now: string) {
+            // The put-back is written, but its answer is lost: the row is queued and carries the mark.
+            const released = await fake.release(id, now);
+            if (releaseFailures-- > 0) throw failure;
+            return released;
+          },
+          async finish(id: string, end: Parameters<JobRepository['finish']>[1]) {
+            if (end.status === 'succeeded') throw failure;
+            return fake.finish(id, end);
+          },
+        }),
+    });
+    const [a, b] = (await s.enqueue('gpu', 'local_gpu', 2, 'p')) as [string, string];
+    const starting = s.scheduler.start();
+    await flush();
+    await failRun(gpu, a, new JobError('provider_unauthorized'));
+    openClaim!();
+    await starting;
+    await flush();
+    expect(s.row(b).status).toBe('queued');
+
+    pause.resume('local_gpu', 'p');
+    s.scheduler.wake();
+    await flush();
+    expect(gpu.runs.map((run) => run.job.id)).toEqual([a, b]);
+    gpu.runOf(b).resolve();
+    await flush();
+
+    // The run of b may have reached the provider, so it is never put back.
+    expect(gpu.runs).toHaveLength(2);
+    expect(s.row(b)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+  });
+
   it('keeps the pause for a second scheduler handed the same gate', async () => {
     const gpu = controlled('local_gpu');
     const pause = createPauseGate({});

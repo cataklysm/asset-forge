@@ -451,7 +451,9 @@ class JobScheduler {
 
   /**
    * Puts a claimed job that was not launched back to `queued`. When that fails, the row is left for the recovery of
-   * a later pass, which knows it never ran.
+   * a later pass, which knows it never ran. A put-back that fails while stopping is not recovered in this session:
+   * the mark lives in memory only, so at the next open the row counts as interrupted, and a job of an
+   * `onInterrupted: 'fail'` handler ends `failed` with its interrupted code.
    *
    * @param job the claimed job
    * @returns resolves once the job is back; rejects with the cause of a failed put-back
@@ -647,6 +649,9 @@ class JobScheduler {
       settled: false,
       done: Promise.resolve(),
     };
+    // A put-back whose answer was lost may have been written: the row was queued again and is launched now, so its
+    // never-launched mark must not outlive this launch.
+    this.leftovers.forget(job.id);
     this.active.set(job.id, run);
     run.done = this.runJob(job, run, handler);
   }
