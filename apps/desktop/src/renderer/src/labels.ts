@@ -9,6 +9,7 @@ export * from './labels/import';
 export * from './labels/jobs';
 export * from './labels/jobs-screen';
 export * from './labels/list-controls';
+export * from './labels/pickers';
 export * from './labels/project-screen';
 export * from './labels/projects';
 export * from './labels/prompt-editor';

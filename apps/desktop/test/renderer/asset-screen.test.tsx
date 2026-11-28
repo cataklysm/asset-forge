@@ -1462,7 +1462,7 @@ it('files tab: the tag filter of the tab follows a rename', async () => {
   await waitFor(() =>
     expect((callsOf(api, 'files:list') as ListRequest[]).some((r) => r.tagNames?.join() === 'front')).toBe(true),
   );
-  expect(screen.getByRole('button', { name: 'Remove front' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Remove Front' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
 });
 
