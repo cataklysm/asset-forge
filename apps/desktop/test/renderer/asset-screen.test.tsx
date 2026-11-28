@@ -1085,6 +1085,24 @@ it('pressing Delete twice sends one request', async () => {
   expect(callsOf(api, 'files:trashMany')).toHaveLength(1);
 });
 
+it('the selection Delete waits for a running single delete instead of sending a second request', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  const pending = deferred<IpcResponse<'files:trashMany'>>();
+  const api = install(asset, { 'files:list': listOf(files), 'files:trashMany': () => pending.promise });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.click(tile('a.png'));
+  await user.click(within(tile('a.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [files[0]!.id] }]);
+  pending.resolve(trashAnswer(files)({ fileIds: [files[0]!.id] }));
+  await waitFor(() => expect(screen.queryByText('1 selected')).toBeNull());
+  expect(callsOf(api, 'files:trashMany')).toHaveLength(1);
+});
+
 it('no dialog opens on Delete', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();

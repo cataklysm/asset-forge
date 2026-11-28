@@ -75,9 +75,8 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const detail = useFileDialog(containerRef);
   // Synchronous guard: a second activation before the re-render must not start a second import.
   const importingRef = useRef(false);
-  // The same for a single delete and for the selection's delete.
+  // The same for the deletes: one guard for a single delete and the selection's delete, so that they never overlap.
   const acting = useRef(false);
-  const deleting = useRef(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const trash = useTrash();
   const zipChoice = useZipChoice();
@@ -200,7 +199,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     const files = [...selection.selected.values()];
     if (files.length === 0) return Promise.resolve();
     return runExclusive(
-      deleting,
+      acting,
       async () => {
         try {
           const { doneIds, failures } = await runFileBatch('files:trashMany', files);

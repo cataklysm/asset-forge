@@ -93,9 +93,9 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onChanged: onFilesChanged,
     onLeave: () => detailDialog.close(),
   });
-  // Synchronous guards: a second activation before the re-render must not send a second request.
+  // Synchronous guard: a second activation before the re-render must not send a second request. One guard for
+  // the single actions and the batches, so that a single delete and the selection's delete never overlap.
   const acting = useRef(false);
-  const batching = useRef(false);
   const trash = useTrash();
 
   // The filter follows a rename in the render that raises `reloadToken`, so the browser never
@@ -170,7 +170,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   /** Runs one batch at a time; it clears both errors and disables the batch buttons while it runs. */
   const batch = (action: () => Promise<void>) =>
-    runExclusive(batching, action, {
+    runExclusive(acting, action, {
       onStart: () => {
         setBatchBusy(true);
         setError(null);
@@ -179,7 +179,10 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       onEnd: () => setBatchBusy(false),
     });
 
-  const nameOf = (fileId: string) => selection.selected.get(fileId)?.originalName ?? fileId;
+  // Batch answers arrive later; names come from the selection as it is then (as in the inbox).
+  const latestSelection = useRef(selection);
+  latestSelection.current = selection;
+  const nameOf = (fileId: string) => latestSelection.current.selected.get(fileId)?.originalName ?? fileId;
 
   const applyRole = () =>
     batch(async () => {
