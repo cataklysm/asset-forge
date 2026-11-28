@@ -170,6 +170,21 @@ export function freshSelected(selected: ReadonlyMap<string, FileRecord>, state: 
 }
 
 /**
+ * The failed pages among those holding the first `MAX_SELECTION` files of a list: Ctrl+A asks for them again and
+ * selects nothing while one of them stays failed, so it never selects a partial result.
+ *
+ * @param state the displayed list
+ * @returns the failed page numbers
+ */
+export function failedSelectablePages(state: PagedState<FileRecord>): number[] {
+  const pages: number[] = [];
+  for (const [page, entry] of state.pages) {
+    if (entry.status === 'failed' && page * PAGE_SIZE < MAX_SELECTION) pages.push(page);
+  }
+  return pages;
+}
+
+/**
  * The loaded files among the first `MAX_SELECTION` of a list, for Ctrl+A.
  *
  * @param state the displayed list; its total must be known
