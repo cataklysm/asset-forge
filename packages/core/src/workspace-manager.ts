@@ -1,12 +1,13 @@
-import type {
-  BackupAttempt,
-  BackupState,
-  FileList,
-  FileRecord,
-  FileTarget,
-  ImportProgress,
-  ImportResult,
-  WorkspaceSummary,
+import {
+  BACKUP_QUIT_DEADLINE_MS,
+  type BackupAttempt,
+  type BackupState,
+  type FileList,
+  type FileRecord,
+  type FileTarget,
+  type ImportProgress,
+  type ImportResult,
+  type WorkspaceSummary,
 } from '@assetforge/contracts';
 import type { BackupFolderStatus, ListedBackup } from './backup-types.js';
 import { DirectoryNotEmptyError, InvalidOperationError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
@@ -16,6 +17,7 @@ import type { FileQuery } from './ports/file-repositories.js';
 import type { BackupSource } from './ports/workspace-backups.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 import { SerialQueue } from './serial-queue.js';
+import { WorkspaceBackupService } from './workspace-backup.js';
 import type { WorkspaceSession } from './session.js';
 import { importSources, newImportProgress, requireTargetAsset, type ImportSourcesOptions } from './workspace-import.js';
 import { holdsWorkspace, newManifest, readManifest, writeManifest } from './workspace-manifest.js';
@@ -30,13 +32,17 @@ import { openWorkspaceDatabase, rejectCopy, requireReachable, type OpenWorkspace
 export class WorkspaceManager {
   private open_: OpenWorkspace | null = null;
   private readonly queue = new SerialQueue();
+  /** The regular and final backups. */
+  private readonly backups: WorkspaceBackupService;
   /** The live progress of the running `importFiles`; set from the start of the work until it settles. */
   private importProgress_: ImportProgress | null = null;
 
   /**
    * @param host the host services the workspaces are built on
    */
-  constructor(private readonly host: WorkspaceHost) {}
+  constructor(private readonly host: WorkspaceHost) {
+    this.backups = new WorkspaceBackupService(host);
+  }
 
   /**
    * The known workspaces. Does not queue.
@@ -83,8 +89,8 @@ export class WorkspaceManager {
    * @returns resolves once it is closed
    */
   close(options?: { backupDeadlineMs?: number }): Promise<void> {
-    void options;
-    return this.queue.run(() => this.doClose());
+    const backupDeadlineMs = options?.backupDeadlineMs ?? BACKUP_QUIT_DEADLINE_MS;
+    return this.queue.run(() => this.doClose({ backupDeadlineMs }));
   }
 
   /**
@@ -131,7 +137,7 @@ export class WorkspaceManager {
    * @returns the attempt
    */
   backupNow(): Promise<BackupAttempt> {
-    return Promise.reject(notImplemented());
+    return this.backups.backupNow();
   }
 
   /**
@@ -140,7 +146,7 @@ export class WorkspaceManager {
    * @returns the state; `workspaceId` null when none is open
    */
   backupState(): BackupState {
-    throw notImplemented();
+    return this.backups.state();
   }
 
   /**
@@ -294,25 +300,32 @@ export class WorkspaceManager {
    * @returns the opened workspace
    */
   private async doOpen(input: { rootPath: string }): Promise<WorkspaceSummary> {
-    await this.doClose();
+    await this.doClose({ backupDeadlineMs: BACKUP_QUIT_DEADLINE_MS });
     const storage = this.host.createStorage(input.rootPath);
     await requireReachable(storage);
     const manifest = await readManifest(storage);
     await rejectCopy(this.host, manifest.id, input.rootPath);
-    this.open_ = await openWorkspaceDatabase(this.host, storage, manifest, input.rootPath);
-    return this.open_.summary;
+    const open = await openWorkspaceDatabase(this.host, storage, manifest, input.rootPath);
+    this.open_ = open;
+    this.backups.startSession({ summary: open.summary, database: open.database });
+    return open.summary;
   }
 
   /**
-   * Closes the open workspace; no-op when none is open.
+   * Closes the open workspace after its closing backup; no-op when none is open.
    *
+   * @param options `backupDeadlineMs` bounds the closing backup, `skip` leaves it out
    * @returns resolves once its database is closed
    */
-  private async doClose(): Promise<void> {
+  private async doClose(options: { backupDeadlineMs?: number; skip?: boolean }): Promise<void> {
     const open = this.open_;
     if (!open) return;
     this.open_ = null;
-    await open.database.close();
+    try {
+      await this.backups.endSession(options);
+    } finally {
+      await open.database.close();
+    }
   }
 
   /**
@@ -324,7 +337,7 @@ export class WorkspaceManager {
   private async doRemove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
     const entry = await this.host.registry.get(input.id);
     if (entry === null) return { folderTrashed: false };
-    if (this.open_?.summary.id === input.id) await this.doClose();
+    if (this.open_?.summary.id === input.id) await this.doClose({ skip: true });
 
     const folderTrashed = input.trashFolder && (await this.trashFolder(entry.rootPath, input.id));
     await this.host.deleteDatabase(input.id);
