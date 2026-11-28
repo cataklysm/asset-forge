@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+﻿import { useRef, useState } from 'react';
 import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
@@ -148,8 +148,8 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
 
   const remove = (file: FileRecord) =>
     runExclusive(acting, async () => {
-      const { failures } = await runFileBatch('files:trashMany', [file]);
-      throwFirst(failures);
+      const { firstError } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(firstError);
       setSelection((current) => dropSelected(current, [file.id]));
       // As with Detach, the reload moves the dialog on.
       onFilesChanged();

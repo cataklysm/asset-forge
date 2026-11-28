@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
@@ -188,8 +188,8 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   /** One file to the trash (menu, dialog); one at a time. A failure rejects for the caller to show. */
   function remove(file: FileRecord): Promise<void> {
     return runExclusive(acting, async () => {
-      const { failures } = await runFileBatch('files:trashMany', [file]);
-      throwFirst(failures);
+      const { firstError } = await runFileBatch('files:trashMany', [file]);
+      throwFirst(firstError);
       moved([file.id]);
       trash.refresh();
     });
@@ -274,11 +274,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
             ),
         )}
         {result !== null && (
-          <ResultStrip
-            title={result.title}
-            failures={result.failures}
-            onDismiss={() => setResult(null)}
-          />
+          <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
         )}
         <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>
           <button
