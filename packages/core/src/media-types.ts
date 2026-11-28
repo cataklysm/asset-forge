@@ -10,6 +10,12 @@ export const PREVIEWABLE_MIME_TYPES: readonly string[] = [
   'image/avif',
 ];
 
+/**
+ * Whether a preview can be generated for the MIME type.
+ *
+ * @param mimeType the stored MIME type
+ * @returns true for a previewable raster image
+ */
 export function isPreviewable(mimeType: string): boolean {
   return PREVIEWABLE_MIME_TYPES.includes(mimeType);
 }
@@ -20,18 +26,34 @@ export const VIDEO_MIME_TYPES: readonly string[] = ['video/mp4', 'video/webm'];
 /** The container format of a video, which decides how the frame tool reads it. */
 export type VideoFormat = 'mp4' | 'webm';
 
+/**
+ * Whether the MIME type is that of a video the app plays.
+ *
+ * @param mimeType the stored MIME type
+ * @returns true for a video
+ */
 export function isVideo(mimeType: string): boolean {
   return VIDEO_MIME_TYPES.includes(mimeType);
 }
 
-/** The container format of a video MIME type; null for anything else. */
+/**
+ * The container format of a video MIME type.
+ *
+ * @param mimeType the stored MIME type
+ * @returns the format; null for anything else
+ */
 export function videoFormat(mimeType: string): VideoFormat | null {
   if (mimeType === 'video/mp4') return 'mp4';
   if (mimeType === 'video/webm') return 'webm';
   return null;
 }
 
-/** A thumbnail can be made: a previewable image, or a video through one of its frames. */
+/**
+ * A thumbnail can be made: a previewable image, or a video through one of its frames.
+ *
+ * @param mimeType the stored MIME type
+ * @returns whether the file has a thumbnail
+ */
 export function hasThumbnail(mimeType: string): boolean {
   return isPreviewable(mimeType) || isVideo(mimeType);
 }
@@ -47,7 +69,12 @@ export const FILE_KIND_EXTENSIONS: Readonly<Record<Exclude<FileKind, 'other'>, r
   video: ['mp4', 'm4v', 'webm'],
 };
 
-/** Lower-case extension of an on-disk name after stripping trailing dots and spaces; null when none. */
+/**
+ * Lower-case extension of an on-disk name after stripping trailing dots and spaces.
+ *
+ * @param fileName the on-disk name
+ * @returns the extension; null when none
+ */
 export function diskExtension(fileName: string): string | null {
   const trimmed = fileName.replace(/[. ]+$/, '');
   const dot = trimmed.lastIndexOf('.');
@@ -57,12 +84,22 @@ export function diskExtension(fileName: string): string | null {
   return extension === '' ? null : extension.toLowerCase();
 }
 
-/** Last `/` segment of a relative storage path. */
+/**
+ * Last `/` segment of a relative storage path.
+ *
+ * @param relativePath the relative storage path
+ * @returns the on-disk name
+ */
 export function diskName(relativePath: string): string {
   return relativePath.slice(relativePath.lastIndexOf('/') + 1);
 }
 
-/** The kind of a file, derived from the extension of its name. */
+/**
+ * The kind of a file, derived from the extension of its name.
+ *
+ * @param fileName the file name
+ * @returns the kind; `other` without a known extension
+ */
 export function fileKind(fileName: string): FileKind {
   const extension = diskExtension(fileName);
   if (extension === null) return 'other';
@@ -72,12 +109,18 @@ export function fileKind(fileName: string): FileKind {
   return 'other';
 }
 
-/** A file can be opened externally when its kind is image, model, document or video, except SVG. */
+/**
+ * A file can be opened externally when its kind is image, model, document or video, except SVG.
+ *
+ * @param relativePath the relative storage path
+ * @returns whether the file can be opened externally
+ */
 export function isOpenable(relativePath: string): boolean {
   const name = diskName(relativePath);
   return fileKind(name) !== 'other' && diskExtension(name) !== 'svg';
 }
 
+/** The stored MIME type per extension (lower case, no dot). */
 const MIME_BY_EXTENSION: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -107,6 +150,9 @@ const OCTET_STREAM = 'application/octet-stream';
 /**
  * The MIME type stored for a file of this name. A video type follows the same extension rule as `fileKind`, so a
  * name has a video type exactly when its kind is `video`.
+ *
+ * @param name the file name
+ * @returns the MIME type; `application/octet-stream` for an unknown extension
  */
 export function mimeFromFileName(name: string): string {
   if (fileKind(name) === 'video') return MIME_BY_EXTENSION[diskExtension(name)!]!;

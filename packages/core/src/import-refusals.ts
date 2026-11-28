@@ -8,7 +8,12 @@ export const REFUSED_IMPORT_EXTENSIONS: readonly string[] = [
   'app', 'dmg', 'pkg', 'appimage', 'iso', 'vhd',
 ];
 
-/** Last extension after stripping trailing dots and spaces, lower case; unlike `diskExtension` a leading dot counts. */
+/**
+ * Last extension after stripping trailing dots and spaces, lower case; unlike `diskExtension` a leading dot counts.
+ *
+ * @param fileName the file name
+ * @returns the extension; null without one
+ */
 export function importExtension(fileName: string): string | null {
   const trimmed = fileName.replace(/[. ]+$/, '');
   const dot = trimmed.lastIndexOf('.');
@@ -18,19 +23,34 @@ export function importExtension(fileName: string): string | null {
 }
 
 /**
- * True when the name, or its part before the first `:` (an NTFS alternate data stream such as
- * `a.exe::$DATA` or `a.exe:stream`, where Windows opens the main stream), has a refused extension.
+ * Whether the name itself has a refused extension.
+ *
+ * @param name the file name
+ * @returns true for a refused extension
  */
-export function isRefusedImport(fileName: string): boolean {
-  const refused = (name: string) => {
-    const extension = importExtension(name);
-    return extension !== null && REFUSED_IMPORT_EXTENSIONS.includes(extension);
-  };
-  const colon = fileName.indexOf(':');
-  return refused(fileName) || (colon >= 0 && refused(fileName.slice(0, colon)));
+function hasRefusedExtension(name: string): boolean {
+  const extension = importExtension(name);
+  return extension !== null && REFUSED_IMPORT_EXTENSIONS.includes(extension);
 }
 
-/** True for a ZIP archive by its name; decides both which sources are unpacked and that entries are not. */
+/**
+ * True when the name, or its part before the first `:` (an NTFS alternate data stream such as
+ * `a.exe::$DATA` or `a.exe:stream`, where Windows opens the main stream), has a refused extension.
+ *
+ * @param fileName the file name
+ * @returns whether the file is refused
+ */
+export function isRefusedImport(fileName: string): boolean {
+  const colon = fileName.indexOf(':');
+  return hasRefusedExtension(fileName) || (colon >= 0 && hasRefusedExtension(fileName.slice(0, colon)));
+}
+
+/**
+ * True for a ZIP archive by its name; decides both which sources are unpacked and that entries are not.
+ *
+ * @param fileName the file name
+ * @returns whether the name is a ZIP archive's
+ */
 export function isZipArchive(fileName: string): boolean {
   return importExtension(fileName) === 'zip';
 }
@@ -42,6 +62,9 @@ export const REFUSED_IMPORT_MESSAGE: string = new ValidationFailedError('This fi
  * True when a source or archive entry of this name is never imported: by its own name, or by the
  * name it would be stored under, since truncation can drop a long fake extension and expose a
  * refused one (`<96 × a>.exe.<16 × b>` is stored as `<96 × a>.exe`).
+ *
+ * @param fileName the name of the source or entry
+ * @returns whether it is refused
  */
 export function isRefusedImportName(fileName: string): boolean {
   return isRefusedImport(fileName) || isRefusedImport(sanitizeFileName(fileName));
