@@ -207,7 +207,6 @@ export function FileBrowser(props: FileBrowserProps) {
       setRows((previous) => nextRows(previous, visible, viewKey));
       publishPosition(latest, position);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewKey],
   );
 
