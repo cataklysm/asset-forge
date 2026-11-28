@@ -763,7 +763,7 @@ describe('GenerationStudio with library prompts', () => {
       <JobsProvider>
         <ProviderSettingsProvider>
           <TagsProvider>
-            <StudioProvider>{children}</StudioProvider>
+            <StudioProvider onOpenPrompt={async () => true}>{children}</StudioProvider>
           </TagsProvider>
         </ProviderSettingsProvider>
       </JobsProvider>
@@ -1010,7 +1010,7 @@ describe('GenerationStudio raised over the linked file dialog', () => {
       <JobsProvider>
         <ProviderSettingsProvider>
           <TagsProvider>
-            <StudioProvider>
+            <StudioProvider onOpenPrompt={async () => true}>
               <Opener />
             </StudioProvider>
           </TagsProvider>

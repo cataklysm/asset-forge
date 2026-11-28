@@ -109,7 +109,7 @@ interface Linked {
 interface StudioProviderProps {
   children: ReactNode;
   /** Shows a library prompt in the Prompts screen; resolves false when the navigation was declined. */
-  onOpenPrompt?: (promptId: string) => Promise<boolean>;
+  onOpenPrompt(promptId: string): Promise<boolean>;
 }
 
 /**
@@ -202,16 +202,19 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
 
   const openPrompt = useCallback(
     (promptId: string) => {
-      // The host asks the leave guard first; a declined navigation keeps both dialogs as they are.
-      void (onOpenPrompt?.(promptId) ?? Promise.resolve(true)).then((proceeded) => {
-        if (!proceeded) return;
-        // An openFile still in flight must not show its dialog after the navigation.
-        linkRequest.current += 1;
-        clear();
-        forget();
-        setStudioFile(null);
-        setLinked(null);
-      });
+      // The host asks the leave guard first; a declined (or failed) navigation keeps both dialogs as they are.
+      void onOpenPrompt(promptId).then(
+        (proceeded) => {
+          if (!proceeded) return;
+          // An openFile still in flight must not show its dialog after the navigation.
+          linkRequest.current += 1;
+          clear();
+          forget();
+          setStudioFile(null);
+          setLinked(null);
+        },
+        () => {},
+      );
     },
     [onOpenPrompt, clear, forget],
   );

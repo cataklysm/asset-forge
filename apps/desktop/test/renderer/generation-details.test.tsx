@@ -92,7 +92,7 @@ function install(handlers: FakeHandlers = {}, providers = [VENICE]) {
 
 function Providers({
   children,
-  onOpenPrompt,
+  onOpenPrompt = async () => true,
 }: {
   children: ReactNode;
   onOpenPrompt?: (id: string) => Promise<boolean>;
