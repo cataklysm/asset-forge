@@ -27,7 +27,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `asset_search_map` rowids: once assets can be deleted, the FTS row and the map row must be deleted together; otherwise rowid reuse attaches a stale index row to a new asset.
 - The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
 - `files:assignMany` holds the exclusive workspace queue for the whole batch.
-- Tags stored before the letter-or-digit rule that consist only of symbols cannot be removed through the UI; a symbol-only name in the tag filter is rejected with `validation_failed`.
 - Decoder byte limit of 256 MiB: an uncompressed 16-bit RGBA 8K TIFF (about 265 MB) gets neither dimensions nor a preview. Raising the limit is an owner decision.
 
 ## IPC and security
