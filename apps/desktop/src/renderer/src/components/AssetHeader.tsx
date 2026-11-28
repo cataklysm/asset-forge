@@ -130,7 +130,7 @@ export function AssetHeader(props: Props) {
           </button>
         </div>
       )}
-      {distinct(errors.filter((message) => message !== typesError)).map((message) => (
+      {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
