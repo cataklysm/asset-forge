@@ -418,6 +418,39 @@ it('a rejected purge call from the detail dialog shows the message in the dialog
   expect((await within(dialog).findByRole('alert')).textContent).toContain('cannot be reached');
 });
 
+it('while a confirmed purge runs, Esc and a second confirm do nothing', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  const held = deferred<{ items: { fileId: string; file: null; error: null }[] }>();
+  const api = install([hero, loose], { handlers: { 'files:purgeMany': () => held.promise } });
+  render(<Harness />);
+  await openMenu(user, 'hero.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' });
+  const confirm = within(dialog).getByRole('button', { name: 'Delete permanently' }) as HTMLButtonElement;
+  await user.click(confirm);
+  await waitFor(() => expect(confirm.disabled).toBe(true));
+  // A second click on the busy confirmation.
+  fireEvent.click(confirm);
+  await user.keyboard('{Escape}');
+  expect(screen.getByRole('dialog', { name: 'Delete 1 file permanently?' })).toBe(dialog);
+  expect(callsOf(api, 'files:purgeMany')).toEqual([{ fileIds: [hero.id] }]);
+  await act(async () => held.resolve({ items: [{ fileId: hero.id, file: null, error: null }] }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(callsOf(api, 'files:purgeMany')).toHaveLength(1);
+});
+
+it('Delete permanently from the detail dialog purges the file and moves on to the next one', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  const api = install([hero, loose]);
+  render(<Harness />);
+  await purgeInDialog(user);
+  expect(callsOf(api, 'files:purgeMany')).toEqual([{ fileIds: [hero.id] }]);
+  expect(await screen.findByRole('dialog', { name: 'loose.png' })).toBeTruthy();
+  await waitFor(() => expect(title()).toBe('Trash1'));
+});
+
 it('a tag rename reloads the trash list', async () => {
   const user = userEvent.setup();
   const { hero, loose } = files();
