@@ -3,7 +3,7 @@ import { resolvePendingFileMove } from './file-move-recovery.js';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { eachFile, type FileBatchItem } from './file-batch.js';
 import { settleGenerationOfJob } from './generations.js';
-import { moveAndCommit } from './journaled-move.js';
+import { commitMove, moveAndCommit } from './journaled-move.js';
 import type { JobControl } from './job-types.js';
 import { cancelJob } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
@@ -176,7 +176,7 @@ async function trashFile(session: WorkspaceSession, control: JobControl, fileId:
     targetRole: null,
     createdAt: session.now().toISOString(),
   });
-  if (!(await isBinaryPresent(session, file))) return session.database.fileMoves.commit(file.id);
+  if (!(await isBinaryPresent(session, file))) return commitMove(session, file.id);
   return moveAndCommit(session, file, target);
 }
 

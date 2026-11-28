@@ -983,8 +983,15 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
 
 class InMemoryFileMoves implements FileMoveRepository {
   readonly rows = new Map<string, FileMove>();
+  /** Errors the next commits reject with, one per commit, before anything is written. */
+  private readonly commitFailures: Error[] = [];
 
   constructor(private readonly files: InMemoryFiles) {}
+
+  /** Makes the next `times` commits reject with `error`, writing nothing. */
+  failCommits(times = 1, error: Error = new Error('database is locked')): void {
+    for (let i = 0; i < times; i++) this.commitFailures.push(error);
+  }
 
   async begin(move: FileMove): Promise<void> {
     if (this.rows.has(move.fileId)) throw new InvalidOperationError(`File ${move.fileId} is already being moved`);
@@ -992,6 +999,8 @@ class InMemoryFileMoves implements FileMoveRepository {
   }
 
   async commit(fileId: string): Promise<FileRecord> {
+    const failure = this.commitFailures.shift();
+    if (failure !== undefined) throw failure;
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
     // Mirrors `refuseAgainstTrash` of the database: a kind that does not fit the file is refused and writes nothing.
