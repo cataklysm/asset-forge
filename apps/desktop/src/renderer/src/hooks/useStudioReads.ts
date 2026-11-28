@@ -59,6 +59,19 @@ export function useStudioReads(input: StudioReadsInput): StudioReads {
     };
   }, []);
 
+  // The two reads keep their own failure, so that one read succeeding does not hide the other one failing.
+  const errors = useRef<{ results: string | null; upscales: string | null }>({ results: null, upscales: null });
+  const setReadError = useCallback((read: 'results' | 'upscales', message: string | null) => {
+    errors.current[read] = message;
+    setLoadError(errors.current.results ?? errors.current.upscales);
+    // The setter is a stable state setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Another source starts without the failures of the one before (the status cleared the shown one).
+  useEffect(() => {
+    errors.current = { results: null, upscales: null };
+  }, [fileId]);
+
   // Only the newest read may set the results.
   const readSeq = useRef(0);
   const loadResults = useCallback(async () => {
@@ -67,9 +80,9 @@ export function useStudioReads(input: StudioReadsInput): StudioReads {
       const answer = await call('generations:forFile', { fileId });
       if (disposed.current || seq !== readSeq.current) return;
       setResults([...answer.results].sort(newestFirst));
-      setLoadError(null);
+      setReadError('results', null);
     } catch (error) {
-      if (!disposed.current && seq === readSeq.current) setLoadError(messageOf(error));
+      if (!disposed.current && seq === readSeq.current) setReadError('results', messageOf(error));
     }
     // The setters are stable state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,21 +92,25 @@ export function useStudioReads(input: StudioReadsInput): StudioReads {
     results?.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
   const selectedFileId = selected?.outputs[0]?.fileId ?? null;
 
-  // The upscales of the selected result, one level deep; only the newest read may set them.
+  // The upscales of the selected result, one level deep; only the newest read may set them. Those of a
+  // result selected before go at once, so that they never show under another one.
   const upscaleSeq = useRef(0);
+  const upscalesOf = useRef<string | null>(null);
   const loadUpscales = useCallback(async () => {
     const seq = ++upscaleSeq.current;
-    if (selectedFileId === null) {
+    if (upscalesOf.current !== selectedFileId || selectedFileId === null) {
+      upscalesOf.current = selectedFileId;
       setUpscales([]);
-      return;
+      setReadError('upscales', null);
     }
+    if (selectedFileId === null) return;
     try {
       const answer = await call('generations:forFile', { fileId: selectedFileId });
       if (disposed.current || seq !== upscaleSeq.current) return;
       setUpscales(answer.results.filter((generation) => generation.kind === 'upscale').sort(newestFirst));
-      setLoadError(null);
+      setReadError('upscales', null);
     } catch (error) {
-      if (!disposed.current && seq === upscaleSeq.current) setLoadError(messageOf(error));
+      if (!disposed.current && seq === upscaleSeq.current) setReadError('upscales', messageOf(error));
     }
     // The setters are stable state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
