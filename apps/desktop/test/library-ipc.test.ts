@@ -8,7 +8,8 @@ import { ipcContract, type IpcChannel } from '@assetforge/contracts';
 import { assetFilePath, TRASH_DIR, trashPath, type WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
-import { createWorkspaceHandlers, dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
+import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
 import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;

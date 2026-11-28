@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from '../src/main/media-protocol.js';
+import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from '../src/main/media-routes.js';
 
 describe('renderer content security policy', () => {
   it('is pinned as a whole', async () => {

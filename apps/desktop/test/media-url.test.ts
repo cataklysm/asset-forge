@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOriginalUrl, parsePreviewUrl } from '../src/main/media-protocol.js';
+import { parseOriginalUrl, parsePreviewUrl } from '../src/main/media-routes.js';
 import { formatLabel, originalUrl, previewUrl, viewUrl } from '../src/renderer/src/media-url.js';
 
 const ID = '0b9f6c1e-1111-4222-8333-444455556666';

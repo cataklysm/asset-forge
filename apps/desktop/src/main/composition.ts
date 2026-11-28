@@ -24,7 +24,7 @@ import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
 import { createImageProviderDirectory } from './generation-handlers.js';
-import type { AppServices } from './ipc.js';
+import type { AppServices } from './workspace-handlers.js';
 import { createChangeFeed } from './change-feed.js';
 import { createJobHost, PROVIDER_CLASSES, type JobHost, type SchedulerClock } from './job-host.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';

@@ -26,7 +26,9 @@ import { createAnalysisServices, createWorkspaceManager } from './composition.js
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
-import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
+import type { Dialogs } from './host-actions.js';
+import { dispatch } from './ipc.js';
+import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
 import { createElectronSiteSessions } from './site-sessions.js';
@@ -36,10 +38,9 @@ import {
   findSourceIn,
   findVideoIn,
   handleMediaRequest,
-  MEDIA_SCHEME,
-  MEDIA_SCHEME_PRIVILEGES,
-  openFile,
 } from './media-protocol.js';
+import { openFile } from './media-file.js';
+import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from './media-routes.js';
 import { isTrustedSender } from './sender.js';
 import { createMainWindow, type MainWindowOptions } from './window.js';
 

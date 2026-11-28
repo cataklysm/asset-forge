@@ -51,7 +51,8 @@ import {
   type WorkspaceManager,
 } from '@assetforge/core';
 import type { FileBatchResult, IpcChannel } from '@assetforge/contracts';
-import { toIpcError, type Dialogs, type HostActions, type IpcHandlers } from './ipc.js';
+import type { Dialogs, HostActions } from './host-actions.js';
+import { toIpcError, type IpcHandlers } from './ipc.js';
 import type { JobHost } from './job-host.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through

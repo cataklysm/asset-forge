@@ -21,7 +21,9 @@ import {
 } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceHost, createWorkspaceManager } from '../src/main/composition.js';
-import { createWorkspaceHandlers, dispatch, type HostActions } from '../src/main/ipc.js';
+import type { HostActions } from '../src/main/host-actions.js';
+import { dispatch } from '../src/main/ipc.js';
+import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
 import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;

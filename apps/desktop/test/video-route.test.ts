@@ -23,11 +23,10 @@ import {
   findSourceIn,
   findVideoIn,
   handleMediaRequest,
-  MEDIA_SCHEME,
-  openFile,
-  parseVideoUrl,
-  type MediaProtocolDeps,
+  type MediaProtocolDependencies,
 } from '../src/main/media-protocol.js';
+import { openFile } from '../src/main/media-file.js';
+import { MEDIA_SCHEME, parseVideoUrl } from '../src/main/media-routes.js';
 
 const ID = '0b6c2f0e-3f7a-4c1d-9e2b-5a8d7c6b4e3f';
 const SHA = 'a'.repeat(64);
@@ -61,7 +60,7 @@ function videoUrl(fileId: string): string {
   return `${MEDIA_SCHEME}://video/${fileId}`;
 }
 
-function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps {
+function fakeDeps(overrides: Partial<MediaProtocolDependencies> = {}): MediaProtocolDependencies {
   return {
     findSource: async (): Promise<PreviewSource> => ({ sha256: SHA, absolutePath: videoPath, video: 'mp4' }),
     findOriginal: async () => null,
@@ -73,7 +72,7 @@ function fakeDeps(overrides: Partial<MediaProtocolDeps> = {}): MediaProtocolDeps
   };
 }
 
-function realDeps(): MediaProtocolDeps {
+function realDeps(): MediaProtocolDependencies {
   return {
     findSource: findSourceIn(manager),
     findOriginal: findOriginalIn(manager),
@@ -308,7 +307,7 @@ describe('video route on a file of several GiB', () => {
     await rm(largeDir, { recursive: true, force: true });
   });
 
-  function largeDeps(): MediaProtocolDeps {
+  function largeDeps(): MediaProtocolDependencies {
     return fakeDeps({ findVideo: async () => ({ absolutePath: largePath, mimeType: 'video/mp4' }) });
   }
 
@@ -383,7 +382,7 @@ describe('video route failures', () => {
     };
     const directory = join(base, 'folder.mp4');
     await mkdir(directory);
-    const cases: MediaProtocolDeps[] = [
+    const cases: MediaProtocolDependencies[] = [
       fakeDeps({ findVideo: unreachable }),
       fakeDeps({ findVideo: async () => ({ absolutePath: join(base, 'missing.mp4'), mimeType: 'video/mp4' }) }),
       fakeDeps({ findVideo: async () => ({ absolutePath: directory, mimeType: 'video/mp4' }) }),

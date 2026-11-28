@@ -1,147 +1,27 @@
-import {
-  type ErrorCode,
-  ipcContract,
-  type IpcChannel,
-  type IpcError,
-  type IpcResult,
-  type WorkspaceSummary,
-} from '@assetforge/contracts';
-import { join } from 'node:path';
-import {
-  AssetForgeError,
-  SerialQueue,
-  workspaceFolderName,
-  type ImageProviderDirectory,
-  type WorkspaceManager,
-} from '@assetforge/core';
+import { type ErrorCode, ipcContract, type IpcChannel, type IpcError, type IpcResult } from '@assetforge/contracts';
+import { AssetForgeError } from '@assetforge/core';
 import type { z } from 'zod';
-import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
-import type { AnalysisPromptStore } from './analysis-prompts.js';
-import type { DescribeController } from './describe-controller.js';
-import { createGenerationHandlers } from './generation-handlers.js';
-import { createJobHandlers } from './job-handlers.js';
-import type { JobHost } from './job-host.js';
-import { createLibraryHandlers } from './library-handlers.js';
-import { createPromptHandlers } from './prompt-handlers.js';
-import type { ProviderHandlers } from './provider-handlers.js';
-import type { ProviderStore } from './provider-store.js';
-import type { SiteHandlers } from './site-handlers.js';
 
+// The IPC boundary: the handler table's type, and the validation of every request and answer that crosses it.
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
 
+/** The request of a channel, as its contract parses it. */
+export type IpcRequest<C extends IpcChannel> = z.infer<(typeof ipcContract)[C]['request']>;
+
+/** The answer of a channel, as its contract parses it. */
+export type IpcResponse<C extends IpcChannel> = z.infer<(typeof ipcContract)[C]['response']>;
+
+/** One handler per channel of the contract. */
 export type IpcHandlers = {
-  [C in keyof typeof ipcContract]: (
-    request: z.infer<(typeof ipcContract)[C]['request']>,
-  ) => Promise<z.infer<(typeof ipcContract)[C]['response']>>;
+  [C in keyof typeof ipcContract]: (request: IpcRequest<C>) => Promise<IpcResponse<C>>;
 };
 
-export interface Dialogs {
-  pickDirectory(): Promise<string | null>;
-  pickFiles(): Promise<string[]>;
-  /** Asks the user how to remove a workspace; the renderer cannot answer this itself. */
-  confirmRemoveWorkspace(workspace: WorkspaceSummary): Promise<RemoveChoice>;
-  /** Asks whether the workflow of an asset may be removed. */
-  confirmRemoveWorkflow(assetName: string): Promise<boolean>;
-}
-
-/** Actions only the host (Electron) can perform. */
-export interface HostActions {
-  /** Electron shell.openPath: resolves '' on success, an error text otherwise. */
-  openPath(absolutePath: string): Promise<string>;
-  showItemInFolder(absolutePath: string): void;
-  /** Electron shell.openExternal: hands an http(s) address to the system browser; rejects when that fails. */
-  openExternal(url: string): Promise<void>;
-  /** Called after a workspace lifecycle channel when a workspace is open afterwards. Never rejects. */
-  workspaceOpened(): Promise<void>;
-  /** Called before a workspace lifecycle channel calls the manager. Never rejects. */
-  workspaceClosing(): Promise<void>;
-}
-
-export type RemoveChoice = 'cancel' | 'forget' | 'forget_and_trash_folder';
-
-/** App-level services the handlers route to; they do not need an open workspace. */
-export interface AppServices {
-  providers: ProviderHandlers;
-  /** The provider entries the analysis channels resolve and the job rows are named from. */
-  providerStore: ProviderStore;
-  /** The `venice` entries the generation channels and generation jobs run on. */
-  imageProviders: ImageProviderDirectory;
-  analysisPrompts: AnalysisPromptHandlers;
-  prompts: AnalysisPromptStore;
-  describe: DescribeController;
-  /** The `sites:*` channels. */
-  sites: SiteHandlers;
-  /** Whether a download lane is the site of a site profile; without it no lane is. */
-  isSiteLane?: (host: string) => boolean;
-}
-
-export function createWorkspaceHandlers(
-  manager: WorkspaceManager,
-  dialogs: Dialogs,
-  host: HostActions,
-  jobs: JobHost,
-  services: AppServices,
-): IpcHandlers {
-  // The open workspace's jobs stop before the manager may close it, outside `exclusive` (a job may
-  // wait for that queue), and start again for whatever workspace is open afterwards, also after a failure.
-  // Lifecycle channels run one at a time, so a second one cannot close a workspace whose jobs were just started.
-  const lifecycleQueue = new SerialQueue();
-  const withNotifications = async <T>(fn: () => Promise<T>): Promise<T> => {
-    await notify(host, 'workspaceClosing');
-    try {
-      return await fn();
-    } finally {
-      if (manager.current() !== null) await notify(host, 'workspaceOpened');
-    }
-  };
-  const lifecycle = <T>(fn: () => Promise<T>): Promise<T> => lifecycleQueue.run(() => withNotifications(fn));
-
-  return {
-    'workspace:list': () => manager.list(),
-    'workspace:current': async () => manager.current(),
-    'workspace:create': (request) => lifecycle(() => manager.create(request)),
-    'workspace:resolveCreatePath': async (request) =>
-      join(request.parentPath, workspaceFolderName(request.name)),
-    'workspace:open': (request) => lifecycle(() => manager.open(request)),
-    'workspace:remove': async ({ id }) => {
-      const workspace = (await manager.list()).find((w) => w.id === id);
-      if (!workspace) return { removed: false, folderTrashed: false };
-      const choice = await dialogs.confirmRemoveWorkspace(workspace);
-      if (choice === 'cancel') return { removed: false, folderTrashed: false };
-      const remove = () => manager.remove({ id, trashFolder: choice === 'forget_and_trash_folder' });
-      // Only the open workspace is closed by a remove; a foreign one must not stop the scheduler.
-      const { folderTrashed } = await lifecycleQueue.run(() =>
-        manager.current()?.id === id ? withNotifications(remove) : remove(),
-      );
-      return { removed: true, folderTrashed };
-    },
-    'workspace:close': async () => {
-      await lifecycle(() => manager.close());
-      return null;
-    },
-    ...createLibraryHandlers(manager, dialogs, host, jobs),
-    ...createJobHandlers(manager, jobs, services.describe, services.prompts, services.providerStore, services.imageProviders, services.isSiteLane),
-    ...createGenerationHandlers(manager, jobs, services.imageProviders),
-    ...createPromptHandlers(manager),
-    'dialog:pickDirectory': () => dialogs.pickDirectory(),
-    'dialog:pickFiles': () => dialogs.pickFiles(),
-    // App-level provider entries and analysis prompts: not behind the workspace guard.
-    ...services.providers,
-    ...services.analysisPrompts,
-    // Site profiles and their crawl: app level too; only `sites:import` needs an open workspace.
-    ...services.sites,
-  };
-}
-
-/** The hooks never reject by contract; a broken one must not fail the channel either. */
-async function notify(host: HostActions, hook: 'workspaceOpened' | 'workspaceClosing'): Promise<void> {
-  try {
-    await host[hook]();
-  } catch (error) {
-    console.error(`The ${hook} hook failed`, error);
-  }
-}
-
+/**
+ * Whether a channel name is one of the contract.
+ *
+ * @param channel the name the renderer sent
+ * @returns true for a known channel
+ */
 export function isIpcChannel(channel: string): channel is IpcChannel {
   return Object.hasOwn(ipcContract, channel);
 }
@@ -150,6 +30,11 @@ export function isIpcChannel(channel: string): channel is IpcChannel {
  * Validates the request, runs the handler and validates its response, so nothing
  * unvalidated crosses the IPC boundary in either direction. Unexpected errors are
  * logged here and reach the renderer only as a generic `internal_error`.
+ *
+ * @param handlers the handler table
+ * @param channel the channel the renderer named
+ * @param rawRequest the request as it arrived
+ * @returns the validated answer or the error the renderer sees
  */
 export async function dispatch(
   handlers: IpcHandlers,
@@ -181,6 +66,10 @@ export async function dispatch(
 /**
  * The error the renderer sees: a domain error keeps its code and message; anything else is
  * logged here and becomes a generic `internal_error`, so cause messages and paths stay in main.
+ *
+ * @param error what the handler threw
+ * @param channel the channel, named in the log line
+ * @returns the error to send
  */
 export function toIpcError(error: unknown, channel?: string): IpcError {
   if (error instanceof AssetForgeError) {
@@ -190,10 +79,22 @@ export function toIpcError(error: unknown, channel?: string): IpcError {
   return { code: 'internal_error', message: 'Unexpected error' };
 }
 
+/**
+ * A failed result.
+ *
+ * @param code the error code
+ * @param message the fixed message
+ * @returns the result
+ */
 function failure(code: ErrorCode, message: string): IpcResult<never> {
   return { ok: false, error: { code, message } };
 }
 
+/**
+ * The result of an unexpected error.
+ *
+ * @returns the generic `internal_error`
+ */
 function internalError(): IpcResult<never> {
   return failure('internal_error', 'Unexpected error');
 }
