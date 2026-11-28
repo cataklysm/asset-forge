@@ -172,7 +172,7 @@ describe('file shell IPC', () => {
   });
 
   it('a throwing workspaceOpened hook does not fail open or create', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
     workspaceOpened.mockImplementation(() => {
       throw new Error('cleanup failed');
     });

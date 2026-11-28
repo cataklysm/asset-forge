@@ -100,7 +100,7 @@ describe('the workspace wiring', () => {
 
 describe('the IPC boundary log', () => {
   it('writes one safe line for an unexpected error and none for a domain error', () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(toIpcError(pathError('EPERM'), 'files:list')).toEqual({
       code: 'internal_error',
       message: 'Unexpected error',
@@ -113,7 +113,7 @@ describe('the IPC boundary log', () => {
   });
 
   it('writes the channel and the issue count of an answer the contract refuses', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const broken = { 'dialog:pickDirectory': async () => ({ path: `/${MARKER}` }) } as unknown as IpcHandlers;
     await dispatch(broken, 'dialog:pickDirectory', {});
     const lines = log.mock.calls.map((call) => call.join(' '));

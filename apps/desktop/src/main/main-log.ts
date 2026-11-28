@@ -26,12 +26,13 @@ export interface JobRecoveryCounts {
 }
 
 /**
- * The main console as the default log: one line per call.
+ * The main console as the one log of the main process: one line per call, written with `console.warn` because
+ * these are diagnostic lines, not crashes.
  *
  * @param line the line
  */
 export const consoleLog: LineLog = (line: string): void => {
-  console.error(line);
+  console.warn(line);
 };
 
 /**

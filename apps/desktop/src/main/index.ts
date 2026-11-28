@@ -91,7 +91,7 @@ function start(): void {
     packagePath: ffmpegPath,
     platform: process.platform,
     arch: process.arch,
-    warn: (line) => console.warn(line),
+    warn: consoleLog,
     runDir: join(app.getPath('userData'), 'bin'),
   });
   const frames = createVideoFrames({ binaryPath: ffmpegBinary });
@@ -103,7 +103,7 @@ function start(): void {
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
     imageProbe: { measure: (path) => pool.measure(path) },
     videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
-    log: (line) => console.warn(line),
+    log: consoleLog,
   });
 
   const importDirectory = createImportDirectoryMemory(join(app.getPath('userData'), IMPORT_DIRECTORY_FILE));
@@ -125,7 +125,7 @@ function start(): void {
     createWindow: (options) => new BrowserWindow(options),
     // Electron's IncomingMessage is a Readable at run time; its typings only declare the events.
     netRequest: (options) => net.request(options) as unknown as SessionNetRequest,
-    log: (line) => console.warn(line),
+    log: consoleLog,
   });
 
   // The vision settings store is the only source of the provider, its key and the default models.
@@ -136,7 +136,7 @@ function start(): void {
     env: process.env,
     images: { jpeg: (path, signal) => pool.jpeg(path, signal) },
     generationImages: createGenerationImageSource(previews),
-    log: (line) => console.warn(line),
+    log: consoleLog,
     appVersion: app.getVersion(),
     siteSessions,
   });

@@ -588,7 +588,7 @@ describe('library IPC', () => {
       const { assetId, ids } = await inboxFiles(['a.png']);
       const session = await manager.read(async (s) => s);
       vi.spyOn(session.database.files, 'get').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
-      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const res = await ok('files:assignMany', { fileIds: ids, assetId, role: 'reference' });
       expect(res.items).toEqual([
         { fileId: ids[0], file: null, error: { code: 'internal_error', message: 'Unexpected error' } },
