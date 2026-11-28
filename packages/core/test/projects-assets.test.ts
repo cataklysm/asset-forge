@@ -6,6 +6,7 @@ import {
   assignAsset,
   createAsset,
   createProject,
+  ensureBuiltInAssetTypes,
   getAsset,
   getWorkflow,
   listAssets,
@@ -18,7 +19,7 @@ import {
   type WorkspaceSession,
 } from '../src/index.js';
 import type { AssetSummary, FileKind, FileRole } from '@assetforge/contracts';
-import { createFakeHost } from './fakes.js';
+import { createFakeHost, InMemoryDatabase } from './fakes.js';
 
 const ROOT = '/ws/a';
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
@@ -50,6 +51,18 @@ describe('asset types', () => {
     await manager.open({ rootPath: ROOT });
     const again = await listAssetTypes(await manager.read(async (s) => s));
     expect(again).toEqual(first);
+  });
+
+  it('draws an id only for a built-in type that is missing', async () => {
+    const database = new InMemoryDatabase();
+    let drawn = 0;
+    const newId = () => `00000000-0000-4000-8000-${String(++drawn).padStart(12, '0')}`;
+    await ensureBuiltInAssetTypes({ database, newId });
+    expect(drawn).toBe(BUILT_IN_ASSET_TYPES.length);
+
+    await ensureBuiltInAssetTypes({ database, newId });
+    expect(drawn).toBe(BUILT_IN_ASSET_TYPES.length);
+    await expect(database.assetTypes.list()).resolves.toHaveLength(BUILT_IN_ASSET_TYPES.length);
   });
 });
 
