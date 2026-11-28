@@ -138,7 +138,8 @@ Core port `RemoteFileSource`: `open(url, signal)` → `{ stream, finalUrl, conte
 or a typed failure that maps to exactly one job error code. `finalUrl` is used only for the file name (§7.4): the
 origin that is stored and compared is always the requested URL, never a redirect target, so a link that redirects to
 a signed, changing address is still recognised the next time. The adapter (Node `http`/`https`, in `packages/storage`
-beside the ZIP reader) applies these rules; they are the security core of the feature:
+beside the ZIP reader: the hop loop in `url-source.ts`, one pinned request in `hop-request.ts`, the body limits in `limited-body.ts`, status and header rules in `response-status.ts` and `response-headers.ts`)
+applies these rules; they are the security core of the feature:
 
 - Schemes `http` and `https` only, any port. Method `GET`, headers `User-Agent: AssetForge/<version>`,
   `Accept: */*`, `Accept-Encoding: identity`; nothing else. A response with a content encoding is refused.

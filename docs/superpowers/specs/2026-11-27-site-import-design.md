@@ -163,7 +163,7 @@ payload (Jobs screen fields, host lanes, host pause) reads both.
 - `RemoteFileSource.open` takes an optional `headersFor(url)`; the adapter calls it for every hop, so
   a redirect off the site carries no cookie. For a URL that belongs to the site the callback also
   answers the session's user agent, so the site sees one client for pages and files; every other
-  request keeps `AssetForge/<version>`. Everything else in `url-source.ts` is unchanged: pinned
+  request keeps `AssetForge/<version>`. Everything else in `url-source.ts` and `hop-request.ts` is unchanged: pinned
   public address, limits, no `Referer`.
 - Filter at download: an announced length below `minBytes`, or a final file name whose kind is not in
   `kinds`, ends the job as succeeded with the result `filtered_size` or `filtered_kind` (the kind wins
@@ -226,7 +226,7 @@ that passed it. Nothing solves, imitates or bypasses a check automatically.
   held by another active job stays failed), then resumes the lane. Other failures stay failed.
 - **Download through the session.** Clearance is bound to the browser that passed the check, so a
   v2 download no longer goes out through Node for hops on the site. `SiteAccess.open` (optional,
-  implemented in `apps/desktop/src/main/site-download.ts`, absent without Electron) runs the hop loop
+  implemented in `apps/desktop/src/main/site-download.ts`, one hop in `session-hop.ts`, absent without Electron) runs the hop loop
   itself, at most `MAX_DOWNLOAD_REDIRECTS` hops, and asks `headersFor` for every hop as before. A hop
   that belongs to the site goes through Electron's `net.request` on the profile's session with
   `redirect: 'manual'`, `useSessionCookies: true`, `referrerPolicy: 'no-referrer'`, `cache: 'no-store'`
