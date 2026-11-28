@@ -1,7 +1,11 @@
 import {
+  MAX_TOKENS_MAX,
+  MAX_TOKENS_MIN,
   PROVIDER_EXTRA_MAX,
   PARALLEL_REQUESTS_MAX,
   PARALLEL_REQUESTS_MIN,
+  TEMPERATURE_MAX,
+  TEMPERATURE_MIN,
   type ProviderKind,
   type ProviderList,
   type ProviderView,
@@ -32,15 +36,7 @@ import {
   THINKING_LABELS,
   THINKING_TITLE,
 } from '../labels';
-import {
-  KINDS,
-  MAX_TOKENS_MAX,
-  THINKING,
-  maxTokensOf,
-  parallelRequestsOf,
-  temperatureOf,
-  type ProviderDraft,
-} from '../provider-draft';
+import { KINDS, THINKING, maxTokensOf, parallelRequestsOf, temperatureOf, type ProviderDraft } from '../provider-draft';
 import { ALERT, BUTTON_INLINE, INPUT, LABEL, MUTED, SELECT } from '../ui';
 import { ModelSelect } from './ModelSelect';
 import { NumberField } from './NumberField';
@@ -187,8 +183,8 @@ export function VisionFields({ entryId, draft, locked, extraMessage, update }: V
       <NumberField
         title={TEMPERATURE_TITLE}
         label={TEMPERATURE_LABEL}
-        min={0}
-        max={2}
+        min={TEMPERATURE_MIN}
+        max={TEMPERATURE_MAX}
         step={0.1}
         value={draft.temperature}
         disabled={locked}
@@ -215,7 +211,7 @@ export function VisionFields({ entryId, draft, locked, extraMessage, update }: V
       <NumberField
         title={MAX_TOKENS_TITLE}
         label={MAX_TOKENS_LABEL}
-        min={1}
+        min={MAX_TOKENS_MIN}
         max={MAX_TOKENS_MAX}
         step={1}
         value={draft.maxTokens}
