@@ -440,6 +440,27 @@ it('a page button that lost the focus while its action ran gets it back', async 
   expect(document.activeElement).toBe(button);
 });
 
+it('a page button that the summary after its action disables hands the focus to the first enabled page button', async () => {
+  const user = userEvent.setup();
+  let summary: JobSummary = { ...IDLE, failed: 1, changes: 1 };
+  const api = install({
+    'jobs:list': listOf([job({ status: 'failed', fileName: 'failed.png' })]),
+    'jobs:retryFailed': () => {
+      summary = { ...IDLE, queued: 1, changes: 2 };
+      return { retried: 1 };
+    },
+  });
+  api.set('jobs:summary', () => summary);
+  renderScreen();
+  await screen.findByText('failed.png');
+  const button = screen.getByRole('button', { name: 'Retry failed' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  button.focus();
+  await user.keyboard('{Enter}');
+  await waitFor(() => expect(button.disabled).toBe(true));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Move jobs' })));
+});
+
 it('a rejected retry shows the alert above the table', async () => {
   const user = userEvent.setup();
   install({

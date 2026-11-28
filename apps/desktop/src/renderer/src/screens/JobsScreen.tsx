@@ -347,7 +347,7 @@ interface JobsActionsProps {
  * @returns the buttons
  */
 function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: JobsActionsProps) {
-  const start = useFocusReturn(busy, run);
+  const start = useFocusReturn(`${busy},${cancellable},${retryable === 0},${finished === 0}`, busy, run);
   return (
     <>
       <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
@@ -383,30 +383,50 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
 
 /**
  * A page button is disabled while its action runs, so the focus falls to the body: once the actions
- * are free again it goes back to the button that started the action, when that is still enabled and
- * nothing else took the focus meanwhile.
+ * are free again it goes back to the button that started the action, when nothing else took the focus
+ * meanwhile. The button stays watched while it holds the focus, because the summary poll after the
+ * action can disable it too (Retry failed with nothing left to retry); the focus then moves to the first
+ * enabled page button instead of the body.
  *
+ * @param enabledKey changes whenever a page button is enabled or disabled
  * @param busy whether an action runs
  * @param run runs one action
  * @returns starts an action from a button
  */
 function useFocusReturn(
+  enabledKey: string,
   busy: boolean,
   run: (action: () => Promise<unknown>) => Promise<void>,
 ): (button: HTMLButtonElement, action: () => Promise<unknown>) => void {
   const returnTo = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (busy) return;
-    const button = returnTo.current;
-    returnTo.current = null;
-    if (button === null || !button.isConnected || button.disabled) return;
-    const active = document.activeElement;
-    if (active === null || active === document.body) button.focus();
-  }, [busy]);
+    if (!busy) returnTo.current = returnFocus(returnTo.current);
+  }, [busy, enabledKey]);
   return (button, action) => {
     returnTo.current = button;
     void run(action);
   };
+}
+
+/**
+ * Gives the focus back to a page button that lost it, or to its first enabled neighbour when it is disabled.
+ *
+ * @param button the button that started the last action, or null
+ * @returns the button to keep watching: the same one while it holds the focus and is enabled, else null
+ */
+function returnFocus(button: HTMLButtonElement | null): HTMLButtonElement | null {
+  if (button === null || !button.isConnected) return null;
+  const active = document.activeElement;
+  // A browser drops the focus of a disabled button to the body; jsdom leaves it on the button.
+  const lost = active === null || active === document.body || (active === button && button.disabled);
+  // Someone else took the focus: nothing is given back.
+  if (!lost) return active === button ? button : null;
+  if (!button.disabled) {
+    button.focus();
+    return button;
+  }
+  button.parentElement?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  return null;
 }
 
 /**
