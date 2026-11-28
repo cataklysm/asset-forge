@@ -16,6 +16,10 @@ export const PROPOSAL_CHANGED = 'The proposal has changed. Review it again.';
 export const NOT_ANALYSABLE = 'This file cannot be analysed';
 /** Tooltip of the disabled Accept and of the marker of a stale proposal. */
 export const STALE_TITLE = 'The file changed after the analysis';
+/** The state shown while an analysis started elsewhere (mode `apply`) is queued or running for the file. */
+export const BATCH_ANALYSIS_LABEL = 'Already being analysed in a batch';
+/** The heading of the AI tags a finished batch analysis applied. */
+export const APPLIED_TAGS_LABEL = 'Applied tags';
 
 /** Tooltip of the start button of the three analysis dialogs while the analysis prompts load (`promptGate`). */
 export const PROMPTS_LOADING = 'The analysis prompts are loading';

@@ -499,6 +499,7 @@ describe('job repository', () => {
       providerId: null,
       providerName: null,
       model: null,
+      mode: 'apply',
       url: null,
       host: null,
       result: null,

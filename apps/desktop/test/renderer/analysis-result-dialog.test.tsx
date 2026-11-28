@@ -25,7 +25,10 @@ import {
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import {
+  APPLIED_TAGS_LABEL,
+  BATCH_ANALYSIS_LABEL,
   PROMPTS_LOAD_FAILED,
+  START_FORCE_LABEL,
   PROVIDER_STATE_LABELS,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
@@ -107,6 +110,7 @@ function jobOf(file: FileRecord, p: Partial<JobView> = {}): JobView {
     providerId: null,
     providerName: null,
     model: null,
+    mode: 'propose',
     url: null,
     host: null,
     result: null,
@@ -481,6 +485,62 @@ describe('AnalysisResultDialog', () => {
     });
     expect(tagBox('Wood').checked).toBe(true);
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('an active batch job of the file shows its own state without Cancel or Analyse', async () => {
+    const file = fileRecord();
+    setup(file, { stored: { proposal: null, job: jobOf(file, { status: 'running', mode: 'apply' }) } });
+    expect((await screen.findByRole('status')).textContent).toBe(BATCH_ANALYSIS_LABEL);
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Analyse' })).toBeNull();
+  });
+
+  it('shows the tags a finished batch job applied, with Analyse again', async () => {
+    vi.useFakeTimers();
+    const file = fileRecord();
+    const job = jobOf(file, { status: 'running', mode: 'apply', model: 'vision-b' });
+    const tagged = {
+      ...file,
+      tags: [
+        { name: 'chair', displayName: 'Chair', origin: 'ai' as const },
+        { name: 'mine', displayName: 'Mine', origin: 'manual' as const },
+      ],
+    };
+    const { api, state } = setup(file, {
+      stored: { proposal: null, job },
+      handlers: { 'files:list': () => ({ items: [tagged], total: 1 }) },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('status').textContent).toBe(BATCH_ANALYSIS_LABEL);
+    expect(callsOf(api, 'files:list')).toHaveLength(0);
+
+    state.stored = { proposal: null, job: { ...job, status: 'succeeded' } };
+    state.summary = { ...IDLE, succeeded: 1, changes: 1 };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    const applied = screen.getByRole('group', { name: APPLIED_TAGS_LABEL });
+    expect(within(applied).getByText('Chair').closest('[title]')!.className).toContain(AI_CHIP);
+    expect(within(applied).queryByText('Mine')).toBeNull();
+    expect(screen.getByTitle('Model').textContent).toBe('vision-b');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(button(START_FORCE_LABEL)).toBeTruthy();
+    expect(callsOf(api, 'files:list')[0]!.request).toEqual({
+      scope: { kind: 'all' },
+      ids: [file.id],
+      offset: 0,
+      limit: 1,
+    });
+  });
+
+  it('a finished job of its own analysis reads no applied tags', async () => {
+    const file = fileRecord();
+    const { api } = setup(file, { stored: { proposal: null, job: jobOf(file, { status: 'succeeded' }) } });
+    await providerReady();
+    expect(screen.queryByRole('group', { name: APPLIED_TAGS_LABEL })).toBeNull();
+    expect(callsOf(api, 'files:list')).toHaveLength(0);
   });
 
   it('a proposal replaced under the open dialog is shown fresh, with every tag on again', async () => {

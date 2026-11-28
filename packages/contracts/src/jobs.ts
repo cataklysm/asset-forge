@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { JobErrorCodeSchema } from './job-errors';
 import { ModelNameSchema, ProviderIdSchema, ProviderKindSchema } from './provider-ref';
 import { CountSchema } from './ipc-shared';
+import { AnalysisModeSchema } from './analysis';
 
 /** The technical status of a job; separate from asset status and workflow step state. */
 export const JobStatusSchema = z.enum([
@@ -58,6 +59,8 @@ export const JobViewSchema = z.object({
   /** The provider name copied into the payload at enqueue; null before payload v4. */
   providerName: z.string().nullable(),
   model: ModelNameSchema.nullable(),
+  /** Whether an analysis job applies or proposes its tags; null for any other job and an unparsable payload. */
+  mode: AnalysisModeSchema.nullable(),
   /** The address of a download job; null for any other job. A download has no provider id, name or model. */
   url: z.string().nullable(),
   /** The host lane of a download job; null for any other job. */

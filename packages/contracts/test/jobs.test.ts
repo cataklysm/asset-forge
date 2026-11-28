@@ -11,6 +11,7 @@ import {
   EnqueueAnalysisResultSchema,
   isRetryableJobError,
   analysisJobFields,
+  analysisJobMode,
   ipcContract,
   ProviderIdSchema,
   IMAGE_GENERATE_JOB,
@@ -36,6 +37,7 @@ const view = {
   providerId: null,
   providerName: null,
   model: null,
+  mode: null,
   url: null,
   host: null,
   result: null,
@@ -228,6 +230,24 @@ describe('several providers', () => {
     expect(analysisJobFields({ version: 2, model: 'm', mode: 'apply' })).toEqual({ providerName: null, model: 'm' });
     expect(analysisJobFields({ version: 1 })).toEqual({ providerName: null, model: null });
     expect(analysisJobFields('x')).toEqual({ providerName: null, model: null });
+  });
+
+  test('analysisJobMode reads the mode of v2 to v4, apply for v1 and null for anything else', () => {
+    expect(analysisJobMode({ version: 4, model: 'm', mode: 'propose', prompt: null, providerName: 'R' })).toBe(
+      'propose',
+    );
+    expect(analysisJobMode({ version: 3, model: 'm', mode: 'apply', prompt })).toBe('apply');
+    expect(analysisJobMode({ version: 2, model: 'm', mode: 'propose' })).toBe('propose');
+    expect(analysisJobMode({ version: 1 })).toBe('apply');
+    expect(analysisJobMode('x')).toBeNull();
+  });
+
+  test('a job view carries the analysis mode or null', () => {
+    expect(JobViewSchema.safeParse({ ...view, mode: 'apply' }).success).toBe(true);
+    expect(JobViewSchema.safeParse({ ...view, mode: 'propose' }).success).toBe(true);
+    expect(JobViewSchema.safeParse({ ...view, mode: 'other' }).success).toBe(false);
+    const { mode: _mode, ...withoutMode } = view;
+    expect(JobViewSchema.safeParse(withoutMode).success).toBe(false);
   });
 
   test('a job view carries provider id, provider name and model', () => {

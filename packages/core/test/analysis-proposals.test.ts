@@ -86,6 +86,7 @@ describe('getProposal', () => {
         providerId: 'environment',
         providerName: 'Environment',
         model: MODEL,
+        mode: 'propose',
         url: null,
         host: null,
         result: null,

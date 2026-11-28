@@ -1,7 +1,9 @@
 import {
+  ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
   analysisJobFields,
+  analysisJobMode,
   downloadJobFields,
   type JobResult,
   type JobView,
@@ -22,7 +24,7 @@ export interface JobViewDetails {
 
 /**
  * A job as a view: a download shows its address and host and no provider, a generation shows the provider and
- * model of its record, any other job those of its analysis payload.
+ * model of its record, any other job those of its analysis payload. Only an analysis job has a mode.
  *
  * @param job the job
  * @param details the file name, the generation and the result read next to it
@@ -32,6 +34,7 @@ export function jobViewOf(job: Job, details: JobViewDetails): JobView {
   const isDownload = job.type === FILE_DOWNLOAD_JOB;
   return {
     ...providerFieldsOf(job, details),
+    mode: job.type === ANALYZE_FILE_JOB ? analysisJobMode(job.payload) : null,
     id: job.id,
     type: job.type,
     status: job.status,
