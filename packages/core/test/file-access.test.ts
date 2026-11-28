@@ -258,6 +258,19 @@ describe('videos', () => {
     expect(await resolveVideoSource(image.session, image.file.id)).toBeNull();
   });
 
+  it('the three media resolvers answer unreachable even when absolutePath itself does not check', async () => {
+    const image = await setup();
+    const video = await setup('clip.mp4');
+    for (const { storage } of [image, video]) {
+      // Like the local adapter: absolutePath only joins paths and never asks whether the share is there.
+      storage.absolutePath = async (relativePath: string) => `/memory/${relativePath}`;
+      storage.reachable = false;
+    }
+    await expect(resolvePreviewSource(image.session, image.file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+    await expect(resolveOriginalSource(image.session, image.file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+    await expect(resolveVideoSource(video.session, video.file.id)).rejects.toBeInstanceOf(StorageUnreachableError);
+  });
+
   it('resolveVideoSource propagates StorageUnreachableError', async () => {
     const { session, storage, file } = await setup('clip.mp4');
     storage.reachable = false;
