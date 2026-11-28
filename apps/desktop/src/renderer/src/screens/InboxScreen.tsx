@@ -9,15 +9,17 @@ import { AssignFileControl } from '../components/FileRoleControls';
 import { ImportProgressView } from '../components/ImportProgressView';
 import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
-import { importFailures, ResultStrip, type ResultFailure } from '../components/ResultStrip';
+import { batchResult, importFailures, ResultStrip, type BatchResult } from '../components/ResultStrip';
 import { SelectionBar } from '../components/SelectionBar';
 import { SiteImportDialog } from '../components/SiteImportDialog';
 import { UrlImportDialog } from '../components/UrlImportDialog';
 import { useZipChoice } from '../components/ZipChoiceDialog';
+import { runExclusive } from '../exclusive';
 import { fileMenuItems } from '../file-actions';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useFileDialog } from '../hooks/useFileDialog';
+import { useKeptScrollOffset } from '../hooks/useKeptScrollOffset';
 import { useLoad } from '../hooks/useLoad';
 import type { ViewPosition } from '../hooks/useVirtualRows';
 import { useChanges } from '../jobs-context';
@@ -31,12 +33,16 @@ import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
 import { ALERT, BUTTON, MUTED } from '../ui';
 
+// The inbox screen: import, the inbox file list with multi-select, and the batch actions on the selection.
+
 const INBOX = { kind: 'inbox' } as const;
 
+/** The props of the inbox screen. */
 interface Props {
   /** Filters and scroll offset; kept by the shell so that they survive navigation. */
   state: InboxListState;
-  onStateChange(s: InboxListState): void;
+  /** Hands changed filters or the kept scroll offset to the shell. */
+  onStateChange(state: InboxListState): void;
   /** True while an import runs; the shell blocks navigation meanwhile. */
   onBusyChange(busy: boolean): void;
 }
@@ -45,10 +51,13 @@ interface Props {
  * The inbox: imported files that are not placed in an asset yet. Import, the file browser with
  * multi-select, and the Selection column for shared tags and the batch assign. The selection is
  * local and does not survive navigation.
+ *
+ * @param props the kept list state and the shell's callbacks
+ * @returns the screen
  */
 export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
+  const [importResult, setImportResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<AssetView>('grid');
   const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
@@ -72,7 +81,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   // follows the change feed itself.
   const [countToken, setCountToken] = useState(0);
   useChanges((changes) => {
-    if (changes.reset || changes.added.some((place) => place.assetId === null)) setCountToken((t) => t + 1);
+    if (changes.reset || changes.added.some((place) => place.assetId === null)) setCountToken((token) => token + 1);
   });
 
   // A tag rename reloads the list; the selection and the shown file are copies it does not reach.
@@ -92,19 +101,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   }, [importing, onBusyChange]);
 
   // Leaving the screen keeps the filters (already in `state`) and the scroll offset.
-  const latest = useRef({ state, onStateChange });
-  latest.current = { state, onStateChange };
-  useEffect(
-    () => () => {
-      const position = positionRef.current;
-      if (position === null) return;
-      const current = latest.current;
-      current.onStateChange({ ...current.state, scrollOffset: position.scrollOffset });
-    },
-    [],
-  );
+  useKeptScrollOffset(positionRef, state, onStateChange);
 
-  const reload = () => setReloadToken((t) => t + 1);
+  const reload = () => setReloadToken((token) => token + 1);
 
   // While the `files:import` call is pending: its progress, and the list fills meanwhile.
   const [running, setRunning] = useState(false);
@@ -124,30 +123,38 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
     onStateChange({ ...state, filters, scrollOffset: 0 });
   }
 
-  async function importFiles() {
-    if (importingRef.current) return;
-    importingRef.current = true;
-    setError(null);
-    setImporting(true);
-    try {
-      const sourcePaths = await call('dialog:pickFiles', {});
-      if (sourcePaths.length === 0) return;
-      const unpackArchives = await zipChoice.choose(sourcePaths);
-      if (unpackArchives === null) return;
-      // A cancel of an earlier import does not count for this one, even before the next render.
-      cancelRequested.current = false;
-      setRunning(true);
-      const results = await call('files:import', { sourcePaths, unpackArchives });
-      const cancelled = cancelRequested.current;
-      setImportResult({ title: importTitle(results, { duplicates: true, cancelled }), failures: importFailures(results) });
-      reload();
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      importingRef.current = false;
-      setRunning(false);
-      setImporting(false);
-    }
+  /** Picks files, asks about archives, imports them into the inbox and shows the result; one import at a time. */
+  function importFiles(): Promise<void> {
+    return runExclusive(
+      importingRef,
+      async () => {
+        try {
+          const sourcePaths = await call('dialog:pickFiles', {});
+          if (sourcePaths.length === 0) return;
+          const unpackArchives = await zipChoice.choose(sourcePaths);
+          if (unpackArchives === null) return;
+          // A cancel of an earlier import does not count for this one, even before the next render.
+          cancelRequested.current = false;
+          setRunning(true);
+          const results = await call('files:import', { sourcePaths, unpackArchives });
+          const cancelled = cancelRequested.current;
+          setImportResult({ title: importTitle(results, { duplicates: true, cancelled }), failures: importFailures(results) });
+          reload();
+        } catch (caught) {
+          setError(describeError(caught));
+        }
+      },
+      {
+        onStart: () => {
+          setError(null);
+          setImporting(true);
+        },
+        onEnd: () => {
+          setRunning(false);
+          setImporting(false);
+        },
+      },
+    );
   }
 
   /** A changed record: the dialog and the selection show it, and the list reloads. */
@@ -169,37 +176,39 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   }
 
   /** One file to the trash (menu, dialog); one at a time. A failure rejects for the caller to show. */
-  async function remove(file: FileRecord): Promise<void> {
-    if (acting.current) return;
-    acting.current = true;
-    try {
+  function remove(file: FileRecord): Promise<void> {
+    return runExclusive(acting, async () => {
       const { failures } = await runFileBatch('files:trashMany', [file]);
       throwFirst(failures);
       moved([file.id]);
       trash.refresh();
-    } finally {
-      acting.current = false;
-    }
+    });
   }
 
   /** All selected files to the trash, not only the eligible ones; one batch at a time. */
-  async function deleteSelected(): Promise<void> {
+  function deleteSelected(): Promise<void> {
     const files = [...selection.selected.values()];
-    if (deleting.current || files.length === 0) return;
-    deleting.current = true;
-    setDeleteBusy(true);
-    setError(null);
-    try {
-      const { doneIds, failures } = await runFileBatch('files:trashMany', files);
-      setImportResult(failures.length === 0 ? null : { title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
-      moved(doneIds);
-      trash.refresh();
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      deleting.current = false;
-      setDeleteBusy(false);
-    }
+    if (files.length === 0) return Promise.resolve();
+    return runExclusive(
+      deleting,
+      async () => {
+        try {
+          const { doneIds, failures } = await runFileBatch('files:trashMany', files);
+          setImportResult(batchResult(doneIds.length, 'deleted', failures));
+          moved(doneIds);
+          trash.refresh();
+        } catch (caught) {
+          setError(describeError(caught));
+        }
+      },
+      {
+        onStart: () => {
+          setDeleteBusy(true);
+          setError(null);
+        },
+        onEnd: () => setDeleteBusy(false),
+      },
+    );
   }
 
   const importButton = (
@@ -303,7 +312,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
               onError: setError,
               onDelete: () => {
                 setError(null);
-                remove(file).catch((e: unknown) => setError(describeError(e)));
+                remove(file).catch((caught: unknown) => setError(describeError(caught)));
               },
             })
           }
