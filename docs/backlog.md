@@ -342,7 +342,6 @@ Not covered by any automated check: the real windows. The hidden page window, th
 - Database backup: a backup is reused when one with the same applied count exists; if an older app version wrote to the database between two failed opens, the reused backup is older than the data.
 - The immediate resolve after a failed move commit retries once without a wait; an error that lasts a moment (`SQLITE_BUSY` beyond the busy timeout) still leaves the row for the next open.
 - `relocateFile` does not resolve an open move row of the file before it begins a new one, unlike restore and purge; a row left by a commit and a resolve that both failed makes the next relocate fail with "already being moved" until the workspace is opened again.
-- Logging: lines go only to the console; a packaged Windows app has no visible console. A bounded log file in `userData` needs a decision and a rotation rule.
 
 ## Not covered by any automated check
 
