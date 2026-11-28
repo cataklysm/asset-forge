@@ -63,6 +63,12 @@ export const NO_KEY_STORE_TITLE = 'The system credential store is not available,
 export const KEY_STORED = 'Stored';
 export const REMOVE_KEY_LABEL = 'Remove key';
 export const REMOVE_KEY_TITLE = 'Deletes the stored key on save';
+/** Shown in place of `KEY_STORED` while the stored key is to be deleted on save. */
+export const KEY_REMOVAL_PENDING = 'Removed on save';
+/** The action that withdraws a pending key removal. */
+export const UNDO_REMOVE_KEY_LABEL = 'Undo';
+/** The tooltip of `UNDO_REMOVE_KEY_LABEL`. */
+export const UNDO_REMOVE_KEY_TITLE = 'Keeps the stored key';
 export const TIMEOUT_LABEL = 'Timeout (s)';
 export const TIMEOUT_TITLE = `Seconds to wait for one answer (${VISION_TIMEOUT_MIN_SECONDS}–${VISION_TIMEOUT_MAX_SECONDS})`;
 export const TIMEOUT_INVALID = `The timeout must be a whole number from ${VISION_TIMEOUT_MIN_SECONDS} to ${VISION_TIMEOUT_MAX_SECONDS}`;
@@ -85,6 +91,11 @@ export const EXTRA_PARAMETERS_TITLE = 'A JSON object merged into every request o
 export const PARALLEL_REQUESTS_LABEL = 'Parallel requests';
 export const PARALLEL_REQUESTS_TITLE = 'Analysis requests sent at the same time';
 export const PARALLEL_REQUESTS_INVALID = `The parallel requests must be a whole number from ${PARALLEL_REQUESTS_MIN} to ${PARALLEL_REQUESTS_MAX}`;
+/** The checkbox of an `openai` entry that decides whether tagging sends `response_format`. */
+export const STRUCTURED_OUTPUT_LABEL = 'Structured output';
+/** The tooltip of `STRUCTURED_OUTPUT_LABEL`. */
+export const STRUCTURED_OUTPUT_TITLE =
+  'Ask the server for the tag answer as a JSON schema; turn off for servers that refuse it';
 export const PROVIDER_STATE_LABEL = 'State';
 export const FROM_ENVIRONMENT = 'From environment';
 export const FROM_ENVIRONMENT_TITLE = 'The provider comes from the environment and cannot be changed here';
@@ -102,3 +113,5 @@ export function deleteProviderTitle(name: string): string {
 
 /** A failed load of the provider settings; not the same as "not configured". */
 export const SETTINGS_LOAD_FAILED = 'The provider settings could not be read';
+/** Shown above a held provider list whose reload failed. */
+export const PROVIDERS_RELOAD_FAILED = 'The provider list could not be reloaded';

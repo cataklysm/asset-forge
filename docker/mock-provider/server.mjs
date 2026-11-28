@@ -438,8 +438,8 @@ export async function startMockProvider(options = {}) {
       return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
 
     const bytes = Buffer.from(image, 'base64');
-    // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets
-    // the JSON.
+    // With the refusal switch on, a request without `response_format` stands for an entry with structured output
+    // off, whose prompt asks for the JSON, and gets the JSON.
     const isJson = request.response_format?.type === 'json_schema' || (!hasFormat && refuseResponseFormat);
     const message =
       failure === 'invalid'

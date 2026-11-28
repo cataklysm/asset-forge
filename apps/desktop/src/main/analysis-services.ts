@@ -29,6 +29,7 @@ import { createProviderStore, type ProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
 import { createSiteAccess } from './site-access.js';
 import { createSiteHandlers } from './site-handlers.js';
+import { sweepOwnerlessSitePartitions, type SitePartitionDirectory } from './site-partition-sweep.js';
 import { createSiteProfileStore, type SiteProfileStore } from './site-profile-store.js';
 import type { SiteSessions } from './site-sessions.js';
 import type { AppServices } from './workspace-handlers.js';
@@ -64,6 +65,12 @@ export interface AnalysisServices extends AppServices {
   workspaceOpened(): Promise<void>;
   /** Cancels a running describe request and stops the jobs. Never rejects. */
   workspaceClosing(): Promise<void>;
+  /**
+   * Clears the site partitions that belong to no stored profile; only once the app is ready. Never rejects.
+   *
+   * @param partitions the site partitions there are
+   */
+  sweepSitePartitions(partitions: SitePartitionDirectory): Promise<void>;
 }
 
 /** What the host passes to the app-level wiring. */
@@ -168,6 +175,14 @@ export function createAnalysisServices(options: AnalysisServiceOptions): Analysi
     }),
     workspaceOpened: () => workspaceOpened(describe, host),
     workspaceClosing: () => workspaceClosing(describe, host),
+    sweepSitePartitions: (partitions) =>
+      sweepOwnerlessSitePartitions({
+        userData: options.userDataPath,
+        store: siteStore,
+        partitions,
+        sessions: siteSessions,
+        log: options.log,
+      }),
   };
 }
 

@@ -14,6 +14,7 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createOpenAiVision, OPENAI_PROVIDER, stripThinking, type OpenAiVisionOptions } from '../src/index.js';
+import { DEFAULT_REQUEST_OPTIONS } from '../src/request-options.js';
 import { refusedUrl, releaseRefusedPorts } from './refused-port.js';
 
 const KEY = 'test-key-not-real';
@@ -325,60 +326,48 @@ describe('stripThinking', () => {
   });
 });
 
-describe('servers without structured output', () => {
-  it('repeats a tagging request once without response_format and remembers the model', async () => {
+describe('structured output', () => {
+  it('fails a tagging request whose response_format is refused like any 400, without a second request', async () => {
     const { url, requests } = await start({ refuseResponseFormat: true });
     const { adapter, reports } = vision({ baseUrl: `${url}/v1` });
-    const first = (await analyze(adapter)) as { tags: string[] };
-    expect(first.tags).toHaveLength(8);
-    expect(requests).toHaveLength(2);
+    await expectCode(analyze(adapter), 'provider_rejected');
+    expect(requests).toHaveLength(1);
     expect(requests[0]!.body).toHaveProperty('response_format');
-    expect(requests[1]!.body).not.toHaveProperty('response_format');
+    expect(reports).toEqual([['provider_rejected', 400]]);
+    // Nothing is remembered: the next request asks for the format again.
+    await failureOf(analyze(adapter));
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.body).toHaveProperty('response_format');
+  });
 
-    const second = (await analyze(adapter)) as { tags: string[] };
-    expect(second).toEqual(first);
-    expect(requests).toHaveLength(3);
-    expect(requests[2]!.body).not.toHaveProperty('response_format');
+  it('never sends response_format with structured output off', async () => {
+    const { url, requests } = await start({ refuseResponseFormat: true });
+    const { adapter, reports } = vision({
+      baseUrl: `${url}/v1`,
+      structuredOutput: false,
+    });
+    const result = (await analyze(adapter)) as { tags: string[] };
+    expect(result.tags).toHaveLength(8);
+    await describeWith(adapter);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expect(request.body).not.toHaveProperty('response_format');
     expect(reports).toEqual([]);
   });
 
-  it('remembers the model per adapter instance and per model', async () => {
-    const { url, requests } = await start({ refuseResponseFormat: true });
-    await analyze(vision({ baseUrl: `${url}/v1` }).adapter);
-    const { adapter } = vision({ baseUrl: `${url}/v1` });
-    await analyze(adapter);
-    expect(requests).toHaveLength(4);
-    await analyze(adapter, MOCK_SLASH_MODEL);
-    expect(requests).toHaveLength(6);
-    expect(requests[4]!.body).toHaveProperty('response_format');
-  });
-
-  it('reports only the second failure when both attempts are refused', async () => {
-    const stub = recording(() => json(400, { error: 'bad request' }));
-    const { adapter, reports } = vision({ baseUrl: STUB_BASE, fetch: stub.fetch });
-    await expectCode(analyze(adapter, 'm1'), 'provider_rejected');
-    expect(stub.calls).toHaveLength(2);
-    expect(bodyOf(stub.calls[0]!)).toHaveProperty('response_format');
-    expect(bodyOf(stub.calls[1]!)).not.toHaveProperty('response_format');
-    expect(reports).toEqual([['provider_rejected', 400]]);
-    // A refused fallback is not remembered.
-    await failureOf(analyze(adapter, 'm1'));
-    expect(bodyOf(stub.calls[2]!)).toHaveProperty('response_format');
-  });
-
-  it('takes the failure of the second attempt as the result', async () => {
-    let call = 0;
-    const { adapter, reports } = vision({
+  it('keeps the format off even when extra sets one', async () => {
+    const stub = recording(() => json(200, { choices: [{ message: { content: '{"tags":["a"]}' } }] }));
+    const adapter = createOpenAiVision({
       baseUrl: STUB_BASE,
-      fetch: async () => (++call === 1 ? json(400, {}) : json(503, {})),
+      fetch: stub.fetch,
+      structuredOutput: false,
+      requestOptions: { ...DEFAULT_REQUEST_OPTIONS, extra: { response_format: { type: 'text' } } },
     });
-    await expectCode(analyze(adapter, 'm1'), 'provider_unavailable');
-    expect(call).toBe(2);
-    expect(reports).toEqual([['provider_unavailable', 503]]);
+    await analyze(adapter, 'm1');
+    expect(bodyOf(stub.calls[0]!)).not.toHaveProperty('response_format');
   });
-
   it.each([
     ['describe on 400', 400, 'describe', 'provider_rejected'],
+    ['tagging on 400', 400, 'analyze', 'provider_rejected'],
     ['tagging on 404', 404, 'analyze', 'provider_rejected'],
     ['tagging on 422', 422, 'analyze', 'provider_rejected'],
     ['tagging on 500', 500, 'analyze', 'provider_unavailable'],

@@ -7,6 +7,7 @@ import {
   DEFAULT_TOTALS,
   MAX_ATTEMPTS,
   RETRY_DELAYS_MS,
+  STOP_DEADLINE_MS,
   createPauseGate,
   createScheduler,
   type PauseGate,
@@ -164,6 +165,7 @@ describe('constants', () => {
     expect(DEFAULT_LIMITS).toEqual({ cpu: 2, io: 2, local_gpu: 1, remote_api: 2 });
     expect(MAX_ATTEMPTS).toBe(3);
     expect(RETRY_DELAYS_MS).toEqual([5_000, 30_000]);
+    expect(STOP_DEADLINE_MS).toBe(10_000);
   });
 });
 
@@ -752,6 +754,68 @@ describe('createScheduler', () => {
     expect(h.runs.map((run) => run.job.id)).toEqual([a]);
     expect(s.row(a)).toMatchObject({ status: 'running', attempt: 1 });
     expect(s.logged).toHaveLength(2);
+  });
+
+  it('stop gives up on a handler that ignores its abort after the deadline and ignores its late end', async () => {
+    for (const policy of ['requeue', 'fail'] as const) {
+      const h = controlled('cpu', policy, { interruptedCode: 'provider_outcome_unknown' });
+      const s = setup({ handlers: { t: h.handler }, limits: { ...DEFAULT_LIMITS, cpu: 2 } });
+      const [hung, quick] = (await s.enqueue('t', 'cpu', 2)) as [string, string];
+      await s.scheduler.start();
+
+      let stopped = false;
+      const stopping = s.scheduler.stop().then(() => (stopped = true));
+      await flush();
+      h.runOf(quick).resolve();
+      await flush();
+      expect(stopped).toBe(false);
+      expect(s.timers.map((timer) => timer.ms)).toEqual([STOP_DEADLINE_MS]);
+
+      await s.fireTimer();
+      await stopping;
+      expect(stopped).toBe(true);
+      expect(s.row(quick).status).toBe('succeeded');
+      expect(s.row(hung).status).toBe('running');
+      expect(s.logged.map((entry) => entry.message)).toEqual(['Job handlers did not end before the stop deadline']);
+
+      const calls = s.calls.n;
+      const changes = s.changes.n;
+      h.runOf(hung).resolve();
+      await flush();
+      expect(s.calls.n).toBe(calls);
+      expect(s.changes.n).toBe(changes);
+      expect(s.row(hung).status).toBe('running');
+      await s.scheduler.stop();
+
+      // The next scheduler recovers the row like any interrupted run; a paid one is never repeated.
+      const next = createScheduler({ jobs: s.fake, handlers: { t: h.handler }, setTimer: () => null, log: () => {} });
+      await next.start();
+      if (policy === 'fail') {
+        expect(s.row(hung)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+        expect(h.runs.filter((run) => run.job.id === hung)).toHaveLength(1);
+      } else {
+        expect(h.runs.filter((run) => run.job.id === hung)).toHaveLength(2);
+        h.runOf(hung).resolve();
+      }
+      await flush();
+      const final = next.stop();
+      await flush();
+      await final;
+    }
+  });
+
+  it('stop clears its deadline when every run ends in time', async () => {
+    const h = controlled('cpu');
+    const s = setup({ handlers: { t: h.handler } });
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.scheduler.start();
+    const stopping = s.scheduler.stop();
+    await flush();
+    expect(s.timers.map((timer) => timer.ms)).toEqual([STOP_DEADLINE_MS]);
+    h.runOf(id).reject(h.runOf(id).signal.reason);
+    await stopping;
+    expect(s.timers).toHaveLength(0);
+    expect(s.logged).toHaveLength(0);
   });
 
   it('makes no repository call after stop resolves', async () => {

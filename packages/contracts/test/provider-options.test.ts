@@ -54,6 +54,7 @@ describe('request options', () => {
       maxTokens: null,
       extra: '',
       parallelRequests: 1,
+      structuredOutput: true,
     });
     expect(ProviderOptionsSchema.safeParse(DEFAULT_PROVIDER_OPTIONS).success).toBe(true);
     expect(PROVIDER_EXTRA_MAX).toBe(4000);
@@ -78,6 +79,15 @@ describe('request options', () => {
     for (const value of [1, 8, 64]) expect(ok(value), String(value)).toBe(true);
     for (const value of [0, 65, 1.5, -1, Number.NaN, '4', null]) expect(ok(value), String(value)).toBe(false);
     const { parallelRequests: _p, ...without } = DEFAULT_PROVIDER_OPTIONS;
+    expect(ProviderOptionsSchema.safeParse(without).success).toBe(false);
+  });
+
+  test('structured output is a boolean and required', () => {
+    const ok = (structuredOutput: unknown) =>
+      ProviderOptionsSchema.safeParse({ ...DEFAULT_PROVIDER_OPTIONS, structuredOutput }).success;
+    expect(ok(false)).toBe(true);
+    for (const value of ['true', 1, null]) expect(ok(value), String(value)).toBe(false);
+    const { structuredOutput: _s, ...without } = DEFAULT_PROVIDER_OPTIONS;
     expect(ProviderOptionsSchema.safeParse(without).success).toBe(false);
   });
 });

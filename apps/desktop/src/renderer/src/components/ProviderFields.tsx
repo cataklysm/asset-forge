@@ -16,6 +16,7 @@ import {
   API_KEY_TITLE,
   EXTRA_PARAMETERS_LABEL,
   EXTRA_PARAMETERS_TITLE,
+  KEY_REMOVAL_PENDING,
   KEY_STORED,
   MAX_TOKENS_LABEL,
   MAX_TOKENS_TITLE,
@@ -29,15 +30,19 @@ import {
   PROVIDER_KIND_TITLE,
   REMOVE_KEY_LABEL,
   REMOVE_KEY_TITLE,
+  STRUCTURED_OUTPUT_LABEL,
+  STRUCTURED_OUTPUT_TITLE,
   TAGGING_MODEL_TITLE,
   TEMPERATURE_LABEL,
   TEMPERATURE_TITLE,
   THINKING_LABEL,
   THINKING_LABELS,
   THINKING_TITLE,
+  UNDO_REMOVE_KEY_LABEL,
+  UNDO_REMOVE_KEY_TITLE,
 } from '../labels';
 import { KINDS, THINKING, maxTokensOf, parallelRequestsOf, temperatureOf, type ProviderDraft } from '../provider-draft';
-import { ALERT, BUTTON_INLINE, INPUT, LABEL, MUTED, SELECT } from '../ui';
+import { ALERT, BUTTON_INLINE, FOCUS, INPUT, LABEL, MUTED, SELECT } from '../ui';
 import { ModelSelect } from './ModelSelect';
 import { NumberField } from './NumberField';
 
@@ -88,6 +93,35 @@ export function KindField({ entry, kind, locked, onChange }: KindFieldProps) {
   );
 }
 
+/** The props of `StoredKeyRow`. */
+interface StoredKeyRowProps {
+  /** The text beside the action. */
+  text: string;
+  /** The action's label. */
+  label: string;
+  /** The action's tooltip. */
+  title: string;
+  disabled: boolean;
+  onClick(): void;
+}
+
+/**
+ * The state of the stored key with its one action: remove it on save, or withdraw that removal.
+ *
+ * @param props the text, the action and its handler
+ * @returns the row
+ */
+function StoredKeyRow({ text, label, title, disabled, onClick }: StoredKeyRowProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`text-sm ${MUTED}`}>{text}</span>
+      <button type="button" className={BUTTON_INLINE} title={title} disabled={disabled} onClick={onClick}>
+        {label}
+      </button>
+    </div>
+  );
+}
+
 /** The props of `ApiKeyField`. */
 interface ApiKeyFieldProps {
   entry: ProviderView | null;
@@ -99,12 +133,13 @@ interface ApiKeyFieldProps {
 }
 
 /**
- * The write-only key field and, while a key is stored, the action that removes it on save.
+ * The write-only key field and, while a key is stored, the action that removes it on save or withdraws that removal.
  *
  * @param props the entry, the list, the draft and its handler
  */
 export function ApiKeyField({ entry, list, draft, locked, busy, update }: ApiKeyFieldProps) {
   const keyTitle = list.canStoreKey ? API_KEY_TITLE : NO_KEY_STORE_TITLE;
+  const stored = entry !== null && entry.hasApiKey;
   return (
     <div className="flex flex-col gap-1">
       <label className="flex flex-col gap-1" title={keyTitle}>
@@ -119,19 +154,24 @@ export function ApiKeyField({ entry, list, draft, locked, busy, update }: ApiKey
           onChange={(event) => update({ apiKey: event.target.value })}
         />
       </label>
-      {entry !== null && entry.hasApiKey && !draft.clearKey && (
-        <div className="flex items-center gap-2">
-          <span className={`text-sm ${MUTED}`}>{KEY_STORED}</span>
-          <button
-            type="button"
-            className={BUTTON_INLINE}
-            title={REMOVE_KEY_TITLE}
-            disabled={locked || busy}
-            onClick={() => update({ clearKey: true, apiKey: '' })}
-          >
-            {REMOVE_KEY_LABEL}
-          </button>
-        </div>
+      {stored && !draft.clearKey && (
+        <StoredKeyRow
+          text={KEY_STORED}
+          label={REMOVE_KEY_LABEL}
+          title={REMOVE_KEY_TITLE}
+          disabled={locked || busy}
+          onClick={() => update({ clearKey: true, apiKey: '' })}
+        />
+      )}
+      {/* A typed key replaces the stored one, so the removal shows only while the field is empty. */}
+      {stored && draft.clearKey && draft.apiKey === '' && (
+        <StoredKeyRow
+          text={KEY_REMOVAL_PENDING}
+          label={UNDO_REMOVE_KEY_LABEL}
+          title={UNDO_REMOVE_KEY_TITLE}
+          disabled={locked || busy}
+          onClick={() => update({ clearKey: false })}
+        />
       )}
     </div>
   );
@@ -231,6 +271,19 @@ export function VisionFields({ entryId, draft, locked, extraMessage, update }: V
         invalid={parallelRequestsOf(draft.parallelRequests) === null}
         onChange={(parallelRequests) => update({ parallelRequests })}
       />
+
+      {draft.kind === 'openai' && (
+        <label className="flex items-center gap-2 text-sm text-text" title={STRUCTURED_OUTPUT_TITLE}>
+          <input
+            type="checkbox"
+            className={`accent-accent ${FOCUS}`}
+            checked={draft.structuredOutput}
+            disabled={locked}
+            onChange={(event) => update({ structuredOutput: event.target.checked })}
+          />
+          <span>{STRUCTURED_OUTPUT_LABEL}</span>
+        </label>
+      )}
 
       <div className="flex flex-col gap-1">
         <label className="flex flex-col gap-1" title={EXTRA_PARAMETERS_TITLE}>

@@ -12,7 +12,7 @@ import {
 } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { ProviderSettings } from '../../src/renderer/src/components/ProviderSettings';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
 const TEST_KEY = 'test-key-not-real';
@@ -445,7 +445,14 @@ const RESPONSE_FORMAT = 'The extra parameters must not set response_format';
 
 const TUNED = providerView({
   name: 'Tuned',
-  options: { temperature: 0.7, thinking: 'on', maxTokens: 512, extra: '{"top_k":40}', parallelRequests: 6 },
+  options: {
+    temperature: 0.7,
+    thinking: 'on',
+    maxTokens: 512,
+    extra: '{"top_k":40}',
+    parallelRequests: 6,
+    structuredOutput: true,
+  },
 });
 const VLLM = providerView({
   kind: 'openai',
@@ -569,6 +576,33 @@ it('a Venice entry shows no parallel requests field', async () => {
   expect(screen.queryByText('Parallel requests')).toBeNull();
 });
 
+it('Structured output is a checkbox of OpenAI-compatible entries only, explained by a tooltip', async () => {
+  const user = userEvent.setup();
+  install({ providers: [LOCAL, VLLM] });
+  renderSection();
+  await loaded();
+  expect(screen.queryByLabelText('Structured output')).toBeNull();
+  await user.click(within(list()).getByRole('button', { name: 'vLLM' }));
+  const checkbox = screen.getByLabelText('Structured output') as HTMLInputElement;
+  expect([checkbox.type, checkbox.checked]).toEqual(['checkbox', true]);
+  const title = checkbox.closest('label')!.getAttribute('title')!;
+  expect(title).toBe('Ask the server for the tag answer as a JSON schema; turn off for servers that refuse it');
+  expect(screen.queryByText(title)).toBeNull();
+});
+
+it('Save sends structured output off for an OpenAI-compatible entry and keeps it', async () => {
+  const user = userEvent.setup();
+  const { api, fake } = install({ providers: [VLLM] });
+  renderSection();
+  await loaded();
+  await user.click(screen.getByLabelText('Structured output'));
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect((callsOf(api, 'providers:save')[0]!.request as SaveRequest).options?.structuredOutput).toBe(false);
+  await waitFor(() => expect(fake.state.providers[0]!.options?.structuredOutput).toBe(false));
+  expect((screen.getByLabelText('Structured output') as HTMLInputElement).checked).toBe(false);
+});
+
 it('Save sends the typed options, and an empty token field as null', async () => {
   const user = userEvent.setup();
   const { api, fake } = install({ providers: [TUNED] });
@@ -586,6 +620,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     maxTokens: 256,
     extra: '{"top_p":0.9}',
     parallelRequests: 6,
+    structuredOutput: true,
   });
   await waitFor(() => expect(fake.state.providers[0]!.options?.maxTokens).toBe(256));
   await retype(user, 'Max. answer tokens', '');
@@ -597,6 +632,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     maxTokens: null,
     extra: '{"top_p":0.9}',
     parallelRequests: 6,
+    structuredOutput: true,
   });
 });
 
@@ -684,4 +720,80 @@ it('a Venice entry is saved without options', async () => {
   await user.click(button('Save'));
   await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
   expect('options' in (callsOf(api, 'providers:save')[0]!.request as SaveRequest)).toBe(false);
+});
+
+const RELOAD_FAILED = 'The provider list could not be reloaded';
+
+/** Renders the section with a hook into the provider context, so a test can reload the list. */
+function renderWithReload() {
+  const handle: { reload: () => Promise<void> } = { reload: async () => {} };
+  function Reloader() {
+    handle.reload = useProviders().reload;
+    return null;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <Reloader />
+      <ProviderSettings />
+    </ProviderSettingsProvider>,
+  );
+  return handle;
+}
+
+it('a failed reload of a held list shows a retry while the list stays usable', async () => {
+  const user = userEvent.setup();
+  const fake = fakeProviders({ providers: [LOCAL, RUNPOD] }, { [LOCAL.id]: MODELS });
+  let failing = false;
+  installFakeApi({
+    ...fake.handlers,
+    'providers:list': (request) => {
+      if (failing) throw fakeError('internal_error');
+      return fake.handlers['providers:list']!(request);
+    },
+  });
+  const handle = renderWithReload();
+  await loaded();
+  expect(screen.queryByText(RELOAD_FAILED)).toBeNull();
+  failing = true;
+  await act(() => handle.reload().catch(() => {}));
+  expect(screen.getByRole('alert').textContent).toBe(RELOAD_FAILED);
+  expect(field('Name').value).toBe('Local');
+  await user.click(within(list()).getByRole('button', { name: 'RunPod' }));
+  expect(field('Name').value).toBe('RunPod');
+  failing = false;
+  await user.click(button('Retry'));
+  await waitFor(() => expect(screen.queryByText(RELOAD_FAILED)).toBeNull());
+  expect(entryNames()).toEqual(['Local', 'RunPod']);
+});
+
+it('Remove key shows the pending removal with an undo that keeps the key', async () => {
+  const user = userEvent.setup();
+  const { api } = install();
+  renderSection();
+  await loaded();
+  await user.click(button('Remove key'));
+  expect(screen.getByText('Removed on save')).toBeTruthy();
+  expect(button('Undo').title).toBe('Keeps the stored key');
+  await user.click(button('Undo'));
+  expect(screen.queryByText('Removed on save')).toBeNull();
+  expect(screen.getByText('Stored')).toBeTruthy();
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect('apiKey' in (callsOf(api, 'providers:save')[0]!.request as SaveRequest)).toBe(false);
+});
+
+it('a key typed after Remove key replaces the pending removal', async () => {
+  const user = userEvent.setup();
+  const { api } = install();
+  renderSection();
+  await loaded();
+  await user.click(button('Remove key'));
+  await user.type(field('API key'), TEST_KEY);
+  expect(screen.queryByText('Removed on save')).toBeNull();
+  await user.clear(field('API key'));
+  expect(screen.getByText('Removed on save')).toBeTruthy();
+  await user.type(field('API key'), TEST_KEY);
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect((callsOf(api, 'providers:save')[0]!.request as SaveRequest).apiKey).toBe(TEST_KEY);
 });
