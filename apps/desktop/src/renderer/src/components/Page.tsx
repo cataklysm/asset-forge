@@ -1,17 +1,30 @@
 import type { ReactNode } from 'react';
 import { BORDER, COUNT, PAGE_TITLE } from '../ui';
 
+/** The props of `Page`. */
 interface Props {
+  /** The page heading. */
   title: ReactNode;
+  /** Shown beside the heading unless null or absent. */
   count?: number | null;
+  /** The tooltip of the count. */
   countTitle?: string;
+  /** The buttons at the end of the title row. */
   actions?: ReactNode;
+  /** The rows between the title row and the content. */
   toolbar?: ReactNode;
+  /** The detail column on the right; absent hides it. */
   detail?: ReactNode;
+  /** The content. */
   children: ReactNode;
 }
 
-/** One page: title row, optional toolbar, content and an optional detail column on the right. */
+/**
+ * One page: title row, optional toolbar, content and an optional detail column on the right.
+ *
+ * @param props the heading, the count, the actions, the toolbar, the detail column and the content
+ * @returns the page
+ */
 export function Page({ title, count, countTitle, actions, toolbar, detail, children }: Props) {
   return (
     <div className="flex min-h-0 flex-1">

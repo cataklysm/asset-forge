@@ -5,15 +5,25 @@ import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
 import { INVALID_TAG } from './TagRow';
 
+/** The props of `TagFilter`. */
 interface Props {
+  /** The normalised tag names of the filter. */
   value: readonly string[];
+  /** Called with the new names. */
   onChange(names: string[]): void;
+  /** The tooltip of the input while it takes more names. */
   title?: string;
 }
 
+/** The most names one filter takes. */
 const MAX_FILTER_TAGS = 10;
 
-/** A tag combobox that adds normalised tag names to a filter, with a removable chip per name. */
+/**
+ * A tag combobox that adds normalised tag names to a filter, with a removable chip per name.
+ *
+ * @param props the names, the change callback and the tooltip
+ * @returns the input and the chips
+ */
 export function TagFilter({ value, onChange, title }: Props) {
   const [text, setText] = useState('');
   const [invalid, setInvalid] = useState(false);

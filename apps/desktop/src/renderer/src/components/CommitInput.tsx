@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { FOCUS, INPUT } from '../ui';
 
+/** The props of `CommitInput`. */
 interface Props {
+  /** The saved value; a new one replaces the draft. */
   value: string;
   /** Return `false` (or resolve to `false`) when saving failed: the field then shows the saved value again. */
   onCommit(value: string): void | boolean | Promise<boolean | void>;
+  /** The accessible name. */
   label: string;
+  /** A textarea instead of a single-line input. */
   multiline?: boolean;
+  /** The most characters the field takes. */
   maxLength: number;
   /** `inline` is borderless until hover or focus; a multiline inline field shows one line until focused. */
   variant?: 'field' | 'inline';
@@ -15,9 +20,15 @@ interface Props {
   className?: string;
 }
 
+/** The classes of the `inline` variant. */
 const INLINE = `min-w-0 rounded-control border border-transparent bg-transparent px-2 text-text placeholder:text-muted hover:border-line focus:border-line focus:bg-surface ${FOCUS}`;
 
-/** Text input or textarea that commits on blur and on Enter (Ctrl+Enter in a textarea), only when the value changed. */
+/**
+ * Text input or textarea that commits on blur and on Enter (Ctrl+Enter in a textarea), only when the value changed.
+ *
+ * @param props the saved value, the commit callback, the label, the look and the limits
+ * @returns the input or textarea
+ */
 export function CommitInput({
   value,
   onCommit,
@@ -63,7 +74,7 @@ export function CommitInput({
     value: draft,
     maxLength,
     placeholder,
-    onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
+    onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
     onFocus: () => setFocused(true),
     onBlur: () => {
       setFocused(false);

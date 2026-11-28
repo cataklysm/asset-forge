@@ -1,14 +1,24 @@
 import { Search } from 'lucide-react';
 import { INPUT } from '../ui';
 
+/** The props of `SearchField`. */
 interface Props {
+  /** The search text. */
   value: string;
-  onChange(v: string): void;
+  /** Called with every change; with '' when Esc clears it. */
+  onChange(value: string): void;
+  /** The placeholder. */
   placeholder: string;
+  /** The accessible name. */
   label: string;
 }
 
-/** A controlled search input; Esc with text clears it. Debouncing is the caller's job. */
+/**
+ * A controlled search input; Esc with text clears it. Debouncing is the caller's job.
+ *
+ * @param props the text, the change callback, the placeholder and the label
+ * @returns the field
+ */
 export function SearchField({ value, onChange, placeholder, label }: Props) {
   return (
     <div className="relative">
