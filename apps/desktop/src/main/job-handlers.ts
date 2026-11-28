@@ -154,7 +154,10 @@ async function generationLaneName(session: WorkspaceSession, lane: string | null
  * @param providers the provider entries
  * @returns the provider classes and the ids of the listed entries
  */
-function removedProviderLanes(providers: ProviderStore): { resourceClasses: readonly ResourceClass[]; lanes: string[] } {
+function removedProviderLanes(providers: ProviderStore): {
+  resourceClasses: readonly ResourceClass[];
+  lanes: string[];
+} {
   return { resourceClasses: PROVIDER_CLASSES, lanes: providers.list().providers.map((entry) => entry.id) };
 }
 

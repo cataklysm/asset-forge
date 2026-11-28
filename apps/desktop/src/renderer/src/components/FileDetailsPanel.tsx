@@ -1,14 +1,7 @@
 import { Fragment, type ReactNode, type RefObject } from 'react';
 import type { FileRecord, TagAssignment } from '@assetforge/contracts';
 import { formatBytes, formatDateTime, formatDuration } from '../format';
-import {
-  ASSIGN_TO_ASSET_HEADING,
-  DELETED_LABEL,
-  DURATION_LABEL,
-  label,
-  ORIGIN_LABEL,
-  ROLE_HEADING,
-} from '../labels';
+import { ASSIGN_TO_ASSET_HEADING, DELETED_LABEL, DURATION_LABEL, label, ORIGIN_LABEL, ROLE_HEADING } from '../labels';
 import { firstControlIn, useKeptFocus } from '../hooks/useStageFocus';
 import { formatLabel } from '../media-url';
 import { ALERT, BORDER, LABEL, PANEL_TITLE } from '../ui';

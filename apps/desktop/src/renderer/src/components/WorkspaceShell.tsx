@@ -242,7 +242,7 @@ interface ScreenDependencies {
   busy: boolean;
   setBusy(busy: boolean): void;
   setView(view: View): void;
-  showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>): void;
+  showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames' | 'tagLabels'>): void;
   /** Counts the views shown, so a navigation to the view shown already mounts its screen afresh. */
   visit: number;
 }
@@ -331,7 +331,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   const [busy, setBusy] = useState(false);
   const shell = useShellState();
 
-  function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>) {
+  function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames' | 'tagLabels'>) {
     shell.setAssetList({
       filters: { ...NO_FILTERS, ...filters },
       scrollOffset: 0,

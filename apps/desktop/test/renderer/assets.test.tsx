@@ -433,7 +433,7 @@ it('list state round trip keeps filters, selection and scroll offset', async () 
   unmount();
   const saved = onState.mock.lastCall![0] as AssetListState;
   expect(saved).toEqual({
-    filters: { ...NO_FILTERS, query: 'oak', tagNames: ['bark'], fileKind: 'image' },
+    filters: { ...NO_FILTERS, query: 'oak', tagNames: ['bark'], tagLabels: { bark: 'Bark' }, fileKind: 'image' },
     scrollOffset: 4400,
     openedIndex: null,
     selectedId: items[2]!.id,
@@ -444,7 +444,7 @@ it('list state round trip keeps filters, selection and scroll offset', async () 
   await waitFor(() => expect(listRequests(api)).toContainEqual({ ...expected, offset: 60 }));
   expect(listRequests(api)).toContainEqual(expected);
   expect((screen.getByRole('searchbox', { name: 'Search assets' }) as HTMLInputElement).value).toBe('oak');
-  expect(screen.getByText('bark')).toBeTruthy();
+  expect(screen.getByText('Bark')).toBeTruthy();
   expect(await within(selectionColumn()).findByText('Asset 2')).toBeTruthy();
   // Row 13 of 336 px is at the top: tile 65 is rendered, tile 2 is not.
   expect(screen.getByText('Asset 65')).toBeTruthy();
@@ -700,6 +700,16 @@ it('a rename switches a tag filter on the old name to the new one and reloads', 
   expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
 });
 
+it('a tag filter chip shows its display name and keeps the renamed one', async () => {
+  const user = userEvent.setup();
+  install({ 'assets:list': listOf(many(2)), ...renameHandlers({ 'front view': 'Front View' }) });
+  const filters = { ...NO_FILTERS, tagNames: ['front view'], tagLabels: { 'front view': 'Front View' } };
+  render(<RenamingHarness initial={{ ...INITIAL, filters }} />);
+  expect(await screen.findByRole('button', { name: 'Remove Front View' })).toBeTruthy();
+  await renameThroughDialog(user, 'Front View', 'Front');
+  expect(await screen.findByRole('button', { name: 'Remove Front' })).toBeTruthy();
+});
+
 it('a merge into a name the filter already holds leaves one chip', async () => {
   const user = userEvent.setup();
   const api = install({
@@ -710,7 +720,8 @@ it('a merge into a name the filter already holds leaves one chip', async () => {
   expect(await screen.findByRole('button', { name: 'Remove front view' })).toBeTruthy();
   await renameThroughDialog(user, 'Front View', 'front');
   await waitFor(() => expect(listRequests(api).some((r) => r.tagNames?.join() === 'front')).toBe(true));
-  expect(screen.getAllByRole('button', { name: 'Remove front' })).toHaveLength(1);
+  // The merge keeps the display name of the existing tag.
+  expect(screen.getAllByRole('button', { name: 'Remove Front' })).toHaveLength(1);
   expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
 });
 

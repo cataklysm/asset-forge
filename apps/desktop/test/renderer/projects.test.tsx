@@ -379,7 +379,7 @@ it('list state round trip keeps filters, scroll offset and selection', async () 
   unmount();
   const saved = onState.mock.lastCall![0] as ProjectListState;
   expect(saved).toEqual({
-    filters: { query: 'oak', tagNames: ['bark'], status: 'active' },
+    filters: { query: 'oak', tagNames: ['bark'], tagLabels: { bark: 'Bark' }, status: 'active' },
     scrollOffset: 4800,
     openedIndex: null,
     selectedId: items[2]!.id,
@@ -926,7 +926,7 @@ it('a rename switches the projects tag filter and the matching content to the ne
       offset: 0,
     }),
   );
-  expect(screen.getByRole('button', { name: 'Remove quercus' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Remove Quercus' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Remove oak' })).toBeNull();
 });
 

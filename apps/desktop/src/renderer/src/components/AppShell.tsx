@@ -302,7 +302,8 @@ export function AppShell({
             />
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
-            <StorageReturnContext.Provider value={reloadKey}>{children}</StorageReturnContext.Provider>          </main>
+            <StorageReturnContext.Provider value={reloadKey}>{children}</StorageReturnContext.Provider>{' '}
+          </main>
         </div>
       </div>
     </div>

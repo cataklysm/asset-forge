@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NO_SELECTION, type FileSelection } from '../src/renderer/src/selection.js';
 import {
+  renameInLabels,
   renameInNames,
   renameInRecord,
   renameInSelection,
@@ -88,6 +89,25 @@ describe('renameInSelection', () => {
     const sel: FileSelection = { selected: new Map([[a.id, a]]), anchor: null };
     expect(renameInSelection(sel, toFront)).toBe(sel);
     expect(renameInSelection(NO_SELECTION, toFront)).toBe(NO_SELECTION);
+  });
+});
+
+describe('renameInLabels', () => {
+  it('moves the display name to the kept tag and drops the source', () => {
+    expect(renameInLabels({ a: 'A', 'front view': 'Front View' }, ['a', 'front'], toFront)).toEqual({
+      a: 'A',
+      front: 'Front',
+    });
+  });
+
+  it('changes only the display name when the normalised name stays', () => {
+    const respell: TagRename = { from: 'front', name: 'front', displayName: 'FRONT' };
+    expect(renameInLabels({ front: 'Front' }, ['front'], respell)).toEqual({ front: 'FRONT' });
+  });
+
+  it('returns the same object when the filter does not hold the tag', () => {
+    const labels = { a: 'A' };
+    expect(renameInLabels(labels, ['a'], toFront)).toBe(labels);
   });
 });
 

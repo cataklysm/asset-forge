@@ -101,7 +101,12 @@ export function FileBrowserToolbar(props: FileBrowserToolbarProps) {
           ))}
         </div>
       </>
-      <TagFilter value={filters.tagNames} title="Image tags" onChange={(tagNames) => props.onFilter({ tagNames })} />
+      <TagFilter
+        value={filters.tagNames}
+        labels={filters.tagLabels}
+        title="Image tags"
+        onChange={(tagNames, tagLabels) => props.onFilter({ tagNames, tagLabels })}
+      />
     </FilterBar>
   );
 }

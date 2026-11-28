@@ -1,5 +1,5 @@
 import type { AssetStatus, FileKind, FileRole, FileScope, IpcRequest, ProjectStatus } from '@assetforge/contracts';
-import { renameInNames, type TagRename } from './tag-rename';
+import { renameInLabels, renameInNames, type TagLabels, type TagRename } from './tag-rename';
 
 // The list states the shell keeps across navigation: filters, scroll offsets and selections, their keys and
 // the queries they turn into, and the gallery view remembered on the device.
@@ -22,6 +22,8 @@ export interface AssetFilters {
   query: string;
   /** Tags the asset or one of its files must carry, all of them. */
   tagNames: string[];
+  /** The display names of `tagNames` as chosen; never part of the key or the query. */
+  tagLabels?: TagLabels;
   /** A role one of the asset's files must have. */
   fileRole: Choice<FileRole>;
   /** A kind one of the asset's files must have. */
@@ -50,6 +52,8 @@ export interface FileFilters {
   kind: Choice<FileKind>;
   /** Tags the file must carry itself, all of them. */
   tagNames: string[];
+  /** The display names of `tagNames` as chosen; never part of the key or the query. */
+  tagLabels?: TagLabels;
 }
 
 /** The inbox's kept state. */
@@ -71,6 +75,8 @@ export interface ProjectFilters {
   status: Choice<ProjectStatus>;
   /** Tags one member asset must carry, all of them. */
   tagNames: string[];
+  /** The display names of `tagNames` as chosen; never part of the key or the query. */
+  tagLabels?: TagLabels;
 }
 
 /** The projects list's kept state. */
@@ -116,22 +122,42 @@ type AnyFilters = AssetFilters | FileFilters | ProjectFilters;
  * @returns the key
  */
 export function listKey(filters: AnyFilters, extra?: string): string {
-  const entries = Object.entries(filters)
+  const entries = Object.entries(restricting(filters))
     .sort(([first], [second]) => (first < second ? -1 : first > second ? 1 : 0))
     .map(([name, value]) => [name, Array.isArray(value) ? [...(value as string[])].sort() : value]);
   return JSON.stringify([extra ?? null, entries]);
 }
 
 /**
- * The filters with the renamed tag in `tagNames`.
+ * The filters with the renamed tag in `tagNames` and its display name in `tagLabels`.
  *
  * @param filters the filters
  * @param change the rename
  * @returns the changed filters; the same object when the filter does not hold the tag
  */
-export function renameInFilters<F extends { tagNames: string[] }>(filters: F, change: TagRename): F {
+export function renameInFilters<F extends { tagNames: string[]; tagLabels?: TagLabels }>(
+  filters: F,
+  change: TagRename,
+): F {
   const tagNames = renameInNames(filters.tagNames, change);
-  return tagNames === filters.tagNames ? filters : { ...filters, tagNames: [...tagNames] };
+  const labels = filters.tagLabels ?? NO_LABELS;
+  const tagLabels = renameInLabels(labels, tagNames, change);
+  if (tagNames === filters.tagNames && tagLabels === labels) return filters;
+  return { ...filters, tagNames: [...tagNames], tagLabels };
+}
+
+/** No display names. */
+const NO_LABELS: TagLabels = {};
+
+/**
+ * The filter fields that restrict a list: everything but the display names.
+ *
+ * @param filters the filters
+ * @returns the fields without `tagLabels`
+ */
+function restricting<F extends AnyFilters>(filters: F): Omit<F, 'tagLabels'> {
+  const { tagLabels: _labels, ...rest } = filters;
+  return rest;
 }
 
 /**
@@ -151,7 +177,7 @@ function isSet(value: string | readonly string[]): boolean {
  * @returns true when one value is set
  */
 export function hasFilters(filters: AnyFilters): boolean {
-  return Object.values(filters).some((value: string | string[]) => isSet(value));
+  return Object.values(restricting(filters)).some((value: string | string[]) => isSet(value));
 }
 
 /**
@@ -176,7 +202,7 @@ function setValues<T extends object>(values: T): Partial<{ [K in keyof T]: Exclu
  * @returns the request without paging
  */
 export function toAssetQuery(filters: AssetFilters): Omit<IpcRequest<'assets:list'>, 'limit' | 'offset'> {
-  return setValues(filters);
+  return setValues(restricting(filters));
 }
 
 /**
@@ -190,7 +216,7 @@ export function toFileQuery(
   scope: FileScope,
   filters: FileFilters,
 ): Omit<IpcRequest<'files:list'>, 'limit' | 'offset'> {
-  return { scope, ...setValues(filters) };
+  return { scope, ...setValues(restricting(filters)) };
 }
 
 /**
@@ -200,7 +226,7 @@ export function toFileQuery(
  * @returns the request without paging
  */
 export function toProjectQuery(filters: ProjectFilters): Omit<IpcRequest<'projects:list'>, 'limit' | 'offset'> {
-  return setValues(filters);
+  return setValues(restricting(filters));
 }
 
 /** Where the gallery view is remembered on the device. */

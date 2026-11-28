@@ -174,8 +174,9 @@ function FileRow({ filters, onFilterChange }: Pick<SearchRowProps, 'filters' | '
     <>
       <TagFilter
         value={filters.tagNames}
+        labels={filters.tagLabels}
         title="Assets that carry all these tags, on the asset or on one of its files"
-        onChange={(tagNames) => onFilterChange({ tagNames })}
+        onChange={(tagNames, tagLabels) => onFilterChange({ tagNames, tagLabels })}
       />
       <select
         className={SELECT}
