@@ -50,37 +50,32 @@ interface FileCount {
   fileCount: number | null;
   /** Sets the count the Files tab reports. */
   setFileCount(count: number | null): void;
-  /** The failure of the last read; null without one. */
-  fileCountError: string | null;
 }
 
 /**
- * The Files tab count: the unfiltered total, read again whenever a token changes.
+ * The Files tab count: the unfiltered total, read again whenever a token changes. A failed read
+ * keeps the last count: the file list beside it names the failure with its own Retry.
  *
  * @param id the asset's id
  * @param reloadToken changes after the user's own changes to the files
  * @param countToken changes when a job added a file to the asset
- * @returns the count, its setter and the read's failure
+ * @returns the count and its setter
  */
 function useFileCount(id: string, reloadToken: number, countToken: number): FileCount {
   const [fileCount, setFileCount] = useState<number | null>(null);
-  const [fileCountError, setFileCountError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     call('files:list', { limit: 1, offset: 0, scope: { kind: 'asset', assetId: id } })
       .then((page) => {
-        if (cancelled) return;
-        setFileCount(page.total);
-        setFileCountError(null);
+        if (!cancelled) setFileCount(page.total);
       })
-      .catch((error: unknown) => {
-        if (!cancelled) setFileCountError(describeError(error));
-      });
+      // The list reads the same files and shows the failure; the count only waits for the next read.
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [id, reloadToken, countToken]);
-  return { fileCount, setFileCount, fileCountError };
+  return { fileCount, setFileCount };
 }
 
 /** An asset as read, with the number of mutations seen when the read started. */
@@ -159,7 +154,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   }
 
   // The Files tab count: the unfiltered total, refreshed after every change to the files.
-  const { fileCount, setFileCount, fileCountError } = useFileCount(id, reloadToken, countToken);
+  const { fileCount, setFileCount } = useFileCount(id, reloadToken, countToken);
 
   useEffect(() => {
     onBusyChange(importing);
@@ -300,11 +295,6 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
           { id: 'relations', label: 'Relations', count: relations.data?.length ?? null },
         ]}
       >
-        {tab === 'files' && fileCountError !== null && (
-          <p role="alert" className={`mt-4 ${ALERT}`}>
-            {fileCountError}
-          </p>
-        )}
         {tab === 'files' && (
           <AssetFilesTab
             asset={asset}

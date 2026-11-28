@@ -698,7 +698,7 @@ it('each tab panel shows its own load error and empty status', async () => {
   expect(await screen.findByText('Not assigned to any project')).toBeTruthy();
   unmount();
 
-  install(asset, {
+  const { calls } = install(asset, {
     'files:list': () => {
       throw fakeError('storage_unreachable');
     },
@@ -709,6 +709,14 @@ it('each tab panel shows its own load error and empty status', async () => {
   render(<Harness id={asset.id} />);
   const files = await screen.findByRole('tabpanel');
   expect(await within(files).findByRole('alert')).toBeTruthy();
+  // The count read fails as well; its failure is not repeated beside the list's own.
+  await waitFor(() => expect(calls.filter((entry) => entry.channel === 'files:list').length).toBeGreaterThan(1));
+  await act(async () => {});
+  expect(
+    within(files)
+      .getAllByRole('alert')
+      .map((alert) => alert.textContent),
+  ).toEqual(['The folder cannot be reached. Check that the drive or network share is available.']);
   expect(within(files).getByRole('button', { name: 'Retry' })).toBeTruthy();
   await user.click(screen.getByRole('tab', { name: /Relations/ }));
   const panel = screen.getByRole('tabpanel');
