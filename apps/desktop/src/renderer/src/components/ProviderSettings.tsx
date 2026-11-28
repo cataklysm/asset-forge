@@ -107,26 +107,24 @@ async function deleteEntry(
  * @param pending whether a delete has ended and the focus is still to be placed
  * @param busy whether an action runs (the entries are disabled meanwhile)
  * @param column the entry column holding the list and New
- * @param placed called once the focus was placed
+ * @param setPending the state setter of `pending`; stable, so the effect runs only on a change of `pending` or `busy`
  */
 function useFocusAfterDelete(
   pending: boolean,
   busy: boolean,
   column: RefObject<HTMLDivElement | null>,
-  placed: () => void,
+  setPending: (pending: boolean) => void,
 ): void {
   useEffect(() => {
     if (!pending || busy) return;
-    placed();
+    setPending(false);
     const element = column.current;
     if (element === null) return;
     const target =
       element.querySelector<HTMLButtonElement>('button[aria-pressed="true"]:not(:disabled)') ??
       element.querySelector<HTMLButtonElement>('button:not([aria-pressed]):not(:disabled)');
     target?.focus();
-    // `placed` and `column` are stable for the section's lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, busy]);
+  }, [pending, busy, column, setPending]);
 }
 
 /** The props of `EntryColumn`. */
@@ -190,7 +188,7 @@ export function ProviderSettings() {
   const { busy, error, setError, run } = useExclusiveRun(messageOf);
   const columnRef = useRef<HTMLDivElement>(null);
   const [focusPending, setFocusPending] = useState(false);
-  useFocusAfterDelete(focusPending, busy, columnRef, () => setFocusPending(false));
+  useFocusAfterDelete(focusPending, busy, columnRef, setFocusPending);
 
   /**
    * Shows the entry `id` (or `NEW`) in the editor and drops the last refusal.
