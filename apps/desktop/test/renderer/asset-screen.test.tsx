@@ -225,6 +225,37 @@ it('the asset tag row adds and removes through assets:addTag/removeTag', async (
   expect(callsOf(api, 'assets:removeTag')).toEqual([{ assetId: asset.id, name: 'nature' }]);
 });
 
+it('a read of the asset that started before a tag change does not undo it', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ tags: [tagOf('Nature')] });
+  const file = fileRecord({ originalName: 'a.png', assetId: asset.id, role: 'reference' });
+  const api = install(asset, {
+    'files:list': listOf([file]),
+    'files:trashMany': (r) => ({
+      items: r.fileIds.map((fileId) => ({
+        fileId,
+        file: { ...file, assetId: null, role: null, deletedAt: NOW },
+        error: null,
+      })),
+    }),
+    'assets:addTag': (r) => ({ ...asset, tags: [tagOf('Nature'), tagOf(r.name)] }),
+  });
+  render(<Harness id={asset.id} />);
+  const row = await screen.findByRole('group', { name: 'Asset tags' });
+  await screen.findByText('a.png');
+  // A delete reads the asset again; that read is held back.
+  const stale = deferred<AssetDetail>();
+  api.set('assets:get', () => stale.promise);
+  await user.click(within(tile('a.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(callsOf(api, 'assets:get').length).toBe(2));
+
+  await user.type(within(row).getByRole('combobox', { name: 'Add asset tag' }), 'Wood{Enter}');
+  expect(await within(row).findByRole('button', { name: 'Remove Wood' })).toBeTruthy();
+  await act(async () => stale.resolve({ ...asset }));
+  expect(within(row).getByRole('button', { name: 'Remove Wood' })).toBeTruthy();
+});
+
 it('the breadcrumb is a link back to the gallery', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();

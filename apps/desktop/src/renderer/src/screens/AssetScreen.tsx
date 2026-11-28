@@ -82,6 +82,26 @@ function useFileCount(id: string, reloadToken: number, countToken: number): File
   return { fileCount, setFileCount, fileCountError };
 }
 
+/** An asset as read, with the number of mutations seen when the read started. */
+interface AssetRead {
+  /** The asset. */
+  asset: AssetDetail;
+  /** The mutation count when the read started. */
+  mutations: number;
+}
+
+/**
+ * Reads the asset and notes how many mutations had answered when the read started.
+ *
+ * @param id the asset's id
+ * @param mutations the screen's mutation count
+ * @returns the asset with the count
+ */
+async function readAsset(id: string, mutations: { readonly current: number }): Promise<AssetRead> {
+  const started = mutations.current;
+  return { asset: await call('assets:get', { id }), mutations: started };
+}
+
 /**
  * One asset with its header, import and tabs.
  *
@@ -115,13 +135,27 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   });
   const zipChoice = useZipChoice();
 
-  const loaded = useLoad(() => call('assets:get', { id }), [id, renameToken]);
+  // Counts the mutations whose answer replaced the asset; a read started before the last of them is older.
+  const mutations = useRef(0);
+  const loaded = useLoad(() => readAsset(id, mutations), [id, renameToken]);
   const types = useLoad(() => call('assetTypes:list', {}), []);
   const assignments = useLoad(() => call('assignments:listByAsset', { assetId: id }), [id]);
   const relations = useLoad(() => call('relations:list', { assetId: id }), [id]);
   // The asset returned by a mutation replaces the loaded one until the next load.
   const [asset, setAsset] = useState<AssetDetail | null>(null);
-  useEffect(() => setAsset(loaded.data), [loaded.data]);
+  useEffect(() => {
+    if (loaded.data === null || loaded.data.mutations === mutations.current) setAsset(loaded.data?.asset ?? null);
+  }, [loaded.data]);
+
+  /**
+   * Shows the asset a mutation answered; a read still under way no longer replaces it.
+   *
+   * @param next the asset as the mutation left it
+   */
+  function changeAsset(next: AssetDetail) {
+    mutations.current += 1;
+    setAsset(next);
+  }
 
   // The Files tab count: the unfiltered total, refreshed after every change to the files.
   const { fileCount, setFileCount, fileCountError } = useFileCount(id, reloadToken, countToken);
@@ -146,7 +180,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   useImportReload(running, importProgress.progress, () => setReloadToken((token) => token + 1));
 
   const saveAsset = (patch: AssetPatch) =>
-    attempt(setError, async () => setAsset(await call('assets:update', { id, patch })));
+    attempt(setError, async () => changeAsset(await call('assets:update', { id, patch })));
 
   /** Like `attempt`, but rejects after reporting, so that the source list keeps the typed text. */
   async function reported(action: () => Promise<unknown>, describe = describeError): Promise<void> {
@@ -230,7 +264,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         asset={asset}
         types={types.data}
         onSave={saveAsset}
-        onAssetChange={setAsset}
+        onAssetChange={changeAsset}
         reported={reported}
         errors={headerErrors}
         importRole={importRole}
@@ -269,7 +303,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             asset={asset}
             reloadToken={reloadToken + renameToken}
             onFilesChanged={filesChanged}
-            onAssetChange={setAsset}
+            onAssetChange={changeAsset}
             onCountChange={setFileCount}
           />
         )}
