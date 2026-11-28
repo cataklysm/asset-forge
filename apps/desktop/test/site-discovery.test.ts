@@ -89,6 +89,79 @@ describe('durable gallery discovery', () => {
     expect(jobs.items.every((job) => job.type === 'site.crawl')).toBe(true);
   });
 
+  it('restarts the same extraction from scratch with the live profile, preserving its target and queued downloads', async () => {
+    let filename = '/old.jpg';
+    let hold = false;
+    let release!: () => void;
+    let begun!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      begun = resolve;
+    });
+    const saved = await open(async (url, request) => {
+      if (hold) {
+        begun();
+        request.signal.addEventListener('abort', release, { once: true });
+        await gate;
+      }
+      return { ok: true, results: { thumbnails: [filename], pagination: [] }, baseUrl: url, finalUrl: url };
+    });
+    const [type] = await h!.ok('assetTypes:list', {});
+    const asset = await h!.ok('assets:create', { name: 'Captured asset', typeId: type!.id });
+    const target = { assetId: asset.id, role: 'reference' as const };
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target });
+    const original = await ready(crawlId);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    await h!.ok('sites:import', { crawlId, selectedUrls: ['https://example.com/old.jpg'] });
+    const downloads = await h!.manager.read((session) => session.database.jobs.listByStatus('queued'));
+    await h!.ok('sites:save', { ...saved, minBytes: 250, kinds: ['image'] });
+    filename = '/fresh.jpg';
+    hold = true;
+    expect(await h!.call('sites:restartCrawl', { crawlId })).toEqual({ ok: true, value: { restarted: true } });
+    await started;
+    const restarted = await h!.ok('sites:getCrawl', { crawlId });
+    expect(restarted).toMatchObject({
+      crawlId,
+      jobId: crawlId,
+      galleryUrl: URL,
+      target,
+      status: 'running',
+      result: null,
+      candidates: [],
+      progress: { pages: 0, files: 0, cancelling: false },
+    });
+    expect(restarted.createdAt).toBe(original.createdAt);
+    const record = await h!.manager.read((session) => session.database.siteCrawls.get(crawlId));
+    expect(record).toMatchObject({ profile: { minBytes: 250 }, checkpoint: null, importedAt: null, completedAt: null });
+    expect((await h!.ok('sites:listCrawls', {})).total).toBe(1);
+    expect(await h!.call('sites:restartCrawl', { crawlId })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_operation' },
+    });
+    expect(await h!.manager.read((session) => session.database.jobs.get(downloads[0]!.id))).toEqual(downloads[0]);
+    hold = false;
+    release();
+    const fresh = await ready(crawlId);
+    expect(fresh.result?.files).toEqual(['https://example.com/fresh.jpg']);
+    expect((await h!.ok('sites:listCrawls', {})).total).toBe(1);
+    await h!.ok('jobs:clearFinished', {});
+    expect(await h!.call('sites:restartCrawl', { crawlId })).toEqual({ ok: true, value: { restarted: true } });
+    expect(
+      (await h!.ok('jobs:list', { limit: 60, offset: 0 })).items.filter((job) => job.type === 'site.crawl'),
+    ).toHaveLength(1);
+  });
+
+  it('retains the previous result when its profile is missing on restart', async () => {
+    const saved = await open();
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    const before = await ready(crawlId);
+    await h!.ok('sites:delete', { id: saved.id });
+    expect(await h!.call('sites:restartCrawl', { crawlId })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toEqual(before);
+  });
+
   it('serves a mixed Jobs page through validated IPC with nine persisted gallery extractions', async () => {
     const saved = await open();
     const ids: string[] = [];
