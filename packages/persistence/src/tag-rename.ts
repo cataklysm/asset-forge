@@ -76,7 +76,12 @@ export async function renameTag(
  * @param displayName the spelling the target takes
  * @returns nothing
  */
-function mergeTag(transaction: RenameTransaction, sourceId: string, targetId: string, displayName: string): void {
+export function mergeTag(
+  transaction: RenameTransaction,
+  sourceId: string,
+  targetId: string,
+  displayName: string,
+): void {
   mergeLinks(transaction, ASSET_LINKS, sourceId, targetId);
   mergeLinks(transaction, FILE_LINKS, sourceId, targetId);
   mergePromptLinks(transaction, sourceId, targetId);

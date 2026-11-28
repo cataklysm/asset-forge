@@ -512,6 +512,20 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName('   ')).toBeNull();
   });
 
+  it('strips control and format characters, while whitespace controls still separate words', () => {
+    const nul = String.fromCodePoint(0);
+    const zeroWidth = String.fromCodePoint(0x200b);
+    const bidiOverride = String.fromCodePoint(0x202e);
+    const softHyphen = String.fromCodePoint(0xad);
+    expect(cleanTagText(`Sci${nul}${zeroWidth} Fi${bidiOverride}`)).toBe('Sci Fi');
+    expect(cleanTagText(`${bidiOverride} a ${zeroWidth} b ${nul}`)).toBe('a b');
+    expect(cleanTagText(`Sci\tFi\r\nNow`)).toBe('Sci Fi Now');
+    expect(normalizeTagName(`ro${softHyphen}bot${String.fromCodePoint(0x7f)}`)).toBe('robot');
+    expect(normalizeTagName(`${nul}${zeroWidth}${bidiOverride}`)).toBeNull();
+    // Removing a format character between a letter and a combining mark still composes to NFC.
+    expect(normalizeTagName(`e${zeroWidth}${String.fromCodePoint(0x301)}`)).toBe(String.fromCodePoint(0xe9));
+  });
+
   it('counts code points against the 64 limit', () => {
     expect(normalizeTagName('a' + String.fromCodePoint(0x1f600).repeat(63))).not.toBeNull();
     expect(normalizeTagName('a' + String.fromCodePoint(0x1f600).repeat(64))).toBeNull();
@@ -529,12 +543,12 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName('ÄÖ')).toBe('äö');
   });
 
-  it('keeps control and format characters as they are (stripping them needs a derived-data step)', () => {
-    // Pins the current rule, so a change to it is a deliberate one: NUL, zero-width space, right-to-left override.
+  it('removes control and format characters (stored names are cleaned by the derived-data step)', () => {
+    // NUL, zero-width space, right-to-left override.
     for (const code of [0x0, 0x200b, 0x202e]) {
       const text = `a${String.fromCodePoint(code)}b`;
-      expect(cleanTagText(` ${text} `)).toBe(text);
-      expect(normalizeTagName(text)).toBe(text);
+      expect(cleanTagText(` ${text} `)).toBe('ab');
+      expect(normalizeTagName(text)).toBe('ab');
     }
   });
 });

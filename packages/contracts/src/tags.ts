@@ -55,14 +55,18 @@ export const TagRenameResultSchema = z.object({ name: z.string(), displayName: z
 /** The answer of `tags:rename`. */
 export type TagRenameResult = z.infer<typeof TagRenameResultSchema>;
 
+/** Control and format characters (NUL, zero-width, bidi overrides, soft hyphen, …): never part of a tag. */
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu;
+
 /**
- * Trimmed, whitespace-collapsed and NFC-normalised; case is kept.
+ * Whitespace becomes a single space (so a tab or line break still separates words), every other control and format
+ * character is removed, then the text is NFC-normalised, trimmed and its spaces collapsed again; case is kept.
  *
  * @param input the typed tag text
  * @returns the cleaned text, possibly empty
  */
 export function cleanTagText(input: string): string {
-  return input.normalize('NFC').trim().replace(/\s+/gu, ' ');
+  return input.replace(/\s/gu, ' ').replace(CONTROL_OR_FORMAT, '').normalize('NFC').trim().replace(/ +/gu, ' ');
 }
 
 /** Clean text, lower-cased and NFC again (lower-casing can produce a composable sequence). */
