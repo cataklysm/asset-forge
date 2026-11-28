@@ -1,27 +1,38 @@
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
 
+/** What the recovery of moves reads and writes. */
+export interface MoveRecoveryDependencies {
+  storage: Storage;
+  files: Pick<FileRepository, 'get'>;
+  fileMoves: FileMoveRepository;
+}
+
+/** How one move row was resolved. */
+type MoveResolution = 'completed' | 'discarded';
+
 /**
  * Startup recovery of interrupted moves: a move whose target exists and whose source (the
  * file row's current path) is gone happened and is committed. Every other move is discarded
  * without touching the file row or either file. Best effort: a row that cannot be resolved
  * now stays and is retried on the next open.
+ *
+ * @param dependencies the storage, the files and the move rows of the workspace
+ * @returns the ids of the files whose move was completed and of those whose move was discarded
  */
-export async function recoverFileMoves(ctx: {
-  storage: Storage;
-  files: Pick<FileRepository, 'get'>;
-  fileMoves: FileMoveRepository;
-}): Promise<{ completed: string[]; discarded: string[] }> {
+export async function recoverFileMoves(
+  dependencies: MoveRecoveryDependencies,
+): Promise<{ completed: string[]; discarded: string[] }> {
   const result = { completed: [] as string[], discarded: [] as string[] };
   let moves;
   try {
-    moves = await ctx.fileMoves.list();
+    moves = await dependencies.fileMoves.list();
   } catch {
     return result;
   }
   for (const move of moves) {
     try {
-      if ((await resolveFileMove(ctx, move)) === 'completed') result.completed.push(move.fileId);
+      if ((await resolveFileMove(dependencies, move)) === 'completed') result.completed.push(move.fileId);
       else result.discarded.push(move.fileId);
     } catch {
       // The row stays and is retried on the next open.
@@ -30,32 +41,40 @@ export async function recoverFileMoves(ctx: {
   return result;
 }
 
-type MoveContext = Parameters<typeof recoverFileMoves>[0];
-
-/** The recovery rule for one move row: commit when the target exists and the source is gone, else abort. */
-async function resolveFileMove(ctx: MoveContext, move: FileMove): Promise<'completed' | 'discarded'> {
-  const file = await ctx.files.get(move.fileId);
-  const moved =
+/**
+ * The recovery rule for one move row: commit when the target exists and the source is gone, else abort.
+ *
+ * @param dependencies the storage, the files and the move rows of the workspace
+ * @param move the open move row
+ * @returns how the row was resolved
+ */
+async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: FileMove): Promise<MoveResolution> {
+  const file = await dependencies.files.get(move.fileId);
+  const isMoved =
     file !== null &&
-    (await ctx.storage.exists(move.targetRelativePath)) &&
-    !(await ctx.storage.exists(file.relativePath));
-  if (moved) {
-    await ctx.fileMoves.commit(move.fileId);
+    (await dependencies.storage.exists(move.targetRelativePath)) &&
+    !(await dependencies.storage.exists(file.relativePath));
+  if (isMoved) {
+    await dependencies.fileMoves.commit(move.fileId);
     return 'completed';
   }
-  await ctx.fileMoves.abort(move.fileId);
+  await dependencies.fileMoves.abort(move.fileId);
   return 'discarded';
 }
 
 /**
  * Resolves an open move row of one file with the recovery rule, so a move whose commit failed in an
- * earlier session is completed or discarded before the file is acted on again. Null without a row.
- * Throws when the row cannot be resolved; it then stays for the next open.
+ * earlier session is completed or discarded before the file is acted on again.
+ *
+ * @param dependencies the storage, the files and the move rows of the workspace
+ * @param fileId the file whose move row is resolved
+ * @returns how the row was resolved; null without a row
+ * @throws when the row cannot be resolved; it then stays for the next open
  */
 export async function resolvePendingFileMove(
-  ctx: MoveContext,
+  dependencies: MoveRecoveryDependencies,
   fileId: string,
-): Promise<'completed' | 'discarded' | null> {
-  const move = (await ctx.fileMoves.list()).find((m) => m.fileId === fileId);
-  return move === undefined ? null : resolveFileMove(ctx, move);
+): Promise<MoveResolution | null> {
+  const move = (await dependencies.fileMoves.list()).find((candidate) => candidate.fileId === fileId);
+  return move === undefined ? null : resolveFileMove(dependencies, move);
 }
