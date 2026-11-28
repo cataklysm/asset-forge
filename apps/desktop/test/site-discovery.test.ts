@@ -128,6 +128,39 @@ describe('durable gallery discovery', () => {
       .toEqual({ ok: true, value: { removed: true } });
   });
 
+  it('imports cancelled partial results, permits profile edits and removes only the review entry', async () => {
+    let blocked!: () => void;
+    const secondDetail = new Promise<void>((resolve) => { blocked = resolve; });
+    const saved = await open((url, request) => {
+      if (url === URL) return Promise.resolve({ ok: true, results: { thumbnails: ['/detail/1', '/detail/2'], pagination: [] }, baseUrl: url, finalUrl: url });
+      if (url.endsWith('/1')) return Promise.resolve({ ok: true, results: { file: ['/partial.jpg'] }, baseUrl: url, finalUrl: url });
+      return new Promise((resolve) => {
+        blocked();
+        request.signal.addEventListener('abort', () => resolve({ ok: false, reason: 'failed' }), { once: true });
+      });
+    });
+    const initial = await h!.ok('sites:save', { ...profile, kinds: [...profile.kinds], id: saved.id,
+      file: '//a/@href', detailConcurrency: 1, requestGapMs: 0 });
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await secondDetail;
+    await h!.ok('sites:cancelCrawl', { crawlId });
+    await h!.until((summary) => summary.cancelled === 1);
+    const partial = await h!.ok('sites:getCrawl', { crawlId });
+    expect(partial.status).toBe('cancelled');
+    expect(partial.result?.files).toContain('https://example.com/partial.jpg');
+    await h!.ok('sites:save', { ...initial, minBytes: 500, kinds: ['document'] });
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    expect((await h!.ok('sites:import', { crawlId, selectedUrls: ['https://example.com/partial.jpg'] })).queued).toBe(1);
+    const downloads = await h!.manager.read((session) => session.database.jobs.listByStatus('queued'));
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]?.payload).toMatchObject({ filter: { kinds: ['image'], minBytes: 0 } });
+    expect(await h!.call('sites:removeCrawl' as Parameters<Harness['call']>[0], { crawlId }))
+      .toEqual({ ok: true, value: { removed: true } });
+    expect(await h!.manager.read((session) => session.database.jobs.listByStatus('queued'))).toEqual(downloads);
+    expect((await h!.ok('sites:list', {})).profiles.find((item) => item.id === saved.id))
+      .toMatchObject({ minBytes: 500, kinds: ['document'] });
+  });
+
   it('retains completed review results when the workspace is closed and reopened', async () => {
     const saved = await open();
     const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
