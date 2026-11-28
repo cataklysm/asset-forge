@@ -1,0 +1,89 @@
+import { sql } from 'drizzle-orm';
+import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { asset } from './assets.js';
+import { FILE_MOVE_KINDS, FILE_ROLES, IMPORT_STATUSES, oneOf } from './vocabulary.js';
+import { storage } from './workspace.js';
+
+export const file = sqliteTable(
+  'file',
+  {
+    id: text('id').primaryKey(),
+    storageId: text('storage_id')
+      .notNull()
+      .references(() => storage.id),
+    assetId: text('asset_id').references(() => asset.id),
+    role: text('role', { enum: FILE_ROLES }),
+    originalName: text('original_name').notNull(),
+    relativePath: text('relative_path').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes'),
+    sha256: text('sha256'),
+    kind: text('kind').notNull().default('other'),
+    width: integer('width'),
+    height: integer('height'),
+    durationMs: integer('duration_ms'),
+    status: text('status', { enum: IMPORT_STATUSES }).notNull(),
+    error: text('error'),
+    importedAt: text('imported_at').notNull(),
+    // The trash (migration 0008). `deleted_at is not null` implies `asset_id` and `role` are null; the
+    // repositories enforce it, not a CHECK, so that 0008 only adds columns and does not rebuild `file`.
+    deletedAt: text('deleted_at'),
+    trashedAssetId: text('trashed_asset_id').references(() => asset.id, { onDelete: 'set null' }),
+    trashedRole: text('trashed_role', { enum: FILE_ROLES }),
+  },
+  (t) => [
+    uniqueIndex('file_storage_id_relative_path_unique').on(t.storageId, t.relativePath),
+    index('file_deleted_at_idx').on(t.deletedAt),
+    index('file_sha256_idx').on(t.sha256),
+    index('file_status_idx').on(t.status),
+    index('file_imported_at_idx').on(t.importedAt),
+    index('file_asset_id_role_idx').on(t.assetId, t.role),
+    index('file_asset_id_kind_idx').on(t.assetId, t.kind),
+    // The complete files of one asset (search reindex); without it `file_status_idx` wins and reads every complete file.
+    index('file_asset_id_status_idx').on(t.assetId, t.status),
+    check('file_status_check', oneOf(t.status, IMPORT_STATUSES)),
+    check('file_role_check', oneOf(t.role, FILE_ROLES)),
+    check('file_asset_role_check', sql`(${t.assetId} is null) = (${t.role} is null)`),
+  ],
+);
+
+/** Web addresses a file was downloaded from (URL import); at most MAX_FILE_ORIGINS per file, gone with the file. */
+export const fileOrigin = sqliteTable(
+  'file_origin',
+  {
+    id: text('id').primaryKey(),
+    fileId: text('file_id')
+      .notNull()
+      .references(() => file.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('file_origin_file_id_url_unique').on(t.fileId, t.url), index('file_origin_url_idx').on(t.url)],
+);
+
+export const fileMove = sqliteTable(
+  'file_move',
+  {
+    fileId: text('file_id')
+      .primaryKey()
+      .references(() => file.id),
+    targetRelativePath: text('target_relative_path').notNull(),
+    targetAssetId: text('target_asset_id').references(() => asset.id),
+    targetRole: text('target_role', { enum: FILE_ROLES }),
+    createdAt: text('created_at').notNull(),
+    kind: text('kind', { enum: FILE_MOVE_KINDS }).notNull().default('relocate'),
+  },
+  (t) => [
+    check('file_move_target_role_check', oneOf(t.targetRole, FILE_ROLES)),
+    check('file_move_target_check', sql`(${t.targetAssetId} is null) = (${t.targetRole} is null)`),
+  ],
+);
+
+/**
+ * Tombstone of a purged trashed file whose trash binary may still be on disk. No foreign key: it
+ * outlives the file row and is deleted once the binary is gone.
+ */
+export const filePurge = sqliteTable('file_purge', {
+  fileId: text('file_id').primaryKey(),
+  purgedAt: text('purged_at').notNull(),
+});
