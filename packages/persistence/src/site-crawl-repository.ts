@@ -107,6 +107,7 @@ export function createSiteCrawlRepository(database: BetterSQLite3Database): Site
     insert: (record, queuedJob) => insertCrawl(database, record, queuedJob),
     get: (id) => getCrawl(database, id),
     remove: (id) => removeCrawl(database, id),
+    restart: (id, profile, now) => restartCrawl(database, id, profile, now),
     list: (page) => listCrawls(database, page),
     listSummaries: (page) => listSummaries(database, page),
     update: (id, patch) => updateCrawl(database, id, patch),
@@ -198,6 +199,91 @@ async function removeCrawl(database: BetterSQLite3Database, id: string): Promise
       .get();
     if (active !== undefined) throw new InvalidOperationError('Cancel this extraction before removing it');
     return transaction.delete(siteCrawl).where(eq(siteCrawl.id, id)).run().changes > 0;
+  });
+}
+
+/**
+ * Restarts one finished extraction and its technical job atomically, preserving destination and list identity.
+ * @param database workspace connection
+ * @param id existing crawl/job id
+ * @param profile current profile snapshot
+ * @param now restart time
+ * @returns whether the saved extraction exists
+ */
+async function restartCrawl(
+  database: BetterSQLite3Database,
+  id: string,
+  profile: Parameters<SiteCrawlRepository['restart']>[1],
+  now: string,
+): Promise<boolean> {
+  const parsed = SiteProfileSchema.parse(profile);
+  const encoded = json(parsed);
+  return database.transaction((transaction) => {
+    const existing = transaction
+      .select({ profileId: siteCrawl.profileId, profile: siteCrawl.profile })
+      .from(siteCrawl)
+      .where(eq(siteCrawl.id, id))
+      .get();
+    if (existing === undefined) return false;
+    if (
+      existing.profileId !== parsed.id ||
+      SiteProfileSchema.parse(JSON.parse(existing.profile)).site !== parsed.site
+    ) {
+      throw new ValidationFailedError('The extraction profile identity cannot change');
+    }
+    const previous = transaction.select({ type: job.type, status: job.status }).from(job).where(eq(job.id, id)).get();
+    if (
+      previous !== undefined &&
+      (previous.type !== SITE_CRAWL_JOB || (ACTIVE_JOB_STATUSES as readonly string[]).includes(previous.status))
+    ) {
+      throw new InvalidOperationError('Cancel this extraction before restarting it');
+    }
+    transaction
+      .update(siteCrawl)
+      .set({
+        profile: encoded,
+        progress: json({ pages: 0, files: 0, cancelling: false }),
+        checkpoint: null,
+        result: null,
+        cancelled: 0,
+        importedAt: null,
+        completedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(siteCrawl.id, id))
+      .run();
+    if (previous === undefined) {
+      insertJob(
+        transaction,
+        {
+          id,
+          type: SITE_CRAWL_JOB,
+          resourceClass: 'cpu',
+          fileId: null,
+          lane: parsed.site,
+          payload: { v: 1, crawlId: id },
+          dedupeKey: null,
+        },
+        now,
+      );
+    } else {
+      transaction
+        .update(job)
+        .set({
+          status: 'queued',
+          attempt: 0,
+          runAfter: null,
+          startedAt: null,
+          finishedAt: null,
+          errorCode: null,
+          errorMessage: null,
+          result: null,
+          updatedAt: now,
+        })
+        .where(eq(job.id, id))
+        .run();
+    }
+    return true;
   });
 }
 

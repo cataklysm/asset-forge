@@ -48,6 +48,50 @@ export class InMemorySiteCrawlRepository implements SiteCrawlRepository {
     return { items: copy(rows.slice(page.offset, page.offset + page.limit)), total: rows.length };
   }
 
+  async restart(id: string, profile: Parameters<SiteCrawlRepository['restart']>[1], now: string): Promise<boolean> {
+    const existing = this.rows.get(id);
+    if (existing === undefined) return false;
+    const parsed = SiteProfileSchema.parse(profile);
+    if (parsed.id !== existing.profile.id || parsed.site !== existing.profile.site)
+      throw new ValidationFailedError('The extraction profile identity cannot change');
+    const index = this.jobs.rows.findIndex((job) => job.id === id);
+    const previous = this.jobs.rows[index];
+    if (
+      previous !== undefined &&
+      (previous.type !== SITE_CRAWL_JOB || (ACTIVE_JOB_STATUSES as readonly string[]).includes(previous.status))
+    )
+      throw new InvalidOperationError('Cancel this extraction before restarting it');
+    if (previous !== undefined) this.jobs.rows.splice(index, 1);
+    await this.jobs.enqueue({
+      jobs: [
+        {
+          id,
+          type: SITE_CRAWL_JOB,
+          resourceClass: 'cpu',
+          fileId: null,
+          lane: parsed.site,
+          payload: { v: 1, crawlId: id },
+          dedupeKey: null,
+        },
+      ],
+      now,
+    });
+    this.rows.set(
+      id,
+      copy({
+        ...existing,
+        profile: parsed,
+        progress: { pages: 0, files: 0, cancelling: false },
+        result: null,
+        checkpoint: null,
+        importedAt: null,
+        completedAt: null,
+        updatedAt: now,
+      }),
+    );
+    return true;
+  }
+
   async listSummaries(page: { limit: number; offset: number }): ReturnType<SiteCrawlRepository['listSummaries']> {
     const rows = [...this.rows.values()].sort(
       (left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),

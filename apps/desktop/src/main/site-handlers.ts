@@ -42,6 +42,7 @@ export type SiteHandlers = Pick<
   | 'sites:listCrawls'
   | 'sites:getCrawl'
   | 'sites:retryCrawl'
+  | 'sites:restartCrawl'
   | 'sites:removeCrawl'
 >;
 
@@ -108,6 +109,7 @@ export function createSiteHandlers(dependencies: SiteHandlerDependencies): SiteH
     'sites:listCrawls': (request) => discovery.list(request),
     'sites:getCrawl': ({ crawlId }) => discovery.get(crawlId),
     'sites:retryCrawl': ({ crawlId }) => discovery.retry(crawlId),
+    'sites:restartCrawl': ({ crawlId }) => discovery.restart(crawlId),
     'sites:removeCrawl': ({ crawlId }) => discovery.remove(crawlId),
     'sites:cancelCrawl': async ({ crawlId }) =>
       crawlId === undefined ? handlers.cancelCrawl() : discovery.cancel(crawlId),

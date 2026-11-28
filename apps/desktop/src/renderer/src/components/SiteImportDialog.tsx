@@ -38,17 +38,15 @@ interface Props {
   target: FileTarget | null;
   onClose(): void;
   onImported?(): void;
+  /** Configuration-only dialog used by the extraction page. */
+  setupOnly?: boolean;
+  initialProfileId?: string;
+  onQueued?(crawlId: string): void;
 }
 
 /** The shared workspace is hosted either by the existing dialog or by a full navigation page. */
-type WorkspaceProps =
-  | (Props & { presentation: 'dialog' })
-  | {
-      presentation: 'page';
-      target: FileTarget | null;
-      onImported?(): void;
-      onClose?: never;
-    };
+type WorkspaceProps = Omit<Props, 'onClose'> &
+  ({ presentation: 'dialog'; onClose(): void } | { presentation: 'page'; onClose?: never });
 
 /**
  * Opens the shared import workspace in the existing asset/inbox dialog.
@@ -65,7 +63,15 @@ export function SiteImportDialog(props: Props) {
  * @param props the destination for new tasks and dialog callbacks
  * @returns the import workspace and profile-deletion confirmation
  */
-export function SiteImportWorkspace({ target, onClose, onImported, presentation }: WorkspaceProps) {
+export function SiteImportWorkspace({
+  target,
+  onClose,
+  onImported,
+  presentation,
+  setupOnly = false,
+  initialProfileId,
+  onQueued,
+}: WorkspaceProps) {
   const selectId = useId();
   const selectRef = useRef<HTMLSelectElement>(null);
   const profileFormRef = useRef<HTMLDivElement>(null);
@@ -111,10 +117,13 @@ export function SiteImportWorkspace({ target, onClose, onImported, presentation 
       ({ profiles: loaded }) => {
         if (disposed.current) return;
         setProfiles(loaded);
-        const first = loaded[0];
+        const first =
+          initialProfileId === undefined ? loaded[0] : loaded.find((profile) => profile.id === initialProfileId);
         if (first !== undefined) {
           setSelectedId(first.id);
           setDraftState(draftOf(first));
+        } else if (initialProfileId !== undefined) {
+          setError(SITE_PROFILE_UNAVAILABLE);
         }
       },
       (caught: unknown) => {
@@ -124,7 +133,7 @@ export function SiteImportWorkspace({ target, onClose, onImported, presentation 
     return () => {
       disposed.current = true;
     };
-  }, []);
+  }, [initialProfileId]);
 
   const saved = profiles.find((profile) => profile.id === selectedId) ?? null;
   const dirty = saved === null || !sameDraft(draft, draftOf(saved));
@@ -208,6 +217,7 @@ export function SiteImportWorkspace({ target, onClose, onImported, presentation 
         setError(answer.error);
         setImportResult(null);
         if (answer.lastId !== null) setSelectedCrawlId(answer.lastId);
+        if (answer.lastId !== null && answer.failed.length === 0) onQueued?.(answer.lastId);
         tasks.setPage(0);
         return tasks.refresh();
       });
@@ -274,16 +284,14 @@ export function SiteImportWorkspace({ target, onClose, onImported, presentation 
     run('queue', () => {
       const task = selected.task;
       if (task === null || profileHasUnsavedChanges || !taskProfileExists) return Promise.resolve();
-      return call('sites:enqueueCrawl', { profileId: task.profileId, url: task.galleryUrl, target: task.target }).then(
-        ({ crawlId }) => {
-          jobs.refresh();
-          if (disposed.current) return;
-          setSelectedCrawlId(crawlId);
-          setImportResult(null);
-          tasks.setPage(0);
-          return tasks.refresh();
-        },
-      );
+      return call('sites:restartCrawl', { crawlId: task.crawlId }).then(() => {
+        jobs.refresh();
+        if (disposed.current) return;
+        setSelectedCrawlId(task.crawlId);
+        setImportResult(null);
+        tasks.setPage(0);
+        return tasks.refresh();
+      });
     });
 
   const removeExtraction = () =>
@@ -340,41 +348,44 @@ export function SiteImportWorkspace({ target, onClose, onImported, presentation 
               setSelectedCrawlId(crawlId);
               setImportResult(null);
             }}
+            showTasks={!setupOnly}
           />
-          <section
-            aria-label={SITE_REVIEW_LABEL}
-            className={`flex flex-col gap-3 rounded-control border p-3 ${BORDER}`}
-          >
-            <h3 className={PANEL_TITLE}>{SITE_REVIEW_LABEL}</h3>
-            {selected.task === null ? (
-              <p className={`text-sm ${MUTED}`}>{SITE_REVIEW_EMPTY}</p>
-            ) : (
-              <SiteCrawlReview
-                key={selected.task.crawlId}
-                task={selected.task}
-                busy={locked}
-                onImport={(selection) => void importSelected(selection)}
-                onCancel={() => void cancel()}
-                onLogIn={() => void taskLogin()}
-                onRetry={() => void retry()}
-                onRemove={() => setConfirmRemove(selected.task)}
-                onEditProfile={() => void editTaskProfile()}
-                onExtractAgain={() => void extractAgain()}
-                canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
-                profileHasUnsavedChanges={profileHasUnsavedChanges}
-              />
-            )}
-            {importResult !== null && (
-              <p role="status" className="text-sm">
-                {siteImportOutcomeText(
-                  importResult.queued,
-                  importResult.alreadyImported,
-                  importResult.alreadyQueued,
-                  importResult.invalid.length,
-                )}
-              </p>
-            )}
-          </section>
+          {!setupOnly && (
+            <section
+              aria-label={SITE_REVIEW_LABEL}
+              className={`flex flex-col gap-3 rounded-control border p-3 ${BORDER}`}
+            >
+              <h3 className={PANEL_TITLE}>{SITE_REVIEW_LABEL}</h3>
+              {selected.task === null ? (
+                <p className={`text-sm ${MUTED}`}>{SITE_REVIEW_EMPTY}</p>
+              ) : (
+                <SiteCrawlReview
+                  key={selected.task.crawlId}
+                  task={selected.task}
+                  busy={locked}
+                  onImport={(selection) => void importSelected(selection)}
+                  onCancel={() => void cancel()}
+                  onLogIn={() => void taskLogin()}
+                  onRetry={() => void retry()}
+                  onRemove={() => setConfirmRemove(selected.task)}
+                  onEditProfile={() => void editTaskProfile()}
+                  onExtractAgain={() => void extractAgain()}
+                  canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
+                  profileHasUnsavedChanges={profileHasUnsavedChanges}
+                />
+              )}
+              {importResult !== null && (
+                <p role="status" className="text-sm">
+                  {siteImportOutcomeText(
+                    importResult.queued,
+                    importResult.alreadyImported,
+                    importResult.alreadyQueued,
+                    importResult.invalid.length,
+                  )}
+                </p>
+              )}
+            </section>
+          )}
         </div>
       </div>
       {shownError !== null && (

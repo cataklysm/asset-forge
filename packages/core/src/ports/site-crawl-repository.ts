@@ -34,6 +34,15 @@ export interface SiteCrawlRepository {
    * @throws InvalidOperationError while its associated discovery job is active
    */
   remove(id: string): Promise<boolean>;
+  /**
+   * Atomically clears review/recovery state and queues the same finished task with a live profile.
+   * @param id the existing crawl and job id
+   * @param profile the current profile with the same identity and site
+   * @param now the restart time
+   * @returns whether the crawl exists
+   * @throws InvalidOperationError while its discovery job is active
+   */
+  restart(id: string, profile: SiteProfile, now: string): Promise<boolean>;
   /** @param page pagination @returns newest saved tasks first */
   list(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlRecord[]; total: number }>;
   /** @param page pagination @returns lightweight queue metadata without result/checkpoint arrays */

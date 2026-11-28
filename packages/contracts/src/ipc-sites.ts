@@ -75,6 +75,11 @@ export const siteChannels = {
     request: z.object({ crawlId: IdSchema }),
     response: z.object({ retried: z.boolean() }),
   },
+  /** Restarts a finished extraction from scratch in place using its live profile and captured destination. */
+  'sites:restartCrawl': {
+    request: z.object({ crawlId: IdSchema }),
+    response: z.object({ restarted: z.boolean() }),
+  },
   /** Removes finished extraction review metadata, preserving its downloads, files, profile and session. */
   'sites:removeCrawl': {
     request: z.object({ crawlId: IdSchema }),

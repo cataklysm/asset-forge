@@ -824,10 +824,10 @@ it('opens saved extractions directly from navigation without entering an asset',
     },
   );
   await user.click(screen.getByRole('link', { name: 'Extractions' }));
-  expect(await screen.findByRole('heading', { name: 'Extractions', level: 2 })).toBeTruthy();
+  expect(await screen.findByRole('list', { name: 'Extractions' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Extractions' }).getAttribute('aria-current')).toBe('page');
   expect(screen.queryByRole('dialog')).toBeNull();
-  await user.click(await within(screen.getByRole('list', { name: 'Extractions' })).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: `Select extraction ${task.galleryUrl}` }));
   expect(await screen.findByText('Target: Captured asset · reference')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Import selected' }));
   await waitFor(() => expect(api.calls.filter((call) => call.channel === 'sites:import')).toHaveLength(1));
@@ -836,7 +836,7 @@ it('opens saved extractions directly from navigation without entering an asset',
   await user.click(screen.getByRole('link', { name: /^Jobs/ }));
   await screen.findByRole('heading', { name: /^Jobs/, level: 2 });
   await user.click(screen.getByRole('link', { name: 'Extractions' }));
-  expect(await within(screen.getByRole('list', { name: 'Extractions' })).findByRole('button')).toBeTruthy();
+  expect(await screen.findByRole('button', { name: `Select extraction ${task.galleryUrl}` })).toBeTruthy();
   expect(api.calls.filter((call) => call.channel === 'sites:cancelCrawl')).toHaveLength(0);
 });
 

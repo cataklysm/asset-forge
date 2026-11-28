@@ -113,6 +113,16 @@ function setup(seed: SiteCrawlTask[] = [], target: FileTarget | null = null, ext
     },
     'sites:cancelCrawl': () => ({ cancelling: true }),
     'sites:retryCrawl': () => ({ retried: true }),
+    'sites:restartCrawl': ({ crawlId }) => {
+      const task = state.tasks.find((entry) => entry.crawlId === crawlId)!;
+      Object.assign(task, {
+        status: 'queued',
+        result: null,
+        candidates: [],
+        progress: { pages: 0, files: 0, cancelling: false },
+      });
+      return { restarted: true };
+    },
     'sites:removeCrawl': ({ crawlId }) => {
       const before = state.tasks.length;
       state.tasks = state.tasks.filter((task) => task.crawlId !== crawlId);
@@ -172,7 +182,7 @@ it('loads the selected extraction live profile for editing instead of the first 
   ).toBeTruthy();
 });
 
-it('extracts again using the saved profile and captured destination rather than current asset navigation', async () => {
+it('restarts the same extraction using its captured destination rather than current asset navigation', async () => {
   const profile = profileOf();
   const captured: FileTarget = { assetId: nextId(), role: 'reference' };
   const current: FileTarget = { assetId: nextId(), role: 'final' };
@@ -180,14 +190,10 @@ it('extracts again using the saved profile and captured destination rather than 
   const { api, state, user } = setup([task], current, { 'sites:list': () => ({ profiles: [profile] }) });
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Extract again' }));
-  await waitFor(() => expect(requests(api, 'sites:enqueueCrawl')).toHaveLength(1));
-  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({
-    profileId: task.profileId,
-    url: task.galleryUrl,
-    target: captured,
-  });
-  expect(state.tasks.some((entry) => entry.crawlId === task.crawlId && entry.status === 'imported')).toBe(true);
-  expect(state.tasks).toHaveLength(2);
+  await waitFor(() => expect(requests(api, 'sites:restartCrawl')).toEqual([{ crawlId: task.crawlId }]));
+  expect(requests(api, 'sites:enqueueCrawl')).toEqual([]);
+  expect(state.tasks).toHaveLength(1);
+  expect(state.tasks[0]).toMatchObject({ crawlId: task.crawlId, target: captured, status: 'queued', result: null });
 });
 
 it('removes only confirmed extraction history and leaves downloads and profile alone', async () => {
@@ -245,13 +251,9 @@ it('requires saving edits to the task profile before explicitly extracting again
   await waitFor(() => expect(again.disabled).toBe(false));
   expect(live.file).toBe('//a/@href');
   await user.click(again);
-  await waitFor(() => expect(requests(api, 'sites:enqueueCrawl')).toHaveLength(1));
-  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({
-    profileId: live.id,
-    url: task.galleryUrl,
-    target: task.target,
-  });
-  expect(task.candidates).toHaveLength(2);
+  await waitFor(() => expect(requests(api, 'sites:restartCrawl')).toEqual([{ crawlId: task.crawlId }]));
+  expect(requests(api, 'sites:enqueueCrawl')).toEqual([]);
+  expect(task.candidates).toHaveLength(0);
 });
 
 it('retains cancelled partial results after importing them and exposes edit, remove and explicit new extraction', async () => {

@@ -364,6 +364,24 @@ export class SiteDiscoveryService {
   }
 
   /**
+   * Starts a fresh run of the same extraction with its current profile; existing downloads remain independent.
+   * @param crawlId existing extraction
+   * @returns whether it was restarted
+   */
+  async restart(crawlId: string): Promise<IpcResponse<'sites:restartCrawl'>> {
+    const restarted = await this.dependencies.manager.exclusive(async (session) => {
+      const record = await requireCrawl(session, crawlId);
+      const profile = this.dependencies.store.get(record.profile.id);
+      if (profile === null) throw new NotFoundError(SITE_PROFILE_NOT_FOUND);
+      const changed = await session.database.siteCrawls.restart(crawlId, profile, session.now().toISOString());
+      if (changed) this.dependencies.jobs.resume(profile.site, ['cpu']);
+      return changed;
+    });
+    if (restarted) this.changed();
+    return { restarted };
+  }
+
+  /**
    * Distinguishes saved tasks from legacy previews.
    * @param crawlId selected task
    * @returns whether it exists in this workspace

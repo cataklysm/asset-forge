@@ -103,6 +103,7 @@ export const idleServices: AppServices = {
     'sites:listCrawls': async () => ({ items: [], total: 0 }),
     'sites:getCrawl': notUsed,
     'sites:retryCrawl': notUsed,
+    'sites:restartCrawl': notUsed,
     'sites:removeCrawl': notUsed,
   },
 };

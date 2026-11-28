@@ -63,6 +63,27 @@ function eligibleUrls(task: SiteCrawlTask, skipExistingNames: boolean): Set<stri
   );
 }
 
+/**
+ * The review selection sent by either the detail controls or a card's Import action.
+ * @param task saved result with current filename matches
+ * @param selected explicit URLs, otherwise the eligible default selection
+ * @param skipExistingNames whether matching names are skipped
+ * @returns the captured task's import choices
+ */
+export function siteImportSelection(
+  task: SiteCrawlTask,
+  selected = eligibleUrls(task, task.target !== null),
+  skipExistingNames = task.target !== null,
+): SiteImportSelection {
+  return {
+    selectedUrls: [...selected],
+    skipExistingNames,
+    includeExistingUrls: task.candidates
+      .filter((candidate) => candidate.alreadyPresent && selected.has(candidate.url))
+      .map((candidate) => candidate.url),
+  };
+}
+
 /** Review controls and actions for one captured extraction. */
 interface Props {
   task: SiteCrawlTask;
@@ -76,6 +97,8 @@ interface Props {
   onExtractAgain(): void;
   canExtractAgain: boolean;
   profileHasUnsavedChanges: boolean;
+  actionsInMenu?: boolean;
+  onSelectionChange?(selection: SiteImportSelection): void;
 }
 
 /**
@@ -96,6 +119,8 @@ export function SiteCrawlReview({
   onExtractAgain,
   canExtractAgain,
   profileHasUnsavedChanges,
+  actionsInMenu = false,
+  onSelectionChange,
 }: Props) {
   const [skipExistingNames, setSkipExistingNames] = useState(task.target !== null);
   const [selected, setSelected] = useState(() => eligibleUrls(task, task.target !== null));
@@ -106,6 +131,9 @@ export function SiteCrawlReview({
     task.candidates.map((candidate) => [candidate.url, candidate.alreadyPresent]),
   ]);
   const selectionRevision = useRef(selectionKey);
+  useEffect(() => {
+    onSelectionChange?.(siteImportSelection(task, selected, skipExistingNames));
+  }, [task, selected, skipExistingNames, onSelectionChange]);
   useEffect(() => {
     if (selectionRevision.current === selectionKey) return;
     selectionRevision.current = selectionKey;
@@ -150,24 +178,33 @@ export function SiteCrawlReview({
         <button type="button" className={BUTTON} disabled={busy} onClick={onEditProfile}>
           {SITE_EDIT_PROFILE_LABEL}
         </button>
-        <button type="button" className={BUTTON} disabled={busy || active || !canExtractAgain} onClick={onExtractAgain}>
-          {SITE_EXTRACT_AGAIN_LABEL}
-        </button>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={busy || active}
-          title={active ? SITE_REMOVE_ACTIVE_TITLE : SITE_REMOVE_EXTRACTION_LABEL}
-          onClick={onRemove}
-        >
-          {SITE_REMOVE_EXTRACTION_LABEL}
-        </button>
+        {!actionsInMenu && (
+          <>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy || active || !canExtractAgain}
+              onClick={onExtractAgain}
+            >
+              {SITE_EXTRACT_AGAIN_LABEL}
+            </button>
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={busy || active}
+              title={active ? SITE_REMOVE_ACTIVE_TITLE : SITE_REMOVE_EXTRACTION_LABEL}
+              onClick={onRemove}
+            >
+              {SITE_REMOVE_EXTRACTION_LABEL}
+            </button>
+          </>
+        )}
       </div>
-      <p className={`text-xs ${MUTED}`}>{SITE_PROFILE_CHANGES_HINT}</p>
+      {!actionsInMenu && <p className={`text-xs ${MUTED}`}>{SITE_PROFILE_CHANGES_HINT}</p>}
       {profileHasUnsavedChanges && <p className={`text-sm ${MUTED}`}>{SITE_SAVE_BEFORE_EXTRACT_HINT}</p>}
       {task.status === 'imported' && <p className={`text-sm ${MUTED}`}>{SITE_DOWNLOADS_HINT}</p>}
       <div className="flex flex-wrap gap-2">
-        {active && (
+        {active && !actionsInMenu && (
           <button type="button" className={BUTTON} disabled={busy || task.progress.cancelling} onClick={onCancel}>
             {CRAWL_CANCEL_LABEL}
           </button>
@@ -294,15 +331,7 @@ export function SiteCrawlReview({
               type="button"
               className={BUTTON}
               disabled={busy || !reviewable || selected.size === 0}
-              onClick={() =>
-                onImport({
-                  selectedUrls: [...selected],
-                  skipExistingNames,
-                  includeExistingUrls: task.candidates
-                    .filter((candidate) => candidate.alreadyPresent && selected.has(candidate.url))
-                    .map((candidate) => candidate.url),
-                })
-              }
+              onClick={() => onImport(siteImportSelection(task, selected, skipExistingNames))}
             >
               {SITE_IMPORT_SELECTED_LABEL}
             </button>

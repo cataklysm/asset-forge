@@ -70,6 +70,45 @@ afterEach(async () => {
 });
 
 describe('durable site crawl results', () => {
+  test.each(['queued', 'running', 'retry_wait', 'waiting_remote'])(
+    'refuses restart atomically while the technical job is %s',
+    async (status) => {
+      const row = { ...record(20), result: result(uuid(20)), checkpoint: { pending: ['detail'] } };
+      await db.siteCrawls.insert(row, {
+        id: row.id,
+        type: 'site.crawl',
+        resourceClass: 'cpu',
+        fileId: null,
+        lane: profile.site,
+        payload: { v: 1, crawlId: row.id },
+        dedupeKey: null,
+      });
+      const sqlite = new Database(path);
+      try {
+        sqlite.prepare('UPDATE job SET status = ? WHERE id = ?').run(status, row.id);
+      } finally {
+        sqlite.close();
+      }
+      const before = await db.siteCrawls.get(row.id);
+      const job = await db.jobs.get(row.id);
+      await expect(db.siteCrawls.restart(row.id, { ...profile, minBytes: 99 }, T1)).rejects.toMatchObject({
+        code: 'invalid_operation',
+      });
+      expect(await db.siteCrawls.get(row.id)).toEqual(before);
+      expect(await db.jobs.get(row.id)).toEqual(job);
+    },
+  );
+
+  test('refuses to change profile identity on restart without losing saved results', async () => {
+    const row = { ...record(20), result: result(uuid(20)) };
+    await db.siteCrawls.insert(row);
+    await expect(db.siteCrawls.restart(row.id, { ...profile, id: uuid(2) }, T1)).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
+    expect(await db.siteCrawls.get(row.id)).toMatchObject(row);
+    expect(await db.jobs.get(row.id)).toBeNull();
+    expect(await db.siteCrawls.restart(uuid(999), profile, T1)).toBe(false);
+  });
   test('removes only finished review metadata and preserves the technical job', async () => {
     const row = record(10);
     await db.siteCrawls.insert(row, {

@@ -133,6 +133,7 @@ it("uses the owner's current selection when importing from the selected card men
   await waitFor(() => expect(card(saved)).toBeTruthy());
   await user.click(card(saved));
   await user.click(await screen.findByRole('checkbox', { name: 'Select a.png' }));
+  await user.click(card(saved));
   await user.click(within(await menu(saved)).getByRole('menuitem', { name: 'Import' }));
   await waitFor(() =>
     expect(api.calls.find((call) => call.channel === 'sites:import')?.request).toMatchObject({
@@ -240,4 +241,30 @@ it('ignores a late detail response after selecting a different extraction', asyn
   await screen.findByText('Target: fast asset · reference');
   pending.resolve(first);
   await waitFor(() => expect(screen.queryByText('Target: slow asset · reference')).toBeNull());
+});
+
+it("edits the selected task's live profile in a separate dialog, not the first listed profile", async () => {
+  const other = { ...profile, id: nextId(), name: 'Other profile' };
+  const saved = task('profile');
+  const { user } = setup([saved], { 'sites:list': () => ({ profiles: [other, profile] }) });
+  await waitFor(() => expect(card(saved)).toBeTruthy());
+  await user.click(card(saved));
+  await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
+  await waitFor(() =>
+    expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Gallery'),
+  );
+  expect(within(dialog).queryByRole('list', { name: 'Extractions' })).toBeNull();
+});
+
+it('reports a missing task profile instead of silently editing another profile', async () => {
+  const other = { ...profile, id: nextId(), name: 'Other profile' };
+  const saved = task('missing');
+  const { user } = setup([saved], { 'sites:list': () => ({ profiles: [other] }) });
+  await waitFor(() => expect(card(saved)).toBeTruthy());
+  await user.click(card(saved));
+  await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Import from site' });
+  expect(await within(dialog).findByText('This extraction profile no longer exists.')).toBeTruthy();
+  expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('');
 });

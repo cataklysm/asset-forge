@@ -28,6 +28,7 @@ interface Props {
   onUrlsChange(value: string): void;
   onQueue(): void;
   onSelect(crawlId: string): void;
+  showTasks?: boolean;
 }
 
 /**
@@ -46,6 +47,7 @@ export function SiteExtractionQueue({
   onUrlsChange,
   onQueue,
   onSelect,
+  showTasks = true,
 }: Props) {
   const urlsId = useId();
   return (
@@ -74,55 +76,57 @@ export function SiteExtractionQueue({
           </button>
         </div>
       </section>
-      <section aria-label={SITE_TASKS_LABEL} className="flex flex-col gap-2">
-        <h3 className={PANEL_TITLE}>
-          {SITE_TASKS_LABEL} <span className={MUTED}>({tasks.total})</span>
-        </h3>
-        {!tasks.loading && tasks.items.length === 0 && <p className={`text-sm ${MUTED}`}>{SITE_TASKS_EMPTY}</p>}
-        <ul aria-label={SITE_TASKS_LABEL} className={`max-h-52 overflow-y-auto rounded-control border ${BORDER}`}>
-          {tasks.items.map((task) => (
-            <li key={task.crawlId} className={`border-b last:border-b-0 ${BORDER}`}>
+      {showTasks && (
+        <section aria-label={SITE_TASKS_LABEL} className="flex flex-col gap-2">
+          <h3 className={PANEL_TITLE}>
+            {SITE_TASKS_LABEL} <span className={MUTED}>({tasks.total})</span>
+          </h3>
+          {!tasks.loading && tasks.items.length === 0 && <p className={`text-sm ${MUTED}`}>{SITE_TASKS_EMPTY}</p>}
+          <ul aria-label={SITE_TASKS_LABEL} className={`max-h-52 overflow-y-auto rounded-control border ${BORDER}`}>
+            {tasks.items.map((task) => (
+              <li key={task.crawlId} className={`border-b last:border-b-0 ${BORDER}`}>
+                <button
+                  type="button"
+                  className={`${BUTTON} h-auto w-full flex-col items-start border-0 px-3 py-2 text-left`}
+                  aria-pressed={task.crawlId === selectedCrawlId}
+                  onClick={() => onSelect(task.crawlId)}
+                >
+                  <span className="flex w-full flex-wrap justify-between gap-2">
+                    <span>{task.profileName}</span>
+                    <span className={`text-xs ${MUTED}`}>{SITE_TASK_STATUS[task.status]}</span>
+                  </span>
+                  <span className="max-w-full truncate text-xs" title={task.galleryUrl}>
+                    {shortUrl(task.galleryUrl)}
+                  </span>
+                  <span className={`text-xs ${MUTED}`}>
+                    {crawlTargetLabel(task)} · {crawlProgressText(task.progress.pages, task.progress.files)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {tasks.total > CRAWL_TASK_PAGE_SIZE && (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={`${BUTTON} h-auto w-full flex-col items-start border-0 px-3 py-2 text-left`}
-                aria-pressed={task.crawlId === selectedCrawlId}
-                onClick={() => onSelect(task.crawlId)}
+                className={BUTTON}
+                disabled={tasks.page === 0}
+                onClick={() => tasks.setPage(tasks.page - 1)}
               >
-                <span className="flex w-full flex-wrap justify-between gap-2">
-                  <span>{task.profileName}</span>
-                  <span className={`text-xs ${MUTED}`}>{SITE_TASK_STATUS[task.status]}</span>
-                </span>
-                <span className="max-w-full truncate text-xs" title={task.galleryUrl}>
-                  {shortUrl(task.galleryUrl)}
-                </span>
-                <span className={`text-xs ${MUTED}`}>
-                  {crawlTargetLabel(task)} · {crawlProgressText(task.progress.pages, task.progress.files)}
-                </span>
+                {SITE_REVIEW_TEXT.previousTasks}
               </button>
-            </li>
-          ))}
-        </ul>
-        {tasks.total > CRAWL_TASK_PAGE_SIZE && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={tasks.page === 0}
-              onClick={() => tasks.setPage(tasks.page - 1)}
-            >
-              {SITE_REVIEW_TEXT.previousTasks}
-            </button>
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={(tasks.page + 1) * CRAWL_TASK_PAGE_SIZE >= tasks.total}
-              onClick={() => tasks.setPage(tasks.page + 1)}
-            >
-              {SITE_REVIEW_TEXT.nextTasks}
-            </button>
-          </div>
-        )}
-      </section>
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={(tasks.page + 1) * CRAWL_TASK_PAGE_SIZE >= tasks.total}
+                onClick={() => tasks.setPage(tasks.page + 1)}
+              >
+                {SITE_REVIEW_TEXT.nextTasks}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }
