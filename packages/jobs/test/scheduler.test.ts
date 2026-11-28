@@ -1822,6 +1822,29 @@ describe('lane hold', () => {
     expect([a1, a2, a3].map((id) => s.row(id).status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
   });
 
+  it('claims no job enqueued or retried into a held lane before the hold ends', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1] = (await s.enqueue('dl', 'io', 1, 'a')) as [string];
+    await s.scheduler.start();
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
+    await flush();
+
+    // Neither a new job nor one the user retries is touched by the hold in the database.
+    const [a2] = (await s.enqueue('dl', 'io', 1, 'a')) as [string];
+    const [b1] = (await s.enqueue('dl', 'io', 1, 'b')) as [string];
+    s.scheduler.wake();
+    await flush();
+    expect(s.row(a2)).toMatchObject({ status: 'queued', attempt: 0 });
+    expect(s.row(b1).status).toBe('running');
+    expect(s.timers.map((x) => x.ms)).toEqual([120_000 - 2]);
+
+    s.advance(120_000 - 2);
+    h.runOf(b1).resolve();
+    await s.fireTimer();
+    expect(s.row(a1)).toMatchObject({ status: 'running', attempt: 2 });
+  });
+
   it('reports a hold that moved waiting jobs as a change of several rows', async () => {
     const h = controlled('io');
     const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });

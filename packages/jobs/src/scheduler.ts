@@ -14,6 +14,7 @@ import {
   type JobOutcome,
   type JobRepository,
 } from '@assetforge/core';
+import { LaneHolds } from './lane-holds.js';
 import type { PauseGate } from './pause-gate.js';
 
 /** Running jobs per lane of a class, unless `laneLimit` answers another limit for the lane. */
@@ -270,6 +271,8 @@ class JobScheduler {
   private recoveryPending = false;
   /** The classes whose last pass failed; a failure streak is logged once. */
   private readonly failingClasses = new Set<ResourceClass>();
+  /** The lanes held after a job asked for a wait. */
+  private readonly laneHolds = new LaneHolds();
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -513,7 +516,10 @@ class JobScheduler {
     // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
     // resume; only the other lanes need the timer.
     const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
-    return next === null ? null : Date.parse(next);
+    // A held lane is excluded above, so the end of its hold needs a timer of its own.
+    const holdEnd = this.laneHolds.earliestEnd(resourceClass, this.config.now().getTime());
+    const candidates = [next === null ? null : Date.parse(next), holdEnd].filter((time) => time !== null);
+    return candidates.length === 0 ? null : Math.min(...candidates);
   }
 
   /**
@@ -651,15 +657,30 @@ class JobScheduler {
       return this.finish(job, { status: 'failed', errorCode: 'internal_error' });
     }
     if (!isRetryableJobError(error.code)) return this.finish(job, { status: 'failed', errorCode: error.code });
+    return this.settleRetryable(job, error);
+  }
+
+  /**
+   * Stores the outcome of a run that failed with a retryable code: a retry, or the end after the last run. A wait the
+   * error asks for holds the lane, in memory before anything is written and then in the database.
+   *
+   * @param job the job of the run
+   * @param error the retryable error
+   * @returns resolves once the outcome and the lane hold are written
+   */
+  private async settleRetryable(job: Job, error: JobError): Promise<void> {
     const wait = error.retryAfterMs;
+    const now = this.config.now().getTime();
+    const holdEnd = job.attempt >= MAX_ATTEMPTS ? now + (wait ?? 0) : now + retryDelayMs(job.attempt, wait);
+    // Held in memory first: no claim in the window before the rows below are written takes a job of the lane.
+    if (wait !== null) this.laneHolds.hold(job.resourceClass, job.lane, holdEnd);
+    const until = new Date(holdEnd).toISOString();
     if (job.attempt >= MAX_ATTEMPTS) {
       await this.finish(job, { status: 'failed', errorCode: error.code });
-      if (wait !== null) await this.holdLane(job, new Date(this.config.now().getTime() + wait).toISOString());
-      return;
+    } else {
+      await this.config.jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter: until, now: this.iso() });
     }
-    const runAfter = new Date(this.config.now().getTime() + retryDelayMs(job.attempt, wait)).toISOString();
-    await this.config.jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter, now: this.iso() });
-    if (wait !== null) await this.holdLane(job, runAfter);
+    if (wait !== null) await this.holdLane(job, until);
   }
 
   /**
@@ -878,7 +899,7 @@ class JobScheduler {
   }
 
   /**
-   * Lanes the class may not claim from: the paused ones and those already running their limit.
+   * Lanes the class may not claim from: the paused ones, the held ones and those already running their limit.
    *
    * @param resourceClass the class
    * @returns the excluded lanes, paused ones first
@@ -887,6 +908,7 @@ class JobScheduler {
     const excluded = new Set<string | null>(
       this.options.pause ? this.options.pause.paused(resourceClass).map((entry) => entry.lane) : [],
     );
+    for (const lane of this.laneHolds.held(resourceClass, this.config.now().getTime())) excluded.add(lane);
     for (const [lane, count] of this.runningOf(resourceClass)) {
       if (count >= this.limitOf(resourceClass, lane)) excluded.add(lane);
     }
