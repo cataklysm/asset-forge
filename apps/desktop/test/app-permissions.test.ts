@@ -21,6 +21,7 @@ const context: AppPermissionContext = {
   mainContents: () => main,
   isAppUrl: (url) => isAppUrl(url, APP_URL),
   isAppOrigin: (origin) => isAppOrigin(origin, APP_URL),
+  isFilePage: true,
 };
 const appFrame = { isMainFrame: true, isApp: true };
 
@@ -87,15 +88,47 @@ describe('app permissions', () => {
     expect(requested({ isMainFrame: true, requestingUrl: FOREIGN })).toBe(false);
   });
 
-  it('answers a check only for the main frame with the app origin and URL', () => {
+  it('answers a check only for the main frame, deciding by its URL when one is named and else by its origin', () => {
     const { check } = installed();
     const permission = 'clipboard-sanitized-write';
     expect(check(main, permission, 'file:///', { isMainFrame: true, requestingUrl: APP_URL })).toBe(true);
     expect(check(main, permission, 'file:///', { isMainFrame: true })).toBe(true);
     expect(check(main, permission, 'file:///', { isMainFrame: false, requestingUrl: APP_URL })).toBe(false);
-    expect(check(main, permission, 'https://example.com', { isMainFrame: true, requestingUrl: APP_URL })).toBe(false);
     expect(check(main, permission, 'file:///', { isMainFrame: true, requestingUrl: FOREIGN })).toBe(false);
+    expect(check(main, permission, 'https://example.com', { isMainFrame: true })).toBe(false);
     expect(check(null, permission, 'file:///', { isMainFrame: true, requestingUrl: APP_URL })).toBe(false);
+  });
+
+  it.each(['null', ''])('accepts the opaque origin %j of the file app page only in the main window', (origin) => {
+    const { check } = installed();
+    const permission = 'clipboard-sanitized-write';
+    expect(check(main, permission, origin, { isMainFrame: true, requestingUrl: APP_URL })).toBe(true);
+    expect(check(main, permission, origin, { isMainFrame: true })).toBe(true);
+    expect(check(main, permission, origin, { isMainFrame: true, requestingUrl: FOREIGN })).toBe(false);
+    expect(check(main, permission, origin, { isMainFrame: false })).toBe(false);
+    expect(check(contentsAt(APP_URL), permission, origin, { isMainFrame: true })).toBe(false);
+    expect(check(null, permission, origin, { isMainFrame: true })).toBe(false);
+  });
+
+  it('refuses an opaque origin when the app page is not a file page', () => {
+    const devUrl = 'http://localhost:5173/';
+    const devMain = contentsAt(devUrl);
+    const handlers: { check?: Parameters<PermissionSession['setPermissionCheckHandler']>[0] } = {};
+    restrictAppPermissions(
+      {
+        setPermissionRequestHandler: () => undefined,
+        setPermissionCheckHandler: (handler) => (handlers.check = handler),
+      },
+      {
+        mainContents: () => devMain,
+        isAppUrl: (url) => isAppUrl(url, devUrl),
+        isAppOrigin: (origin) => isAppOrigin(origin, devUrl),
+        isFilePage: false,
+      },
+    );
+    expect(handlers.check!(devMain, 'fullscreen', 'http://localhost:5173', { isMainFrame: true })).toBe(true);
+    expect(handlers.check!(devMain, 'fullscreen', 'null', { isMainFrame: true })).toBe(false);
+    expect(handlers.check!(devMain, 'fullscreen', '', { isMainFrame: true })).toBe(false);
   });
 
   it('matches app origins by scheme and host for files and by origin for the dev server', () => {

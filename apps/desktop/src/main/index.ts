@@ -171,6 +171,7 @@ function start(): void {
         mainContents: () => state.mainWindow?.webContents ?? null,
         isAppUrl: (url) => isAppUrl(url, appUrl),
         isAppOrigin: (origin) => isAppOrigin(origin, appUrl),
+        isFilePage: appUrl.startsWith('file:'),
       });
       registerMediaProtocol(manager, previews);
       openMainWindow(state, siteSessions, windowOptions);

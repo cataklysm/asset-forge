@@ -72,7 +72,12 @@ export interface AppPermissionContext {
    * @returns whether it is the app's origin
    */
   isAppOrigin(origin: string): boolean;
+  /** Whether the app page is a `file:` page, whose origin Electron may name as `'null'` or `''`. */
+  isFilePage: boolean;
 }
+
+/** The origins Electron may name for a `file:` page, which has an opaque origin. */
+const OPAQUE_ORIGINS: ReadonlySet<string> = new Set(['null', '']);
 
 /** The frame that asks, as far as the rule needs it. */
 export interface PermissionFrame {
@@ -105,7 +110,9 @@ export function isAppPermissionGranted(
 }
 
 /**
- * The asking frame of a permission check: its origin must be the app's, and so must its URL when Electron names one.
+ * The asking frame of a permission check. Its URL decides when Electron names one; otherwise its origin must be the
+ * app's, where a `file:` app page also accepts the opaque origin `'null'` or `''`. The rule still requires the main
+ * frame of the main window showing the app page, so an opaque origin alone never grants anything.
  *
  * @param context the app URL rules
  * @param requestingOrigin the origin Electron names
@@ -117,8 +124,11 @@ function checkingFrame(
   requestingOrigin: string,
   details: PermissionCheckDetails,
 ): PermissionFrame {
-  const urlIsApp = details.requestingUrl === undefined || context.isAppUrl(details.requestingUrl);
-  return { isMainFrame: details.isMainFrame, isApp: urlIsApp && context.isAppOrigin(requestingOrigin) };
+  if (details.requestingUrl !== undefined) {
+    return { isMainFrame: details.isMainFrame, isApp: context.isAppUrl(details.requestingUrl) };
+  }
+  const isOpaqueFileOrigin = context.isFilePage && OPAQUE_ORIGINS.has(requestingOrigin);
+  return { isMainFrame: details.isMainFrame, isApp: isOpaqueFileOrigin || context.isAppOrigin(requestingOrigin) };
 }
 
 /**
