@@ -3,12 +3,14 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BACKUP_UNREADABLE_MESSAGE } from '@assetforge/contracts';
-import { InvalidOperationError, type BackupSource } from '@assetforge/core';
+import { BackupError, InvalidOperationError, type BackupSource } from '@assetforge/core';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { createDatabaseBackups, type DatabaseBackupsOptions } from '../src/database-backups.js';
 import { LOCAL_TEMPORARY_PATTERN } from '../src/database-snapshot.js';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 import { createWorkspaceDatabase, realChecker, shippedMigrationCount, WORKSPACE_ID } from './backup-fixtures.js';
+import { migrationsUpTo } from './migrations-folder.js';
 
 const NOW = new Date('2026-11-28T09:05:03Z');
 
@@ -149,6 +151,72 @@ describe('stageRestore', () => {
       failing.stageRestore(WORKSPACE_ID, { origin: 'regular', directory: regular, name: 'x' }, signal()),
     ).rejects.toThrow(BACKUP_UNREADABLE_MESSAGE);
     expect(await temporaryFiles()).toEqual([]);
+  });
+
+  test('install of a copy without facts is refused and the live file stays', async () => {
+    await createWorkspaceDatabase(databaseDirectory);
+    const before = await checksum(live);
+    await writeFile(join(regular, 'damaged.sqlite'), 'not a database at all '.repeat(100));
+    const staged = await backups().stageRestore(
+      WORKSPACE_ID,
+      { origin: 'regular', directory: regular, name: 'damaged.sqlite' },
+      signal(),
+    );
+    await expect(staged.install()).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(await checksum(live)).toBe(before);
+    await staged.discard();
+    expect(await temporaryFiles()).toEqual([]);
+  });
+
+  test('an aborted stage answers backup_failed, during the copy and during the check', async () => {
+    await createWorkspaceDatabase(regular, 'good.sqlite');
+    const duringCopy = new AbortController();
+    const copyAborted = backups({
+      copyIn: async () => {
+        duringCopy.abort();
+        throw new Error('stopped');
+      },
+    }).stageRestore(WORKSPACE_ID, { origin: 'regular', directory: regular, name: 'good.sqlite' }, duringCopy.signal);
+    await expect(copyAborted).rejects.toBeInstanceOf(BackupError);
+    await expect(copyAborted).rejects.toMatchObject({ code: 'backup_failed' });
+    const duringCheck = new AbortController();
+    const checkAborted = backups({
+      check: async () => {
+        duringCheck.abort();
+        return null;
+      },
+    }).stageRestore(WORKSPACE_ID, { origin: 'regular', directory: regular, name: 'good.sqlite' }, duringCheck.signal);
+    await expect(checkAborted).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(await temporaryFiles()).toEqual([]);
+  });
+
+  test('a restored copy with an older schema opens migrated, with its lineage and in WAL mode', async () => {
+    const { lineageId } = await createWorkspaceDatabase(regular, 'good.sqlite');
+    await createWorkspaceDatabase(databaseDirectory);
+    const newer = await migrationsUpTo(join(dir, 'newer'), await shippedMigrationCount(), [
+      { tag: '9999_later', sql: 'CREATE TABLE later (id integer);' },
+    ]);
+    const staged = await backups({ check: realChecker(newer) }).stageRestore(
+      WORKSPACE_ID,
+      { origin: 'regular', directory: regular, name: 'good.sqlite' },
+      signal(),
+    );
+    expect(staged.facts).toMatchObject({ lineageId, appliedMigrations: await shippedMigrationCount() });
+    await staged.install();
+    const database = await openWorkspaceDatabase(live, newer);
+    try {
+      expect((await database.meta.get())!.lineageId).toBe(lineageId);
+    } finally {
+      await database.close();
+    }
+    const sqlite = new Database(live);
+    try {
+      expect(sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
+      expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'later'").get()).toEqual({ name: 'later' });
+    } finally {
+      sqlite.close();
+    }
+    expect((await readdir(databaseDirectory)).some((name) => name.includes('.restore-'))).toBe(false);
   });
 
   test('stageRestore creates a missing database directory', async () => {

@@ -3,7 +3,7 @@ import { copyFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { BackupError, type DatabaseSnapshot, type SnapshotFacts } from '@assetforge/core';
 import type Database from 'better-sqlite3';
-import type { BackupChecker } from './backup-check.js';
+import { checkExited, isCheckRunning, type BackupChecker } from './backup-check.js';
 
 /**
  * Snapshots of a workspace database in a temporary file in its own directory, checked there by the backup check.
@@ -58,6 +58,29 @@ export async function removeWithSideFiles(path: string): Promise<void> {
 }
 
 /**
+ * Removes a checked copy and its side files once every check worker on it has exited; never rejects.
+ *
+ * @param path the copy
+ * @returns resolves once the workers are gone and every removal was tried
+ */
+export async function removeAfterCheck(path: string): Promise<void> {
+  await checkExited(path);
+  await removeWithSideFiles(path);
+}
+
+/**
+ * Removes a copy after a failure: at once when no check worker holds it, otherwise in the background after the
+ * worker has exited, so the caller is not held by a worker busy in a long SQLite call. A leftover goes on the sweep.
+ *
+ * @param path the copy
+ * @returns resolves once removed, or at once when the removal waits for a worker
+ */
+export async function removeCopyOnFailure(path: string): Promise<void> {
+  const removal = removeAfterCheck(path);
+  if (!isCheckRunning(path)) await removal;
+}
+
+/**
  * Removes the leftover temporary files of snapshots and restores in a database directory, best effort.
  *
  * @param databaseDirectory the directory of the database
@@ -105,7 +128,7 @@ export async function snapshotOpenDatabase(
     await sqlite.backup(path, { progress: () => nextStep(signal) });
     return await checkedSnapshot(path, changeCount, check, signal);
   } catch (error) {
-    await removeWithSideFiles(path);
+    await removeCopyOnFailure(path);
     throw asBackupError(error);
   }
 }
@@ -129,10 +152,12 @@ export async function snapshotClosedDatabase(
   try {
     throwIfAborted(signal);
     await copyFile(databaseFilePath, path);
-    if (await isFile(`${databaseFilePath}-wal`)) await copyFile(`${databaseFilePath}-wal`, `${path}-wal`);
+    for (const suffix of ['-wal', '-journal']) {
+      if (await isFile(databaseFilePath + suffix)) await copyFile(databaseFilePath + suffix, path + suffix);
+    }
     return await checkedSnapshot(path, 0, check, signal);
   } catch (error) {
-    await removeWithSideFiles(path);
+    await removeCopyOnFailure(path);
     throw asBackupError(error);
   }
 }
@@ -170,7 +195,7 @@ async function checkedSnapshot(
  * @returns the snapshot
  */
 function snapshotOf(facts: SnapshotFacts, path: string, sizeBytes: number, changeCount: number): DatabaseSnapshot {
-  return { ...facts, path, sizeBytes, changeCount, discard: () => removeWithSideFiles(path) };
+  return { ...facts, path, sizeBytes, changeCount, discard: () => removeAfterCheck(path) };
 }
 
 /**

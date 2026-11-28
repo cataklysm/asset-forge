@@ -23,7 +23,7 @@ export interface SwapFileSystem {
 }
 
 /** The order the files of a database are moved aside in: side files first, the main file last. */
-const MOVE_ORDER = ['-wal', '-shm', ''] as const;
+const MOVE_ORDER = ['-journal', '-wal', '-shm', ''] as const;
 
 /** One set of replaced files: its name without suffix and what it sorts by. */
 interface ReplacedSet {
@@ -88,7 +88,8 @@ export async function installDatabase(
   now: Date,
   fileSystem: SwapFileSystem = { rename },
 ): Promise<void> {
-  const target = join(dirname(databaseFilePath), await freeReplacedName(databaseFilePath, now));
+  const targetName = await freeReplacedName(databaseFilePath, now);
+  const target = join(dirname(databaseFilePath), targetName);
   const moved = await moveAside(databaseFilePath, target, fileSystem);
   try {
     await fileSystem.rename(stagedPath, databaseFilePath);
@@ -96,7 +97,7 @@ export async function installDatabase(
     await moveBack(databaseFilePath, target, moved, fileSystem);
     throw new BackupError('backup_failed', { cause: error });
   }
-  await pruneReplaced(databaseFilePath);
+  await pruneReplaced(databaseFilePath, moved.length > 0 ? targetName : null);
 }
 
 /**
@@ -167,17 +168,20 @@ async function freeReplacedName(databaseFilePath: string, now: Date): Promise<st
 }
 
 /**
- * Deletes the replaced sets of a database beyond the newest `REPLACED_KEEP_COUNT`, with their side files; best
- * effort, never rejects.
+ * Deletes the replaced sets of a database beyond `REPLACED_KEEP_COUNT`, with their side files; best effort, never
+ * rejects. The kept set (the one a replacement just made) always survives, whatever its stamp, so a clock that was
+ * ahead cannot delete it; the remaining slots go to the newest others.
  *
  * @param databaseFilePath the live database file
+ * @param keptName the name of the set that must survive; null keeps the newest only
  * @returns resolves once every old set was tried
  */
-export async function pruneReplaced(databaseFilePath: string): Promise<void> {
+export async function pruneReplaced(databaseFilePath: string, keptName: string | null = null): Promise<void> {
   const directory = dirname(databaseFilePath);
   const names = await namesIn(directory);
-  const sets = replacedSets(basename(databaseFilePath), names);
-  for (const set of sets.slice(REPLACED_KEEP_COUNT)) {
+  const others = replacedSets(basename(databaseFilePath), names).filter((set) => set.name !== keptName);
+  const slots = keptName === null ? REPLACED_KEEP_COUNT : REPLACED_KEEP_COUNT - 1;
+  for (const set of others.slice(slots)) {
     for (const name of names.filter((candidate) => belongsToSet(candidate, set.name))) {
       try {
         await rm(join(directory, name), { force: true });

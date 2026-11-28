@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BackupError, type SnapshotFacts } from '@assetforge/core';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { BackupChecker } from '../src/backup-check.js';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { checkExited, createBackupChecker, isCheckRunning, type BackupChecker } from '../src/backup-check.js';
+import { MIGRATIONS_FOLDER } from '../src/index.js';
 import {
   LOCAL_TEMPORARY_PATTERN,
   snapshotClosedDatabase,
@@ -23,6 +24,7 @@ const FACTS: SnapshotFacts = {
   newerThanApp: false,
 };
 const fakeChecker: BackupChecker = async () => FACTS;
+const BUSY_WORKER_URL = new URL('./busy-check-worker.mjs', import.meta.url);
 
 let dir: string;
 let open: Database.Database[] = [];
@@ -142,8 +144,26 @@ describe('snapshot of the open database', () => {
       return answer;
     };
     await expect(snapshotOpenDatabase(sqlite, path, check, controller.signal)).rejects.toBeInstanceOf(BackupError);
-    expect(await temporaryFiles()).toEqual([]);
+    await vi.waitFor(async () => expect(await temporaryFiles()).toEqual([]));
   });
+
+  test('an abort during a busy check frees the caller at once and removes the copy after the worker exited', async () => {
+    const { path } = await createWorkspaceDatabase(dir);
+    const sqlite = connect(path);
+    const busy = createBackupChecker({ workerUrl: BUSY_WORKER_URL, migrationsFolder: MIGRATIONS_FOLDER });
+    const controller = new AbortController();
+    let checked = '';
+    const check: BackupChecker = (copy, signal) => {
+      checked = copy;
+      setTimeout(() => controller.abort(), 300);
+      return busy(copy, signal);
+    };
+    const snapshot = snapshotOpenDatabase(sqlite, path, check, controller.signal);
+    await expect(snapshot).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(isCheckRunning(checked)).toBe(true);
+    await checkExited(checked);
+    await vi.waitFor(async () => expect(await temporaryFiles()).toEqual([]));
+  }, 60_000);
 
   test('a copy that fails its check is refused and removed', async () => {
     const sqlite = largeDatabase();
@@ -216,6 +236,21 @@ describe('snapshot of a closed database', () => {
     const snapshot = await snapshotClosedDatabase(path, realChecker(), new AbortController().signal);
     await snapshot.discard();
     expect([await checksum(path), await checksum(`${path}-wal`)]).toEqual(before);
+  });
+
+  test('a closed snapshot copies a -journal beside the copy for the check to roll back', async () => {
+    const { path } = await createWorkspaceDatabase(dir);
+    await writeFile(`${path}-journal`, 'journal');
+    let journal: string | null = null;
+    const check: BackupChecker = async (copy) => {
+      journal = await readFile(`${copy}-journal`, 'utf8');
+      return FACTS;
+    };
+    const snapshot = await snapshotClosedDatabase(path, check, new AbortController().signal);
+    expect(journal).toBe('journal');
+    await snapshot.discard();
+    expect(await temporaryFiles()).toEqual([]);
+    expect(await readFile(`${path}-journal`, 'utf8')).toBe('journal');
   });
 
   test('a missing database answers backup_failed', async () => {

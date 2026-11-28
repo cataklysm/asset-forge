@@ -127,6 +127,40 @@ describe('installDatabase', () => {
     ]);
   });
 
+  test('a -journal is moved aside with the database and back on a failure', async () => {
+    await writeFile(live, 'live');
+    await writeFile(`${live}-journal`, 'journal');
+    const failing: SwapFileSystem = {
+      rename: async (from, to) => {
+        if (from === staged) throw new Error('locked');
+        await rename(from, to);
+      },
+    };
+    await expect(installDatabase(live, staged, NOW, failing)).rejects.toBeInstanceOf(BackupError);
+    expect(await readFile(`${live}-journal`, 'utf8')).toBe('journal');
+    await installDatabase(live, staged, NOW);
+    expect(await names()).toEqual(['assetforge.sqlite', STAMP, `${STAMP}-journal`]);
+  });
+
+  test('the set just moved aside survives two sets stamped in the future', async () => {
+    const future = ['assetforge.sqlite.replaced-20991231T000000Z', 'assetforge.sqlite.replaced-20991231T000001Z'];
+    for (const name of future) {
+      await writeFile(join(dir, name), 'future');
+      await writeFile(join(dir, `${name}-wal`), 'future wal');
+    }
+    await writeLive();
+    await installDatabase(live, staged, NOW);
+    expect(await names()).toEqual([
+      'assetforge.sqlite',
+      STAMP,
+      `${STAMP}-shm`,
+      `${STAMP}-wal`,
+      future[1],
+      `${future[1]}-wal`,
+    ]);
+    expect(await readFile(join(dir, STAMP), 'utf8')).toBe('live');
+  });
+
   test('replaced files are never matched by the pre-migration or temp patterns', () => {
     for (const suffix of ['', '-2', '-wal', '-2-shm', '-journal']) {
       const name = STAMP + suffix;

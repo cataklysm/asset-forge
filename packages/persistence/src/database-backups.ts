@@ -1,11 +1,24 @@
 import { copyFile, mkdir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { BACKUP_UNREADABLE_MESSAGE } from '@assetforge/contracts';
-import { InvalidOperationError, type BackupSource, type StagedRestore, type WorkspaceBackups } from '@assetforge/core';
+import {
+  BackupError,
+  InvalidOperationError,
+  type BackupSource,
+  type SnapshotFacts,
+  type StagedRestore,
+  type WorkspaceBackups,
+} from '@assetforge/core';
 import Database from 'better-sqlite3';
 import type { BackupChecker } from './backup-check.js';
 import { isPreMigrationBackupName, listPreMigrationBackups } from './database-backup.js';
-import { removeWithSideFiles, restoreTemporaryName, snapshotClosedDatabase } from './database-snapshot.js';
+import {
+  removeAfterCheck,
+  removeCopyOnFailure,
+  removeWithSideFiles,
+  restoreTemporaryName,
+  snapshotClosedDatabase,
+} from './database-snapshot.js';
 import { installDatabase } from './database-swap.js';
 
 /** The options of `createDatabaseBackups`. */
@@ -97,8 +110,8 @@ function lineageWith(databaseFilePath: string, readonly: boolean): string | null
  * @param source where the backup lies
  * @param signal aborts the copy
  * @returns the staged copy
- * @throws InvalidOperationError with `BACKUP_UNREADABLE_MESSAGE` when the copy fails or the signal fired; nothing is
- * left behind then
+ * @throws InvalidOperationError with `BACKUP_UNREADABLE_MESSAGE` when the copy fails; nothing is left behind then
+ * @throws BackupError `backup_failed` when the signal fired; the copy is removed once its check worker has exited
  */
 async function stageRestore(
   options: DatabaseBackupsOptions,
@@ -111,22 +124,70 @@ async function stageRestore(
   try {
     await mkdir(dirname(databaseFilePath), { recursive: true });
     await copySource(options, databaseFilePath, source, stagedPath, signal);
-    signal.throwIfAborted();
   } catch (error) {
     await removeWithSideFiles(stagedPath);
-    throw new InvalidOperationError(BACKUP_UNREADABLE_MESSAGE, { cause: error });
+    throw stageFailure(error, signal);
   }
-  const facts = await options.check(stagedPath, signal);
+  const facts = signal.aborted ? null : await options.check(stagedPath, signal);
   if (signal.aborted) {
-    await removeWithSideFiles(stagedPath);
-    throw new InvalidOperationError(BACKUP_UNREADABLE_MESSAGE, { cause: signal.reason });
+    await removeCopyOnFailure(stagedPath);
+    throw new BackupError('backup_failed', { cause: signal.reason });
   }
-  const now = options.now ?? (() => new Date());
+  return stagedRestore(databaseFilePath, stagedPath, facts, options.now ?? (() => new Date()));
+}
+
+/**
+ * The error of a stage whose copy failed: an abort is `backup_failed`, anything else an unreadable backup.
+ *
+ * @param error the failure
+ * @param signal the abort signal of the stage
+ * @returns the error to throw
+ */
+function stageFailure(error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) return new BackupError('backup_failed', { cause: error });
+  return new InvalidOperationError(BACKUP_UNREADABLE_MESSAGE, { cause: error });
+}
+
+/**
+ * The staged restore over a checked copy. Install refuses a copy whose check found no facts.
+ *
+ * @param databaseFilePath the live database file
+ * @param stagedPath the checked copy
+ * @param facts what the check found
+ * @param now the clock
+ * @returns the staged restore
+ */
+function stagedRestore(
+  databaseFilePath: string,
+  stagedPath: string,
+  facts: SnapshotFacts | null,
+  now: () => Date,
+): StagedRestore {
   return {
     facts,
-    install: () => installDatabase(databaseFilePath, stagedPath, now()),
-    discard: () => removeWithSideFiles(stagedPath),
+    install: () => installChecked(databaseFilePath, stagedPath, facts, now()),
+    discard: () => removeAfterCheck(stagedPath),
   };
+}
+
+/**
+ * Installs a staged copy whose check found its facts.
+ *
+ * @param databaseFilePath the live database file
+ * @param stagedPath the checked copy
+ * @param facts what the check found
+ * @param now the time of the replacement
+ * @returns resolves once the copy is the live database
+ * @throws BackupError `backup_failed` when the check found no facts or the swap failed
+ */
+async function installChecked(
+  databaseFilePath: string,
+  stagedPath: string,
+  facts: SnapshotFacts | null,
+  now: Date,
+): Promise<void> {
+  if (facts === null) throw new BackupError('backup_failed');
+  await installDatabase(databaseFilePath, stagedPath, now);
 }
 
 /**

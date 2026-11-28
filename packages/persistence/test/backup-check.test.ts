@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { createBackupChecker } from '../src/backup-check.js';
+import { checkExited, createBackupChecker, isCheckRunning } from '../src/backup-check.js';
 import { MIGRATIONS_FOLDER } from '../src/index.js';
 import {
   createWorkspaceDatabase,
@@ -111,6 +111,51 @@ test('a timeout answers null', async () => {
   const { path } = await createWorkspaceDatabase(dir);
   const checker = createBackupChecker({ workerUrl: WORKER_URL, migrationsFolder: MIGRATIONS_FOLDER, timeoutMs: 0 });
   expect(await checker(path)).toBeNull();
+});
+
+const BUSY_WORKER_URL = new URL('./busy-check-worker.mjs', import.meta.url);
+
+/**
+ * Waits a while.
+ *
+ * @param ms the time
+ * @returns resolves after it
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test('a stop answers at once while the worker is busy in a synchronous call, and checkExited waits for it', async () => {
+  const { path } = await createWorkspaceDatabase(dir);
+  const checker = createBackupChecker({ workerUrl: BUSY_WORKER_URL, migrationsFolder: MIGRATIONS_FOLDER });
+  const controller = new AbortController();
+  const answer = checker(path, controller.signal);
+  await delay(300);
+  const stoppedAt = Date.now();
+  controller.abort();
+  expect(await answer).toBeNull();
+  expect(Date.now() - stoppedAt).toBeLessThan(200);
+  expect(isCheckRunning(path)).toBe(true);
+  await checkExited(path);
+  expect(Date.now() - stoppedAt).toBeGreaterThan(200);
+  expect(isCheckRunning(path)).toBe(false);
+}, 60_000);
+
+test('a timeout answers at once while the worker is busy', async () => {
+  const { path } = await createWorkspaceDatabase(dir);
+  const checker = createBackupChecker({
+    workerUrl: BUSY_WORKER_URL,
+    migrationsFolder: MIGRATIONS_FOLDER,
+    timeoutMs: 300,
+  });
+  const startedAt = Date.now();
+  expect(await checker(path)).toBeNull();
+  expect(Date.now() - startedAt).toBeLessThan(1000);
+  await checkExited(path);
+}, 60_000);
+
+test('checkExited of a path without a check resolves at once', async () => {
+  await expect(checkExited(join(dir, 'none.sqlite'))).resolves.toBeUndefined();
 });
 
 test('an aborted signal answers null', async () => {
