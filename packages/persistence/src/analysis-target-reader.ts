@@ -5,7 +5,8 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { fileListWhere } from './file-list.js';
 import { qualified } from './qualified.js';
 import { file, fileAnalysis, fileAnalysisProposal, job } from './schema.js';
-import { matchingAssetIds, type Tx } from './search-index.js';
+import { matchingAssetIds } from './asset-search.js';
+import type { Tx } from './search-index.js';
 
 const fileId = qualified(file, file.id);
 const fileSha256 = qualified(file, file.sha256);

@@ -1,11 +1,12 @@
-import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@assetforge/contracts';
+import type { FileRecord, TagAssignment, TagSuggestion } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, ValidationFailedError, type TagRepository } from '@assetforge/core';
-import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { toRecords } from './file-records.js';
-import { parseTags } from './proposal-tags.js';
-import { assetTag, file, fileAnalysisProposal, fileTag, promptTag, tag } from './schema.js';
+import { assetTag, file, fileTag, promptTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type Tx } from './search-index.js';
+import { ensureTag, linkAssetTag, linkFileTags } from './tag-links.js';
+import { ASSET_LINKS, FILE_LINKS, affectedAssets, mergeLinks, mergePromptLinks, rewriteProposals } from './tag-rename.js';
 
 /**
  * The rows of a batch in request order; throws for an unknown file, then for a file that is not
@@ -42,131 +43,6 @@ function finishBatch(tx: Tx, rows: (typeof file.$inferSelect)[]): FileRecord[] {
 
 /** Highest code point; sorts after every character that can follow a prefix in a name. */
 const PREFIX_END = String.fromCodePoint(0x10ffff);
-
-/** Inserts the tag unless its name exists and returns the id of the tag with that name. */
-export function ensureTag(
-  tx: Pick<BetterSQLite3Database, 'insert' | 'select'>,
-  r: { name: string; displayName: string; newId: string; now: string },
-): string {
-  tx.insert(tag)
-    .values({ id: r.newId, name: r.name, displayName: r.displayName, createdAt: r.now })
-    .onConflictDoNothing({ target: tag.name })
-    .run();
-  return tx.select({ id: tag.id }).from(tag).where(eq(tag.name, r.name)).get()!.id;
-}
-
-type Writer = Pick<BetterSQLite3Database, 'insert' | 'delete' | 'select'>;
-
-/** An owner carries a tag at most once and manual wins: a manual add replaces an ai link, an ai add yields to any link. */
-function linkAssetTag(tx: Writer, assetId: string, tagId: string, origin: TagOrigin, now: string): void {
-  if (origin === 'manual') {
-    tx.delete(assetTag).where(and(eq(assetTag.assetId, assetId), eq(assetTag.tagId, tagId), eq(assetTag.origin, 'ai'))).run();
-  }
-  const carried = tx.select({ tagId: assetTag.tagId }).from(assetTag).where(and(eq(assetTag.assetId, assetId), eq(assetTag.tagId, tagId))).get();
-  if (!carried) tx.insert(assetTag).values({ assetId, tagId, origin, createdAt: now }).run();
-}
-
-/** Same rule as `linkAssetTag`, for each file of the list. */
-function linkFileTags(tx: Writer, fileIds: readonly string[], tagId: string, origin: TagOrigin, now: string): void {
-  const ids = [...new Set(fileIds)];
-  if (origin === 'manual') {
-    tx.delete(fileTag).where(and(inArray(fileTag.fileId, ids), eq(fileTag.tagId, tagId), eq(fileTag.origin, 'ai'))).run();
-  }
-  const carried = new Set(
-    tx
-      .select({ fileId: fileTag.fileId })
-      .from(fileTag)
-      .where(and(inArray(fileTag.fileId, ids), eq(fileTag.tagId, tagId)))
-      .all()
-      .map((row) => row.fileId),
-  );
-  const fresh = ids.filter((id) => !carried.has(id));
-  if (fresh.length > 0) tx.insert(fileTag).values(fresh.map((fileId) => ({ fileId, tagId, origin, createdAt: now }))).run();
-}
-
-/** Table and owner column of a link table; constants, never user input. */
-type LinkTable = { table: SQL; owner: SQL };
-const ASSET_LINKS: LinkTable = { table: sql.raw('asset_tag'), owner: sql.raw('asset_id') };
-const FILE_LINKS: LinkTable = { table: sql.raw('file_tag'), owner: sql.raw('file_id') };
-
-type RenameTx = Pick<BetterSQLite3Database, 'select' | 'insert' | 'update' | 'delete' | 'run' | 'all' | 'get'>;
-
-/** The assets whose index holds the tag: those carrying it and those with a file carrying it. */
-function affectedAssets(tx: RenameTx, tagId: string): string[] {
-  return tx
-    .all<{ assetId: string }>(sql`
-      select asset_id as assetId from asset_tag where tag_id = ${tagId}
-      union
-      select f.asset_id from file_tag as ft join file as f on f.id = ft.file_id
-      where ft.tag_id = ${tagId} and f.asset_id is not null`)
-    .map((row) => row.assetId);
-}
-
-/**
- * Moves every link of `sourceId` to `targetId` with set-based statements (no owner id lists, so
- * any number of links fits). An owner carrying both keeps its target link, raised to manual when
- * a source link was manual and dated to the earlier of the two; a link that only moves keeps its
- * origin and createdAt.
- */
-function mergeLinks(tx: RenameTx, { table, owner }: LinkTable, sourceId: string, targetId: string): void {
-  tx.run(sql`
-    update ${table} set origin = 'manual'
-    where tag_id = ${targetId} and origin = 'ai'
-      and ${owner} in (select s.${owner} from ${table} as s where s.tag_id = ${sourceId} and s.origin = 'manual')
-      and ${owner} not in (select m.${owner} from ${table} as m where m.tag_id = ${targetId} and m.origin = 'manual')`);
-  tx.run(sql`
-    update ${table} set created_at = (
-      select min(s.created_at) from ${table} as s where s.tag_id = ${sourceId} and s.${owner} = ${table}.${owner})
-    where tag_id = ${targetId}
-      and created_at > (select min(s.created_at) from ${table} as s where s.tag_id = ${sourceId} and s.${owner} = ${table}.${owner})`);
-  tx.run(sql`
-    delete from ${table}
-    where tag_id = ${sourceId} and ${owner} in (select t.${owner} from ${table} as t where t.tag_id = ${targetId})`);
-  tx.run(sql`update ${table} set tag_id = ${targetId} where tag_id = ${sourceId}`);
-}
-
-/**
- * Like `mergeLinks` for prompt links, which have no origin: a prompt carrying both keeps its
- * target link dated to the earlier of the two; a link that only moves keeps its createdAt.
- * Prompts keep their `updated_at`.
- */
-function mergePromptLinks(tx: RenameTx, sourceId: string, targetId: string): void {
-  tx.run(sql`
-    update prompt_tag set created_at = (
-      select s.created_at from prompt_tag as s where s.tag_id = ${sourceId} and s.prompt_id = prompt_tag.prompt_id)
-    where tag_id = ${targetId}
-      and created_at > (select s.created_at from prompt_tag as s where s.tag_id = ${sourceId} and s.prompt_id = prompt_tag.prompt_id)`);
-  tx.run(sql`
-    delete from prompt_tag
-    where tag_id = ${sourceId} and prompt_id in (select t.prompt_id from prompt_tag as t where t.tag_id = ${targetId})`);
-  tx.run(sql`update prompt_tag set tag_id = ${targetId} where tag_id = ${sourceId}`);
-}
-
-/**
- * Every entry named `from` or `name` in a waiting proposal becomes `name` spelled `displayName`; a
- * list that then holds the name twice keeps the first. `instr` on the JSON text narrows the rows
- * (no LIKE wildcards); only lists that really change are written.
- */
-function rewriteProposals(tx: RenameTx, r: { from: string; name: string; displayName: string }): void {
-  const rows = tx
-    .select({ fileId: fileAnalysisProposal.fileId, tags: fileAnalysisProposal.tags })
-    .from(fileAnalysisProposal)
-    .where(
-      sql`instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.from)}) > 0 or instr(${fileAnalysisProposal.tags}, ${JSON.stringify(r.name)}) > 0`,
-    )
-    .all();
-  for (const row of rows) {
-    const tags = parseTags(row.tags);
-    const touched = (t: { name: string }) => t.name === r.from || t.name === r.name;
-    if (!tags.some((t) => touched(t) && (t.name !== r.name || t.displayName !== r.displayName))) continue;
-    const rewritten: { name: string; displayName: string }[] = [];
-    for (const t of tags) {
-      const entry = touched(t) ? { name: r.name, displayName: r.displayName } : t;
-      if (!rewritten.some((x) => x.name === entry.name)) rewritten.push(entry);
-    }
-    tx.update(fileAnalysisProposal).set({ tags: JSON.stringify(rewritten) }).where(eq(fileAnalysisProposal.fileId, row.fileId)).run();
-  }
-}
 
 export function createTagRepository(db: BetterSQLite3Database): TagRepository {
   return {

@@ -6,7 +6,8 @@ import { assetFilter, outerAssetId } from './asset-filters.js';
 import { assetTagsOf, matchedTagsOf } from './list-tags.js';
 import { qualified } from './qualified.js';
 import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, tag, workflowStepDefinition } from './schema.js';
-import { reindexAsset, searchAssets, type Tx } from './search-index.js';
+import { searchAssets } from './asset-search.js';
+import { reindexAsset, type Tx } from './search-index.js';
 
 const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   id: row.id,

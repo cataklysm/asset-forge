@@ -3,7 +3,7 @@ import type { PromptRepository } from '@assetforge/core';
 import { and, asc, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { prompt, promptTag, promptVersion, tag } from './schema.js';
-import { ensureTag } from './tag-repository.js';
+import { ensureTag } from './tag-links.js';
 
 type Tx = Pick<BetterSQLite3Database, 'select'>;
 type VersionRow = typeof promptVersion.$inferSelect;

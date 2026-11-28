@@ -4,7 +4,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { parseTags } from './proposal-tags.js';
 import { file, fileAnalysis, fileAnalysisProposal, fileTag } from './schema.js';
 import { reindexAssets } from './search-index.js';
-import { ensureTag } from './tag-repository.js';
+import { ensureTag } from './tag-links.js';
 
 type WriteTx = Pick<BetterSQLite3Database, 'select' | 'insert' | 'delete' | 'run' | 'all' | 'get'>;
 
