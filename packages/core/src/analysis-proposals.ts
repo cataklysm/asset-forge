@@ -7,7 +7,7 @@ import {
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
-import type { Job } from './jobs.js';
+import type { Job } from './job-types.js';
 import type { Proposal } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 

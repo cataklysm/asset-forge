@@ -4,7 +4,8 @@ import { InvalidOperationError, NotFoundError, StorageUnreachableError } from '.
 import { eachFile, type FileBatchItem } from './file-batch.js';
 import { settleGenerationOfJob } from './generations.js';
 import { moveAndCommit } from './journaled-move.js';
-import { cancelJob, type JobControl } from './jobs.js';
+import type { JobControl } from './job-types.js';
+import { cancelJob } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
 import type { WorkspaceSession } from './session.js';
 

@@ -17,7 +17,7 @@ import {
   type StartGenerationResult,
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, ProviderNotConfiguredError, ValidationFailedError } from './errors.js';
-import type { Job, JobControl, JobOutcome, NewJob } from './jobs.js';
+import type { Job, JobControl, JobOutcome, NewJob } from './job-types.js';
 import { measureFile } from './measure-file.js';
 import { isPreviewable } from './media-types.js';
 import type { GenerationPromptRef } from './ports/generation-repository.js';

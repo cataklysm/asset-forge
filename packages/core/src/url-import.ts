@@ -7,7 +7,7 @@ import {
   type UrlImportResult,
 } from '@assetforge/contracts';
 import { normalizeDownloadUrl } from './download-url.js';
-import type { NewJob } from './jobs.js';
+import type { NewJob } from './job-types.js';
 import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 

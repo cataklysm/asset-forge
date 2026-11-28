@@ -11,7 +11,7 @@ import { GENERATION_RESULT_EXTENSIONS, generationNames } from './generation-name
 import { settleGenerationOfJob } from './generations.js';
 import { streamImportContextOf } from './import-context.js';
 import { importStream, type ImportContext } from './import-file.js';
-import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './job-types.js';
 import type {
   GenerationImageSource,
   ImageInput,

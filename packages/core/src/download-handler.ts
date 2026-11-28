@@ -14,7 +14,7 @@ import { openRemote, siteLoginOf } from './download-open.js';
 import { streamImportContextOf } from './import-context.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { isRefusedImportName } from './import-refusals.js';
-import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './job-types.js';
 import { fileKind } from './media-types.js';
 import type { RemoteFile, RemoteFileSource } from './ports/remote-files.js';
 import type { SiteAccess } from './ports/site-access.js';

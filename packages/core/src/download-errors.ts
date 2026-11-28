@@ -1,6 +1,6 @@
 import type { JobErrorCode } from '@assetforge/contracts';
 import { clampRetryAfterMs } from './download-limits.js';
-import { JobError } from './jobs.js';
+import { JobError } from './job-types.js';
 import { RemoteFileError, type RemoteFileFailure } from './ports/remote-files.js';
 
 // The job errors of the `file.download` job. None carries a cause: a cause could hold the URL.

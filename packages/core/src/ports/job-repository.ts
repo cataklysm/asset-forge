@@ -1,5 +1,5 @@
 import type { JobErrorCode, JobResult, JobStatus, JobView, ResourceClass } from '@assetforge/contracts';
-import type { Job, NewJob } from '../jobs.js';
+import type { Job, NewJob } from '../job-types.js';
 
 /** The persistent job queue of a workspace. Every transition is guarded by the status it starts from. */
 export interface JobRepository {
