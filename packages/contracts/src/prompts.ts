@@ -59,7 +59,9 @@ export type PromptDetail = z.infer<typeof PromptDetailSchema>;
 /** Default values by variable name (matched regardless of case). */
 export const PromptDefaultsSchema = z
   .record(z.string().max(200), z.string().max(PROMPT_VARIABLE_VALUE_MAX))
-  .refine((defaults) => Object.keys(defaults).length <= DEFAULTS_TRANSPORT_KEYS);
+  .refine((defaults) => Object.keys(defaults).length <= DEFAULTS_TRANSPORT_KEYS, {
+    message: `At most ${DEFAULTS_TRANSPORT_KEYS} default values`,
+  });
 /** Default values by variable name. */
 export type PromptDefaults = z.infer<typeof PromptDefaultsSchema>;
 
