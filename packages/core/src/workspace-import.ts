@@ -3,6 +3,7 @@ import { relocateFile } from './asset-files.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
 import { safeErrorMessage } from './errors.js';
 import { lastPathSegment } from './file-names.js';
+import { importContextOf } from './import-context.js';
 import { importFile, type ImportContext } from './import-file.js';
 import { isZipArchive } from './import-refusals.js';
 import type { ArchiveReader } from './ports/source-files.js';
@@ -80,16 +81,7 @@ class SourceImport {
     private readonly options: ImportSourcesOptions,
     private readonly progress: ImportProgress,
   ) {
-    this.context = {
-      storage: session.storage,
-      storageId: session.storageId,
-      files: session.database.files,
-      sources: host.sources,
-      archives: host.archives,
-      probe: host.imageProbe,
-      newId: session.newId,
-      now: session.now,
-    };
+    this.context = { ...importContextOf(session, host.sources), archives: host.archives };
   }
 
   /**

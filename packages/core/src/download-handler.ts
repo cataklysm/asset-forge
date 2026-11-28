@@ -11,7 +11,7 @@ import { relocateFile } from './asset-files.js';
 import { streamFailure } from './download-errors.js';
 import { downloadBaseName, downloadFileName, isWebPage } from './download-name.js';
 import { openRemote, siteLoginOf } from './download-open.js';
-import { SourceNotReadableError } from './errors.js';
+import { streamImportContextOf } from './import-context.js';
 import { importStream, type ImportContext } from './import-file.js';
 import { isRefusedImportName } from './import-refusals.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
@@ -49,32 +49,14 @@ interface StreamErrors {
  * @returns the job handler
  */
 export function createFileDownloadHandler(dependencies: FileDownloadHandlerDependencies): JobHandler {
-  const context = importContextOf(dependencies.session);
+  // A download hands its body as a stream and never opens a source file.
+  const context = streamImportContextOf(dependencies.session);
   return {
     resourceClass: 'io',
     onInterrupted: 'requeue',
     run(job: Job, signal: AbortSignal): Promise<void> {
       return runDownload(dependencies, context, job, signal);
     },
-  };
-}
-
-/**
- * The import context of downloads: the workspace's storage and files, and no source files, since a download hands
- * its body as a stream.
- *
- * @param session the open workspace
- * @returns the import context
- */
-function importContextOf(session: WorkspaceSession): ImportContext {
-  return {
-    storage: session.storage,
-    storageId: session.storageId,
-    files: session.database.files,
-    sources: { open: () => Promise.reject(new SourceNotReadableError()) },
-    probe: session.imageProbe,
-    newId: () => session.newId(),
-    now: () => session.now(),
   };
 }
 
