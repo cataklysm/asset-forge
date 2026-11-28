@@ -158,7 +158,13 @@ export const MOCK_PROMPT_VIOLATION_OK = 'mock:violation-200';
 /** How many entries `requests` and `imageRequests` keep by default; beyond it the oldest is dropped. */
 export const MOCK_MAX_RECORDED = 1000;
 
-/** Appends an entry to a record list, dropping the oldest beyond `limit` while keeping the same array. */
+/**
+ * Appends an entry to a record list, dropping the oldest beyond `limit` while keeping the same array.
+ *
+ * @param list `requests` or `imageRequests`
+ * @param entry the recorded request
+ * @param limit how many entries the list keeps
+ */
 function record(list, entry, limit) {
   list.push(entry);
   if (list.length > limit) list.splice(0, list.length - limit);
