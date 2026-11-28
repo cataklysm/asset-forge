@@ -858,8 +858,9 @@ describe('GenerationStudio with library prompts', () => {
     await user.click(button(LIBRARY_PROMPT_LABEL));
     const picker = await screen.findByRole('dialog', { name: PROMPTS_LABEL });
     await user.click(await within(picker).findByText('Hero shot'));
-    rerender(fileRecord({ originalName: 'other.png' }));
+    // The answer arrives in the same act as the switch, so only the superseded load keeps it out.
     await act(async () => {
+      rerender(fileRecord({ originalName: 'other.png' }));
       pending.resolve(prompt);
       await pending.promise;
     });
