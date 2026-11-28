@@ -323,7 +323,7 @@ it('a late answer of a create does not replace the prompt chosen in the meantime
   await waitFor(() => expect(requests(api, 'prompts:list')).toHaveLength(2));
   await act(async () => {});
   expect(title().value).toBe('Other');
-  expect(requests(api, 'prompts:get')).toHaveLength(1);
+  expect(api.calls.filter((c) => c.channel === 'prompts:get')).toHaveLength(1);
 });
 
 it('a failed saveVersion shows the message and keeps the draft', async () => {

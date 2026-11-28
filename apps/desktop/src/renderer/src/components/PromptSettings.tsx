@@ -99,6 +99,44 @@ interface PurposeGroupProps {
   onCreate(): void;
 }
 
+/** The props of `PromptRow`. */
+interface PromptRowProps {
+  prompt: AnalysisPrompt;
+  /** The id the unsaved marker takes. */
+  markerId: string;
+  selected: boolean;
+  unsaved: boolean;
+  select(id: string): void;
+}
+
+/**
+ * One prompt of a purpose, marked when it has unsaved changes.
+ *
+ * @param props the prompt, its state and the select handler
+ * @returns the list item
+ */
+function PromptRow({ prompt, markerId, selected, unsaved, select }: PromptRowProps) {
+  return (
+    <li className="flex flex-col">
+      <button
+        type="button"
+        className={BUTTON_INLINE}
+        aria-pressed={selected}
+        aria-describedby={unsaved ? markerId : undefined}
+        onClick={() => select(prompt.id)}
+      >
+        <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
+        {unsaved && (
+          // Hidden from the name; the button is described by it.
+          <span id={markerId} title={UNSAVED_CHANGES} aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-accent">
+            <span className="sr-only">{UNSAVED_CHANGES}</span>
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 /**
  * The prompts of one purpose, each marked when it has unsaved changes, and the action that adds one.
  *
@@ -111,34 +149,16 @@ function PurposeGroup({ purpose, headingId, own, selectedId, drafts, busy, selec
         {PROMPT_PURPOSE_LABELS[purpose]}
       </h4>
       <ul className="flex flex-col gap-1">
-        {own.map((prompt) => {
-          const unsaved = changed(prompt, drafts[prompt.id]);
-          const markerId = `${headingId}-${prompt.id}-unsaved`;
-          return (
-            <li key={prompt.id} className="flex flex-col">
-              <button
-                type="button"
-                className={BUTTON_INLINE}
-                aria-pressed={prompt.id === selectedId}
-                aria-describedby={unsaved ? markerId : undefined}
-                onClick={() => select(prompt.id)}
-              >
-                <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
-                {unsaved && (
-                  // Hidden from the name; the button is described by it.
-                  <span
-                    id={markerId}
-                    title={UNSAVED_CHANGES}
-                    aria-hidden
-                    className="h-2 w-2 shrink-0 rounded-full bg-accent"
-                  >
-                    <span className="sr-only">{UNSAVED_CHANGES}</span>
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
+        {own.map((prompt) => (
+          <PromptRow
+            key={prompt.id}
+            prompt={prompt}
+            markerId={`${headingId}-${prompt.id}-unsaved`}
+            selected={prompt.id === selectedId}
+            unsaved={changed(prompt, drafts[prompt.id])}
+            select={select}
+          />
+        ))}
       </ul>
       <div>
         <button type="button" className={BUTTON} title={NEW_PROMPT_TITLE} disabled={busy} onClick={onCreate}>
@@ -200,6 +220,7 @@ export function PromptSettings() {
    * Resets the selected prompt; edits made while the reset ran stay as a draft.
    *
    * @param prompt the selected prompt
+   * @returns when the reset ended
    */
   const resetPrompt = (prompt: AnalysisPrompt) => {
     const kept = drafts[prompt.id];
