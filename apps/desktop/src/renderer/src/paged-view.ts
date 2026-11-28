@@ -21,17 +21,6 @@ export function wantedPages(total: number | null, rows: ShownRows | null, viewKe
 }
 
 /**
- * The page that failed while the total is still unknown, so the list can only offer Retry.
- *
- * @param state the paged list
- * @returns the page number, or null
- */
-export function failedFirstPage<T>(state: PagedState<T>): number | null {
-  if (state.total !== null) return null;
-  return [...state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null;
-}
-
-/**
  * The failed page that takes the place of the whole list while the total is unknown, with its failure text.
  *
  * @param state the paged list

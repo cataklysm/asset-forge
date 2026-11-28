@@ -922,7 +922,7 @@ it('a rename on the asset screen rewrites the gallery filter that is not mounted
   await screen.findByRole('group', { name: 'Asset tags' });
   await renameThroughDialog(user, 'Front View', 'Front');
   await user.click(screen.getAllByRole('link', { name: 'Assets' })[0]!);
-  expect(await screen.findByRole('button', { name: 'Remove front' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Remove Front' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Remove front view' })).toBeNull();
   await waitFor(() =>
     expect(

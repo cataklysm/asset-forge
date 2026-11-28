@@ -1,5 +1,5 @@
 import { LayoutGrid, List, type LucideIcon } from 'lucide-react';
-import { AssetStatusSchema, type AssetType, type ProjectSummary } from '@assetforge/contracts';
+import { AssetStatusSchema, type AssetType } from '@assetforge/contracts';
 import { distinct } from '../format';
 import { ANALYSE_ASSETS_TITLE, FILE_KIND_OPTIONS, label } from '../labels';
 import { hasFilters, NO_FILTERS, type AssetFilters, type AssetView } from '../list-state';
@@ -7,6 +7,7 @@ import { ROLES, roleOptions } from '../role-options';
 import { ALERT, ICON_BUTTON, SELECT } from '../ui';
 import { AnalyseAllButton } from './AnalysisDialogs';
 import { FilterBar } from './FilterBar';
+import { ProjectFilter } from './ProjectFilter';
 import { ResultStrip } from './ResultStrip';
 import { SearchField } from './SearchField';
 import { TagFilter } from './TagFilter';
@@ -29,8 +30,6 @@ interface SearchRowProps {
   onFilterChange(change: Partial<AssetFilters>): void;
   /** The asset types for the type filter. */
   types: readonly AssetType[];
-  /** The projects for the project filter. */
-  projects: readonly ProjectSummary[];
   /** Why Analyse all is blocked; null when it is not. */
   analysisBlocked: string | null;
   /** Starts the analysis of the assets the filters match. */
@@ -90,7 +89,6 @@ function SearchRow({
   filters,
   onFilterChange,
   types,
-  projects,
   analysisBlocked,
   onAnalyseAll,
   view,
@@ -130,19 +128,7 @@ function SearchRow({
           </option>
         ))}
       </select>
-      <select
-        className={SELECT}
-        aria-label="Project"
-        value={filters.projectId}
-        onChange={(event) => onFilterChange({ projectId: event.target.value })}
-      >
-        <option value="">All projects</option>
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </select>
+      <ProjectFilter projectId={filters.projectId} onChange={(projectId) => onFilterChange({ projectId })} />
       <div className="ml-auto flex items-center gap-2">
         <AnalyseAllButton blocked={analysisBlocked} title={ANALYSE_ASSETS_TITLE} onClick={onAnalyseAll} />
         {VIEWS.map(({ view: option, tooltip, icon: Icon }) => (
@@ -174,8 +160,9 @@ function FileRow({ filters, onFilterChange }: Pick<SearchRowProps, 'filters' | '
     <>
       <TagFilter
         value={filters.tagNames}
+        labels={filters.tagLabels}
         title="Assets that carry all these tags, on the asset or on one of its files"
-        onChange={(tagNames) => onFilterChange({ tagNames })}
+        onChange={(tagNames, tagLabels) => onFilterChange({ tagNames, tagLabels })}
       />
       <select
         className={SELECT}

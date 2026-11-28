@@ -12,6 +12,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
+import { StorageReturnContext } from '../storage-context';
 import { useSearchShortcut } from '../hooks/useSearchShortcut';
 import {
   activeNavLabel,
@@ -257,7 +258,7 @@ export function AppShell({
   children,
 }: Props) {
   const [unreachable, setUnreachable] = useState(false);
-  // Bumped by Retry; keys the page so it reloads from scratch.
+  // Bumped by Retry; keys the page so it reloads from scratch, and is the storage return signal.
   const [reloadKey, setReloadKey] = useState(0);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -301,7 +302,7 @@ export function AppShell({
             />
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
-            {children}
+            <StorageReturnContext.Provider value={reloadKey}>{children}</StorageReturnContext.Provider>{' '}
           </main>
         </div>
       </div>

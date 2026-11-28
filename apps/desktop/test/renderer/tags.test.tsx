@@ -9,7 +9,7 @@ import { TagCombobox } from '../../src/renderer/src/components/TagCombobox';
 import { TagFilter } from '../../src/renderer/src/components/TagFilter';
 import { TagList } from '../../src/renderer/src/components/TagList';
 import { TagRow } from '../../src/renderer/src/components/TagRow';
-import { renameInTags, type TagRename } from '../../src/renderer/src/tag-rename';
+import { renameInTags, type TagLabels, type TagRename } from '../../src/renderer/src/tag-rename';
 import { TagsProvider, useRenamed } from '../../src/renderer/src/tags-context';
 import { AI_CHIP, CHIP, FILTER_CHIP, MATCHED_CHIP } from '../../src/renderer/src/ui';
 import { deferred, installFakeApi } from './fake-api';
@@ -378,6 +378,35 @@ it('the tag filter stops at 10 tags', async () => {
   expect(input.readOnly).toBe(false);
   expect(input.getAttribute('aria-disabled')).toBeNull();
   expect(document.activeElement).toBe(input);
+});
+
+function LabelledFilterHarness({ onChange }: { onChange(names: string[], labels: TagLabels): void }) {
+  const [state, setState] = useState<{ names: string[]; labels: TagLabels }>({ names: [], labels: {} });
+  return (
+    <TagFilter
+      value={state.names}
+      labels={state.labels}
+      onChange={(names, labels) => {
+        onChange(names, labels);
+        setState({ names, labels });
+      }}
+    />
+  );
+}
+
+it('the tag filter keeps the display name a tag was chosen with', async () => {
+  installFakeApi({ 'tags:suggest': () => [] });
+  const user = userEvent.setup();
+  const onChange = vi.fn();
+  render(<LabelledFilterHarness onChange={onChange} />);
+  const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Tags' });
+
+  await user.type(input, '  Front View {Enter}');
+  expect(onChange).toHaveBeenLastCalledWith(['front view'], { 'front view': 'Front View' });
+  expect(screen.getByText('Front View')).toBeTruthy();
+  await user.type(input, 'Oak{Enter}');
+  await user.click(screen.getByRole('button', { name: 'Remove Front View' }));
+  expect(onChange).toHaveBeenLastCalledWith(['oak'], { oak: 'Oak' });
 });
 
 const TAG_USAGE = {

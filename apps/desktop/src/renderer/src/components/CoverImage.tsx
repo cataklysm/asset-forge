@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { previewUrl } from '../media-url';
+import { useStorageReturn } from '../storage-context';
 import { MUTED } from '../ui';
 
 // A cached preview in a fixed frame.
@@ -22,9 +23,10 @@ interface Props {
  * @returns the frame
  */
 export function CoverImage({ fileId, size, fallback, className = '' }: Props) {
-  // Remembers which file failed, so a new `fileId` gets a fresh attempt.
-  const [failed, setFailed] = useState<string | null>(null);
-  const showImage = fileId !== null && failed !== fileId;
+  // Remembers which file failed and when, so a new `fileId` or a storage that is reachable again gets a fresh attempt.
+  const storageReturn = useStorageReturn();
+  const [failed, setFailed] = useState<{ fileId: string; storageReturn: number } | null>(null);
+  const showImage = fileId !== null && (failed?.fileId !== fileId || failed.storageReturn !== storageReturn);
   return (
     <div className={`flex items-center justify-center overflow-hidden rounded-control bg-raised ${className}`}>
       {showImage ? (
@@ -36,7 +38,7 @@ export function CoverImage({ fileId, size, fallback, className = '' }: Props) {
           draggable={false}
           // Never upscaled; larger images shrink to fit, uncropped.
           className="max-h-full max-w-full object-contain"
-          onError={() => setFailed(fileId)}
+          onError={() => setFailed({ fileId, storageReturn })}
         />
       ) : (
         <span className={`truncate px-1 text-xs ${MUTED}`}>{fallback}</span>

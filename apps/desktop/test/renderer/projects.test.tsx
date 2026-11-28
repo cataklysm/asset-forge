@@ -332,6 +332,7 @@ it('Show all in the shell switches to the assets gallery with the project and ta
   const assets = Array.from({ length: 20 }, (_, i) => assetSummary({ name: `Asset ${i}`, typeId: TYPE.id }));
   const api = install({
     'projects:list': listOf([project]),
+    'projects:get': () => project,
     'assets:list': (request) => pageOf(assets.slice(0, Math.min(request.limit, 20)), 25),
     'assignments:listByAsset': () => [],
   });
@@ -351,7 +352,7 @@ it('Show all in the shell switches to the assets gallery with the project and ta
       tagNames: ['oak'],
     }),
   );
-  expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe(project.id);
+  expect(await screen.findByRole('button', { name: 'Remove project Forest' })).toBeTruthy();
 });
 
 it('list state round trip keeps filters, scroll offset and selection', async () => {
@@ -379,7 +380,7 @@ it('list state round trip keeps filters, scroll offset and selection', async () 
   unmount();
   const saved = onState.mock.lastCall![0] as ProjectListState;
   expect(saved).toEqual({
-    filters: { query: 'oak', tagNames: ['bark'], status: 'active' },
+    filters: { query: 'oak', tagNames: ['bark'], tagLabels: { bark: 'Bark' }, status: 'active' },
     scrollOffset: 4800,
     openedIndex: null,
     selectedId: items[2]!.id,
@@ -622,8 +623,34 @@ function member(projectId: string, name: string): ProjectMember {
     assignedAt: NOW,
     updatedAt: NOW,
     asset,
+    coverFileId: null,
   };
 }
+
+it('the member table shows the cover of each member asset', async () => {
+  const project: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: '',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  const cover = nextId();
+  const members = [{ ...member(project.id, 'Covered'), coverFileId: cover }, member(project.id, 'Bare')];
+  installFakeApi({
+    'projects:get': () => project,
+    'assetTypes:list': () => [TYPE],
+    'assignments:listByProject': () => pageOf(members),
+    'assets:list': () => pageOf([]),
+  });
+  render(<ProjectScreen id={project.id} onNavigate={() => {}} />);
+  const table = await screen.findByRole('table', { name: 'Members' });
+  const covered = (await within(table).findByText('Covered')).closest('tr')!;
+  expect(covered.querySelector('img')?.getAttribute('src')).toContain(cover);
+  const bare = within(table).getByText('Bare').closest('tr')!;
+  expect(bare.querySelector('img')).toBeNull();
+});
 
 it('the project screen keeps the member pager and member editing', async () => {
   const user = userEvent.setup();
@@ -900,7 +927,7 @@ it('a rename switches the projects tag filter and the matching content to the ne
       offset: 0,
     }),
   );
-  expect(screen.getByRole('button', { name: 'Remove quercus' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Remove Quercus' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Remove oak' })).toBeNull();
 });
 

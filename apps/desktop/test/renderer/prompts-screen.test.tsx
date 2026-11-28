@@ -577,3 +577,23 @@ it('during an import Save, Delete, New and tag editing are disabled', async () =
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'New' }).disabled).toBe(true);
   expect(within(editor()).getByRole<HTMLInputElement>('combobox', { name: 'Add prompt tag' }).disabled).toBe(true);
 });
+
+it('a failed first page names the failure beside Retry', async () => {
+  const user = userEvent.setup();
+  let fail = true;
+  const store = fakePrompts([promptDetail({ title: 'Hero' })]);
+  installFakeApi({
+    'tags:suggest': () => [],
+    ...store.handlers,
+    'prompts:list': (request) => {
+      if (fail) throw fakeError('storage_full');
+      return store.handlers['prompts:list'](request);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  expect(screen.getByText('There is not enough free space in this folder.').getAttribute('role')).toBe('alert');
+  fail = false;
+  await user.click(retry);
+  await option('Hero');
+});

@@ -7,6 +7,7 @@ import {
   hasFilters,
   listKey,
   readView,
+  renameInFilters,
   toAssetQuery,
   toFileQuery,
   toProjectQuery,
@@ -53,6 +54,24 @@ describe('listKey', () => {
     expect(listKey({ ...NO_FILTERS, typeId: 'a","b' })).not.toBe(listKey(split));
     expect(listKey({ ...NO_FILTERS, query: 'x' })).not.toBe(listKey({ ...NO_FILTERS, projectId: 'x' }));
     expect(listKey({ ...NO_FILTERS, tagNames: ['a,b'] })).not.toBe(listKey({ ...NO_FILTERS, tagNames: ['a', 'b'] }));
+  });
+});
+
+describe('tag labels', () => {
+  it('never change the key, the filter flag or the query', () => {
+    const labelled = { ...NO_FILTERS, tagNames: ['oak'], tagLabels: { oak: 'Oak' } };
+    expect(listKey(labelled)).toBe(listKey({ ...NO_FILTERS, tagNames: ['oak'] }));
+    expect(hasFilters({ ...NO_PROJECT_FILTERS, tagLabels: { oak: 'Oak' } })).toBe(false);
+    expect(toAssetQuery(labelled)).toEqual({ tagNames: ['oak'] });
+  });
+
+  it('renameInFilters rewrites the names and the labels', () => {
+    const filters = { ...NO_FILE_FILTERS, tagNames: ['front view'], tagLabels: { 'front view': 'Front View' } };
+    expect(renameInFilters(filters, { from: 'front view', name: 'front', displayName: 'Front' })).toEqual({
+      ...NO_FILE_FILTERS,
+      tagNames: ['front'],
+      tagLabels: { front: 'Front' },
+    });
   });
 });
 

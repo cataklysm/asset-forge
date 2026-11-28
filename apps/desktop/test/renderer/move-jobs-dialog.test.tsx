@@ -344,3 +344,24 @@ it('Cancel closes without a request', async () => {
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(reroutes(api)).toHaveLength(0);
 });
+
+it('a paused target entry carries the paused tooltip on its option and on the select while chosen', async () => {
+  const user = userEvent.setup();
+  install({
+    'jobs:summary': () => ({
+      ...IDLE,
+      paused: [{ providerId: RUNPOD.id, providerName: 'RunPod', kind: 'ollama', reason: 'provider_unreachable' }],
+    }),
+  });
+  const { dialog } = renderDialog(LOCAL.id);
+  await waitFor(() => expect(targetSelect(dialog).value).toBe(RUNPOD.id));
+  const option = (name: string) =>
+    within(targetSelect(dialog))
+      .getAllByRole('option')
+      .find((o) => o.textContent?.startsWith(name)) as HTMLOptionElement;
+  await waitFor(() => expect(option('RunPod').title).toBe('paused'));
+  expect(option('Spare').title).toBe('');
+  expect(targetSelect(dialog).title).toBe('paused');
+  await user.selectOptions(targetSelect(dialog), SPARE.id);
+  expect(targetSelect(dialog).title).toBe('');
+});

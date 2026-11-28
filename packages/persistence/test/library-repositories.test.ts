@@ -242,7 +242,7 @@ describe('project assignments', () => {
     await db.projectAssets.insert(assignment(2, 12));
     const first = await db.projectAssets.listByProject(uuid(1), { limit: 1, offset: 0 });
     expect(first.total).toBe(2);
-    expect(first.items).toEqual([{ ...assignment(1, 12), asset: asset(12, 'Motel', uuid(105)) }]);
+    expect(first.items).toEqual([{ ...assignment(1, 12), asset: asset(12, 'Motel', uuid(105)), coverFileId: null }]);
     const second = await db.projectAssets.listByProject(uuid(1), { limit: 1, offset: 1 });
     expect(second.items.map((m) => m.asset.name)).toEqual(['Pump']);
     await expect(db.projectAssets.listByProject(uuid(9), { limit: 5, offset: 0 })).resolves.toEqual({

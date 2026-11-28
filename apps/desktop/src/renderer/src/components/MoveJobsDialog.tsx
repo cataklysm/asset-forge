@@ -3,6 +3,7 @@ import {
   JOB_ERROR_MESSAGES,
   isVisionKind,
   purposeOf,
+  type JobSummary,
   type ProviderList,
   type WaitingByProvider,
 } from '@assetforge/contracts';
@@ -193,6 +194,17 @@ function blockedReason(
   return null;
 }
 
+/**
+ * The entries whose job queue is paused, so a move into one can say that its jobs will wait there.
+ *
+ * @param summary the polled job summary; null while none was read
+ * @returns the ids of the paused entries
+ */
+function pausedProviderIds(summary: JobSummary | null): ReadonlySet<string> {
+  const ids = (summary?.paused ?? []).flatMap((paused) => (paused.providerId === null ? [] : [paused.providerId]));
+  return new Set(ids);
+}
+
 /** What reading the waiting counts works with. */
 interface LaneReading {
   /** True once the dialog unmounted. */
@@ -235,7 +247,8 @@ async function readLanes(reading: LaneReading): Promise<void> {
  */
 export function MoveJobsDialog({ source, onClose }: Props) {
   const providers = useProviders();
-  const { refresh, changeToken } = useJobs();
+  const { refresh, changeToken, summary } = useJobs();
+  const pausedIds = pausedProviderIds(summary);
   const [allLanes, setLanes] = useState<WaitingByProvider[] | null>(null);
   const lanes = allLanes === null ? null : allLanes.filter((lane) => !isImageLane(providers.list, lane.providerId));
   const [lanesError, setLanesError] = useState<string | null>(null);
@@ -340,6 +353,7 @@ export function MoveJobsDialog({ source, onClose }: Props) {
               purpose="vision"
               value={target}
               exclude={from ?? null}
+              pausedIds={pausedIds}
               disabled={moving}
               onChange={(id) => setChoice({ target: id, model: defaultModelOf(providers, id, 'tagging') })}
             />

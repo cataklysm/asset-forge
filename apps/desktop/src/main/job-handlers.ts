@@ -1,4 +1,10 @@
-import { IMAGE_GENERATE_JOB, ImageGeneratePayloadSchema, purposeOf, type ProviderKind } from '@assetforge/contracts';
+import {
+  IMAGE_GENERATE_JOB,
+  ImageGeneratePayloadSchema,
+  purposeOf,
+  type ProviderKind,
+  type ResourceClass,
+} from '@assetforge/contracts';
 import {
   cancelAllJobs,
   cancelJob,
@@ -142,6 +148,20 @@ async function generationLaneName(session: WorkspaceSession, lane: string | null
 }
 
 /**
+ * The filter of the jobs whose provider entry no longer exists: provider lanes outside the listed entries. A download
+ * lane is a host and its resource class is not a provider class, so downloads never match.
+ *
+ * @param providers the provider entries
+ * @returns the provider classes and the ids of the listed entries
+ */
+function removedProviderLanes(providers: ProviderStore): {
+  resourceClasses: readonly ResourceClass[];
+  lanes: string[];
+} {
+  return { resourceClasses: PROVIDER_CLASSES, lanes: providers.list().providers.map((entry) => entry.id) };
+}
+
+/**
  * One page of jobs, each named after its provider entry.
  *
  * @param dependencies the manager and the provider entries
@@ -152,13 +172,14 @@ async function listNamedJobs(
   dependencies: JobHandlerDependencies,
   request: IpcRequest<'jobs:list'>,
 ): Promise<IpcResponse<'jobs:list'>> {
-  const { limit, offset, status, providerId, ids } = request;
+  const { limit, offset, status, providerId, providerRemoved, ids } = request;
   const page = await dependencies.manager.read((session) =>
     listJobs(session, {
       limit,
       offset,
       ...(status === undefined ? {} : { status }),
       ...(providerId === undefined ? {} : { lane: providerId }),
+      ...(providerRemoved === undefined ? {} : { laneOutside: removedProviderLanes(dependencies.providers) }),
       ...(ids === undefined ? {} : { ids }),
     }),
   );

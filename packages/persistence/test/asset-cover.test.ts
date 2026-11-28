@@ -119,6 +119,43 @@ describe('asset cover repository', () => {
     await expect(db.assets.get(chosen.id)).resolves.toMatchObject({ updatedAt: T2 });
   });
 
+  test('the project member list carries the same cover as the asset list', async () => {
+    const chosen = await addAsset(10, 'Alpha');
+    const automatic = await addAsset(11, 'Beta');
+    const none = await addAsset(12, 'Gamma');
+    await addFile({ n: 100, assetId: chosen.id, importedAt: T1 });
+    const picked = await addFile({ n: 101, assetId: chosen.id, importedAt: T2 });
+    await db.assets.setCover(chosen.id, picked, T2);
+    await addFile({ n: 111, assetId: automatic.id, importedAt: T2 });
+    const first = await addFile({ n: 110, assetId: automatic.id, importedAt: T1 });
+    await addFile({ n: 120, assetId: none.id, mimeType: BLEND });
+    await db.projects.insert({
+      id: uuid(50),
+      name: 'P',
+      description: '',
+      status: 'active',
+      createdAt: T1,
+      updatedAt: T1,
+    });
+    for (const member of [chosen, automatic, none])
+      await db.projectAssets.insert({
+        projectId: uuid(50),
+        assetId: member.id,
+        priority: 'normal',
+        intendedUse: '',
+        approvalStatus: 'pending',
+        notes: '',
+        assignedAt: T1,
+        updatedAt: T1,
+      });
+    const members = await db.projectAssets.listByProject(uuid(50), { limit: 10, offset: 0 });
+    expect(members.items.map((member) => [member.asset.name, member.coverFileId])).toEqual([
+      ['Alpha', picked],
+      ['Beta', first],
+      ['Gamma', null],
+    ]);
+  });
+
   test('pending and failed images are never the automatic cover', async () => {
     const a = await addAsset(10, 'Alpha');
     await addFile({ n: 100, assetId: a.id, status: 'pending' });

@@ -38,7 +38,7 @@ const SKELETON_ROWS = 6;
 interface Props extends ProjectsScreenInput {
   onOpenAsset(id: string): void;
   /** Shows the gallery with these filters. */
-  onShowAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>): void;
+  onShowAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames' | 'tagLabels'>): void;
 }
 
 /**
@@ -68,7 +68,11 @@ export function ProjectsScreen(props: Props) {
           onOpenAsset={onOpenAsset}
           onShowAll={() => {
             if (selectedProject !== null)
-              onShowAssets({ projectId: selectedProject.id, tagNames: [...filters.tagNames] });
+              onShowAssets({
+                projectId: selectedProject.id,
+                tagNames: [...filters.tagNames],
+                ...(filters.tagLabels !== undefined && { tagLabels: filters.tagLabels }),
+              });
           }}
         />
       }
@@ -145,8 +149,9 @@ function ProjectsToolbar({ filters, total, allError, setFilter }: ToolbarProps) 
           <StatusFilter value={filters.status} onChange={(status) => setFilter({ status })} />
           <TagFilter
             value={filters.tagNames}
+            labels={filters.tagLabels}
             title={PROJECT_TAG_FILTER_TITLE}
-            onChange={(tagNames) => setFilter({ tagNames })}
+            onChange={(tagNames, tagLabels) => setFilter({ tagNames, tagLabels })}
           />
         </>
       </FilterBar>

@@ -3,12 +3,12 @@ import { RelationKindSchema, type AssetDetail, type RelationKind } from '@assetf
 import { call } from '../api';
 import { attempt } from '../attempt';
 import { distinct } from '../format';
-import { useLoad } from '../hooks/useLoad';
-import { relationLabel } from '../labels';
+import { ADD_TO_PROJECT_LABEL, relationLabel } from '../labels';
 import { ALERT, BORDER, BUTTON, MUTED, SELECT } from '../ui';
 import { AssetPicker } from './AssetPicker';
 import { AssignmentFields } from './AssignmentFields';
 import { Link } from './Link';
+import { ProjectPicker } from './ProjectPicker';
 
 // The Projects and Relations tabs of the asset screen.
 
@@ -38,16 +38,9 @@ interface ProjectsPanelProps {
  */
 export function ProjectsPanel({ asset, assignments, disabled, onOpenProject }: ProjectsPanelProps) {
   const [error, setError] = useState<string | null>(null);
-  const [projectToAdd, setProjectToAdd] = useState('');
-  const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
-
   const assigned = assignments.data ?? [];
-  const assignedIds = new Set(assigned.map((assignment) => assignment.projectId));
-  const unassigned = (projects.data?.items ?? []).filter((project) => !assignedIds.has(project.id));
-  const effectiveProject = unassigned.some((project) => project.id === projectToAdd)
-    ? projectToAdd
-    : (unassigned[0]?.id ?? '');
-  const errors = [error, assignments.error, projects.error].filter((message): message is string => message !== null);
+  const assignedIds = assigned.map((assignment) => assignment.projectId);
+  const errors = [error, assignments.error].filter((message): message is string => message !== null);
 
   return (
     <div className="space-y-3 pt-4">
@@ -87,32 +80,17 @@ export function ProjectsPanel({ asset, assignments, disabled, onOpenProject }: P
           </li>
         ))}
       </ul>
-      <div className="flex items-center gap-2">
-        <select
-          className={SELECT}
-          aria-label="Project to add"
-          value={effectiveProject}
-          onChange={(event) => setProjectToAdd(event.target.value)}
-        >
-          {unassigned.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={effectiveProject === ''}
-          onClick={() =>
-            void attempt(setError, async () => {
-              await call('assignments:assign', { projectId: effectiveProject, assetId: asset.id });
+      <div className="max-w-sm">
+        <ProjectPicker
+          label={ADD_TO_PROJECT_LABEL}
+          excludeIds={assignedIds}
+          onPick={(project) =>
+            attempt(setError, async () => {
+              await call('assignments:assign', { projectId: project.id, assetId: asset.id });
               assignments.reload();
             })
           }
-        >
-          Add to project
-        </button>
+        />
       </div>
     </div>
   );

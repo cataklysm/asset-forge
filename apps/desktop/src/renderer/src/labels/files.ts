@@ -1,5 +1,9 @@
 import type { FileKind } from '@assetforge/contracts';
 
+/** The headings above the role control of an asset file and the assign control of an inbox file (detail dialog). */
+export const ROLE_HEADING = 'Role';
+export const ASSIGN_TO_ASSET_HEADING = 'Assign to asset';
+
 /** The entries of the file type filters, in this order. */
 export const FILE_KIND_OPTIONS: readonly { kind: FileKind; title: string }[] = [
   { kind: 'image', title: 'Image' },

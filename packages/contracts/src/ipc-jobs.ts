@@ -6,13 +6,17 @@ import { type ChannelContracts, ChosenIdsSchema, CountSchema, EmptyRequestSchema
 
 /** The job channels: the job list and summary, cancel, retry, resume and moving waiting jobs to another provider. */
 export const jobChannels = {
-  /** Newest first. */
+  /**
+   * Newest first. `providerId` narrows to the jobs of that entry; `providerRemoved` to the analysis and generation
+   * jobs whose entry no longer exists (never the downloads or the jobs without a provider). Not both.
+   */
   'jobs:list': {
     request: PageRequestSchema.extend({
       status: JobStatusSchema.optional(),
       providerId: ProviderIdSchema.optional(),
+      providerRemoved: z.literal(true).optional(),
       ids: ChosenIdsSchema.optional(),
-    }),
+    }).refine((request) => request.providerId === undefined || request.providerRemoved === undefined),
     response: pageOf(JobViewSchema),
   },
   'jobs:summary': {

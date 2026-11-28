@@ -146,8 +146,10 @@ export interface JobRepository {
    * original name, `providerId` the lane, `providerName` and `model` come from `analysisJobFields` of the payload,
    * `url` and `host` from `downloadJobFields`, `result` from the stored column. A `FILE_DOWNLOAD_JOB` answers
    * `providerId`, `providerName` and `model` null. `ids` narrows the list to those jobs within the other filters.
+   * `laneOutside` narrows it to the jobs of those resource classes that have a lane and whose lane is not one of
+   * `lanes`, such as the jobs of a provider entry that no longer exists.
    *
-   * @param filter the page, and the status, lane and ids to narrow it to
+   * @param filter the page, and the status, lane, lanes outside and ids to narrow it to
    * @returns the page and the total
    */
   list(filter: {
@@ -155,6 +157,7 @@ export interface JobRepository {
     offset: number;
     status?: JobStatus;
     lane?: string | null;
+    laneOutside?: { resourceClasses: readonly ResourceClass[]; lanes: readonly string[] };
     ids?: readonly string[];
   }): Promise<{ items: JobView[]; total: number }>;
   /**

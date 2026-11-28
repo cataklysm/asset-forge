@@ -4,6 +4,7 @@ import {
   type JobStatus,
   type JobSummary,
   type JobView,
+  type ResourceClass,
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import type { CancelOptions, Job, JobControl } from './job-types.js';
@@ -26,15 +27,23 @@ async function requireJob(session: WorkspaceSession, jobId: string): Promise<Job
 }
 
 /**
- * One page of jobs, newest first; with `lane` only the jobs of that lane.
+ * One page of jobs, newest first; with `lane` only the jobs of that lane, with `laneOutside` only the jobs of those
+ * resource classes whose lane is set and not one of the given lanes.
  *
  * @param session the open workspace
- * @param query the page, and optionally the status, the lane and the chosen ids
+ * @param query the page, and optionally the status, the lane, the lanes outside and the chosen ids
  * @returns the page and the total
  */
 export function listJobs(
   session: WorkspaceSession,
-  query: { limit: number; offset: number; status?: JobStatus; lane?: string; ids?: readonly string[] },
+  query: {
+    limit: number;
+    offset: number;
+    status?: JobStatus;
+    lane?: string;
+    laneOutside?: { resourceClasses: readonly ResourceClass[]; lanes: readonly string[] };
+    ids?: readonly string[];
+  },
 ): Promise<{ items: JobView[]; total: number }> {
   return session.database.jobs.list(query);
 }

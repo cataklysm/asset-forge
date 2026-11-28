@@ -1,7 +1,7 @@
 import type { TagOrigin } from '@assetforge/contracts';
 import { Pencil, X } from 'lucide-react';
 import { AI_TAG_TITLE, RENAME_LABEL, removeTagLabel, renameTagLabel } from '../labels';
-import { AI_CHIP, CHIP, FILTER_CHIP, FOCUS, MATCHED_CHIP } from '../ui';
+import { AI_CHIP, CHIP, CHIP_BUTTON, FILTER_CHIP, MATCHED_CHIP } from '../ui';
 
 /** The props of `TagChip`. */
 interface Props {
@@ -16,9 +16,6 @@ interface Props {
   /** The look of a chip that matches the current filter. */
   matched?: boolean;
 }
-
-/** The classes of the pencil and remove buttons. */
-const CHIP_BUTTON = `inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-80 hover:opacity-100 ${FOCUS}`;
 
 /**
  * The chip classes: filter before matched before AI before the plain look.

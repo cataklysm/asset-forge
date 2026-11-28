@@ -66,6 +66,28 @@ export function renameInSelection(selection: FileSelection, change: TagRename): 
   return selected === null ? selection : { ...selection, selected };
 }
 
+/** The display names of a filter's tags, by normalised name. */
+export type TagLabels = Readonly<Record<string, string>>;
+
+/**
+ * Filter labels after a rename: the source's entry dropped, the kept tag spelled as renamed when the filter holds
+ * it. The same object when nothing changes.
+ *
+ * @param labels the display names of a filter
+ * @param names the filter's tag names after the rename
+ * @param change the finished rename
+ * @returns the renamed labels, or `labels` itself when nothing changes
+ */
+export function renameInLabels(labels: TagLabels, names: readonly string[], change: TagRename): TagLabels {
+  const holds = names.includes(change.name);
+  const stale = change.from !== change.name && change.from in labels;
+  if (!stale && (!holds || labels[change.name] === change.displayName)) return labels;
+  const next: Record<string, string> = { ...labels };
+  delete next[change.from];
+  if (holds) next[change.name] = change.displayName;
+  return next;
+}
+
 /**
  * Filter names: `from` replaced by `name` in place, no duplicate. The same array when `from` is absent.
  *

@@ -5,6 +5,7 @@ import { call } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FilterBar } from '../components/FilterBar';
 import { Page } from '../components/Page';
+import { ListRetry } from '../components/PageFailure';
 import { PromptEditor } from '../components/PromptEditor';
 import { PromptList } from '../components/PromptList';
 import { SearchField } from '../components/SearchField';
@@ -21,13 +22,13 @@ import {
   PROMPT_TAG_FILTER_TITLE,
   promptCountLabel,
   PROMPTS_LABEL,
-  RETRY_LABEL,
   SEARCH_PROMPTS_LABEL,
   UNSAVED_PROMPT_TITLE,
 } from '../labels';
 import { useLeaveGuard } from '../leave-guard';
-import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
-import { renameInNames } from '../tag-rename';
+import { failedFirstEntry, wantedPages, type ShownRows } from '../paged-view';
+import { renameInFilters } from '../list-state';
+import type { TagLabels } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { BUTTON, MUTED } from '../ui';
 
@@ -44,6 +45,15 @@ interface Editing {
   id: string | null;
   serial: number;
 }
+
+/** The tag filter of the list: the normalised names and the display names they were chosen with. */
+interface TagFilterState {
+  tagNames: string[];
+  tagLabels: TagLabels;
+}
+
+/** The tag filter that matches every prompt. */
+const NO_TAG_FILTER: TagFilterState = { tagNames: [], tagLabels: {} };
 
 /** The number of skeleton rows while the first page loads. */
 const SKELETON_ROWS = 6;
@@ -122,7 +132,8 @@ type PromptPages = ReturnType<typeof usePromptPages>;
  */
 export function PromptsScreen({ busy, initialId = null }: Props) {
   const [queryText, setQueryText] = useState('');
-  const [tagNames, setTagNames] = useState<readonly string[]>([]);
+  const [tagFilter, setTagFilter] = useState<TagFilterState>(NO_TAG_FILTER);
+  const tagNames = tagFilter.tagNames;
   const [editing, setEditing] = useState<Editing | null>(initialId === null ? null : { id: initialId, serial: 0 });
   const [dirty, setDirty] = useState(false);
   // The open question whether to discard the draft, answered by the dialog.
@@ -130,7 +141,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
 
   const query = useDebouncedValue(queryText.trim(), SEARCH_DEBOUNCE_MS);
   const { renameToken } = useTags();
-  useRenamed((change) => setTagNames((names) => renameInNames(names, change)));
+  useRenamed((change) => setTagFilter((current) => renameInFilters(current, change)));
   const pages = usePromptPages({ query, tagNames, renameToken });
 
   const ask = useCallback(() => new Promise<boolean>((resolve) => setAsking(() => resolve)), []);
@@ -148,10 +159,10 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
     setEditing((current) => ({ id, serial: (current?.serial ?? 0) + 1 }));
   }
 
-  function setFilter(change: { query?: string; tagNames?: readonly string[] }) {
+  function setFilter(change: { query?: string; tags?: TagFilterState }) {
     pages.restore.current = NO_POSITION;
     if (change.query !== undefined) setQueryText(change.query);
-    if (change.tagNames !== undefined) setTagNames(change.tagNames);
+    if (change.tags !== undefined) setTagFilter(change.tags);
   }
 
   const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
@@ -194,7 +205,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
         <div className="flex min-h-0 w-80 shrink-0 flex-col gap-3">
           <FilterBar
             resultCount={total === null ? null : promptCountLabel(total)}
-            onClear={filtered ? () => setFilter({ query: '', tagNames: [] }) : null}
+            onClear={filtered ? () => setFilter({ query: '', tags: NO_TAG_FILTER }) : null}
           >
             <SearchField
               label={SEARCH_PROMPTS_LABEL}
@@ -204,8 +215,9 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
             />
             <TagFilter
               value={tagNames}
+              labels={tagFilter.tagLabels}
               title={PROMPT_TAG_FILTER_TITLE}
-              onChange={(names) => setFilter({ tagNames: names })}
+              onChange={(names, labels) => setFilter({ tags: { tagNames: names, tagLabels: labels } })}
             />
           </FilterBar>
           <div className="flex min-h-0 flex-1 flex-col" aria-busy={pages.paged.pending || undefined}>
@@ -259,16 +271,8 @@ function promptsBody(
 ): ReactNode {
   const { paged } = pages;
   const total = paged.state.total;
-  const failedPage = failedFirstPage(paged.state);
-  if (failedPage !== null) {
-    return (
-      <div>
-        <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-          {RETRY_LABEL}
-        </button>
-      </div>
-    );
-  }
+  const failedPage = failedFirstEntry(paged.state);
+  if (failedPage !== null) return <ListRetry failed={failedPage} onRetry={paged.retry} />;
   if (total === null) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true">

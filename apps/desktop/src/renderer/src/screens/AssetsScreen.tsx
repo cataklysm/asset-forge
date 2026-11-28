@@ -92,7 +92,6 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
   const analysis = useAnalysisDialogs({ onStarted: (result) => setStarted(enqueueTitle(result)), onChanged: () => {} });
 
   const types = useLoad(() => call('assetTypes:list', {}), []);
-  const projects = useLoad(() => call('projects:list', { limit: 200, offset: 0 }), []);
   // The title shows the size of the whole library, independent of the filters.
   const library = useLoad(() => call('assets:list', { limit: 1, offset: 0 }), []);
 
@@ -248,14 +247,13 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           onRetry: paged.retry,
           positionRef: position,
         };
-  const errors = [types.error, projects.error, library.error].filter((message): message is string => message !== null);
+  const errors = [types.error, library.error].filter((message): message is string => message !== null);
 
   const toolbar = (
     <AssetToolbar
       filters={filters}
       onFilterChange={setFilter}
       types={typeItems}
-      projects={projects.data?.items ?? []}
       analysisBlocked={analysis.blocked}
       onAnalyseAll={() => analysis.start({ kind: 'assetFilter', filter: toAssetQuery(effective) })}
       view={view}

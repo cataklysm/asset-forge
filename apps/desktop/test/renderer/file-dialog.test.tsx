@@ -163,7 +163,7 @@ it('without a role control the dialog shows no Role or Assign section', async ()
   install();
   render(<Harness file={fileRecord()} asset={null} roleControl={null} />);
   await openDialog();
-  expect(screen.queryByRole('heading', { name: 'Assign' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Assign to asset' })).toBeNull();
 });
 
 it('the asset link follows to the asset', async () => {
@@ -222,7 +222,7 @@ it('the details column shows its sections in order with one heading style', asyn
   expect(more.querySelector('svg')).not.toBeNull();
   unmount();
 
-  // An asset without tags has no "Asset tags" heading; the inbox shows "Assign" and no asset part.
+  // An asset without tags has no "Asset tags" heading; the inbox shows "Assign to asset" and no asset part.
   render(<Harness file={fileRecord({ assetId: ASSET.id, role: 'reference' })} asset={{ ...ASSET, tags: [] }} />);
   await openDialog();
   expect(headings(3)).toEqual(['Image details', 'Role', 'Image tags', 'Asset']);
@@ -232,13 +232,13 @@ it('the inbox shows Assign, and a non-image file is described as a file', async 
   install();
   const { unmount } = render(<Harness file={fileRecord()} asset={null} />);
   await openDialog();
-  expect(headings(3)).toEqual(['Image details', 'Assign', 'Image tags']);
+  expect(headings(3)).toEqual(['Image details', 'Assign to asset', 'Image tags']);
   unmount();
 
   const text = fileRecord({ originalName: 'notes.txt', mimeType: 'text/plain', previewable: false, kind: 'document' });
   render(<Harness file={text} asset={null} />);
   await openDialog();
-  expect(headings(3)).toEqual(['File details', 'Assign', 'File tags']);
+  expect(headings(3)).toEqual(['File details', 'Assign to asset', 'File tags']);
   expect(screen.getByRole('group', { name: 'File tags' })).toBeTruthy();
 });
 
@@ -881,7 +881,7 @@ it('a trashed file shows its origin, read-only tags and only Restore and Delete 
   expect(within(tags).getByText('Moss')).toBeTruthy();
   expect(within(tags).queryByRole('button')).toBeNull();
   expect(screen.queryByRole('combobox', { name: 'Add image tag' })).toBeNull();
-  expect(screen.queryByRole('heading', { name: 'Assign' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Assign to asset' })).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Role' })).toBeNull();
 
   await user.click(screen.getByRole('button', { name: 'More' }));

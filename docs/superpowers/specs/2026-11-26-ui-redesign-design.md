@@ -79,7 +79,7 @@ Proposed values, read off the mockups (CSS px at 100 % zoom):
 | `danger` | `#f87171` on `#2a1015` | errors, failed imports |
 | `warning` | `#fbbf24` | storage unreachable banner |
 
-- **Typography:** `"Segoe UI Variable", "Segoe UI", system-ui, sans-serif`. Page title 28/600; workspace name 24/600; section heading 18/600; tile title 17/600; body 15/400; label and meta 14/400 in `muted`; chip 13/400. Counts next to page titles 28/400 in `muted`.
+- **Typography:** `"Segoe UI Variable", "Segoe UI", system-ui, sans-serif`. Page title 28/600; workspace name 24/600; section heading 18/600; tile title 17/600; body 14/400 (Tailwind `text-sm`, also in buttons and tables; the mockups read 15, 14 was kept); label and meta 14/400 in `muted`; chip 13/400. Counts next to page titles 28/400 in `muted`.
 - **Spacing:** 4 px grid. Page padding 24; header height 76 with a bottom divider; nav width 200; detail column width 300 (264 below 1280 px window width); gap between columns 24 with 1 px vertical dividers; toolbar rows 40 high, 12 apart; tile gap 16.
 - **Radii:** controls and chips 6; tiles and preview frames 8; dialogs 10.
 - **Controls:** height 36 (toolbar) / 32 (inline); `BUTTON` = `raised` background, 1 px `line` border, `text`, radius 6, px 14, hover border `line-strong`, `aria-pressed` → `nav-active` background and `accent` border, disabled 50 % opacity. Focus ring 2 px `accent`, offset 2. Chip = 1 px `line-strong` border, transparent, height 26, px 10; a filter chip has `accent` border and text and a remove icon.
