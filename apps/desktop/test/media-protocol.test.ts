@@ -214,10 +214,10 @@ describe('openFile', () => {
   });
 
   it('closes the handle when the stream is cancelled, and not before', async () => {
-    // Sixteen 64 KiB chunks, more than the stream reads ahead (a single chunk would be read to the end and closed on
-    // its own while the test waits).
+    // Sixty-four 64 KiB chunks, well beyond what the stream reads ahead (a single chunk would be read to the end and
+    // closed on its own while the test waits).
     const large = join(base, 'large.bin');
-    await writeFile(large, new Uint8Array(1024 * 1024));
+    await writeFile(large, new Uint8Array(4 * 1024 * 1024));
     const opened = await openFile(large);
     const handle = await lastHandle();
     const reader = opened.stream!.getReader();
