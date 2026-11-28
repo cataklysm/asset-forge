@@ -34,6 +34,7 @@ function crawlOf(p: Partial<SiteCrawlResult> = {}): SiteCrawlResult {
     filtered: 3,
     disallowed: 0,
     invalid: 0,
+    offSite: 0,
     pageFailures: 0,
     truncated: null,
     cancelled: false,
@@ -222,7 +223,8 @@ it('Log in calls sites:openLogin with the profile, and the gallery URL when it b
 
 it('Test shows the counts and the list of found files, and enables Import', async () => {
   const { api, profile } = await tested({
-    'sites:crawl': () => crawlOf({ disallowed: 4, invalid: 5, pageFailures: 6, truncated: 'files', cancelled: true }),
+    'sites:crawl': () =>
+      crawlOf({ disallowed: 4, invalid: 5, offSite: 7, pageFailures: 6, truncated: 'files', cancelled: true }),
   });
   expect(requests(api, 'sites:crawl')).toEqual([{ profileId: profile.id, url: 'https://example.com/gallery' }]);
   const text = dialog().textContent!;
@@ -233,6 +235,7 @@ it('Test shows the counts and the list of found files, and enables Import', asyn
     'Filtered 3',
     'Disallowed 4',
     'Not usable 5',
+    'Off site 7',
     'Page failures 6',
     'Stopped at Max. files',
     'Cancelled',

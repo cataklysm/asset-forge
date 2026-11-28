@@ -130,6 +130,7 @@ describe('crawlSite', () => {
       filtered: 0,
       disallowed: 0,
       invalid: 0,
+      offSite: 0,
       pageFailures: 0,
       truncated: null,
       cancelled: false,
@@ -222,6 +223,7 @@ describe('crawlSite', () => {
         pages: 2,
         pageFailures: 0,
         invalid: 0,
+        offSite: 0,
         truncated: null,
         problems: [],
       });
@@ -596,6 +598,7 @@ describe('crawl problems', () => {
         filtered: 0,
         disallowed: 0,
         invalid: 0,
+        offSite: 0,
         pageFailures: 1,
         truncated: null,
         cancelled: false,
@@ -737,6 +740,8 @@ describe('crawl problems', () => {
     });
     const result = await run(d, profile({ pagination: '//p', file: '//img' }));
     expect(result.files).toEqual([`${G}/2.jpg`]);
+    // Each distinct link off the site counts once, however often it is found.
+    expect(result.offSite).toBe(2);
     expect(result.problems).toEqual([
       { url: 'https://other.test/d/1', stage: 'detail', reason: 'off_site', detail: null },
       { url: 'https://other.test/g2', stage: 'gallery', reason: 'off_site', detail: null },

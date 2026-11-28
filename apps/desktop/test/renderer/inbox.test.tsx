@@ -1285,6 +1285,7 @@ it('Import from site follows Import from URLs, is disabled while importing and i
       filtered: 0,
       disallowed: 0,
       invalid: 0,
+      offSite: 0,
       pageFailures: 0,
       truncated: null,
       cancelled: false,
