@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { FileRoleSchema, type Asset, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
@@ -90,6 +90,12 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
   const eligibleIds = eligible.map((file) => file.id);
   const allImages = files.length > 0 && files.every((file) => file.kind === 'image');
   const failedMessage = new Map(result?.failures.map((failure) => [failure.key, failure.message]) ?? []);
+  const resultStale = result !== null && !result.failures.some((failure) => selection.selected.has(failure.key));
+
+  // The strip belongs to the files it lists: once none of them is selected, it goes for good.
+  useEffect(() => {
+    if (resultStale) setResult(null);
+  }, [resultStale]);
 
   /** Adds or removes a tag on every eligible file. */
   async function changeTags(channel: 'files:addTagMany' | 'files:removeTagMany', name: string) {
@@ -177,7 +183,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
             {error}
           </p>
         )}
-        {result !== null && (
+        {result !== null && !resultStale && (
           <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
         )}
       </section>

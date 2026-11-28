@@ -195,6 +195,41 @@ it('a partially failed assign lists the failure and drops the moved files', asyn
   expect(within(names).getByText('Failed').getAttribute('title')).toBe('This item no longer exists.');
 });
 
+it('the assign failure strip goes once no failed file is selected any more', async () => {
+  const user = userEvent.setup();
+  const { c1, c2 } = files();
+  const c3 = fileRecord({ originalName: 'c3.png' });
+  const api = install([c1, c2, c3], {
+    'files:assignMany': () => {
+      api.setFiles([c2, c3]);
+      return {
+        items: [
+          { fileId: c1.id, file: { ...c1, assetId: OAK.id, role: 'reference' }, error: null },
+          { fileId: c2.id, file: null, error: { code: 'not_found', message: 'not_found' } },
+        ],
+      };
+    },
+  });
+  render(<Harness />);
+  await selectRange(user, 'c1.png', 'c2.png');
+  await pickAsset(user);
+  await user.click(within(column()).getByRole('button', { name: 'Assign 2 files' }));
+  expect((await within(column()).findByRole('alert')).textContent).toContain('c2.png');
+  await waitFor(() => expect(screen.getByText('1 selected')).toBeTruthy());
+
+  await user.click(tile('c3.png'));
+  await waitFor(() =>
+    expect(within(within(column()).getByRole('list', { name: 'Selected files' })).getByText('c3.png')).toBeTruthy(),
+  );
+  expect(within(column()).queryByRole('alert')).toBeNull();
+  // Selecting the failed file again does not bring the old strip back.
+  await user.click(tile('c2.png'));
+  await waitFor(() =>
+    expect(within(within(column()).getByRole('list', { name: 'Selected files' })).getByText('c2.png')).toBeTruthy(),
+  );
+  expect(within(column()).queryByRole('alert')).toBeNull();
+});
+
 it('shared image tags show only tags every eligible file carries; removing one removes it from all', async () => {
   const user = userEvent.setup();
   const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('oak'), tagOf('bark')] });
