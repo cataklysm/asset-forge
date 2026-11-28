@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -94,6 +94,12 @@ export function TrashScreen({ state, onStateChange }: Props) {
   // The title and Empty trash use the number of all files in the trash, independent of the filters.
   const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: TRASH }), [reloadToken]);
   const total = all.data?.total ?? null;
+
+  // An open Empty trash confirmation has nothing left to do once a count reload finds the trash empty.
+  const nothingToEmpty = pending?.kind === 'empty' && total === 0 && !busy;
+  useEffect(() => {
+    if (nothingToEmpty) setPending(null);
+  }, [nothingToEmpty]);
 
   // Leaving the screen keeps the filters (already in `state`) and the scroll offset.
   useKeptScrollOffset(positionRef, state, onStateChange);

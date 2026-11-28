@@ -249,6 +249,38 @@ it('the Empty trash confirmation follows a count reload that answers while it is
   expect(await screen.findByRole('dialog', { name: 'Delete 2 files permanently?' })).toBeTruthy();
 });
 
+it('the Empty trash confirmation closes when a count reload finds the trash empty', async () => {
+  const user = userEvent.setup();
+  const { hero } = files();
+  let items = [hero];
+  const held = deferred<void>();
+  let holdCount = false;
+  const api = install(items, {
+    handlers: {
+      'files:list': async (r: ListRequest) => {
+        // The title's count read after the restore is held back.
+        if (holdCount && r.limit === 1) await held.promise;
+        return pageOf(items.slice(r.offset, r.offset + r.limit), items.length);
+      },
+      'files:restoreMany': (r) => {
+        items = items.filter((f) => !r.fileIds.includes(f.id));
+        return { items: r.fileIds.map((fileId) => ({ fileId, file: null, error: null })) };
+      },
+    },
+  });
+  render(<Harness />);
+  await waitFor(() => expect(title()).toBe('Trash1'));
+  holdCount = true;
+  await openMenu(user, 'hero.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Restore' }));
+  await waitFor(() => expect(screen.queryByText('hero.png')).toBeNull());
+  await user.click(screen.getByRole('button', { name: 'Empty trash' }));
+  expect(await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' })).toBeTruthy();
+  await act(async () => held.resolve());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(api.calls.filter((entry) => entry.channel === 'trash:empty')).toHaveLength(0);
+});
+
 it('Empty trash reports failures by count only', async () => {
   const user = userEvent.setup();
   const { hero, loose } = files();
