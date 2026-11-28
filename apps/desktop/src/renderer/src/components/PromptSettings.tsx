@@ -145,7 +145,7 @@ export function PromptSettings() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, AnalysisPromptDraft>>({});
   const [confirming, setConfirming] = useState(false);
-  const { busy, error, run } = useExclusiveRun(describeError);
+  const { busy, error, setError, run } = useExclusiveRun(describeError);
   const headingId = useId();
 
   /**
@@ -181,6 +181,30 @@ export function PromptSettings() {
   const savePrompt = (prompt: AnalysisPrompt, draft: AnalysisPromptDraft) => {
     const kept = drafts[prompt.id];
     return run(() => save(saveInputOf(prompt, draft)).then(() => dropDraft(prompt.id, kept)));
+  };
+
+  /**
+   * Resets the selected prompt; edits made while the reset ran stay as a draft.
+   *
+   * @param prompt the selected prompt
+   */
+  const resetPrompt = (prompt: AnalysisPrompt) => {
+    const kept = drafts[prompt.id];
+    return run(() =>
+      reset(prompt.id).then(() => {
+        if (kept !== undefined) dropDraft(prompt.id, kept);
+      }),
+    );
+  };
+
+  /**
+   * Selects a prompt; the message of an action on another prompt goes.
+   *
+   * @param id the prompt
+   */
+  const selectPrompt = (id: string) => {
+    if (id !== selected?.id) setError(null);
+    setSelectedId(id);
   };
 
   /**
@@ -223,7 +247,7 @@ export function PromptSettings() {
                 selectedId={selected?.id}
                 drafts={drafts}
                 busy={busy}
-                select={setSelectedId}
+                select={selectPrompt}
                 onCreate={() => void run(() => createPrompt({ save, reset }, list, purpose, setSelectedId))}
               />
             ))}
@@ -243,7 +267,7 @@ export function PromptSettings() {
                 }))
               }
               onSave={(draft) => savePrompt(selected, draft)}
-              onReset={() => run(() => reset(selected.id).then(() => dropDraft(selected.id)))}
+              onReset={() => resetPrompt(selected)}
               onDelete={() => setConfirming(true)}
             />
           )}

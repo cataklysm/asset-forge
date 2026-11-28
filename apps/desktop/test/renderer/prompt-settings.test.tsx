@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { IpcRequest } from '@assetforge/contracts';
+import type { AnalysisPrompt, IpcRequest } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
 import { PromptSettings } from '../../src/renderer/src/components/PromptSettings';
@@ -8,6 +8,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { SettingsScreen } from '../../src/renderer/src/screens/SettingsScreen';
 import { BUTTON, BUTTON_INLINE, ICON_BUTTON } from '../../src/renderer/src/ui';
 import {
+  deferred,
   fakeAnalysisPrompts,
   fakeError,
   fakeProviders,
@@ -184,6 +185,36 @@ it('Reset calls the channel without asking and shows the returned text', async (
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(requestsOf(api, 'analysisPrompts:reset')).toEqual([{ id: DETAILED.id }]);
   expect(screen.queryByTitle('Unsaved changes')).toBeNull();
+});
+
+it('text typed while a reset runs stays as a draft', async () => {
+  const pending = deferred<AnalysisPrompt>();
+  const answer = { ...DETAILED, text: BUILT_IN_TAGGING_TEXT, maxTags: 15 };
+  install({ 'analysisPrompts:reset': () => pending.promise });
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.click(button('Reset'));
+  await userEvent.type(field('Text'), ' typed meanwhile');
+  await act(async () => pending.resolve(answer));
+  await waitFor(() => expect(button('Reset').disabled).toBe(false));
+  expect(field('Text').value).toBe('Describe the person precisely typed meanwhile');
+  expect(within(entry('Tagging', 'Detailed')).getByTitle('Unsaved changes')).toBeTruthy();
+});
+
+it('the message of a refused action goes when another prompt is selected', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.clear(field('Name'));
+  await userEvent.type(field('Name'), 'default');
+  await userEvent.click(button('Save'));
+  await screen.findByRole('alert');
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  expect(screen.getByRole('alert')).toBeTruthy();
+  await userEvent.click(entry('Image to prompt', 'Default'));
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('Delete asks first, then calls the channel', async () => {
