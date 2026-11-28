@@ -693,6 +693,34 @@ it('the Selection column follows a rename when no loaded page holds the selected
   expect(within(column).queryByText('Front View')).toBeNull();
 });
 
+it('the Selection column keeps the filter highlight of a renamed tag when no loaded page holds the asset', async () => {
+  const user = userEvent.setup();
+  const oak = assetSummary({
+    name: 'Oak tree',
+    typeId: TYPE.id,
+    tags: [tagOf('Front View')],
+    matchedTags: [{ name: 'front view', displayName: 'Front View', onAsset: true, onFiles: false }],
+  });
+  const rename = renameHandlers({ 'front view': 'Front View' });
+  const api = install({
+    'assets:list': listOf([oak]),
+    ...rename,
+    'tags:rename': (request) => {
+      // After the rename the reloaded list no longer holds the selected asset.
+      api.set('assets:list', listOf([]));
+      return rename['tags:rename'](request);
+    },
+  });
+  render(<RenamingHarness initial={{ ...INITIAL, filters: { ...NO_FILTERS, tagNames: ['front view'] } }} />);
+  await screen.findByText('Oak tree');
+  await user.click(itemOf('Oak tree'));
+  const column = selectionColumn();
+  await renameThroughDialog(user, 'Front View', 'Side');
+  await waitFor(() => expect(screen.queryByText('Oak tree', { selector: '[data-index] *' })).toBeNull());
+  const chip = within(column).getByText('Side');
+  expect(chip.closest('[data-matched]')).not.toBeNull();
+});
+
 it('an asset selected before a remount stays in the Selection column when a filter hides it', async () => {
   const user = userEvent.setup();
   const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });

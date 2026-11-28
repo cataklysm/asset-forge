@@ -26,9 +26,9 @@ import {
   type AssetView,
 } from '../list-state';
 import { findLoaded, PAGE_SIZE } from '../paged-list';
-import { renameInTags } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { BUTTON, MUTED } from '../ui';
+import { renameInSummary } from './summary-rename';
 
 // The asset gallery: filters, a virtualised grid or table with endless paging, and the Selection column.
 
@@ -154,14 +154,16 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   // The selected asset as last seen, for when no loaded page holds it (any more).
   const lastSelected = useRef<AssetSummary | null>(null);
+  // A changed copy is shown at once, not only with the next render of the reload.
+  const [, setRenamedCopies] = useState(0);
   // The reload reaches the loaded pages; this copy follows the rename here.
   useRenamed((change) => {
     const asset = lastSelected.current;
     if (asset === null) return;
-    const tags = renameInTags(asset.tags, change);
-    const coverTags = renameInTags(asset.coverTags, change);
-    if (tags !== asset.tags || coverTags !== asset.coverTags)
-      lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
+    const renamed = renameInSummary(asset, change);
+    if (renamed === asset) return;
+    lastSelected.current = renamed;
+    setRenamedCopies((count) => count + 1);
   });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   // A loaded page holds the newest copy, also of an asset selected before this mount.
