@@ -32,6 +32,26 @@ function renderedSources(dir = RENDERER_SRC): string[] {
   });
 }
 
+/** The relative luminance (WCAG 2) of a colour token written as `#rrggbb` in `css`. */
+function luminance(css: string, name: string): number {
+  const match = css.match(new RegExp(`--color-${name}: *#([0-9a-f]{6});`, 'i'));
+  if (!match) throw new Error(`token ${name} missing`);
+  const [red, green, blue] = [0, 2, 4]
+    .map((start) => parseInt(match[1]!.slice(start, start + 2), 16) / 255)
+    .map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)) as [
+    number,
+    number,
+    number,
+  ];
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+/** The contrast ratio (WCAG 2) of two colour tokens of `css`. */
+function contrast(css: string, first: string, second: string): number {
+  const [high, low] = [luminance(css, first), luminance(css, second)].sort((a, b) => b - a) as [number, number];
+  return (high + 0.05) / (low + 0.05);
+}
+
 const readUi = () => readFileSync(new URL('../src/renderer/src/ui.ts', import.meta.url), 'utf8');
 
 describe('design tokens and window appearance', () => {
@@ -54,6 +74,12 @@ describe('design tokens and window appearance', () => {
       ai: '#b9a3ff',
     }))
       expect(css).toMatch(new RegExp(`--color-${name}: *${value};`, 'i'));
+  });
+
+  it('the AI colour has a contrast of at least 4.5 on the page and surface backgrounds', () => {
+    const css = readFileSync(new URL('../src/renderer/src/index.css', import.meta.url), 'utf8');
+    expect(contrast(css, 'ai', 'bg')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(css, 'ai', 'surface')).toBeGreaterThanOrEqual(4.5);
   });
 
   it('the window background equals the page token and the minimum size is 1024 × 680', () => {
