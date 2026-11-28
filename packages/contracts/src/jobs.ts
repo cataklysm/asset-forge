@@ -43,7 +43,7 @@ export const JobViewSchema = z.object({
   id: z.string(),
   type: z.string(),
   status: JobStatusSchema,
-  attempt: z.number().int().nonnegative(),
+  attempt: CountSchema,
   fileId: z.string().nullable(),
   /** Original file name; null when the job has no file. */
   fileName: z.string().nullable(),
@@ -108,7 +108,7 @@ export type JobSummary = z.infer<typeof JobSummarySchema>;
 export const WaitingByProviderSchema = z.object({
   providerId: ProviderIdSchema.nullable(),
   providerName: z.string().nullable(),
-  waiting: z.number().int().min(0),
+  waiting: CountSchema,
 });
 /** The waiting analysis jobs of one provider. */
 export type WaitingByProvider = z.infer<typeof WaitingByProviderSchema>;

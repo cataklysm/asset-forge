@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FileKindSchema } from './files';
-import { CountSchema } from './ipc-shared';
+import { CountSchema, IdSchema } from './ipc-shared';
 
 /** At most this many site profiles at app level. */
 export const MAX_SITE_PROFILES = 50;
@@ -50,7 +50,7 @@ const profileFields = {
 
 /** A site profile; `site` is taken from the URL typed at creation (`siteOf`) and never changes. */
 export const SiteProfileSchema = z.object({
-  id: z.uuid(),
+  id: IdSchema,
   site: z.string().min(1).max(253),
   ...profileFields,
 });
@@ -60,7 +60,7 @@ export type SiteProfile = z.infer<typeof SiteProfileSchema>;
 /** Without `id` a profile is created and `url` gives its site; with `id` it is replaced and its site stays. */
 export const SaveSiteProfileSchema = z
   .object({
-    id: z.uuid().optional(),
+    id: IdSchema.optional(),
     url: z.string().max(2000).optional(),
     ...profileFields,
   })
@@ -122,7 +122,7 @@ export type SiteCrawlProblem = z.infer<typeof SiteCrawlProblemSchema>;
  * not fit.
  */
 export const SiteCrawlResultSchema = z.object({
-  crawlId: z.uuid(),
+  crawlId: IdSchema,
   files: z.array(z.string()).max(SITE_MAX_FILES.max),
   pages: CountSchema,
   duplicates: CountSchema,

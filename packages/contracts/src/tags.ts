@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CountSchema } from './ipc-shared';
 
 /** Longest tag name, in code points. */
 export const MAX_TAG_LENGTH = 64;
@@ -42,9 +43,9 @@ export const TagUsageSchema = z.object({
   name: z.string(),
   /** '' when the tag does not exist. */
   displayName: z.string(),
-  assets: z.number().int().min(0),
-  files: z.number().int().min(0),
-  prompts: z.number().int().min(0),
+  assets: CountSchema,
+  files: CountSchema,
+  prompts: CountSchema,
 });
 /** The answer of `tags:usage`. */
 export type TagUsage = z.infer<typeof TagUsageSchema>;

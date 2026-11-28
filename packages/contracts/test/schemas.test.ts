@@ -5,7 +5,6 @@ import {
   AssetRelationViewSchema,
   AssetSummarySchema,
   AssetWorkflowSchema,
-  AssignManyResultSchema,
   FileBatchResultSchema,
   FileRecordSchema,
   FileScopeSchema,
@@ -623,8 +622,8 @@ describe('trash channels', () => {
     ).toBe(true);
   });
 
-  it('AssignManyResultSchema is the neutral batch result', () => {
-    expect(AssignManyResultSchema).toBe(FileBatchResultSchema);
+  it('files:assignMany answers the neutral batch result', () => {
+    expect(ipcContract['files:assignMany'].response).toBe(FileBatchResultSchema);
   });
 
   it('trash:empty and trash:summary take an empty request and answer counts', () => {

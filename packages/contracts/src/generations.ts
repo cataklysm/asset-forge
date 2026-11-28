@@ -84,7 +84,7 @@ export const GenerationSchema = z.object({
   /** The fully resolved prompt; null for an upscale. */
   prompt: z.string().nullable(),
   parameters: GenerationParametersSchema,
-  jobId: z.uuid().nullable(),
+  jobId: IdSchema.nullable(),
   /** The status of the current job; null when the job row is gone. */
   jobStatus: JobStatusSchema.nullable(),
   createdAt: z.string(),
@@ -92,9 +92,9 @@ export const GenerationSchema = z.object({
   inputs: z.array(GenerationFileSchema),
   outputs: z.array(GenerationFileSchema),
   /** The library prompt of the version, read through the version row; null once the prompt is deleted. */
-  promptId: z.uuid().nullable(),
+  promptId: IdSchema.nullable(),
   /** The library prompt version it was started from; null for an upscale, a free prompt or a deleted prompt. */
-  promptVersionId: z.uuid().nullable(),
+  promptVersionId: IdSchema.nullable(),
   /** Copies taken at start; they outlive the prompt. */
   promptTitle: z.string().nullable(),
   promptVersionNumber: z.number().int().min(1).nullable(),
@@ -121,7 +121,7 @@ export const StartGenerationSchema = z.discriminatedUnion('kind', [
       providerId: ProviderIdSchema.optional(),
       model: ModelNameSchema,
       prompt: z.string().max(20000).optional(),
-      promptVersionId: z.uuid().optional(),
+      promptVersionId: IdSchema.optional(),
       variables: z
         .record(z.string().max(200), z.string().max(20000))
         .refine((values) => Object.keys(values).length <= START_VARIABLES_TRANSPORT_KEYS)

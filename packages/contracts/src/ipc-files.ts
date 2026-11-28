@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FileListFilterSchema } from './analysis';
-import { AssignManyResultSchema, FileIdsSchema, FileListSchema, FileRecordSchema, FileRecordsSchema } from './files';
+import { FileBatchResultSchema, FileIdsSchema, FileListSchema, FileRecordSchema, FileRecordsSchema } from './files';
 import { FileRoleSchema } from './library';
 import { PageRequestSchema } from './paging';
 import { type ChannelContracts, ChosenIdsSchema, IdSchema } from './ipc-shared';
@@ -26,7 +26,7 @@ export const fileChannels = {
   /** Assigns each file on its own, in request order; one failing file does not stop the others. */
   'files:assignMany': {
     request: z.object({ fileIds: FileIdsSchema, assetId: IdSchema, role: FileRoleSchema }),
-    response: AssignManyResultSchema,
+    response: FileBatchResultSchema,
   },
   'files:addTag': {
     request: z.object({ fileId: IdSchema, name: z.string().max(200) }),
