@@ -634,7 +634,7 @@ The mock provider (phase 4a) is `docker/mock-provider/server.mjs`, plain Node wi
 
 The following commands are target conventions. They only work once the Compose file, services and package scripts are implemented in the repository.
 
-Already working (phase 1, no Docker needed): `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm typecheck`, a single test via `pnpm --filter @assetforge/<package> test <file> -t "<name>"` (without a `--` separator, which pnpm would pass on literally and thereby disable the filter), and `pnpm --filter @assetforge/persistence db:generate`. The persistence and desktop tests run under Electron's Node because of the better-sqlite3 ABI. Since phase 4a `docker compose --profile mock up -d` and its `down` work as well; the `server` profile is still planned, and there is no `ai` profile (§14.1).
+Already working (phase 1, no Docker needed): `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint` (ESLint over the sources, see `docs/code-style.md`), a single test via `pnpm --filter @assetforge/<package> test <file> -t "<name>"` (without a `--` separator, which pnpm would pass on literally and thereby disable the filter), and `pnpm --filter @assetforge/persistence db:generate`. The persistence and desktop tests run under Electron's Node because of the better-sqlite3 ABI. Since phase 4a `docker compose --profile mock up -d` and its `down` work as well; the `server` profile is still planned, and there is no `ai` profile (§14.1).
 
 ```bash
 pnpm install
@@ -648,8 +648,10 @@ docker compose --profile mock up -d
 # Later: central API host and PostgreSQL in local Docker
 docker compose --profile server up -d
 
-# Tests and cleanup
+# Tests, checks and cleanup
 pnpm test
+pnpm typecheck
+pnpm lint
 docker compose --profile mock --profile server down
 ```
 

@@ -166,15 +166,15 @@ class OpenAiVision {
    * @returns the parsed answer
    */
   async analyzeImage({ image, prompt, schema, model, signal }: Parameters<VisionProvider['analyzeImage']>[0]) {
-    const r = { image, prompt, model, signal };
-    if (this.withoutFormat.has(model)) return this.chat(r, parseTagging);
+    const input = { image, prompt, model, signal };
+    if (this.withoutFormat.has(model)) return this.chat(input, parseTagging);
 
     const responseFormat = {
       response_format: { type: 'json_schema', json_schema: { name: 'tags', strict: true, schema } },
     };
     try {
       // Silent: only the final outcome is reported, and a refused format may still be repeated.
-      return await this.chat(r, parseTagging, responseFormat, true);
+      return await this.chat(input, parseTagging, responseFormat, true);
     } catch (error) {
       if (!(error instanceof JobError)) throw error;
       if (statusOf(error) !== REFUSED_FORMAT_STATUS) {
@@ -183,7 +183,7 @@ class OpenAiVision {
       }
     }
     // A server without structured output: the prompt carries the JSON format line, so ask once more without it.
-    const result = await this.chat(r, parseTagging);
+    const result = await this.chat(input, parseTagging);
     this.withoutFormat.add(model);
     return result;
   }
@@ -211,22 +211,22 @@ class OpenAiVision {
   /**
    * One chat completion request.
    *
-   * @param r the image, the prompt, the model and the signal
+   * @param input the image, the prompt, the model and the signal
    * @param interpret turns the answer's text into the result
    * @param extraOwn further fields of the adapter's own, such as `response_format`
    * @param silent when true, a failure is not reported
    * @returns the result
    */
   private chat<T>(
-    r: ChatInput,
+    input: ChatInput,
     interpret: (text: string) => T,
     extraOwn: Record<string, unknown> = {},
     silent = false,
   ): Promise<T> {
-    const url = `data:image/jpeg;base64,${Buffer.from(r.image).toString('base64')}`;
+    const url = `data:image/jpeg;base64,${Buffer.from(input.image).toString('base64')}`;
     const request: JsonRequest = {
       path: '/chat/completions',
-      signal: r.signal,
+      signal: input.signal,
       timeoutMs: this.timeoutMs,
       silent,
       // The adapter's own fields come last: `extra` can never change the model, the stream or the format.
@@ -234,13 +234,13 @@ class OpenAiVision {
         this.fixed,
         this.requestOptions.extra,
         {
-          model: r.model,
+          model: input.model,
           stream: false,
           messages: [
             {
               role: 'user',
               content: [
-                { type: 'text', text: r.prompt },
+                { type: 'text', text: input.prompt },
                 { type: 'image_url', image_url: { url } },
               ],
             },

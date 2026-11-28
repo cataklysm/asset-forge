@@ -20,13 +20,13 @@ export function messageOf(error: unknown): string {
 /**
  * Orders generations newest first, the higher id first at the same time.
  *
- * @param a the one generation
- * @param b the other generation
+ * @param left the one generation
+ * @param right the other generation
  * @returns the sort order
  */
-export function newestFirst(a: Generation, b: Generation): number {
-  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
-  return a.id < b.id ? 1 : -1;
+export function newestFirst(left: Generation, right: Generation): number {
+  if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? 1 : -1;
+  return left.id < right.id ? 1 : -1;
 }
 
 /**

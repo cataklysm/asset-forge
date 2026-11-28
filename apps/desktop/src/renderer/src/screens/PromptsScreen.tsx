@@ -153,7 +153,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }
 
   const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
-  const refresh = useCallback(() => setReload((n) => n + 1), []);
+  const refresh = useCallback(() => setReload((token) => token + 1), []);
   const onSaved = useCallback(
     (detail: PromptDetail, created: boolean) => {
       refresh();

@@ -33,16 +33,16 @@ export function latestOnly<T>(): (promise: Promise<T>) => Promise<LatestResult<T
 }
 
 /**
- * Loads on mount, on every change of `deps` and on `reload()`; the data of the last success stays while a later
+ * Loads on mount, on every change of `dependencies` and on `reload()`; the data of the last success stays while a later
  * load runs or fails.
  *
  * @param load the request; the one of the latest render is used
- * @param deps the values that start a new load
+ * @param dependencies the values that start a new load
  * @returns the data, the error message of the latest load, whether one runs, and a reload
  */
 export function useLoad<T>(
   load: () => Promise<T>,
-  deps: readonly unknown[],
+  dependencies: readonly unknown[],
 ): { data: T | null; error: string | null; loading: boolean; reload(): void } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export function useLoad<T>(
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, tick]);
+  }, [...dependencies, tick]);
 
   const reload = useCallback(() => setTick((count) => count + 1), []);
   return { data, error, loading, reload };

@@ -36,10 +36,10 @@ export const MOVE_TO = 'To';
 /**
  * '3 waiting'.
  *
- * @param n the number of waiting jobs
+ * @param count the number of waiting jobs
  * @returns the count line
  */
-export const WAITING_COUNT = (n: number) => `${n} waiting`;
+export const WAITING_COUNT = (count: number) => `${count} waiting`;
 export const NO_WAITING_JOBS = 'No waiting jobs';
 export const COUNTING_WAITING_JOBS = 'The waiting jobs are being counted';
 export const JOBS_PROVIDER_HEADER = 'Provider';

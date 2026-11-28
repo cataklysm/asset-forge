@@ -44,10 +44,10 @@ function tagsFor(imageBytes) {
   return picked;
 }
 
-function sendJson(res, status, body) {
+function sendJson(response, status, body) {
   const text = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
-  res.end(text);
+  response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
+  response.end(text);
 }
 
 /** A plain-text description for a chat request without `format`, derived from the same picks as the tags. */
@@ -147,10 +147,10 @@ const EDIT_MODELS = [
 ];
 const LONG_EDGE = { '1K': 64, '2K': 128, '4K': 256 };
 
-const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
+const CRC_TABLE = Array.from({ length: 256 }, (_, entry) => {
+  let value = entry;
+  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
 });
 
 function crc32(bytes) {
@@ -172,14 +172,14 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 /** A deterministic RGB PNG of the given size, coloured from `seed`. */
 function pngOf(width, height, seed) {
-  const [r, g, b] = createHash('sha256').update(seed).digest();
+  const [red, green, blue] = createHash('sha256').update(seed).digest();
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header[8] = 8; // bit depth
   header[9] = 2; // truecolour
   const row = Buffer.alloc(1 + width * 3);
-  for (let x = 0; x < width; x += 1) row.set([r, g, b], 1 + x * 3);
+  for (let x = 0; x < width; x += 1) row.set([red, green, blue], 1 + x * 3);
   const raw = Buffer.concat(Array.from({ length: height }, () => row));
   return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))]);
 }
@@ -190,9 +190,9 @@ function pngSizeOf(bytes) {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-function sendPng(res, bytes, headers = {}) {
-  res.writeHead(200, { 'content-type': 'image/png', 'content-length': bytes.length, ...headers });
-  res.end(bytes);
+function sendPng(response, bytes, headers = {}) {
+  response.writeHead(200, { 'content-type': 'image/png', 'content-length': bytes.length, ...headers });
+  response.end(bytes);
 }
 
 /** The multipart fields of a request body: text fields and the bytes of `image`. */
@@ -224,9 +224,9 @@ function editAnswer(fields) {
   const edge = LONG_EDGE[resolution];
   const ratio = /^(\d{1,2}):(\d{1,2})$/.exec(aspectRatio);
   if (!edge || !ratio || Number(ratio[1]) === 0 || Number(ratio[2]) === 0) return { status: 400, error: 'Invalid parameters' };
-  const [w, h] = [Number(ratio[1]), Number(ratio[2])];
-  const width = w >= h ? edge : Math.max(1, Math.round((edge * w) / h));
-  const height = h >= w ? edge : Math.max(1, Math.round((edge * h) / w));
+  const [widthRatio, heightRatio] = [Number(ratio[1]), Number(ratio[2])];
+  const width = widthRatio >= heightRatio ? edge : Math.max(1, Math.round((edge * widthRatio) / heightRatio));
+  const height = heightRatio >= widthRatio ? edge : Math.max(1, Math.round((edge * heightRatio) / widthRatio));
   return { status: 200, png: pngOf(width, height, `${fields.model}\n${fields.prompt}\n${aspectRatio}\n${resolution}`) };
 }
 
@@ -243,7 +243,7 @@ export async function startMockProvider(options = {}) {
   /** Slow answers still waiting; `close` sends them at once. */
   const slow = new Set();
 
-  const authorized = (req) => apiKey === null || req.headers.authorization === `Bearer ${apiKey}`;
+  const authorized = (request) => apiKey === null || request.headers.authorization === `Bearer ${apiKey}`;
   let completionCount = 0;
 
   /** Sends a chat answer after `delayMs`; `close` drops the ones still waiting. */
@@ -257,21 +257,21 @@ export async function startMockProvider(options = {}) {
   }
 
   /** `POST /v1/chat/completions`, after the key check; consumes the shared failure queue. */
-  function openAiChat(res, body) {
+  function openAiChat(response, body) {
     const failure = failures.shift();
     if (failure === 'hang') return;
-    if (typeof failure === 'number') return sendJson(res, failure, { error: 'mock failure' });
+    if (typeof failure === 'number') return sendJson(response, failure, { error: 'mock failure' });
 
     const request = body && typeof body === 'object' ? body : {};
     if (!OPENAI_CHAT_MODELS.includes(request.model)) {
-      return sendJson(res, 404, { error: { message: `model '${String(request.model)}' not found`, type: 'invalid_request_error' } });
+      return sendJson(response, 404, { error: { message: `model '${String(request.model)}' not found`, type: 'invalid_request_error' } });
     }
     const hasFormat = request.response_format !== undefined;
     if (hasFormat && refuseResponseFormat) {
-      return sendJson(res, 400, { error: { message: 'response_format is not supported', type: 'invalid_request_error' } });
+      return sendJson(response, 400, { error: { message: 'response_format is not supported', type: 'invalid_request_error' } });
     }
     const image = openAiImageOf(Array.isArray(request.messages) ? request.messages : []);
-    if (image === undefined) return sendJson(res, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
+    if (image === undefined) return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
 
     const bytes = Buffer.from(image, 'base64');
     // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets the JSON.
@@ -283,7 +283,7 @@ export async function startMockProvider(options = {}) {
     completionCount += 1;
     const id = `chatcmpl-mock-${completionCount}`;
     answerLater(() =>
-      sendJson(res, 200, {
+      sendJson(response, 200, {
         id,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
@@ -293,70 +293,70 @@ export async function startMockProvider(options = {}) {
     );
   }
 
-  async function venice(req, res, path, raw) {
+  async function venice(request, response, path, raw) {
     // The multipart body is not kept on `requests`; `imageRequests` records its fields and the image size.
-    requests.push({ method: req.method ?? '', path, body: undefined, headers: { ...req.headers } });
-    const query = new URL(req.url ?? '/', 'http://mock').searchParams;
-    if (req.method === 'GET' && path === '/api/v1/models') {
-      if (!authorized(req)) return sendJson(res, 401, { error: 'Authentication failed' });
+    requests.push({ method: request.method ?? '', path, body: undefined, headers: { ...request.headers } });
+    const query = new URL(request.url ?? '/', 'http://mock').searchParams;
+    if (request.method === 'GET' && path === '/api/v1/models') {
+      if (!authorized(request)) return sendJson(response, 401, { error: 'Authentication failed' });
       const type = query.get('type') ?? 'text';
-      return sendJson(res, 200, { object: 'list', type, data: type === 'inpaint' ? EDIT_MODELS : [] });
+      return sendJson(response, 200, { object: 'list', type, data: type === 'inpaint' ? EDIT_MODELS : [] });
     }
     const isEdit = path === '/api/v1/image/edit';
-    if (req.method !== 'POST' || (!isEdit && path !== '/api/v1/image/upscale')) return sendJson(res, 404, { error: 'not found' });
+    if (request.method !== 'POST' || (!isEdit && path !== '/api/v1/image/upscale')) return sendJson(response, 404, { error: 'not found' });
 
-    const { fields, image } = await readForm(req.headers['content-type'], raw);
-    imageRequests.push({ path, authorization: req.headers.authorization ?? null, fields, fileBytes: image?.length ?? 0 });
-    if (!authorized(req)) return sendJson(res, 401, { error: 'Authentication failed' });
-    if (!image || image.length === 0) return sendJson(res, 400, { error: 'No image supplied' });
+    const { fields, image } = await readForm(request.headers['content-type'], raw);
+    imageRequests.push({ path, authorization: request.headers.authorization ?? null, fields, fileBytes: image?.length ?? 0 });
+    if (!authorized(request)) return sendJson(response, 401, { error: 'Authentication failed' });
+    if (!image || image.length === 0) return sendJson(response, 400, { error: 'No image supplied' });
 
     if (!isEdit) {
       const scale = Number(fields.scale);
-      if (scale !== 2 && scale !== 4) return sendJson(res, 400, { error: 'Invalid scale' });
+      if (scale !== 2 && scale !== 4) return sendJson(response, 400, { error: 'Invalid scale' });
       const base = pngSizeOf(image) ?? { width: 32, height: 32 };
-      return sendPng(res, pngOf(base.width * scale, base.height * scale, image));
+      return sendPng(response, pngOf(base.width * scale, base.height * scale, image));
     }
 
-    if (typeof fields.prompt !== 'string' || fields.prompt.length === 0) return sendJson(res, 400, { error: 'No prompt supplied' });
+    if (typeof fields.prompt !== 'string' || fields.prompt.length === 0) return sendJson(response, 400, { error: 'No prompt supplied' });
     const trigger = Object.hasOwn(TRIGGERS, fields.prompt) ? TRIGGERS[fields.prompt] : null;
     if (trigger) {
       const text = JSON.stringify({ error: trigger.error });
-      res.writeHead(trigger.status, {
+      response.writeHead(trigger.status, {
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(text),
         ...(trigger.violation ? { [VIOLATION_HEADER]: 'true' } : {}),
       });
-      return res.end(text);
+      return response.end(text);
     }
     const answer = editAnswer(fields);
-    if (answer.status !== 200) return sendJson(res, answer.status, { error: answer.error });
-    if (fields.prompt === MOCK_PROMPT_VIOLATION_OK) return sendPng(res, answer.png, { [VIOLATION_HEADER]: 'true' });
-    if (fields.prompt !== MOCK_PROMPT_SLOW) return sendPng(res, answer.png);
+    if (answer.status !== 200) return sendJson(response, answer.status, { error: answer.error });
+    if (fields.prompt === MOCK_PROMPT_VIOLATION_OK) return sendPng(response, answer.png, { [VIOLATION_HEADER]: 'true' });
+    if (fields.prompt !== MOCK_PROMPT_SLOW) return sendPng(response, answer.png);
 
     const send = () => {
       clearTimeout(timer);
       slow.delete(send);
-      if (!res.writableEnded && !res.destroyed) sendPng(res, answer.png);
+      if (!response.writableEnded && !response.destroyed) sendPng(response, answer.png);
     };
     const timer = setTimeout(send, SLOW_MS);
     slow.add(send);
-    res.on('close', () => {
+    response.on('close', () => {
       clearTimeout(timer);
       slow.delete(send);
     });
   }
 
-  const server = createServer((req, res) => {
+  const server = createServer((incoming, response) => {
     // The log line carries method, path and status only; headers (and so the key) never reach it.
-    const logged = (req.url ?? '').split('?')[0];
-    res.on('finish', () => log(`${req.method ?? ''} ${logged} ${res.statusCode}`));
+    const logged = (incoming.url ?? '').split('?')[0];
+    response.on('finish', () => log(`${incoming.method ?? ''} ${logged} ${response.statusCode}`));
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
-      const path = (req.url ?? '').split('?')[0];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      const path = (incoming.url ?? '').split('?')[0];
       if (path.startsWith('/api/v1/')) {
-        venice(req, res, path, Buffer.concat(chunks)).catch(() => {
-          if (!res.headersSent) sendJson(res, 500, { error: 'mock error' });
+        venice(incoming, response, path, Buffer.concat(chunks)).catch(() => {
+          if (!response.headersSent) sendJson(response, 500, { error: 'mock error' });
         });
         return;
       }
@@ -369,45 +369,45 @@ export async function startMockProvider(options = {}) {
           body = raw;
         }
       }
-      requests.push({ method: req.method ?? '', path, body, headers: { ...req.headers } });
+      requests.push({ method: incoming.method ?? '', path, body, headers: { ...incoming.headers } });
 
-      if (apiKey !== null && req.headers.authorization !== `Bearer ${apiKey}`) {
-        sendJson(res, 401, { error: 'unauthorized' });
+      if (apiKey !== null && incoming.headers.authorization !== `Bearer ${apiKey}`) {
+        sendJson(response, 401, { error: 'unauthorized' });
         return;
       }
-      if (req.method === 'GET' && path === '/api/tags') {
-        sendJson(res, 200, { models: MODELS.map((name) => ({ name, model: name })) });
+      if (incoming.method === 'GET' && path === '/api/tags') {
+        sendJson(response, 200, { models: MODELS.map((name) => ({ name, model: name })) });
         return;
       }
-      if (req.method === 'GET' && path === '/v1/models') {
-        sendJson(res, 200, { object: 'list', data: OPENAI_MODELS.map((id) => ({ id, object: 'model' })) });
+      if (incoming.method === 'GET' && path === '/v1/models') {
+        sendJson(response, 200, { object: 'list', data: OPENAI_MODELS.map((id) => ({ id, object: 'model' })) });
         return;
       }
-      if (req.method === 'POST' && path === '/v1/chat/completions') {
-        openAiChat(res, body);
+      if (incoming.method === 'POST' && path === '/v1/chat/completions') {
+        openAiChat(response, body);
         return;
       }
-      if (req.method === 'POST' && path === '/api/show') {
+      if (incoming.method === 'POST' && path === '/api/show') {
         const model = body && typeof body === 'object' ? body.model : undefined;
-        if (typeof model === 'string' && Object.hasOwn(SHOW, model)) sendJson(res, 200, SHOW[model]);
-        else sendJson(res, 404, { error: 'model not found' });
+        if (typeof model === 'string' && Object.hasOwn(SHOW, model)) sendJson(response, 200, SHOW[model]);
+        else sendJson(response, 404, { error: 'model not found' });
         return;
       }
-      if (req.method !== 'POST' || path !== '/api/chat') {
-        sendJson(res, 404, { error: 'not found' });
+      if (incoming.method !== 'POST' || path !== '/api/chat') {
+        sendJson(response, 404, { error: 'not found' });
         return;
       }
 
       const failure = failures.shift();
       if (failure === 'hang') return;
       if (typeof failure === 'number') {
-        sendJson(res, failure, { error: 'mock failure' });
+        sendJson(response, failure, { error: 'mock failure' });
         return;
       }
 
       const request = body && typeof body === 'object' ? body : {};
       if (request.model !== MOCK_MODEL) {
-        sendJson(res, 404, { error: `model '${String(request.model)}' not found` });
+        sendJson(response, 404, { error: `model '${String(request.model)}' not found` });
         return;
       }
       const messages = Array.isArray(request.messages) ? request.messages : [];
@@ -415,7 +415,7 @@ export async function startMockProvider(options = {}) {
         .flatMap((message) => (Array.isArray(message?.images) ? message.images : []))
         .find((entry) => typeof entry === 'string' && entry.length > 0);
       if (image === undefined) {
-        sendJson(res, 400, { error: 'no image supplied' });
+        sendJson(response, 400, { error: 'no image supplied' });
         return;
       }
 
@@ -427,7 +427,7 @@ export async function startMockProvider(options = {}) {
             ? descriptionFor(bytes)
             : JSON.stringify({ tags: tagsFor(bytes) });
       answerLater(() =>
-        sendJson(res, 200, {
+        sendJson(response, 200, {
           model: MOCK_MODEL,
           created_at: new Date().toISOString(),
           message: { role: 'assistant', content },

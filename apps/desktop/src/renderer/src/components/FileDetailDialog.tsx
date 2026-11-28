@@ -64,10 +64,10 @@ function guarded<A extends unknown[]>(
   report: (message: string) => void,
 ): ((...args: A) => void) | undefined {
   if (action === undefined) return undefined;
-  return (...args: A) => {
+  return (...actionArguments: A) => {
     setError(null);
     Promise.resolve()
-      .then(() => action(...args))
+      .then(() => action(...actionArguments))
       .catch((error: unknown) => report(describeError(error)));
   };
 }

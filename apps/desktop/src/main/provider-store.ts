@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- load, save, delete and the key handling share one serial write order (docs/backlog.md) */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {

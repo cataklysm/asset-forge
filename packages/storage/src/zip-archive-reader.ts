@@ -90,7 +90,7 @@ export class ZipArchiveReader implements ArchiveReader {
     }
 
     return {
-      entries: directory.map((d) => d.entry),
+      entries: directory.map((listed) => listed.entry),
       openEntry: (index) => archive.openEntry(directory[index]?.location),
       close: () => archive.close(),
     };
