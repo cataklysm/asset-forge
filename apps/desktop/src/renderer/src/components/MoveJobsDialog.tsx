@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import {
   JOB_ERROR_MESSAGES,
   isVisionKind,
@@ -193,15 +193,49 @@ function blockedReason(
   return null;
 }
 
+/** What reading the waiting counts works with. */
+interface LaneReading {
+  /** True once the dialog unmounted. */
+  disposed: MutableRefObject<boolean>;
+  /** Only the newest read may take its answer. */
+  request: MutableRefObject<number>;
+  /** Whether a read has answered yet. */
+  read: MutableRefObject<boolean>;
+  setLanes(lanes: WaitingByProvider[]): void;
+  setLanesError(message: string | null): void;
+}
+
+/**
+ * Reads the waiting counts per provider. A failed read shows its reason only while nothing was read;
+ * later it keeps the counts shown.
+ *
+ * @param reading the refs and setters
+ * @returns resolves once the answer is taken or dropped; never rejects
+ */
+async function readLanes(reading: LaneReading): Promise<void> {
+  const request = ++reading.request.current;
+  const isNewest = () => !reading.disposed.current && reading.request.current === request;
+  try {
+    const answer = await call('jobs:waitingByProvider', {});
+    if (!isNewest()) return;
+    reading.read.current = true;
+    reading.setLanes(answer);
+    reading.setLanesError(null);
+  } catch (failure) {
+    if (isNewest() && !reading.read.current) reading.setLanesError(describeError(failure));
+  }
+}
+
 /**
  * Moves every waiting analysis job of one provider onto another provider and model (`jobs:reroute`).
- * Mounted while open; after a move it polls the job summary and closes, a refusal stays in the dialog.
+ * Mounted while open; the waiting counts are read again whenever the jobs change. After a move it polls
+ * the job summary and closes, a refusal stays in the dialog.
  *
  * @param props the source lane and the close handler
  */
 export function MoveJobsDialog({ source, onClose }: Props) {
   const providers = useProviders();
-  const { refresh } = useJobs();
+  const { refresh, changeToken } = useJobs();
   const [allLanes, setLanes] = useState<WaitingByProvider[] | null>(null);
   const lanes = allLanes === null ? null : allLanes.filter((lane) => !isImageLane(providers.list, lane.providerId));
   const [lanesError, setLanesError] = useState<string | null>(null);
@@ -213,25 +247,23 @@ export function MoveJobsDialog({ source, onClose }: Props) {
   const [moving, setMoving] = useState(false);
   const movingRef = useRef(false);
   const disposed = useRef(false);
+  const lanesRequest = useRef(0);
+  const lanesRead = useRef(false);
 
   const { checkAll } = providers;
   useEffect(() => {
     disposed.current = false;
     checkAll();
-    call('jobs:waitingByProvider', {}).then(
-      (answer) => {
-        if (!disposed.current) setLanes(answer);
-      },
-      (failure) => {
-        if (!disposed.current) setLanesError(describeError(failure));
-      },
-    );
     return () => {
       disposed.current = true;
     };
-    // The states and the counts are asked once, when the dialog opens.
+    // The states are asked once, when the dialog opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void readLanes({ disposed, request: lanesRequest, read: lanesRead, setLanes, setLanesError });
+  }, [changeToken]);
 
   const fixed = source !== undefined;
   const from = fromLane(source, chosenSource, lanes);
