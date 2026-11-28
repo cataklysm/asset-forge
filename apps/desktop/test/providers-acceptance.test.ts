@@ -223,6 +223,7 @@ describe('several vision providers', () => {
     it('run on the first entry: v1 and v3 apply their tags, v2 asks for its own model', async () => {
       mocks = await startTwoMocks();
       await h.provider({ name: 'First', url: mocks.a.url, apiKey: TEST_KEY, taggingModel: MOCK_MODEL });
+      await h.provider({ name: 'Second', url: mocks.b.url, apiKey: TEST_KEY_2, taggingModel: MOCK_MODEL });
       const fileIds = await unroutedJobs();
 
       await h.ok('workspace:open', { rootPath: workspaceRoot() });
@@ -238,13 +239,16 @@ describe('several vision providers', () => {
           .map((r) => (r.body as { model: string }).model)
           .sort(),
       ).toEqual(['legacy-model', MOCK_MODEL, MOCK_MODEL].sort());
+      expect(chats(mocks.b)).toEqual([]);
       const files = (await h.ok('files:list', { ...page, scope: { kind: 'all' } })).items;
       const aiTags = (fileId: string) => files.find((f) => f.id === fileId)!.tags.filter((t) => t.origin === 'ai');
-      // v1 runs with the legacy text and limit 20, v3 with the copy of its prompt and its limit.
-      expect(aiTags(fileIds[0]!).length).toBeGreaterThan(0);
-      expect(aiTags(fileIds[0]!).length).toBeLessThanOrEqual(20);
-      expect(aiTags(fileIds[2]!).length).toBeGreaterThan(0);
-      expect(aiTags(fileIds[2]!).length).toBeLessThanOrEqual(3);
+      // v1 runs with the legacy text and limit 20, so all eight tags of the mock stay; v3 with its prompt and limit.
+      expect(aiTags(fileIds[0]!)).toHaveLength(8);
+      expect(aiTags(fileIds[2]!)).toHaveLength(3);
+      const sentTexts = chats(mocks.a).map((r) => JSON.stringify((r.body as { messages: unknown }).messages));
+      const v3Text = sentTexts.find((text) => text.includes('Only armour.'));
+      expect(v3Text).toContain('Give at most 3 tags.');
+      expect(sentTexts.filter((text) => text.includes('Only armour.'))).toHaveLength(1);
     });
 
     it('stay without an entry, fail as not configured on the lane without a provider, and resume there', async () => {
