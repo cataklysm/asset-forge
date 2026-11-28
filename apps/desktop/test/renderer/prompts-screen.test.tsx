@@ -127,6 +127,23 @@ it('editing only the title sends prompts:update and nothing else', async () => {
   await option('Hero shot');
 });
 
+it('a failed list read after a save keeps the rows shown', async () => {
+  const user = userEvent.setup();
+  const { api } = install([promptDetail({ title: 'Hero' }), promptDetail({ title: 'Other' })]);
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  const lists = requests(api, 'prompts:list').length;
+  api.set('prompts:list', () => {
+    throw fakeError('internal_error');
+  });
+  await user.type(within(editor()).getByRole('textbox', { name: 'Title' }), ' shot');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:list').length).toBeGreaterThan(lists));
+  await waitFor(() => expect(saveButton().disabled).toBe(true));
+  expect(within(list()).getByText('Other')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+});
+
 it('editing the text sends prompts:saveVersion with the loaded version as base', async () => {
   const user = userEvent.setup();
   const prompt = promptDetail({ title: 'Hero', content: 'A {{view}}', defaults: { view: 'front' } });
@@ -488,6 +505,36 @@ it('tags are added through prompts:addTag and a rename rewrites the detail and t
   await renameThroughDialog(user, 'Shop', 'Store');
   await waitFor(() => expect(requests(api, 'prompts:list').at(-1)).toMatchObject({ tagNames: ['store'] }));
   expect(within(within(editor()).getByRole('group', { name: 'Prompt tags' })).getByText('Store')).toBeTruthy();
+});
+
+it('Save and Delete stay disabled while a tag change is in flight', async () => {
+  const user = userEvent.setup();
+  const prompt = promptDetail({ title: 'Hero' });
+  const store = fakePrompts([prompt]);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  installFakeApi({
+    'tags:suggest': () => [],
+    ...store.handlers,
+    'prompts:addTag': async (request) => {
+      await gate;
+      return store.handlers['prompts:addTag'](request);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Title' }), '!');
+  expect(saveButton().disabled).toBe(false);
+  await user.type(within(editor()).getByRole('combobox', { name: 'Add prompt tag' }), 'Night{Enter}');
+  await waitFor(() => expect(saveButton().disabled).toBe(true));
+  expect(within(editor()).getByRole<HTMLButtonElement>('button', { name: 'Delete' }).disabled).toBe(true);
+  await act(async () => {
+    release();
+  });
+  await within(editor()).findByText('Night');
+  await waitFor(() => expect(saveButton().disabled).toBe(false));
 });
 
 it('during an import Save, Delete, New and tag editing are disabled', async () => {

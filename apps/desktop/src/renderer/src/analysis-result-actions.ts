@@ -66,7 +66,7 @@ export async function analyseFile(
     await action.reader.read(id);
     if (action.live() && result.enqueued === 0 && result.skipped.alreadyQueued === 0) action.setError(NOT_ANALYSABLE);
   } catch (error) {
-    recoverMissingPrompt(error, records.prompts, () => {
+    recoverMissingPrompt(error, records.prompts, records.providers, () => {
       if (action.live()) records.dropChosenPrompt();
     });
     if (action.live()) action.setError(describeError(error));

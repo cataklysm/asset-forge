@@ -54,24 +54,23 @@ const NO_POSITION: ViewRestore = { scrollOffset: 0, index: null, focus: false };
 interface PromptPagesInput {
   query: string;
   tagNames: readonly string[];
-  /** Raised after every save, tag change or delete. */
-  reload: number;
   /** Raised after every tag rename. */
   renameToken: number;
 }
 
 /**
- * The paged prompt list with its position: a reload keeps the displayed position, a new filter
- * starts where `restore` was set (see `setFilter` in {@link PromptsScreen}).
+ * The paged prompt list with its position: a rename keeps the displayed position, a new filter
+ * starts where `restore` was set (see `setFilter` in {@link PromptsScreen}). A save, tag change or
+ * delete reloads in place through `paged.refresh`, which keeps the rows shown when the read fails.
  *
- * @param input the filter and the reload counters
+ * @param input the filter and the rename counter
  * @returns the paged list, the start and position refs and the row callback
  */
-function usePromptPages({ query, tagNames, reload, renameToken }: PromptPagesInput) {
-  const key = JSON.stringify([query, tagNames, reload, renameToken]);
+function usePromptPages({ query, tagNames, renameToken }: PromptPagesInput) {
+  const key = JSON.stringify([query, tagNames, renameToken]);
   const restore = useRef<ViewRestore>(NO_POSITION);
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
-  const lastReload = useRef(`${reload}:${renameToken}`);
+  const lastRename = useRef(renameToken);
   const [rows, setRows] = useState<ShownRows | null>(null);
 
   const fetchPage = useCallback(
@@ -88,8 +87,8 @@ function usePromptPages({ query, tagNames, reload, renameToken }: PromptPagesInp
   const paged = usePagedList<PromptSummary>(key, fetchPage, wanted);
   const total = paged.state.total;
   const viewKey = paged.state.key;
-  if (lastReload.current !== `${reload}:${renameToken}`) {
-    lastReload.current = `${reload}:${renameToken}`;
+  if (lastRename.current !== renameToken) {
+    lastRename.current = renameToken;
     const current = position.current?.viewKey === viewKey ? position.current.get() : null;
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: null, focus: false };
   }
@@ -124,8 +123,6 @@ type PromptPages = ReturnType<typeof usePromptPages>;
 export function PromptsScreen({ busy, initialId = null }: Props) {
   const [queryText, setQueryText] = useState('');
   const [tagNames, setTagNames] = useState<readonly string[]>([]);
-  // Raised after every save, tag change or delete: the list reloads where it is.
-  const [reload, setReload] = useState(0);
   const [editing, setEditing] = useState<Editing | null>(initialId === null ? null : { id: initialId, serial: 0 });
   const [dirty, setDirty] = useState(false);
   // The open question whether to discard the draft, answered by the dialog.
@@ -134,7 +131,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   const query = useDebouncedValue(queryText.trim(), SEARCH_DEBOUNCE_MS);
   const { renameToken } = useTags();
   useRenamed((change) => setTagNames((names) => renameInNames(names, change)));
-  const pages = usePromptPages({ query, tagNames, reload, renameToken });
+  const pages = usePromptPages({ query, tagNames, renameToken });
 
   const ask = useCallback(() => new Promise<boolean>((resolve) => setAsking(() => resolve)), []);
   useLeaveGuard(dirty ? ask : null);
@@ -158,7 +155,8 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }
 
   const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
-  const refresh = useCallback(() => setReload((token) => token + 1), []);
+  // After every save, tag change or delete: the list reloads where it is.
+  const refresh = pages.paged.refresh;
   // The serial of the editor shown now, so that a late create answer of an editor left since is not taken.
   const shownSerial = useRef<number | null>(editing?.serial ?? null);
   useEffect(() => {

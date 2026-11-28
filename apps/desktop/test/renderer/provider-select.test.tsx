@@ -107,6 +107,43 @@ it('a reload drops the model answers of entries that are no longer listed', asyn
   expect(Object.keys(state!.models)).toEqual([LOCAL.id]);
 });
 
+it('a reload whose list predates a save does not drop the saved entry or its models', async () => {
+  const fake = fakeProviders({ providers: [LOCAL] });
+  const api = installFakeApi(fake.handlers);
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(state!.models[LOCAL.id]).toBeDefined());
+  const stale = deferred<ProviderList>();
+  api.set('providers:list', () => stale.promise);
+  let reloading: Promise<void> = Promise.resolve();
+  act(() => {
+    reloading = state!.reload();
+  });
+  // The reload's answer is read before the save: it does not hold the new entry.
+  const before = structuredClone(fake.state);
+  api.set('providers:list', fake.handlers['providers:list']);
+  let saved: { id: string } | null = null;
+  await act(async () => {
+    saved = await state!.save({
+      name: 'RunPod',
+      baseUrl: 'https://pod.example.test',
+      timeoutSeconds: 120,
+      taggingModel: 'big-vision',
+      promptModel: null,
+    });
+  });
+  await act(async () => {
+    stale.resolve(before);
+    await reloading;
+  });
+  await waitFor(() => expect(state!.list?.providers.map((p) => p.name)).toEqual(['Local', 'RunPod']));
+  await waitFor(() => expect(state!.models[saved!.id]).toBeDefined());
+  expect(state!.loading).toBe(false);
+});
+
 it('a failed first load holds no list and counts as failed', async () => {
   installFakeApi({
     ...fakeProviders().handlers,

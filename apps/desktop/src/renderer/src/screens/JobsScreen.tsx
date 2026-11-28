@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import { MAX_CHOSEN_IDS, type Changes, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
+import {
+  MAX_CHOSEN_IDS,
+  type Changes,
+  type JobStatus,
+  type JobSummary,
+  type JobView,
+  type ProviderList,
+} from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { JobTable, type JobTableProps } from '../components/JobTable';
@@ -18,6 +25,7 @@ import {
   JOBS_PROVIDER_HEADER,
   JOBS_STATUS_LABEL,
   JOBS_TITLE,
+  jobCount,
   jobStatusLabel,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
@@ -238,6 +246,7 @@ export function JobsScreen() {
   );
   const toolbar = (
     <JobsToolbar
+      total={total}
       status={status}
       providerId={providerId}
       entries={entries}
@@ -257,7 +266,13 @@ export function JobsScreen() {
   };
 
   return (
-    <Page title={JOBS_TITLE} count={total} countTitle={JOBS_COUNT_TITLE} actions={actions} toolbar={toolbar}>
+    <Page
+      title={JOBS_TITLE}
+      count={summary === null ? null : workspaceTotal(summary)}
+      countTitle={JOBS_COUNT_TITLE}
+      actions={actions}
+      toolbar={toolbar}
+    >
       <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3" aria-busy={paged.pending || undefined}>
         {error !== null && (
           <p role="alert" className={ALERT}>
@@ -332,7 +347,7 @@ interface JobsActionsProps {
  * @returns the buttons
  */
 function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: JobsActionsProps) {
-  const start = useFocusReturn(busy, run);
+  const start = useFocusReturn(`${busy},${cancellable},${retryable === 0},${finished === 0}`, busy, run);
   return (
     <>
       <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
@@ -368,34 +383,66 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
 
 /**
  * A page button is disabled while its action runs, so the focus falls to the body: once the actions
- * are free again it goes back to the button that started the action, when that is still enabled and
- * nothing else took the focus meanwhile.
+ * are free again it goes back to the button that started the action, when nothing else took the focus
+ * meanwhile. The button stays watched while it holds the focus, because the summary poll after the
+ * action can disable it too (Retry failed with nothing left to retry); the focus then moves to the first
+ * enabled page button instead of the body.
  *
+ * @param enabledKey changes whenever a page button is enabled or disabled
  * @param busy whether an action runs
  * @param run runs one action
  * @returns starts an action from a button
  */
 function useFocusReturn(
+  enabledKey: string,
   busy: boolean,
   run: (action: () => Promise<unknown>) => Promise<void>,
 ): (button: HTMLButtonElement, action: () => Promise<unknown>) => void {
   const returnTo = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (busy) return;
-    const button = returnTo.current;
-    returnTo.current = null;
-    if (button === null || !button.isConnected || button.disabled) return;
-    const active = document.activeElement;
-    if (active === null || active === document.body) button.focus();
-  }, [busy]);
+    if (!busy) returnTo.current = returnFocus(returnTo.current);
+  }, [busy, enabledKey]);
   return (button, action) => {
     returnTo.current = button;
     void run(action);
   };
 }
 
+/**
+ * Gives the focus back to a page button that lost it, or to its first enabled neighbour when it is disabled.
+ *
+ * @param button the button that started the last action, or null
+ * @returns the button to keep watching: the same one while it holds the focus and is enabled, else null
+ */
+function returnFocus(button: HTMLButtonElement | null): HTMLButtonElement | null {
+  if (button === null || !button.isConnected) return null;
+  const active = document.activeElement;
+  // A browser drops the focus of a disabled button to the body; jsdom leaves it on the button.
+  const lost = active === null || active === document.body || (active === button && button.disabled);
+  // Someone else took the focus: nothing is given back.
+  if (!lost) return active === button ? button : null;
+  if (!button.disabled) {
+    button.focus();
+    return button;
+  }
+  button.parentElement?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  return null;
+}
+
+/**
+ * Every job of the workspace, whatever the filters: the count beside the title says so in its tooltip.
+ *
+ * @param summary the polled summary
+ * @returns the number of jobs in all statuses
+ */
+function workspaceTotal(summary: JobSummary): number {
+  return summary.queued + summary.running + summary.waiting + summary.failed + summary.cancelled + summary.succeeded;
+}
+
 /** The props of {@link JobsToolbar}. */
 interface JobsToolbarProps {
+  /** The number of jobs the filters match; null while unknown. */
+  total: number | null;
   status: JobStatus | '';
   providerId: string;
   entries: readonly ProviderEntry[];
@@ -404,14 +451,14 @@ interface JobsToolbarProps {
 }
 
 /**
- * The filters: status and provider.
+ * The filters: status and provider, and the number of jobs they match.
  *
- * @param props the filter values, the entries and the callbacks
+ * @param props the matched count, the filter values, the entries and the callbacks
  * @returns the filter bar
  */
-function JobsToolbar({ status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
+function JobsToolbar({ total, status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
   return (
-    <FilterBar resultCount={null} onClear={null}>
+    <FilterBar resultCount={total === null ? null : jobCount(total)} onClear={null}>
       <select
         className={SELECT}
         aria-label={JOBS_STATUS_LABEL}
