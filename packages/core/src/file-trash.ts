@@ -1,18 +1,15 @@
 import { IMAGE_GENERATE_JOB, type FileRecord } from '@assetforge/contracts';
-import { resolvePendingFileMove } from './asset-files.js';
+import { resolvePendingFileMove } from './file-move-recovery.js';
 import { AssetForgeError, InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
 import { settleGenerationOfJob } from './generations.js';
 import { cancelJob, type JobControl } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
-import type { FileRepository } from './ports/file-repositories.js';
-import type { Storage } from './ports/storage.js';
 import type { WorkspaceSession } from './session.js';
 
 /** The outcome of one file of a batch: the file afterwards (null once it is gone) or the error. */
 export type FileBatchItem = { fileId: string; file: FileRecord | null; error: Error | null };
 
 const EMPTY_CHUNK = 200;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The refusal of a purge while a generation of the file runs. */
 export const RUNNING_GENERATION_MESSAGE = 'This file still has a running generation';
 const MOVE_FAILED = 'The file could not be moved; it may be in use, missing, or the target already exists';
@@ -243,55 +240,4 @@ export async function emptyTrash(s: WorkspaceSession, control: JobControl): Prom
 
 export function trashCount(s: WorkspaceSession): Promise<number> {
   return s.database.files.countTrashed();
-}
-
-/**
- * Startup cleanup of the trash directory: an entry named `<file id>_…` whose id has a purge
- * tombstone and no row is a binary left behind by a purge and is removed. Every other entry stays,
- * also one without row and tombstone. A tombstone is deleted once no entry of its id is left. Does
- * nothing while the storage is unreachable. Never throws.
- */
-export async function sweepTrash(ctx: {
-  storage: Storage;
-  files: Pick<FileRepository, 'get' | 'listPurgedIds' | 'forgetPurge'>;
-}): Promise<{ removed: string[]; skipped: string[] }> {
-  const result = { removed: [] as string[], skipped: [] as string[] };
-  let purged: Set<string>;
-  let entries: string[];
-  try {
-    if (!(await ctx.storage.isReachable())) return result;
-    purged = new Set(await ctx.files.listPurgedIds());
-    if (purged.size === 0) return result;
-    entries = await ctx.storage.list(TRASH_DIR);
-  } catch {
-    return result;
-  }
-  const left = new Set<string>();
-  for (const name of entries) {
-    const id = name.slice(0, 36);
-    if (!UUID.test(id) || name[36] !== '_' || !purged.has(id)) continue;
-    const path = `${TRASH_DIR}/${name}`;
-    try {
-      if ((await ctx.files.get(id)) !== null) {
-        left.add(id);
-        continue;
-      }
-      await ctx.storage.remove(path);
-      result.removed.push(path);
-    } catch {
-      left.add(id);
-      result.skipped.push(path);
-    }
-  }
-  for (const id of purged) {
-    if (left.has(id)) continue;
-    try {
-      // A share that dropped while sweeping lists nothing; never take that for "already gone".
-      if (!(await ctx.storage.isReachable())) return result;
-      await ctx.files.forgetPurge(id);
-    } catch {
-      // The tombstone stays for the next sweep.
-    }
-  }
-  return result;
 }
