@@ -2103,10 +2103,12 @@ export function createFakeHost(): {
         databases.set(workspaceId, db);
       }
       db.closed = false;
+      missingDatabases.delete(workspaceId);
       return db;
     },
     async deleteDatabase(workspaceId) {
       databases.delete(workspaceId);
+      missingDatabases.add(workspaceId);
     },
     async databaseExists(workspaceId) {
       return !missingDatabases.has(workspaceId);

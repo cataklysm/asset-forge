@@ -389,7 +389,7 @@ describe('recovery on open', () => {
 
     await manager.remove({ id: summary.id, trashFolder: false });
     expect(databases.has(summary.id)).toBe(false);
-    await manager.open({ rootPath: ROOT });
+    await manager.open({ rootPath: ROOT, startEmpty: true });
 
     expect(databases.get(summary.id)!.files.records.size).toBe(0);
     expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
@@ -403,7 +403,7 @@ describe('recovery on open', () => {
     storage.files.set(trashPath(ID1, 'a.png'), Buffer.from('a'));
 
     await manager.remove({ id: summary.id, trashFolder: false });
-    await manager.open({ rootPath: ROOT });
+    await manager.open({ rootPath: ROOT, startEmpty: true });
     expect(storage.files.has(trashPath(ID1, 'a.png'))).toBe(true);
     await manager.close();
     await manager.open({ rootPath: ROOT });

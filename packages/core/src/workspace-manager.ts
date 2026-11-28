@@ -7,8 +7,11 @@ import {
   type FileTarget,
   type ImportProgress,
   type ImportResult,
+  RESTORE_OPEN_MESSAGE,
+  type WorkspaceManifest,
   type WorkspaceSummary,
 } from '@assetforge/contracts';
+import { listWorkspaceBackups, liveLineageOf, resolveBackupTarget } from './backup-listing.js';
 import type { BackupFolderStatus, ListedBackup } from './backup-types.js';
 import { DirectoryNotEmptyError, InvalidOperationError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
 import { listFiles } from './file-list.js';
@@ -20,7 +23,9 @@ import { SerialQueue } from './serial-queue.js';
 import { WorkspaceBackupService } from './workspace-backup.js';
 import type { WorkspaceSession } from './session.js';
 import { importSources, newImportProgress, requireTargetAsset, type ImportSourcesOptions } from './workspace-import.js';
-import { holdsWorkspace, newManifest, readManifest, writeManifest } from './workspace-manifest.js';
+import type { Storage } from './ports/storage.js';
+import { holdsWorkspace, isSameRoot, newManifest, readManifest, writeManifest } from './workspace-manifest.js';
+import { installBackup } from './workspace-restore.js';
 import { openWorkspaceDatabase, rejectCopy, requireReachable, type OpenWorkspace } from './workspace-open.js';
 
 /**
@@ -116,19 +121,18 @@ export class WorkspaceManager {
     workspace: { id: string } | { rootPath: string };
     extraDirectory: string | null;
   }): Promise<{ workspaceId: string; backups: ListedBackup[]; unreachable: boolean }> {
-    void request;
-    return Promise.reject(notImplemented());
+    return this.listBackupsOf(request.workspace, request.extraDirectory);
   }
 
   /**
-   * Replaces the local database of a closed workspace by a backup and opens it.
+   * Replaces the local database of a closed workspace by a backup and opens it; another open workspace is closed
+   * first. A damaged, foreign or newer backup is refused and the database stays as it was.
    *
    * @param request the workspace folder and the backup
    * @returns the opened workspace
    */
   restore(request: { rootPath: string; source: BackupSource }): Promise<WorkspaceSummary> {
-    void request;
-    return Promise.reject(notImplemented());
+    return this.queue.run(() => this.doRestore(request));
   }
 
   /**
@@ -290,7 +294,7 @@ export class WorkspaceManager {
     }
     await storage.ensureLayout();
     await writeManifest(storage, newManifest(this.host, input.name));
-    return this.doOpen({ rootPath: input.rootPath });
+    return this.doOpen({ rootPath: input.rootPath, startEmpty: true });
   }
 
   /**
@@ -299,16 +303,88 @@ export class WorkspaceManager {
    * @param input the folder
    * @returns the opened workspace
    */
-  private async doOpen(input: { rootPath: string }): Promise<WorkspaceSummary> {
+  private async doOpen(input: { rootPath: string; startEmpty?: boolean }): Promise<WorkspaceSummary> {
     await this.doClose({ backupDeadlineMs: BACKUP_QUIT_DEADLINE_MS });
     const storage = this.host.createStorage(input.rootPath);
     await requireReachable(storage);
     const manifest = await readManifest(storage);
     await rejectCopy(this.host, manifest.id, input.rootPath);
-    const open = await openWorkspaceDatabase(this.host, storage, manifest, input.rootPath);
+    return this.startOpen(storage, manifest, input.rootPath, { startEmpty: input.startEmpty === true });
+  }
+
+  /**
+   * Opens the database of a checked workspace and starts its backups.
+   *
+   * @param storage the storage of the folder
+   * @param manifest the checked manifest
+   * @param rootPath the folder
+   * @param options `startEmpty` for `openWorkspaceDatabase`; `hasSameLineageBackup` when it is known
+   * @returns the opened workspace
+   */
+  private async startOpen(
+    storage: Storage,
+    manifest: WorkspaceManifest,
+    rootPath: string,
+    options: { startEmpty: boolean; hasSameLineageBackup?: boolean },
+  ): Promise<WorkspaceSummary> {
+    const open = await openWorkspaceDatabase(this.host, storage, manifest, rootPath, options);
     this.open_ = open;
-    this.backups.startSession({ summary: open.summary, database: open.database });
-    return open.summary;
+    const { summary, database } = open;
+    this.backups.startSession({ summary, database, hasSameLineageBackup: options.hasSameLineageBackup });
+    return summary;
+  }
+
+  /**
+   * Lists the backups of a workspace, open or not, without queueing.
+   *
+   * @param workspace the workspace by id or folder
+   * @param extraDirectory a further directory the user picked
+   * @returns the workspace id, its backups and whether its place could not be listed
+   */
+  private async listBackupsOf(
+    workspace: { id: string } | { rootPath: string },
+    extraDirectory: string | null,
+  ): Promise<{ workspaceId: string; backups: ListedBackup[]; unreachable: boolean }> {
+    const target = await resolveBackupTarget(this.host, workspace);
+    const open = this.open_?.summary.id === target.id ? this.open_.database : null;
+    const liveLineage = await liveLineageOf(this.host, target.id, open);
+    const listing = await listWorkspaceBackups(this.host, target, extraDirectory, liveLineage);
+    return { workspaceId: target.id, ...listing };
+  }
+
+  /**
+   * Replaces the local database of a workspace that is not open by a checked backup, then opens it.
+   *
+   * @param request the workspace folder and the backup
+   * @returns the opened workspace
+   */
+  private async doRestore(request: { rootPath: string; source: BackupSource }): Promise<WorkspaceSummary> {
+    const { rootPath, source } = request;
+    this.refuseRestoreOfOpen(rootPath, null);
+    const storage = this.host.createStorage(rootPath);
+    await requireReachable(storage);
+    const manifest = await readManifest(storage);
+    this.refuseRestoreOfOpen(rootPath, manifest.id);
+    await rejectCopy(this.host, manifest.id, rootPath);
+    await this.doClose({ backupDeadlineMs: BACKUP_QUIT_DEADLINE_MS });
+    await installBackup(this.host, manifest, source);
+    // The restored state came from a backup, so it is not copied again until it changes.
+    return this.startOpen(storage, manifest, rootPath, { startEmpty: true, hasSameLineageBackup: true });
+  }
+
+  /**
+   * Refuses to restore the open workspace.
+   *
+   * @param rootPath the folder of the restore
+   * @param workspaceId the workspace id of its manifest; null before it was read
+   * @throws InvalidOperationError when it is the open workspace
+   */
+  private refuseRestoreOfOpen(rootPath: string, workspaceId: string | null): void {
+    const open = this.open_?.summary;
+    if (open === undefined) return;
+    if (isSameRoot(open.rootPath, rootPath) || open.id === workspaceId) {
+      throw new InvalidOperationError(RESTORE_OPEN_MESSAGE);
+    }
   }
 
   /**

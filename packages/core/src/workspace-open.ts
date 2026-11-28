@@ -1,7 +1,12 @@
 import type { WorkspaceManifest, WorkspaceSummary } from '@assetforge/contracts';
 import { recoverFileMoves } from './file-move-recovery.js';
 import { ensureBuiltInAssetTypes } from './asset-types.js';
-import { StorageUnreachableError, WorkspaceDuplicateError, WorkspaceMismatchError } from './errors.js';
+import {
+  StorageUnreachableError,
+  WorkspaceDatabaseMissingError,
+  WorkspaceDuplicateError,
+  WorkspaceMismatchError,
+} from './errors.js';
 import { sweepTrash } from './trash-sweep.js';
 import type { Storage } from './ports/storage.js';
 import type { WorkspaceDatabase } from './ports/workspace-database.js';
@@ -68,14 +73,18 @@ export async function rejectCopy(host: WorkspaceHost, id: string, rootPath: stri
  * @param storage the storage of the workspace folder
  * @param manifest the checked manifest
  * @param rootPath the folder
+ * @param options `startEmpty` lets the open create a missing database; without it a missing one is refused
  * @returns the open workspace, already written to the registry
+ * @throws `WorkspaceDatabaseMissingError` when the local database is missing and `startEmpty` is not set
  */
 export async function openWorkspaceDatabase(
   host: WorkspaceHost,
   storage: Storage,
   manifest: WorkspaceManifest,
   rootPath: string,
+  options: { startEmpty: boolean },
 ): Promise<OpenWorkspace> {
+  if (!options.startEmpty && !(await host.databaseExists(manifest.id))) throw new WorkspaceDatabaseMissingError();
   const database = await host.openDatabase(manifest.id);
   try {
     return await prepareWorkspace(host, storage, database, manifest, rootPath);
