@@ -332,6 +332,7 @@ it('Show all in the shell switches to the assets gallery with the project and ta
   const assets = Array.from({ length: 20 }, (_, i) => assetSummary({ name: `Asset ${i}`, typeId: TYPE.id }));
   const api = install({
     'projects:list': listOf([project]),
+    'projects:get': () => project,
     'assets:list': (request) => pageOf(assets.slice(0, Math.min(request.limit, 20)), 25),
     'assignments:listByAsset': () => [],
   });
@@ -351,7 +352,7 @@ it('Show all in the shell switches to the assets gallery with the project and ta
       tagNames: ['oak'],
     }),
   );
-  expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe(project.id);
+  expect(await screen.findByRole('button', { name: 'Remove project Forest' })).toBeTruthy();
 });
 
 it('list state round trip keeps filters, scroll offset and selection', async () => {

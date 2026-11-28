@@ -27,7 +27,7 @@ export interface SearchPickerProps<T extends PickerEntry> {
   /** Entries that are never offered. */
   excludeIds?: readonly string[];
   /** Receives the picked entry; a second pick waits until it has settled. */
-  onPick(entry: T): void | Promise<void>;
+  onPick(entry: T): unknown;
   /** Stretches the search input to the width of its container. */
   fullWidth?: boolean;
 }

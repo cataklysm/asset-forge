@@ -13,7 +13,7 @@ interface Props {
   /** Projects that are never offered. */
   excludeIds?: readonly string[];
   /** Receives the picked project; a second pick waits until it has settled. */
-  onPick(project: ProjectSummary): void | Promise<void>;
+  onPick(project: ProjectSummary): unknown;
   /** Stretches the search input to the width of its container. */
   fullWidth?: boolean;
 }

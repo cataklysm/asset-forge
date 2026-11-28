@@ -49,6 +49,9 @@ export const FILTER_CHIP = `${CHIP_BASE} border-accent text-accent`;
 /** A tag that matched the active tag filter: accent border, normal text. */
 export const MATCHED_CHIP = `${CHIP_BASE} border-accent text-text`;
 
+/** The small icon buttons inside a chip (rename, remove). */
+export const CHIP_BUTTON = `inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-80 hover:opacity-100 ${FOCUS}`;
+
 /** Secondary text. */
 export const MUTED = 'text-muted';
 

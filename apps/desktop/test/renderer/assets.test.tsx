@@ -818,3 +818,37 @@ it('the file type filter offers Video and asks for assets with a video', async (
   await userEvent.setup().selectOptions(select, 'Video');
   await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, fileKind: 'video' }));
 });
+
+it('the project filter searches projects by the typed text, shows the pick as a chip and clears it', async () => {
+  const user = userEvent.setup();
+  const forest = projectSummary({ name: 'Forest' });
+  const api = install({
+    'assets:list': listOf(many(2)),
+    'projects:list': ({ query }) => pageOf(query === 'fo' ? [forest] : []),
+    'projects:get': () => forest,
+  });
+  render(<Harness />);
+  await user.type(await screen.findByRole('combobox', { name: 'Project' }), 'fo');
+  await user.click(await screen.findByRole('option', { name: 'Forest' }));
+  await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0, projectId: forest.id }));
+  expect(screen.queryByRole('combobox', { name: 'Project' })).toBeNull();
+  const projectRequests = api.calls
+    .filter((c) => c.channel === 'projects:list')
+    .map((c) => c.request as { limit: number });
+  expect(projectRequests.every((request) => request.limit < 200)).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Remove project Forest' }));
+  await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ limit: 60, offset: 0 }));
+  expect(screen.getByRole('combobox', { name: 'Project' })).toBeTruthy();
+});
+
+it('a project filter from the list state shows the project name even when no page holds it', async () => {
+  const forest = projectSummary({ name: 'Forest' });
+  const api = install({
+    'assets:list': listOf(many(2)),
+    'projects:list': () => pageOf([]),
+    'projects:get': () => forest,
+  });
+  render(<Harness initial={{ ...INITIAL, filters: { ...NO_FILTERS, projectId: forest.id } }} />);
+  expect(await screen.findByRole('button', { name: 'Remove project Forest' })).toBeTruthy();
+  expect(api.calls.filter((c) => c.channel === 'projects:get').map((c) => c.request)).toEqual([{ id: forest.id }]);
+});
