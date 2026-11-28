@@ -1,4 +1,9 @@
-import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, type AnalysisPreview, type AnalysisTarget } from '@assetforge/contracts';
+import {
+  ACTIVE_JOB_STATUSES,
+  ANALYZE_FILE_JOB,
+  type AnalysisPreview,
+  type AnalysisTarget,
+} from '@assetforge/contracts';
 import {
   tagName,
   type AnalysisFingerprint,
