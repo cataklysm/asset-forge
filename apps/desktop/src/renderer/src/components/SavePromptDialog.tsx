@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import type { PromptDetail } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
 import {
@@ -62,19 +62,22 @@ interface SaveModeChoiceProps {
   title: string;
   mode: SaveMode;
   onMode(mode: SaveMode): void;
+  /** The radio of the new version. */
+  versionRef: RefObject<HTMLInputElement | null>;
 }
 
 /**
  * The choice between a new version of the origin and a new prompt.
  *
- * @param props the origin's title, the mode and the callback
+ * @param props the origin's title, the mode, the callback and the ref of the version radio
  * @returns the radio group
  */
-function SaveModeChoice({ title, mode, onMode }: SaveModeChoiceProps) {
+function SaveModeChoice({ title, mode, onMode, versionRef }: SaveModeChoiceProps) {
   return (
     <fieldset className="flex flex-col gap-2 text-sm text-text">
       <label className="inline-flex items-center gap-2">
         <input
+          ref={versionRef}
           type="radio"
           name="save-as"
           className={`accent-accent ${FOCUS}`}
@@ -140,6 +143,14 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
   const asVersion = found !== null && mode === 'version';
   const blocked = looking || saving || (!asVersion && title.trim() === '');
 
+  // The title field takes the first focus; once it is disabled for a new version the focus moves to that choice.
+  const versionRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!asVersion) return;
+    const active = document.activeElement;
+    if (active === titleRef.current || active === document.body || active === null) versionRef.current?.focus();
+  }, [asVersion]);
+
   async function save() {
     if (blocked) return;
     setSaving(true);
@@ -163,7 +174,7 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
           void save();
         }}
       >
-        {found !== null && <SaveModeChoice title={found.title} mode={mode} onMode={setMode} />}
+        {found !== null && <SaveModeChoice title={found.title} mode={mode} onMode={setMode} versionRef={versionRef} />}
         <label htmlFor={titleId} className={LABEL}>
           {PROMPT_TITLE_LABEL}
         </label>

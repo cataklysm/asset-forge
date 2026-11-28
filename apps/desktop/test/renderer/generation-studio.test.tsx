@@ -840,6 +840,18 @@ describe('GenerationStudio with library prompts', () => {
     expect(promptBox().value).toBe('A front at night');
   });
 
+  it('Save to library keeps the focus inside the dialog when the title field is disabled for a new version', async () => {
+    setup({ prompts: [hero()] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await pickPrompt(user, 'Hero shot');
+    await user.click(button(EDIT_PROMPT_TEXT_LABEL));
+    await user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    const asVersion = await within(dialog).findByRole('radio', { name: newVersionOfLabel('Hero shot') });
+    await waitFor(() => expect(document.activeElement).toBe(asVersion));
+  });
+
   it('Save to library of a typed prompt creates a prompt, shows a refusal inside the dialog and attaches the form', async () => {
     const { api } = setup({ prompts: [promptDetail({ title: 'Taken' })] });
     await modelsReady();
