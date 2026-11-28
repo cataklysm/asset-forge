@@ -199,6 +199,29 @@ it('while an update and a new version are being saved the fields take no typing,
   expect(field('Title').value).toBe('Hero shot!');
 });
 
+it('while a save runs the tags cannot be changed, so its answer cannot hide a tag change', async () => {
+  const user = userEvent.setup();
+  const prompt = promptDetail({ title: 'Hero', content: 'A hero' });
+  const store = fakePrompts([prompt]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:update': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:update']!(request as never);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await openPrompt(user, 'Hero');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Title' }), ' shot');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:update')).toHaveLength(1));
+  const tagInput = within(editor()).getByRole('combobox', { name: 'Add prompt tag' }) as HTMLInputElement;
+  expect(tagInput.disabled).toBe(true);
+  hold.release();
+  await waitFor(() => expect(tagInput.disabled).toBe(false));
+});
+
 it('while a save runs no older version can be chosen or adopted, so the draft and the shown version stay', async () => {
   const user = userEvent.setup();
   const time = '2026-11-27T10:00:00.000Z';

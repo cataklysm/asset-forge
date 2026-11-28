@@ -300,7 +300,8 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
           label={PROMPT_TAGS_LABEL}
           kind="prompt"
           tags={detail.tags}
-          disabled={busy}
+          // A save's answer replaces the detail: a tag change made meanwhile would vanish from the editor.
+          disabled={busy || saving}
           onAdd={(name) => changeTags('prompts:addTag', name)}
           onRemove={(name) => changeTags('prompts:removeTag', name)}
         />
