@@ -98,6 +98,31 @@ it('a storage_unreachable failure shows the banner and Retry remounts the page',
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('while an import runs Retry on the storage banner is disabled and keeps the page', async () => {
+  const user = userEvent.setup();
+  installFakeApi({
+    'assets:list': () => {
+      throw fakeError('storage_unreachable');
+    },
+  });
+  let mounts = 0;
+  function Child() {
+    useEffect(() => {
+      mounts += 1;
+      void call('assets:list', { limit: 1, offset: 0 }).catch(() => {});
+    }, []);
+    return <p>child</p>;
+  }
+  render(shell({ busy: true }, <Child />));
+  await screen.findByRole('alert');
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  expect(retry.getAttribute('aria-disabled')).toBe('true');
+  expect(retry.getAttribute('title')).toBe('Import in progress');
+  await user.click(retry);
+  expect(mounts).toBe(1);
+  expect(screen.getByRole('alert')).toBeTruthy();
+});
+
 it('Ctrl+F focuses the page search field', async () => {
   const user = userEvent.setup();
   render(shell({}, <input aria-label="Search" data-search-field="" />));
@@ -848,4 +873,22 @@ it('a dirty prompt draft asks before the main navigation leaves; cancel stays, d
     }),
   );
   await waitFor(() => expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-current')).toBe('page'));
+});
+
+it('choosing Prompts while the prompts screen shows asks nothing and keeps the draft', async () => {
+  const user = userEvent.setup();
+  workspaceShell(
+    () => IDLE,
+    () => {},
+    { 'tags:suggest': () => [], ...fakePrompts([promptDetail({ title: 'Hero' })]).handlers },
+  );
+  await user.click(screen.getByRole('link', { name: 'Prompts' }));
+  const listbox = await screen.findByRole('listbox', { name: 'Prompts' });
+  await user.click(await within(listbox).findByText('Hero'));
+  const editor = screen.getByRole('region', { name: 'Prompt' });
+  await user.type(await within(editor).findByDisplayValue('Hero'), ' shot');
+
+  await user.click(screen.getByRole('link', { name: 'Prompts' }));
+  expect(screen.queryByRole('dialog', { name: 'Discard the unsaved changes?' })).toBeNull();
+  expect(within(editor).getByDisplayValue('Hero shot')).toBeTruthy();
 });

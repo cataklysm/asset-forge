@@ -194,6 +194,32 @@ function ShellHeader({ workspaceName, rootPath, busy, onClose }: ShellHeaderProp
 }
 
 /**
+ * The banner while the storage cannot be reached. Retry remounts the page, so it waits while an import runs:
+ * the remount would drop the page's busy block while the main process still imports.
+ *
+ * @param props the busy flag and the retry
+ * @returns the banner
+ */
+function StorageBanner({ busy, onRetry }: { busy: boolean; onRetry(): void }) {
+  return (
+    <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
+      <span>{UNREACHABLE_MESSAGE}</span>
+      <button
+        type="button"
+        className={BUTTON}
+        aria-disabled={busy || undefined}
+        title={busy ? BUSY_TITLE : undefined}
+        onClick={() => {
+          if (!busy) onRetry();
+        }}
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
+/**
  * The application frame: header, navigation, the alert region and the page slot.
  *
  * @param props the workspace, the navigation state, the paused lanes and their actions, and the page
@@ -240,19 +266,13 @@ export function AppShell({
 
         <div className="flex min-w-0 flex-1 flex-col">
           {unreachable && (
-            <div role="alert" className={`m-6 mb-0 flex items-center justify-between gap-4 ${WARNING}`}>
-              <span>{UNREACHABLE_MESSAGE}</span>
-              <button
-                type="button"
-                className={BUTTON}
-                onClick={() => {
-                  setUnreachable(false);
-                  setReloadKey((key) => key + 1);
-                }}
-              >
-                Retry
-              </button>
-            </div>
+            <StorageBanner
+              busy={busy}
+              onRetry={() => {
+                setUnreachable(false);
+                setReloadKey((key) => key + 1);
+              }}
+            />
           )}
           {(paused.length > 0 || pausedHosts.length > 0) && (
             <PauseBanner
