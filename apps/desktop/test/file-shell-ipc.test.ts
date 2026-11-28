@@ -243,4 +243,42 @@ describe('file shell IPC', () => {
     });
     expect(await ok('assets:setCover', { assetId: asset.id, fileId: null })).toMatchObject({ id: asset.id });
   });
+
+  it('the trash channels raise the job counter and wake the scheduler after the work, also when an item failed', async () => {
+    const { file } = await setup('wake.png');
+    const calls: string[] = [];
+    handlers = createWorkspaceHandlers(
+      manager,
+      {
+        pickDirectory: async () => null,
+        pickFiles: async () => [],
+        confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWorkflow: async () => false,
+      },
+      host,
+      {
+        ...idleJobHost,
+        changed: () => void calls.push('changed'),
+        wake: () => void calls.push('wake'),
+        cancel: async () => void calls.push('cancel'),
+      },
+      idleServices,
+    );
+    const trashed = await ok<{ items: { error: unknown }[] }>('files:trashMany', {
+      fileIds: [file.id, crypto.randomUUID()],
+    });
+    expect(trashed.items.map((item) => item.error === null)).toEqual([true, false]);
+    expect(calls.slice(-2)).toEqual(['changed', 'wake']);
+    calls.length = 0;
+    await ok('files:restoreMany', { fileIds: [file.id] });
+    expect(calls).toEqual(['changed', 'wake']);
+    calls.length = 0;
+    await ok('files:trashMany', { fileIds: [file.id] });
+    calls.length = 0;
+    await ok('files:purgeMany', { fileIds: [file.id] });
+    expect(calls.slice(-2)).toEqual(['changed', 'wake']);
+    calls.length = 0;
+    await ok('trash:empty', {});
+    expect(calls.slice(-2)).toEqual(['changed', 'wake']);
+  });
 });
