@@ -8,4 +8,5 @@ export type View =
   | { name: 'inbox' }
   | { name: 'trash' }
   | { name: 'jobs' }
+  | { name: 'extractions' }
   | { name: 'settings' };

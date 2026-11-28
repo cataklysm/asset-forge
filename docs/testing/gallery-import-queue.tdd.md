@@ -130,3 +130,14 @@ The owner clarified that downloads run normally: after cancelling discovery and 
 - Runtime RED checkpoints: `eb73b73` (missing UI actions), `3ed9cf3` (missing removal and profile-save lock), `80eb521` (cancelled-partial sequence). Backend GREEN checkpoint: `8b86f1d`.
 - Final combined suite: **4,606 tests passed**, one pre-existing conditional E2E seed skipped. Typecheck, formatting, lint (zero errors), production dependency audit and isolated Electron build passed.
 - Native rendered validation with fake IPC passed cancelled partial import -> edit/save live profile -> new extraction with the captured target -> remove original review, with no cancellation request. Existing snapshots were displayed separately from the edited live profile.
+
+## Direct Extractions navigation
+
+The owner requested a separate `Extractions` entry immediately below `Jobs`, without first opening an asset. The navigation opens a standard workspace page using the existing `Page` component.
+
+- Extracted the existing dialog's presentation boundary into shared `SiteImportWorkspace`; profiles, polling, queue submission, saved results and review actions still have one implementation. `SiteImportDialog` retains its existing caller interface and modal behavior.
+- New submissions from the page target the Inbox. Existing tasks retain their captured asset/role, including when imported from this page; no asset detail lookup or target override is needed.
+- Navigation away stops the view's polling without cancelling background extraction. Returning reloads persisted task summaries and review data.
+- RED checkpoint `f2b894d`: the navigation entry and standalone screen were missing. The root navigation regression and the new screen tests then passed alongside the existing modal tests.
+- Validation: **1,071 renderer tests passed across 56 files**; workspace typechecking, formatting, lint (zero errors), production dependency audit and the isolated Electron build passed. No backend contract, database or migration changed.
+- Native rendered validation passed navigation order, page opening without a main modal, captured asset review, no asset lookup and Jobs -> Extractions return without cancellation. At a 1280 × 800 viewport the shell's main area measured 724 px for both its client and scroll height, so the page retains the bounded scrolling layout.

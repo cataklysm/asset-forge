@@ -43,7 +43,8 @@ export const FOUND_FILES_LABEL = 'Found files';
 export const SITE_QUEUE_LABEL = 'Queue extraction';
 export const SITE_QUEUE_TITLE = 'Extracts URLs in the background; downloads start only after your review';
 export const SITE_URLS_LABEL = 'Gallery URLs';
-export const SITE_URLS_HINT = 'One gallery URL per line. You can close this window while extraction continues.';
+export const SITE_URLS_HINT =
+  'One gallery URL per line. You can keep working while extraction continues in the background.';
 export const SITE_TASKS_LABEL = 'Extractions';
 export const SITE_TASKS_EMPTY = 'No extractions yet. Queue a gallery to get started.';
 export const SITE_REVIEW_LABEL = 'Review results';

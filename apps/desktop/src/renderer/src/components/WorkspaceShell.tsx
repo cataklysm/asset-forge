@@ -13,6 +13,7 @@ import { AssetsScreen } from '../screens/AssetsScreen';
 import { AssetScreen } from '../screens/AssetScreen';
 import { InboxScreen } from '../screens/InboxScreen';
 import { JobsScreen } from '../screens/JobsScreen';
+import { ExtractionsScreen } from '../screens/ExtractionsScreen';
 import { ProjectScreen } from '../screens/ProjectScreen';
 import { ProjectsScreen } from '../screens/ProjectsScreen';
 import { PromptsScreen } from '../screens/PromptsScreen';
@@ -300,6 +301,8 @@ function screenFor(
       return <PromptsScreen key={`${view.id ?? ''}:${visit}`} busy={busy} initialId={view.id ?? null} />;
     case 'jobs':
       return <JobsScreen />;
+    case 'extractions':
+      return <ExtractionsScreen />;
     case 'settings':
       return <SettingsScreen />;
     default:

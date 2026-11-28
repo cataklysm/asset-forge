@@ -5,6 +5,7 @@ import {
   ListChecks,
   Package,
   ScrollText,
+  ScanSearch,
   Settings,
   Trash2,
   type LucideIcon,
@@ -19,6 +20,7 @@ import {
   ASSETS_NAV_LABEL,
   INBOX_NAV_LABEL,
   JOBS_NAV_LABEL,
+  EXTRACTIONS_NAV_LABEL,
   MAIN_NAV_LABEL,
   PROJECTS_NAV_LABEL,
   PROMPTS_LABEL,
@@ -35,7 +37,7 @@ import { PauseBanner } from './PauseBanner';
 export { BUSY_TITLE } from './busy-title';
 
 /** A screen of the main navigation. */
-export type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
+export type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'extractions' | 'settings';
 
 /** The props of `AppShell`. */
 interface Props {
@@ -81,6 +83,7 @@ const NAV: { section: Section; label: string; icon: LucideIcon }[] = [
   { section: 'inbox', label: INBOX_NAV_LABEL, icon: Inbox },
   { section: 'trash', label: TRASH_LABEL, icon: Trash2 },
   { section: 'jobs', label: JOBS_NAV_LABEL, icon: ListChecks },
+  { section: 'extractions', label: EXTRACTIONS_NAV_LABEL, icon: ScanSearch },
   { section: 'settings', label: SETTINGS_LABEL, icon: Settings },
 ];
 

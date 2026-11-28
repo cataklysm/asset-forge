@@ -40,13 +40,32 @@ interface Props {
   onImported?(): void;
 }
 
+/** The shared workspace is hosted either by the existing dialog or by a full navigation page. */
+type WorkspaceProps =
+  | (Props & { presentation: 'dialog' })
+  | {
+      presentation: 'page';
+      target: FileTarget | null;
+      onImported?(): void;
+      onClose?: never;
+    };
+
 /**
- * Profile configuration, background extraction queue and saved result review in one consistent dialog.
+ * Opens the shared import workspace in the existing asset/inbox dialog.
+ * @param props the captured destination and dialog callbacks
+ * @returns the dialog-hosted workspace
+ */
+export function SiteImportDialog(props: Props) {
+  return <SiteImportWorkspace {...props} presentation="dialog" />;
+}
+
+/**
+ * Shared profile configuration, extraction queue and result review for dialogs and the navigation page.
  *
  * @param props the destination for new tasks and dialog callbacks
  * @returns the import workspace and profile-deletion confirmation
  */
-export function SiteImportDialog({ target, onClose, onImported }: Props) {
+export function SiteImportWorkspace({ target, onClose, onImported, presentation }: WorkspaceProps) {
   const selectId = useId();
   const selectRef = useRef<HTMLSelectElement>(null);
   const profileFormRef = useRef<HTMLDivElement>(null);
@@ -282,96 +301,105 @@ export function SiteImportDialog({ target, onClose, onImported }: Props) {
     });
 
   const shownError = error ?? tasks.error ?? selected.error;
+  const content = (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <p className={`shrink-0 text-sm ${MUTED}`}>{SITE_BACKGROUND_HINT}</p>
+      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:overflow-hidden">
+        <div
+          ref={profileFormRef}
+          className={`min-h-0 overflow-y-auto overscroll-contain rounded-control border p-3 ${BORDER}`}
+        >
+          <SiteProfileForm
+            selectId={selectId}
+            selectRef={selectRef}
+            profiles={profiles}
+            selectedId={selectedId}
+            saved={saved}
+            draft={draft}
+            locked={locked}
+            dirty={dirty}
+            savable={request !== null}
+            onSelect={select}
+            onDraftChange={(patch) => setDraftState((current) => ({ ...current, ...patch }))}
+            onSave={() => void save()}
+            onDelete={() => setConfirmDelete(true)}
+            onLogIn={() => void logIn()}
+          />
+        </div>
+        <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto overscroll-contain">
+          <SiteExtractionQueue
+            urls={urls}
+            target={target}
+            locked={locked}
+            queueable={queueable}
+            tasks={tasks}
+            selectedCrawlId={selectedCrawlId}
+            onUrlsChange={setUrls}
+            onQueue={() => void enqueue()}
+            onSelect={(crawlId) => {
+              setSelectedCrawlId(crawlId);
+              setImportResult(null);
+            }}
+          />
+          <section
+            aria-label={SITE_REVIEW_LABEL}
+            className={`flex flex-col gap-3 rounded-control border p-3 ${BORDER}`}
+          >
+            <h3 className={PANEL_TITLE}>{SITE_REVIEW_LABEL}</h3>
+            {selected.task === null ? (
+              <p className={`text-sm ${MUTED}`}>{SITE_REVIEW_EMPTY}</p>
+            ) : (
+              <SiteCrawlReview
+                key={selected.task.crawlId}
+                task={selected.task}
+                busy={locked}
+                onImport={(selection) => void importSelected(selection)}
+                onCancel={() => void cancel()}
+                onLogIn={() => void taskLogin()}
+                onRetry={() => void retry()}
+                onRemove={() => setConfirmRemove(selected.task)}
+                onEditProfile={() => void editTaskProfile()}
+                onExtractAgain={() => void extractAgain()}
+                canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
+                profileHasUnsavedChanges={profileHasUnsavedChanges}
+              />
+            )}
+            {importResult !== null && (
+              <p role="status" className="text-sm">
+                {siteImportOutcomeText(
+                  importResult.queued,
+                  importResult.alreadyImported,
+                  importResult.alreadyQueued,
+                  importResult.invalid.length,
+                )}
+              </p>
+            )}
+          </section>
+        </div>
+      </div>
+      {shownError !== null && (
+        <p role="alert" className={`shrink-0 ${ALERT}`}>
+          {shownError}
+        </p>
+      )}
+      {presentation === 'dialog' && (
+        <div className={`flex shrink-0 justify-end border-t pt-3 ${BORDER}`}>
+          <button type="button" className={BUTTON} onClick={onClose}>
+            {CLOSE_LABEL}
+          </button>
+        </div>
+      )}
+    </div>
+  );
   return (
     <>
-      <Dialog open title={SITE_IMPORT_LABEL} size="workspace" onClose={onClose} initialFocusRef={selectRef}>
-        <div className="flex h-full min-h-0 flex-col gap-4">
-          <p className={`shrink-0 text-sm ${MUTED}`}>{SITE_BACKGROUND_HINT}</p>
-          <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto lg:grid-cols-[20rem_minmax(0,1fr)] lg:overflow-hidden">
-            <div
-              ref={profileFormRef}
-              className={`min-h-0 overflow-y-auto overscroll-contain rounded-control border p-3 ${BORDER}`}
-            >
-              <SiteProfileForm
-                selectId={selectId}
-                selectRef={selectRef}
-                profiles={profiles}
-                selectedId={selectedId}
-                saved={saved}
-                draft={draft}
-                locked={locked}
-                dirty={dirty}
-                savable={request !== null}
-                onSelect={select}
-                onDraftChange={(patch) => setDraftState((current) => ({ ...current, ...patch }))}
-                onSave={() => void save()}
-                onDelete={() => setConfirmDelete(true)}
-                onLogIn={() => void logIn()}
-              />
-            </div>
-            <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto overscroll-contain">
-              <SiteExtractionQueue
-                urls={urls}
-                target={target}
-                locked={locked}
-                queueable={queueable}
-                tasks={tasks}
-                selectedCrawlId={selectedCrawlId}
-                onUrlsChange={setUrls}
-                onQueue={() => void enqueue()}
-                onSelect={(crawlId) => {
-                  setSelectedCrawlId(crawlId);
-                  setImportResult(null);
-                }}
-              />
-              <section
-                aria-label={SITE_REVIEW_LABEL}
-                className={`flex flex-col gap-3 rounded-control border p-3 ${BORDER}`}
-              >
-                <h3 className={PANEL_TITLE}>{SITE_REVIEW_LABEL}</h3>
-                {selected.task === null ? (
-                  <p className={`text-sm ${MUTED}`}>{SITE_REVIEW_EMPTY}</p>
-                ) : (
-                  <SiteCrawlReview
-                    key={selected.task.crawlId}
-                    task={selected.task}
-                    busy={locked}
-                    onImport={(selection) => void importSelected(selection)}
-                    onCancel={() => void cancel()}
-                    onLogIn={() => void taskLogin()}
-                    onRetry={() => void retry()}
-                    onRemove={() => setConfirmRemove(selected.task)}
-                    onEditProfile={() => void editTaskProfile()}
-                    onExtractAgain={() => void extractAgain()}
-                    canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
-                    profileHasUnsavedChanges={profileHasUnsavedChanges}
-                  />
-                )}
-                {importResult !== null && (
-                  <p role="status" className="text-sm">
-                    {siteImportOutcomeText(
-                      importResult.queued,
-                      importResult.alreadyImported,
-                      importResult.alreadyQueued,
-                      importResult.invalid.length,
-                    )}
-                  </p>
-                )}
-              </section>
-            </div>
-          </div>
-          {shownError !== null && (
-            <p role="alert" className={`shrink-0 ${ALERT}`}>
-              {shownError}
-            </p>
-          )}
-          <div className={`flex shrink-0 justify-end border-t pt-3 ${BORDER}`}>
-            <button type="button" className={BUTTON} onClick={onClose}>
-              {CLOSE_LABEL}
-            </button>
-          </div>
-        </div>
-      </Dialog>
+      {presentation === 'dialog' ? (
+        <Dialog open title={SITE_IMPORT_LABEL} size="workspace" onClose={onClose} initialFocusRef={selectRef}>
+          {content}
+        </Dialog>
+      ) : (
+        content
+      )}
       {saved !== null && (
         <ConfirmDialog
           open={confirmDelete}

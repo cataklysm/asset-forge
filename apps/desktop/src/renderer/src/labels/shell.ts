@@ -18,6 +18,8 @@ export const PROJECTS_NAV_LABEL = 'Projects';
 export const INBOX_NAV_LABEL = 'Inbox';
 /** The navigation entry of the Jobs screen. */
 export const JOBS_NAV_LABEL = 'Jobs';
+/** The navigation entry for background discovery tasks and saved import reviews. */
+export const EXTRACTIONS_NAV_LABEL = 'Extractions';
 
 /**
  * The accessible name of a navigation entry with an active count: 'Jobs, 3 active'.

@@ -10,7 +10,7 @@ import {
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
-import { AppShell } from '../../src/renderer/src/components/AppShell';
+import { AppShell, type Section } from '../../src/renderer/src/components/AppShell';
 import {
   JobsAppShell,
   leaveTo,
@@ -24,8 +24,6 @@ import { deferred, fakeError, fakePrompts, installFakeApi, promptDetail, type Fa
 import { assetSummary, fileRecord, pageOf, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 import { readySiteCrawl } from './site-crawl-fixtures';
-
-type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
 function shell(
   props: {
@@ -801,18 +799,30 @@ it('Extractions follows Jobs in the workspace navigation', () => {
 it('opens saved extractions directly from navigation without entering an asset', async () => {
   const user = userEvent.setup();
   const profile = {
-    id: '22222222-2222-4222-8222-222222222222', name: 'Gallery', site: 'example.com',
-    thumbnails: '//a/@href', pagination: '', file: '', kinds: ['image' as const], minBytes: 0,
-    urlContains: '', maxPages: 20, maxFiles: 1000,
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Gallery',
+    site: 'example.com',
+    thumbnails: '//a/@href',
+    pagination: '',
+    file: '',
+    kinds: ['image' as const],
+    minBytes: 0,
+    urlContains: '',
+    maxPages: 20,
+    maxFiles: 1000,
   };
   const task = readySiteCrawl(profile, { assetId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', role: 'reference' });
   task.targetAssetName = 'Captured asset';
-  const api = workspaceShell(() => IDLE, () => {}, {
-    'sites:list': () => ({ profiles: [profile] }),
-    'sites:listCrawls': () => ({ items: [task], total: 1 }),
-    'sites:getCrawl': () => structuredClone(task),
-    'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
-  });
+  const api = workspaceShell(
+    () => IDLE,
+    () => {},
+    {
+      'sites:list': () => ({ profiles: [profile] }),
+      'sites:listCrawls': () => ({ items: [task], total: 1 }),
+      'sites:getCrawl': () => structuredClone(task),
+      'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+    },
+  );
   await user.click(screen.getByRole('link', { name: 'Extractions' }));
   expect(await screen.findByRole('heading', { name: 'Extractions', level: 2 })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Extractions' }).getAttribute('aria-current')).toBe('page');
@@ -824,7 +834,7 @@ it('opens saved extractions directly from navigation without entering an asset',
   expect(api.calls.find((call) => call.channel === 'sites:import')?.request).toMatchObject({ crawlId: task.crawlId });
   expect(api.calls.filter((call) => call.channel === 'assets:get')).toHaveLength(0);
   await user.click(screen.getByRole('link', { name: /^Jobs/ }));
-  await screen.findByRole('heading', { name: 'Jobs', level: 2 });
+  await screen.findByRole('heading', { name: /^Jobs/, level: 2 });
   await user.click(screen.getByRole('link', { name: 'Extractions' }));
   expect(await within(screen.getByRole('list', { name: 'Extractions' })).findByRole('button')).toBeTruthy();
   expect(api.calls.filter((call) => call.channel === 'sites:cancelCrawl')).toHaveLength(0);
