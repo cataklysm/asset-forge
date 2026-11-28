@@ -1072,6 +1072,33 @@ describe('job lanes', () => {
     expect(withoutLane.items.map((i) => i.id)).toEqual([uuid(11)]);
   });
 
+  test('list with laneOutside lists the jobs of those classes whose lane is set and not one of the lanes', async () => {
+    await enqueueInOrder(
+      laned(10, 'a'),
+      laned(11, 'gone'),
+      laned(12, null),
+      newJob(13, { lane: 'gone-image', resourceClass: 'remote_api' }),
+      // A download lane is a host: never a removed provider.
+      newJob(14, { lane: 'example.test', resourceClass: 'io' }),
+    );
+
+    const removed = await db.jobs.list({
+      limit: 10,
+      offset: 0,
+      laneOutside: { resourceClasses: ['local_gpu', 'remote_api'], lanes: ['a'] },
+    });
+    expect(removed.total).toBe(2);
+    expect(removed.items.map((i) => i.id)).toEqual([uuid(13), uuid(11)]);
+    // No known lane at all: every provider job with a lane.
+    const none = await db.jobs.list({
+      limit: 10,
+      offset: 0,
+      laneOutside: { resourceClasses: ['local_gpu'], lanes: [] },
+      status: 'queued',
+    });
+    expect(none.items.map((i) => i.id)).toEqual([uuid(11), uuid(10)]);
+  });
+
   test('list narrows to the given ids within the status and lane filters', async () => {
     await enqueueInOrder(laned(10, 'a'), laned(11, 'a'), laned(12, 'b'));
 

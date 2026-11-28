@@ -31,6 +31,7 @@ import {
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
   NO_JOBS,
+  REMOVED_PROVIDERS,
   RETRY_FAILED_LABEL,
 } from '../labels';
 import { useProviders } from '../provider-context';
@@ -51,7 +52,21 @@ type ProviderEntry = ProviderList['providers'][number];
 /** The paged list of jobs. */
 type PagedJobs = ReturnType<typeof usePagedList<JobView>>;
 /** The filter of `jobs:list` without paging. */
-type ListRequest = { status?: JobStatus; providerId?: string };
+type ListRequest = { status?: JobStatus; providerId?: string; providerRemoved?: true };
+
+/** The provider filter value of the jobs whose entry no longer exists; never a provider id. */
+const REMOVED_FILTER = ':removed';
+
+/**
+ * The provider part of the `jobs:list` filter.
+ *
+ * @param providerId the chosen filter value: '' for all, `REMOVED_FILTER`, else an entry id
+ * @returns the filter fields
+ */
+function providerFilterOf(providerId: string): Pick<ListRequest, 'providerId' | 'providerRemoved'> {
+  if (providerId === '') return {};
+  return providerId === REMOVED_FILTER ? { providerRemoved: true } : { providerId };
+}
 
 /** The newest list state the change listener reads. */
 interface LatestList {
@@ -133,7 +148,7 @@ async function runAction(run: ActionRun, action: () => Promise<unknown>): Promis
 }
 
 /**
- * The provider filter: the chosen entry while it is listed, else all.
+ * The provider filter: the chosen entry while it is listed, or the removed providers, else all.
  *
  * @param entries the listed entries
  * @returns the chosen entry ('' for all) and its setter
@@ -141,7 +156,8 @@ async function runAction(run: ActionRun, action: () => Promise<unknown>): Promis
 function useProviderFilter(entries: readonly ProviderEntry[]): [string, (value: string) => void] {
   // The chosen provider filter; '' (all) once its entry is no longer listed.
   const [chosenProvider, setChosenProvider] = useState('');
-  const providerId = entries.some((entry) => entry.id === chosenProvider) ? chosenProvider : '';
+  const providerId =
+    chosenProvider === REMOVED_FILTER || entries.some((entry) => entry.id === chosenProvider) ? chosenProvider : '';
   return [providerId, setChosenProvider];
 }
 
@@ -174,7 +190,7 @@ export function JobsScreen() {
   // The list's filter without paging; also the base of a read of chosen ids.
   const listRequest: ListRequest = {
     ...(status === '' ? {} : { status }),
-    ...(providerId === '' ? {} : { providerId }),
+    ...providerFilterOf(providerId),
   };
   const fetchPage = useCallback(
     (offset: number, limit: number) => call('jobs:list', { limit, offset, ...listRequest }),
@@ -508,6 +524,7 @@ function JobsToolbar({ total, status, providerId, entries, onStatus, onProvider 
             {entry.name}
           </option>
         ))}
+        <option value={REMOVED_FILTER}>{REMOVED_PROVIDERS}</option>
       </select>
     </FilterBar>
   );

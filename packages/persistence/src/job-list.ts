@@ -1,6 +1,6 @@
 import { IMAGE_GENERATE_JOB, type JobView } from '@assetforge/contracts';
 import { jobViewOf, type JobRepository } from '@assetforge/core';
-import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { inLane, resultOf, toJob, type JobReader, type JobRow } from './job-rows.js';
 import { file, generation, job } from './schema.js';
@@ -51,12 +51,27 @@ export async function listJobs(
  * @param filter the filters
  * @returns the condition; undefined without filters
  */
-function jobListWhere({ status, lane, ids }: JobListFilter): SQL | undefined {
+function jobListWhere({ status, lane, laneOutside, ids }: JobListFilter): SQL | undefined {
   return and(
     status === undefined ? undefined : eq(job.status, status),
     // `inLane`, so a null lane matches the jobs without one instead of no row (`= NULL` is never true).
     lane === undefined ? undefined : inLane(lane),
+    laneOutside === undefined ? undefined : outsideLanes(laneOutside),
     ids === undefined ? undefined : inArray(job.id, [...ids]),
+  );
+}
+
+/**
+ * The jobs of these resource classes that have a lane and whose lane is not one of `lanes`.
+ *
+ * @param filter the resource classes and the lanes to leave out
+ * @returns the condition
+ */
+function outsideLanes({ resourceClasses, lanes }: NonNullable<JobListFilter['laneOutside']>): SQL | undefined {
+  return and(
+    inArray(job.resourceClass, [...resourceClasses]),
+    isNotNull(job.providerId),
+    lanes.length === 0 ? undefined : notInArray(job.providerId, [...lanes]),
   );
 }
 

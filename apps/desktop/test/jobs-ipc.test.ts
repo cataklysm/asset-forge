@@ -644,4 +644,25 @@ describe('analysis:enqueue with an analysis prompt', () => {
     for (const job of items)
       expect(job).toMatchObject({ type: 'file.download', host: 'example.org', providerId: null });
   });
+
+  it('lists the jobs of a removed provider with providerRemoved, never the downloads or a listed entry', async () => {
+    await setup();
+    await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
+    pause.record('local_gpu', entryId, 'provider_unauthorized');
+    const openai = openAiEntry();
+    pause.record('local_gpu', openai.id, 'provider_unauthorized');
+    const fileIds = await importImages(3);
+    await ok('analysis:enqueue', { ...filesRequest(fileIds.slice(0, 2)), providerId: entryId });
+    await ok('analysis:enqueue', { ...filesRequest(fileIds.slice(2)), providerId: openai.id });
+    expect(await ok('files:importUrls', { urls: ['https://example.org/a.png'] })).toMatchObject({ queued: 1 });
+
+    expect(await ok('jobs:list', { ...page, providerRemoved: true })).toMatchObject({ total: 0 });
+    store.delete(entryId);
+    const removed = await ok('jobs:list', { ...page, providerRemoved: true });
+    expect(removed.total).toBe(2);
+    for (const job of removed.items) expect(job).toMatchObject({ providerId: entryId, type: 'vision.analyze_file' });
+
+    const both = await call('jobs:list', { ...page, providerId: openai.id, providerRemoved: true });
+    expect(both).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
 });

@@ -47,6 +47,8 @@ export const COUNTING_WAITING_JOBS = 'The waiting jobs are being counted';
 export const JOBS_PROVIDER_HEADER = 'Provider';
 export const ALL_PROVIDERS = 'All providers';
 export const REMOVED_PROVIDER = 'Removed provider';
+/** The provider filter entry for the jobs whose provider entry no longer exists. */
+export const REMOVED_PROVIDERS = 'Removed providers';
 
 /**
  * The name of a job lane: its stored name, else `No provider` for id null and `Removed provider` otherwise.

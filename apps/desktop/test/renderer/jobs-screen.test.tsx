@@ -70,13 +70,16 @@ function job(p: Partial<JobView> = {}): JobView {
 
 type ListRequest = IpcRequest<'jobs:list'>;
 
-function listOf(items: JobView[]) {
+/** A fake `jobs:list`; `knownIds` are the listed entries, so `providerRemoved` matches the jobs of any other entry. */
+function listOf(items: JobView[], knownIds: readonly string[] = []) {
+  const removed = (j: JobView) => j.providerId !== null && !knownIds.includes(j.providerId);
   return (request: ListRequest) => {
     const matching = items.filter(
       (j) =>
         (request.ids === undefined || request.ids.includes(j.id)) &&
         (request.status === undefined || j.status === request.status) &&
-        (request.providerId === undefined || j.providerId === request.providerId),
+        (request.providerId === undefined || j.providerId === request.providerId) &&
+        (request.providerRemoved === undefined || removed(j)),
     );
     return pageOf(matching.slice(request.offset, request.offset + request.limit), matching.length);
   };
@@ -851,7 +854,7 @@ it('the provider filter offers All providers plus the entries and sends provider
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['All providers', 'Local Ollama', 'RunPod']),
+    ).toEqual(['All providers', 'Local Ollama', 'RunPod', 'Removed providers']),
   );
   expect((listCalls(api).at(-1)!.request as ListRequest).providerId).toBeUndefined();
 
@@ -865,6 +868,30 @@ it('the provider filter offers All providers plus the entries and sends provider
   await user.selectOptions(select, '');
   expect(await screen.findByText('local.png')).toBeTruthy();
   expect((listCalls(api).at(-1)!.request as ListRequest).providerId).toBeUndefined();
+});
+
+it('the provider filter offers the jobs of removed providers last and sends providerRemoved', async () => {
+  const user = userEvent.setup();
+  const local = job({ fileName: 'local.png', providerId: LOCAL.id, providerName: 'Local Ollama' });
+  const gone = job({ fileName: 'gone.png', providerId: nextId(), providerName: 'Old pod' });
+  const api = withProviders({ 'jobs:list': listOf([local, gone], [LOCAL.id, RUNPOD.id]) });
+  renderScreen();
+  await screen.findByText('local.png');
+  const select = (await screen.findByRole('combobox', { name: 'Provider' })) as HTMLSelectElement;
+  await waitFor(() =>
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['All providers', 'Local Ollama', 'RunPod', 'Removed providers']),
+  );
+
+  await user.selectOptions(select, within(select).getByRole('option', { name: 'Removed providers' }));
+  await waitFor(() => expect(screen.queryByText('local.png')).toBeNull());
+  expect(screen.getByText('gone.png')).toBeTruthy();
+  const last = listCalls(api).at(-1)!.request as ListRequest;
+  expect(last.providerRemoved).toBe(true);
+  expect(last.providerId).toBeUndefined();
 });
 
 it('Move jobs in the toolbar opens the move dialog with a source select, and closing it reloads the list', async () => {
