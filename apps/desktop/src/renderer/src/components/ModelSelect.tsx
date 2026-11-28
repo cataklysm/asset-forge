@@ -4,6 +4,7 @@ import { EDIT_MODEL_LABEL, MODEL_PURPOSE_LABELS, NO_MODEL_LABEL, REFRESH_MODELS_
 import { useProviders } from '../provider-context';
 import { ICON_BUTTON, SELECT } from '../ui';
 
+/** The props of `ModelSelect`. */
 interface Props {
   /** The entry whose models are listed; null lists nothing. */
   providerId: string | null;
@@ -22,6 +23,7 @@ interface ModelOption {
   title?: string;
 }
 
+/** The props of `ModelListSelect`. */
 interface ModelListSelectProps {
   label: string;
   /** The entry whose list is refreshed; null offers no refresh. */
@@ -39,10 +41,12 @@ interface ModelListSelectProps {
 /**
  * The markup both model selects share: a select with no model, `value` even when it is not (or not
  * yet) listed, the options, and a refresh of the entry's list.
+ *
+ * @param props the label, the options, the load state and the selected model with its setter
  */
 function ModelListSelect({ label, providerId, options, loading, message, value, onChange, disabled }: ModelListSelectProps) {
   const { loadModels } = useProviders();
-  const listed = value !== null && options.some((m) => m.name === value);
+  const listed = value !== null && options.some((option) => option.name === value);
   const canRefresh = !disabled && !loading && providerId !== null;
 
   return (
@@ -54,7 +58,7 @@ function ModelListSelect({ label, providerId, options, loading, message, value, 
           value={value ?? ''}
           disabled={disabled}
           aria-busy={loading || undefined}
-          onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+          onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
         >
           <option value="">{NO_MODEL_LABEL}</option>
           {value !== null && !listed && <option value={value}>{value}</option>}
@@ -80,16 +84,46 @@ function ModelListSelect({ label, providerId, options, loading, message, value, 
   );
 }
 
-const RANK = (model: VisionModel) => (model.vision === true ? 0 : model.vision === null ? 1 : 2);
+/**
+ * The rank of a model in the list: vision models first, then the ones without reported capabilities.
+ *
+ * @param model the model
+ * @returns 0, 1 or 2
+ */
+function rankOf(model: VisionModel): number {
+  if (model.vision === true) return 0;
+  if (model.vision === null) return 1;
+  return 2;
+}
 
-/** Vision models first, then the ones without reported capabilities, then the rest; each by name. */
+/**
+ * Compares two names in code unit order.
+ *
+ * @param left one name
+ * @param right the other name
+ * @returns a negative number, zero or a positive number
+ */
+function compareNames(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+/**
+ * Vision models first, then the ones without reported capabilities, then the rest; each by name.
+ *
+ * @param models the listed models
+ * @returns a sorted copy
+ */
 function ordered(models: readonly VisionModel[]): VisionModel[] {
-  return [...models].sort((a, b) => RANK(a) - RANK(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return [...models].sort((left, right) => rankOf(left) - rankOf(right) || compareNames(left.name, right.name));
 }
 
 /**
  * The models of vision entry `providerId` (`ollama` or `openai`) as a select: models without vision cannot be chosen, and
  * `value` stays shown and selected even when it is not (or not yet) in the list. It preselects nothing itself.
+ *
+ * @param props the entry, the purpose and the selected model with its setter
  */
 export function ModelSelect({ providerId, purpose, value, onChange, disabled = false }: Props) {
   const { models } = useProviders();
@@ -99,7 +133,7 @@ export function ModelSelect({ providerId, purpose, value, onChange, disabled = f
     <ModelListSelect
       label={MODEL_PURPOSE_LABELS[purpose]}
       providerId={providerId}
-      options={list.map((m) => ({ name: m.name, disabled: m.vision === false }))}
+      options={list.map((model) => ({ name: model.name, disabled: model.vision === false }))}
       loading={providerId !== null && answer === undefined}
       message={answer !== undefined && !answer.ok ? JOB_ERROR_MESSAGES[answer.code] : null}
       value={value}
@@ -109,6 +143,7 @@ export function ModelSelect({ providerId, purpose, value, onChange, disabled = f
   );
 }
 
+/** The props of `EditModelSelect`. */
 interface EditModelSelectProps {
   /** The `venice` entry whose edit models are listed; null lists nothing. */
   providerId: string | null;
@@ -120,6 +155,8 @@ interface EditModelSelectProps {
 /**
  * The edit models of `venice` entry `providerId` as a select, each with its price as tooltip when
  * known; `value` stays shown and selected even when it is not (or not yet) in the list.
+ *
+ * @param props the entry and the selected model with its setter
  */
 export function EditModelSelect({ providerId, value, onChange, disabled = false }: EditModelSelectProps) {
   const { imageModels } = useProviders();
@@ -129,7 +166,7 @@ export function EditModelSelect({ providerId, value, onChange, disabled = false 
     <ModelListSelect
       label={EDIT_MODEL_LABEL}
       providerId={providerId}
-      options={list.map((m) => ({ name: m.name, title: m.price ?? undefined }))}
+      options={list.map((model) => ({ name: model.name, title: model.price ?? undefined }))}
       loading={providerId !== null && (answer === undefined || answer === 'checking')}
       // The settings show a failed list through the entry's state.
       message={null}

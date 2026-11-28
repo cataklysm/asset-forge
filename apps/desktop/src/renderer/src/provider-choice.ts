@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { purposeOf, type ProviderPurpose } from '@assetforge/contracts';
 import { defaultEditModelOf, defaultModelOf, defaultProviderId, useProviders, type ProvidersState } from './provider-context';
 
+/** The provider and model one dialog uses, with their setters. */
 export interface ProviderChoice {
   /** The selected entry: the one chosen while it is listed with the dialog's purpose, otherwise `defaultProviderId`. */
   providerId: string | null;
@@ -13,6 +14,7 @@ export interface ProviderChoice {
   setModel(model: string | null): void;
 }
 
+/** What the user chose in the current opening. */
 interface Chosen {
   providerId: string | null;
   /** Undefined while no model was chosen for `providerId`. */
@@ -23,6 +25,11 @@ interface Chosen {
  * The provider and model of one dialog over the entries of `purpose`. `opening` names the current
  * opening (null while closed): a new opening starts from the defaults and asks every entry for its
  * state once the list is there. A chosen entry that leaves the list falls back to `defaultProviderId`.
+ *
+ * @param purpose the purpose of the entries offered
+ * @param defaultModel the model an entry starts with
+ * @param opening the current opening; null while closed
+ * @returns the choice
  */
 function useChoice(
   purpose: ProviderPurpose,
@@ -41,7 +48,7 @@ function useChoice(
   const listed =
     chosen !== null &&
     chosen.providerId !== null &&
-    (list?.providers.some((p) => p.id === chosen.providerId && purposeOf(p.kind) === purpose) ?? false);
+    (list?.providers.some((entry) => entry.id === chosen.providerId && purposeOf(entry.kind) === purpose) ?? false);
   const providerId = listed ? chosen.providerId : defaultProviderId(providers, purpose);
   const model =
     chosen !== null && chosen.providerId === providerId && chosen.model !== undefined
@@ -69,12 +76,23 @@ function useChoice(
   };
 }
 
-/** The vision entry (Ollama or OpenAI-compatible) and model of one analysis dialog; the model defaults to the entry's one for `purpose`. */
+/**
+ * The vision entry (Ollama or OpenAI-compatible) and model of one analysis dialog.
+ *
+ * @param purpose which default model of the entry applies
+ * @param opening the current opening; null while closed
+ * @returns the choice
+ */
 export function useProviderChoice(purpose: 'tagging' | 'prompt', opening: string | null): ProviderChoice {
   return useChoice('vision', (state, id) => defaultModelOf(state, id, purpose), opening);
 }
 
-/** The image entry (Venice) and edit model of the studio; the model defaults to `defaultEditModelOf`. */
+/**
+ * The image entry (Venice) and edit model of the studio; the model defaults to `defaultEditModelOf`.
+ *
+ * @param opening the current opening; null while closed
+ * @returns the choice
+ */
 export function useImageProviderChoice(opening: string | null): ProviderChoice {
   return useChoice('image', defaultEditModelOf, opening);
 }

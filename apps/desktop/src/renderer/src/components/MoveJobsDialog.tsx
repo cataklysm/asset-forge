@@ -23,50 +23,154 @@ import { Dialog } from './Dialog';
 import { ModelSelect } from './ModelSelect';
 import { ProviderSelect } from './ProviderSelect';
 
+/** The props of `MoveJobsDialog`. */
 interface Props {
   /** The lane whose waiting jobs move: undefined offers a select over the lanes; null is the jobs without a provider. */
   source: string | null | undefined;
   onClose(): void;
 }
 
-/** The name of lane `id`: the entry's current name when it is listed, else the stored one, else a fixed label. */
+/** The target entry and model of a move. */
+interface MoveChoice {
+  target: string | null;
+  model: string | null;
+}
+
+/**
+ * The name of lane `id`: the entry's current name when it is listed, else the stored one, else a fixed label.
+ *
+ * @param list the provider list; null while not loaded
+ * @param id the lane; null is the jobs without a provider
+ * @param stored the provider name stored with the jobs
+ * @returns the name
+ */
 export function laneName(list: ProviderList | null, id: string | null, stored: string | null): string {
-  const entry = id === null ? undefined : list?.providers.find((p) => p.id === id);
+  const entry = id === null ? undefined : list?.providers.find((provider) => provider.id === id);
   return entry?.name ?? laneLabel(id, stored);
 }
 
-/** The value of a lane in the From select; the lane without a provider is the empty string. */
+/**
+ * The value of a lane in the From select.
+ *
+ * @param id the lane; null is the jobs without a provider
+ * @returns the value; the lane without a provider is the empty string
+ */
 const laneValue = (id: string | null) => id ?? '';
 
-/** Whether `id` names a listed vision entry (Ollama or OpenAI-compatible): only those take analysis jobs. */
+/**
+ * Whether `id` names a listed vision entry (Ollama or OpenAI-compatible): only those take analysis jobs.
+ *
+ * @param list the provider list; null while not loaded
+ * @param id the entry
+ * @returns true for a listed vision entry
+ */
 const isTarget = (list: ProviderList | null, id: string | null) =>
-  id !== null && list?.providers.some((p) => p.id === id && isVisionKind(p.kind)) === true;
+  id !== null && list?.providers.some((provider) => provider.id === id && isVisionKind(provider.kind)) === true;
 
-/** Whether `id` names a listed image entry: its generation jobs never move, so it is no source either. */
+/**
+ * Whether `id` names a listed image entry: its generation jobs never move, so it is no source either.
+ *
+ * @param list the provider list; null while not loaded
+ * @param id the lane
+ * @returns true for a listed image entry
+ */
 const isImageLane = (list: ProviderList | null, id: string | null) =>
-  id !== null && list?.providers.some((p) => p.id === id && purposeOf(p.kind) === 'image') === true;
+  id !== null && list?.providers.some((provider) => provider.id === id && purposeOf(provider.kind) === 'image') === true;
 
-/** The target a move preselects: the default vision entry unless it is the source, else the first other one. */
+/**
+ * The target a move preselects: the default vision entry unless it is the source, else the first other one.
+ *
+ * @param state the provider list
+ * @param source the lane the jobs move from
+ * @returns the target, null when there is none
+ */
 function pickTarget(state: Pick<ProvidersState, 'list'>, source: string | null | undefined): string | null {
   const preferred = defaultProviderId(state, 'vision');
   if (preferred !== null && preferred !== source) return preferred;
-  return state.list?.providers.find((p) => isVisionKind(p.kind) && p.id !== source)?.id ?? null;
+  return state.list?.providers.find((provider) => isVisionKind(provider.kind) && provider.id !== source)?.id ?? null;
+}
+
+/**
+ * The lane the jobs move from: the fixed source, else the chosen lane while it has waiting jobs, else the first.
+ *
+ * @param source the source given to the dialog; undefined offers a choice
+ * @param chosenSource the lane chosen in the From select; undefined until one is chosen
+ * @param lanes the lanes with waiting jobs; null while counting
+ * @returns the lane, undefined when there is none yet
+ */
+function fromLane(
+  source: string | null | undefined,
+  chosenSource: string | null | undefined,
+  lanes: readonly WaitingByProvider[] | null,
+): string | null | undefined {
+  if (source !== undefined) return source;
+  if (chosenSource !== undefined && lanes?.some((lane) => lane.providerId === chosenSource)) return chosenSource;
+  return lanes?.[0]?.providerId;
+}
+
+/**
+ * The target and model in force: the user's choice while its target is a listed vision entry other than the
+ * source, otherwise the preselection with the target's default tagging model.
+ *
+ * @param providers the provider state
+ * @param choice the user's choice; null while the preselection applies
+ * @param from the lane the jobs move from
+ * @returns the target and model
+ */
+function effectiveChoice(providers: ProvidersState, choice: MoveChoice | null, from: string | null | undefined): MoveChoice {
+  if (choice !== null && choice.target !== from && isTarget(providers.list, choice.target)) return choice;
+  const target = pickTarget(providers, from);
+  return { target, model: defaultModelOf(providers, target, 'tagging') };
+}
+
+/**
+ * Why the move cannot start, as the tooltip of the disabled Move button.
+ *
+ * @param providers the provider state
+ * @param choice the target and model in force
+ * @param waiting the count of waiting jobs; null while counting
+ * @param lanesError why the counts could not be read; null when they could
+ * @param from the lane the jobs move from
+ * @returns the reason, null when it can start
+ */
+function blockedReason(
+  providers: ProvidersState,
+  { target, model }: MoveChoice,
+  waiting: number | null,
+  lanesError: string | null,
+  from: string | null | undefined,
+): string | null {
+  if (target === null) return JOB_ERROR_MESSAGES.provider_not_configured;
+  const status = providerStatus(providers, target);
+  if (status !== 'ready') return PROVIDER_STATE_LABELS[status];
+  if (model === null) return CHOOSE_MODEL;
+  const answer = providers.models[target];
+  if (answer !== undefined && answer.ok) {
+    const entry = answer.models.find((listed) => listed.name === model);
+    if (entry === undefined) return MODEL_NOT_LISTED;
+    if (entry.vision === false) return MODEL_NOT_VISION;
+  }
+  if (waiting === null) return lanesError === null ? COUNTING_WAITING_JOBS : null;
+  if (waiting === 0 || from === undefined) return NO_WAITING_JOBS;
+  return null;
 }
 
 /**
  * Moves every waiting analysis job of one provider onto another provider and model (`jobs:reroute`).
  * Mounted while open; after a move it polls the job summary and closes, a refusal stays in the dialog.
+ *
+ * @param props the source lane and the close handler
  */
 export function MoveJobsDialog({ source, onClose }: Props) {
   const providers = useProviders();
   const { refresh } = useJobs();
   const [allLanes, setLanes] = useState<WaitingByProvider[] | null>(null);
-  const lanes = allLanes === null ? null : allLanes.filter((l) => !isImageLane(providers.list, l.providerId));
+  const lanes = allLanes === null ? null : allLanes.filter((lane) => !isImageLane(providers.list, lane.providerId));
   const [lanesError, setLanesError] = useState<string | null>(null);
   // The From choice when no source is given; undefined until one is chosen.
   const [chosenSource, setChosenSource] = useState<string | null | undefined>(undefined);
   // The user's target and model; null while the preselection applies.
-  const [choice, setChoice] = useState<{ target: string | null; model: string | null } | null>(null);
+  const [choice, setChoice] = useState<MoveChoice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const movingRef = useRef(false);
@@ -80,8 +184,8 @@ export function MoveJobsDialog({ source, onClose }: Props) {
       (answer) => {
         if (!disposed.current) setLanes(answer);
       },
-      (e) => {
-        if (!disposed.current) setLanesError(describeError(e));
+      (failure) => {
+        if (!disposed.current) setLanesError(describeError(failure));
       },
     );
     return () => {
@@ -92,43 +196,18 @@ export function MoveJobsDialog({ source, onClose }: Props) {
   }, []);
 
   const fixed = source !== undefined;
-  const from: string | null | undefined = fixed
-    ? source
-    : chosenSource !== undefined && lanes?.some((l) => l.providerId === chosenSource)
-      ? chosenSource
-      : lanes?.[0]?.providerId;
-  const lane = from === undefined ? undefined : lanes?.find((l) => l.providerId === from);
+  const from = fromLane(source, chosenSource, lanes);
+  const lane = from === undefined ? undefined : lanes?.find((listed) => listed.providerId === from);
   const waiting = lanes === null ? null : (lane?.waiting ?? 0);
   const fromName = from === undefined ? null : laneName(providers.list, from, lane?.providerName ?? null);
 
-  const listed = (id: string | null) => id !== from && isTarget(providers.list, id);
-  const effective =
-    choice !== null && listed(choice.target)
-      ? choice
-      : (() => {
-          const target = pickTarget(providers, from);
-          return { target, model: defaultModelOf(providers, target, 'tagging') };
-        })();
+  const effective = effectiveChoice(providers, choice, from);
   const { target, model } = effective;
 
-  function blockedReason(): string | null {
-    if (target === null) return JOB_ERROR_MESSAGES.provider_not_configured;
-    const status = providerStatus(providers, target);
-    if (status !== 'ready') return PROVIDER_STATE_LABELS[status];
-    if (model === null) return CHOOSE_MODEL;
-    const answer = providers.models[target];
-    if (answer !== undefined && answer.ok) {
-      const entry = answer.models.find((m) => m.name === model);
-      if (entry === undefined) return MODEL_NOT_LISTED;
-      if (entry.vision === false) return MODEL_NOT_VISION;
-    }
-    if (waiting === null) return lanesError === null ? COUNTING_WAITING_JOBS : null;
-    if (waiting === 0 || from === undefined) return NO_WAITING_JOBS;
-    return null;
-  }
-  const blocked = blockedReason();
+  const blocked = blockedReason(providers, effective, waiting, lanesError, from);
   const canMove = blocked === null && !moving && waiting !== null && from !== undefined;
 
+  /** Sends the move; closes after it, a refusal stays in the dialog. */
   async function move() {
     if (movingRef.current || !canMove || target === null || model === null || from === undefined) return;
     movingRef.current = true;
@@ -138,8 +217,8 @@ export function MoveJobsDialog({ source, onClose }: Props) {
       await call('jobs:reroute', { fromProviderId: from, toProviderId: target, model });
       refresh();
       if (!disposed.current) onClose();
-    } catch (e) {
-      if (!disposed.current) setError(describeError(e));
+    } catch (failure) {
+      if (!disposed.current) setError(describeError(failure));
     } finally {
       movingRef.current = false;
       if (!disposed.current) setMoving(false);
@@ -167,14 +246,14 @@ export function MoveJobsDialog({ source, onClose }: Props) {
               value={from === undefined ? '' : laneValue(from)}
               disabled={moving || lanes === null || lanes.length === 0}
               aria-busy={lanes === null || undefined}
-              onChange={(e) => {
-                const next = lanes?.find((l) => laneValue(l.providerId) === e.target.value);
+              onChange={(event) => {
+                const next = lanes?.find((listed) => laneValue(listed.providerId) === event.target.value);
                 if (next !== undefined) setChosenSource(next.providerId);
               }}
             >
-              {(lanes ?? []).map((l) => (
-                <option key={laneValue(l.providerId)} value={laneValue(l.providerId)}>
-                  {laneName(providers.list, l.providerId, l.providerName)}
+              {(lanes ?? []).map((listed) => (
+                <option key={laneValue(listed.providerId)} value={laneValue(listed.providerId)}>
+                  {laneName(providers.list, listed.providerId, listed.providerName)}
                 </option>
               ))}
             </select>

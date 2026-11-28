@@ -24,6 +24,7 @@ import { useStudio } from '../studio-context';
 import { ALERT, ICON_BUTTON_INLINE, LABEL, MUTED, PANEL_TITLE } from '../ui';
 import { Link } from './Link';
 
+/** The answer of `generations:forFile` for one file. */
 interface Lineage {
   fileId: string;
   madeBy: Generation | null;
@@ -31,9 +32,43 @@ interface Lineage {
 }
 
 /**
+ * The output files of `results`, one entry per output file, newest generation first as answered; an output
+ * listed twice shows once.
+ *
+ * @param results the generations made from the file
+ * @returns the distinct output files
+ */
+function distinctOutputs(results: readonly Generation[]): GenerationFile[] {
+  const seen = new Set<string>();
+  return results.flatMap((generation) => generation.outputs).filter((output) => {
+    const key = output.fileId ?? `name:${output.name}:${output.sha256}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Writes `text` to the clipboard.
+ *
+ * @param text the text
+ * @returns resolves to true when it was written
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The generation that made the file (its sources, provider, model, parameters and prompt) and the
  * files generated from it. A source or result is a link that opens it; once purged only its name
  * stays, with the deleted mark. Reloads whenever jobs change, so a new result shows up.
+ *
+ * @param props.fileId the file shown in the detail dialog
  */
 export function GenerationDetails({ fileId }: { fileId: string }) {
   const { changeToken } = useJobs();
@@ -54,14 +89,7 @@ export function GenerationDetails({ fileId }: { fileId: string }) {
 
   if (lineage === null || lineage.fileId !== fileId) return null;
   const { madeBy } = lineage;
-  // One entry per output file, newest generation first as answered; an output listed twice shows once.
-  const seen = new Set<string>();
-  const outputs = lineage.results.flatMap((g) => g.outputs).filter((output) => {
-    const key = output.fileId ?? `name:${output.name}:${output.sha256}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const outputs = distinctOutputs(lineage.results);
 
   return (
     <>
@@ -76,18 +104,14 @@ export function GenerationDetails({ fileId }: { fileId: string }) {
   );
 }
 
+/**
+ * The `Generated from` block: the sources, provider, model, parameters, the library prompt and the prompt text.
+ *
+ * @param props.generation the generation that made the file
+ */
 function MadeBy({ generation }: { generation: Generation }) {
   const [copyFailed, setCopyFailed] = useState(false);
   const { prompt } = generation;
-  const studio = useStudio();
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyFailed(false);
-    } catch {
-      setCopyFailed(true);
-    }
-  }
   return (
     <section aria-label={GENERATED_FROM_LABEL} className="space-y-2">
       <h3 className={PANEL_TITLE}>{GENERATED_FROM_LABEL}</h3>
@@ -103,22 +127,7 @@ function MadeBy({ generation }: { generation: Generation }) {
         )}
         <dt className={LABEL}>{PARAMETERS_LABEL}</dt>
         <dd>{generationParametersText(generation.parameters)}</dd>
-        {generation.promptTitle !== null && generation.promptVersionNumber !== null && (
-          <>
-            <dt className={LABEL}>{ATTACHED_PROMPT_LABEL}</dt>
-            <dd className="break-words">
-              {generation.promptId === null ? (
-                <span title={promptValuesTitle(generation.promptVariables)}>
-                  {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
-                </span>
-              ) : (
-                <Link title={promptValuesTitle(generation.promptVariables)} onFollow={() => studio.openPrompt(generation.promptId!)}>
-                  {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
-                </Link>
-              )}
-            </dd>
-          </>
-        )}
+        <AttachedPrompt generation={generation} />
       </dl>
       {prompt !== null && (
         <div className="space-y-1">
@@ -129,7 +138,7 @@ function MadeBy({ generation }: { generation: Generation }) {
               aria-label={COPY_PROMPT_TITLE}
               title={COPY_PROMPT_TITLE}
               className={ICON_BUTTON_INLINE}
-              onClick={() => void copy(prompt)}
+              onClick={() => void copyToClipboard(prompt).then((copied) => setCopyFailed(!copied))}
             >
               <Copy size={14} aria-hidden />
             </button>
@@ -146,6 +155,38 @@ function MadeBy({ generation }: { generation: Generation }) {
   );
 }
 
+/**
+ * The library prompt row of `MadeBy`: `<title> v<n>`, a link to the Prompts screen while the prompt exists, with
+ * the values in the tooltip. Nothing for a generation without a library prompt.
+ *
+ * @param props.generation the generation that made the file
+ */
+function AttachedPrompt({ generation }: { generation: Generation }) {
+  const studio = useStudio();
+  if (generation.promptTitle === null || generation.promptVersionNumber === null) return null;
+  return (
+    <>
+      <dt className={LABEL}>{ATTACHED_PROMPT_LABEL}</dt>
+      <dd className="break-words">
+        {generation.promptId === null ? (
+          <span title={promptValuesTitle(generation.promptVariables)}>
+            {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
+          </span>
+        ) : (
+          <Link title={promptValuesTitle(generation.promptVariables)} onFollow={() => studio.openPrompt(generation.promptId!)}>
+            {attachedPromptLabel(generation.promptTitle, generation.promptVersionNumber)}
+          </Link>
+        )}
+      </dd>
+    </>
+  );
+}
+
+/**
+ * The files of a generation as links that open them; a purged one shows its name with the deleted mark.
+ *
+ * @param props.files the inputs or outputs
+ */
 function FileLinks({ files }: { files: readonly GenerationFile[] }) {
   const studio = useStudio();
   const [failed, setFailed] = useState(false);
