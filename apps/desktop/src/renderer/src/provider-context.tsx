@@ -136,6 +136,8 @@ function purposeOfEntry(list: ProviderList | null | undefined, id: string): Prov
 
 /**
  * Asks for the models of one entry by its purpose; only the newest request for the entry sets its answer.
+ * A re-check (`refresh`) keeps the last answer until the new one comes, so a ready entry stays usable
+ * meanwhile; any other request first drops it, since it follows a change of the entry.
  *
  * @param loading the refs and setters
  * @param id the entry
@@ -148,7 +150,9 @@ async function loadEntryModels(loading: ModelLoading, id: string, refresh: boole
   const input = refresh ? { providerId: id, refresh: true } : { providerId: id };
   const isNewest = () => !loading.disposed.current && loading.requests.get(id) === request;
   if (purposeOfEntry(loading.list.current, id) === 'image') {
-    loading.setImageModels((answers) => (answers[id] === 'checking' ? answers : { ...answers, [id]: 'checking' }));
+    loading.setImageModels((answers) =>
+      answers[id] === 'checking' || (refresh && answers[id] !== undefined) ? answers : { ...answers, [id]: 'checking' },
+    );
     let result: ListImageModelsResult;
     try {
       result = await call('providers:listImageModels', input);
@@ -158,7 +162,7 @@ async function loadEntryModels(loading: ModelLoading, id: string, refresh: boole
     if (isNewest()) loading.setImageModels((answers) => ({ ...answers, [id]: result }));
     return;
   }
-  loading.setModels((answers) => (answers[id] === undefined ? answers : { ...answers, [id]: undefined }));
+  if (!refresh) loading.setModels((answers) => (answers[id] === undefined ? answers : { ...answers, [id]: undefined }));
   let result: ListModelsResult;
   try {
     result = await call('providers:listModels', input);

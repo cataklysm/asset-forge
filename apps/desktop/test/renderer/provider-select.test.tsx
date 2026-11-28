@@ -200,6 +200,29 @@ it('opening the select asks every entry once with refresh', async () => {
   );
 });
 
+it('a re-check keeps the last answer until the new one comes', async () => {
+  const user = userEvent.setup();
+  const slow = deferred<ListModelsResult>();
+  let calls = 0;
+  const fake = fakeProviders(
+    { providers: [LOCAL] },
+    {
+      [LOCAL.id]: () => {
+        calls += 1;
+        return calls === 1 ? READY : slow.promise;
+      },
+    },
+  );
+  installFakeApi(fake.handlers);
+  renderHarness();
+  await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Local — ready']));
+  await user.click(providerSelect());
+  expect(calls).toBe(2);
+  expect(optionTexts(providerSelect())).toEqual(['Local — ready']);
+  await act(async () => slow.resolve(UNREACHABLE));
+  expect(optionTexts(providerSelect())).toEqual(['Local — not reachable']);
+});
+
 it('choosing another entry switches the model list', async () => {
   const user = userEvent.setup();
   const fake = fakeProviders(
@@ -580,7 +603,8 @@ it('a late image list answer for a deselected entry is ignored', async () => {
     </ProviderSettingsProvider>,
   );
   await waitFor(() => expect(askedVenice).toBe(2));
-  await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Venice — checking', 'Venice 2 — ready']));
+  // The re-check of the opening keeps the last answer while it runs.
+  await waitFor(() => expect(optionTexts(providerSelect())).toEqual(['Venice — ready', 'Venice 2 — ready']));
   expect(screen.getByText(`choice:${VENICE.id}:edit-b`)).toBeTruthy();
   await user.selectOptions(providerSelect(), VENICE_2.id);
   expect(screen.getByText(`choice:${VENICE_2.id}:edit-c`)).toBeTruthy();
