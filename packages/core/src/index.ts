@@ -6,6 +6,7 @@ export * from './analysis-proposals.js';
 export * from './asset-cover.js';
 export * from './asset-sources.js';
 export * from './asset-files.js';
+export type { FileBatchItem } from './file-batch.js';
 export * from './file-list.js';
 export * from './file-move-recovery.js';
 export * from './asset-types.js';

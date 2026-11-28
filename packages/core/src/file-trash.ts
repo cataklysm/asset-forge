@@ -1,13 +1,12 @@
 import { IMAGE_GENERATE_JOB, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { resolvePendingFileMove } from './file-move-recovery.js';
-import { AssetForgeError, InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
+import { InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
+import { eachFile, type FileBatchItem } from './file-batch.js';
 import { settleGenerationOfJob } from './generations.js';
+import { moveAndCommit } from './journaled-move.js';
 import { cancelJob, type JobControl } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
 import type { WorkspaceSession } from './session.js';
-
-/** The outcome of one file of a batch: the file afterwards (null once it is gone) or the error. */
-export type FileBatchItem = { fileId: string; file: FileRecord | null; error: Error | null };
 
 /** Where a restored file goes: its relative path, and its asset and role (both null in the inbox). */
 interface RestorePlacement {
@@ -20,34 +19,7 @@ interface RestorePlacement {
 const EMPTY_CHUNK = 200;
 /** The refusal of a purge while a generation of the file runs. */
 export const RUNNING_GENERATION_MESSAGE = 'This file still has a running generation';
-const MOVE_FAILED = 'The file could not be moved; it may be in use, missing, or the target already exists';
 const NOT_IN_TRASH = 'The file is not in the trash';
-
-/**
- * Runs `operation` for each id in request order; a failure is reported for its file and never stops the next.
- *
- * @param fileIds the files, in request order
- * @param operation the work for one file; resolves to the file afterwards, null once it is gone
- * @returns one item per file, in request order
- */
-async function eachFile(
-  fileIds: readonly string[],
-  operation: (fileId: string) => Promise<FileRecord | null>,
-): Promise<FileBatchItem[]> {
-  const items: FileBatchItem[] = [];
-  for (const fileId of fileIds) {
-    try {
-      items.push({ fileId, file: await operation(fileId), error: null });
-    } catch (error) {
-      items.push({
-        fileId,
-        file: null,
-        error: error instanceof Error ? error : new Error('Unexpected error', { cause: error }),
-      });
-    }
-  }
-  return items;
-}
 
 /**
  * The file row.
@@ -164,31 +136,6 @@ async function refuseRunningGeneration(session: WorkspaceSession, fileId: string
   if (jobs.some((job) => job.type === IMAGE_GENERATE_JOB && job.status === 'running')) {
     throw new InvalidOperationError(RUNNING_GENERATION_MESSAGE);
   }
-}
-
-/**
- * Journaled move of a file to `target` (the move row is already begun): moves the binary, aborts the row on
- * failure, then commits. A failed commit leaves the row for `recoverFileMoves` on the next open.
- *
- * @param session the open workspace
- * @param file the file to move
- * @param target the relative path it moves to
- * @returns the file as committed
- * @throws the move's AssetForgeError, else InvalidOperationError when the binary could not be moved
- */
-async function moveAndCommit(session: WorkspaceSession, file: FileRecord, target: string): Promise<FileRecord> {
-  try {
-    await session.storage.move(file.relativePath, target);
-  } catch (error) {
-    try {
-      await session.database.fileMoves.abort(file.id);
-    } catch {
-      // The source is still in place, so recovery discards the row on the next open.
-    }
-    if (error instanceof AssetForgeError) throw error;
-    throw new InvalidOperationError(MOVE_FAILED, { cause: error });
-  }
-  return session.database.fileMoves.commit(file.id);
 }
 
 /**
