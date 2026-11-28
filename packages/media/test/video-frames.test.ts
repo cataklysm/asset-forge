@@ -8,9 +8,9 @@ import { join } from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import sharp from 'sharp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { frameMatches, jpegDimensions } from '../src/jpeg-dimensions.js';
+import { jpegDimensions } from '../src/jpeg-dimensions.js';
 import { durationFromLine, readDiagnostics } from '../src/video-diagnostics.js';
-import { frameArguments, FRAME_EDGE } from '../src/video-frame-arguments.js';
+import { frameArguments, frameMatches, FRAME_EDGE } from '../src/video-frame-arguments.js';
 import {
   createVideoFrames,
   KILL_GRACE_MS,

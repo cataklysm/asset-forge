@@ -1,22 +1,21 @@
-import { FRAME_EDGE } from './video-frame-arguments.js';
-import type { Size } from './video-diagnostics.js';
+import type { ImageSize } from './messages.js';
 
-/** True when `frame` is the size the scale filter gives for a video of displayed size `video`. */
-export function frameMatches(video: Size, frame: Size): boolean {
-  const factor = Math.min(1, FRAME_EDGE / Math.max(video.width, video.height));
-  return (
-    Math.abs(Math.max(1, Math.round(video.width * factor)) - frame.width) <= 1 &&
-    Math.abs(Math.max(1, Math.round(video.height * factor)) - frame.height) <= 1
-  );
-}
+/** The `bytes[index]` value as a number; the caller has checked that the index is in range. */
+type ByteAt = (index: number) => number;
 
-/** Width and height from the first start-of-frame marker of a JPEG; null for anything else. */
-export function jpegDimensions(bytes: Uint8Array): Size | null {
+/**
+ * Width and height from the first start-of-frame marker of a JPEG.
+ *
+ * @param bytes the file's content
+ * @returns the size the marker states; null for anything that is not such a JPEG
+ */
+export function jpegDimensions(bytes: Uint8Array): ImageSize | null {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const byteAt: ByteAt = (index) => bytes[index] as number;
   let offset = 2;
   while (offset + 4 <= bytes.length) {
     if (bytes[offset] !== 0xff) return null;
-    const marker = bytes[offset + 1] as number;
+    const marker = byteAt(offset + 1);
     if (marker === 0xff) {
       offset++;
       continue;
@@ -26,16 +25,35 @@ export function jpegDimensions(bytes: Uint8Array): Size | null {
       continue;
     }
     if (marker === 0xd9 || marker === 0xda) return null;
-    const length = ((bytes[offset + 2] as number) << 8) | (bytes[offset + 3] as number);
+    const length = (byteAt(offset + 2) << 8) | byteAt(offset + 3);
     if (length < 2) return null;
-    const isFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    if (isFrame) {
-      if (offset + 9 > bytes.length) return null;
-      const height = ((bytes[offset + 5] as number) << 8) | (bytes[offset + 6] as number);
-      const width = ((bytes[offset + 7] as number) << 8) | (bytes[offset + 8] as number);
-      return width > 0 && height > 0 ? { width, height } : null;
-    }
+    if (isStartOfFrame(marker)) return frameSize(bytes, offset, byteAt);
     offset += 2 + length;
   }
   return null;
+}
+
+/**
+ * Whether a marker starts a frame: SOF0 to SOF15 without DHT, JPG and DAC.
+ *
+ * @param marker the byte after 0xFF
+ * @returns true for a start-of-frame marker
+ */
+function isStartOfFrame(marker: number): boolean {
+  return marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+}
+
+/**
+ * The size a start-of-frame segment states.
+ *
+ * @param bytes the file's content
+ * @param offset where the segment's marker starts
+ * @param byteAt reads one byte of `bytes`
+ * @returns the size; null when the segment is cut off or states a zero edge
+ */
+function frameSize(bytes: Uint8Array, offset: number, byteAt: ByteAt): ImageSize | null {
+  if (offset + 9 > bytes.length) return null;
+  const height = (byteAt(offset + 5) << 8) | byteAt(offset + 6);
+  const width = (byteAt(offset + 7) << 8) | byteAt(offset + 8);
+  return width > 0 && height > 0 ? { width, height } : null;
 }
