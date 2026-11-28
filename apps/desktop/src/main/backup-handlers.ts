@@ -117,7 +117,10 @@ async function listBackups(
   const extraDirectory = request.pickFolder === true ? await dialogs.pickDirectory() : null;
   const workspace = 'id' in request ? { id: request.id } : { rootPath: request.rootPath };
   const listing = await manager.listBackups({ workspace, extraDirectory });
-  return { backups: state.ids.issue('restore', listing.workspaceId, listing.backups), unreachable: listing.unreachable };
+  return {
+    backups: state.ids.issue('restore', listing.workspaceId, listing.backups),
+    unreachable: listing.unreachable,
+  };
 }
 
 /**

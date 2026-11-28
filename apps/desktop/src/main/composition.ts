@@ -136,7 +136,11 @@ function backupCheckerOf(options: CompositionOptions): BackupChecker {
  * @param check the backup check
  * @returns the backup port
  */
-function workspaceBackups(userDataPath: string, registry: JsonWorkspaceRegistry, check: BackupChecker): WorkspaceBackups {
+function workspaceBackups(
+  userDataPath: string,
+  registry: JsonWorkspaceRegistry,
+  check: BackupChecker,
+): WorkspaceBackups {
   const target = createBackupTarget({ registry });
   const database = createDatabaseBackups({
     databaseFilePathOf: (workspaceId) => databaseFilePath(userDataPath, workspaceId),

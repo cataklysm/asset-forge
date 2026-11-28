@@ -72,10 +72,18 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
    * @returns the chosen folder; null when none is chosen, the value is not a non-empty string or the id is unknown
    */
   async backupDirectory(id: string): Promise<string | null> {
-    return this.serially(async () => {
-      const value = (await this.read()).entryKeys.get(id)?.[BACKUP_DIRECTORY_KEY];
-      return typeof value === 'string' && value !== '' ? value : null;
-    });
+    return this.serially(() => this.backupDirectoryNow(id));
+  }
+
+  /**
+   * The body of `backupDirectory`, run inside the queue.
+   *
+   * @param id the workspace
+   * @returns the chosen folder, or null
+   */
+  private async backupDirectoryNow(id: string): Promise<string | null> {
+    const value = (await this.read()).entryKeys.get(id)?.[BACKUP_DIRECTORY_KEY];
+    return typeof value === 'string' && value !== '' ? value : null;
   }
 
   /**

@@ -115,13 +115,16 @@ describe('phase 1 acceptance', () => {
     }
   });
 
-  it('initialises a fresh database when the userData workspace directory is gone', async () => {
+  it('initialises a fresh database when the userData workspace directory is gone and the user chose to start empty', async () => {
     const ws = await createAndImport();
     await rm(join(userDataPath, 'workspaces', ws.id), { recursive: true, force: true });
 
     const manager = createWorkspaceManager({ userDataPath, migrationsFolder: MIGRATIONS_FOLDER });
     try {
-      const reopened = await manager.open({ rootPath: workspaceRoot });
+      await expect(manager.open({ rootPath: workspaceRoot })).rejects.toMatchObject({
+        code: 'workspace_database_missing',
+      });
+      const reopened = await manager.open({ rootPath: workspaceRoot, startEmpty: true });
       expect(reopened.id).toBe(ws.id);
       expect((await manager.listFiles({ limit: 50, offset: 0, scope: { kind: 'all' } })).total).toBe(0);
     } finally {

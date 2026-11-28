@@ -44,7 +44,10 @@ function validate(candidate: string): Promise<void> {
 
 describe('validateChosenDirectory', () => {
   it('refuses own root, a subfolder of another root, userData and a path written with .. into a root', async () => {
-    await expect(validate(own)).rejects.toMatchObject({ code: 'validation_failed', message: LOCATION_IN_WORKSPACE_MESSAGE });
+    await expect(validate(own)).rejects.toMatchObject({
+      code: 'validation_failed',
+      message: LOCATION_IN_WORKSPACE_MESSAGE,
+    });
     await expect(validate(join(other, 'sub'))).rejects.toMatchObject({ message: LOCATION_IN_WORKSPACE_MESSAGE });
     await expect(validate(join(base, 'sibling', '..', 'own'))).rejects.toMatchObject({
       message: LOCATION_IN_WORKSPACE_MESSAGE,

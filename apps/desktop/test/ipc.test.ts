@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
+import { JsonWorkspaceRegistry } from '../src/main/json-registry.js';
 import type { Dialogs, RemoveChoice } from '../src/main/host-actions.js';
 import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
@@ -15,6 +16,9 @@ import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 let base: string;
 let manager: WorkspaceManager;
 let handlers: IpcHandlers;
+let registry: JsonWorkspaceRegistry;
+let removeAnyway = false;
+const withoutBackup: string[] = [];
 
 let choice: RemoveChoice = 'cancel';
 
@@ -22,15 +26,22 @@ const dialogs: Dialogs = {
   pickDirectory: async () => null,
   pickFiles: async () => [],
   confirmRemoveWorkspace: async () => choice,
-  confirmRemoveWithoutBackup: async () => false,
+  confirmRemoveWithoutBackup: async (_workspace, message) => {
+    withoutBackup.push(message);
+    return removeAnyway;
+  },
   confirmRemoveWorkflow: async () => false,
 };
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'af-ipc-'));
   choice = 'cancel';
+  removeAnyway = false;
+  withoutBackup.length = 0;
+  registry = new JsonWorkspaceRegistry(join(base, 'userData', 'settings.json'));
   manager = createWorkspaceManager({
     userDataPath: join(base, 'userData'),
+    registry,
     migrationsFolder: MIGRATIONS_FOLDER,
     backupWorkerUrl: TEST_BACKUP_WORKER_URL,
     // Stands in for the OS trash: the folder ends up next to the workspaces, not deleted.
@@ -208,18 +219,19 @@ describe('workspace:remove', () => {
     expect(again).toMatchObject({ ok: true, value: { name: 'Demo' } });
   });
 
-  describe('lifecycle notifications', () => {
-    function recordingHandlers(): string[] {
-      const calls: string[] = [];
-      const host = {
-        ...noopHost,
-        workspaceOpened: async () => void calls.push('opened'),
-        workspaceClosing: async () => void calls.push('closing'),
-      };
-      handlers = createWorkspaceHandlers(manager, dialogs, host, idleJobHost, idleServices);
-      return calls;
-    }
+  /** Replaces the handlers by ones whose host records the lifecycle notifications. */
+  function recordingHandlers(): string[] {
+    const calls: string[] = [];
+    const host = {
+      ...noopHost,
+      workspaceOpened: async () => void calls.push('opened'),
+      workspaceClosing: async () => void calls.push('closing'),
+    };
+    handlers = createWorkspaceHandlers(manager, dialogs, host, idleJobHost, idleServices);
+    return calls;
+  }
 
+  describe('lifecycle notifications', () => {
     it('leaves the open workspace alone when another one is removed', async () => {
       const calls = recordingHandlers();
       const { id } = await createWorkspace();
@@ -257,5 +269,61 @@ describe('workspace:remove', () => {
   it('rejects a request without a valid id', async () => {
     const result = await dispatch(handlers, 'workspace:remove', { id: '../x' });
     expect(result).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
+  describe('when the final backup fails', () => {
+    /** A workspace whose backup folder cannot be reached, so its final backup fails. */
+    async function unreachableBackup(): Promise<{ id: string; rootPath: string }> {
+      const created = await createWorkspace();
+      await registry.setBackupDirectory(created.id, join(base, 'gone'));
+      choice = 'forget';
+      return created;
+    }
+
+    it('removes the workspace anyway when the user agrees', async () => {
+      const calls = recordingHandlers();
+      const { id, rootPath } = await unreachableBackup();
+      calls.length = 0;
+      removeAnyway = true;
+      const result = await dispatch(handlers, 'workspace:remove', { id });
+      expect(result).toEqual({ ok: true, value: { removed: true, folderTrashed: false } });
+      expect(withoutBackup).toEqual(['The backup folder cannot be reached']);
+      expect(calls).toEqual(['closing']);
+      expect(await manager.list()).toEqual([]);
+      expect(await hasLocalData(id)).toBe(false);
+      expect(existsSync(join(rootPath, 'workspace.json'))).toBe(true);
+    });
+
+    it('keeps the workspace, closed, when the user declines', async () => {
+      const calls = recordingHandlers();
+      const { id } = await unreachableBackup();
+      calls.length = 0;
+      const result = await dispatch(handlers, 'workspace:remove', { id });
+      expect(result).toEqual({ ok: true, value: { removed: false, folderTrashed: false } });
+      expect(withoutBackup).toHaveLength(1);
+      expect(calls).toEqual(['closing']);
+      expect(manager.current()).toBeNull();
+      expect((await manager.list()).map((workspace) => workspace.id)).toEqual([id]);
+      expect(await hasLocalData(id)).toBe(true);
+    });
+  });
+});
+
+describe('workspace:open without a local database', () => {
+  it('answers workspace_database_missing, and startEmpty opens an empty database', async () => {
+    const rootPath = join(base, 'Kept');
+    const created = await dispatch(handlers, 'workspace:create', { name: 'Kept', rootPath });
+    if (!created.ok) throw new Error('create failed');
+    const id = (created.value as { id: string }).id;
+    choice = 'forget';
+    await dispatch(handlers, 'workspace:remove', { id });
+
+    const missing = await dispatch(handlers, 'workspace:open', { rootPath });
+    expect(missing).toMatchObject({
+      ok: false,
+      error: { code: 'workspace_database_missing', message: 'This workspace has no database on this machine' },
+    });
+    const empty = await dispatch(handlers, 'workspace:open', { rootPath, startEmpty: true });
+    expect(empty).toMatchObject({ ok: true, value: { id, name: 'Kept' } });
   });
 });

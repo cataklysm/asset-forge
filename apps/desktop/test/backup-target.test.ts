@@ -72,8 +72,9 @@ describe('backup target', () => {
   it('free space below size answers backup_no_space and writes nothing', async () => {
     free = 100;
     const place = await location();
-    await expect(target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal))
-      .rejects.toMatchObject({ code: 'backup_no_space' });
+    await expect(
+      target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'backup_no_space' });
     expect(await target.list(place.directory)).toEqual([]);
   });
 
@@ -81,8 +82,9 @@ describe('backup target', () => {
     chosen = join(base, 'gone');
     const place = await location();
     expect(place).toMatchObject({ kind: 'chosen', chosenPath: chosen });
-    await expect(target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal))
-      .rejects.toMatchObject({ code: 'backup_location_unreachable' });
+    await expect(
+      target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'backup_location_unreachable' });
     await expect(target.list(place.directory)).rejects.toMatchObject({ code: 'backup_location_unreachable' });
   });
 
@@ -95,9 +97,9 @@ describe('backup target', () => {
     const place = await location();
     const controller = new AbortController();
     controller.abort();
-    await expect(target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), controller.signal)).rejects.toMatchObject(
-      { code: 'backup_failed' },
-    );
+    await expect(
+      target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), controller.signal),
+    ).rejects.toMatchObject({ code: 'backup_failed' });
     expect(await readdir(place.directory)).toEqual([]);
   });
 
