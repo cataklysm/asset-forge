@@ -261,8 +261,8 @@ describe('generation studio end to end', () => {
       target: { assetId, role: 'reference' },
     });
     const started500 = await started(edit(sourceId, MOCK_PROMPT_FAIL));
+    // With no job active nothing is left that could send the request again.
     await h.until((s) => s.failed === 1 && active(s) === 0);
-    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(mock!.imageRequests).toHaveLength(1);
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({
@@ -391,8 +391,8 @@ describe('generation studio end to end', () => {
 
     await h.services.workspaceClosing();
     await h.ok('workspace:open', { rootPath: join(h.base, 'workspace') });
-    // A repeated request would have no event to wait on; this pause gives one the chance to show up.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // The open settled the interrupted job; with no job active nothing is left that could repeat the request.
+    expect(active(await h.ok('jobs:summary', {}))).toBe(0);
 
     const [job] = (await h.ok('jobs:list', page)).items;
     expect(job).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });

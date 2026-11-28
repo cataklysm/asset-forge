@@ -11,7 +11,7 @@ import {
   type IpcResponse,
   type JobSummary,
 } from '@assetforge/contracts';
-import type { WorkspaceManager } from '@assetforge/core';
+import type { VisionProvider, WorkspaceManager } from '@assetforge/core';
 import { createPauseGate, DEFAULT_LIMITS } from '@assetforge/jobs';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { OLLAMA_PROVIDER } from '@assetforge/providers';
@@ -46,6 +46,82 @@ async function mockTagsOf(
 
 const active = (s: JobSummary) => s.queued + s.running + s.waiting;
 
+/** A vision lookup whose tagging requests wait at a gate the test opens, so a job stays running until it is let on. */
+interface GatedVision {
+  /** The wrapped lookup. */
+  vision: (lane: string | null) => VisionProvider | null;
+  /** Lets this many more requests through. */
+  admit(count: number): void;
+  /** Lets every request through from now on. */
+  open(): void;
+  /** Resolves once this many requests wait at the gate. */
+  waiting(count: number): Promise<void>;
+}
+
+/**
+ * Wraps a vision lookup with a gate; a request aborted while it waits rejects with the signal's reason.
+ *
+ * @param inner the real lookup
+ * @returns the gated lookup and its controls
+ */
+function gatedVision(inner: (lane: string | null) => VisionProvider | null): GatedVision {
+  let admitted = 0;
+  let isOpen = false;
+  const waiting = new Set<() => void>();
+  const watchers = new Set<{ count: number; resolve: () => void }>();
+  const notify = () => {
+    for (const watcher of [...watchers]) {
+      if (waiting.size < watcher.count) continue;
+      watchers.delete(watcher);
+      watcher.resolve();
+    }
+  };
+  const pass = (signal: AbortSignal) =>
+    new Promise<void>((resolve, reject) => {
+      if (signal.aborted) return reject(signal.reason);
+      if (isOpen || admitted > 0) {
+        if (!isOpen) admitted -= 1;
+        return resolve();
+      }
+      const stop = () => {
+        waiting.delete(go);
+        reject(signal.reason);
+      };
+      const go = () => {
+        waiting.delete(go);
+        signal.removeEventListener('abort', stop);
+        resolve();
+      };
+      signal.addEventListener('abort', stop, { once: true });
+      waiting.add(go);
+      notify();
+    });
+  return {
+    vision: (lane) => {
+      const provider = inner(lane);
+      if (provider === null) return null;
+      return {
+        analyzeImage: async (request) => {
+          await pass(request.signal);
+          return provider.analyzeImage(request);
+        },
+        describeImage: (request) => provider.describeImage(request),
+        listModels: (signal) => provider.listModels(signal),
+      };
+    },
+    admit: (count) => (admitted += count),
+    open: () => {
+      isOpen = true;
+      for (const go of [...waiting]) go();
+    },
+    waiting: (count) =>
+      new Promise<void>((resolve) => {
+        watchers.add({ count, resolve });
+        notify();
+      }),
+  };
+}
+
 describe('phase 4a acceptance', () => {
   let base: string;
   let manager: WorkspaceManager;
@@ -71,10 +147,12 @@ describe('phase 4a acceptance', () => {
 
   it('analyses a batch through cancel, retry and a close mid-batch without touching manual tags', async () => {
     const provider = mockProviderEntry(join(base, 'userData'), mock.url);
+    // Each step waits on the gate instead of racing the mock's answer time, which a loaded machine stretches.
+    const gate = gatedVision(provider.vision);
     const jobHost = createJobHost({
       feed: createChangeFeed(),
       manager,
-      vision: provider.vision,
+      vision: gate.vision,
       images: { jpeg: (path) => readFile(path) },
       provider: () => OLLAMA_PROVIDER,
       pause: createPauseGate({}),
@@ -148,19 +226,23 @@ describe('phase 4a acceptance', () => {
         [fileIds[1]!, 'hand picked'],
       ]);
 
+      // One job is let through; the second one is then running and held at the gate.
+      gate.admit(1);
       expect(await call('analysis:enqueue', filesRequest(fileIds))).toEqual({ enqueued: 6, skipped: NONE_SKIPPED });
 
-      // Cancel all while the batch runs.
-      await until((s) => s.succeeded >= 1);
+      // Cancel all while the batch runs: the held job and the four queued ones.
+      await until((s) => s.succeeded === 1);
+      await gate.waiting(1);
       await call('jobs:cancelAll', {});
       const afterCancel = await until((s) => active(s) === 0);
-      expect(afterCancel.cancelled).toBeGreaterThanOrEqual(1);
+      expect(afterCancel).toMatchObject({ succeeded: 1, cancelled: 5 });
 
-      // Retry the cancelled ones and close the workspace while the next one runs.
-      expect(await call('jobs:retryFailed', {})).toEqual({ retried: afterCancel.cancelled });
-      await until((s) => s.running === 1);
-      const [interrupted] = (await call('jobs:list', { limit: 10, offset: 0, status: 'running' })).items;
-      expect(interrupted).toBeDefined();
+      // Retry the cancelled ones and close the workspace while the next one is held running.
+      expect(await call('jobs:retryFailed', {})).toEqual({ retried: 5 });
+      await gate.waiting(1);
+      const running = (await call('jobs:list', { limit: 10, offset: 0, status: 'running' })).items;
+      expect(running).toHaveLength(1);
+      const interrupted = running[0];
       await call('workspace:close', {});
 
       // Reopen without starting the scheduler: the interrupted job is back in the queue, its run not counted.
@@ -171,6 +253,7 @@ describe('phase 4a acceptance', () => {
       expect(jobs.find((j) => j.id === interrupted!.id)).toMatchObject({ status: 'queued', attempt: 0 });
 
       holdScheduler = false;
+      gate.open();
       await jobHost.workspaceOpened();
       await until((s) => s.succeeded === 6 && active(s) === 0);
 
