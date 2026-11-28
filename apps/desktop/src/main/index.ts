@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { ipcContract, type IpcResult } from '@assetforge/contracts';
-import type { WorkspaceManager } from '@assetforge/core';
+import { errorLogLine, writeLine, type WorkspaceManager } from '@assetforge/core';
 import ffmpegPath from 'ffmpeg-static';
 import {
   createPreviewService,
@@ -22,6 +22,7 @@ import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
 import { createGenerationImageSource } from './generation-image-source.js';
 import { dispatch, type IpcHandlers } from './ipc.js';
+import { consoleLog } from './main-log.js';
 import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
@@ -102,6 +103,7 @@ function start(): void {
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
     imageProbe: { measure: (path) => pool.measure(path) },
     videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
+    log: (line) => console.warn(line),
   });
 
   const importDirectory = createImportDirectoryMemory(join(app.getPath('userData'), IMPORT_DIRECTORY_FILE));
@@ -190,7 +192,7 @@ function start(): void {
  */
 async function workspaceOpened(parts: AppParts): Promise<void> {
   // cleanup() never rejects by contract; the catch keeps a broken promise from going unhandled.
-  void parts.previews.cleanup().catch((error: unknown) => console.error('Cleaning the preview cache failed', error));
+  void parts.previews.cleanup().catch((error: unknown) => logError('Cleaning the preview cache failed', error));
   // A channel that was already running when quitting began must not start jobs on a closing database.
   if (parts.state.shutdown === 'running') await parts.services.workspaceOpened();
 }
@@ -243,7 +245,7 @@ function beforeQuit(parts: AppParts, event: Electron.Event): void {
   event.preventDefault();
   if (state.shutdown === 'closing') return;
   state.shutdown = 'closing';
-  void closeApp({ ...parts, logError: (message, error) => console.error(message, error) }).finally(() => {
+  void closeApp({ ...parts, logError }).finally(() => {
     state.shutdown = 'closed';
     app.quit();
   });
@@ -291,6 +293,17 @@ function openMainWindow(parts: AppParts, windowOptions: MainWindowOptions): void
  * @param error why the start failed
  */
 function failStartup(error: unknown): void {
-  console.error('AssetForge failed to start', error);
+  logError('AssetForge failed to start', error);
   app.exit(1);
+}
+
+/**
+ * Writes one line about a failure of the main process: the fixed text and the error's safe description, never its
+ * message or stack, which carry paths.
+ *
+ * @param message the fixed text
+ * @param error what failed
+ */
+function logError(message: string, error: unknown): void {
+  writeLine(consoleLog, errorLogLine(message, {}, error));
 }

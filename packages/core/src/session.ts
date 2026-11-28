@@ -1,4 +1,5 @@
 import type { WorkspaceSummary } from '@assetforge/contracts';
+import type { LineLog } from './log-line.js';
 import type { ImageProbe, VideoProbe } from './ports/media-probes.js';
 import type { Storage } from './ports/storage.js';
 import type { WorkspaceDatabase } from './ports/workspace-database.js';
@@ -29,4 +30,6 @@ export interface WorkspaceSession {
    * @returns it
    */
   now(): Date;
+  /** The host's log; nothing is logged without it. */
+  readonly log?: LineLog;
 }

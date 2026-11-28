@@ -14,6 +14,7 @@ import { downloadBaseName, downloadFileName, isWebPage } from './download-name.j
 import { openRemote, siteLoginOf } from './download-open.js';
 import { streamImportContextOf } from './import-context.js';
 import { importStream, type ImportContext } from './import-file.js';
+import { logDownloadFailure, logImportFailure } from './import-log.js';
 import { isRefusedImportName } from './import-refusals.js';
 import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './job-types.js';
 import { fileKind } from './media-types.js';
@@ -82,7 +83,9 @@ async function runDownload(
   } catch (error) {
     if (signal.aborted) throw signal.reason;
     if (error instanceof JobError) throw error;
-    // Unexpected: no cause, since its message could hold the URL and the scheduler logs a foreign error.
+    // Unexpected: no cause, since its message could hold the URL and the scheduler logs a foreign error. The line
+    // keeps the error's class and system code only.
+    logDownloadFailure(dependencies.session.log, job.id, error);
     throw new JobError('internal_error');
   }
 }
@@ -391,8 +394,9 @@ async function placeNewFile(
   if (target !== null) {
     try {
       placedIn = (await relocateFile(dependencies.session, fileId, target)).assetId;
-    } catch {
+    } catch (error) {
       // Best effort: the file stays in the inbox.
+      logImportFailure(dependencies.session.log, 'placement', { file: fileId }, error);
     }
   }
   reportEffect(dependencies.effects, (effects) => effects.fileAdded(placedIn));

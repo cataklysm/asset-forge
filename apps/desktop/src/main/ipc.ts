@@ -1,6 +1,7 @@
 import { type ErrorCode, ipcContract, type IpcChannel, type IpcError, type IpcResult } from '@assetforge/contracts';
-import { AssetForgeError } from '@assetforge/core';
+import { AssetForgeError, writeLine } from '@assetforge/core';
 import type { z } from 'zod';
+import { consoleLog, ipcContractLine, ipcFailureLine } from './main-log.js';
 
 // The IPC boundary: the handler table's type, and the validation of every request and answer that crosses it.
 // Kept free of Electron imports so the routing and validation logic is unit-testable.
@@ -54,7 +55,8 @@ export async function dispatch(
     const raw = await handler(request.data);
     const response = contract.response.safeParse(raw);
     if (!response.success) {
-      console.error(`IPC response for ${channel} violates the contract`, response.error);
+      // The issues quote values of the answer, so only their number is written.
+      writeLine(consoleLog, ipcContractLine(channel, response.error.issues.length));
       return internalError();
     }
     return { ok: true, value: response.data };
@@ -75,7 +77,8 @@ export function toIpcError(error: unknown, channel?: string): IpcError {
   if (error instanceof AssetForgeError) {
     return { code: error.code, message: error.message };
   }
-  console.error(channel === undefined ? 'IPC handler failed' : `IPC handler for ${channel} failed`, error);
+  // The safe description only: the message and stack of a Node or SQLite error carry paths.
+  writeLine(consoleLog, ipcFailureLine(channel, error));
   return { code: 'internal_error', message: 'Unexpected error' };
 }
 
