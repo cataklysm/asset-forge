@@ -141,7 +141,12 @@ class LanePauses {
     private readonly threshold: number,
   ) {}
 
-  /** @param resourceClass queue @param lane source @param reason actual refusal */
+  /**
+   * Explicitly holds a source until the owner resumes it.
+   * @param resourceClass the queue resource class
+   * @param lane the affected source
+   * @param reason the actual refusal that requires user action
+   */
   pause(resourceClass: ResourceClass, lane: string | null, reason: JobErrorCode): void {
     const reasons = lanesOf(this.reasons, resourceClass);
     if (reasons.has(lane)) return;

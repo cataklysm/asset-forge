@@ -30,7 +30,7 @@ export function useCrawlTasks(): CrawlTaskList {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const epoch = useRef(0);
-  const refresh = useRef<() => Promise<void>>(async () => {});
+  const refresh = useRef<() => Promise<void>>(() => Promise.resolve());
 
   useEffect(() => {
     const id = ++epoch.current;
@@ -60,7 +60,7 @@ export function useCrawlTasks(): CrawlTaskList {
     void read();
     const stop = startPolling(read, () => {}, CRAWL_POLL_MS);
     return () => {
-      ++epoch.current;
+      epoch.current = id + 1;
       stop();
     };
   }, [page]);

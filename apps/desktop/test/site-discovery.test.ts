@@ -110,9 +110,11 @@ describe('durable gallery discovery', () => {
 
   it('recreates a cleared technical job when retrying its retained discovery', async () => {
     let authorized = false;
-    const saved = await open(async (url) => authorized
-      ? { ok: true, results: { thumbnails: ['/photo.jpg'], pagination: [] }, baseUrl: url, finalUrl: url }
-      : { ok: false, reason: 'http_error', status: 401 });
+    const saved = await open(async (url) =>
+      authorized
+        ? { ok: true, results: { thumbnails: ['/photo.jpg'], pagination: [] }, baseUrl: url, finalUrl: url }
+        : { ok: false, reason: 'http_error', status: 401 },
+    );
     const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
     await h!.until((summary) => summary.failed === 1);
     await h!.ok('jobs:clearFinished', {});

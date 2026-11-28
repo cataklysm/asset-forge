@@ -3,10 +3,12 @@
 - Date: 2026-11-28.
 - Reference code state: `main`, commit `7940ddf`.
 - Additional performance/settings review: `main`, commit `057fe03`.
-- Status: discussion notes and backlog; the proposals below are not implemented by this document.
+- Status: agreed background discovery/review, parallel parsing and filename filtering are implemented on `feat/gallery-import-queue`; the original discussion and broader proposals below are retained for context.
 - Priority: perform the planned code cleanup first, then prioritize non-blocking, parallel URL discovery. Download tuning remains secondary.
 
 Agreed follow-ups cover the optional filename prefilter, queued background parsing with saved results, accessible profile deletion, and a clearer site-import dialog. The architecture recommendations remain proposals to evaluate during that work.
+
+Implementation and validation are recorded in [gallery-import-queue.tdd.md](docs/testing/gallery-import-queue.tdd.md). The branch reuses the existing queue, SQLite persistence, browser sessions and download/import path. It has not been merged. Download-performance settings and broader source-adapter proposals remain follow-up work.
 
 ## Agreed improvement: optional filename prefilter
 
@@ -269,4 +271,4 @@ Code cleanup should not silently change these behaviors or implement the deferre
 - [Site-import design](docs/superpowers/specs/2026-11-27-site-import-design.md): original scope and deliberate limitations; compare with the current code before relying on older transport assumptions.
 - [Cloudflare challenge-response detection](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/): `cf-mitigated: challenge` identifies a challenge response.
 
-No scraper behavior, runtime settings or source files were changed while recording this note.
+This note originally recorded a read-only review. The later authorized implementation is isolated on the feature branch identified above; the historical checklist is retained as the discussion record.
