@@ -1110,6 +1110,71 @@ describe('GenerationStudio with library prompts', () => {
     expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
   });
 
+  it('Use settings of a library result whose prompt is gone leaves its resolved text as the free prompt', async () => {
+    const file = fileRecord();
+    const made = generation(file, {
+      prompt: 'A back of a villain',
+      promptId: nextId(),
+      promptVersionId: nextId(),
+      promptTitle: 'Gone shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'back', who: 'a villain' },
+    });
+    const { api } = setup({ results: [made] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    await waitFor(() => expect(callsOf(api, 'prompts:get')).toHaveLength(1));
+    expect(promptBox().value).toBe('A back of a villain');
+    expect(promptBox().readOnly).toBe(false);
+    expect(screen.queryByText(attachedPromptLabel('Gone shot', 1))).toBeNull();
+  });
+
+  it('a late answer of an earlier Use settings does not replace the library prompt of a later one', async () => {
+    const first = hero();
+    const second = promptDetail({ title: 'Villain shot', content: 'A {{who}} at dusk' });
+    const file = fileRecord();
+    const fromFirst = generation(file, {
+      createdAt: '2026-01-02T00:00:00.000Z',
+      prompt: 'A side of a hero',
+      promptId: first.id,
+      promptVersionId: first.currentVersion.id,
+      promptTitle: 'Hero shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side', who: 'a hero' },
+    });
+    fromFirst.outputs[0]!.name = 'first.png';
+    const fromSecond = generation(file, {
+      prompt: 'A rogue at dusk',
+      promptId: second.id,
+      promptVersionId: second.currentVersion.id,
+      promptTitle: 'Villain shot',
+      promptVersionNumber: 1,
+      promptVariables: { who: 'rogue' },
+    });
+    fromSecond.outputs[0]!.name = 'second.png';
+    const pendingFirst = deferred<PromptDetail>();
+    setup({
+      prompts: [first, second],
+      results: [fromFirst, fromSecond],
+      handlers: {
+        'prompts:get': ({ id }) => (id === first.id ? pendingFirst.promise : structuredClone(second)),
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'first.png' }));
+    await user.click(button('Use settings'));
+    await user.click(screen.getByRole('button', { name: 'second.png' }));
+    await user.click(button('Use settings'));
+    await screen.findByText(attachedPromptLabel('Villain shot', 1));
+    await act(async () => pendingFirst.resolve(structuredClone(first)));
+    expect(screen.getByText(attachedPromptLabel('Villain shot', 1))).toBeTruthy();
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+    expect(textbox('who').value).toBe('rogue');
+  });
+
   it('a not_found start shows the message and keeps the prompt and its values', async () => {
     setup({
       prompts: [hero()],

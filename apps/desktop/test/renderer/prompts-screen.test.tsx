@@ -94,6 +94,18 @@ it('the screen carries no explanatory paragraph: only state lines and alerts', a
   expect(paragraphs()).toEqual([]);
 });
 
+it('Space on a list row opens that prompt', async () => {
+  const user = userEvent.setup();
+  install([promptDetail({ title: 'Hero' }), promptDetail({ title: 'Villain' })]);
+  render(<PromptsScreen busy={false} />);
+  const row = await option('Villain');
+  row.focus();
+  await user.keyboard(' ');
+  await waitFor(() =>
+    expect(within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' }).value).toBe('Villain'),
+  );
+});
+
 it('the tag filter goes into prompts:list', async () => {
   const user = userEvent.setup();
   const { api } = install([promptDetail({ title: 'Hero', tags: [tagOf('Shop')] }), promptDetail({ title: 'Other' })]);
