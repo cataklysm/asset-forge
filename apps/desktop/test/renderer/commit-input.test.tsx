@@ -60,3 +60,78 @@ it('a failed save shows the saved value again', async () => {
 
   expect(input.value).toBe('Oak');
 });
+
+/**
+ * A promise with the functions that settle it.
+ *
+ * @returns the promise, its resolve and its reject function
+ */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
+/**
+ * A commit callback whose first call waits for the given promise and whose later calls succeed.
+ *
+ * @param first the answer of the first call
+ * @returns the mocked callback
+ */
+function firstCallWaits(first: Promise<boolean>) {
+  let calls = 0;
+  return vi.fn((_value: string) => {
+    calls += 1;
+    return calls === 1 ? first : Promise.resolve(true);
+  });
+}
+
+it('text committed while a save runs is saved after the save succeeded', async () => {
+  const user = userEvent.setup();
+  const first = deferred<boolean>();
+  const onCommit = firstCallWaits(first.promise);
+  render(<CommitInput value="Oak" onCommit={onCommit} label="Name" maxLength={50} />);
+  const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Name' });
+
+  await user.clear(input);
+  await user.type(input, 'Pine{Enter}');
+  await user.type(input, ' cone');
+  await act(async () => {
+    fireEvent.blur(input);
+  });
+  expect(onCommit).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    first.resolve(true);
+  });
+
+  expect(onCommit).toHaveBeenCalledTimes(2);
+  expect(onCommit).toHaveBeenLastCalledWith('Pine cone');
+});
+
+it('text committed while a save runs is saved after the save failed', async () => {
+  const user = userEvent.setup();
+  const first = deferred<boolean>();
+  const onCommit = firstCallWaits(first.promise);
+  render(<CommitInput value="Oak" onCommit={onCommit} label="Name" maxLength={50} />);
+  const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Name' });
+
+  await user.clear(input);
+  await user.type(input, 'Pine{Enter}');
+  await user.type(input, ' cone');
+  await act(async () => {
+    fireEvent.blur(input);
+  });
+
+  await act(async () => {
+    first.reject(new Error('offline'));
+  });
+
+  expect(onCommit).toHaveBeenCalledTimes(2);
+  expect(onCommit).toHaveBeenLastCalledWith('Pine cone');
+  expect(input.value).toBe('Pine cone');
+});
