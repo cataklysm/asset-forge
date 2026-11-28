@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react';
+﻿import { useRef, useState } from 'react';
 import { FileRoleSchema, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
-import { ALERT, BUTTON, INPUT } from '../ui';
+import { ALERT, BUTTON, SELECT } from '../ui';
 import { AssetPicker } from './AssetPicker';
 
 // The role select of an asset's file and the assign control of an inbox file.
@@ -65,7 +65,7 @@ export function FileRoleSelect({
   return (
     <div className="space-y-2">
       <select
-        className={fullWidth ? `${INPUT} w-full` : INPUT}
+        className={fullWidth ? `${SELECT} w-full` : SELECT}
         disabled={busy}
         aria-label={`Role of ${file.originalName}`}
         value={file.role ?? 'other'}
@@ -104,12 +104,17 @@ export function AssignFileControl({
   const [assigning, setAssigning] = useState(false);
   const [role, setRole] = useState<FileRole>('reference');
   const [error, setError] = useState<string | null>(null);
+  // The file has left the inbox: a later pick before the list has dropped the file sends nothing. (The picker
+  // itself ignores a pick while the previous one runs.)
+  const assignedRef = useRef<string | null>(null);
 
-  /** Assigns the file to the picked asset with the chosen role. */
+  /** Assigns the file to the picked asset with the chosen role, once per file. */
   async function assign(assetId: string) {
+    if (assignedRef.current === file.id) return;
     setError(null);
     try {
       await call('files:assign', { fileId: file.id, assetId, role });
+      assignedRef.current = file.id;
       onAssigned();
     } catch (caught) {
       setError(describeError(caught));
@@ -122,7 +127,7 @@ export function AssignFileControl({
       {assigning ? (
         <>
           <select
-            className={`${INPUT} ${width}`}
+            className={`${SELECT} ${width}`}
             aria-label="Role"
             value={role}
             onChange={(event) => setRole(FileRoleSchema.parse(event.target.value))}
