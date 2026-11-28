@@ -276,7 +276,15 @@ function screenFor(view: View, { shell: state, busy, setBusy, setView, showAsset
         />
       );
     case 'project':
-      return <ProjectScreen key={view.id} id={view.id} onNavigate={setView} />;
+      return (
+        <ProjectScreen
+          key={view.id}
+          id={view.id}
+          onNavigate={setView}
+          initialMemberOffset={shell.memberPage.projectId === view.id ? shell.memberPage.offset : 0}
+          onMemberOffsetChange={(offset) => state.setMemberPage({ projectId: view.id, offset })}
+        />
+      );
     case 'inbox':
       return <InboxScreen state={shell.inboxList} onStateChange={state.setInboxList} onBusyChange={setBusy} />;
     case 'trash':

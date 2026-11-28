@@ -12,6 +12,14 @@ import {
 } from '../list-state';
 import type { TagRename } from '../tag-rename';
 
+/** The member page of the project screen shown last. */
+export interface MemberPageState {
+  /** The project, or null before one was shown. */
+  projectId: string | null;
+  /** The offset of the shown member page. */
+  offset: number;
+}
+
 /** The list state of the workspace screens, kept while the user navigates. */
 export interface ShellState {
   assetList: AssetListState;
@@ -19,6 +27,7 @@ export interface ShellState {
   inboxList: InboxListState;
   trashList: TrashListState;
   assetTab: AssetTab;
+  memberPage: MemberPageState;
 }
 
 /** The state of a newly opened workspace. */
@@ -28,6 +37,7 @@ const INITIAL_SHELL: ShellState = {
   inboxList: { filters: NO_FILE_FILTERS, scrollOffset: 0 },
   trashList: { filters: NO_FILE_FILTERS, scrollOffset: 0 },
   assetTab: 'files',
+  memberPage: { projectId: null, offset: 0 },
 };
 
 /** What `useShellState` hands out: the state, one setter per part and the rename of filter tags. */
@@ -38,6 +48,7 @@ interface ShellStateHandle {
   setInboxList(inboxList: InboxListState): void;
   setTrashList(trashList: TrashListState): void;
   setAssetTab(assetTab: AssetTab): void;
+  setMemberPage(memberPage: MemberPageState): void;
   /** A renamed tag in the filters of every list, mounted or not; the lists reload themselves. Stable. */
   renameInShell(change: TagRename): void;
 }
@@ -66,6 +77,7 @@ export function useShellState(): ShellStateHandle {
   const setInboxList = (inboxList: InboxListState) => setShell((current) => ({ ...current, inboxList }));
   const setTrashList = (trashList: TrashListState) => setShell((current) => ({ ...current, trashList }));
   const setAssetTab = (assetTab: AssetTab) => setShell((current) => ({ ...current, assetTab }));
+  const setMemberPage = (memberPage: MemberPageState) => setShell((current) => ({ ...current, memberPage }));
 
   const renameInShell = useCallback((change: TagRename) => {
     setShell((current) => ({
@@ -77,5 +89,14 @@ export function useShellState(): ShellStateHandle {
     }));
   }, []);
 
-  return { shell, setAssetList, setProjectList, setInboxList, setTrashList, setAssetTab, renameInShell };
+  return {
+    shell,
+    setAssetList,
+    setProjectList,
+    setInboxList,
+    setTrashList,
+    setAssetTab,
+    setMemberPage,
+    renameInShell,
+  };
 }

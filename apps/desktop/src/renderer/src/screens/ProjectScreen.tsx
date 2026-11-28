@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProjectStatusSchema, type Project } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { AssetPicker } from '../components/AssetPicker';
@@ -43,13 +43,70 @@ function toggled(old: ReadonlySet<string>, assetId: string): ReadonlySet<string>
 }
 
 /**
+ * The offset of the last member page that still shows a member.
+ *
+ * @param total the number of members
+ * @returns the offset, 0 for no members
+ */
+function lastMemberPageOffset(total: number): number {
+  return total <= 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+}
+
+/**
+ * The offset of the member page, reported on every change.
+ *
+ * @param initial the offset to start on
+ * @param onChange called with every new offset
+ * @returns the offset and its setter, which is stable
+ */
+function useMemberOffset(
+  initial: number,
+  onChange: ((offset: number) => void) | undefined,
+): [number, (offset: number) => void] {
+  const [offset, setOffset] = useState(initial);
+  const onChangeRef = useRef(onChange);
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  const change = useCallback((next: number) => {
+    setOffset(next);
+    onChangeRef.current?.(next);
+  }, []);
+  return [offset, change];
+}
+
+/**
+ * Moves the member page back to the last page once the members end before it: a page kept from an
+ * earlier visit, or the last member of the last page removed.
+ *
+ * @param total the number of members once loaded, else null
+ * @param offset the shown offset
+ * @param setOffset the setter of the offset
+ */
+function useLastPageClamp(total: number | null, offset: number, setOffset: (offset: number) => void): void {
+  useEffect(() => {
+    if (total !== null && offset > 0 && offset >= total) setOffset(lastMemberPageOffset(total));
+  }, [total, offset, setOffset]);
+}
+
+/** The props of `ProjectScreen`. */
+interface ProjectScreenProps {
+  id: string;
+  onNavigate(view: View): void;
+  /** The member page to start on, e.g. the one shown when the user left this project. */
+  initialMemberOffset?: number;
+  /** Called with every new member page offset. */
+  onMemberOffsetChange?(offset: number): void;
+}
+
+/**
  * One project: name, status and description edited in place, its members and Add asset.
  *
- * @param props the project id and the navigation
+ * @param props the project id, the navigation and the member page kept by the shell
  * @returns the screen
  */
-export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view: View): void }) {
-  const [offset, setOffset] = useState(0);
+export function ProjectScreen({ id, onNavigate, initialMemberOffset = 0, onMemberOffsetChange }: ProjectScreenProps) {
+  const [offset, setOffset] = useMemberOffset(initialMemberOffset, onMemberOffsetChange);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const { renameToken } = useTags();
@@ -63,6 +120,7 @@ export function ProjectScreen({ id, onNavigate }: { id: string; onNavigate(view:
   );
   // The picker must exclude every member, not only those on the visible page.
   const allMembers = useLoad(() => call('assignments:listByProject', { projectId: id, limit: 200, offset: 0 }), [id]);
+  useLastPageClamp(members.data?.total ?? null, offset, setOffset);
 
   function reloadMembers() {
     members.reload();

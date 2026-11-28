@@ -665,6 +665,92 @@ it('the project screen keeps the member pager and member editing', async () => {
   expect(screen.getByRole('combobox', { name: 'Search assets' })).toBeTruthy();
 });
 
+/**
+ * A project and a fake API whose members can be removed.
+ *
+ * @param count the number of members
+ * @returns the project, the members and the fake API
+ */
+function projectWithMembers(count: number) {
+  const project: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: '',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  const members = Array.from({ length: count }, (_, i) => member(project.id, `Member ${i}`));
+  const api = installFakeApi({
+    'projects:get': () => project,
+    'assetTypes:list': () => [TYPE],
+    'assignments:listByProject': ({ limit, offset }) => pageOf(members.slice(offset, offset + limit), members.length),
+    'assignments:remove': ({ assetId }) => {
+      members.splice(
+        members.findIndex((entry) => entry.assetId === assetId),
+        1,
+      );
+      return null;
+    },
+    'assets:list': () => pageOf([]),
+  });
+  return { project, members, api };
+}
+
+it('the project screen starts on the member page it is given and reports every page change', async () => {
+  const user = userEvent.setup();
+  const { project, api } = projectWithMembers(120);
+  const onMemberOffsetChange = vi.fn();
+  render(
+    <ProjectScreen
+      id={project.id}
+      onNavigate={() => {}}
+      initialMemberOffset={50}
+      onMemberOffsetChange={onMemberOffsetChange}
+    />,
+  );
+
+  expect(await screen.findByText('Member 50')).toBeTruthy();
+  expect(screen.queryByText('Member 0')).toBeNull();
+  expect(api.calls.filter((c) => c.channel === 'assignments:listByProject').map((c) => c.request)).not.toContainEqual({
+    projectId: project.id,
+    limit: 50,
+    offset: 0,
+  });
+  const pager = screen.getByRole('navigation', { name: 'Pagination' });
+  await user.click(within(pager).getByRole('button', { name: 'Next' }));
+  expect(await screen.findByText('Member 100')).toBeTruthy();
+  expect(onMemberOffsetChange).toHaveBeenLastCalledWith(100);
+});
+
+it('removing the only member of the last page shows the page before it', async () => {
+  const user = userEvent.setup();
+  const { project } = projectWithMembers(51);
+  const onMemberOffsetChange = vi.fn();
+  render(
+    <ProjectScreen
+      id={project.id}
+      onNavigate={() => {}}
+      initialMemberOffset={50}
+      onMemberOffsetChange={onMemberOffsetChange}
+    />,
+  );
+
+  const row = (await screen.findByText('Member 50')).closest('tr')!;
+  await user.click(within(row).getByRole('button', { name: 'Remove Member 50 from Forest' }));
+  expect(await screen.findByText('Member 0')).toBeTruthy();
+  expect(onMemberOffsetChange).toHaveBeenLastCalledWith(0);
+});
+
+it('a member page kept from an earlier visit that is past the end moves to the last page', async () => {
+  // Thirty members need no pager, so only the screen itself can step back.
+  const { project } = projectWithMembers(30);
+  render(<ProjectScreen id={project.id} onNavigate={() => {}} initialMemberOffset={150} />);
+
+  expect(await screen.findByText('Member 0')).toBeTruthy();
+  expect(screen.queryByRole('navigation', { name: 'Pagination' })).toBeNull();
+});
+
 /** The projects list inside a `TagsProvider` whose renames rewrite the filters, as the workspace shell does. */
 function RenamingHarness(props: { initial: ProjectListState; tag: { name: string; displayName: string } }) {
   const [state, setState] = useState(props.initial);
