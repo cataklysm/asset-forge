@@ -4,7 +4,7 @@ import type { IpcChannel } from '@assetforge/contracts';
 // when a channel is added to or removed from the contract without this list following.
 
 /** Every channel of the IPC contract; the preload forwards nothing else to the main process. */
-export const KNOWN_CHANNELS:Readonly<Record<IpcChannel, true>> = {
+export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'analysis:acceptProposal': true,
   'analysis:cancelDescribe': true,
   'analysis:describe': true,
