@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
 
 /** Answers whether the navigation may leave; false keeps it where it is. */
 type Guard = () => Promise<boolean>;
@@ -49,7 +58,10 @@ export function LeaveGuardProvider({ children }: { children: ReactNode }) {
 export function useLeaveGuard(guard: Guard | null): void {
   const context = useContext(LeaveGuardContext);
   const latest = useRef<Guard | null>(guard);
-  latest.current = guard;
+  // Written after the commit, never during a render that may be thrown away.
+  useLayoutEffect(() => {
+    latest.current = guard;
+  });
   useEffect(() => context?.register(latest), [context]);
 }
 
