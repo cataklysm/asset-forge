@@ -440,6 +440,37 @@ it('a page button that lost the focus while its action ran gets it back', async 
   expect(document.activeElement).toBe(button);
 });
 
+it('a page button the owner left after its focus came back is not focused again by a later poll', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const pending = deferred<{ cancelled: number }>();
+  let summary: JobSummary = { ...IDLE, queued: 1, failed: 1, succeeded: 1, changes: 1 };
+  const api = install({ 'jobs:list': listOf([job()]), 'jobs:cancelAll': () => pending.promise });
+  api.set('jobs:summary', () => summary);
+  renderScreen();
+  await screen.findByText('rock.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  button.focus();
+  await user.keyboard('{Enter}');
+  button.blur();
+  await act(async () => {
+    pending.resolve({ cancelled: 1 });
+    await pending.promise;
+  });
+  await waitFor(() => expect(document.activeElement).toBe(button));
+  button.blur();
+  expect(document.activeElement).toBe(document.body);
+  summary = { ...IDLE, queued: 1, changes: 2 };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+  });
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Clear finished' }) as HTMLButtonElement).disabled).toBe(true),
+  );
+  expect(document.activeElement).toBe(document.body);
+});
+
 it('a page button that the summary after its action disables hands the focus to the first enabled page button', async () => {
   const user = userEvent.setup();
   let summary: JobSummary = { ...IDLE, failed: 1, changes: 1 };
