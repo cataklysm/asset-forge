@@ -460,13 +460,23 @@ describe('provider store: keys', () => {
     ['host case', 'http://Ollama.Example.test:11434', 'http://ollama.example.TEST:11434/x', true],
     ['an IPv6 literal', 'http://[::1]:11434', 'http://[0:0:0:0:0:0:0:1]:11434/api', true],
     ['an explicit default port', 'http://ollama.example.test', 'http://ollama.example.test:80', true],
-    ['a trailing dot', 'http://ollama.example.test:11434', 'http://ollama.example.test.:11434', false],
+    ['a trailing dot', 'http://ollama.example.test:11434', 'http://ollama.example.test.:11434', true],
+    ['a trailing dot removed', 'http://ollama.example.test.:11434', 'http://ollama.example.test:11434', true],
   ])('normalises the origin for %s', (_label, first, second, kept) => {
     const s = store();
     const a = s.save(input({ baseUrl: first, apiKey: KEY }));
     expect(s.save(input({ id: a.id, baseUrl: second })).hasApiKey).toBe(kept);
     expect(s.apiKeyFor(a.id, second)).toBe(kept ? KEY : null);
     expect(existsSync(keyFile(a.id))).toBe(kept);
+  });
+
+  it('sends a key kept across a trailing dot only to the origin stored now', () => {
+    const s = store();
+    const a = s.save(input({ baseUrl: 'http://ollama.example.test:11434', apiKey: KEY }));
+    s.save(input({ id: a.id, baseUrl: 'http://ollama.example.test.:11434' }));
+    expect(s.apiKeyFor(a.id, 'http://ollama.example.test.:11434/api')).toBe(KEY);
+    expect(s.apiKeyFor(a.id, 'http://ollama.example.test:11434/api')).toBeNull();
+    expect(s.apiKeyFor(a.id, 'http://other.example.test.:11434/api')).toBeNull();
   });
   it('keeps the key when apiKey is absent, deletes it on null, replaces it on a string', () => {
     const s = store();

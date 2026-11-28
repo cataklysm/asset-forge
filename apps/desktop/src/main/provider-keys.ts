@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:
 import { join } from 'node:path';
 import { z } from 'zod';
 import { writeAtomic } from './atomic-file.js';
-import { originOf, type ProviderEntry } from './provider-entry.js';
+import { isSameKeyOrigin, originOf, type ProviderEntry } from './provider-entry.js';
 import type { SecretCodec } from './secret-codec.js';
 
 // One API key per provider entry, encrypted by the OS credential store, in `userData/credentials/vision-api-key-<id>`
@@ -211,7 +211,7 @@ export class ProviderKeyFiles {
     if (decoded === null) return null;
     const origin = originOf(entry.baseUrl);
     if (origin === null) return null;
-    if (decoded.form === 'bound') return decoded.origin === origin ? decoded.key : null;
+    if (decoded.form === 'bound') return isSameKeyOrigin(decoded.origin, origin) ? decoded.key : null;
     // A bare key is used only when its binding at load failed, and only while the entry keeps the origin of then.
     return this.unboundOrigins.get(entry.id) === origin ? decoded.key : null;
   }

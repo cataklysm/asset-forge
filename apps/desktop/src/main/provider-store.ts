@@ -26,6 +26,7 @@ import {
   ValidationFailedError,
 } from '@assetforge/core';
 import {
+  isSameKeyOrigin,
   KIND_CHANGED,
   optionsFor,
   originOf,
@@ -337,7 +338,7 @@ class SettingsProviderStore {
     this.commit({ ...current, providers });
     // The entry changed once it is written, so listeners hear of it even if a key file operation fails.
     try {
-      if (previous === null || request.apiKey === null || originOf(previous.baseUrl) !== originOf(baseUrl))
+      if (previous === null || request.apiKey === null || !isSameKeyOrigin(previous.baseUrl, baseUrl))
         this.keys.remove(entry.id);
       if (encrypted !== null) this.keys.write(entry.id, encrypted);
     } finally {
