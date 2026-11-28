@@ -1,6 +1,8 @@
 export { DERIVED_DATA_VERSION, type DerivedDataOptions } from './derived-data.js';
 export { createGenerationRepository } from './generation-repository.js';
-export { BACKUP_FAILED_MESSAGE, BACKUP_KEEP_COUNT } from './database-backup.js';
+export { BACKUP_FAILED_MESSAGE, BACKUP_KEEP_COUNT, listPreMigrationBackups } from './database-backup.js';
+export { createDatabaseBackups, type DatabaseBackups, type DatabaseBackupsOptions } from './database-backups.js';
+export { installDatabase, pruneReplaced, replacedName, type SwapFileSystem } from './database-swap.js';
 export { type BackupOptions } from './migrate-with-backup.js';
 export {
   BACKUP_CHECK_TIMEOUT_MS,

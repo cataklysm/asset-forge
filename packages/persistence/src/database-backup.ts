@@ -1,6 +1,6 @@
 import { readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { InvalidOperationError } from '@assetforge/core';
+import { InvalidOperationError, type LocalBackupFile } from '@assetforge/core';
 import type Database from 'better-sqlite3';
 
 /**
@@ -183,6 +183,52 @@ async function finishedBackups(databaseFilePath: string): Promise<BackupEntry[]>
     if (match) entries.push({ name, appliedCount: Number(match[1]), stamp: match[2]! });
   }
   return entries.sort((left, right) => right.stamp.localeCompare(left.stamp) || right.appliedCount - left.appliedCount);
+}
+
+/**
+ * Whether a name is a finished backup name of this database file.
+ *
+ * @param databaseFileName the database file name without directory
+ * @param name the name
+ * @returns true when it matches `<database file name>.backup-<appliedCount>-<yyyymmddhhmmss>`
+ */
+export function isPreMigrationBackupName(databaseFileName: string, name: string): boolean {
+  return finishedBackupPattern(databaseFileName).test(name);
+}
+
+/**
+ * The stamp of a backup name as an ISO timestamp.
+ *
+ * @param stamp `yyyymmddhhmmss` in UTC
+ * @returns the ISO timestamp; null when it is no valid date
+ */
+function stampAsIso(stamp: string): string | null {
+  const iso = `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(8, 10)}:${stamp.slice(10, 12)}:${stamp.slice(12, 14)}.000Z`;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) || date.toISOString() !== iso ? null : iso;
+}
+
+/**
+ * The finished backups made before pending migrations beside the database, newest first. A name whose stamp is no
+ * valid date and an entry that is not a regular file are left out.
+ *
+ * @param databaseFilePath the database file
+ * @returns the backups; none when the directory is missing
+ */
+export async function listPreMigrationBackups(databaseFilePath: string): Promise<LocalBackupFile[]> {
+  const backups: LocalBackupFile[] = [];
+  for (const entry of await finishedBackups(databaseFilePath)) {
+    const createdAt = stampAsIso(entry.stamp);
+    if (createdAt === null) continue;
+    try {
+      const info = await stat(join(dirname(databaseFilePath), entry.name));
+      if (!info.isFile()) continue;
+      backups.push({ name: entry.name, sizeBytes: info.size, createdAt, appliedMigrations: entry.appliedCount });
+    } catch {
+      // Removed meanwhile: not listed.
+    }
+  }
+  return backups;
 }
 
 /**

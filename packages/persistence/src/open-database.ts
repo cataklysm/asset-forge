@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { BackupError, type WorkspaceDatabase } from '@assetforge/core';
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { BackupChecker } from './backup-check.js';
+import { snapshotOpenDatabase, sweepLocalTemporary } from './database-snapshot.js';
 import { migrateWithBackup, type BackupOptions } from './migrate-with-backup.js';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetSourceRepository } from './asset-source-repository.js';
@@ -37,6 +39,8 @@ export interface OpenWorkspaceDatabaseOptions {
   derivedData?: DerivedDataOptions;
   /** The options of the backup before pending migrations. */
   backup?: BackupOptions;
+  /** The backup check of a snapshot; without it every snapshot fails with `backup_failed`. */
+  check?: BackupChecker;
 }
 
 /**
@@ -58,6 +62,7 @@ export async function openWorkspaceDatabase(
 ): Promise<WorkspaceDatabase> {
   const existed = existsSync(databaseFilePath);
   mkdirSync(dirname(databaseFilePath), { recursive: true });
+  await sweepLocalTemporary(dirname(databaseFilePath));
   const sqlite = new Database(databaseFilePath);
   try {
     sqlite.pragma('journal_mode = WAL');
@@ -65,7 +70,7 @@ export async function openWorkspaceDatabase(
     registerSqlFunctions(sqlite);
     const database = drizzle(sqlite);
     await migrateWithBackup(sqlite, database, { databaseFilePath, migrationsFolder, existed, backup: options.backup });
-    return workspaceDatabase(sqlite, database, options);
+    return workspaceDatabase({ sqlite, database, databaseFilePath, options });
   } catch (error) {
     closeQuietly(sqlite);
     throw error;
@@ -86,19 +91,26 @@ function closeQuietly(sqlite: Database.Database): void {
   }
 }
 
+/** What `workspaceDatabase` wires the repositories over. */
+interface OpenedDatabase {
+  /** The connection. */
+  sqlite: Database.Database;
+  /** The Drizzle handle over it. */
+  database: BetterSQLite3Database;
+  /** The database file. */
+  databaseFilePath: string;
+  /** The options of the derived data step and the snapshot check, read when they run. */
+  options: OpenWorkspaceDatabaseOptions;
+}
+
 /**
- * Every repository over the opened database, with the derived data step and close.
+ * Every repository over the opened database, with the derived data step, the snapshot and close.
  *
- * @param sqlite the connection
- * @param database the Drizzle handle over it
- * @param options the options of the derived data step, read when the step runs
+ * @param opened the connection, its Drizzle handle, the file and the options
  * @returns the workspace database
  */
-function workspaceDatabase(
-  sqlite: Database.Database,
-  database: BetterSQLite3Database,
-  options: OpenWorkspaceDatabaseOptions,
-): WorkspaceDatabase {
+function workspaceDatabase(opened: OpenedDatabase): WorkspaceDatabase {
+  const { sqlite, database, databaseFilePath, options } = opened;
   return {
     meta: createMetaRepository(database),
     storages: createStorageRepository(database),
@@ -126,7 +138,10 @@ function workspaceDatabase(
     changeCount() {
       return (sqlite.prepare('select total_changes() as n').get() as { n: number }).n;
     },
-    snapshot: snapshotNotBuilt,
+    snapshot({ signal }) {
+      if (options.check === undefined) return snapshotWithoutCheck();
+      return snapshotOpenDatabase(sqlite, databaseFilePath, options.check, signal);
+    },
     async close() {
       if (sqlite.open) sqlite.close();
     },
@@ -134,10 +149,10 @@ function workspaceDatabase(
 }
 
 /**
- * The snapshot until it is built: always fails.
+ * The snapshot of a database opened without a backup check: always fails.
  *
  * @returns never; always rejects with `backup_failed`
  */
-async function snapshotNotBuilt(): Promise<never> {
+async function snapshotWithoutCheck(): Promise<never> {
   throw new BackupError('backup_failed');
 }
