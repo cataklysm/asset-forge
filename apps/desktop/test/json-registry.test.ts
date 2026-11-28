@@ -114,6 +114,33 @@ describe('JsonWorkspaceRegistry', () => {
     });
   });
 
+  it('keeps unknown keys inside a workspace entry when it writes, also when the entry is replaced', async () => {
+    const file = join(dir, 'settings.json');
+    const first = entry(ID_A, 'one', '2026-01-01T00:00:00.000Z');
+    const second = entry(ID_B, 'other', '2026-01-03T00:00:00.000Z');
+    await writeFile(
+      file,
+      JSON.stringify({
+        workspaces: [
+          { ...first, pinned: true },
+          { ...second, colour: 'blue' },
+        ],
+      }),
+    );
+    const registry = new JsonWorkspaceRegistry(file);
+    expect(await registry.list()).toEqual([first, second]);
+    const renamed = entry(ID_A, 'renamed', '2026-01-04T00:00:00.000Z');
+    await registry.upsert(renamed);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      workspaces: [
+        { ...renamed, pinned: true },
+        { ...second, colour: 'blue' },
+      ],
+    });
+    await registry.remove(ID_A);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ workspaces: [{ ...second, colour: 'blue' }] });
+  });
+
   it('removes the temporary file when the rename fails and keeps serving afterwards', async () => {
     const file = join(dir, 'settings.json');
     const registry = new JsonWorkspaceRegistry(file);
