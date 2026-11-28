@@ -63,6 +63,7 @@ export async function openWorkspaceDatabase(
  * Closes a connection whose open failed. A failing close is swallowed, so the caller sees why the open failed.
  *
  * @param sqlite the connection
+ * @returns nothing
  */
 function closeQuietly(sqlite: Database.Database): void {
   try {
