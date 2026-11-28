@@ -24,7 +24,7 @@ export interface StudioState {
   open(file: FileRecord): void;
   /**
    * Starts an upscale of `file`. It names no entry: the main process runs the image provider used
-   * last (else the first). Rejects with the reason a sent start failed. While an upscale of the file
+   * last (else the first), and an accepted start records it here too. Rejects with the reason a sent start failed. While an upscale of the file
    * is in flight it sends nothing and resolves; the start in flight reports its own outcome.
    */
   upscale(file: FileRecord, scale: UpscaleScale): Promise<void>;
@@ -126,19 +126,28 @@ async function readLinked(fileId: string): Promise<Linked> {
   return { file, asset: asset === null ? null : { id: asset.id, name: asset.name, tags: asset.tags } };
 }
 
+/** What an upscale from outside the studio does after an accepted start. */
+interface UpscaleEffects {
+  /** Polls the job summary. */
+  refresh(): void;
+  /** Records the entry as the image entry used last. */
+  noteUsed(providerId: string): void;
+}
+
 /**
  * Sends an upscale of `file` and polls the jobs after it.
  *
  * @param file the source file
  * @param scale the scale
- * @param refresh polls the job summary
+ * @param effects polls the job summary and records the entry the main process chose
  * @returns resolves once it was sent; rejects with the reason a sent start failed
  */
-async function startUpscale(file: FileRecord, scale: UpscaleScale, refresh: () => void): Promise<void> {
-  // No entry here: the renderer does not learn which image entry was used last.
+async function startUpscale(file: FileRecord, scale: UpscaleScale, effects: UpscaleEffects): Promise<void> {
+  // No entry here: the main process resolves the image entry used last, and the answer names it.
   const result = await call('generations:start', { kind: 'upscale', fileId: file.id, scale });
   if (!result.ok) throw new Error(JOB_ERROR_MESSAGES[result.code]);
-  refresh();
+  effects.refresh();
+  effects.noteUsed(result.generation.providerId);
 }
 
 /**
@@ -176,7 +185,7 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
   const { draft, keepDraft, startError, setStartError, opened, forget } = useStudioDrafts();
   const { recallVariable, rememberVariables } = useVariableMemory();
 
-  const { list } = providers;
+  const { list, noteUsed } = providers;
   const hasImageEntry = list?.providers.some((entry) => purposeOf(entry.kind) === 'image');
   const blocked = list !== null && !hasImageEntry ? NO_IMAGE_PROVIDER_TITLE : null;
 
@@ -221,9 +230,9 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
 
   const upscale = useCallback(
     async (file: FileRecord, scale: UpscaleScale) => {
-      await guardStart(file.id, 'upscale', () => startUpscale(file, scale, refresh));
+      await guardStart(file.id, 'upscale', () => startUpscale(file, scale, { refresh, noteUsed }));
     },
-    [guardStart, refresh],
+    [guardStart, refresh, noteUsed],
   );
 
   const session = useMemo<StudioSession>(

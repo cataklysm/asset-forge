@@ -53,6 +53,8 @@ export interface EditStart {
   setStartError(message: string | null): void;
   /** Makes the jobs context poll at once. */
   refresh(): void;
+  /** Records the entry of an accepted start as the image entry used last. */
+  noteUsed(providerId: string): void;
   /** After an accepted start while this studio is mounted. */
   onStarted(): void;
 }
@@ -67,8 +69,10 @@ export interface EditStart {
 async function sendEdit(start: EditStart, request: StartRequest): Promise<void> {
   const result = await call('generations:start', request);
   // A studio mounted anew meanwhile reads its results when the jobs poll and shows the error.
-  if (result.ok) start.refresh();
-  else start.setStartError(JOB_ERROR_MESSAGES[result.code]);
+  if (result.ok) {
+    start.refresh();
+    start.noteUsed(result.generation.providerId);
+  } else start.setStartError(JOB_ERROR_MESSAGES[result.code]);
   if (start.disposed.current) return;
   if (result.ok) start.onStarted();
 }
@@ -129,6 +133,8 @@ export interface ResultContext {
   setActionError(message: string | null): void;
   /** Makes the jobs context poll at once. */
   refresh(): void;
+  /** Records the entry of an accepted start as the image entry used last. */
+  noteUsed(providerId: string): void;
   /** The jobs poll at once and the results are read again. */
   changed(): void;
 }
@@ -142,7 +148,10 @@ export interface ResultContext {
  */
 async function sendUpscale(context: ResultContext, request: StartRequest): Promise<void> {
   const result = await call('generations:start', request);
-  if (result.ok) context.refresh();
+  if (result.ok) {
+    context.refresh();
+    context.noteUsed(result.generation.providerId);
+  }
   if (context.disposed.current) return;
   if (!result.ok) context.setActionError(JOB_ERROR_MESSAGES[result.code]);
   else context.changed();

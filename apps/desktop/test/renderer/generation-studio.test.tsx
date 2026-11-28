@@ -669,6 +669,35 @@ describe('GenerationStudio', () => {
     expect(combobox(EDIT_MODEL_LABEL).value).toBe('res-only');
   });
 
+  it('an accepted start makes its entry the one preselected for the next file', async () => {
+    const other: ProviderView = { ...VENICE, id: nextId(), name: 'Venice B', editModel: 'mock-edit' };
+    const { api, file, rerender } = setup({
+      providers: [VENICE, other],
+      handlers: {
+        'generations:start': (request) => ({
+          ok: true,
+          generation: generation(file, {
+            status: 'pending',
+            jobStatus: 'queued',
+            outputs: [],
+            providerId: request.providerId ?? VENICE.id,
+          }),
+        }),
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.selectOptions(combobox('Provider'), other.id);
+    await waitFor(() => expect(optionsOf(combobox(EDIT_MODEL_LABEL))).toContain('mock-edit'));
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(callsOf(api, 'generations:start')).toHaveLength(1));
+
+    rerender(fileRecord({ id: 'other', originalName: 'other.png' }));
+    await waitFor(() => expect(promptBox().value).toBe(''));
+    expect(combobox('Provider').value).toBe(other.id);
+  });
+
   it('another file starts from a fresh state', async () => {
     const made = generation(fileRecord());
     const { rerender } = setup({

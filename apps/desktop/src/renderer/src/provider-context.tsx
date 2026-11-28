@@ -53,7 +53,10 @@ export interface ProvidersState {
   save(input: SaveProvider): Promise<ProviderView>;
   /** Deletes the entry and drops it with its model lists. */
   remove(id: string): Promise<void>;
-  /** Records locally what the main process stored after an analysis start, so the next dialog preselects it. */
+  /**
+   * Records locally what the main process stored after an accepted analysis or generation start, as the
+   * entry used last of its purpose, so the next dialog preselects it.
+   */
   noteUsed(id: string): void;
 }
 
@@ -304,7 +307,9 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   const noteUsed = useCallback(
     (id: string) => {
       const current = listRef.current;
-      if (current !== null && current.lastUsedId !== id) takeList({ ...current, lastUsedId: id });
+      if (current === null) return;
+      const slot = purposeOfEntry(current, id) === 'image' ? 'lastUsedImageId' : 'lastUsedId';
+      if (current[slot] !== id) takeList({ ...current, [slot]: id });
     },
     [takeList],
   );

@@ -111,13 +111,14 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       setStarting: status.setStarting,
       setStartError,
       refresh,
+      noteUsed: providers.noteUsed,
       onStarted,
     };
     void startEdit(start, editRequestOf(file.id, providerId, model, form));
   }
 
   const act = (action: () => Promise<void>) => runAction({ busy, setBusy, setActionError, disposed }, action);
-  const context: ResultContext = { session, disposed, setActionError, refresh, changed };
+  const context: ResultContext = { session, disposed, setActionError, refresh, noteUsed: providers.noteUsed, changed };
   const upscale = (fileId: string, scale: UpscaleScale) => act(() => upscaleFile(context, providerId, fileId, scale));
   const retry = (generation: Generation) => act(() => retryGeneration(context, generation));
   const remove = (generation: Generation) => act(() => removeGeneration(context, generation));
