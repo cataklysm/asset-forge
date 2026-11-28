@@ -1,9 +1,9 @@
 import { normalizeTagName } from '@assetforge/contracts';
 import { useEffect, useRef, useState } from 'react';
+import { INVALID_TAG, TAG_FILTER_LABEL, tagFilterFullTitle } from '../labels';
 import { ALERT } from '../ui';
 import { TagChip } from './TagChip';
 import { TagCombobox } from './TagCombobox';
-import { INVALID_TAG } from './TagRow';
 
 /** The props of `TagFilter`. */
 interface Props {
@@ -60,9 +60,9 @@ export function TagFilter({ value, onChange, title }: Props) {
             setInvalid(false);
           }}
           onCommit={add}
-          placeholder="Tags"
-          label="Tags"
-          title={full ? `At most ${MAX_FILTER_TAGS} tags` : title}
+          placeholder={TAG_FILTER_LABEL}
+          label={TAG_FILTER_LABEL}
+          title={full ? tagFilterFullTitle(MAX_FILTER_TAGS) : title}
           inputRef={input}
           // Read-only rather than disabled, so the input adding the tenth tag keeps the focus.
           readOnly={full}

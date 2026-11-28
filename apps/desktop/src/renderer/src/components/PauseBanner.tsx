@@ -14,6 +14,7 @@ import {
   OPEN_SITE_TITLE,
   RESUME_LABEL,
   RESUME_TITLE,
+  SETTINGS_LABEL,
 } from '../labels';
 import { BUTTON, WARNING } from '../ui';
 import { BUSY_TITLE } from './busy-title';
@@ -176,7 +177,7 @@ function PauseLine({ entry, busy, onResume, onMove, onSettings }: PauseLineProps
               if (!busy) onSettings();
             }}
           >
-            Settings
+            {SETTINGS_LABEL}
           </button>
         )}
         {/* Only analysis jobs move; an image provider's generation jobs stay on it. */}

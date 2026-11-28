@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from './api';
 import { WorkspaceShell } from './components/WorkspaceShell';
+import { LOADING_LABEL } from './labels';
 import { WorkspaceScreen } from './screens/WorkspaceScreen';
 
 /**
@@ -37,7 +38,7 @@ export function App() {
       </p>
     );
   }
-  if (current === undefined) return <p className="p-6 text-muted">Loading…</p>;
+  if (current === undefined) return <p className="p-6 text-muted">{LOADING_LABEL}</p>;
   if (current === null) return <WorkspaceScreen onOpened={setCurrent} />;
   // Keyed by workspace, so no list, scroll or loader state carries over to another workspace.
   return <WorkspaceShell key={current.id} workspace={current} onClosed={() => setCurrent(null)} />;

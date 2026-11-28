@@ -1,2 +1,2 @@
-/** Tooltip of the navigation (and of the dialogs' Settings) while an import runs. */
-export const BUSY_TITLE = 'Import in progress';
+// The text lives with the other shell texts; this module keeps the older import path working.
+export { BUSY_TITLE } from '../labels/shell';

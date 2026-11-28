@@ -1,10 +1,10 @@
 import { cleanTagText, normalizeTagName } from '@assetforge/contracts';
 import { useRef, useState, type RefObject } from 'react';
 import { describeError } from '../api';
+import { INVALID_TAG } from '../labels';
 import type { PendingFocus } from './useTagRowFocus';
 
-/** Shown when the typed tag fails the name rule. */
-export const INVALID_TAG = 'Tags need a letter or digit and at most 64 characters.';
+export { INVALID_TAG } from '../labels';
 
 /** What `useTagRowEdit` hands to the row. */
 interface TagRowEdit {

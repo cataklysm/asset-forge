@@ -1,4 +1,5 @@
 import { Image as ImageIcon } from 'lucide-react';
+import { ASSET_TAGS_LABEL, IMAGE_TAGS_LABEL, PROMPT_TAGS_LABEL } from '../labels';
 import { CHIP } from '../ui';
 import { TagChip } from './TagChip';
 
@@ -23,8 +24,8 @@ interface Props {
  * @returns the name, or undefined for file tags
  */
 function listLabel(kind: Props['kind']): string | undefined {
-  if (kind === 'asset') return 'Asset tags';
-  return kind === 'prompt' ? 'Prompt tags' : undefined;
+  if (kind === 'asset') return ASSET_TAGS_LABEL;
+  return kind === 'prompt' ? PROMPT_TAGS_LABEL : undefined;
 }
 
 /**
@@ -39,7 +40,9 @@ export function TagList({ tags, kind, max, matched, wrap = false }: Props) {
   const hidden = tags.length - shown.length;
   return (
     <div className={`flex min-w-0 items-center gap-1.5 ${wrap ? '' : 'overflow-hidden whitespace-nowrap'}`}>
-      {kind === 'file' && <ImageIcon size={16} role="img" aria-label="Image tags" className="shrink-0 text-muted" />}
+      {kind === 'file' && (
+        <ImageIcon size={16} role="img" aria-label={IMAGE_TAGS_LABEL} className="shrink-0 text-muted" />
+      )}
       <ul aria-label={listLabel(kind)} className={`flex min-w-0 items-center gap-1.5 ${wrap ? 'flex-wrap' : ''}`}>
         {shown.map((tag) => (
           <li key={tag.name} className="min-w-0">
