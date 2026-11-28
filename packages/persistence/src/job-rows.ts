@@ -30,6 +30,16 @@ export const errorCodeOf = (value: string | null): JobErrorCode | null =>
   value === null ? null : JobErrorCodeSchema.catch('internal_error').parse(value);
 
 /**
+ * The error a row reads as: the stored code and the fixed message of that code. The stored `error_message` is not
+ * read back, so the pair always agrees, also for a code read as `internal_error` and for a row written before a
+ * message text changed.
+ *
+ * @param value the `error_code` column
+ * @returns the code and its message; both null when the column is null
+ */
+export const storedErrorOf = (value: string | null) => errorOf(errorCodeOf(value));
+
+/**
  * A job row as the core type.
  *
  * @param row the row
@@ -46,8 +56,7 @@ export const toJob = (row: JobRow): Job => ({
   dedupeKey: row.dedupeKey,
   attempt: row.attempt,
   runAfter: row.runAfter,
-  errorCode: errorCodeOf(row.errorCode),
-  errorMessage: row.errorMessage,
+  ...storedErrorOf(row.errorCode),
   createdAt: row.createdAt,
   startedAt: row.startedAt,
   finishedAt: row.finishedAt,

@@ -224,6 +224,23 @@ describe('job repository', () => {
     });
   });
 
+  test('a stored message never reaches the reader: the message is the one of the code read', async () => {
+    await enqueue(T0, newJob(10), newJob(11));
+    handle
+      .prepare("update job set status = 'failed', error_code = ?, error_message = ? where id = ?")
+      .run('not_a_code', 'leaked text', uuid(10));
+    handle
+      .prepare("update job set status = 'failed', error_code = ?, error_message = ? where id = ?")
+      .run('provider_timeout', 'an older text', uuid(11));
+    const unexpected = { errorCode: 'internal_error', errorMessage: JOB_ERROR_MESSAGES.internal_error };
+    const timeout = { errorCode: 'provider_timeout', errorMessage: JOB_ERROR_MESSAGES.provider_timeout };
+    expect(await db.jobs.get(uuid(10))).toMatchObject(unexpected);
+    expect(await db.jobs.get(uuid(11))).toMatchObject(timeout);
+    const { items } = await db.jobs.list({ offset: 0, limit: 10 });
+    expect(items.find((item) => item.id === uuid(10))).toMatchObject(unexpected);
+    expect(items.find((item) => item.id === uuid(11))).toMatchObject(timeout);
+  });
+
   test('cancelPending cancels one or all pending jobs and leaves running and finished ones alone', async () => {
     await enqueue(T0, newJob(10), newJob(11), newJob(12), newJob(13), newJob(14));
     await claim(T0); // 10 running

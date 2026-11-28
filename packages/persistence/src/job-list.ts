@@ -8,7 +8,7 @@ import {
 import type { JobRepository } from '@assetforge/core';
 import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { errorCodeOf, inLane, resultOf, type JobReader, type JobRow } from './job-rows.js';
+import { inLane, storedErrorOf, resultOf, type JobReader, type JobRow } from './job-rows.js';
 import { file, generation, job } from './schema.js';
 
 // The job list of the Jobs screen: one page of jobs with what each row shows besides the job itself.
@@ -116,8 +116,7 @@ function toJobView(entry: JobListEntry): JobView {
     attempt: row.attempt,
     fileId: row.fileId,
     fileName: entry.fileName,
-    errorCode: errorCodeOf(row.errorCode),
-    errorMessage: row.errorMessage,
+    ...storedErrorOf(row.errorCode),
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
