@@ -28,7 +28,7 @@ import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-dir
 import { createGenerationImageSource } from './generation-image-source.js';
 import { createWorkspaceHandlers, dispatch, type Dialogs } from './ipc.js';
 import { createSafeStorageCodec } from './secret-codec.js';
-import type { SessionNetRequest } from './site-download.js';
+import type { SessionNetRequest } from './session-request.js';
 import { createElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppUrl } from './app-url.js';
 import {

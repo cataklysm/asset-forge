@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EXTRACT_LIMITS, extractionCode, readExtraction } from '../src/main/site-sessions.js';
+import { EXTRACT_LIMITS, extractionCode, readExtraction } from '../src/main/site-extraction.js';
 
 // The extraction script runs here against jsdom's XPath, the closest stand-in for the page's isolated world that
 // the test Electron (ELECTRON_RUN_AS_NODE) allows.

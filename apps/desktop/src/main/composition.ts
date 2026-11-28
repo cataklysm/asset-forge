@@ -34,7 +34,8 @@ import { createProviderStore, type ProviderStore } from './provider-store.js';
 import type { SecretCodec } from './secret-codec.js';
 import { createSiteHandlers } from './site-handlers.js';
 import { createSiteProfileStore, type SiteProfileStore } from './site-profile-store.js';
-import { createSiteAccess, type SiteSessions } from './site-sessions.js';
+import { createSiteAccess } from './site-access.js';
+import type { SiteSessions } from './site-sessions.js';
 
 export interface CompositionOptions {
   userDataPath: string;

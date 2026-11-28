@@ -3,8 +3,10 @@ import { PassThrough, type Readable } from 'node:stream';
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { RemoteFileError, type RemoteFile, type RemoteFileSource } from '@assetforge/core';
-import { createSessionDownload, SESSION_REQUEST_HEADERS, type SessionNetRequest } from '../src/main/site-download.js';
-import { createElectronSiteSessions, createSiteAccess, sessionRequestOptions, sitePartition } from '../src/main/site-sessions.js';
+import { SESSION_REQUEST_HEADERS, sessionRequestOptions, type SessionNetRequest } from '../src/main/session-request.js';
+import { createSiteAccess } from '../src/main/site-access.js';
+import { createSessionDownload } from '../src/main/site-download.js';
+import { createElectronSiteSessions, sitePartition } from '../src/main/site-sessions.js';
 
 const PROFILE = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
 

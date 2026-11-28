@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FileRecord, JobSummary, SiteProfile } from '@assetforge/contracts';
 import { createUrlSource } from '@assetforge/storage';
-import { createPageLoader, createSiteAccess, type PageView, type SiteSessions } from '../src/main/site-sessions.js';
+import { createSiteAccess } from '../src/main/site-access.js';
+import { createPageLoader, type PageView } from '../src/main/site-page-loader.js';
+import type { SiteSessions } from '../src/main/site-sessions.js';
 import { createHarness, type Harness } from './analysis-harness.js';
 import { pngOf } from './png-fixture.js';
 

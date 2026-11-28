@@ -2,25 +2,12 @@ import { EventEmitter } from 'node:events';
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
 import type { SiteProfile } from '@assetforge/contracts';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  cookieHeader,
-  createElectronSiteSessions,
-  createHostVetter,
-  createPageLoader,
-  pageResourceBlocked,
-  createSiteAccess,
-  EXTRACT_LIMITS,
-  extractionCode,
-  leftSiteHost,
-  loginNavigationAllowed,
-  loginTitle,
-  pageNavigationAllowed,
-  PAGE_TIMING,
-  readExtraction,
-  requestDecision,
-  sitePartition,
-  type PageView,
-} from '../src/main/site-sessions.js';
+import { cookieHeader, createSiteAccess } from '../src/main/site-access.js';
+import { EXTRACT_LIMITS, extractionCode, readExtraction } from '../src/main/site-extraction.js';
+import { loginNavigationAllowed, loginTitle } from '../src/main/site-login-window.js';
+import { createPageLoader, leftSiteHost, pageNavigationAllowed, PAGE_TIMING, type PageView } from '../src/main/site-page-loader.js';
+import { createHostVetter, pageResourceBlocked, requestDecision } from '../src/main/site-request-filter.js';
+import { createElectronSiteSessions, sitePartition } from '../src/main/site-sessions.js';
 
 const profile: SiteProfile = {
   id: '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f',

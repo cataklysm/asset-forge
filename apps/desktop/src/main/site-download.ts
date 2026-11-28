@@ -12,18 +12,9 @@ import {
   type RemoteFileSource,
   type RemoteOpenOptions,
 } from '@assetforge/core';
-import {
-  bounded,
-  dispositionName,
-  headerText,
-  isChallenge,
-  isPublicAddress,
-  limitedBody,
-  mediaType,
-  parseContentLength,
-  statusFailure,
-  type BodySource,
-} from '@assetforge/storage';
+import { bounded, isPublicAddress } from '@assetforge/storage';
+import type { SessionNetRequest } from './session-request.js';
+import { sessionHop } from './session-hop.js';
 
 // Site downloads through the profile's own browser session (spec "Browser check"). A hop on the profile's site goes
 // out through Electron's network stack with the session's cookies, so a site that bound its clearance to the browser
@@ -31,29 +22,6 @@ import {
 // Node source. Electron is not imported here: the request is made by `SiteSessions.request`, which tests fake.
 // Nothing here logs, and no error carries a URL, an address, a header or a cause.
 
-/** The answer of a session request as Electron's net `IncomingMessage` offers it; header names are lower case. */
-export interface SessionNetResponse extends BodySource {
-  readonly statusCode: number;
-  readonly headers: Record<string, string | string[]>;
-}
-
-/** The part of Electron's net `ClientRequest` a session download uses. */
-export interface SessionNetRequest {
-  on(event: 'response', listener: (response: SessionNetResponse) => void): unknown;
-  on(
-    event: 'redirect',
-    listener: (statusCode: number, method: string, redirectUrl: string, headers: Record<string, string | string[]>) => void,
-  ): unknown;
-  on(event: 'error', listener: (error: unknown) => void): unknown;
-  abort(): void;
-  end(): void;
-}
-
-/**
- * The only headers a session request sets itself. The session adds its own cookies and its unchanged user agent;
- * no `Cookie`, `User-Agent` or `Referer` is ever set by hand.
- */
-export const SESSION_REQUEST_HEADERS: Readonly<Record<string, string>> = { Accept: '*/*', 'Accept-Encoding': 'identity' };
 
 /** The limits of a session download; the same as those of the Node source. */
 export interface SessionDownloadLimits {
@@ -87,7 +55,7 @@ export interface SessionDownloadDeps {
 /** What `SiteAccess.open` is. */
 export type SessionDownload = (profileId: string, url: string, signal: AbortSignal, options: RemoteOpenOptions) => Promise<RemoteFile>;
 
-interface Config {
+export interface Config {
   siteOf: SessionDownloadDeps['siteOf'];
   request: SessionDownloadDeps['request'];
   remote: RemoteFileSource;
@@ -123,7 +91,7 @@ export function createSessionDownload(deps: SessionDownloadDeps): SessionDownloa
 }
 
 /** A failure without a cause: a cause could carry the URL or an address. */
-const failure = (kind: 'rejected' | 'unreachable' | 'address_refused' | 'too_large'): RemoteFileError => new RemoteFileError(kind);
+export const failure = (kind: 'rejected' | 'unreachable' | 'address_refused' | 'too_large'): RemoteFileError => new RemoteFileError(kind);
 
 /**
  * The hop loop: every hop on the site is vetted and sent through the session; the first hop off the site is handed
@@ -220,129 +188,3 @@ async function askHeaders(url: URL, options: RemoteOpenOptions, signal: AbortSig
   );
 }
 
-type HopOutcome = { kind: 'file'; file: RemoteFile } | { kind: 'redirect'; location: string | undefined };
-
-/**
- * Ends a session request, ignoring a request that already ended.
- *
- * @param req the request to abort
- * @returns nothing
- */
-function abortQuietly(req: SessionNetRequest): void {
-  try {
-    req.abort();
-  } catch {
-    // Already ended.
-  }
-}
-
-/**
- * Sends one hop through the profile's session. A redirect is not followed: the request is aborted inside the
- * redirect event (Electron fails a manual redirect that is neither followed nor aborted there) and its target
- * becomes the next hop. The statuses map exactly like the Node source's, a browser challenge first.
- *
- * @param url the hop
- * @param profileId the profile whose session sends it
- * @param config the request factory and the limits
- * @param signal aborts the hop and the body with its reason
- * @param deadline the end of the whole download
- * @param hopDeadline the time by which the answer's headers must have arrived
- * @returns the file, or the redirect target
- */
-function sessionHop(
-  url: URL,
-  profileId: string,
-  config: Config,
-  signal: AbortSignal,
-  deadline: number,
-  hopDeadline: number,
-): Promise<HopOutcome> {
-  return new Promise<HopOutcome>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    let req: SessionNetRequest;
-    try {
-      req = config.request(profileId, url.href);
-    } catch {
-      reject(failure('unreachable'));
-      return;
-    }
-
-    let settled = false;
-    const settle = (done: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      done();
-    };
-    const fail = (error: unknown) =>
-      settle(() => {
-        abortQuietly(req);
-        reject(error);
-      });
-    const onAbort = () => fail(signal.reason);
-    const timer = setTimeout(() => fail(failure('unreachable')), Math.max(0, hopDeadline - Date.now()));
-    signal.addEventListener('abort', onAbort, { once: true });
-    req.on('error', () => fail(failure('unreachable')));
-
-    req.on('redirect', (status, _method, redirectUrl, headers) => {
-      const mitigated = headerText(headers['cf-mitigated']);
-      if (isChallenge(mitigated)) {
-        fail(statusFailure(status, { mitigated }));
-        return;
-      }
-      settle(() => {
-        abortQuietly(req);
-        resolve({ kind: 'redirect', location: redirectUrl });
-      });
-      // A redirect that arrives after the hop ended is still aborted, so Electron raises no error of its own.
-      abortQuietly(req);
-    });
-
-    req.on('response', (res) => {
-      if (settled) {
-        res.destroy();
-        return;
-      }
-      const status = res.statusCode;
-      const mitigated = headerText(res.headers['cf-mitigated']);
-      if (status !== 200 || isChallenge(mitigated)) {
-        res.destroy();
-        fail(statusFailure(status, { retryAfter: headerText(res.headers['retry-after']), mitigated }));
-        return;
-      }
-      // Chromium decodes a compressed body itself; its announced length is then not the length that arrives.
-      const encoding = headerText(res.headers['content-encoding']);
-      const identity = encoding === undefined || encoding.trim() === '' || encoding.trim().toLowerCase() === 'identity';
-      const contentLength = identity ? parseContentLength(headerText(res.headers['content-length'])) : null;
-      if (contentLength !== null && contentLength > config.limits.maxBytes) {
-        res.destroy();
-        fail(failure('too_large'));
-        return;
-      }
-      settle(() =>
-        resolve({
-          kind: 'file',
-          file: {
-            stream: limitedBody(
-              { destroy: () => abortQuietly(req), onError: (listener) => req.on('error', listener) },
-              res,
-              config.limits,
-              signal,
-              deadline,
-              contentLength,
-            ),
-            finalUrl: url.href,
-            contentType: mediaType(headerText(res.headers['content-type'])),
-            contentLength,
-            dispositionName: dispositionName(headerText(res.headers['content-disposition'])),
-          },
-        }),
-      );
-    });
-    req.end();
-  });
-}
