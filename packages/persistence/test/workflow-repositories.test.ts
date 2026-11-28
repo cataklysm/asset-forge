@@ -357,6 +357,56 @@ describe('asset workflow repository', () => {
   });
 });
 
+describe('asset with its workflow', () => {
+  const newWorkflow = (stepIds: number[]) => ({
+    workflow: { id: uuid(70), assetId: uuid(1), templateVersionId: version1.id, createdAt: TS },
+    steps: sortedSteps.map((s, i) => ({ id: uuid(stepIds[i]!), stepDefinitionId: s.id, updatedAt: TS })),
+  });
+  const count = (table: string) => (openRaw().prepare(`select count(*) as n from ${table}`).get() as { n: number }).n;
+
+  beforeEach(async () => {
+    await db.assetTypes.insertMissing(typeRows(100));
+    await seedTemplate();
+  });
+
+  test('insertWithWorkflow writes the asset, its search entry, the workflow and its steps', async () => {
+    await db.assets.insertWithWorkflow(asset(1, 'Hero'), newWorkflow([71, 72, 73, 74]));
+
+    await expect(db.assets.get(uuid(1))).resolves.toEqual(asset(1, 'Hero'));
+    const workflow = await db.assetWorkflows.getByAsset(uuid(1));
+    expect(workflow).toMatchObject({ id: uuid(70), templateId: TEMPLATE, templateVersion: 1 });
+    expect(workflow!.steps.map((s) => s.id)).toEqual([uuid(71), uuid(72), uuid(73), uuid(74)]);
+    expect(workflow!.steps.every((s) => s.state === 'not_started' && s.notes === '')).toBe(true);
+    await expect(db.assets.list({ query: 'hero', offset: 0, limit: 10 })).resolves.toMatchObject({ total: 1 });
+  });
+
+  test('a step row that fails rolls back the asset, its search entry and the workflow', async () => {
+    // Two steps with the same id: the second insert breaks the primary key after the asset and workflow rows.
+    await expect(db.assets.insertWithWorkflow(asset(1, 'Hero'), newWorkflow([71, 72, 72, 74]))).rejects.toThrow(
+      /UNIQUE/,
+    );
+
+    await expect(db.assets.get(uuid(1))).resolves.toBeNull();
+    await expect(db.assetWorkflows.getByAsset(uuid(1))).resolves.toBeNull();
+    expect(count('asset')).toBe(0);
+    expect(count('asset_search_map')).toBe(0);
+    expect(count('asset_search')).toBe(0);
+    expect(count('asset_workflow')).toBe(0);
+    expect(count('asset_workflow_step')).toBe(0);
+  });
+
+  test('a workflow row that fails rolls back the asset', async () => {
+    const broken = newWorkflow([71, 72, 73, 74]);
+    broken.workflow.templateVersionId = uuid(99);
+
+    await expect(db.assets.insertWithWorkflow(asset(1, 'Hero'), broken)).rejects.toThrow(/FOREIGN KEY/);
+
+    expect(count('asset')).toBe(0);
+    expect(count('asset_search_map')).toBe(0);
+    expect(count('asset_workflow')).toBe(0);
+  });
+});
+
 describe('asset type default template', () => {
   test('setDefaultWorkflowTemplateIfUnset does not replace an existing default', async () => {
     await db.assetTypes.insertMissing(typeRows(100));

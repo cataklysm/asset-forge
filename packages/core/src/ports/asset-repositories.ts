@@ -12,6 +12,7 @@ import type {
   RelationKind,
 } from '@assetforge/contracts';
 import type { Page } from './page.js';
+import type { NewAssetWorkflow } from './workflow-repositories.js';
 
 // The asset rows of a workspace: the asset types, the assets with their covers, their relations and their source
 // URLs.
@@ -80,6 +81,14 @@ export interface AssetRepository {
    * @param asset the row
    */
   insert(asset: Asset): Promise<void>;
+  /**
+   * One transaction: inserts a new asset with its search entry and its first workflow, the workflow row and one step
+   * row per entry (state 'not_started', notes ''). Writes nothing when any of it fails.
+   *
+   * @param asset the row
+   * @param workflow the workflow of the asset and its steps
+   */
+  insertWithWorkflow(asset: Asset, workflow: NewAssetWorkflow): Promise<void>;
   /**
    * One asset.
    *

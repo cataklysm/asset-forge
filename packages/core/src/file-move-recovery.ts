@@ -98,8 +98,8 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
 }
 
 /**
- * Resolves an open move row of one file with the recovery rule, so a move whose commit failed in an
- * earlier session is completed or discarded before the file is acted on again.
+ * Resolves an open move row of one file with the recovery rule: right after its commit failed (`commitMove`), and
+ * before the file is acted on again when an earlier resolve failed too, so the move is completed or discarded.
  *
  * @param dependencies the storage, the files and the move rows of the workspace
  * @param fileId the file whose move row is resolved
