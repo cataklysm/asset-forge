@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { BACKUP_INFO_FILE } from '@assetforge/contracts';
@@ -14,11 +14,17 @@ import {
   type DatabaseSnapshot,
   type WorkspaceBackups,
 } from '@assetforge/core';
-import { resolveLocation } from './backup-location.js';
+import { requireSafeBackupDirectory, resolveLocation, type LocationContext } from './backup-location.js';
 
 /** The temporary file of one write attempt: the backup name, a uuid and `.tmp`, unique per attempt. */
 const ATTEMPT_TEMPORARY_PATTERN =
   /^assetforge-[0-9a-f]{12}-\d{8}T\d{6}Z-m\d{1,4}\.sqlite\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
+
+/** The system codes of a full disk or an exceeded quota. */
+const NO_SPACE_CODES = new Set(['ENOSPC', 'EDQUOT']);
+
+/** The system codes of a file system without hard links (some network shares). */
+const LINK_UNSUPPORTED_CODES = new Set(['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV']);
 
 /** Where the chosen backup folder of a workspace is stored. */
 export interface BackupDirectoryStore {
@@ -40,6 +46,13 @@ export interface BackupTargetOptions {
    * @returns the free bytes; null when they cannot be measured
    */
   freeBytes?: (directory: string) => Promise<number | null>;
+  /**
+   * The folders a backup directory must not lead into, checked right before it is written to or deleted from;
+   * without it the directory is not checked.
+   *
+   * @returns every workspace root and the app data folder
+   */
+  forbiddenRoots?: () => Promise<LocationContext>;
 }
 
 /** The file side of the workspace backup and the copy a restore reads a regular backup through. */
@@ -63,6 +76,8 @@ interface PlaceFacts {
   name: string;
   /** The folder whose reachability decides `backup_location_unreachable`: the workspace root or the chosen folder. */
   anchor: string;
+  /** Whether it is the default place in the workspace folder or a chosen folder. */
+  kind: BackupLocation['kind'];
 }
 
 /** The state shared by the operations of one target. */
@@ -88,7 +103,7 @@ export function createBackupTarget(options: BackupTargetOptions): BackupTarget {
     locationOf: (workspace) => locationOf(state, workspace),
     write: (snapshot, location, fileName, signal) => writeBackup(state, snapshot, location, fileName, signal),
     list: (directory) => listBackups(state, directory),
-    remove: (directory, name) => removeBackup(directory, name),
+    remove: (directory, name) => removeBackup(state, directory, name),
     copyIn: (source, destinationPath, signal) => copyIn(source, destinationPath, signal),
   };
 }
@@ -106,7 +121,7 @@ async function locationOf(
 ): Promise<BackupLocation> {
   const location = resolveLocation(workspace, await state.options.registry.backupDirectory(workspace.id));
   const anchor = location.chosenPath ?? workspace.rootPath;
-  state.places.set(location.directory, { id: workspace.id, name: workspace.name, anchor });
+  state.places.set(location.directory, { id: workspace.id, name: workspace.name, anchor, kind: location.kind });
   return location;
 }
 
@@ -131,22 +146,72 @@ async function writeBackup(
   const place = placeOf(state, location);
   if (parseBackupName(fileName) === null) throw new BackupError('backup_failed');
   if (!(await isReachable(place.anchor))) throw new BackupError('backup_location_unreachable');
-  const free = await (state.options.freeBytes ?? nearestFreeBytes)(location.directory);
-  if (free !== null && free < snapshot.sizeBytes) throw new BackupError('backup_no_space');
   const temporary = join(location.directory, `${fileName}.${randomUUID()}.tmp`);
   state.running.add(temporary);
   try {
-    await mkdir(location.directory, { recursive: true });
-    await sweepTemporary(state, location.directory);
+    await preparePlace(state, location.directory, place);
+    const free = await (state.options.freeBytes ?? nearestFreeBytes)(location.directory);
+    if (free !== null && free < snapshot.sizeBytes) throw new BackupError('backup_no_space');
     if (location.kind === 'chosen') await writeInfo(location.directory, place);
     await pipeline(createReadStream(snapshot.path), createWriteStream(temporary, { flags: 'wx' }), { signal });
-    await rename(temporary, join(location.directory, fileName));
+    await placeWithoutReplacing(temporary, join(location.directory, fileName));
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);
-    throw writeFailure(error);
+    throw await writeFailure(error, place.anchor);
   } finally {
     state.running.delete(temporary);
   }
+}
+
+/**
+ * Creates the backup directory, checks where it really leads and removes the leftovers of earlier attempts, so
+ * they no longer count against the free space.
+ *
+ * @param state the target state
+ * @param directory the backup directory
+ * @param place the facts of its place
+ * @returns resolves once the directory is ready
+ * @throws BackupError `backup_location_unreachable` when the directory leads into a forbidden folder
+ */
+async function preparePlace(state: TargetState, directory: string, place: PlaceFacts): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  await requireSafePlace(state, directory, place);
+  await sweepTemporary(state, directory);
+}
+
+/**
+ * Checks where a backup directory really leads, when the host gave the folders it must stay out of.
+ *
+ * @param state the target state
+ * @param directory the backup directory
+ * @param place the facts of its place
+ * @returns resolves when it may be used
+ * @throws BackupError `backup_location_unreachable` when it may not
+ */
+async function requireSafePlace(state: TargetState, directory: string, place: PlaceFacts): Promise<void> {
+  if (state.options.forbiddenRoots === undefined) return;
+  const ownRoot = place.kind === 'workspace' ? place.anchor : null;
+  await requireSafeBackupDirectory(directory, ownRoot, await state.options.forbiddenRoots());
+}
+
+/**
+ * Gives a complete temporary file its backup name without ever replacing a backup of that name: such a backup
+ * already holds a complete copy, so the attempt counts as done and the temporary file goes.
+ *
+ * @param temporary the complete temporary file
+ * @param final the backup file
+ * @returns resolves once the backup is in place
+ */
+async function placeWithoutReplacing(temporary: string, final: string): Promise<void> {
+  try {
+    await link(temporary, final);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? '';
+    if (code !== 'EEXIST' && !LINK_UNSUPPORTED_CODES.has(code)) throw error;
+    // Without hard links, the name is checked right before the rename instead.
+    if (code !== 'EEXIST' && !(await isReachable(final))) return rename(temporary, final);
+  }
+  await rm(temporary, { force: true });
 }
 
 /**
@@ -160,19 +225,23 @@ function placeOf(state: TargetState, location: BackupLocation): PlaceFacts {
   const known = state.places.get(location.directory);
   if (known !== undefined) return known;
   const id = basename(location.directory);
-  return { id, name: id, anchor: location.chosenPath ?? dirname(dirname(location.directory)) };
+  const anchor = location.chosenPath ?? dirname(dirname(location.directory));
+  return { id, name: id, anchor, kind: location.kind };
 }
 
 /**
- * The error of a failed write: a backup error stays, a full disk is `backup_no_space`, anything else `backup_failed`.
+ * The error of a failed write: a backup error stays, a place that can no longer be reached is
+ * `backup_location_unreachable`, a full disk or quota `backup_no_space`, anything else `backup_failed`.
  *
  * @param error the failure
+ * @param anchor the folder whose reachability decides the place
  * @returns the backup error
  */
-function writeFailure(error: unknown): BackupError {
+async function writeFailure(error: unknown, anchor: string): Promise<BackupError> {
   if (error instanceof BackupError) return error;
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return new BackupError(code === 'ENOSPC' ? 'backup_no_space' : 'backup_failed', { cause: error });
+  if (!(await isReachable(anchor))) return new BackupError('backup_location_unreachable', { cause: error });
+  const code = (error as NodeJS.ErrnoException | null)?.code ?? '';
+  return new BackupError(NO_SPACE_CODES.has(code) ? 'backup_no_space' : 'backup_failed', { cause: error });
 }
 
 /**
@@ -264,15 +333,20 @@ async function isMissingPlace(state: TargetState, directory: string, error: unkn
 }
 
 /**
- * Deletes one regular backup.
+ * Deletes one regular backup, after checking where its directory really leads (a place `locationOf` did not
+ * resolve counts as a chosen one).
  *
+ * @param state the target state
  * @param directory the backup directory
  * @param name the backup name
  * @returns resolves once it is gone
- * @throws BackupError `backup_failed` for a name that is not a backup name, or when the delete failed
+ * @throws BackupError `backup_failed` for a name that is not a backup name, or when the delete failed;
+ *   `backup_location_unreachable` when the directory leads into a forbidden folder
  */
-async function removeBackup(directory: string, name: string): Promise<void> {
+async function removeBackup(state: TargetState, directory: string, name: string): Promise<void> {
   if (!isBackupName(name)) throw new BackupError('backup_failed');
+  const place = state.places.get(directory) ?? { id: '', name: '', anchor: directory, kind: 'chosen' as const };
+  await requireSafePlace(state, directory, place);
   try {
     await rm(join(directory, name), { force: true });
   } catch (error) {

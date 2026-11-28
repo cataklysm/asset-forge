@@ -18,6 +18,7 @@ import {
   type BackupChecker,
 } from '@assetforge/persistence';
 import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
+import type { LocationContext } from './backup-location.js';
 import { createBackupTarget } from './backup-target.js';
 import { JsonWorkspaceRegistry } from './json-registry.js';
 
@@ -141,13 +142,25 @@ function workspaceBackups(
   registry: JsonWorkspaceRegistry,
   check: BackupChecker,
 ): WorkspaceBackups {
-  const target = createBackupTarget({ registry });
+  const target = createBackupTarget({ registry, forbiddenRoots: () => forbiddenRootsOf(userDataPath, registry) });
   const database = createDatabaseBackups({
     databaseFilePathOf: (workspaceId) => databaseFilePath(userDataPath, workspaceId),
     check,
     copyIn: target.copyIn,
   });
   return { ...target, ...database };
+}
+
+/**
+ * The folders a backup directory must not lead into.
+ *
+ * @param userDataPath the app's `userData` directory
+ * @param registry gives every registered workspace
+ * @returns every workspace root and the app data folder
+ */
+async function forbiddenRootsOf(userDataPath: string, registry: JsonWorkspaceRegistry): Promise<LocationContext> {
+  const workspaceRoots = (await registry.list()).map((workspace) => workspace.rootPath);
+  return { workspaceRoots, userDataPath };
 }
 
 /**

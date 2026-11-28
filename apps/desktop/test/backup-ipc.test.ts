@@ -14,7 +14,7 @@ import {
 import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
-import type { Dialogs } from '../src/main/host-actions.js';
+import type { Dialogs, HostActions } from '../src/main/host-actions.js';
 import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { JsonWorkspaceRegistry } from '../src/main/json-registry.js';
 import { RunningRestores } from '../src/main/running-restores.js';
@@ -31,6 +31,9 @@ let picked: string | null;
 /** Every answer of the test, checked for paths at the end of each test. */
 let answers: unknown[];
 let logLines: string[];
+let restores: RunningRestores;
+/** While set, every lifecycle step waits for it in its closing notification, which holds the lifecycle queue. */
+let closingGate: { promise: Promise<void>; release: () => void } | null;
 
 const dialogs: Dialogs = {
   pickDirectory: async () => picked,
@@ -54,8 +57,11 @@ beforeEach(async () => {
     registry,
     backupWorkerUrl: TEST_BACKUP_WORKER_URL,
   });
-  const backup = { registry, userDataPath: userData, restores: new RunningRestores() };
-  handlers = createWorkspaceHandlers(manager, dialogs, noopHost, idleJobHost, { ...idleServices, backup });
+  restores = new RunningRestores();
+  closingGate = null;
+  const host: HostActions = { ...noopHost, workspaceClosing: async () => closingGate?.promise };
+  const backup = { registry, userDataPath: userData, restores };
+  handlers = createWorkspaceHandlers(manager, dialogs, host, idleJobHost, { ...idleServices, backup });
 });
 
 afterEach(async () => {
@@ -287,6 +293,42 @@ describe('restore through IPC', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'validation_failed', message: BACKUP_DAMAGED_MESSAGE } });
     await value('workspace:open', { rootPath });
     expect(await projectNames()).toEqual(['Current']);
+  });
+
+  it('a restore aborted while it waits in the lifecycle queue fails and changes nothing', async () => {
+    const { id, rootPath } = await createWorkspace('Own');
+    await value('projects:create', { name: 'Old' });
+    await value('backup:now', {});
+    await value('projects:create', { name: 'New' });
+    // The only backup so far holds just `Old`; a restore that went ahead would drop `New`.
+    const listing = await value<BackupListing>('workspace:backups', { id });
+    expect(listing.backups).toHaveLength(1);
+
+    let release = () => undefined as void;
+    closingGate = { promise: new Promise<void>((resolve) => (release = resolve)), release: () => release() };
+    const closing = send('workspace:close', {});
+    const restoring = send('workspace:restore', { rootPath, backupId: listing.backups[0]!.backupId });
+    await vi.waitFor(() => expect(restores.size).toBe(1));
+    restores.abortAll();
+    const gate = closingGate;
+    closingGate = null;
+    gate.release();
+
+    await closing;
+    expect(await restoring).toMatchObject({ ok: false, error: { code: 'backup_failed' } });
+    await value('workspace:open', { rootPath });
+    expect((await projectNames()).sort()).toEqual(['New', 'Old']);
+  });
+
+  it('a folder that cannot be reached answers what opening it answers', async () => {
+    // A folder below a file can never be reached, like a share that is offline.
+    await writeFile(join(base, 'offline'), '');
+    const rootPath = join(base, 'offline', 'root');
+    const opened = await send('workspace:open', { rootPath });
+    expect(opened.ok).toBe(false);
+    const restored = await send('workspace:restore', { rootPath, backupId: randomUUID() });
+    expect(restored).toEqual(opened);
+    expect(restored).toMatchObject({ error: { code: 'storage_unreachable' } });
   });
 
   it('lists the backups of another lineage in the status and deletes one of them', async () => {

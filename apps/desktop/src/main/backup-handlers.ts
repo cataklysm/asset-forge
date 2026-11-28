@@ -1,6 +1,8 @@
 import type { BackupStatus } from '@assetforge/contracts';
 import {
+  BackupError,
   InvalidOperationError,
+  StorageUnreachableError,
   NoWorkspaceOpenError,
   readManifest,
   type BackupFolderStatus,
@@ -137,13 +139,32 @@ async function restoreBackup(
   request: IpcRequest<'workspace:restore'>,
 ): Promise<IpcResponse<'workspace:restore'>> {
   const { manager, runLifecycle } = state.dependencies;
-  const manifest = await readManifest(new LocalFileSystemStorage(request.rootPath));
+  const storage = new LocalFileSystemStorage(request.rootPath);
+  if (!(await storage.isReachable())) throw new StorageUnreachableError('Storage is not reachable');
+  const manifest = await readManifest(storage);
   const source = state.ids.resolve('restore', manifest.id, request.backupId);
-  const summary = await runLifecycle(() =>
-    state.restores.run((signal) => manager.restore({ rootPath: request.rootPath, source, signal })),
+  // The abort is registered before the step waits in the lifecycle queue, so quitting also stops a waiting restore.
+  const summary = await state.restores.run((signal) =>
+    runLifecycle(() => restoreUnlessAborted(manager, { rootPath: request.rootPath, source, signal })),
   );
   state.ids.forget(manifest.id);
   return summary;
+}
+
+/**
+ * Runs a restore step unless it was aborted while it waited in the lifecycle queue; then nothing is closed or moved.
+ *
+ * @param manager the workspace manager
+ * @param request the workspace folder, the backup and the abort signal
+ * @returns the opened workspace
+ * @throws BackupError `backup_failed` when the signal was aborted before the step started
+ */
+async function restoreUnlessAborted(
+  manager: WorkspaceManager,
+  request: Parameters<WorkspaceManager['restore']>[0] & { signal: AbortSignal },
+): Promise<IpcResponse<'workspace:restore'>> {
+  if (request.signal.aborted) throw new BackupError('backup_failed');
+  return manager.restore(request);
 }
 
 /**

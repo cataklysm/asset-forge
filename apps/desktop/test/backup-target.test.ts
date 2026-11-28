@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,7 @@ beforeEach(async () => {
   target = createBackupTarget({
     registry: { backupDirectory: async () => chosen },
     freeBytes: async () => free,
+    forbiddenRoots: async () => ({ workspaceRoots: [root], userDataPath: join(base, 'userData') }),
   });
   const path = join(base, 'snapshot.tmp');
   await writeFile(path, Buffer.alloc(4096, 7));
@@ -51,6 +52,17 @@ afterEach(async () => {
  */
 function nameAt(at: string): string {
   return backupFileName(LINEAGE, new Date(at), 19);
+}
+
+/**
+ * @param path a file
+ * @returns whether it exists
+ */
+async function exists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
 }
 
 /** @returns the place of the test workspace */
@@ -181,6 +193,74 @@ describe('backup target', () => {
       .write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal)
       .catch((caught: Error) => caught);
     expect((error as Error).message).not.toContain(base);
+  });
+
+  it('a leftover .tmp is swept before the free space is measured', async () => {
+    const place = await location();
+    await mkdir(place.directory, { recursive: true });
+    const leftover = join(place.directory, `${nameAt('2026-11-27T10:00:00Z')}.tmp`);
+    await writeFile(leftover, Buffer.alloc(4096));
+    // Free space plus the leftover covers the backup; the free space alone does not.
+    target = createBackupTarget({
+      registry: { backupDirectory: async () => chosen },
+      freeBytes: async () => ((await exists(leftover)) ? 4095 : 8191),
+    });
+    const name = nameAt('2026-11-28T10:00:00Z');
+    await target.write(snapshot, await location(), name, new AbortController().signal);
+    expect(await readdir(place.directory)).toEqual([name]);
+  });
+
+  it('a second write under the same name keeps the first backup', async () => {
+    const place = await location();
+    const name = nameAt('2026-11-28T10:00:00Z');
+    await target.write(snapshot, place, name, new AbortController().signal);
+    const other = join(base, 'other.tmp');
+    await writeFile(other, Buffer.alloc(2048, 9));
+    await target.write({ ...snapshot, path: other, sizeBytes: 2048 }, place, name, new AbortController().signal);
+    expect(await readdir(place.directory)).toEqual([name]);
+    expect(await readFile(join(place.directory, name))).toEqual(Buffer.alloc(4096, 7));
+  });
+
+  describe('a place whose folders lead elsewhere', () => {
+    it('a chosen place linked into a workspace folder is refused and gets nothing', async () => {
+      chosen = join(base, 'chosen');
+      const inside = join(root, 'inside');
+      await mkdir(join(chosen, BACKUP_FOLDER_NAME), { recursive: true });
+      await mkdir(inside);
+      await symlink(inside, join(chosen, BACKUP_FOLDER_NAME, ID), 'junction');
+      const place = await location();
+      await expect(
+        target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal),
+      ).rejects.toMatchObject({ code: 'backup_location_unreachable' });
+      expect(await readdir(inside)).toEqual([]);
+    });
+
+    it('a default place linked into the app data is refused', async () => {
+      const userData = join(base, 'userData');
+      await mkdir(userData);
+      await mkdir(join(root, '.assetforge'));
+      await symlink(userData, join(root, '.assetforge', 'backups'), 'junction');
+      const place = await location();
+      await expect(
+        target.write(snapshot, place, nameAt('2026-11-28T10:00:00Z'), new AbortController().signal),
+      ).rejects.toMatchObject({ code: 'backup_location_unreachable' });
+      expect(await readdir(userData)).toEqual([]);
+    });
+
+    it('a delete through such a link is refused and the file stays', async () => {
+      chosen = join(base, 'chosen');
+      const inside = join(root, 'inside');
+      await mkdir(join(chosen, BACKUP_FOLDER_NAME), { recursive: true });
+      await mkdir(inside);
+      await symlink(inside, join(chosen, BACKUP_FOLDER_NAME, ID), 'junction');
+      const name = nameAt('2026-11-28T10:00:00Z');
+      await writeFile(join(inside, name), 'x');
+      const place = await location();
+      await expect(target.remove(place.directory, name)).rejects.toMatchObject({
+        code: 'backup_location_unreachable',
+      });
+      expect(await readdir(inside)).toEqual([name]);
+    });
   });
 
   it('nearestFreeBytes measures the nearest existing ancestor', async () => {

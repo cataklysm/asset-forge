@@ -158,7 +158,8 @@ class WorkspaceLifecycle {
 
   /**
    * Removes a workspace after the user chose how. When its final backup fails, the user is asked whether to remove
-   * it anyway; the workspace stays closed either way.
+   * it anyway. Declining leaves the workspace as it is and never reopens it; from the UI this only arises for a
+   * workspace that is not open.
    *
    * @param request the workspace's id
    * @returns whether it was removed and its folder trashed
