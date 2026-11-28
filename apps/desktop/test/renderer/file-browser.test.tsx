@@ -70,10 +70,13 @@ function Harness(props: {
         view={view}
         onViewChange={setView}
         selection={selection}
-        onSelectionChange={(next) => {
-          props.onSelection?.(next);
-          setSelection(next);
-        }}
+        onSelectionChange={(change) =>
+          setSelection((current) => {
+            const next = typeof change === 'function' ? change(current) : change;
+            if (next !== current) props.onSelection?.(next);
+            return next;
+          })
+        }
         reloadToken={reloadToken}
         onOpen={onOpen}
         menuItems={(file) => fileMenuItems(file, { cover: null, onDetails: () => onOpen(file) })}

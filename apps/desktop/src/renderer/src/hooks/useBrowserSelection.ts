@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { freshSelected, selectableFiles, type BrowserLatest } from '../components/file-browser-state';
 import type { PagedState } from '../paged-list';
-import { MAX_SELECTION, refreshSelected, selectAll } from '../selection';
+import { MAX_SELECTION, refreshSelected, selectAll, type FileSelection } from '../selection';
 
 // The upkeep of the file browser's selection: the shift anchor is dropped on a filter change, selected files show
 // their latest records, and Ctrl+A selects once the pages up to MAX_SELECTION have settled.
@@ -20,21 +20,21 @@ export function useBrowserSelection(
   filterKey: string,
   state: PagedState<FileRecord>,
 ): () => void {
-  // A shift range is relative to the list it started in.
+  // A shift range is relative to the list it started in. Both upkeep steps are functional updates, so two of them in
+  // one commit build on each other instead of on the selection of the last render.
   const lastFilterKey = useRef(filterKey);
   useEffect(() => {
     if (lastFilterKey.current === filterKey) return;
     lastFilterKey.current = filterKey;
-    const { selection: current, onSelectionChange } = latest.current.props;
-    if (current.anchor !== null) onSelectionChange({ ...current, anchor: null });
+    if (latest.current.props.selection.anchor === null) return;
+    latest.current.props.onSelectionChange(withoutAnchor);
   }, [filterKey]);
 
   // Selected files show their latest records once a page holding them is loaded.
   useEffect(() => {
     const { selection: current, onSelectionChange } = latest.current.props;
-    if (current.selected.size === 0) return;
-    const fresh = freshSelected(current.selected, state);
-    if (fresh.length > 0) onSelectionChange(refreshSelected(current, fresh));
+    if (current.selected.size === 0 || freshSelected(current.selected, state).length === 0) return;
+    onSelectionChange((selection) => withFreshRecords(selection, state));
   }, [state]);
 
   // Ctrl+A: after the pages up to MAX_SELECTION have settled, the next render selects them.
@@ -53,4 +53,26 @@ export function useBrowserSelection(
       () => {},
     );
   };
+}
+
+/**
+ * The selection without its shift anchor.
+ *
+ * @param selection the current selection
+ * @returns the same one when it has no anchor
+ */
+function withoutAnchor(selection: FileSelection): FileSelection {
+  return selection.anchor === null ? selection : { ...selection, anchor: null };
+}
+
+/**
+ * The selection with the loaded records of its files.
+ *
+ * @param selection the current selection
+ * @param state the displayed list
+ * @returns the same one when no selected record changed
+ */
+function withFreshRecords(selection: FileSelection, state: PagedState<FileRecord>): FileSelection {
+  const fresh = freshSelected(selection.selected, state);
+  return fresh.length > 0 ? refreshSelected(selection, fresh) : selection;
 }

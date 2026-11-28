@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import type { FileListFilter, FileRecord, FileScope } from '@assetforge/contracts';
 import { call } from '../api';
 import { pagesForRows } from '../gallery';
@@ -44,8 +52,8 @@ export interface FileBrowserProps {
   positionRef?: MutableRefObject<ViewPosition | null>;
   /** The selected files as the host keeps them. */
   selection: FileSelection;
-  /** Receives a changed selection. */
-  onSelectionChange(selection: FileSelection): void;
+  /** Receives a changed selection, or a function of the current one (a state setter takes both). */
+  onSelectionChange(change: SetStateAction<FileSelection>): void;
   /**
    * Part of the list key; bump after a mutation to refetch. The position is kept. Background changes
    * (jobs) never go through it: the list follows the change feed in place.
