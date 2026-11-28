@@ -1,4 +1,10 @@
-import { ANALYZE_FILE_JOB, FILE_DOWNLOAD_JOB, IMAGE_GENERATE_JOB } from '@assetforge/contracts';
+import {
+  ANALYZE_FILE_JOB,
+  FILE_DOWNLOAD_JOB,
+  IMAGE_GENERATE_JOB,
+  JobViewSchema,
+  SITE_CRAWL_JOB,
+} from '@assetforge/contracts';
 import { describe, expect, it } from 'vitest';
 import { jobViewOf, type Job } from '../src/index.js';
 
@@ -28,6 +34,22 @@ function jobOf(type: string, payload: unknown, lane: string | null): Job {
 const generation = { providerName: 'Venice', model: 'edit-model' };
 
 describe('jobViewOf', () => {
+  it('keeps a gallery extraction host lane out of the provider fields and satisfies the IPC view contract', () => {
+    const job = { ...jobOf(SITE_CRAWL_JOB, { v: 1, crawlId: 'crawl' }, 'example.com'), fileId: null };
+    const view = jobViewOf(job, { fileName: null, generation: null, result: null });
+    expect(view).toMatchObject({
+      type: SITE_CRAWL_JOB,
+      providerId: null,
+      providerName: null,
+      model: null,
+      mode: null,
+      url: null,
+      host: null,
+    });
+    expect(JobViewSchema.safeParse(view).success).toBe(true);
+    expect(job.lane).toBe('example.com');
+  });
+
   it('shows a download with its address and host and without a provider', () => {
     const job = jobOf(
       FILE_DOWNLOAD_JOB,

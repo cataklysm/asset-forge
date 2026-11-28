@@ -89,6 +89,44 @@ describe('durable gallery discovery', () => {
     expect(jobs.items.every((job) => job.type === 'site.crawl')).toBe(true);
   });
 
+  it('serves a mixed Jobs page through validated IPC with nine persisted gallery extractions', async () => {
+    const saved = await open();
+    const ids: string[] = [];
+    for (let i = 0; i < 9; i++) {
+      const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: `${URL}/${i}`, target: null });
+      ids.push(crawlId);
+    }
+    for (const id of ids) await ready(id);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    await h!.ok('sites:import', { crawlId: ids[0]!, selectedUrls: ['https://example.com/photo.jpg'] });
+
+    const response = await h!.call('jobs:list', { limit: 60, offset: 0 });
+    expect(response, h!.logs.filter((line) => line.includes('IPC response violates')).join('\n')).toMatchObject({
+      ok: true,
+      value: { total: 10 },
+    });
+    const jobs = await h!.ok('jobs:list', { limit: 60, offset: 0 });
+    const extractions = jobs.items.filter((job) => job.type === 'site.crawl');
+    expect(extractions).toHaveLength(9);
+    for (const job of extractions) {
+      expect(job).toMatchObject({ status: 'succeeded', providerId: null, providerName: null, model: null });
+    }
+    expect(jobs.items.find((job) => job.type === 'file.download')).toMatchObject({
+      status: 'queued',
+      providerId: null,
+      host: saved.site,
+    });
+    expect((await h!.ok('jobs:list', { limit: 60, offset: 0, status: 'succeeded' })).total).toBe(9);
+    expect((await h!.ok('jobs:list', { limit: 60, offset: 0, ids: [ids[0]!] })).items).toHaveLength(1);
+    expect(await h!.manager.read((session) => session.database.jobs.get(ids[0]!))).toMatchObject({ lane: saved.site });
+
+    const rootPath = h!.manager.current()!.rootPath;
+    await h!.ok('workspace:close', {});
+    await h!.ok('workspace:open', { rootPath });
+    expect((await h!.ok('jobs:list', { limit: 60, offset: 0 })).total).toBe(10);
+    expect(h!.logs.some((line) => line.includes('IPC response violates'))).toBe(false);
+  });
+
   it('removes an imported extraction without cancelling pending downloads or deleting its profile or files', async () => {
     const saved = await open();
     const fileId = await h!.importPng({ name: 'existing.png', width: 8, height: 8 });
