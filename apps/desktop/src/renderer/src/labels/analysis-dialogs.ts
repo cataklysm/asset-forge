@@ -27,7 +27,7 @@ export const GENERATING_TITLE = 'The prompt is being generated';
 export const NO_FILE_TITLE = 'No image to describe';
 export const DESCRIBE_LABEL = 'Generate';
 export const COPY_LABEL = 'Copy';
-export const PROMPT_RESULT_LABEL = 'Prompt';
+export const PROMPT_RESULT_LABEL = 'Generated prompt';
 /** Tooltip of Generate when the provider lists no model that takes images. */
 export const NO_DESCRIBE_MODEL = 'The provider offers no model that can describe images';
 /** Tooltip of Generate when the chosen model does not take images. */

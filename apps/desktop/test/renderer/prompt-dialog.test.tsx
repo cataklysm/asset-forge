@@ -105,7 +105,7 @@ const FILE = fileRecord({ originalName: 'fox.png' });
 
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const modelSelect = () => screen.getByRole('combobox', { name: 'Prompt model' }) as HTMLSelectElement;
-const promptField = () => screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
+const promptField = () => screen.getByRole('textbox', { name: 'Generated prompt' }) as HTMLTextAreaElement;
 const promptSelect = () => screen.getByRole('combobox', { name: 'Prompt' }) as HTMLSelectElement;
 
 async function ready() {
@@ -131,6 +131,14 @@ it('opens with the prompt default selected', async () => {
   expect(modelSelect().value).toBe('vision-a');
   expect(promptField().value).toBe('');
   expect(promptField().readOnly).toBe(true);
+});
+
+it('the prompt select and the result text carry different names', async () => {
+  install();
+  render(ui({}));
+  await ready();
+  expect(screen.getAllByLabelText('Prompt')).toEqual([promptSelect()]);
+  expect(promptField()).toBeTruthy();
 });
 
 it('Generate sends analysis:describe with a fresh request id, the file and the chosen model', async () => {
