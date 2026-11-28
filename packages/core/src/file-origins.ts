@@ -1,7 +1,7 @@
 import type { FileOrigin } from '@assetforge/contracts';
 import { NotFoundError } from './errors.js';
 import type { WorkspaceSession } from './session.js';
-import { normalizeDownloadUrl } from './url-import.js';
+import { normalizeDownloadUrl } from './download-url.js';
 
 /**
  * The addresses a file was downloaded from, oldest first.

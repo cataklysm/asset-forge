@@ -32,6 +32,7 @@ export * from './prompts.js';
 export * from './recover-imports.js';
 export * from './download-handler.js';
 export * from './download-name.js';
+export * from './download-url.js';
 export * from './url-import.js';
 export * from './download-limits.js';
 export * from './file-origins.js';
