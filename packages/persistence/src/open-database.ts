@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { WorkspaceDatabase } from '@assetforge/core';
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetSourceRepository } from './asset-source-repository.js';
@@ -27,50 +27,76 @@ import { createTagRepository } from './tag-repository.js';
 import { createAssetWorkflowRepository } from './asset-workflow-repository.js';
 import { createWorkflowTemplateRepository } from './workflow-template-repository.js';
 
+/** The migrations shipped with this package. */
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../migrations', import.meta.url));
 
+/**
+ * Opens (and creates) the workspace database: WAL, foreign keys, the SQL functions and the migrations,
+ * then wires every repository. A failure closes the connection again.
+ *
+ * @param databaseFilePath the database file; its directory is created
+ * @param migrationsFolder the migrations to apply
+ * @param options the options of the derived data step
+ * @returns the workspace database
+ */
 export async function openWorkspaceDatabase(
-  dbFilePath: string,
+  databaseFilePath: string,
   migrationsFolder: string,
   options: { derivedData?: DerivedDataOptions } = {},
 ): Promise<WorkspaceDatabase> {
-  mkdirSync(dirname(dbFilePath), { recursive: true });
-  const sqlite = new Database(dbFilePath);
+  mkdirSync(dirname(databaseFilePath), { recursive: true });
+  const sqlite = new Database(databaseFilePath);
   try {
     sqlite.pragma('journal_mode = WAL');
     sqlite.pragma('foreign_keys = ON');
     registerSqlFunctions(sqlite);
-    const db = drizzle(sqlite);
-    migrate(db, { migrationsFolder });
-    return {
-      meta: createMetaRepository(db),
-      storages: createStorageRepository(db),
-      files: createFileRepository(db),
-      fileMoves: createFileMoveRepository(db),
-      assetTypes: createAssetTypeRepository(db),
-      projects: createProjectRepository(db),
-      assets: createAssetRepository(db),
-      projectAssets: createProjectAssetRepository(db),
-      relations: createAssetRelationRepository(db),
-      workflowTemplates: createWorkflowTemplateRepository(db),
-      assetWorkflows: createAssetWorkflowRepository(db),
-      tags: createTagRepository(db),
-      assetSources: createAssetSourceRepository(db),
-      fileOrigins: createFileOriginRepository(db),
-      jobs: createJobRepository(db),
-      analyses: createFileAnalysisRepository(db),
-      analysisTargets: createAnalysisTargetReader(db),
-      generations: createGenerationRepository(db),
-      prompts: createPromptRepository(db),
-      async ensureDerivedData() {
-        await ensureDerivedData(db, options.derivedData);
-      },
-      async close() {
-        if (sqlite.open) sqlite.close();
-      },
-    };
+    const database = drizzle(sqlite);
+    migrate(database, { migrationsFolder });
+    return workspaceDatabase(sqlite, database, options);
   } catch (error) {
     sqlite.close();
     throw error;
   }
+}
+
+/**
+ * Every repository over the opened database, with the derived data step and close.
+ *
+ * @param sqlite the connection
+ * @param database the Drizzle handle over it
+ * @param options the options of the derived data step, read when the step runs
+ * @returns the workspace database
+ */
+function workspaceDatabase(
+  sqlite: Database.Database,
+  database: BetterSQLite3Database,
+  options: { derivedData?: DerivedDataOptions },
+): WorkspaceDatabase {
+  return {
+    meta: createMetaRepository(database),
+    storages: createStorageRepository(database),
+    files: createFileRepository(database),
+    fileMoves: createFileMoveRepository(database),
+    assetTypes: createAssetTypeRepository(database),
+    projects: createProjectRepository(database),
+    assets: createAssetRepository(database),
+    projectAssets: createProjectAssetRepository(database),
+    relations: createAssetRelationRepository(database),
+    workflowTemplates: createWorkflowTemplateRepository(database),
+    assetWorkflows: createAssetWorkflowRepository(database),
+    tags: createTagRepository(database),
+    assetSources: createAssetSourceRepository(database),
+    fileOrigins: createFileOriginRepository(database),
+    jobs: createJobRepository(database),
+    analyses: createFileAnalysisRepository(database),
+    analysisTargets: createAnalysisTargetReader(database),
+    generations: createGenerationRepository(database),
+    prompts: createPromptRepository(database),
+    async ensureDerivedData() {
+      await ensureDerivedData(database, options.derivedData);
+    },
+    async close() {
+      if (sqlite.open) sqlite.close();
+    },
+  };
 }
