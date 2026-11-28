@@ -47,7 +47,10 @@ export function workspaceSegments(relativePath: string, allowRoot: boolean): str
  */
 export function isInside(root: string, target: string): boolean {
   const relative = path.relative(WINDOWS ? root.toLowerCase() : root, WINDOWS ? target.toLowerCase() : target);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  if (relative === '') return true;
+  // Only a whole `..` segment leaves the root; a name such as `..config` stays inside.
+  const leavesRoot = relative === '..' || relative.startsWith(`..${path.sep}`);
+  return !leavesRoot && !path.isAbsolute(relative);
 }
 
 /**
