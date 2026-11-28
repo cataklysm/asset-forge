@@ -4,7 +4,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { parseTags } from './proposal-tags.js';
 import { file, fileAnalysis, fileAnalysisProposal, fileTag } from './schema.js';
 import { reindexAssets } from './search-index.js';
-import { ensureTag } from './tag-links.js';
+import { ensureTag, linkFileTags } from './tag-links.js';
 
 /** What writing an analysis needs of a transaction handle. */
 type WriteTransaction = Pick<BetterSQLite3Database, 'select' | 'insert' | 'delete' | 'run' | 'all' | 'get'>;
@@ -84,20 +84,11 @@ function writeAnalysis(transaction: WriteTransaction, write: AnalysisWrite): voi
     .delete(fileTag)
     .where(and(eq(fileTag.fileId, write.fileId), eq(fileTag.origin, 'ai')))
     .run();
+  // Only manual links are left, so the shared rule (an ai link yields to any link) keeps a manual tag manual and
+  // inserts a name repeated in the answer once.
   for (const typed of write.tags) {
     const tagId = ensureTag(transaction, { ...typed, now: write.analysis.analysedAt });
-    const manual = transaction
-      .select({ tagId: fileTag.tagId })
-      .from(fileTag)
-      .where(and(eq(fileTag.fileId, write.fileId), eq(fileTag.tagId, tagId), eq(fileTag.origin, 'manual')))
-      .get();
-    if (manual) continue;
-    // A name repeated in the answer is inserted once.
-    transaction
-      .insert(fileTag)
-      .values({ fileId: write.fileId, tagId, origin: 'ai', createdAt: write.analysis.analysedAt })
-      .onConflictDoNothing()
-      .run();
+    linkFileTags(transaction, [write.fileId], tagId, 'ai', write.analysis.analysedAt);
   }
   transaction
     .insert(fileAnalysis)

@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { AnalysisTarget, FileKind, FileRole } from '@assetforge/contracts';
-import { BUILT_IN_ASSET_TYPES, type AnalysisFingerprint, type WorkspaceDatabase } from '@assetforge/core';
+import {
+  BUILT_IN_ASSET_TYPES,
+  PREVIEWABLE_MIME_TYPES,
+  VIDEO_MIME_TYPES,
+  isAnalysable,
+  type AnalysisFingerprint,
+  type WorkspaceDatabase,
+} from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T0 = '2026-01-01T00:00:00.000Z';
@@ -397,5 +404,50 @@ describe('trashed files as analysis targets', () => {
       alreadyQueued: 0,
       notAnalysable: 2,
     });
+  });
+});
+
+describe('the analysable rule', () => {
+  test('the reader marks exactly the files core calls analysable', async () => {
+    const mimeTypes = [...PREVIEWABLE_MIME_TYPES, ...VIDEO_MIME_TYPES, 'image/svg+xml', 'text/plain'];
+    const fileIds: string[] = [];
+    let next = 700;
+    for (const mimeType of mimeTypes) {
+      const id = uuid(next++);
+      await addFile({ id, name: 'f', mimeType });
+      fileIds.push(id);
+    }
+    const pending = uuid(next++);
+    await addFile({ id: pending, name: 'pending.png', complete: false });
+    const failed = uuid(next++);
+    await addFile({ id: failed, name: 'failed.png', complete: false });
+    await db.files.markFailed(failed, 'The file could not be imported');
+    const withoutChecksum = uuid(next++);
+    await addFile({ id: withoutChecksum, name: 'no-sum.png' });
+    handle.prepare('update file set sha256 = null where id = ?').run(withoutChecksum);
+    const trashed = uuid(next++);
+    await addFile({ id: trashed, name: 'trashed.png' });
+    await db.fileMoves.begin({
+      fileId: trashed,
+      kind: 'trash',
+      targetRelativePath: `.assetforge/trash/${trashed}_f.png`,
+      targetAssetId: null,
+      targetRole: null,
+      createdAt: T1,
+    });
+    await db.fileMoves.commit(trashed);
+    fileIds.push(pending, failed, withoutChecksum, trashed);
+
+    const entries = await db.analysisTargets.page({
+      target: { kind: 'files', fileIds },
+      fingerprint: FP,
+      mimeTypes: PREVIEWABLE_MIME_TYPES,
+      afterId: null,
+      limit: 100,
+    });
+    const expected = [];
+    for (const id of fileIds) expected.push([id, isAnalysable((await db.files.get(id))!)]);
+    expect(entries.map((entry) => [entry.fileId, entry.analysable])).toEqual(expected);
+    expect(entries.filter((entry) => entry.analysable)).toHaveLength(PREVIEWABLE_MIME_TYPES.length);
   });
 });

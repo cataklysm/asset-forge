@@ -1,7 +1,8 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { FileRecordSchema } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
@@ -43,6 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await db?.close();
   db = undefined;
   await rm(dir, { recursive: true, force: true });
@@ -193,5 +195,50 @@ describe('workspace database', () => {
       kind: 'workspace_root',
       createdAt: '2026-01-01T00:00:00.000Z',
     });
+  });
+});
+
+/**
+ * A migrations folder whose one migration is not valid SQL.
+ *
+ * @returns the folder
+ */
+async function brokenMigrations(): Promise<string> {
+  const folder = join(dir, 'broken-migrations');
+  await mkdir(join(folder, 'meta'), { recursive: true });
+  const entry = { idx: 0, version: '6', when: 1, tag: '0000_broken', breakpoints: true };
+  await writeFile(
+    join(folder, 'meta', '_journal.json'),
+    JSON.stringify({ version: '7', dialect: 'sqlite', entries: [entry] }),
+  );
+  await writeFile(join(folder, '0000_broken.sql'), 'this is not sql;');
+  return folder;
+}
+
+describe('opening the database', () => {
+  test('the database runs in WAL mode', async () => {
+    await open();
+    const reader = new Database(dbPath, { readonly: true });
+    try {
+      expect(reader.pragma('journal_mode', { simple: true })).toBe('wal');
+    } finally {
+      reader.close();
+    }
+  });
+
+  test('a failed migration closes the connection and rejects with its own error', async () => {
+    const close = vi.spyOn(Database.prototype, 'close');
+    await expect(openWorkspaceDatabase(dbPath, await brokenMigrations())).rejects.toThrow(/Failed to run the query/);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  test('a close that fails after a failed migration does not hide the migration error', async () => {
+    const close = Database.prototype.close;
+    vi.spyOn(Database.prototype, 'close').mockImplementationOnce(function (this: Database.Database) {
+      // Closed for real, so the test folder can be removed; then failing as a broken close would.
+      close.call(this);
+      throw new Error('close failed');
+    });
+    await expect(openWorkspaceDatabase(dbPath, await brokenMigrations())).rejects.toThrow(/Failed to run the query/);
   });
 });
