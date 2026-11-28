@@ -806,6 +806,24 @@ describe('GenerationStudio with library prompts', () => {
     expect('prompt' in request).toBe(false);
   });
 
+  it('a picked prompt whose answer arrives after the studio switched to another file is not attached there', async () => {
+    const prompt = hero();
+    const pending = deferred<PromptDetail>();
+    const { rerender } = setup({ prompts: [prompt], handlers: { 'prompts:get': () => pending.promise } });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(button(LIBRARY_PROMPT_LABEL));
+    const picker = await screen.findByRole('dialog', { name: PROMPTS_LABEL });
+    await user.click(await within(picker).findByText('Hero shot'));
+    rerender(fileRecord({ originalName: 'other.png' }));
+    await act(async () => {
+      pending.resolve(prompt);
+      await pending.promise;
+    });
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+    expect(promptBox().readOnly).toBe(false);
+  });
+
   it('a resolved text over the model limit blocks Generate with the prompt length reason', async () => {
     setup({ prompts: [promptDetail({ title: 'Long', content: '{{who}}' })] });
     await modelsReady();

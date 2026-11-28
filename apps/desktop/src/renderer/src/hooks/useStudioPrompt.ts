@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useRef, type MutableRefObject } from 'react';
 import { purposeOf, type Generation, type PromptDetail, type PromptVersion } from '@assetforge/contracts';
 import { call, messageOf } from '../api';
 import type { ProviderChoice } from '../provider-choice';
@@ -113,17 +113,17 @@ export function useStudioPrompt(input: StudioPromptInput): StudioPrompt {
   const { fileId, form, fieldsState, setStartError, disposed, choice, providers } = input;
   const { setFields, setPicking, setSaving, setPendingModel } = fieldsState;
   const promptSeq = useRef(0);
-  useEffect(() => {
+  // A file change supersedes a load in flight during the render that shows the new file, so no answer for the
+  // old file can attach before an effect would run.
+  const shownFile = useRef(fileId);
+  if (shownFile.current !== fileId) {
+    shownFile.current = fileId;
     promptSeq.current += 1;
-  }, [fileId]);
+  }
   const load: PromptLoad = { promptSeq, disposed, setFields, setStartError, recallVariable: input.recallVariable };
 
   async function pickPrompt(promptId: string) {
-    try {
-      if (await loadPrompt(load, promptId, (detail) => detail.currentVersion)) setPicking(false);
-    } catch (error) {
-      throw new Error(messageOf(error));
-    }
+    if (await loadPrompt(load, promptId, (detail) => detail.currentVersion)) setPicking(false);
   }
 
   function loadCurrent() {
