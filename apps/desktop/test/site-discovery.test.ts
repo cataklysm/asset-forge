@@ -6,24 +6,55 @@ import type { SiteSessions } from '../src/main/site-sessions';
 import { createHarness, type Harness } from './analysis-harness';
 
 const URL = 'https://example.com/gallery';
-const profile = { url: URL, name: 'Example', thumbnails: '//a/@href', pagination: '', file: '', kinds: ['image'] as const,
-  minBytes: 0, urlContains: '', maxPages: 20, maxFiles: 1000 };
-const remote: RemoteFileSource = { open: async () => { throw new RemoteFileError('not_found'); } };
+const profile = {
+  url: URL,
+  name: 'Example',
+  thumbnails: '//a/@href',
+  pagination: '',
+  file: '',
+  kinds: ['image'] as const,
+  minBytes: 0,
+  urlContains: '',
+  maxPages: 20,
+  maxFiles: 1000,
+};
+const remote: RemoteFileSource = {
+  open: async () => {
+    throw new RemoteFileError('not_found');
+  },
+};
 
 /** Browser sessions are mocked; requests and durable jobs use the real application wiring and SQLite. */
 function sessions(load?: PageLoader['load']): SiteSessions {
   return {
-    openLogin: () => {}, loginProfileId: () => null, focusLogin: () => {}, clear: async () => {},
-    cookies: async () => [], userAgent: () => 'test',
-    openPage: () => ({ loader: { load: load ?? (async (url): Promise<PageLoadResult> => ({
-      ok: true, results: { thumbnails: ['/photo.jpg', '/download?id=53'], pagination: [] }, baseUrl: url, finalUrl: url,
-    })) }, close: () => {} }),
+    openLogin: () => {},
+    loginProfileId: () => null,
+    focusLogin: () => {},
+    clear: async () => {},
+    cookies: async () => [],
+    userAgent: () => 'test',
+    openPage: () => ({
+      loader: {
+        load:
+          load ??
+          (async (url): Promise<PageLoadResult> => ({
+            ok: true,
+            results: { thumbnails: ['/photo.jpg', '/download?id=53'], pagination: [] },
+            baseUrl: url,
+            finalUrl: url,
+          })),
+      },
+      close: () => {},
+    }),
   };
 }
 
 describe('durable gallery discovery', () => {
   let h: Harness | undefined;
-  afterEach(async () => { await h?.close(); h = undefined; });
+  afterEach(async () => {
+    await h?.close();
+    h = undefined;
+  });
   async function open(load?: PageLoader['load']) {
     h = await createHarness({ remote, siteSessions: sessions(load), siteWait: async () => {} });
     const rootPath = join(h.base, 'workspace');
@@ -48,7 +79,8 @@ describe('durable gallery discovery', () => {
       tasks.push(await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: `${URL}/${i}`, target: null }));
     }
     expect(new Set(tasks.map((task) => task.crawlId)).size).toBe(5);
-    for (const task of tasks) expect((await ready(task.crawlId)).result?.files).toContain('https://example.com/photo.jpg');
+    for (const task of tasks)
+      expect((await ready(task.crawlId)).result?.files).toContain('https://example.com/photo.jpg');
     const listed = await h!.ok('sites:listCrawls', {});
     expect(listed.total).toBe(5);
     expect(listed.items.every((task) => task.status === 'ready')).toBe(true);
@@ -76,12 +108,72 @@ describe('durable gallery discovery', () => {
     expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('failed');
   });
 
+  it('recreates a cleared technical job when retrying its retained discovery', async () => {
+    let authorized = false;
+    const saved = await open(async (url) => authorized
+      ? { ok: true, results: { thumbnails: ['/photo.jpg'], pagination: [] }, baseUrl: url, finalUrl: url }
+      : { ok: false, reason: 'http_error', status: 401 });
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await h!.until((summary) => summary.failed === 1);
+    await h!.ok('jobs:clearFinished', {});
+    authorized = true;
+    expect(await h!.ok('sites:retryCrawl', { crawlId })).toEqual({ retried: true });
+    expect((await ready(crawlId)).result?.files).toContain('https://example.com/photo.jpg');
+  });
+
   it('holds a throttled site for at least the shared fallback delay', async () => {
     const saved = await open(async () => ({ ok: false, reason: 'http_error', status: 429 }));
     const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
     await h!.until((summary) => summary.waiting === 1);
     const job = await h!.manager.read((session) => session.database.jobs.get(crawlId));
     expect(job?.errorCode).toBe('download_throttled');
-    expect(Date.parse(job!.runAfter!) - Date.parse(job!.updatedAt)).toBeGreaterThanOrEqual(60_000);
+    // The scheduler may stamp updatedAt just after calculating runAfter; allow timing drift, never the old 5 s fallback.
+    expect(Date.parse(job!.runAfter!) - Date.parse(job!.updatedAt)).toBeGreaterThanOrEqual(59_000);
+  });
+
+  it('rechecks live names, retains skipped review, honors overrides and preserves the captured target', async () => {
+    const saved = await open(async (url) => ({
+      ok: true,
+      results: { thumbnails: ['/photo.png', '/other.png', '/download?id=53'], pagination: [] },
+      baseUrl: url,
+      finalUrl: url,
+    }));
+    const [type] = await h!.ok('assetTypes:list', {});
+    const asset = await h!.ok('assets:create', { name: 'Captured asset', typeId: type!.id });
+    const other = await h!.ok('assets:create', { name: 'Other asset', typeId: type!.id });
+    const target = { assetId: asset.id, role: 'reference' as const };
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target });
+    const preview = await ready(crawlId);
+    expect(preview.targetAssetName).toBe('Captured asset');
+    expect(preview.candidates.find((candidate) => candidate.expectedName === 'photo.png')?.alreadyPresent).toBe(false);
+    expect(preview.candidates.find((candidate) => candidate.url.includes('id=53'))?.expectedName).toBeNull();
+    await h!.importPng({ name: 'photo.png', width: 8, height: 8, target });
+    const photo = 'https://example.com/photo.png';
+    const skipped = await h!.ok('sites:import', { crawlId, selectedUrls: [photo], skipExistingNames: true });
+    expect(skipped.queued).toBe(0);
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('ready');
+    const forced = await h!.ok('sites:import', {
+      crawlId,
+      selectedUrls: [photo],
+      skipExistingNames: true,
+      includeExistingUrls: [photo],
+      target: { assetId: other.id, role: 'concept' },
+    });
+    expect(forced.queued).toBe(1);
+    const next = await h!.ok('sites:import', {
+      crawlId,
+      selectedUrls: ['https://example.com/other.png'],
+      skipExistingNames: true,
+    });
+    expect(next.queued).toBe(1);
+    const downloads = await h!.manager.read(async (session) => {
+      const jobs = await session.database.jobs.list({ limit: 100, offset: 0 });
+      return Promise.all(
+        jobs.items.filter((job) => job.type === 'file.download').map((job) => session.database.jobs.get(job.id)),
+      );
+    });
+    expect(downloads).toHaveLength(2);
+    expect(downloads.every((job) => (job?.payload as { target: unknown }).target !== null)).toBe(true);
+    for (const job of downloads) expect(job?.payload).toMatchObject({ target });
   });
 });
