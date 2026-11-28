@@ -373,6 +373,20 @@ describe('PagedLoader', () => {
     await expect(done).rejects.toThrow();
   });
 
+  it('loadThrough rejects while a new key loads and the previous list is still displayed', async () => {
+    const h = harness('A');
+    h.loader.setWanted([0]);
+    h.calls[0]!.resolve(200);
+    await flush();
+    h.loader.setKey('B');
+    expect(h.loader.pending).toBe(true);
+    // Ctrl+A acts on the displayed list, which the new key has superseded: nothing is loaded for it.
+    await expect(h.loader.loadThrough(200)).rejects.toThrow();
+    h.calls[1]!.resolve(200);
+    await flush();
+    expect(h.calls.map((call) => call.offset)).toEqual([0, 0]);
+  });
+
   it('does not reset when the same key is set again', () => {
     const h = harness('A');
     h.loader.setWanted([0]);

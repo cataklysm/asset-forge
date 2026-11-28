@@ -12,7 +12,7 @@ export interface PagedList<T> {
   pending: boolean;
   /** Requests a failed page again. */
   retry(page: number): void;
-  /** Loads every page up to `count` items; rejects when the list changes or unmounts first. */
+  /** Loads every page up to `count` items; rejects while `pending` and when the list changes or unmounts first. */
   loadThrough(count: number): Promise<void>;
   /** Replaces loaded records by fresh ones with the same id. */
   patch(items: readonly T[]): void;
