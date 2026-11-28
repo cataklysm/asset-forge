@@ -111,21 +111,34 @@ function PurposeGroup({ purpose, headingId, own, selectedId, drafts, busy, selec
         {PROMPT_PURPOSE_LABELS[purpose]}
       </h4>
       <ul className="flex flex-col gap-1">
-        {own.map((prompt) => (
-          <li key={prompt.id} className="flex flex-col">
-            <button
-              type="button"
-              className={BUTTON_INLINE}
-              aria-pressed={prompt.id === selectedId}
-              onClick={() => select(prompt.id)}
-            >
-              <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
-              {changed(prompt, drafts[prompt.id]) && (
-                <span title={UNSAVED_CHANGES} aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-accent" />
-              )}
-            </button>
-          </li>
-        ))}
+        {own.map((prompt) => {
+          const unsaved = changed(prompt, drafts[prompt.id]);
+          const markerId = `${headingId}-${prompt.id}-unsaved`;
+          return (
+            <li key={prompt.id} className="flex flex-col">
+              <button
+                type="button"
+                className={BUTTON_INLINE}
+                aria-pressed={prompt.id === selectedId}
+                aria-describedby={unsaved ? markerId : undefined}
+                onClick={() => select(prompt.id)}
+              >
+                <span className="min-w-0 flex-1 truncate text-left">{prompt.name}</span>
+                {unsaved && (
+                  // Hidden from the name; the button is described by it.
+                  <span
+                    id={markerId}
+                    title={UNSAVED_CHANGES}
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full bg-accent"
+                  >
+                    <span className="sr-only">{UNSAVED_CHANGES}</span>
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <div>
         <button type="button" className={BUTTON} title={NEW_PROMPT_TITLE} disabled={busy} onClick={onCreate}>

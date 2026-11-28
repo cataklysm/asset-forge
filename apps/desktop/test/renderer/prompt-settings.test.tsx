@@ -145,6 +145,18 @@ it('a tag limit typed with a leading zero is not an unsaved change of the same n
   expect(button('Save').disabled).toBe(true);
 });
 
+it('a list entry with unsaved changes is described as such for a screen reader', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  expect(entry('Tagging', 'Detailed').getAttribute('aria-describedby')).toBeNull();
+  await userEvent.type(field('Text'), ' and more');
+  const describedBy = entry('Tagging', 'Detailed').getAttribute('aria-describedby');
+  expect(describedBy).not.toBeNull();
+  expect(document.getElementById(describedBy!)!.textContent).toBe('Unsaved changes');
+});
+
 it('New creates "New prompt", then "New prompt 2", with the built-in content, and selects it', async () => {
   const { api } = install();
   renderSection();
