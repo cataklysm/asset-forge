@@ -67,15 +67,15 @@ function hasRefusedExtension(name: string): boolean {
 }
 
 /**
- * True when the name, or its part before the first `:` (an NTFS alternate data stream such as
- * `a.exe::$DATA` or `a.exe:stream`, where Windows opens the main stream), has a refused extension.
+ * True when the name, or any of its parts between `:` (an NTFS alternate data stream such as `a.exe::$DATA` or
+ * `a.exe:stream`, where Windows opens the main stream, also behind a drive such as `C:a.exe::$DATA`), has a refused
+ * extension.
  *
  * @param fileName the file name
  * @returns whether the file is refused
  */
 export function isRefusedImport(fileName: string): boolean {
-  const colon = fileName.indexOf(':');
-  return hasRefusedExtension(fileName) || (colon >= 0 && hasRefusedExtension(fileName.slice(0, colon)));
+  return hasRefusedExtension(fileName) || fileName.split(':').some(hasRefusedExtension);
 }
 
 /**
