@@ -74,7 +74,7 @@ it('moving the current index scrolls the strip to its tile', () => {
     const { rerender } = render(<FilmStrip list={listOf(files, 0)} />);
     scrollTo.mockClear();
     rerender(<FilmStrip list={listOf(files, 400)} />);
-    const lefts = scrollTo.mock.calls.map(([options]) => (typeof options === 'object' ? (options.left ?? 0) : 0));
+    const lefts = scrollTo.mock.calls.map((call) => (call[0] as ScrollToOptions | undefined)?.left ?? 0);
     // The tile at 400 starts at 400 × (96 + 8) pixels; `auto` puts its end at the right edge of the 1280 pixel strip.
     expect(Math.max(0, ...lefts)).toBeGreaterThan(400 * 104 - 1280);
   } finally {
