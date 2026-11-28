@@ -308,7 +308,8 @@ export function TrashScreen({ state, onStateChange }: Props) {
           }}
         />
         <ConfirmDialog
-          open={pending !== null}
+          // Closed in the same render that finds the trash empty, so the title never names zero files.
+          open={pending !== null && !nothingToEmpty}
           // Empty trash names the count as it is now: a reload that answers while the dialog is open updates it.
           title={
             pending === null ? '' : purgeConfirmTitle(pending.kind === 'purge' ? pending.files.length : (total ?? 0))

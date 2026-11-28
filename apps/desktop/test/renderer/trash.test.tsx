@@ -276,8 +276,16 @@ it('the Empty trash confirmation closes when a count reload finds the trash empt
   await waitFor(() => expect(screen.queryByText('hero.png')).toBeNull());
   await user.click(screen.getByRole('button', { name: 'Empty trash' }));
   expect(await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' })).toBeTruthy();
+  // The render between the count and the closing effect must not name zero files either.
+  const titles: string[] = [];
+  const observer = new MutationObserver((records) =>
+    records.forEach((record) => record.removedNodes.forEach((node) => titles.push(node.textContent ?? ''))),
+  );
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true });
   await act(async () => held.resolve());
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  observer.disconnect();
+  expect(titles.some((text) => text.includes('Delete 0 files permanently?'))).toBe(false);
   expect(api.calls.filter((entry) => entry.channel === 'trash:empty')).toHaveLength(0);
 });
 
