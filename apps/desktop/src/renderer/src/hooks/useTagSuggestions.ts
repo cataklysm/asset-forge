@@ -18,7 +18,7 @@ interface TagSuggestions {
 
 /**
  * The tag suggestions for a prefix while the list is open; a later prefix supersedes an earlier request,
- * and every new answer drops the active suggestion.
+ * and a new prefix as well as every new answer drop the active suggestion.
  *
  * @param open whether the suggestion list is open
  * @param prefix the normalised prefix; '' asks for nothing
@@ -32,11 +32,13 @@ export function useTagSuggestions(open: boolean, prefix: string): TagSuggestions
 
   useEffect(() => {
     let mounted = true;
+    // The suggestions of the previous prefix stay shown until the answer arrives, but none of them may stay
+    // active: Enter would commit it instead of the text now typed.
+    setActive(-1);
     if (!open || prefix === '') {
       // Supersedes a request still in flight.
       void track.current!(Promise.resolve(NONE));
       setSuggestions(NONE);
-      setActive(-1);
       return;
     }
     void track.current!(call('tags:suggest', { prefix, limit: SUGGESTION_LIMIT })).then((result) => {

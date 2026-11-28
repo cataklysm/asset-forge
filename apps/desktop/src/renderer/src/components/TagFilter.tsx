@@ -28,7 +28,7 @@ export function TagFilter({ value, onChange, title }: Props) {
   const [text, setText] = useState('');
   const [invalid, setInvalid] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  // After a chip is removed, focus goes to the input once it is enabled again.
+  // After a chip is removed, focus goes to the input.
   const focusInput = useRef(false);
   const full = value.length >= MAX_FILTER_TAGS;
 
@@ -39,7 +39,7 @@ export function TagFilter({ value, onChange, title }: Props) {
   }, [value]);
 
   function add(raw: string) {
-    if (raw.trim() === '') return;
+    if (raw.trim() === '' || full) return;
     const name = normalizeTagName(raw);
     if (name === null) {
       setInvalid(true);
@@ -64,7 +64,8 @@ export function TagFilter({ value, onChange, title }: Props) {
           label="Tags"
           title={full ? `At most ${MAX_FILTER_TAGS} tags` : title}
           inputRef={input}
-          disabled={full}
+          // Read-only rather than disabled, so the input adding the tenth tag keeps the focus.
+          readOnly={full}
         />
         {value.map((name) => (
           <TagChip

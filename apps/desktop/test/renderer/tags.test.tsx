@@ -1,5 +1,5 @@
 import type { TagAssignment, TagSuggestion } from '@assetforge/contracts';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { readFileSync } from 'node:fs';
@@ -203,6 +203,52 @@ it('Esc closes the suggestion list first and is left to the caller afterwards', 
   expect(onCommit).toHaveBeenCalledWith('o');
 });
 
+it('the combobox names its list only while the list is shown', async () => {
+  installFakeApi({ 'tags:suggest': () => [{ name: 'oak', displayName: 'Oak' }] });
+  const user = userEvent.setup();
+  render(<ComboHarness onCommit={() => {}} />);
+  const input = screen.getByRole('combobox', { name: 'Tags' });
+  expect(input.hasAttribute('aria-controls')).toBe(false);
+  await user.type(input, 'o');
+  const listbox = await screen.findByRole('listbox');
+  expect(input.getAttribute('aria-controls')).toBe(listbox.id);
+  await user.keyboard('{Escape}');
+  expect(input.hasAttribute('aria-controls')).toBe(false);
+});
+
+it('typing on drops the active suggestion before the new answer arrives', async () => {
+  const later = deferred<TagSuggestion[]>();
+  installFakeApi({
+    'tags:suggest': ({ prefix }) => (prefix === 'o' ? [{ name: 'oak', displayName: 'Oak' }] : later.promise),
+  });
+  const user = userEvent.setup();
+  const onCommit = vi.fn();
+  render(<ComboHarness onCommit={onCommit} />);
+  const input = screen.getByRole('combobox', { name: 'Tags' });
+  await user.type(input, 'o');
+  await screen.findByRole('option', { name: 'Oak' });
+  await user.keyboard('{ArrowDown}');
+  expect(input.hasAttribute('aria-activedescendant')).toBe(true);
+
+  await user.keyboard('l');
+  expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+  await user.keyboard('{Enter}');
+  expect(onCommit).toHaveBeenCalledWith('ol');
+});
+
+it('Enter that confirms an input method composition commits nothing', async () => {
+  installFakeApi({ 'tags:suggest': () => [] });
+  const user = userEvent.setup();
+  const onCommit = vi.fn();
+  render(<ComboHarness onCommit={onCommit} />);
+  const input = screen.getByRole('combobox', { name: 'Tags' });
+  await user.type(input, 'ka');
+  fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+  expect(onCommit).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onCommit).toHaveBeenCalledWith('ka');
+});
+
 it('clicking a suggestion commits it', async () => {
   installFakeApi({ 'tags:suggest': () => [{ name: 'oak', displayName: 'Oak' }] });
   const user = userEvent.setup();
@@ -335,12 +381,17 @@ it('the tag filter stops at 10 tags', async () => {
 
   for (let i = 1; i < 10; i += 1) await user.type(input, `t${i}{Enter}`);
   expect(onChange).toHaveBeenLastCalledWith(['oak', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
-  expect(input.disabled).toBe(true);
+  expect(input.readOnly).toBe(true);
   expect(input.title).toBe('At most 10 tags');
+  // The input that added the tenth tag keeps the focus.
+  expect(document.activeElement).toBe(input);
+  await user.keyboard('x{Enter}');
+  expect(onChange).toHaveBeenCalledTimes(10);
+  expect(input.value).toBe('');
 
   await user.click(screen.getByRole('button', { name: 'Remove oak' }));
   expect(onChange).toHaveBeenLastCalledWith(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
-  expect(input.disabled).toBe(false);
+  expect(input.readOnly).toBe(false);
   expect(document.activeElement).toBe(input);
 });
 
