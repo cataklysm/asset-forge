@@ -155,6 +155,15 @@ export const MOCK_PROMPT_SLOW = 'mock:slow';
 /** A 200 with the content-violation header. */
 export const MOCK_PROMPT_VIOLATION_OK = 'mock:violation-200';
 
+/** How many entries `requests` and `imageRequests` keep by default; beyond it the oldest is dropped. */
+export const MOCK_MAX_RECORDED = 1000;
+
+/** Appends an entry to a record list, dropping the oldest beyond `limit` while keeping the same array. */
+function record(list, entry, limit) {
+  list.push(entry);
+  if (list.length > limit) list.splice(0, list.length - limit);
+}
+
 const SLOW_MS = 30_000;
 const VIOLATION_HEADER = 'x-venice-is-content-violation';
 const TRIGGERS = {
@@ -295,6 +304,8 @@ export async function startMockProvider(options = {}) {
   // An empty key means none: the Compose file passes an unset variable through as an empty string.
   const apiKey = options.apiKey ? String(options.apiKey) : null;
   const failures = [...(options.failures ?? [])];
+  const maxRecorded =
+    Number.isInteger(options.maxRecorded) && options.maxRecorded >= 0 ? options.maxRecorded : MOCK_MAX_RECORDED;
   const requests = [];
   const imageRequests = [];
   const timers = new Set();
@@ -362,7 +373,11 @@ export async function startMockProvider(options = {}) {
 
   async function venice(request, response, path, raw) {
     // The multipart body is not kept on `requests`; `imageRequests` records its fields and the image size.
-    requests.push({ method: request.method ?? '', path, body: undefined, headers: { ...request.headers } });
+    record(
+      requests,
+      { method: request.method ?? '', path, body: undefined, headers: { ...request.headers } },
+      maxRecorded,
+    );
     const query = new URL(request.url ?? '/', 'http://mock').searchParams;
     if (request.method === 'GET' && path === '/api/v1/models') {
       if (!authorized(request)) return sendJson(response, 401, { error: 'Authentication failed' });
@@ -374,12 +389,11 @@ export async function startMockProvider(options = {}) {
       return sendJson(response, 404, { error: 'not found' });
 
     const { fields, image } = await readForm(request.headers['content-type'], raw);
-    imageRequests.push({
-      path,
-      authorization: request.headers.authorization ?? null,
-      fields,
-      fileBytes: image?.length ?? 0,
-    });
+    record(
+      imageRequests,
+      { path, authorization: request.headers.authorization ?? null, fields, fileBytes: image?.length ?? 0 },
+      maxRecorded,
+    );
     if (!authorized(request)) return sendJson(response, 401, { error: 'Authentication failed' });
     if (!image || image.length === 0) return sendJson(response, 400, { error: 'No image supplied' });
 
@@ -444,7 +458,7 @@ export async function startMockProvider(options = {}) {
           body = raw;
         }
       }
-      requests.push({ method: incoming.method ?? '', path, body, headers: { ...incoming.headers } });
+      record(requests, { method: incoming.method ?? '', path, body, headers: { ...incoming.headers } }, maxRecorded);
 
       if (apiKey !== null && incoming.headers.authorization !== `Bearer ${apiKey}`) {
         sendJson(response, 401, { error: 'unauthorized' });
