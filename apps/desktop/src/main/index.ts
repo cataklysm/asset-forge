@@ -24,6 +24,7 @@ import { dispatch, type IpcHandlers } from './ipc.js';
 import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
+import { createSitePartitionDirectory } from './site-partition-sweep.js';
 import { createElectronSiteSessions, type ElectronSiteSessions } from './site-sessions.js';
 import { getAppUrl, isAppOrigin, isAppUrl } from './app-url.js';
 import { findOriginalIn, findSourceIn, findVideoIn, handleMediaRequest } from './media-protocol.js';
@@ -175,6 +176,8 @@ function start(): void {
       });
       registerMediaProtocol(manager, previews);
       openMainWindow(state, siteSessions, windowOptions);
+      // Sessions exist only once the app is ready; the sweep never rejects and logs no path, URL or cookie.
+      void services.sweepSitePartitions(createSitePartitionDirectory(app.getPath('userData')));
     })
     .catch(failStartup);
 }
