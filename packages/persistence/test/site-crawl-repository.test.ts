@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { SiteCrawlProgress, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
 import type { NewJob, WorkspaceDatabase } from '@assetforge/core';
@@ -48,6 +49,7 @@ const record = (n: number) => ({
   result: null as SiteCrawlResult | null,
   checkpoint: null as unknown,
   importedAt: null as string | null,
+  completedAt: null as string | null,
   createdAt: T0,
   updatedAt: T0,
 });
@@ -68,6 +70,23 @@ afterEach(async () => {
 });
 
 describe('durable site crawl results', () => {
+  test('lists lightweight task headers without decoding full review results or checkpoints', async () => {
+    const row = { ...record(10), result: { ...result(uuid(10)), cancelled: true }, checkpoint: { pending: ['detail'] } };
+    await db.siteCrawls.insert(row);
+    const sqlite = new Database(path);
+    try {
+      // A schema-incompatible review payload must not affect periodic task-header reads.
+      sqlite.prepare('UPDATE site_crawl SET result = ?, checkpoint = ? WHERE id = ?').run('{}', '{}', row.id);
+    } finally {
+      sqlite.close();
+    }
+    const { result: _result, checkpoint: _checkpoint, ...header } = row;
+    expect(await db.siteCrawls.listSummaries({ limit: 20, offset: 0 })).toEqual({
+      items: [{ ...header, cancelled: true }],
+      total: 1,
+    });
+  });
+
   test('retains a successful discovery completion marker after reopening and job cleanup', async () => {
     const row = record(10);
     await db.siteCrawls.insert(row, {
