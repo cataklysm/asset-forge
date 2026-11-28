@@ -6,7 +6,7 @@ import { fileListWhere } from './file-list.js';
 import { qualified } from './qualified.js';
 import { file, fileAnalysis, fileAnalysisProposal, job } from './schema.js';
 import { matchingAssetIds } from './asset-search.js';
-import type { Tx } from './search-index.js';
+import type { IndexTransaction } from './search-index.js';
 
 const fileId = qualified(file, file.id);
 const fileSha256 = qualified(file, file.sha256);
@@ -30,7 +30,7 @@ function normalisedTagNames(names: readonly string[] | undefined): string[] | un
  * The WHERE over the outer `file` row that selects the files of the target, built from the filters
  * of the file and asset lists. Null when nothing can match (no ids, an unknown or invalid tag).
  */
-function targetWhere(tx: Tx, target: AnalysisTarget): { where: SQL | undefined } | null {
+function targetWhere(tx: IndexTransaction, target: AnalysisTarget): { where: SQL | undefined } | null {
   switch (target.kind) {
     case 'files':
       return target.fileIds.length === 0 ? null : { where: inArray(file.id, [...new Set(target.fileIds)]) };

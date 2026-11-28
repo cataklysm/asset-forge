@@ -2,7 +2,7 @@ import type { MatchedTag, TagAssignment, TagOrigin } from '@assetforge/contracts
 import { sql, type SQL } from 'drizzle-orm';
 import { qualified } from './qualified.js';
 import { assetTag, file, fileTag, tag } from './schema.js';
-import type { Tx } from './search-index.js';
+import type { IndexTransaction } from './search-index.js';
 
 /** `(?, ?, ...)` for an `in` list; SQLite accepts the empty list `()`. */
 const inList = (values: readonly string[]): SQL => sql`(${sql.join(
@@ -36,7 +36,7 @@ export function assetTagsSql(assetIds: readonly string[], fileIds: readonly stri
  * ordered by name, then origin. Owners without tags are missing from the maps.
  */
 export function assetTagsOf(
-  tx: Tx,
+  tx: IndexTransaction,
   assetIds: readonly string[],
   coverFileIds: readonly string[],
 ): { asset: Map<string, TagAssignment[]>; file: Map<string, TagAssignment[]> } {
@@ -79,7 +79,7 @@ export function matchedTagsSql(assetIds: readonly string[], tagIds: readonly str
  * For each given asset, one entry per requested tag in request order, saying whether the asset
  * itself or one of its complete files carries it. Tag ids that do not exist are left out.
  */
-export function matchedTagsOf(tx: Tx, assetIds: readonly string[], tagIds: readonly string[]): Map<string, MatchedTag[]> {
+export function matchedTagsOf(tx: IndexTransaction, assetIds: readonly string[], tagIds: readonly string[]): Map<string, MatchedTag[]> {
   const result = new Map<string, MatchedTag[]>();
   if (assetIds.length === 0) return result;
   const tags = new Map<string, { name: string; displayName: string }>();

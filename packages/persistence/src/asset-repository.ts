@@ -7,7 +7,7 @@ import { assetTagsOf, matchedTagsOf } from './list-tags.js';
 import { qualified } from './qualified.js';
 import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, tag, workflowStepDefinition } from './schema.js';
 import { searchAssets } from './asset-search.js';
-import { reindexAsset, type Tx } from './search-index.js';
+import { reindexAsset, type IndexTransaction } from './search-index.js';
 
 const toAsset = (row: typeof asset.$inferSelect): Asset => ({
   id: row.id,
@@ -103,7 +103,7 @@ function summaries(
  * the matched tags: one statement for the tags, and two more (tag ids, matches) with a tag filter,
  * whatever the page size.
  */
-function withTags(tx: Tx, items: BareSummary[], tagNames: readonly string[]): AssetSummary[] {
+function withTags(tx: IndexTransaction, items: BareSummary[], tagNames: readonly string[]): AssetSummary[] {
   if (items.length === 0) return [];
   const ids = items.map((s) => s.id);
   const coverIds = items.flatMap((s) => (s.coverFileId === null ? [] : [s.coverFileId]));
@@ -118,7 +118,7 @@ function withTags(tx: Tx, items: BareSummary[], tagNames: readonly string[]): As
 }
 
 /** The ids of the named tags in request order, in one statement like the tag filter; unknown names are left out. */
-function requestedTagIds(tx: Tx, names: readonly string[]): string[] {
+function requestedTagIds(tx: IndexTransaction, names: readonly string[]): string[] {
   const unique = [...new Set(names)];
   const byName = new Map(
     tx.select({ id: tag.id, name: tag.name }).from(tag).where(inArray(tag.name, unique)).all().map((t) => [t.name, t.id]),
