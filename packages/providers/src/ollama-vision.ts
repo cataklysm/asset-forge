@@ -157,9 +157,10 @@ class OllamaVision {
     const content = await this.chat({ image, prompt, model, signal }, schema);
     try {
       return JSON.parse(content) as unknown;
-    } catch (error) {
+    } catch {
       this.options.onFailure?.('invalid_response', 200);
-      throw new JobError('invalid_response', { cause: error });
+      // No cause: a parse error's message can quote part of the answer.
+      throw new JobError('invalid_response');
     }
   }
 

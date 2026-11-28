@@ -167,13 +167,14 @@ export class LocalFileSystemStorage implements Storage {
         // A fixed text: the caller maps it to its own message, and a path never belongs in an error.
         throw Object.assign(new Error('The target already exists'), { code: 'EEXIST' });
       }
-      const created = await missingDirectories(path.dirname(targetPath));
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
       try {
-        await fs.rename(sourcePath, targetPath);
+        await renameCreatingParent(sourcePath, targetPath);
       } catch (error) {
-        await removeEmptyDirectories(created);
-        throw error;
+        if (!isNotFound(error) || !(await this.pathExists(sourcePath)) || (await this.pathExists(targetPath))) {
+          throw error;
+        }
+        // A parallel move whose rename failed removed the directory it had created, which this move also relied on.
+        await renameCreatingParent(sourcePath, targetPath);
       }
     });
   }
@@ -363,6 +364,25 @@ async function missingDirectories(directory: string): Promise<string[]> {
     }
     if (path.dirname(current) === current) return missing;
     missing.push(current);
+  }
+}
+
+/**
+ * Renames a file, creating the target's missing parent directories first; a failed rename removes the directories
+ * this call created again.
+ *
+ * @param sourcePath the file's absolute path
+ * @param targetPath the absolute path it moves to
+ * @returns resolves once it moved
+ */
+async function renameCreatingParent(sourcePath: string, targetPath: string): Promise<void> {
+  const created = await missingDirectories(path.dirname(targetPath));
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  try {
+    await fs.rename(sourcePath, targetPath);
+  } catch (error) {
+    await removeEmptyDirectories(created);
+    throw error;
   }
 }
 

@@ -16,7 +16,11 @@ import {
   MOCK_REASONING_ONLY_MODEL,
   MOCK_SLASH_MODEL,
   MOCK_TEXT_MODEL,
+  MOCK_STYLES,
   MOCK_THINKING_MODEL,
+  MOCK_VIEWS,
+  MOCK_VOCABULARY,
+  mockImageDigest,
   startMockProvider,
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
@@ -153,6 +157,38 @@ describe('mock provider', () => {
     expect(new Set(first.slice(0, 6)).size).toBe(6);
     expect(first.every((tag) => tag === tag.toLowerCase())).toBe(true);
     expect(first[6]).toMatch(/view|close-up/);
+  });
+
+  it('takes the first six tags from the vocabulary, then one view and one style', async () => {
+    const { url } = await start();
+    for (const image of [imageA, imageB]) {
+      const tags = await tagsOf(await chat(url, image));
+      expect(tags.slice(0, 6).every((tag) => MOCK_VOCABULARY.includes(tag))).toBe(true);
+      expect(MOCK_VIEWS).toContain(tags[6]);
+      expect(MOCK_STYLES).toContain(tags[7]);
+    }
+  });
+
+  it('records a chat image as the digest of its bytes, never as the Base64', async () => {
+    const { url, requests } = await start();
+    await chat(url, imageA);
+    const body = requests[0]?.body as { messages: { images: string[] }[] };
+    expect(body.messages[0]!.images).toEqual([mockImageDigest(Buffer.from('image-a'))]);
+    expect(JSON.stringify(requests)).not.toContain(imageA);
+  });
+
+  it('delays a scripted status failure like an answer', async () => {
+    const { url } = await start({ delayMs: 50, failures: [503] });
+    const started = performance.now();
+    expect((await chat(url, imageA)).status).toBe(503);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(45);
+  });
+
+  it('takes a scripted failure before the model is checked', async () => {
+    const { url } = await start({ failures: [503] });
+    expect((await chat(url, imageA, 'other')).status).toBe(503);
+    expect((await chat(url, imageA, 'other')).status).toBe(404);
+    expect((await chat(url, imageA)).status).toBe(200);
   });
 
   it('answers in the shape of Ollama', async () => {

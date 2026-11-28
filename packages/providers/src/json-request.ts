@@ -79,18 +79,16 @@ export function createJsonRequester(
  *
  * @param body the request's JSON value; undefined for a GET
  * @param key the API key; null or empty for none
- * @returns the headers
- * @throws JobError `provider_unauthorized` when the key cannot be put into a header
+ * @returns the headers; null when the key cannot be put into a header
  */
-function requestHeaders(body: unknown, key: string | null): Headers {
+function requestHeaders(body: unknown, key: string | null): Headers | null {
   try {
     const headers = new Headers();
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (key) headers.set('authorization', `Bearer ${key}`);
     return headers;
   } catch {
-    // The header error quotes the value, so it is never kept: a key that cannot be sent cannot authenticate.
-    throw new JobError('provider_unauthorized');
+    return null;
   }
 }
 
@@ -140,73 +138,21 @@ class JsonCall {
    */
   async send<T>(interpret: (body: unknown) => T): Promise<T> {
     const request = this.request;
-    const { options } = this.connection;
     request.signal.throwIfAborted();
     const timer = setTimeout(() => this.timeout.abort(), request.timeoutMs);
-    const combined = AbortSignal.any([request.signal, this.timeout.signal]);
-
     try {
-      // Read per request: a key changed or removed in the settings applies to the next call.
-      const key = options.apiKey?.() ?? null;
-      const headers = requestHeaders(request.body, key);
-
-      const fetchImpl = this.connection.fetchImpl;
-      let response: Response;
-      try {
-        response = await fetchImpl(`${this.connection.base}${request.path}`, {
-          method: request.body === undefined ? 'GET' : 'POST',
-          headers,
-          ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-          signal: combined,
-          redirect: 'manual',
-        });
-      } catch {
-        // No cause: a fetch error may quote the request, and the request carries the key.
-        return this.fail('provider_unreachable', undefined);
-      }
-      this.status = response.status;
-
-      // A redirect is never followed: the configured base URL is the only address the adapter talks to.
-      if (isRedirect(response)) {
-        await discard(response);
-        return this.fail('provider_rejected', undefined);
-      }
-
-      if (!response.ok) {
-        // The body of a failed answer is only a discarded cause; it is never read.
-        await discard(response);
-        return this.fail(failedStatusCode(response.status), undefined);
-      }
-
-      const declared = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
-        await discard(response);
-        return this.fail('invalid_response', undefined);
-      }
-
-      let text: string;
-      try {
-        text = await readCapped(response, MAX_RESPONSE_BYTES);
-      } catch (error) {
-        if (error instanceof ResponseTooLarge) return this.fail('invalid_response', error);
-        return this.fail('provider_unreachable', undefined);
-      }
-
-      let body: unknown;
-      try {
-        body = JSON.parse(text);
-      } catch (error) {
-        return this.fail('invalid_response', error);
-      }
+      const response = await this.answer(AbortSignal.any([request.signal, this.timeout.signal]));
+      const body = await this.readBody(response);
       try {
         return interpret(body);
-      } catch (error) {
-        return this.fail('invalid_response', error);
+      } catch {
+        // No cause: the interpreter's message may quote the answer.
+        return this.fail('invalid_response');
       }
     } catch (error) {
       // Only the code and the status leave the adapter; a caller abort is not a provider failure.
       if (error instanceof JobError && !request.signal.aborted && !request.silent) {
-        options.onFailure?.(error.code, this.status);
+        this.connection.options.onFailure?.(error.code, this.status);
       }
       throw error;
     } finally {
@@ -215,20 +161,85 @@ class JsonCall {
   }
 
   /**
+   * Sends the request and takes the answer when it is a success; a redirect or a failed status fails the call.
+   *
+   * @param signal the caller's signal combined with the timeout
+   * @returns the successful answer, its body not yet read
+   */
+  private async answer(signal: AbortSignal): Promise<Response> {
+    const request = this.request;
+    // Read per request: a key changed or removed in the settings applies to the next call.
+    const headers = requestHeaders(request.body, this.connection.options.apiKey?.() ?? null);
+    // The header error quotes the value, so it is never kept: a key that cannot be sent cannot authenticate.
+    if (headers === null) return this.fail('provider_unauthorized');
+    let response: Response;
+    try {
+      response = await this.connection.fetchImpl(`${this.connection.base}${request.path}`, {
+        method: request.body === undefined ? 'GET' : 'POST',
+        headers,
+        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+        signal,
+        redirect: 'manual',
+      });
+    } catch {
+      // No cause: a fetch error may quote the request, and the request carries the key.
+      return this.fail('provider_unreachable');
+    }
+    this.status = response.status;
+    // A redirect is never followed: the configured base URL is the only address the adapter talks to.
+    if (isRedirect(response)) {
+      await discard(response);
+      return this.fail('provider_rejected');
+    }
+    if (!response.ok) {
+      // The body of a failed answer is never read.
+      await discard(response);
+      return this.fail(failedStatusCode(response.status));
+    }
+    return response;
+  }
+
+  /**
+   * Reads a successful answer within `MAX_RESPONSE_BYTES` and parses it as JSON.
+   *
+   * @param response the successful answer
+   * @returns the parsed body
+   */
+  private async readBody(response: Response): Promise<unknown> {
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+      await discard(response);
+      return this.fail('invalid_response');
+    }
+    let text: string;
+    try {
+      text = await readCapped(response, MAX_RESPONSE_BYTES);
+    } catch (error) {
+      if (error instanceof ResponseTooLarge) return this.fail('invalid_response');
+      return this.fail('provider_unreachable');
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      // No cause: a parse error's message can quote part of the answer.
+      return this.fail('invalid_response');
+    }
+  }
+
+  /**
    * Throws the error of a failure. A caller abort always wins; the timeout only replaces a transport failure, which
    * is what its abort causes, so an answer that arrived keeps the code it earned even when the timer fired since.
    *
+   * The error never carries a cause: what went wrong may quote the request, which carries the key, or the answer.
+   *
    * @param code the failure's code
-   * @param cause kept as the error's cause; never a value that may quote the request
    * @returns never; always throws the caller's abort reason, `provider_timeout` or a `JobError` of `code`
    */
-  private fail(code: JobErrorCode, cause: unknown): never {
+  private fail(code: JobErrorCode): never {
     const request = this.request;
     if (request.signal.aborted) throw request.signal.reason;
-    if (code === 'provider_unreachable' && this.timeout.signal.aborted) {
-      throw new JobError('provider_timeout', { cause });
-    }
-    const error = new JobError(code, { cause });
+    if (code === 'provider_unreachable' && this.timeout.signal.aborted) throw new JobError('provider_timeout');
+    const error = new JobError(code);
     if (this.status !== null) statuses.set(error, this.status);
     throw error;
   }
