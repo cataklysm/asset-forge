@@ -15,6 +15,8 @@ import {
   type JobRepository,
 } from '@assetforge/core';
 import { LaneHolds } from './lane-holds.js';
+import { LaneRotation } from './lane-rotation.js';
+import { LeftoverRows } from './recovery-steps.js';
 import type { PauseGate } from './pause-gate.js';
 
 /** Running jobs per lane of a class, unless `laneLimit` answers another limit for the lane. */
@@ -273,6 +275,10 @@ class JobScheduler {
   private readonly failingClasses = new Set<ResourceClass>();
   /** The lanes held after a job asked for a wait. */
   private readonly laneHolds = new LaneHolds();
+  /** The rows this scheduler left `running` itself, so the recovery knows whether they ran. */
+  private readonly leftovers = new LeftoverRows();
+  /** The order the lanes of a class with a total were served in. */
+  private readonly rotation = new LaneRotation();
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -413,8 +419,7 @@ class JobScheduler {
   }
 
   /**
-   * Puts every job found `running` that this scheduler is not running back to `queued`, or fails it with the
-   * interrupted code under `onInterrupted: 'fail'`.
+   * Handles every job found `running` that this scheduler is not running, by the step `LeftoverRows.stepOf` picks.
    *
    * @returns resolves once every such job is handled or a stop began
    */
@@ -423,11 +428,43 @@ class JobScheduler {
       if (this.stopping) break;
       // A launched run stores its own outcome.
       if (this.active.has(job.id)) continue;
-      const changedRow =
-        this.config.handlers[job.type]?.onInterrupted === 'fail'
-          ? await this.finishJob(job, { status: 'failed', errorCode: this.interruptedCodeOf(job) })
-          : await this.config.jobs.release(job.id, this.iso());
+      const changedRow = await this.recoverRow(job);
+      this.leftovers.forget(job.id);
       if (changedRow) this.changed(job.id);
+    }
+  }
+
+  /**
+   * Applies the recovery step of one row found `running`.
+   *
+   * @param job the row
+   * @returns resolves to whether the row changed
+   */
+  private recoverRow(job: Job): Promise<boolean> {
+    const step = this.leftovers.stepOf(job, this.config.handlers[job.type]?.onInterrupted === 'fail');
+    const errorCode = this.interruptedCodeOf(job);
+    if (step === 'release') return this.config.jobs.release(job.id, this.iso());
+    if (step === 'retry')
+      return this.config.jobs.scheduleRetry(job.id, { errorCode, runAfter: this.iso(), now: this.iso() });
+    return this.finishJob(job, { status: 'failed', errorCode });
+  }
+
+  /**
+   * Puts a claimed job that was not launched back to `queued`. When that fails, the row is left for the recovery of
+   * a later pass, which knows it never ran. A put-back that fails while stopping is not recovered in this session:
+   * the mark lives in memory only, so at the next open the row counts as interrupted, and a job of an
+   * `onInterrupted: 'fail'` handler ends `failed` with its interrupted code.
+   *
+   * @param job the claimed job
+   * @returns resolves once the job is back; rejects with the cause of a failed put-back
+   */
+  private async putBack(job: Job): Promise<void> {
+    try {
+      await this.config.jobs.release(job.id, this.iso());
+    } catch (cause) {
+      this.leftovers.addUnlaunched(job.id);
+      this.recoveryPending = true;
+      throw cause;
     }
   }
 
@@ -497,20 +534,16 @@ class JobScheduler {
       if (this.stopping) return null;
       // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
       if (this.atTotal(resourceClass)) return null;
-      const job = await this.config.jobs.claimNext({
-        resourceClass,
-        types,
-        now: this.iso(),
-        excludeLanes: this.excludedLanes(resourceClass),
-      });
+      const job = await this.claim(resourceClass, types);
       if (!job) break;
       if (this.stopping) {
-        await this.config.jobs.release(job.id, this.iso());
+        await this.putBack(job);
         return null;
       }
       // A run that ended during the claim may have paused the lane; its job goes back without spending a run.
       if (await this.releaseIfBarred(job)) continue;
       this.launch(job);
+      this.rotation.record(resourceClass, job.lane);
       this.changed(job.id);
     }
     if (this.stopping) return null;
@@ -521,6 +554,44 @@ class JobScheduler {
     const holdEnd = this.laneHolds.earliestEnd(resourceClass, this.config.now().getTime());
     const candidates = [next === null ? null : Date.parse(next), holdEnd].filter((time) => time !== null);
     return candidates.length === 0 ? null : Math.min(...candidates);
+  }
+
+  /**
+   * Claims the next job of a class. Under a class total the lanes take turns: the lanes served recently are left out
+   * as long as another lane has a claimable job, the one served longest ago given back first.
+   *
+   * @param resourceClass the class
+   * @param types the job types of the class
+   * @returns the claimed job; null when no lane that may claim has one
+   */
+  private async claim(resourceClass: ResourceClass, types: string[]): Promise<Job | null> {
+    const excluded = this.excludedLanes(resourceClass);
+    const rotating = this.config.totals[resourceClass] !== undefined;
+    const attempts = rotating ? this.rotation.preferences(resourceClass) : [[]];
+    for (const [index, served] of attempts.entries()) {
+      const job = await this.config.jobs.claimNext({
+        resourceClass,
+        types,
+        now: this.iso(),
+        excludeLanes: [...excluded, ...served],
+      });
+      if (job || this.stopping) return job;
+      if (index > 0) this.forgetIdleLane(resourceClass, attempts[index - 1]!);
+    }
+    return null;
+  }
+
+  /**
+   * Drops from the rotation the lane that a claim finding nothing gave back, when it has no running job: it has
+   * nothing to claim, so leaving it out of later claims would only cost queries.
+   *
+   * @param resourceClass the class of the claim
+   * @param previous the lanes the claim before left out; its last lane is the one given back
+   */
+  private forgetIdleLane(resourceClass: ResourceClass, previous: (string | null)[]): void {
+    if (previous.length === 0) return;
+    const lane = previous[previous.length - 1] as string | null;
+    if (!this.runningOf(resourceClass).has(lane)) this.rotation.forget(resourceClass, lane);
   }
 
   /**
@@ -547,10 +618,10 @@ class JobScheduler {
     try {
       barred = this.excludedLanes(job.resourceClass).includes(job.lane);
     } catch (cause) {
-      await this.config.jobs.release(job.id, this.iso());
+      await this.putBack(job);
       throw cause;
     }
-    if (barred) await this.config.jobs.release(job.id, this.iso());
+    if (barred) await this.putBack(job);
     return barred;
   }
 
@@ -593,6 +664,9 @@ class JobScheduler {
       settled: false,
       done: Promise.resolve(),
     };
+    // A put-back whose answer was lost may have been written: the row was queued again and is launched now, so its
+    // never-launched mark must not outlive this launch.
+    this.leftovers.forget(job.id);
     this.active.set(job.id, run);
     run.done = this.runJob(job, run, handler);
   }
@@ -617,7 +691,8 @@ class JobScheduler {
     try {
       await this.settle(job, run, outcome);
     } catch (cause) {
-      // The row may still be `running`; the next pass recovers it as a restart would.
+      // The row may still be `running`; the next pass recovers it, spending the attempt of this run.
+      this.leftovers.addUnsettled(job.id);
       this.recoveryPending = true;
       this.config.log('Job outcome could not be stored', cause);
     }

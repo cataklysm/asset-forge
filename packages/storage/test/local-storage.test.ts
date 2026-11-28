@@ -223,6 +223,19 @@ describe('file-system error mapping', () => {
     expect(await storage.readText('inbox/a.txt')).toBe('A');
   });
 
+  it('ends the cleanup at the first directory it cannot remove and still reports the rename failure', async () => {
+    await storage.writeText('inbox/a.txt', 'A');
+    const cause = errno('EBUSY', path.join(root, 'inbox', 'a.txt'));
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(cause);
+    const rmdir = vi.spyOn(fs, 'rmdir').mockRejectedValueOnce(errno('EBUSY', path.join(root, 'assets')));
+    await expect(storage.move('inbox/a.txt', 'assets/new-asset/sub/a.txt')).rejects.toBe(cause);
+    // The deepest directory could not go, so its parent is not tried.
+    expect(rmdir).toHaveBeenCalledTimes(1);
+    expect(String(rmdir.mock.calls[0]![0])).toBe(path.join(root, 'assets', 'new-asset', 'sub'));
+    expect(await storage.list('assets/new-asset')).toEqual(['sub']);
+    expect(await storage.readText('inbox/a.txt')).toBe('A');
+  });
+
   it('keeps an existing empty target directory when the rename fails', async () => {
     await storage.writeText('inbox/a.txt', 'A');
     await fs.mkdir(path.join(root, 'assets', 'existing'));
@@ -425,6 +438,29 @@ describe('path escape', () => {
     }
     expect(raced).toBe(true);
     expect(await storage.readText('assets/new-asset/a.txt')).toBe('A');
+  });
+
+  it('refuses an entry that exists but never resolves after a few looks', async () => {
+    await fs.mkdir(path.join(root, 'assets', 'unresolvable'));
+    const dir = path.join(root, 'assets', 'unresolvable');
+    const realpath = fs.realpath.bind(fs);
+    let looks = 0;
+    const spy = vi.spyOn(fs, 'realpath').mockImplementation(async (p, ...rest) => {
+      if (p === dir) {
+        looks += 1;
+        throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      }
+      return realpath(p as string, ...(rest as []));
+    });
+    try {
+      await expect(storage.writeText('assets/unresolvable/a.txt', 'x')).rejects.toThrow(
+        new PathEscapeError('Path crosses a dangling link'),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    // The first look and three more.
+    expect(looks).toBe(4);
   });
 
   it('still refuses a dangling link found while the path is checked', async () => {
