@@ -613,6 +613,21 @@ it('the Selection column follows a rename when no loaded page holds the selected
   expect(within(column).queryByText('Front View')).toBeNull();
 });
 
+it('an asset selected before a remount stays in the Selection column when a filter hides it', async () => {
+  const user = userEvent.setup();
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
+  const pine = assetSummary({ name: 'Pine', typeId: TYPE.id });
+  install({
+    'assets:list': (request) => (request.status === 'in_review' ? pageOf([pine]) : listOf([oak, pine])(request)),
+  });
+  // The selection comes from the kept list state, not from a click in this mount.
+  render(<Harness initial={{ ...INITIAL, selectedId: oak.id }} />);
+  expect(await within(selectionColumn()).findByText('Oak tree')).toBeTruthy();
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'in_review');
+  await waitFor(() => expect(screen.queryByText('Oak tree', { selector: '[data-index] *' })).toBeNull());
+  expect(within(selectionColumn()).getByText('Oak tree')).toBeTruthy();
+});
+
 it('the file type filter offers Video and asks for assets with a video', async () => {
   const api = install({ 'assets:list': listOf(many(2)) });
   render(<Harness />);

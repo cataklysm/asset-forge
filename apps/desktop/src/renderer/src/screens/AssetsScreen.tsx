@@ -164,6 +164,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
       lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
   });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
+  // A loaded page holds the newest copy, also of an asset selected before this mount.
+  if (loadedSelection !== null) lastSelected.current = loadedSelection.item;
   const selectedAsset =
     loadedSelection?.item ?? (lastSelected.current?.id === state.selectedId ? lastSelected.current : null);
 
