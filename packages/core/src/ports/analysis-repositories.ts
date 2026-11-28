@@ -45,6 +45,9 @@ export interface Proposal extends AnalysisFingerprint {
   createdAt: string;
 }
 
+/** What accepting a proposal did: applied it, found none, found it out of date, or found the file in the trash. */
+export type ProposalAcceptance = 'accepted' | 'missing' | 'stale' | 'trashed';
+
 /** The analysis records and tag proposals of the files. */
 export interface FileAnalysisRepository {
   /**
@@ -91,22 +94,23 @@ export interface FileAnalysisRepository {
    */
   getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null>;
   /**
-   * One transaction. False when there is no proposal or it is stale (the file is gone, not complete or its sha256
-   * differs from `sha256` / the proposal's; a stale proposal is deleted). False without writing anything for a file
-   * in the trash, which keeps its proposal for a restore. Otherwise applies exactly `tags` as `apply` does, writes
-   * the analysis row from the proposal's fingerprint and prompt name with `analysedAt = now`, deletes the proposal
-   * and returns true.
+   * One transaction, checked in this order: `missing` without a proposal; `trashed`, writing nothing, for a file in
+   * the trash, which keeps its proposal for a restore; `stale` and the proposal deleted when the file is gone, not
+   * complete or its current sha256 differs from the proposal's; `stale` without deleting anything when `sha256`
+   * differs from the proposal's or `tags` is empty or holds a name outside the proposal (the caller read an older
+   * proposal). Otherwise applies exactly `tags` as `apply` does, writes the analysis row from the proposal's
+   * fingerprint and prompt name with `analysedAt = now`, deletes the proposal and answers `accepted`.
    *
    * @param acceptance the file, the hash the owner saw, the accepted tags with an id for a new tag row each and the
    *   time
-   * @returns true when the proposal was applied
+   * @returns what happened
    */
   acceptProposal(acceptance: {
     fileId: string;
     sha256: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
-  }): Promise<boolean>;
+  }): Promise<ProposalAcceptance>;
   /**
    * Deletes the proposal; no-op without one.
    *

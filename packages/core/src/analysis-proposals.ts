@@ -6,9 +6,9 @@ import {
   type ProposalView,
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
-import { requireLiveFile } from './file-trash.js';
+import { requireLiveFile, TRASHED_FILE_MESSAGE } from './file-trash.js';
 import type { Job } from './job-types.js';
-import type { Proposal } from './ports/analysis-repositories.js';
+import type { Proposal, ProposalAcceptance } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
 /** A proposal as it is read, with whether its file changed since. */
@@ -86,8 +86,8 @@ export async function getProposal(
  * @param session the open workspace
  * @param request the file and the chosen tag names
  * @returns resolves once the tags are applied
- * @throws `NotFoundError` without a proposal; `InvalidOperationError` for a foreign or empty choice and for a
- *   stale proposal, which is deleted
+ * @throws `NotFoundError` without a proposal; `InvalidOperationError` for a file in the trash (its proposal is
+ *   kept), for a foreign or empty choice and for a stale proposal, which is deleted
  */
 export async function acceptProposal(
   session: WorkspaceSession,
@@ -95,21 +95,29 @@ export async function acceptProposal(
 ): Promise<void> {
   const proposal = await session.database.analyses.getProposal(request.fileId);
   if (proposal === null) throw new NotFoundError('The file has no tag proposal');
-  // Checked before the stale branch, so a trashed file keeps its proposal for a restore.
-  const file = await session.database.files.get(request.fileId);
-  if (file !== null) requireLiveFile(file);
-  if (proposal.stale) {
-    await session.database.analyses.discardProposal(request.fileId);
-    throw new InvalidOperationError('The tag proposal is out of date');
-  }
-  const chosen = chosenNames(proposal, request.names);
-  const accepted = await session.database.analyses.acceptProposal({
+  // A stale proposal is handed over with no tags, so the repository's trash and stale checks answer before the
+  // choice is looked at.
+  const chosen = proposal.stale ? new Set<string>() : chosenNames(proposal, request.names);
+  const outcome = await session.database.analyses.acceptProposal({
     fileId: request.fileId,
     sha256: proposal.sha256,
     tags: proposal.tags.filter((tag) => chosen.has(tag.name)).map((tag) => ({ ...tag, newId: session.newId() })),
     now: session.now().toISOString(),
   });
-  if (!accepted) throw new InvalidOperationError('The tag proposal is out of date');
+  refuseUnaccepted(outcome);
+}
+
+/**
+ * Turns an acceptance that applied nothing into its error.
+ *
+ * @param outcome what the repository answered
+ * @returns nothing for `accepted`
+ * @throws `NotFoundError` for `missing`; `InvalidOperationError` for `trashed` and `stale`
+ */
+function refuseUnaccepted(outcome: ProposalAcceptance): void {
+  if (outcome === 'missing') throw new NotFoundError('The file has no tag proposal');
+  if (outcome === 'trashed') throw new InvalidOperationError(TRASHED_FILE_MESSAGE);
+  if (outcome === 'stale') throw new InvalidOperationError('The tag proposal is out of date');
 }
 
 /**

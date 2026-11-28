@@ -1,4 +1,4 @@
-import type { FileAnalysis, FileAnalysisRepository, Proposal } from '@assetforge/core';
+import type { FileAnalysis, FileAnalysisRepository, Proposal, ProposalAcceptance } from '@assetforge/core';
 import { and, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { parseTags } from './proposal-tags.js';
@@ -214,34 +214,32 @@ async function getProposal(
 }
 
 /**
- * Applies the chosen tags of the stored proposal; a stale proposal is deleted.
+ * Applies the chosen tags of the stored proposal; a proposal whose file changed is deleted.
  *
  * @param database the workspace database
- * @param request the file, its checksum, the chosen tags and the time
- * @returns false when nothing was applied
+ * @param request the file, the checksum the caller saw, the chosen tags and the time
+ * @returns what happened, in the order the port describes
  */
 async function acceptProposal(
   database: BetterSQLite3Database,
   request: Parameters<FileAnalysisRepository['acceptProposal']>[0],
-): Promise<boolean> {
+): Promise<ProposalAcceptance> {
   return database.transaction((transaction) => {
     const row = transaction
       .select()
       .from(fileAnalysisProposal)
       .where(eq(fileAnalysisProposal.fileId, request.fileId))
       .get();
-    if (!row) return false;
+    if (!row) return 'missing';
     // A trashed file keeps its proposal for a restore; nothing is written meanwhile.
-    if (inTrash(transaction, request.fileId)) return false;
-    // A choice outside the stored proposal is refused without touching it.
-    if (request.tags.length === 0) return false;
-    const proposed = new Set(parseTags(row.tags).map((proposedTag) => proposedTag.name));
-    if (request.tags.some((chosen) => !proposed.has(chosen.name))) return false;
-    const target = row.sha256 === request.sha256 ? matchingFile(transaction, request.fileId, row.sha256) : undefined;
+    if (inTrash(transaction, request.fileId)) return 'trashed';
+    const target = matchingFile(transaction, request.fileId, row.sha256);
     if (!target) {
       transaction.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, request.fileId)).run();
-      return false;
+      return 'stale';
     }
+    // The caller read another proposal than the stored one: refused without touching the valid one.
+    if (row.sha256 !== request.sha256 || !withinProposal(row.tags, request.tags)) return 'stale';
     writeAnalysis(transaction, {
       fileId: request.fileId,
       assetId: target.assetId,
@@ -255,8 +253,20 @@ async function acceptProposal(
         analysedAt: request.now,
       },
     });
-    return true;
+    return 'accepted';
   });
+}
+
+/**
+ * Whether a choice is a non-empty subset of the stored proposal's tags.
+ *
+ * @param storedTags the proposal's tags as stored
+ * @param chosen the chosen tags
+ * @returns true when at least one tag is chosen and every chosen name is one of the proposal's
+ */
+function withinProposal(storedTags: string, chosen: readonly { name: string }[]): boolean {
+  const proposed = new Set(parseTags(storedTags).map((proposedTag) => proposedTag.name));
+  return chosen.length > 0 && chosen.every((tag) => proposed.has(tag.name));
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ANALYZE_FILE_JOB } from '@assetforge/contracts';
 import {
   acceptProposal,
@@ -203,8 +203,30 @@ describe('acceptProposal', () => {
   it('refuses when the repository does not accept', async () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
-    c.db.analyses.acceptProposal = async () => false;
+    c.db.analyses.acceptProposal = async () => 'stale';
     await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }));
+  });
+
+  it('maps each answer of the one repository transaction to its error', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    const answerWith = async (outcome: 'missing' | 'trashed' | 'stale') => {
+      c.db.analyses.acceptProposal = async () => outcome;
+      return acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e as Error);
+    };
+    const missing = await answerWith('missing');
+    expect(missing).toBeInstanceOf(NotFoundError);
+    expect(missing?.message).toBe('The file has no tag proposal');
+    expect((await answerWith('trashed'))?.message).toBe('The file is in the trash');
+    expect((await answerWith('stale'))?.message).toBe('The tag proposal is out of date');
+  });
+
+  it('reads no file record: the trash is checked inside the repository transaction', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    const get = vi.spyOn(c.db.files, 'get');
+    await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] });
+    expect(get).not.toHaveBeenCalled();
   });
 });
 

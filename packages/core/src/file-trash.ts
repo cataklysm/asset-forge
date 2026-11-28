@@ -21,6 +21,8 @@ interface RestorePlacement {
 const EMPTY_CHUNK = 200;
 /** The refusal of a purge while a generation of the file runs. */
 export const RUNNING_GENERATION_MESSAGE = 'This file still has a running generation';
+/** The refusal of an action on a file in the trash. */
+export const TRASHED_FILE_MESSAGE = 'The file is in the trash';
 const NOT_IN_TRASH = 'The file is not in the trash';
 
 /**
@@ -44,7 +46,7 @@ async function requireFile(session: WorkspaceSession, fileId: string): Promise<F
  * @throws InvalidOperationError for a file in the trash
  */
 export function requireLiveFile(file: FileRecord): void {
-  if (file.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
+  if (file.deletedAt !== null) throw new InvalidOperationError(TRASHED_FILE_MESSAGE);
 }
 
 /**

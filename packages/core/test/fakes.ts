@@ -53,6 +53,7 @@ import type {
   AnalysisTargetEntry,
   AnalysisTargetReader,
   Proposal,
+  ProposalAcceptance,
   FileAnalysis,
   FileAnalysisRepository,
 } from '../src/ports/analysis-repositories.js';
@@ -841,16 +842,17 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     sha256: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
-  }): Promise<boolean> {
+  }): Promise<ProposalAcceptance> {
     const proposal = this.proposals.get(r.fileId);
-    if (!proposal) return false;
-    if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return false;
+    if (!proposal) return 'missing';
     // The proposal of a trashed file is kept for a restore; only a genuinely stale one is deleted.
-    if (this.files.isTrashed(r.fileId)) return false;
-    if (proposal.sha256 !== r.sha256 || !this.hasContent(r.fileId, r.sha256)) {
+    if (this.files.isTrashed(r.fileId)) return 'trashed';
+    if (!this.hasContent(r.fileId, proposal.sha256)) {
       this.proposals.delete(r.fileId);
-      return false;
+      return 'stale';
     }
+    if (proposal.sha256 !== r.sha256) return 'stale';
+    if (r.tags.length === 0 || r.tags.some((t) => !proposal.tags.some((p) => p.name === t.name))) return 'stale';
     this.writeTags(r.fileId, r.tags);
     this.rows.set(r.fileId, {
       fileId: r.fileId,
@@ -862,7 +864,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
       analysedAt: r.now,
     });
     this.proposals.delete(r.fileId);
-    return true;
+    return 'accepted';
   }
 
   async discardProposal(fileId: string): Promise<void> {
