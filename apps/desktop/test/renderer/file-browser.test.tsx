@@ -9,7 +9,7 @@ import { formatDateTime } from '../../src/renderer/src/format';
 import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/renderer/src/list-state';
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
-import { deferred, installFakeApi, noChanges, type FakeHandlers } from './fake-api';
+import { deferred, fakeError, installFakeApi, noChanges, type FakeHandlers } from './fake-api';
 import { settleQueued } from './settle';
 import { fileRecord, nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 
@@ -437,6 +437,28 @@ it('the viewer keeps its neighbours loaded and show() loads the page it needs; t
   expect(onView).toHaveBeenCalledTimes(2);
   expect(onView).toHaveBeenLastCalledWith(files[126]);
   expect(viewerText()).toBe('index 126 total 130');
+});
+
+it('show() into a page whose load failed requests that page again', async () => {
+  const files = many(130);
+  const onView = vi.fn();
+  let failing = true;
+  const api = install({
+    'files:list': (request: ListRequest) => {
+      if (request.offset === 60 && failing) throw fakeError('internal_error');
+      return listOf(files)(request);
+    },
+  });
+  render(<ViewerHarness initialFileId={files[59]!.id} onView={onView} />);
+  await screen.findByText('File 0.png');
+  // The page after the shown file fails; the list's Retry sits behind the viewer.
+  await waitFor(() => expect(listRequests(api).filter((r) => r.offset === 60)).toHaveLength(1));
+  await settleQueued();
+  failing = false;
+  show(60);
+  await waitFor(() => expect(onView).toHaveBeenLastCalledWith(files[60]));
+  expect(listRequests(api).filter((r) => r.offset === 60)).toHaveLength(2);
+  expect(viewerText()).toBe('index 60 total 130');
 });
 
 it('after a reload without the shown file the viewer moves to the follower, else the previous, else closes', async () => {
