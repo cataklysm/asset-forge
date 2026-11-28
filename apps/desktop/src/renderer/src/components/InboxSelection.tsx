@@ -68,6 +68,50 @@ function markerOf(file: FileRecord, assignError: string | undefined): Marker | n
       : null;
 }
 
+/** The batch assign's request. */
+interface AssignRequest {
+  /** The eligible files. */
+  fileIds: string[];
+  /** The picked asset. */
+  assetId: string;
+  /** The picked role. */
+  role: FileRole;
+}
+
+/** What the batch assign reports to. */
+interface AssignDependencies {
+  /** The selection as it is when the answer arrives; names come from it. */
+  latest: { readonly current: FileSelection };
+  /** Shows the per-file failures, or clears the strip. */
+  setResult(result: { title: string; failures: ResultFailure[] } | null): void;
+  /** Shows a failure of the whole request. */
+  setError(message: string): void;
+  /** Receives the files that moved. */
+  onAssigned(movedIds: string[]): void;
+}
+
+/**
+ * Sends the batch assign and reports its answer.
+ *
+ * @param request the files, asset and role
+ * @param dependencies where the answer is reported
+ * @returns settles once the answer was reported
+ */
+async function sendAssign(request: AssignRequest, dependencies: AssignDependencies): Promise<void> {
+  const nameOf = (fileId: string) => dependencies.latest.current.selected.get(fileId)?.originalName ?? fileId;
+  try {
+    const { items } = await call('files:assignMany', request);
+    const failures = assignFailures(items, nameOf);
+    const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
+    dependencies.setResult(
+      failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
+    );
+    dependencies.onAssigned(moved);
+  } catch (caught) {
+    dependencies.setError(describeError(caught));
+  }
+}
+
 /**
  * The Selection column of the inbox: the size of the selection, its shared image tags, the batch
  * assign to an asset and the selected names. Files that are not completely imported are marked
@@ -104,27 +148,16 @@ export function InboxSelection({ selection, tagInputRef, assignGuard, onAssigned
     onFilesChanged(items);
   }
 
-  /** Assigns every eligible file to the picked asset, once at a time, and reports per-file failures. */
+  /**
+   * Assigns every eligible file to the picked asset, once at a time, and reports per-file failures.
+   *
+   * @returns settles when the assign ended or was ignored
+   */
   function assign(): Promise<void> {
     if (asset === null || eligibleIds.length === 0) return Promise.resolve();
     const request = { fileIds: eligibleIds, assetId: asset.id, role };
-    return assignGuard.run(
-      async () => {
-        const nameOf = (fileId: string) => latest.current.selected.get(fileId)?.originalName ?? fileId;
-        try {
-          const { items } = await call('files:assignMany', request);
-          const failures = assignFailures(items, nameOf);
-          const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
-          setResult(
-            failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
-          );
-          onAssigned(moved);
-        } catch (caught) {
-          setError(describeError(caught));
-        }
-      },
-      { onStart: () => setError(null) },
-    );
+    const dependencies = { latest, setResult, setError, onAssigned };
+    return assignGuard.run(() => sendAssign(request, dependencies), { onStart: () => setError(null) });
   }
 
   const noneEligible = eligible.length === 0;
