@@ -121,6 +121,16 @@ describe('ollama vision adapter', () => {
     await expectCode(analyze({ baseUrl: url, model: MOCK_MODEL }), 'invalid_response', url);
   });
 
+  it('keeps no cause that could quote the answer for content or a body that is not JSON', async () => {
+    const baseUrl = 'http://127.0.0.1:1';
+    const content = JSON.stringify({ message: { content: 'secret-answer-text' } });
+    for (const body of [content, 'secret-answer-text']) {
+      const error = await failureOf(analyze({ baseUrl, model: MOCK_MODEL, fetch: answering(200, body) }));
+      expect((error as JobError).code).toBe('invalid_response');
+      expect((error as JobError).cause).toBeUndefined();
+    }
+  });
+
   it('maps a body without message content to invalid_response', async () => {
     const baseUrl = 'http://127.0.0.1:1';
     await expectCode(
