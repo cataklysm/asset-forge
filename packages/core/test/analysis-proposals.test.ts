@@ -134,6 +134,13 @@ describe('getProposal', () => {
     c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
     expect((await getProposal(c.session, c.file.id)).proposal?.stale).toBe(true);
   });
+
+  it('marks a proposal of a file that is no longer complete stale, like the SQLite reader', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, status: 'failed' });
+    expect((await getProposal(c.session, c.file.id)).proposal?.stale).toBe(true);
+  });
 });
 
 describe('acceptProposal', () => {

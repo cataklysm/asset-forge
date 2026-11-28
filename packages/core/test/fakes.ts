@@ -830,7 +830,9 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   async getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null> {
     const proposal = this.proposals.get(fileId);
     if (!proposal) return null;
-    return { ...structuredClone(proposal), stale: this.files.records.get(fileId)?.sha256 !== proposal.sha256 };
+    const record = this.files.records.get(fileId);
+    const stale = record?.status !== 'complete' || record.sha256 !== proposal.sha256;
+    return { ...structuredClone(proposal), stale };
   }
 
   async acceptProposal(r: {
