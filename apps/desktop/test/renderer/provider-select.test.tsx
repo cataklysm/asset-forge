@@ -90,6 +90,23 @@ it('a failed reload keeps the list already held and does not count as failed', a
   expect(state!.loading).toBe(false);
 });
 
+it('a reload drops the model answers of entries that are no longer listed', async () => {
+  const fake = fakeProviders({ providers: [LOCAL, RUNPOD] });
+  installFakeApi(fake.handlers);
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(Object.keys(state!.models).sort()).toEqual([LOCAL.id, RUNPOD.id].sort()));
+  // Deleted elsewhere: the next list no longer holds RunPod.
+  fake.state.providers = [LOCAL];
+  await act(async () => {
+    await state!.reload();
+  });
+  expect(Object.keys(state!.models)).toEqual([LOCAL.id]);
+});
+
 it('a failed first load holds no list and counts as failed', async () => {
   installFakeApi({
     ...fakeProviders().handlers,
