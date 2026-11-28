@@ -141,3 +141,12 @@ The owner requested a separate `Extractions` entry immediately below `Jobs`, wit
 - RED checkpoint `f2b894d`: the navigation entry and standalone screen were missing. The root navigation regression and the new screen tests then passed alongside the existing modal tests.
 - Validation: **1,071 renderer tests passed across 56 files**; workspace typechecking, formatting, lint (zero errors), production dependency audit and the isolated Electron build passed. No backend contract, database or migration changed.
 - Native rendered validation passed navigation order, page opening without a main modal, captured asset review, no asset lookup and Jobs -> Extractions return without cancellation. At a 1280 × 800 viewport the shell's main area measured 724 px for both its client and scroll height, so the page retains the bounded scrolling layout.
+
+## Jobs IPC regression with persisted extractions
+
+The owner reported `IPC response violates the contract: channel=jobs:list issues=9`. Gallery extraction jobs store their website host in the scheduler lane. The shared `jobViewOf` mapper only excluded download lanes from `providerId`, so it exposed extraction hosts as provider IDs, which the UUID/environment provider contract correctly rejected. Each persisted extraction contributed one issue and the entire Jobs page failed to load.
+
+- RED checkpoint `aec0f6d`: a unit test detects the host incorrectly exposed as a provider; a real SQLite/application-wiring test queues nine extractions and one download, then reproduces the exact nine-issue failure through validated `jobs:list` IPC.
+- The mapper now gives extraction jobs a null provider ID, like downloads. The strict IPC contract and stored scheduler lanes remain unchanged. Existing jobs require no migration or deletion.
+- The integration regression covers the mixed Jobs list, status and ID filters, unchanged persisted lanes, and reopening the workspace with existing extraction history. Earlier discovery tests read the repository directly and renderer fixtures supplied already-valid views, so they missed this contract boundary.
+- GREEN: **242 targeted tests passed** (28 core job tests, 41 discovery/jobs IPC tests, 80 persistence tests, 93 Jobs/context/shell renderer tests). Workspace typechecking, changed-source lint, formatting and diff checks passed; the production dependency audit reported zero vulnerabilities. No renderer layout or running application data was changed.

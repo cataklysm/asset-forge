@@ -2,6 +2,7 @@ import {
   ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
+  SITE_CRAWL_JOB,
   analysisJobFields,
   analysisJobMode,
   downloadJobFields,
@@ -24,7 +25,8 @@ export interface JobViewDetails {
 
 /**
  * A job as a view: a download shows its address and host and no provider, a generation shows the provider and
- * model of its record, any other job those of its analysis payload. Only an analysis job has a mode.
+ * model of its record, an extraction has no provider, and an analysis shows those of its payload.
+ * Only an analysis job has a mode.
  *
  * @param job the job
  * @param details the file name, the generation and the result read next to it
@@ -47,8 +49,8 @@ export function jobViewOf(job: Job, details: JobViewDetails): JobView {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     runAfter: job.runAfter,
-    // A download's lane is its host, not a provider.
-    providerId: isDownload ? null : job.lane,
+    // Download and extraction lanes identify hosts, never providers.
+    providerId: isDownload || job.type === SITE_CRAWL_JOB ? null : job.lane,
     ...(isDownload ? downloadJobFields(job.payload) : { url: null, host: null }),
     result: details.result,
   };
