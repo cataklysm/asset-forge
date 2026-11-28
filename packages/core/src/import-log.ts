@@ -42,6 +42,22 @@ export function logImportFailure(
   writeLine(log, errorLogLine(IMPORT_FAILED_EVENT, fields, error));
 }
 
+/** The fixed event text of a download that ends as `internal_error`. */
+export const DOWNLOAD_FAILED_EVENT = 'Download failed unexpectedly';
+
+/**
+ * Writes one line for a download job that failed with an error that is not a `JobError` and therefore ends as
+ * `internal_error`; the job id is the only id, since the URL and its host never enter a line.
+ *
+ * @param log the host's log; nothing is written without one
+ * @param jobId the download job
+ * @param error what ended the download
+ */
+export function logDownloadFailure(log: LineLog | undefined, jobId: string, error: unknown): void {
+  if (log === undefined) return;
+  writeLine(log, errorLogLine(DOWNLOAD_FAILED_EVENT, { operation: 'download', job: jobId }, error));
+}
+
 /**
  * Whether an import failure is worth a line: an unexpected error, or an `InvalidOperationError` that wraps one (the
  * journaled move turns a failed binary move into `This file could not be moved` with the raw error as its cause).
