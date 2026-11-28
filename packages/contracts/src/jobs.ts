@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { JobErrorCodeSchema } from './job-errors';
 import { ModelNameSchema, ProviderIdSchema, ProviderKindSchema } from './provider-ref';
+import { CountSchema } from './ipc-shared';
 
 /** The technical status of a job; separate from asset status and workflow step state. */
 export const JobStatusSchema = z.enum([
@@ -63,8 +64,6 @@ export const JobViewSchema = z.object({
 /** A job as the Jobs screen shows it. */
 export type JobView = z.infer<typeof JobViewSchema>;
 
-const count = z.number().int().nonnegative();
-
 /**
  * A provider whose jobs are paused; `providerId` null is the jobs without a provider. `kind` follows
  * the kind of the lane's entry (`purposeOf` tells a vision lane from an image lane); for a lane whose
@@ -86,14 +85,14 @@ export type PausedHost = z.infer<typeof PausedHostSchema>;
 
 /** `waiting` is `retry_wait` and `waiting_remote` together. */
 export const JobSummarySchema = z.object({
-  queued: count,
-  running: count,
-  waiting: count,
-  failed: count,
-  cancelled: count,
-  succeeded: count,
+  queued: CountSchema,
+  running: CountSchema,
+  waiting: CountSchema,
+  failed: CountSchema,
+  cancelled: CountSchema,
+  succeeded: CountSchema,
   /** The total of the change feed; a list reads `changes:since` when it moved. */
-  changes: count,
+  changes: CountSchema,
   /** Every provider whose analysis queue is paused because it is down or refused the request; empty otherwise. */
   paused: z.array(PausedProviderSchema),
   /** Every download host that is paused after repeated failures; empty otherwise. */

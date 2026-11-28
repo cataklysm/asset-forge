@@ -3,8 +3,8 @@ import { FileIdsSchema, FileKindSchema, FileScopeSchema } from './files';
 import { JobErrorCodeSchema } from './job-errors';
 import { AssetStatusSchema, FileRoleSchema } from './library';
 import { ModelNameSchema } from './provider-ref';
+import { CountSchema } from './ipc-shared';
 
-const count = z.number().int().nonnegative();
 const TagNameSchema = z.string().max(200);
 
 /** The filter part of `files:list`: which files a list shows, without paging. */
@@ -51,28 +51,31 @@ export type AnalysisMode = z.infer<typeof AnalysisModeSchema>;
 
 /** What an enqueue of a target with a model would do, by file count. */
 export const AnalysisPreviewSchema = z.object({
-  analysable: count,
-  alreadyAnalysed: count,
-  alreadyQueued: count,
-  notAnalysable: count,
+  analysable: CountSchema,
+  alreadyAnalysed: CountSchema,
+  alreadyQueued: CountSchema,
+  notAnalysable: CountSchema,
 });
 /** The answer of `analysis:preview`. */
 export type AnalysisPreview = z.infer<typeof AnalysisPreviewSchema>;
 
 /** Counts, not a per-file list: a filter target can cover a whole workspace. */
 export const EnqueueAnalysisResultSchema = z.object({
-  enqueued: count,
+  enqueued: CountSchema,
   skipped: z.object({
-    notFound: count,
-    notAnalysable: count,
-    alreadyQueued: count,
-    alreadyAnalysed: count,
+    notFound: CountSchema,
+    notAnalysable: CountSchema,
+    alreadyQueued: CountSchema,
+    alreadyAnalysed: CountSchema,
   }),
 });
 /** The answer of `analysis:enqueue`. */
 export type EnqueueAnalysisResult = z.infer<typeof EnqueueAnalysisResultSchema>;
 
-/** Why a file was not queued by an enqueue; the IPC result carries counts per reason (`EnqueueAnalysisResultSchema`). */
+/**
+ * Why a file was not queued by an enqueue; the IPC result carries counts per reason
+ * (`EnqueueAnalysisResultSchema`).
+ */
 export const AnalysisSkipReasonSchema = z.enum(['not_found', 'not_analysable', 'already_queued', 'already_analysed']);
 /** Why a file was not queued by an enqueue. */
 export type AnalysisSkipReason = z.infer<typeof AnalysisSkipReasonSchema>;

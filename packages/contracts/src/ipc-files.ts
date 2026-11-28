@@ -46,7 +46,10 @@ export const fileChannels = {
     request: z.object({ fileIds: FileIdsSchema, name: z.string().max(200) }),
     response: FileRecordsSchema,
   },
-  /** Measures a complete image or video without stored dimensions (a video also its duration); returns the (possibly unchanged) record. */
+  /**
+   * Measures a complete image or video without stored dimensions (a video also its duration); returns the
+   * (possibly unchanged) record.
+   */
   'files:measure': {
     request: z.object({ fileId: IdSchema }),
     response: FileRecordSchema,

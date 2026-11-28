@@ -2,8 +2,6 @@ import { z } from 'zod';
 import { PROMPT_VARIABLE_NAME_MAX, PROMPT_VARIABLE_VALUE_MAX } from './prompt-template';
 import { TagAssignmentSchema } from './tags';
 
-export { PROMPT_VARIABLE_NAME_MAX, PROMPT_VARIABLE_VALUE_MAX };
-
 /** Longest title of a library prompt. */
 export const PROMPT_TITLE_MAX = 120;
 /** Longest description of a library prompt. */

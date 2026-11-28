@@ -17,7 +17,10 @@ export const TagAssignmentSchema = z.object({
 /** A tag on one owner. */
 export type TagAssignment = z.infer<typeof TagAssignmentSchema>;
 
-/** Where a requested filter tag was found on a list item: on the asset itself, on one of its complete files, or both. */
+/**
+ * Where a requested filter tag was found on a list item: on the asset itself, on one of its complete files, or
+ * both.
+ */
 export const MatchedTagSchema = z.object({
   name: z.string(),
   displayName: z.string(),

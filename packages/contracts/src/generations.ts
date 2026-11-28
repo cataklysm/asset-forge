@@ -2,8 +2,7 @@ import { z } from 'zod';
 import { JobErrorCodeSchema } from './job-errors';
 import { JobStatusSchema } from './jobs';
 import { ModelNameSchema, ProviderIdSchema, ProviderKindSchema } from './provider-ref';
-
-const IdSchema = z.uuid();
+import { IdSchema } from './ipc-shared';
 
 /** The host's limit on an edit prompt; a model may allow fewer characters. */
 export const GENERATION_PROMPT_MAX = 8000;
@@ -57,7 +56,10 @@ export const GenerationParametersSchema = z.union([EditParametersSchema, Upscale
 /** The versioned parameters a generation stores. */
 export type GenerationParameters = z.infer<typeof GenerationParametersSchema>;
 
-/** An input or output file of a generation; `fileId` null once the file was purged, `trashed` while it is in the trash. */
+/**
+ * An input or output file of a generation; `fileId` null once the file was purged, `trashed` while it is in the
+ * trash.
+ */
 export const GenerationFileSchema = z.object({
   fileId: IdSchema.nullable(),
   name: z.string(),
