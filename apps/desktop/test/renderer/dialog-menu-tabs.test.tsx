@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
@@ -51,6 +51,45 @@ it('Esc closes the dialog and focus returns to the trigger', async () => {
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(dialog.open).toBe(false);
   expect(document.activeElement).toBe(trigger);
+});
+
+it('a dialog the browser closes while it is held open calls onClose once and returns focus', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(<DialogHarness onClose={onClose} />);
+  const trigger = screen.getByRole('button', { name: 'New asset' });
+  await user.click(trigger);
+  const dialog = document.querySelector('dialog')!;
+
+  // As a `method="dialog"` form does: the element closes without Esc.
+  act(() => dialog.close());
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(dialog.open).toBe(false);
+  expect(document.activeElement).toBe(trigger);
+});
+
+/** A dialog that its content closes by setting `open` to false, without `onClose`. */
+function DoneHarness({ onClose }: { onClose(): void }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Dialog open={open} title="Done" onClose={onClose}>
+      <button type="button" onClick={() => setOpen(false)}>
+        Done
+      </button>
+    </Dialog>
+  );
+}
+
+it('a dialog its caller closes does not call onClose', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(<DoneHarness onClose={onClose} />);
+  const dialog = document.querySelector('dialog')!;
+  expect(dialog.open).toBe(true);
+
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(dialog.open).toBe(false);
+  expect(onClose).not.toHaveBeenCalled();
 });
 
 it('the detail dialog follows the window size with an even margin; the form dialog keeps its size', async () => {

@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode, type RefObject } from 'react';
+import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { BORDER, SECTION_TITLE } from '../ui';
 
@@ -65,9 +65,12 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const openRef = useRef(open);
-  openRef.current = open;
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  // Before the effect of `useModalDialog` closes the element, so its close event sees the new `open`.
+  useLayoutEffect(() => {
+    openRef.current = open;
+    onCloseRef.current = onClose;
+  });
   useModalDialog(ref, open, initialFocusRef);
 
   const detail = size === 'detail';
