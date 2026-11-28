@@ -180,17 +180,18 @@ interface RunningFocusTargets {
  * the user moved elsewhere is left alone.
  *
  * @param running whether a request runs
- * @param targets the buttons
+ * @param targets the buttons; read only inside the effect
  */
-function useRunningFocus(running: boolean, targets: RunningFocusTargets): void {
+function useRunningFocus(running: boolean, targets: MutableRefObject<RunningFocusTargets>): void {
   const previous = useRef(running);
   useEffect(() => {
     if (previous.current === running) return;
     previous.current = running;
     if (!focusLost()) return;
-    const generate = targets.generate.current;
-    const fallback = generate !== null && !generate.disabled ? generate : targets.close.current;
-    const target = running ? targets.cancel.current : fallback;
+    const buttons = targets.current;
+    const generate = buttons.generate.current;
+    const fallback = generate !== null && !generate.disabled ? generate : buttons.close.current;
+    const target = running ? buttons.cancel.current : fallback;
     target?.focus();
   }, [running, targets]);
 }
@@ -221,7 +222,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
     cancel: cancelButton,
     close: closeButton,
   });
-  useRunningFocus(running, focusTargets.current);
+  useRunningFocus(running, focusTargets);
 
   const promptId = effectivePromptId(prompts, 'image_prompt', chosenPrompt);
   const gate = providerGate(providers, providerId, model, 'prompt');
