@@ -138,6 +138,54 @@ describe('asset cover repository', () => {
     await expect(db.assets.getCover(a.id)).resolves.toEqual({ coverFileId: first, coverIsChosen: false });
   });
 
+  test('setCover writes only a complete file with a thumbnail attached to the asset', async () => {
+    const a = await addAsset(10, 'Alpha');
+    const b = await addAsset(11, 'Beta');
+    const image = await addFile({ n: 100, assetId: a.id });
+    const video = await addFile({ n: 101, assetId: a.id, mimeType: MP4 });
+    const refused = [
+      await addFile({ n: 102, assetId: b.id }),
+      await addFile({ n: 103, assetId: null }),
+      await addFile({ n: 104, assetId: a.id, status: 'pending' }),
+      await addFile({ n: 105, assetId: a.id, status: 'failed' }),
+      await addFile({ n: 106, assetId: a.id, mimeType: BLEND }),
+      await addFile({ n: 107, assetId: a.id, mimeType: 'image/svg+xml' }),
+      uuid(999),
+    ];
+    for (const fileId of refused) {
+      await expect(db.assets.setCover(a.id, fileId, T2)).resolves.toBe(false);
+    }
+    await expect(db.assets.get(a.id)).resolves.toMatchObject({ updatedAt: T1 });
+    await expect(db.assets.getCover(a.id)).resolves.toEqual({ coverFileId: image, coverIsChosen: false });
+    await expect(db.assets.setCover(a.id, video, T2)).resolves.toBe(true);
+    await expect(db.assets.getCover(a.id)).resolves.toEqual({ coverFileId: video, coverIsChosen: true });
+    await expect(db.assets.setCover(a.id, null, T2)).resolves.toBe(true);
+    await expect(db.assets.setCover(uuid(998), null, T2)).resolves.toBe(false);
+    await expect(db.assets.setCover(uuid(998), image, T2)).resolves.toBe(false);
+  });
+
+  test('setCover refuses a trashed file', async () => {
+    const a = await addAsset(10, 'Alpha');
+    const trashed = await addFile({ n: 100, assetId: a.id });
+    await db.files.setPlacement(trashed, { relativePath: `inbox/${trashed}/f100`, assetId: null, role: null });
+    handle.prepare('UPDATE file SET deleted_at = ?, trashed_asset_id = ? WHERE id = ?').run(T2, a.id, trashed);
+    await expect(db.assets.setCover(a.id, trashed, T2)).resolves.toBe(false);
+  });
+
+  test('getDetail reads the asset, its cover, tags and sources; null for an unknown asset', async () => {
+    const a = await addAsset(10, 'Alpha');
+    const image = await addFile({ n: 100, assetId: a.id });
+    await db.assetSources.insert({ id: uuid(300), assetId: a.id, url: 'https://example.com/', createdAt: T2 });
+    await expect(db.assets.getDetail(a.id)).resolves.toEqual({
+      ...(await db.assets.get(a.id)),
+      coverFileId: image,
+      coverIsChosen: false,
+      tags: [],
+      sources: [{ id: uuid(300), url: 'https://example.com/', createdAt: T2 }],
+    });
+    await expect(db.assets.getDetail(uuid(999))).resolves.toBeNull();
+  });
+
   test('getCover of an unknown asset is null', async () => {
     await expect(db.assets.getCover(uuid(999))).resolves.toBeNull();
   });

@@ -167,6 +167,7 @@ describe('asset list filters', () => {
       kind: FileKind,
       originalName: string,
       status: 'complete' | 'pending' | 'failed' = 'complete',
+      mimeType = 'application/octet-stream',
     ) => {
       const id = `f0000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
       await db.files.insertPending({
@@ -174,7 +175,7 @@ describe('asset list filters', () => {
         storageId: 's',
         originalName,
         relativePath: `assets/${assetId}/${originalName}`,
-        mimeType: 'application/octet-stream',
+        mimeType,
         importedAt: '2026-01-01T00:00:00.000Z',
         kind,
       });
@@ -265,7 +266,7 @@ describe('asset list filters', () => {
     const { session, make, addFile, tagAsset, tagFile, list } = await seed();
     const a = await make('A');
     await tagAsset(a.id, 'oak', 'Oak');
-    const cover = await addFile(a.id, 'reference', 'image', 'a.png');
+    const cover = await addFile(a.id, 'reference', 'image', 'a.png', 'complete', 'image/png');
     await tagFile(cover, 'bark');
     await tagFile(await addFile(a.id, 'reference', 'image', 'b.png'), 'moss');
     await session.database.assets.setCover(a.id, cover, 'now');

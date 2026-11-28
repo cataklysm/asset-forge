@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { FileRole, ImportStatus } from '@assetforge/contracts';
 import {
   assetFilePath,
@@ -163,6 +163,27 @@ describe('asset cover', () => {
     const chosen = await setAssetCover(session, { assetId: ctx.asset.id, fileId: uuid(1) });
     expect(chosen.updatedAt).toBe(now.toISOString());
     await expect(ctx.db.assets.get(ctx.asset.id)).resolves.toMatchObject({ updatedAt: now.toISOString() });
+  });
+
+  it('setAssetCover writes through the guarded update and reads the file only to explain a refusal', async () => {
+    const ctx = await setup();
+    await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    const fileRead = vi.spyOn(ctx.db.files, 'get');
+    await setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(1) });
+    expect(fileRead).not.toHaveBeenCalled();
+    await expect(setAssetCover(ctx.session, { assetId: ctx.other.id, fileId: uuid(1) })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
+    expect(fileRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('setAssetCover answers validation_failed when the guarded write refuses a file that reads as usable', async () => {
+    const ctx = await setup();
+    await addFile(ctx, { id: uuid(1), name: 'a.png', mimeType: png, importedAt: T1, assetId: ctx.asset.id });
+    ctx.db.assets.setCover = async () => false;
+    await expect(setAssetCover(ctx.session, { assetId: ctx.asset.id, fileId: uuid(1) })).rejects.toMatchObject({
+      code: 'validation_failed',
+    });
   });
 
   it('no image means no cover', async () => {

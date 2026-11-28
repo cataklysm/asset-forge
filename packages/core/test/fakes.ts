@@ -6,6 +6,7 @@ import type {
   AnalysisTarget,
   Asset,
   AssetAssignment,
+  AssetDetail,
   AssetList,
   AssetRelation,
   AssetRelationView,
@@ -1409,6 +1410,7 @@ class InMemoryAssets implements AssetRepository {
     private readonly workflows: InMemoryAssetWorkflows,
     private readonly covers: CoverChoices,
     private readonly tags: InMemoryTags,
+    private readonly sources: InMemoryAssetSources,
   ) {}
 
   private coverOf(assetId: string): AssetCover {
@@ -1422,12 +1424,35 @@ class InMemoryAssets implements AssetRepository {
     return this.rows.has(assetId) ? this.coverOf(assetId) : null;
   }
 
-  async setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<void> {
+  async getDetail(assetId: string): Promise<AssetDetail | null> {
     const row = this.rows.get(assetId);
-    if (!row) return;
+    if (!row) return null;
+    return {
+      ...row,
+      ...this.coverOf(assetId),
+      tags: await this.tags.listForAsset(assetId),
+      sources: await this.sources.listByAsset(assetId),
+    };
+  }
+
+  /** Like the guarded UPDATE: a chosen file must be a complete, live file with a thumbnail of this asset. */
+  async setCover(assetId: string, fileId: string | null, updatedAt: string): Promise<boolean> {
+    const row = this.rows.get(assetId);
+    if (!row) return false;
     if (fileId === null) this.covers.delete(assetId);
-    else this.covers.set(assetId, fileId);
+    else {
+      const file = this.files.records.get(fileId);
+      const usable =
+        file !== undefined &&
+        file.assetId === assetId &&
+        file.status === 'complete' &&
+        file.deletedAt === null &&
+        hasThumbnail(file.mimeType);
+      if (!usable) return false;
+      this.covers.set(assetId, fileId);
+    }
     this.rows.set(assetId, { ...row, updatedAt });
+    return true;
   }
 
   async insert(asset: Asset): Promise<void> {
@@ -1690,7 +1715,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   readonly projects = new InMemoryProjects(this.links, this.files, this.tags);
   readonly workflowTemplates = new InMemoryWorkflowTemplates();
   readonly assetWorkflows = new InMemoryAssetWorkflows(this.workflowTemplates);
-  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags);
+  readonly assets = new InMemoryAssets(this.links, this.files, this.assetWorkflows, this.covers, this.tags, this.assetSources);
   readonly projectAssets = new InMemoryProjectAssets(this.links, this.projects, this.assets);
   readonly relations = new InMemoryRelations(this.assets);
   readonly jobs = new InMemoryJobRepository(

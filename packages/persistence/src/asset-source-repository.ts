@@ -11,7 +11,7 @@ import { assetSource } from './schema.js';
  */
 export function createAssetSourceRepository(database: BetterSQLite3Database): AssetSourceRepository {
   return {
-    listByAsset: (assetId) => listByAsset(database, assetId),
+    listByAsset: async (assetId) => sourcesOfAsset(database, assetId),
     get: (id) => getSource(database, id),
     countByAsset: (assetId) => countByAsset(database, assetId),
     insert: (row) => insertSource(database, row),
@@ -20,17 +20,17 @@ export function createAssetSourceRepository(database: BetterSQLite3Database): As
 }
 
 /**
- * The sources of an asset, oldest first.
+ * The sources of an asset, oldest first; synchronous, so it can run inside another read transaction.
  *
- * @param database the workspace database
+ * @param reader the workspace database or an open transaction
  * @param assetId the asset
  * @returns the sources
  */
-async function listByAsset(
-  database: BetterSQLite3Database,
+export function sourcesOfAsset(
+  reader: Pick<BetterSQLite3Database, 'select'>,
   assetId: string,
-): ReturnType<AssetSourceRepository['listByAsset']> {
-  return database
+): Awaited<ReturnType<AssetSourceRepository['listByAsset']>> {
+  return reader
     .select({ id: assetSource.id, url: assetSource.url, createdAt: assetSource.createdAt })
     .from(assetSource)
     .where(eq(assetSource.assetId, assetId))

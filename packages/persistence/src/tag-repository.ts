@@ -29,7 +29,7 @@ export function createTagRepository(database: BetterSQLite3Database): TagReposit
     removeFromFile: (request) => removeFromFile(database, request),
     addToFiles: (request) => addToFiles(database, request),
     removeFromFiles: (request) => removeFromFiles(database, request),
-    listForAsset: (assetId) => listForAsset(database, assetId),
+    listForAsset: async (assetId) => tagsOfAsset(database, assetId),
     usage: (name) => tagUsage(database, name),
     rename: (request) => renameTag(database, request),
   };
@@ -183,14 +183,14 @@ async function removeFromFiles(
 }
 
 /**
- * The tags the asset carries itself.
+ * The tags the asset carries itself; synchronous, so it can run inside another read transaction.
  *
- * @param database the workspace database
+ * @param reader the workspace database or an open transaction
  * @param assetId the asset
  * @returns the assignments by name, then origin
  */
-async function listForAsset(database: BetterSQLite3Database, assetId: string): Promise<TagAssignment[]> {
-  return database
+export function tagsOfAsset(reader: Pick<BetterSQLite3Database, 'select'>, assetId: string): TagAssignment[] {
+  return reader
     .select({ name: tag.name, displayName: tag.displayName, origin: assetTag.origin })
     .from(assetTag)
     .innerJoin(tag, eq(tag.id, assetTag.tagId))
