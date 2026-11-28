@@ -2,6 +2,7 @@ import type { AssetRelationView } from '@assetforge/contracts';
 import type { AssetRelationRepository } from '@assetforge/core';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { toAsset } from './asset-rows.js';
 import { asset, assetRelation } from './schema.js';
 
 /** What reading relations needs of a transaction handle. */
@@ -115,14 +116,6 @@ function relationsInDirection(
       kind: row.relation.kind,
       createdAt: row.relation.createdAt,
       direction,
-      other: {
-        id: row.other.id,
-        name: row.other.name,
-        typeId: row.other.typeId,
-        description: row.other.description,
-        status: row.other.status,
-        createdAt: row.other.createdAt,
-        updatedAt: row.other.updatedAt,
-      },
+      other: toAsset(row.other),
     }));
 }
