@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { MAX_CHOSEN_IDS, type Changes, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
@@ -346,6 +346,7 @@ interface JobsActionsProps {
  * @returns the buttons
  */
 function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: JobsActionsProps) {
+  const start = useFocusReturn(busy, run);
   return (
     <>
       <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
@@ -355,7 +356,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         type="button"
         className={BUTTON}
         disabled={busy || !cancellable}
-        onClick={() => void run(() => call('jobs:cancelAll', {}))}
+        onClick={(event) => start(event.currentTarget, () => call('jobs:cancelAll', {}))}
       >
         {CANCEL_ALL_LABEL}
       </button>
@@ -363,7 +364,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         type="button"
         className={BUTTON}
         disabled={busy || retryable === 0}
-        onClick={() => void run(() => call('jobs:retryFailed', {}))}
+        onClick={(event) => start(event.currentTarget, () => call('jobs:retryFailed', {}))}
       >
         {RETRY_FAILED_LABEL}
       </button>
@@ -371,12 +372,40 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         type="button"
         className={BUTTON}
         disabled={busy || finished === 0}
-        onClick={() => void run(() => call('jobs:clearFinished', {}))}
+        onClick={(event) => start(event.currentTarget, () => call('jobs:clearFinished', {}))}
       >
         {CLEAR_FINISHED_LABEL}
       </button>
     </>
   );
+}
+
+/**
+ * A page button is disabled while its action runs, so the focus falls to the body: once the actions
+ * are free again it goes back to the button that started the action, when that is still enabled and
+ * nothing else took the focus meanwhile.
+ *
+ * @param busy whether an action runs
+ * @param run runs one action
+ * @returns starts an action from a button
+ */
+function useFocusReturn(
+  busy: boolean,
+  run: (action: () => Promise<unknown>) => Promise<void>,
+): (button: HTMLButtonElement, action: () => Promise<unknown>) => void {
+  const returnTo = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    const button = returnTo.current;
+    returnTo.current = null;
+    if (button === null || !button.isConnected || button.disabled) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body) button.focus();
+  }, [busy]);
+  return (button, action) => {
+    returnTo.current = button;
+    void run(action);
+  };
 }
 
 /** The props of {@link JobsToolbar}. */

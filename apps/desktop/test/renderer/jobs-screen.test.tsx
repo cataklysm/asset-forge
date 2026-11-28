@@ -415,6 +415,31 @@ it.each([
   expect(api.calls.filter((c) => c.channel === 'jobs:summary').length).toBeGreaterThan(summaries);
 });
 
+it('a page button that lost the focus while its action ran gets it back', async () => {
+  const user = userEvent.setup();
+  const pending = deferred<{ cancelled: number }>();
+  install(
+    { 'jobs:list': listOf([job()]), 'jobs:cancelAll': () => pending.promise },
+    { ...IDLE, queued: 1, failed: 1, succeeded: 1 },
+  );
+  renderScreen();
+  await screen.findByText('rock.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  button.focus();
+  await user.keyboard('{Enter}');
+  expect(button.disabled).toBe(true);
+  // A browser drops the focus of a disabled button to the body; jsdom does not, so it is done here.
+  button.blur();
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => {
+    pending.resolve({ cancelled: 1 });
+    await pending.promise;
+  });
+  await waitFor(() => expect(button.disabled).toBe(false));
+  expect(document.activeElement).toBe(button);
+});
+
 it('a rejected retry shows the alert above the table', async () => {
   const user = userEvent.setup();
   install({
