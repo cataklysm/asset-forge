@@ -129,6 +129,10 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Contracts: `AssignManyResultSchema` is only an alias of `FileBatchResultSchema`.
 - Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
 - Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
+- Persistence: in `job-repository.ts`, `finish` and `setOutcome` call `fromRunning` with the outer database handle inside `database.transaction(...)` instead of the transaction handle; with better-sqlite3 this is the same connection and works, but it departs from the convention. `settle` in `generation-repository.ts` relies on the same thing by design: it writes through the database handle while it runs inside the job repository's transaction.
+- Persistence: `purge` in `file-repository.ts` stamps the tombstone with `new Date()` instead of a time passed in by the caller, so it is the only write in the package that reads the clock itself.
+- Persistence: several SQL template lines are longer than 120 characters (`asset-filters.ts`, `project-list.ts`, `prompt-rows.ts`, `tag-repository.ts`, `tag-rename.ts`); they were left as they are so the SQL text stays unchanged.
+- Persistence: the select key `n` of the count statements (`count()` results in `asset-source-repository.ts`, `file-origin-repository.ts`, `project-asset-repository.ts`, `project-list.ts`, `prompt-repository.ts`) was kept, since it names a column alias in the generated SQL.
 
 ## Tooling and tests
 
