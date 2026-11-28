@@ -12,7 +12,7 @@ import {
 } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { NONE_ANALYSABLE } from '../../src/renderer/src/analysis';
-import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE } from '../../src/renderer/src/labels';
+import { ANALYSE_SELECTION_TITLE, ANALYSE_TITLE, label } from '../../src/renderer/src/labels';
 import { OpenSettingsProvider } from '../../src/renderer/src/components/AnalysisDialogs';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
@@ -571,10 +571,13 @@ it('after an assign that moves on to a file without an assign control, the focus
 
   const next = await screen.findByRole('dialog', { name: 'f1.png' });
   expect(within(next).queryByRole('button', { name: 'Assign' })).toBeNull();
-  await waitFor(() => expect(document.activeElement).not.toBe(document.body));
-  const active = document.activeElement as HTMLElement;
-  expect(next.contains(active)).toBe(true);
-  expect(active.tabIndex).toBe(-1);
+  // The stage area: the focusable element around the stage, which shows the status of the failed file.
+  const area = within(next)
+    .getAllByText(label('failed'))
+    .map((element) => element.parentElement)
+    .find((element) => element?.getAttribute('tabindex') === '-1');
+  expect(area).toBeDefined();
+  await waitFor(() => expect(document.activeElement).toBe(area));
 });
 
 const VISION: ProviderView = providerView();
