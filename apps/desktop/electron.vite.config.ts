@@ -23,6 +23,11 @@ const MAIN_ENTRY = fileURLToPath(new URL('src/main/index.ts', import.meta.url));
 // Worker thread entry; built next to index.js as out/main/preview-worker.js.
 const PREVIEW_WORKER_ENTRY = fileURLToPath(new URL('../../packages/media/src/preview-worker.ts', import.meta.url));
 
+// Worker thread entry of the backup check; built next to index.js as out/main/backup-check-worker.js.
+export const BACKUP_CHECK_WORKER_ENTRY = fileURLToPath(
+  new URL('../../packages/persistence/src/backup-check-worker.ts', import.meta.url),
+);
+
 /** Copies the SQL migrations next to the built main bundle (`out/main/migrations`). */
 function copyMigrations(): Plugin {
   return {
@@ -47,7 +52,11 @@ export default defineConfig(({ command }) => ({
       // answers the path of its downloaded binary next to its own file, so it must stay there too.
       externalizeDeps: { exclude: WORKSPACE_PACKAGES, include: ['better-sqlite3', 'sharp', 'ffmpeg-static'] },
       rolldownOptions: {
-        input: { index: MAIN_ENTRY, 'preview-worker': PREVIEW_WORKER_ENTRY },
+        input: {
+          index: MAIN_ENTRY,
+          'preview-worker': PREVIEW_WORKER_ENTRY,
+          'backup-check-worker': BACKUP_CHECK_WORKER_ENTRY,
+        },
       },
     },
   },

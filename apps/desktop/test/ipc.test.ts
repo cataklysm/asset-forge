@@ -9,6 +9,7 @@ import { createWorkspaceManager } from '../src/main/composition.js';
 import type { Dialogs, RemoveChoice } from '../src/main/host-actions.js';
 import { dispatch, type IpcHandlers } from '../src/main/ipc.js';
 import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
+import { TEST_BACKUP_WORKER_URL } from './backup-worker.js';
 import { idleJobHost, idleServices, noopHost } from './idle-job-host.js';
 
 let base: string;
@@ -31,6 +32,7 @@ beforeEach(async () => {
   manager = createWorkspaceManager({
     userDataPath: join(base, 'userData'),
     migrationsFolder: MIGRATIONS_FOLDER,
+    backupWorkerUrl: TEST_BACKUP_WORKER_URL,
     // Stands in for the OS trash: the folder ends up next to the workspaces, not deleted.
     moveToTrash: async (path) => {
       await mkdir(join(base, 'trash'), { recursive: true });

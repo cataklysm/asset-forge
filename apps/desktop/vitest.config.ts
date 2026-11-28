@@ -9,6 +9,7 @@ export default defineConfig({
           name: 'main',
           include: ['test/**/*.test.ts'],
           exclude: ['test/renderer/**', '**/node_modules/**'],
+          globalSetup: ['test/global-setup.ts'],
         },
       },
       {

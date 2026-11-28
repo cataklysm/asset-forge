@@ -6,6 +6,9 @@ import { WorkspaceSummarySchema, type WorkspaceSummary } from '@assetforge/contr
 
 const WorkspaceListSchema = WorkspaceSummarySchema.array();
 
+/** The entry key of the backup folder chosen for a workspace. */
+const BACKUP_DIRECTORY_KEY = 'backupDirectory';
+
 /** The file's content: the workspaces and every other top-level key, which a write keeps as it found them. */
 interface RegistryContent {
   /** The registered workspaces. */
@@ -60,6 +63,47 @@ export class JsonWorkspaceRegistry implements WorkspaceRegistry {
    */
   async remove(id: string): Promise<void> {
     return this.serially(() => this.removeNow(id));
+  }
+
+  /**
+   * The backup folder chosen for a workspace, stored as the entry key `backupDirectory`.
+   *
+   * @param id the workspace
+   * @returns the chosen folder; null when none is chosen, the value is not a non-empty string or the id is unknown
+   */
+  async backupDirectory(id: string): Promise<string | null> {
+    return this.serially(async () => {
+      const value = (await this.read()).entryKeys.get(id)?.[BACKUP_DIRECTORY_KEY];
+      return typeof value === 'string' && value !== '' ? value : null;
+    });
+  }
+
+  /**
+   * Stores or clears the backup folder chosen for a workspace; an unknown id writes nothing.
+   *
+   * @param id the workspace
+   * @param directory the chosen folder; null returns to the default place
+   * @returns when it was written
+   */
+  async setBackupDirectory(id: string, directory: string | null): Promise<void> {
+    return this.serially(() => this.setBackupDirectoryNow(id, directory));
+  }
+
+  /**
+   * The body of `setBackupDirectory`, run inside the queue.
+   *
+   * @param id the workspace
+   * @param directory the chosen folder, or null
+   * @returns when it was written
+   */
+  private async setBackupDirectoryNow(id: string, directory: string | null): Promise<void> {
+    const content = await this.read();
+    if (!content.workspaces.some((workspace) => workspace.id === id)) return;
+    const keys = { ...content.entryKeys.get(id) };
+    if (directory === null) delete keys[BACKUP_DIRECTORY_KEY];
+    else keys[BACKUP_DIRECTORY_KEY] = directory;
+    content.entryKeys.set(id, keys);
+    await this.write(content);
   }
 
   /**
