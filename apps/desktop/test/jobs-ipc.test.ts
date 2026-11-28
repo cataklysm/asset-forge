@@ -44,6 +44,8 @@ let entryId: string;
 let store: ProviderStore;
 
 const uuid = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
+/** The creation time of a proposal named in an accept. */
+const STAMP = '2026-11-28T10:00:00.000Z';
 /** The phase 4a request shape in the phase 4b contract: an explicit file list, applied. */
 const filesRequest = (fileIds: string[]) => ({
   target: { kind: 'files' as const, fileIds },
@@ -172,7 +174,7 @@ describe('job IPC', () => {
       ['analysis:preview', { target: { kind: 'files', fileIds: [uuid] }, model: MOCK_MODEL, providerId: uuid }],
       ['analysis:describe', { requestId: uuid, fileId: uuid, model: MOCK_MODEL, providerId: uuid }],
       ['analysis:getProposal', { fileId: uuid }],
-      ['analysis:acceptProposal', { fileId: uuid, names: ['red car'] }],
+      ['analysis:acceptProposal', { fileId: uuid, createdAt: STAMP, names: ['red car'] }],
       ['analysis:discardProposal', { fileId: uuid }],
       ['analysis:describe', { requestId: uuid, fileId: uuid, model: MOCK_MODEL }],
       ['analysis:cancelDescribe', { requestId: uuid }],
@@ -192,14 +194,16 @@ describe('job IPC', () => {
   it('refuses an accept with an empty tag name', async () => {
     await setup();
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
-    expect(await call('analysis:acceptProposal', { fileId: uuid, names: [''] })).toMatchObject({
+    expect(await call('analysis:acceptProposal', { fileId: uuid, createdAt: STAMP, names: [''] })).toMatchObject({
       ok: false,
       error: { code: 'invalid_request' },
     });
-    expect(await call('analysis:acceptProposal', { fileId: uuid, names: ['red car'] })).toMatchObject({
-      ok: false,
-      error: { code: 'not_found' },
-    });
+    expect(await call('analysis:acceptProposal', { fileId: uuid, createdAt: STAMP, names: ['red car'] })).toMatchObject(
+      {
+        ok: false,
+        error: { code: 'not_found' },
+      },
+    );
   });
 
   it('refuses a proposal for more than one file', async () => {

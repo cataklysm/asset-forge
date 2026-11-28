@@ -400,7 +400,11 @@ describe('AnalysisResultDialog', () => {
     expect(tagBox('Oak').checked).toBe(false);
     await user.click(button('Accept'));
     await waitFor(() => expect(callsOf(api, 'analysis:acceptProposal')).toHaveLength(1));
-    expect(callsOf(api, 'analysis:acceptProposal')[0]!.request).toEqual({ fileId: file.id, names: ['wood', 'table'] });
+    expect(callsOf(api, 'analysis:acceptProposal')[0]!.request).toEqual({
+      fileId: file.id,
+      createdAt: NOW,
+      names: ['wood', 'table'],
+    });
     expect(onChanged).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

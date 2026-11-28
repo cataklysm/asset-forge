@@ -147,7 +147,8 @@ export async function acceptProposal(
       action.setError(PROPOSAL_CHANGED);
       return;
     }
-    await call('analysis:acceptProposal', { fileId: id, names });
+    // The creation time names the proposal on screen, so a newer one stored meanwhile is refused and kept.
+    await call('analysis:acceptProposal', { fileId: id, createdAt: shown.proposal.createdAt, names });
   } catch (error) {
     if (!action.live()) return;
     if (error instanceof ApiError && (error.code === 'invalid_operation' || error.code === 'not_found')) {

@@ -45,10 +45,15 @@ export const analysisChannels = {
   },
   /**
    * Applies a non-empty subset of the proposal's tag names; `not_found` when the file has no proposal,
-   * `invalid_operation` when it is stale or a name is not in it.
+   * `invalid_operation` when it is stale, when `createdAt` is not the stored proposal's (the caller saw another one;
+   * the stored proposal is kept) or a name is not in it.
    */
   'analysis:acceptProposal': {
-    request: z.object({ fileId: IdSchema, names: z.array(z.string().min(1).max(200)).min(1).max(50) }),
+    request: z.object({
+      fileId: IdSchema,
+      createdAt: z.iso.datetime(),
+      names: z.array(z.string().min(1).max(200)).min(1).max(50),
+    }),
     response: z.object({}),
   },
   /** Idempotent. */

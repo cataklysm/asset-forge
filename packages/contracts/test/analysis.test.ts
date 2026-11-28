@@ -135,10 +135,20 @@ describe('analysis results', () => {
   test('accepting a proposal takes one to fifty non-empty names', () => {
     const request = ipcContract['analysis:acceptProposal'].request;
     const fileId = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
-    expect(request.safeParse({ fileId, names: ['oak'] }).success).toBe(true);
-    expect(request.safeParse({ fileId, names: [] }).success).toBe(false);
-    expect(request.safeParse({ fileId, names: [''] }).success).toBe(false);
-    expect(request.safeParse({ fileId, names: Array.from({ length: 51 }, (_, i) => `t${i}`) }).success).toBe(false);
+    const createdAt = '2026-11-28T10:00:00.000Z';
+    expect(request.safeParse({ fileId, createdAt, names: ['oak'] }).success).toBe(true);
+    expect(request.safeParse({ fileId, createdAt, names: [] }).success).toBe(false);
+    expect(request.safeParse({ fileId, createdAt, names: [''] }).success).toBe(false);
+    expect(request.safeParse({ fileId, createdAt, names: Array.from({ length: 51 }, (_, i) => `t${i}`) }).success).toBe(
+      false,
+    );
+  });
+
+  test('accepting a proposal names the proposal by its creation time', () => {
+    const request = ipcContract['analysis:acceptProposal'].request;
+    const fileId = '3f2b8c1e-5d4a-4b6e-8f10-1a2b3c4d5e6f';
+    expect(request.safeParse({ fileId, names: ['oak'] }).success).toBe(false);
+    expect(request.safeParse({ fileId, createdAt: 'yesterday', names: ['oak'] }).success).toBe(false);
   });
 
   test('a describe result is a text or a code', () => {

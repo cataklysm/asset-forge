@@ -49,23 +49,26 @@ export async function getProposal(
  * analysis. `names` must be a non-empty subset of the proposal's tags, compared normalised.
  *
  * @param session the open workspace
- * @param request the file and the chosen tag names
+ * @param request the file, the creation time of the proposal the caller saw and the chosen tag names
  * @returns resolves once the tags are applied
  * @throws `NotFoundError` without a proposal; `InvalidOperationError` for a file in the trash (its proposal is
- *   kept), for a foreign or empty choice and for a stale proposal, which is deleted
+ *   kept), for a foreign or empty choice, for a stale proposal, which is deleted, and for a proposal other than the
+ *   one the caller saw, which is kept
  */
 export async function acceptProposal(
   session: WorkspaceSession,
-  request: { fileId: string; names: string[] },
+  request: { fileId: string; createdAt: string; names: string[] },
 ): Promise<void> {
   const proposal = await session.database.analyses.getProposal(request.fileId);
   if (proposal === null) throw new NotFoundError('The file has no tag proposal');
-  // A stale proposal is handed over with no tags, so the repository's trash and stale checks answer before the
-  // choice is looked at.
-  const chosen = proposal.stale ? new Set<string>() : await choiceOf(session, proposal, request);
+  // A stale proposal, or one the caller did not see, is handed over with no tags, so the repository's trash and
+  // stale checks answer before the choice is looked at.
+  const unseen = proposal.stale || proposal.createdAt !== request.createdAt;
+  const chosen = unseen ? new Set<string>() : await choiceOf(session, proposal, request);
   const outcome = await session.database.analyses.acceptProposal({
     fileId: request.fileId,
     sha256: proposal.sha256,
+    createdAt: request.createdAt,
     tags: proposal.tags.filter((tag) => chosen.has(tag.name)).map((tag) => ({ ...tag, newId: session.newId() })),
     now: session.now().toISOString(),
   });

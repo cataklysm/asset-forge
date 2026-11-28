@@ -97,8 +97,10 @@ describe('proposal view with a prompt name', () => {
 
   test('accepting a proposal takes up to 50 names', () => {
     const request = ipcContract['analysis:acceptProposal'].request;
-    expect(request.safeParse({ fileId: id, names: Array.from({ length: 50 }, (_, i) => `t${i}`) }).success).toBe(true);
-    expect(request.safeParse({ fileId: id, names: Array.from({ length: 51 }, (_, i) => `t${i}`) }).success).toBe(false);
+    const createdAt = '2026-11-28T10:00:00.000Z';
+    const names = (count: number) => Array.from({ length: count }, (_, i) => `t${i}`);
+    expect(request.safeParse({ fileId: id, createdAt, names: names(50) }).success).toBe(true);
+    expect(request.safeParse({ fileId: id, createdAt, names: names(51) }).success).toBe(false);
   });
 
   test('enqueue and describe take an optional prompt id', () => {
