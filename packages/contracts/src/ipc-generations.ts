@@ -8,6 +8,7 @@ import {
 } from './generations';
 import { type ChannelContracts, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
+/** The generation channels of the studio: start, list, retry and remove generations, and the prompts used last. */
 export const generationChannels = {
   /** Starts an edit or upscale of one complete image outside the trash as a job. */
   'generations:start': {

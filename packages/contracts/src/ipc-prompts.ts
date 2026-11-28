@@ -9,6 +9,7 @@ import {
 } from './prompts';
 import { type ChannelContracts, IdSchema } from './ipc-shared';
 
+/** The prompt library channels: prompts of the workspace with their versions and tags. */
 export const promptChannels = {
   /** The prompt library, newest change first; every query word must appear, every tag must be on the prompt. */
   'prompts:list': {

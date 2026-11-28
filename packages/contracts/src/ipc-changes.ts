@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ChangesSchema } from './changes';
 import type { ChannelContracts } from './ipc-shared';
 
+/** The change feed channel that lists read to update loaded rows in place. */
 export const changeChannels = {
   /**
    * What changed in the open workspace since `cursor`; `reset` for a null, foreign or too old cursor and without a

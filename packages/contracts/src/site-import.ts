@@ -29,8 +29,10 @@ export const SiteFilterSchema = z.object({
     .refine((kinds) => new Set(kinds).size === kinds.length, { message: 'The kinds must be distinct' }),
   minBytes: z.number().int().min(0).max(SITE_MIN_BYTES_MAX),
 });
+/** Which downloaded files a site import keeps. */
 export type SiteFilter = z.infer<typeof SiteFilterSchema>;
 
+/** The fields a stored profile and a save request share. */
 const profileFields = {
   name: z.string().trim().min(1).max(SITE_PROFILE_NAME_MAX),
   /** Selects the gallery's links. */
@@ -53,6 +55,7 @@ export const SiteProfileSchema = z.object({
   site: z.string().min(1).max(253),
   ...profileFields,
 });
+/** A site profile. */
 export type SiteProfile = z.infer<typeof SiteProfileSchema>;
 
 /** Without `id` a profile is created and `url` gives its site; with `id` it is replaced and its site stays. */
@@ -62,7 +65,11 @@ export const SaveSiteProfileSchema = z
     url: z.string().max(2000).optional(),
     ...profileFields,
   })
-  .refine((r) => r.id !== undefined || r.url !== undefined, { message: 'A new profile needs a URL', path: ['url'] });
+  .refine((profile) => profile.id !== undefined || profile.url !== undefined, {
+    message: 'A new profile needs a URL',
+    path: ['url'],
+  });
+/** The request of `sites:save`. */
 export type SaveSiteProfile = z.infer<typeof SaveSiteProfileSchema>;
 
 /** At most this many problems one crawl answers; the rest is only counted (`problemsDropped`). */
@@ -75,6 +82,7 @@ export const SITE_PROBLEM_VALUE_MAX = 200;
  * a page that never became a usable URL; the problem's `url` is then the page it was found on.
  */
 export const SiteCrawlStageSchema = z.enum(['gallery', 'detail', 'file', 'link']);
+/** What the URL of a crawl problem was meant to be. */
 export type SiteCrawlStage = z.infer<typeof SiteCrawlStageSchema>;
 
 /**
@@ -96,14 +104,17 @@ export const SiteCrawlProblemReasonSchema = z.enum([
   'filtered_kind',
   'filtered_text',
 ]);
+/** Why a page or a URL gave nothing. */
 export type SiteCrawlProblemReason = z.infer<typeof SiteCrawlProblemReasonSchema>;
 
+/** One reason a page or URL of a crawl gave nothing. */
 export const SiteCrawlProblemSchema = z.object({
   url: z.string().max(10_000),
   stage: SiteCrawlStageSchema,
   reason: SiteCrawlProblemReasonSchema,
   detail: z.string().max(253).nullable(),
 });
+/** One reason a page or URL of a crawl gave nothing. */
 export type SiteCrawlProblem = z.infer<typeof SiteCrawlProblemSchema>;
 
 /**
@@ -125,7 +136,10 @@ export const SiteCrawlResultSchema = z.object({
   problems: z.array(SiteCrawlProblemSchema).max(SITE_MAX_PROBLEMS),
   problemsDropped: count,
 });
+/** The answer of `sites:crawl`. */
 export type SiteCrawlResult = z.infer<typeof SiteCrawlResultSchema>;
 
+/** The progress of the running crawl: pages loaded and file URLs found so far. */
 export const SiteCrawlProgressSchema = z.object({ pages: count, files: count, cancelling: z.boolean() });
+/** The progress of the running crawl. */
 export type SiteCrawlProgress = z.infer<typeof SiteCrawlProgressSchema>;

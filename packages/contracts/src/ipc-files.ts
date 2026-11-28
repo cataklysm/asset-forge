@@ -11,6 +11,7 @@ import { FileRoleSchema } from './library';
 import { PageRequestSchema } from './paging';
 import { type ChannelContracts, ChosenIdsSchema, IdSchema } from './ipc-shared';
 
+/** The file channels: lists, assignment to assets, file tags, measuring and handing a file to the system. */
 export const fileChannels = {
   'files:list': {
     /** `hasProposal` and `ids` are list filters only; they are not part of `FileListFilter` in an analysis target. */

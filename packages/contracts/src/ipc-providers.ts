@@ -4,6 +4,7 @@ import { ProviderIdSchema } from './provider-ref';
 import { ProviderListSchema, ProviderViewSchema, SaveProviderSchema } from './provider-settings';
 import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
 
+/** The provider channels: the provider entries of the app and the models each one offers. */
 export const providerChannels = {
   /** Provider channels need no open workspace. A view never carries an API key. */
   'providers:list': {

@@ -10,6 +10,7 @@ import {
 } from './site-import';
 import { type ChannelContracts, EmptyRequestSchema, IdRequestSchema, IdSchema } from './ipc-shared';
 
+/** The site import channels: site profiles, the login window, the crawl and the import of its answer. */
 export const siteChannels = {
   /** App-level site profiles; the site channels need no open workspace except `sites:import`. No channel carries a cookie. */
   'sites:list': {

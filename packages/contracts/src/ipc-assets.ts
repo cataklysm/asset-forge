@@ -22,6 +22,7 @@ const RelationKeySchema = z.object({
   kind: RelationKindSchema,
 });
 
+/** The asset channels: asset types, assets with their tags, cover and sources, and typed relations between assets. */
 export const assetChannels = {
   'assetTypes:list': {
     request: EmptyRequestSchema,
@@ -77,7 +78,7 @@ export const assetChannels = {
     request: z.object({ assetId: IdSchema, sourceId: IdSchema }),
     response: AssetDetailSchema,
   },
-  // Opens a stored source in the system browser; the renderer never passes the address itself.
+  /** Opens a stored source in the system browser; the renderer never passes the address itself. */
   'assets:openSource': {
     request: z.object({ assetId: IdSchema, sourceId: IdSchema }),
     response: z.null(),

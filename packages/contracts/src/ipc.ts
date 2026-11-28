@@ -20,8 +20,13 @@ import { workspaceChannels } from './ipc-workspace';
 
 export { MAX_CHOSEN_IDS } from './ipc-shared';
 
+/** What the preload hands back for every call: the answer, or the error the main process forwarded. */
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError };
 
+/**
+ * Every IPC channel with the schema of its request and its answer. The main process validates each request
+ * against it; the families live in the `ipc-*.ts` files, and a channel name is unique across them.
+ */
 export const ipcContract = {
   ...workspaceChannels,
   ...importChannels,
@@ -42,6 +47,9 @@ export const ipcContract = {
   ...dialogChannels,
 } as const satisfies Record<string, { request: z.ZodType; response: z.ZodType }>;
 
+/** The name of an IPC channel. */
 export type IpcChannel = keyof typeof ipcContract;
+/** The parsed request of a channel. */
 export type IpcRequest<C extends IpcChannel> = z.infer<(typeof ipcContract)[C]['request']>;
+/** The parsed answer of a channel. */
 export type IpcResponse<C extends IpcChannel> = z.infer<(typeof ipcContract)[C]['response']>;

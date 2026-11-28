@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TagRenameResultSchema, TagSuggestionSchema, TagUsageSchema } from './tags';
 import type { ChannelContracts } from './ipc-shared';
 
+/** The tag channels: suggestions, usage counts and rename or merge across the workspace. */
 export const tagChannels = {
   'tags:suggest': {
     request: z.object({ prefix: z.string().max(200), limit: z.number().int().min(1).max(50) }),

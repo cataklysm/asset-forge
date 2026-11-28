@@ -7,6 +7,7 @@ import {
 } from './workflows';
 import { type ChannelContracts, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
+/** The workflow channels: templates and the workflow of an asset with its step states and notes. */
 export const workflowChannels = {
   'workflowTemplates:list': {
     request: EmptyRequestSchema,

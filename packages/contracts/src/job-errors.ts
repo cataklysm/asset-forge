@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+/** Why a job failed; a job row and the IPC answer carry only the code and its fixed message. */
 export const JobErrorCodeSchema = z.enum([
   'provider_unreachable',
   'provider_timeout',
@@ -31,6 +32,7 @@ export const JobErrorCodeSchema = z.enum([
   'download_login_not_sent',
   'download_browser_check',
 ]);
+/** Why a job failed. */
 export type JobErrorCode = z.infer<typeof JobErrorCodeSchema>;
 
 /** The only text a job row or IPC response carries for a failure. */
@@ -66,6 +68,7 @@ export const JOB_ERROR_MESSAGES: Record<JobErrorCode, string> = {
   download_browser_check: 'The site asks for a browser check',
 };
 
+/** The codes a job is run again for, while it has attempts left. */
 const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
   'provider_unreachable',
   'provider_timeout',
@@ -76,6 +79,12 @@ const RETRYABLE: ReadonlySet<JobErrorCode> = new Set([
   'download_throttled',
 ]);
 
+/**
+ * Whether a failure is worth another attempt.
+ *
+ * @param code the code the job failed with
+ * @returns true for a passing failure of the provider or the server; false for everything a repeat would not change
+ */
 export function isRetryableJobError(code: JobErrorCode): boolean {
   return RETRYABLE.has(code);
 }

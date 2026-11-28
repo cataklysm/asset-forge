@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { WorkspaceSummarySchema } from './workspace';
 import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
 
+/** The workspace channels: list, create, open, close and remove workspaces and resolve the path of a new one. */
 export const workspaceChannels = {
   'workspace:list': {
     request: EmptyRequestSchema,

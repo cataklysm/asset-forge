@@ -15,6 +15,7 @@ export const FileListFilterSchema = z.object({
   role: FileRoleSchema.optional(),
   kind: FileKindSchema.optional(),
 });
+/** Which files a list shows. */
 export type FileListFilter = z.infer<typeof FileListFilterSchema>;
 
 /** The filter part of `assets:list`: which assets the gallery shows, without paging. */
@@ -27,6 +28,7 @@ export const AssetListFilterSchema = z.object({
   fileRole: FileRoleSchema.optional(),
   fileKind: FileKindSchema.optional(),
 });
+/** Which assets the gallery shows. */
 export type AssetListFilter = z.infer<typeof AssetListFilterSchema>;
 
 /**
@@ -39,10 +41,12 @@ export const AnalysisTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('asset'), assetId: z.uuid() }),
   z.object({ kind: z.literal('assetFilter'), filter: AssetListFilterSchema }),
 ]);
+/** What an analysis covers. */
 export type AnalysisTarget = z.infer<typeof AnalysisTargetSchema>;
 
 /** `apply` writes the AI tags; `propose` stores a proposal that waits for the owner. */
 export const AnalysisModeSchema = z.enum(['apply', 'propose']);
+/** Whether an analysis writes its tags or proposes them. */
 export type AnalysisMode = z.infer<typeof AnalysisModeSchema>;
 
 /** What an enqueue of a target with a model would do, by file count. */
@@ -52,6 +56,7 @@ export const AnalysisPreviewSchema = z.object({
   alreadyQueued: count,
   notAnalysable: count,
 });
+/** The answer of `analysis:preview`. */
 export type AnalysisPreview = z.infer<typeof AnalysisPreviewSchema>;
 
 /** Counts, not a per-file list: a filter target can cover a whole workspace. */
@@ -64,14 +69,17 @@ export const EnqueueAnalysisResultSchema = z.object({
     alreadyAnalysed: count,
   }),
 });
+/** The answer of `analysis:enqueue`. */
 export type EnqueueAnalysisResult = z.infer<typeof EnqueueAnalysisResultSchema>;
 
 /** Why a file was not queued by an enqueue; the IPC result carries counts per reason (`EnqueueAnalysisResultSchema`). */
 export const AnalysisSkipReasonSchema = z.enum(['not_found', 'not_analysable', 'already_queued', 'already_analysed']);
+/** Why a file was not queued by an enqueue. */
 export type AnalysisSkipReason = z.infer<typeof AnalysisSkipReasonSchema>;
 
 /** A tag of a proposal: normalised name and the text shown. */
 export const ProposalTagSchema = z.object({ name: z.string(), displayName: z.string() });
+/** A tag of a proposal. */
 export type ProposalTag = z.infer<typeof ProposalTagSchema>;
 
 /** A waiting proposal of a file; `stale` when the file's content changed since the analysis. */
@@ -83,6 +91,7 @@ export const ProposalViewSchema = z.object({
   stale: z.boolean(),
   tags: z.array(ProposalTagSchema).max(50),
 });
+/** A waiting proposal of a file. */
 export type ProposalView = z.infer<typeof ProposalViewSchema>;
 
 /** The Image2Prompt answer; the text is never stored. */
@@ -90,4 +99,5 @@ export const DescribeResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), text: z.string() }),
   z.object({ ok: z.literal(false), code: z.union([JobErrorCodeSchema, z.enum(['cancelled', 'busy'])]) }),
 ]);
+/** The answer of `analysis:describe`. */
 export type DescribeResult = z.infer<typeof DescribeResultSchema>;

@@ -18,6 +18,7 @@ import { type ChannelContracts, IdRequestSchema, IdSchema } from './ipc-shared';
 
 const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });
 
+/** The project channels: projects, their members and the project-specific data of an assignment. */
 export const projectChannels = {
   'projects:list': {
     request: PageRequestSchema.extend({

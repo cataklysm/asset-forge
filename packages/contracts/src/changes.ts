@@ -14,4 +14,5 @@ export const ChangesSchema = z.object({
   fileIds: z.array(z.string()),
   added: z.array(z.object({ assetId: z.string().nullable() })),
 });
+/** The answer of `changes:since`. */
 export type Changes = z.infer<typeof ChangesSchema>;

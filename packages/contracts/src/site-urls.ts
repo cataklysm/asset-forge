@@ -1,4 +1,9 @@
-/** The lower-case host of an http(s) URL without user info; null for anything else or a host ending in a dot. */
+/**
+ * The lower-case host of an http(s) URL without user info.
+ *
+ * @param url the URL as text
+ * @returns the host, or null for anything else or a host ending in a dot
+ */
 function hostOf(url: string): string | null {
   let parsed: URL;
   try {
@@ -18,6 +23,9 @@ function hostOf(url: string): string | null {
  * host or a host ending in a dot, and for a single label without a dot (`localhost`, `intranet`) unless it is an
  * IPv6 literal, since such a site would let every host under it belong to it. An IPv4 literal always has dots. It
  * does not apply the full URL rule of the import; the caller does.
+ *
+ * @param url the URL as text
+ * @returns the site, or null when the URL gives none
  */
 export function siteOf(url: string): string | null {
   const host = hostOf(url);
@@ -28,7 +36,13 @@ export function siteOf(url: string): string | null {
   return site;
 }
 
-/** True when the URL is http(s) without user info and its host is `site` or ends with `.` + `site`. */
+/**
+ * Whether a URL belongs to a site: http(s) without user info, and its host is `site` or ends with `.` + `site`.
+ *
+ * @param url the URL as text
+ * @param site the site of a profile, compared regardless of case
+ * @returns true when the URL belongs to the site; false for an empty site
+ */
 export function belongsToSite(url: string, site: string): boolean {
   const wanted = site.toLowerCase();
   if (wanted === '') return false;

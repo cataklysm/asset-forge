@@ -2,21 +2,28 @@ import { z } from 'zod';
 import { PROVIDER_EXTRA_MAX } from './extra-parameters';
 import { MAX_PROVIDERS, ModelNameSchema, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
 
+/** Shortest request timeout of a provider entry, in seconds. */
 export const VISION_TIMEOUT_MIN_SECONDS = 10;
+/** Longest request timeout of a provider entry, in seconds. */
 export const VISION_TIMEOUT_MAX_SECONDS = 600;
+/** The request timeout a new provider entry starts with, in seconds. */
 export const VISION_TIMEOUT_DEFAULT_SECONDS = 120;
 
 const TimeoutSecondsSchema = z.number().int().min(VISION_TIMEOUT_MIN_SECONDS).max(VISION_TIMEOUT_MAX_SECONDS);
 
 /** Whether a vision request asks the model to think; `default` sends nothing about it. */
 export const ThinkingSchema = z.enum(['default', 'off', 'on']);
+/** Whether a vision request asks the model to think. */
 export type Thinking = z.infer<typeof ThinkingSchema>;
 
-/** Analysis requests a vision entry gets at the same time. */
+/** Analysis requests a vision entry gets at the same time: the fewest. */
 export const PARALLEL_REQUESTS_MIN = 1;
+/** Analysis requests a vision entry gets at the same time: the most. */
 export const PARALLEL_REQUESTS_MAX = 64;
+/** Analysis requests a vision entry gets at the same time: the value of a new entry. */
 export const PARALLEL_REQUESTS_DEFAULT = 1;
 
+/** The analysis requests a vision entry gets at the same time: 1 to 64. */
 export const ParallelRequestsSchema = z.number().int().min(PARALLEL_REQUESTS_MIN).max(PARALLEL_REQUESTS_MAX);
 
 /**
@@ -31,8 +38,10 @@ export const ProviderOptionsSchema = z.object({
   extra: z.string().max(PROVIDER_EXTRA_MAX),
   parallelRequests: ParallelRequestsSchema,
 });
+/** The request options of a vision entry. */
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
 
+/** The options a new vision entry starts with; with them the `ollama` request body is unchanged. */
 export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   temperature: 0,
   thinking: 'default',
@@ -65,8 +74,10 @@ export const ProviderViewSchema = z.object({
   hasApiKey: z.boolean(),
   options: ProviderOptionsSchema.nullable(),
 });
+/** A provider entry as the renderer sees it. */
 export type ProviderView = z.infer<typeof ProviderViewSchema>;
 
+/** The answer of `providers:list`: every entry and the entries used last. */
 export const ProviderListSchema = z.object({
   providers: z.array(ProviderViewSchema).max(MAX_PROVIDERS),
   /** The entry used last for an analysis; null when none was used or it no longer exists. */
@@ -78,6 +89,7 @@ export const ProviderListSchema = z.object({
   /** The OS credential store can encrypt; without it no key can be saved. */
   canStoreKey: z.boolean(),
 });
+/** The answer of `providers:list`. */
 export type ProviderList = z.infer<typeof ProviderListSchema>;
 
 /** The refusal of an API key that holds a control character or another character a request header cannot carry. */
@@ -111,4 +123,5 @@ export const SaveProviderSchema = z.object({
     .optional(),
   options: ProviderOptionsSchema.optional(),
 });
+/** The request of `providers:save`. */
 export type SaveProvider = z.infer<typeof SaveProviderSchema>;

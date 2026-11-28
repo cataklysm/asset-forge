@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { EmptyTrashResultSchema, FileBatchResultSchema, FileIdsSchema, TrashSummarySchema } from './files';
 import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
 
+/** The trash channels: moving files to the trash, restoring and purging them, and emptying the trash. */
 export const trashChannels = {
   /** Moves each complete file to the trash and removes each failed file outright; per item, in request order. */
   'files:trashMany': {

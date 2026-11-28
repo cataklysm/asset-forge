@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { JobErrorCodeSchema } from './job-errors';
 import { ModelNameSchema, ProviderIdSchema, ProviderKindSchema } from './provider-ref';
 
+/** The technical status of a job; separate from asset status and workflow step state. */
 export const JobStatusSchema = z.enum([
   'queued',
   'running',
@@ -11,12 +12,17 @@ export const JobStatusSchema = z.enum([
   'cancelled',
   'retry_wait',
 ]);
+/** The technical status of a job. */
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 
+/** The resource a job needs; each class has its own limit in the scheduler. */
 export const ResourceClassSchema = z.enum(['cpu', 'io', 'local_gpu', 'remote_api']);
+/** The resource a job needs. */
 export type ResourceClass = z.infer<typeof ResourceClassSchema>;
 
+/** The statuses of a job that has not ended yet. */
 export const ACTIVE_JOB_STATUSES = ['queued', 'running', 'waiting_remote', 'retry_wait'] as const;
+/** The statuses of a job that has ended. */
 export const FINISHED_JOB_STATUSES = ['succeeded', 'failed', 'cancelled'] as const;
 
 /**
@@ -25,8 +31,10 @@ export const FINISHED_JOB_STATUSES = ['succeeded', 'failed', 'cancelled'] as con
  * versions wrote for either; it still parses, and no new job writes it.
  */
 export const JobResultSchema = z.enum(['already_present', 'filtered', 'filtered_kind', 'filtered_size']);
+/** What a succeeded job produced besides its file. */
 export type JobResult = z.infer<typeof JobResultSchema>;
 
+/** A job as the Jobs screen shows it, with the fields read from its payload. */
 export const JobViewSchema = z.object({
   id: z.string(),
   type: z.string(),
@@ -52,6 +60,7 @@ export const JobViewSchema = z.object({
   host: z.string().nullable(),
   result: JobResultSchema.nullable(),
 });
+/** A job as the Jobs screen shows it. */
 export type JobView = z.infer<typeof JobViewSchema>;
 
 const count = z.number().int().nonnegative();
@@ -67,10 +76,12 @@ export const PausedProviderSchema = z.object({
   kind: ProviderKindSchema,
   reason: JobErrorCodeSchema,
 });
+/** A provider whose jobs are paused. */
 export type PausedProvider = z.infer<typeof PausedProviderSchema>;
 
 /** A download host whose jobs are paused for the application session. */
 export const PausedHostSchema = z.object({ host: z.string(), reason: JobErrorCodeSchema });
+/** A download host whose jobs are paused. */
 export type PausedHost = z.infer<typeof PausedHostSchema>;
 
 /** `waiting` is `retry_wait` and `waiting_remote` together. */
@@ -81,12 +92,14 @@ export const JobSummarySchema = z.object({
   failed: count,
   cancelled: count,
   succeeded: count,
+  /** The total of the change feed; a list reads `changes:since` when it moved. */
   changes: count,
   /** Every provider whose analysis queue is paused because it is down or refused the request; empty otherwise. */
   paused: z.array(PausedProviderSchema),
   /** Every download host that is paused after repeated failures; empty otherwise. */
   pausedHosts: z.array(PausedHostSchema),
 });
+/** The answer of `jobs:summary`. */
 export type JobSummary = z.infer<typeof JobSummarySchema>;
 
 /** The waiting (`queued` and `retry_wait`) analysis jobs of one provider; `providerId` null is the jobs without one. */
@@ -95,4 +108,5 @@ export const WaitingByProviderSchema = z.object({
   providerName: z.string().nullable(),
   waiting: z.number().int().min(0),
 });
+/** The waiting analysis jobs of one provider. */
 export type WaitingByProvider = z.infer<typeof WaitingByProviderSchema>;

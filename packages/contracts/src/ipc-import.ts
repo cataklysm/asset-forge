@@ -3,6 +3,7 @@ import { FileTargetSchema, ImportProgressSchema, ImportResultSchema } from './fi
 import { FileOriginSchema, IMPORT_URL_STRING_MAX, MAX_IMPORT_URLS, UrlImportResultSchema } from './url-import';
 import { type ChannelContracts, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
+/** The import channels: files and URLs into the workspace, progress and cancel of an import, and file origins. */
 export const importChannels = {
   'files:import': {
     request: z.object({

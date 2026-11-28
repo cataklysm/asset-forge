@@ -123,6 +123,11 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
 - `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
 - The preview worker pool doc comments still say "none" for failed jobs.
+- Contracts: the `FileIdsSchema` refine message `duplicate ids` is lower case, unlike every other message.
+- Contracts: `prompts.ts` re-exports `PROMPT_VARIABLE_NAME_MAX` and `PROMPT_VARIABLE_VALUE_MAX` from `prompt-template.ts`, so the index exposes them through two files.
+- Contracts: `AssignManyResultSchema` is only an alias of `FileBatchResultSchema`.
+- Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
+- Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
 
 ## Tooling and tests
 

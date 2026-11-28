@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
 
+/** The native dialogs of the main process that pick files or a directory. */
 export const dialogChannels = {
   'dialog:pickDirectory': {
     request: EmptyRequestSchema,

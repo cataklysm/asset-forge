@@ -4,10 +4,14 @@ import { FileTargetSchema } from './files';
 import { ModelNameSchema, ProviderNameSchema } from './provider-ref';
 import { SiteFilterSchema } from './site-import';
 
+/** The job type of the tag analysis of one file. */
 export const ANALYZE_FILE_JOB = 'vision.analyze_file';
+/** The job type of one image generation. */
 export const IMAGE_GENERATE_JOB = 'image.generate';
+/** The job type of one download of the URL or site import. */
 export const FILE_DOWNLOAD_JOB = 'file.download';
 
+/** The fields every download payload version has. */
 const downloadFields = {
   url: z.string().min(1).max(2000),
   target: FileTargetSchema.nullable(),
@@ -23,10 +27,17 @@ export const FileDownloadPayloadV2Schema = z.object({
   siteProfileId: z.uuid(),
   filter: SiteFilterSchema,
 });
+/** The payload of a `file.download` job, by version. */
 export const FileDownloadPayloadSchema = z.discriminatedUnion('v', [FileDownloadPayloadV1Schema, FileDownloadPayloadV2Schema]);
+/** The payload of a `file.download` job. */
 export type FileDownloadPayload = z.infer<typeof FileDownloadPayloadSchema>;
 
-/** { url, host } of a download payload; nulls for anything else. `host` is lower case with a non-default port. */
+/**
+ * The address and host lane of a download job, for the job list.
+ *
+ * @param payload the stored payload of any job
+ * @returns `{ url, host }` of a download payload, `host` lower case with a non-default port; nulls for anything else
+ */
 export function downloadJobFields(payload: unknown): { url: string | null; host: string | null } {
   const parsed = FileDownloadPayloadSchema.safeParse(payload);
   if (!parsed.success) return { url: null, host: null };
@@ -39,6 +50,7 @@ export function downloadJobFields(payload: unknown): { url: string | null; host:
 
 /** An image generation job names its generation row; everything else lives on that row. */
 export const ImageGeneratePayloadSchema = z.object({ v: z.literal(1), generationId: z.uuid() });
+/** The payload of an `image.generate` job. */
 export type ImageGeneratePayload = z.infer<typeof ImageGeneratePayloadSchema>;
 
 /** The analysis prompt a v3 job runs with, copied at enqueue so later edits do not reach waiting jobs. */
@@ -47,6 +59,7 @@ export const AnalyzeFilePromptSchema = z.object({
   text: AnalysisPromptTextSchema,
   maxTags: AnalysisTagLimitSchema,
 });
+/** The analysis prompt copied into a job. */
 export type AnalyzeFilePrompt = z.infer<typeof AnalyzeFilePromptSchema>;
 
 /**
@@ -72,9 +85,15 @@ export const AnalyzeFilePayloadSchema = z.union([
     providerName: ProviderNameSchema,
   }),
 ]);
+/** The payload of a `vision.analyze_file` job. */
 export type AnalyzeFilePayload = z.infer<typeof AnalyzeFilePayloadSchema>;
 
-/** The provider name (v4) and model (v2 to v4) of an analysis payload; nulls otherwise or when it does not parse. */
+/**
+ * The provider name and model of an analysis job, for the job list.
+ *
+ * @param payload the stored payload of any job
+ * @returns the provider name (v4) and model (v2 to v4) of an analysis payload; nulls otherwise or when unparsable
+ */
 export function analysisJobFields(payload: unknown): { providerName: string | null; model: string | null } {
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
   if (!parsed.success || parsed.data.version === 1) return { providerName: null, model: null };

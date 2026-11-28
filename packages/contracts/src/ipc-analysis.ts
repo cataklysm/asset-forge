@@ -11,6 +11,7 @@ import { JobViewSchema } from './jobs';
 import { ModelNameSchema, ProviderIdSchema } from './provider-ref';
 import { type ChannelContracts, IdSchema } from './ipc-shared';
 
+/** The analysis channels: preview and enqueue of the tag analysis, proposals, and Image to prompt. */
 export const analysisChannels = {
   /** What `analysis:enqueue` of this target with this model would do, as counts. */
   'analysis:preview': {

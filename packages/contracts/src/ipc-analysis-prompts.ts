@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AnalysisPromptListSchema, AnalysisPromptSchema, SaveAnalysisPromptSchema } from './analysis-prompts';
 import { type ChannelContracts, EmptyRequestSchema, IdRequestSchema } from './ipc-shared';
 
+/** The analysis prompt channels: the named prompts of the tag analysis and Image to prompt at app level. */
 export const analysisPromptChannels = {
   /** App-level analysis prompts need no open workspace. The file order is kept; a purpose never has none. */
   'analysisPrompts:list': {

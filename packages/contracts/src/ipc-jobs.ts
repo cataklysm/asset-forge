@@ -4,6 +4,7 @@ import { PageRequestSchema, pageOf } from './paging';
 import { ModelNameSchema, ProviderIdSchema } from './provider-ref';
 import { type ChannelContracts, ChosenIdsSchema, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
+/** The job channels: the job list and summary, cancel, retry, resume and moving waiting jobs to another provider. */
 export const jobChannels = {
   /** Newest first. */
   'jobs:list': {
