@@ -7,6 +7,7 @@ import {
 } from '@assetforge/contracts';
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { qualified } from './qualified.js';
 import { prompt, promptTag, promptVersion, tag } from './schema.js';
 
 // Prompt rows as the contracts describe them: versions, tags, summaries and the list conditions.
@@ -85,7 +86,7 @@ function tagsOf(reader: PromptReader, promptIds: readonly string[]): Map<string,
 }
 
 /** The highest-numbered version of a prompt, as a correlated subquery condition on `promptVersion`. */
-export const isCurrent = sql`${promptVersion.number} = (select max(v.number) from prompt_version as v where v.prompt_id = ${promptVersion.promptId})`;
+export const isCurrent = sql`${qualified(promptVersion, promptVersion.number)} = (select max(v.number) from prompt_version as v where v.prompt_id = ${qualified(promptVersion, promptVersion.promptId)})`;
 
 /**
  * The current version of each of these prompts by prompt id.
@@ -135,12 +136,12 @@ export function promptSummaries(reader: PromptReader, rows: readonly PromptRow[]
  */
 export function matchesWord(word: string): SQL {
   return sql`(
-    instr(af_fold(${prompt.title}), ${word}) > 0
-    or instr(af_fold(${prompt.description}), ${word}) > 0
-    or instr(af_fold((select v.content from prompt_version as v where v.prompt_id = ${prompt.id} order by v.number desc limit 1)), ${word}) > 0
+    instr(af_fold(${qualified(prompt, prompt.title)}), ${word}) > 0
+    or instr(af_fold(${qualified(prompt, prompt.description)}), ${word}) > 0
+    or instr(af_fold((select v.content from prompt_version as v where v.prompt_id = ${qualified(prompt, prompt.id)} order by v.number desc limit 1)), ${word}) > 0
     or exists (
       select 1 from prompt_tag as pt join tag as t on t.id = pt.tag_id
-      where pt.prompt_id = ${prompt.id} and instr(af_fold(t.display_name), ${word}) > 0))`;
+      where pt.prompt_id = ${qualified(prompt, prompt.id)} and instr(af_fold(t.display_name), ${word}) > 0))`;
 }
 
 /**
@@ -150,4 +151,4 @@ export function matchesWord(word: string): SQL {
  * @returns the condition over the outer prompt row
  */
 export const carriesTag = (name: string): SQL =>
-  sql`exists (select 1 from prompt_tag as pt join tag as t on t.id = pt.tag_id where pt.prompt_id = ${prompt.id} and t.name = ${name})`;
+  sql`exists (select 1 from prompt_tag as pt join tag as t on t.id = pt.tag_id where pt.prompt_id = ${qualified(prompt, prompt.id)} and t.name = ${name})`;

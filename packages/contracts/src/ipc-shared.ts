@@ -7,6 +7,8 @@ export type ChannelContracts = Record<string, { request: z.ZodType; response: z.
 export const EmptyRequestSchema = z.object({});
 /** The id of a row. */
 export const IdSchema = z.uuid();
+/** A number of rows or items: a whole number of at least zero. */
+export const CountSchema = z.number().int().nonnegative();
 /** A request that names one row by its id. */
 export const IdRequestSchema = z.object({ id: IdSchema });
 /** The most ids one `files:list` or `jobs:list` request may choose. */

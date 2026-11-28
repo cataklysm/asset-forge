@@ -237,7 +237,13 @@ describe('job repository', () => {
     expect(await db.jobs.cancelPending({ id: uuid(10), now: T1 })).toBe(0);
 
     expect(await db.jobs.cancelPending({ now: T2 })).toBe(2); // 11 and 14
-    expect((await db.jobs.get(uuid(11)))?.status).toBe('cancelled');
+    // The job that waited for its retry no longer waits and drops the error of its earlier run.
+    expect(await db.jobs.get(uuid(11))).toMatchObject({
+      status: 'cancelled',
+      runAfter: null,
+      errorCode: null,
+      errorMessage: null,
+    });
     expect((await db.jobs.get(uuid(14)))?.status).toBe('cancelled');
     expect((await db.jobs.get(uuid(10)))?.status).toBe('running');
     expect(await db.jobs.get(uuid(12))).toMatchObject({ status: 'succeeded', finishedAt: T0 });
@@ -355,6 +361,24 @@ describe('job repository', () => {
     ).rejects.toThrow('boom');
     expect((await db.jobs.get(uuid(14)))?.status).toBe('queued');
     expect((await db.jobs.get(uuid(15)))?.status).toBe('queued');
+  });
+
+  test('cancelPendingOfFile ends a job waiting for its retry without its run time and earlier error', async () => {
+    await enqueue(T0, newJob(10, { fileId: FILE_ID }));
+    await claim(T0);
+    await db.jobs.scheduleRetry(uuid(10), { errorCode: 'provider_timeout', runAfter: T9, now: T0 });
+
+    expect(await db.jobs.cancelPendingOfFile({ fileId: FILE_ID, refuseRunning: [], now: T1 })).toEqual({
+      refused: false,
+      cancelled: 1,
+    });
+    expect(await db.jobs.get(uuid(10))).toMatchObject({
+      status: 'cancelled',
+      runAfter: null,
+      errorCode: null,
+      errorMessage: null,
+      finishedAt: T1,
+    });
   });
 
   test('retry with excludeTypes skips jobs of those types, for all and by id', async () => {
@@ -904,6 +928,15 @@ describe('job lanes', () => {
     });
     expect(await db.jobs.list({ limit: 10, offset: 0, lane: 'a', status: 'failed' })).toEqual({ items: [], total: 0 });
     expect((await db.jobs.list({ limit: 10, offset: 0, lane: 'b' })).items[0]?.createdAt).toBe(T1);
+  });
+
+  test('list with a null lane lists the jobs without a lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, null));
+
+    // The port types the filter as a string; a null that reaches the repository must still match by `IS NULL`.
+    const withoutLane = await db.jobs.list({ limit: 10, offset: 0, lane: null as unknown as string });
+    expect(withoutLane.total).toBe(1);
+    expect(withoutLane.items.map((i) => i.id)).toEqual([uuid(11)]);
   });
 
   test('list narrows to the given ids within the status and lane filters', async () => {

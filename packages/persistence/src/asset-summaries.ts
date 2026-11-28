@@ -5,8 +5,9 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { outerAssetId } from './asset-filters.js';
 import { assetTagsOf, matchedTagsOf } from './list-tags.js';
 import { qualified } from './qualified.js';
-import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, tag, workflowStepDefinition } from './schema.js';
+import { asset, assetWorkflow, assetWorkflowStep, file, projectAsset, workflowStepDefinition } from './schema.js';
 import type { IndexTransaction } from './search-index.js';
+import { existingTags } from './tag-lookup.js';
 
 // The rows of the asset list: counts, workflow progress, cover and tags of each asset.
 
@@ -142,14 +143,5 @@ export function withTags(
  * @returns the ids
  */
 function requestedTagIds(transaction: IndexTransaction, names: readonly string[]): string[] {
-  const unique = [...new Set(names)];
-  const byName = new Map(
-    transaction
-      .select({ id: tag.id, name: tag.name })
-      .from(tag)
-      .where(inArray(tag.name, unique))
-      .all()
-      .map((row) => [row.name, row.id]),
-  );
-  return unique.flatMap((name) => byName.get(name) ?? []);
+  return existingTags(transaction, names).map((existing) => existing.id);
 }

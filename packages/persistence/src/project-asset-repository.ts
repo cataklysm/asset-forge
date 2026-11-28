@@ -2,6 +2,7 @@ import type { AssetAssignment, ProjectAssignment, ProjectMemberList } from '@ass
 import type { AssignmentKey, ProjectAssetRepository } from '@assetforge/core';
 import { and, asc, count, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { toAsset } from './asset-rows.js';
 import { asset, project, projectAsset } from './schema.js';
 
 /**
@@ -18,22 +19,6 @@ const toAssignment = (row: typeof projectAsset.$inferSelect): ProjectAssignment 
   approvalStatus: row.approvalStatus,
   notes: row.notes,
   assignedAt: row.assignedAt,
-  updatedAt: row.updatedAt,
-});
-
-/**
- * The asset of a row.
- *
- * @param row the asset row
- * @returns the asset
- */
-const toAsset = (row: typeof asset.$inferSelect) => ({
-  id: row.id,
-  name: row.name,
-  typeId: row.typeId,
-  description: row.description,
-  status: row.status,
-  createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
 

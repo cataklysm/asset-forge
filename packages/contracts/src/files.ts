@@ -56,7 +56,10 @@ export const FileRecordSchema = z.object({
 /** A file row as the renderer sees it. */
 export type FileRecord = z.infer<typeof FileRecordSchema>;
 
-/** One result per plain source; for an unpacked archive one per imported or refused entry, or one for the archive as a whole. */
+/**
+ * One result per plain source; for an unpacked archive one per imported or refused entry, or one for the archive
+ * as a whole.
+ */
 export const ImportResultSchema = z.object({
   sourcePath: z.string(),
   /** The entry's path inside the archive; null for a plain source and for an archive-level failure. */
@@ -110,7 +113,7 @@ export const FileIdsSchema = z
   .array(z.uuid())
   .min(1)
   .max(1000)
-  .refine((ids) => new Set(ids).size === ids.length, 'duplicate ids');
+  .refine((ids) => new Set(ids).size === ids.length, { message: 'The file ids must be distinct' });
 
 /**
  * One result per requested file, in request order: the resulting record or the error of that file.

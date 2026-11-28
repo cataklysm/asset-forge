@@ -4,6 +4,7 @@ import { and, count, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-or
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { qualified } from './qualified.js';
 import { file, fileAnalysisProposal, fileTag, tag } from './schema.js';
+import { filterTags } from './tag-lookup.js';
 
 // The statements of a file list: the condition of its filters, the page and the count.
 
@@ -92,12 +93,10 @@ function proposalMatches(hasProposal: boolean): SQL {
  * @returns the conditions; null when a requested tag does not exist
  */
 function tagsMatch(reader: ListTransaction, tagNames: readonly string[] | undefined): SQL[] | null {
-  const names = [...new Set(tagNames ?? [])];
-  if (names.length === 0) return [];
-  const tagIds = reader.select({ id: tag.id }).from(tag).where(inArray(tag.name, names)).all();
-  if (tagIds.length < names.length) return null;
+  const tags = filterTags(reader, tagNames ?? []);
+  if (tags === null) return null;
   const fileId = qualified(file, file.id);
-  return tagIds.map(
+  return tags.map(
     ({ id }) =>
       sql`exists (select 1 from ${fileTag} where ${qualified(fileTag, fileTag.fileId)} = ${fileId} and ${qualified(fileTag, fileTag.tagId)} = ${id})`,
   );
