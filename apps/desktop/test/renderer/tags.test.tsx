@@ -382,6 +382,8 @@ it('the tag filter stops at 10 tags', async () => {
   for (let i = 1; i < 10; i += 1) await user.type(input, `t${i}{Enter}`);
   expect(onChange).toHaveBeenLastCalledWith(['oak', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
   expect(input.readOnly).toBe(true);
+  // It looks disabled, since it takes no more names.
+  expect(input.getAttribute('aria-disabled')).toBe('true');
   expect(input.title).toBe('At most 10 tags');
   // The input that added the tenth tag keeps the focus.
   expect(document.activeElement).toBe(input);
@@ -392,6 +394,7 @@ it('the tag filter stops at 10 tags', async () => {
   await user.click(screen.getByRole('button', { name: 'Remove oak' }));
   expect(onChange).toHaveBeenLastCalledWith(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
   expect(input.readOnly).toBe(false);
+  expect(input.getAttribute('aria-disabled')).toBeNull();
   expect(document.activeElement).toBe(input);
 });
 

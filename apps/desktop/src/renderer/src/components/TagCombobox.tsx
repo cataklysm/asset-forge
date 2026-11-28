@@ -117,6 +117,8 @@ export function TagCombobox({
         title={title}
         disabled={disabled}
         readOnly={readOnly}
+        // A read-only input takes no text, so it looks like a disabled one while keeping the focus.
+        aria-disabled={readOnly || undefined}
         maxLength={200}
         value={value}
         onChange={(event) => {
@@ -125,7 +127,7 @@ export function TagCombobox({
         }}
         onKeyDown={handleKeyDown}
         onBlur={() => setOpen(false)}
-        className={look === 'inline' ? INLINE_INPUT : `${INPUT} w-40`}
+        className={`${look === 'inline' ? INLINE_INPUT : `${INPUT} w-40`} aria-disabled:opacity-50`}
       />
       {expanded && (
         <ul
