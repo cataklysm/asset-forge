@@ -12,7 +12,7 @@ import {
   type PromptReader,
 } from './prompt-rows.js';
 import { prompt, promptTag, promptVersion, tag } from './schema.js';
-import { ensureTag } from './tag-links.js';
+import { dropUnusedTags, ensureTag, tagIdByName } from './tag-links.js';
 
 /**
  * The prompt repository over the workspace database.
@@ -215,7 +215,17 @@ async function addVersion(
  */
 async function removePrompt(database: BetterSQLite3Database, id: string): Promise<boolean> {
   // Versions and tag links go through their `cascade` rule; generations' `prompt_version_id` through `set null`.
-  return database.delete(prompt).where(eq(prompt.id, id)).run().changes > 0;
+  return database.transaction((transaction) => {
+    const tagIds = transaction
+      .select({ tagId: promptTag.tagId })
+      .from(promptTag)
+      .where(eq(promptTag.promptId, id))
+      .all()
+      .map((link) => link.tagId);
+    const removed = transaction.delete(prompt).where(eq(prompt.id, id)).run().changes > 0;
+    dropUnusedTags(transaction, tagIds);
+    return removed;
+  });
 }
 
 /**
@@ -296,6 +306,8 @@ async function removeTag(
       .run().changes;
     if (removed > 0)
       transaction.update(prompt).set({ updatedAt: request.now }).where(eq(prompt.id, request.promptId)).run();
+    const tagId = tagIdByName(transaction, request.name);
+    if (tagId !== null) dropUnusedTags(transaction, [tagId]);
     return 'ok' as const;
   });
 }

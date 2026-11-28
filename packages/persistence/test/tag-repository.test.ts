@@ -463,9 +463,10 @@ describe('tag usage and rename', () => {
   });
 
   test('usage of a tag without links counts zero; of an unknown name it is null', async () => {
-    const a = await addAsset(10);
-    await tagAsset(a.id, 'lonely', 'manual', 'Lonely');
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'lonely' });
+    // Only a row older versions left behind has no links.
+    handle
+      .prepare('insert into tag (id, name, display_name, created_at) values (?, ?, ?, ?)')
+      .run(uuid(nextTagId++), 'lonely', 'Lonely', T1);
     expect(await db.tags.usage('lonely')).toEqual({ displayName: 'Lonely', assets: 0, files: 0, prompts: 0 });
     expect(await db.tags.usage('unknown')).toBeNull();
   });
@@ -634,8 +635,12 @@ describe('tag usage and rename', () => {
 
   test('a merge succeeds when the source or the target has no links', async () => {
     const a = await addAsset(10);
-    await tagAsset(a.id, 'empty source');
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'empty source' });
+    // Only rows older versions left behind have no links.
+    const legacyRow = (name: string) =>
+      handle
+        .prepare('insert into tag (id, name, display_name, created_at) values (?, ?, ?, ?)')
+        .run(uuid(nextTagId++), name, name, T1);
+    legacyRow('empty source');
     await tagAsset(a.id, 'front');
     expect(await db.tags.rename({ from: 'empty source', name: 'front', displayName: 'front', merge: true })).toEqual({
       merged: true,
@@ -643,8 +648,7 @@ describe('tag usage and rename', () => {
     expect(tagRow('empty source')).toBeUndefined();
     expect(await db.tags.listForAsset(a.id)).toEqual([{ name: 'front', displayName: 'front', origin: 'manual' }]);
 
-    await tagAsset(a.id, 'empty target');
-    await db.tags.removeFromAsset({ assetId: a.id, name: 'empty target' });
+    legacyRow('empty target');
     expect(
       await db.tags.rename({ from: 'front', name: 'empty target', displayName: 'Empty Target', merge: true }),
     ).toEqual({ merged: true });
@@ -773,5 +777,138 @@ describe('prompt tags', () => {
     expect(promptUpdatedAt()).toEqual(
       [both, sourceOnly, bothTargetOlder].map((id) => ({ id, updated_at: PROMPT_UPDATED })),
     );
+  });
+});
+
+describe('unused tag rows', () => {
+  const SHA = 'a'.repeat(64);
+  const tagNames = () =>
+    (handle.prepare('select name from tag order by name').all() as { name: string }[]).map((row) => row.name);
+  const tagIdOf = (name: string) =>
+    (handle.prepare('select id from tag where name = ?').get(name) as { id: string } | undefined)?.id;
+  const typed = (name: string) => ({ name, displayName: name, newId: uuid(nextTagId++) });
+  const applyTags = (fileId: string, names: string[]) =>
+    db.analyses.apply({
+      fileId,
+      sha256: SHA,
+      tags: names.map(typed),
+      provider: 'ollama',
+      model: 'qwen',
+      promptVersion: 1,
+      promptName: null,
+      now: T1,
+    });
+  /** Inserts a row without links, as older versions left behind. */
+  const legacyRow = (name: string) =>
+    handle
+      .prepare('insert into tag (id, name, display_name, created_at) values (?, ?, ?, ?)')
+      .run(uuid(nextTagId++), name, name, T1);
+
+  test('removing the last asset or file link deletes the row; a row still linked stays', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await tagAsset(a.id, 'shared');
+    await tagFile(f, 'shared');
+    await tagAsset(a.id, 'asset only');
+    await tagFile(f, 'file only');
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'asset only' });
+    await db.tags.removeFromFile({ fileId: f, name: 'file only' });
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'shared' });
+    expect(tagNames()).toEqual(['shared']);
+    await db.tags.removeFromFile({ fileId: f, name: 'shared' });
+    expect(tagNames()).toEqual([]);
+    expect(await db.tags.usage('shared')).toBeNull();
+  });
+
+  test('a batch removal deletes the rows it left without links', async () => {
+    const f = await addFile(20);
+    const g = await addFile(21);
+    const request = { name: 'batch', displayName: 'batch', origin: 'manual' as const, now: T1 };
+    await db.tags.addToFiles({ ...request, fileIds: [f, g], newId: uuid(nextTagId++) });
+    await db.tags.removeFromFiles({ fileIds: [f], name: 'batch' });
+    expect(tagNames()).toEqual(['batch']);
+    await db.tags.removeFromFiles({ fileIds: [g], name: 'batch' });
+    expect(tagNames()).toEqual([]);
+  });
+
+  test('a new analysis deletes the ai tags it no longer names and keeps the row of a tag named again', async () => {
+    const f = await addFile(20);
+    await applyTags(f, ['rusty', 'metal']);
+    const metal = tagIdOf('metal');
+    await applyTags(f, ['metal', 'old']);
+    expect(tagNames()).toEqual(['metal', 'old']);
+    expect(tagIdOf('metal')).toBe(metal);
+  });
+
+  test('a purge deletes the rows only the purged file used', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await tagAsset(a.id, 'kept');
+    await tagFile(f, 'kept');
+    await tagFile(f, 'gone');
+    handle.prepare("update file set status = 'failed' where id = ?").run(f);
+    expect(await db.files.purge(f, T1)).toBe(true);
+    expect(tagNames()).toEqual(['kept']);
+  });
+
+  test('removing a prompt tag or deleting the prompt deletes the rows it left without links', async () => {
+    const addPrompt = async (n: number) => {
+      await db.prompts.create({
+        id: uuid(n),
+        title: `P${n}`,
+        titleKey: `p${n}`,
+        description: '',
+        version: { id: uuid(n + 1000), content: 'x', variables: [] },
+        now: T1,
+      });
+      return uuid(n);
+    };
+    const tagPrompt = (promptId: string, name: string) =>
+      db.prompts.addTag({ promptId, name, displayName: name, newId: uuid(nextTagId++), now: T1, max: 50 });
+    const p = await addPrompt(30);
+    const q = await addPrompt(31);
+    await tagPrompt(p, 'removed');
+    await tagPrompt(p, 'deleted');
+    await tagPrompt(p, 'shared');
+    await tagPrompt(q, 'shared');
+    await db.prompts.removeTag({ promptId: p, name: 'removed', now: T1 });
+    expect(tagNames()).toEqual(['deleted', 'shared']);
+    expect(await db.prompts.remove(p)).toBe(true);
+    expect(tagNames()).toEqual(['shared']);
+  });
+
+  test('a rename or merge leaves no row without links', async () => {
+    const a = await addAsset(10);
+    legacyRow('empty');
+    const renamed = await db.tags.rename({ from: 'empty', name: 'still empty', displayName: 'Still', merge: false });
+    expect(renamed).toEqual({ merged: false });
+    legacyRow('empty source');
+    legacyRow('empty target');
+    const merged = await db.tags.rename({ from: 'empty source', name: 'empty target', displayName: 'x', merge: true });
+    expect(merged).toEqual({ merged: true });
+    await tagAsset(a.id, 'front');
+    expect(tagNames()).toEqual(['front']);
+  });
+
+  test('a waiting proposal keeps naming a tag whose row went and is accepted as before', async () => {
+    const a = await addAsset(10);
+    const f = await addFile(20);
+    await tagAsset(a.id, 'rusty');
+    await db.analyses.propose({
+      fileId: f,
+      sha256: SHA,
+      provider: 'ollama',
+      model: 'qwen',
+      promptVersion: 1,
+      tags: [{ name: 'rusty', displayName: 'Rusty' }],
+      promptName: null,
+      createdAt: T1,
+    });
+    await db.tags.removeFromAsset({ assetId: a.id, name: 'rusty' });
+    expect(tagNames()).toEqual([]);
+    expect((await db.analyses.getProposal(f))?.tags).toEqual([{ name: 'rusty', displayName: 'Rusty' }]);
+    const accepted = await db.analyses.acceptProposal({ fileId: f, sha256: SHA, tags: [typed('rusty')], now: T1 });
+    expect(accepted).toBe('accepted');
+    expect((await db.files.get(f))!.tags).toEqual([{ name: 'rusty', displayName: 'rusty', origin: 'ai' }]);
   });
 });
