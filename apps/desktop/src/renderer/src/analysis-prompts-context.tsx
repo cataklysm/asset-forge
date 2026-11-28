@@ -59,6 +59,8 @@ interface PromptsLoading {
   disposed: MutableRefObject<boolean>;
   /** Only the newest reload may take its answer. */
   request: MutableRefObject<number>;
+  /** The newest reload that has ended; a reload is under way while it differs from `request`. */
+  settled: MutableRefObject<number>;
   setPrompts(prompts: AnalysisPrompt[] | null): void;
   setLastUsed(lastUsed: LastUsed): void;
   setLoading(loading: boolean): void;
@@ -110,13 +112,15 @@ async function reloadPrompts(loading: PromptsLoading): Promise<void> {
     }
     throw error;
   } finally {
+    if (request === loading.request.current) loading.settled.current = request;
     if (!loading.disposed.current && request === loading.request.current) loading.setLoading(false);
   }
 }
 
 /**
  * The analysis prompts of the app and the ones used last. Loads once on mount; save, remove and
- * reset take the answer into the list without listing again. It does not poll.
+ * reset take the answer into the list and list again only while a reload is under way (its answer
+ * may predate the change). It does not poll.
  *
  * @param props.children the tree that reads the prompts
  */
@@ -128,11 +132,28 @@ export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
   const disposed = useRef(false);
   // Only the newest reload may take its answer; an older one arriving later is dropped.
   const reloadRequest = useRef(0);
+  const reloadSettled = useRef(0);
 
   const reload = useCallback(
-    () => reloadPrompts({ disposed, request: reloadRequest, setPrompts, setLastUsed, setLoading, setFailed }),
+    () =>
+      reloadPrompts({
+        disposed,
+        request: reloadRequest,
+        settled: reloadSettled,
+        setPrompts,
+        setLastUsed,
+        setLoading,
+        setFailed,
+      }),
     [],
   );
+
+  // A reload under way may answer a list read before a change: list again after the change, so
+  // the newer reload supersedes the older one.
+  const relistIfLoading = useCallback(() => {
+    if (disposed.current || reloadSettled.current === reloadRequest.current) return;
+    void reload().catch(() => {});
+  }, [reload]);
 
   useEffect(() => {
     disposed.current = false;
@@ -143,27 +164,39 @@ export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
     };
   }, [reload]);
 
-  const save = useCallback(async (input: SaveAnalysisPrompt) => {
-    const prompt = await call('analysisPrompts:save', input);
-    if (!disposed.current) setPrompts((list) => upsert(list, prompt));
-    return prompt;
-  }, []);
+  const save = useCallback(
+    async (input: SaveAnalysisPrompt) => {
+      const prompt = await call('analysisPrompts:save', input);
+      if (!disposed.current) setPrompts((list) => upsert(list, prompt));
+      relistIfLoading();
+      return prompt;
+    },
+    [relistIfLoading],
+  );
 
-  const remove = useCallback(async (id: string) => {
-    await call('analysisPrompts:delete', { id });
-    if (disposed.current) return;
-    setPrompts((list) => (list === null ? list : list.filter((entry) => entry.id !== id)));
-    setLastUsed((used) => ({
-      tagging: used.tagging === id ? null : used.tagging,
-      imagePrompt: used.imagePrompt === id ? null : used.imagePrompt,
-    }));
-  }, []);
+  const remove = useCallback(
+    async (id: string) => {
+      await call('analysisPrompts:delete', { id });
+      if (disposed.current) return;
+      setPrompts((list) => (list === null ? list : list.filter((entry) => entry.id !== id)));
+      setLastUsed((used) => ({
+        tagging: used.tagging === id ? null : used.tagging,
+        imagePrompt: used.imagePrompt === id ? null : used.imagePrompt,
+      }));
+      relistIfLoading();
+    },
+    [relistIfLoading],
+  );
 
-  const reset = useCallback(async (id: string) => {
-    const prompt = await call('analysisPrompts:reset', { id });
-    if (!disposed.current) setPrompts((list) => upsert(list, prompt));
-    return prompt;
-  }, []);
+  const reset = useCallback(
+    async (id: string) => {
+      const prompt = await call('analysisPrompts:reset', { id });
+      if (!disposed.current) setPrompts((list) => upsert(list, prompt));
+      relistIfLoading();
+      return prompt;
+    },
+    [relistIfLoading],
+  );
 
   const noteUsed = useCallback((purpose: AnalysisPromptPurpose, id: string) => {
     setLastUsed((used) => ({ ...used, [lastUsedKey(purpose)]: id }));

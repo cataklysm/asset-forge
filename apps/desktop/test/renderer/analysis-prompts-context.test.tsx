@@ -6,7 +6,8 @@ import {
   useAnalysisPrompts,
   type AnalysisPromptsState,
 } from '../../src/renderer/src/analysis-prompts-context';
-import { fakeAnalysisPrompts, fakeError, installFakeApi } from './fake-api';
+import type { AnalysisPromptList } from '@assetforge/contracts';
+import { deferred, fakeAnalysisPrompts, fakeError, installFakeApi } from './fake-api';
 import { imagePrompt, taggingPrompt } from './fixtures';
 
 const DEFAULT_TAGGING = taggingPrompt();
@@ -88,6 +89,31 @@ it('save appends a new prompt and replaces an existing one without listing again
   );
   expect(state().prompts![1]).toEqual({ ...DETAILED, text: 'Changed', maxTags: 30 });
   expect(api.calls.filter((c) => c.channel === 'analysisPrompts:list')).toHaveLength(1);
+});
+
+it('a reload under way while a save answers does not bring back the list from before the save', async () => {
+  const fake = seeded();
+  const api = installFakeApi(fake.handlers);
+  const state = mount();
+  await screen.findByText('3 prompts');
+  const stale = deferred<AnalysisPromptList>();
+  const before = structuredClone(fake.state);
+  let lists = 0;
+  api.set('analysisPrompts:list', () => {
+    lists += 1;
+    return lists === 1 ? stale.promise : fake.handlers['analysisPrompts:list']({});
+  });
+  let reloading: Promise<void> | null = null;
+  act(() => {
+    reloading = state().reload();
+  });
+  const created = await act(() => state().save({ purpose: 'image_prompt', name: 'Short', text: 'Be brief' }));
+  await act(async () => {
+    stale.resolve(before);
+    await reloading;
+  });
+  await waitFor(() => expect(state().loading).toBe(false));
+  expect(state().prompts!.map((p) => p.id)).toContain(created.id);
 });
 
 it('remove drops the prompt and clears a matching prompt used last', async () => {
