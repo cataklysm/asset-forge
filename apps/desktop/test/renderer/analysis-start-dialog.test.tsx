@@ -385,6 +385,15 @@ it('a failed model list blocks Start even with a stored model, and offers no set
   expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
 });
 
+it('an internal_error on the model list with a stored model blocks Start and offers no settings', async () => {
+  install({}, CONFIGURED, { ok: false, code: 'internal_error' });
+  renderDialog();
+  await previewShown();
+  await waitFor(() => expect(startButton().title).toBe(JOB_ERROR_MESSAGES.internal_error));
+  expect(startButton().disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+});
+
 it('while the settings load Start says so, and a failed load is not "not configured"', async () => {
   const settings = deferred<ProviderList>();
   install({ 'providers:list': () => settings.promise });
@@ -443,6 +452,72 @@ it('Settings is disabled with the given reason while the settings screen cannot 
   await user.click(settings);
   expect(onClose).not.toHaveBeenCalled();
   expect(onOpenSettings).not.toHaveBeenCalled();
+});
+
+it('Settings offered while a start is in flight does nothing', async () => {
+  const user = userEvent.setup();
+  const enqueue = deferred<EnqueueAnalysisResult>();
+  let modelCalls = 0;
+  install({
+    'analysis:enqueue': () => enqueue.promise,
+    'providers:listModels': () => {
+      modelCalls += 1;
+      return modelCalls <= 2 ? MODELS : { ok: false, code: 'provider_unauthorized' };
+    },
+  });
+  let providers: ProvidersState | null = null;
+  function Probe() {
+    providers = useProviders();
+    return null;
+  }
+  const onClose = vi.fn();
+  const onOpenSettings = vi.fn();
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <AnalysisPromptsProvider>
+          <Probe />
+          <AnalysisStartDialog
+            open
+            target={assetTarget()}
+            onClose={onClose}
+            onStarted={() => {}}
+            onOpenSettings={onOpenSettings}
+          />
+        </AnalysisPromptsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  await previewShown();
+  await waitFor(() => expect(startButton().disabled).toBe(false));
+  await user.click(startButton());
+  await waitFor(() => expect(startButton().disabled).toBe(true));
+  // The entry turns out to refuse the key while the start is still under way.
+  await act(async () => {
+    await providers!.loadModels(CONFIGURED.id, true);
+  });
+  const settings = await screen.findByRole('button', { name: 'Settings' });
+  await user.click(settings);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(onOpenSettings).not.toHaveBeenCalled();
+  await act(async () => enqueue.resolve(ENQUEUED));
+});
+
+it('a preview answer of a previous target arriving after the target changed is ignored', async () => {
+  const first = deferred<AnalysisPreview>();
+  const otherTarget: AnalysisTarget = { kind: 'asset', assetId: '00000000-0000-4000-8000-0000000000bb' };
+  const api = install({
+    'analysis:preview': (request: PreviewRequest) =>
+      request.target.kind === 'asset' && request.target.assetId === otherTarget.assetId
+        ? { analysable: 4, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }
+        : first.promise,
+  });
+  const { rerender } = renderDialog();
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  rerender({ target: otherTarget });
+  await waitFor(() => expect(count('To analyse')).toBe('4'));
+  await act(async () => first.resolve({ analysable: 99, alreadyAnalysed: 0, alreadyQueued: 0, notAnalysable: 0 }));
+  expect(count('To analyse')).toBe('4');
 });
 
 it('a failed start keeps the retry of a preview that failed afterwards', async () => {
