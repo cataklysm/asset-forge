@@ -138,7 +138,7 @@ function queryWords(query: string): string[] {
         .filter((word) => word !== '')
         .map(foldSearchWord),
     ),
-  ].sort((a, b) => b.length - a.length);
+  ].sort((left, right) => right.length - left.length);
   const kept: string[] = [];
   for (const word of words) {
     if (!kept.some((longer) => longer.includes(word))) kept.push(word);
