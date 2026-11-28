@@ -90,8 +90,8 @@ const isStatus = (status: number): boolean => Number.isInteger(status) && status
 
 /**
  * The PageLoader of one page window (spec "The crawl", step 2, and "Diagnostics"). The poll starts when the
- * document is parsed and does not wait for the load to finish; while the load is still under way a match counts
- * only once two polls in a row saw the same number of nodes, so a list a script is still filling is not cut short.
+ * document is parsed and does not wait for the load to finish. A match counts only once two polls in a row saw
+ * the same URL values, including after document load, so a list a script is still filling is not cut short.
  * Every load stops the view when it ends: a page that answered loads nothing further, and a navigation still under
  * way cannot redirect, or report leaving the site, during the next load; a left-the-site signal or a status only
  * ever reaches the load that is running when it arrives. A main-frame status of 400 or more makes a load that found
@@ -287,7 +287,7 @@ class PageLoad {
   private async poll(): Promise<void> {
     if (this.isPolling || this.isDone) return;
     this.isPolling = true;
-    /** The node counts of the last poll made while the load was still under way. */
+    /** The URL values of the last poll made while the load was still under way. */
     let seen = '';
     for (;;) {
       let raw: unknown;
@@ -297,9 +297,9 @@ class PageLoad {
         raw = undefined; // The page was replaced meanwhile; ask again.
       }
       if (this.isDone) return;
-      const counts = this.judge(raw, seen);
-      if (counts === null) return;
-      seen = counts;
+      const values = this.judge(raw, seen);
+      if (values === null) return;
+      seen = values;
       await sleep(this.timing.pollMs);
       if (this.isDone) return;
     }
@@ -309,8 +309,8 @@ class PageLoad {
    * Judges one poll: finishes the load on an invalid query, a match that counts, or the end of the settle time.
    *
    * @param raw what the page answered; undefined when it could not be asked
-   * @param seen the node counts of the last poll while the load was still under way
-   * @returns the node counts to remember for the next poll; null when the load finished
+   * @param seen the URL values of the last poll while the load was still under way
+   * @returns the URL values to remember for the next poll; null when the load finished
    */
   private judge(raw: unknown, seen: string): string | null {
     const extraction = raw === undefined ? null : readExtraction(raw, this.names);
@@ -319,9 +319,13 @@ class PageLoad {
       return null;
     }
     let remembered = '';
-    if (extraction !== null && (extraction.counts[this.request.waitFor] ?? 0) > 0) {
-      const counts = JSON.stringify(extraction.counts);
-      if (this.settledAt !== null || counts === seen) {
+    if (
+      extraction !== null &&
+      (extraction.counts[this.request.waitFor] ?? 0) > 0 &&
+      (extraction.results[this.request.waitFor] ?? []).some((value) => this.usable(value, extraction.baseUrl))
+    ) {
+      const values = JSON.stringify(extraction.results);
+      if (values === seen) {
         this.finish({
           ok: true,
           results: extraction.results,
@@ -330,12 +334,30 @@ class PageLoad {
         });
         return null;
       }
-      remembered = counts;
+      remembered = values;
     }
     if (this.settledAt !== null && Date.now() >= this.settledAt + this.timing.settleMs) {
       this.finish(this.missed('no_match'));
       return null;
     }
     return remembered;
+  }
+
+  /**
+   * Tests whether a selected value can identify an HTTP file or page rather than merely an existing DOM node.
+   *
+   * @param value the selected attribute or text
+   * @param baseUrl the document base
+   * @returns true for a nonempty HTTP(S) URL or resolvable relative URL without embedded credentials
+   */
+  private usable(value: string, baseUrl: string): boolean {
+    const text = value.trim();
+    if (text === '' || text.startsWith('#')) return false;
+    try {
+      const url = new URL(text, baseUrl || this.url);
+      return ['http:', 'https:'].includes(url.protocol) && url.username === '' && url.password === '';
+    } catch {
+      return false;
+    }
   }
 }

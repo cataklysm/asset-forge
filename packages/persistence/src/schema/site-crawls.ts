@@ -1,4 +1,4 @@
-import { check, index, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -18,6 +18,8 @@ export const siteCrawl = sqliteTable(
     checkpoint: text('checkpoint'),
     result: text('result'),
     importedAt: text('imported_at'),
+    completedAt: text('completed_at'),
+    cancelled: integer('cancelled').notNull().default(0),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -29,5 +31,6 @@ export const siteCrawl = sqliteTable(
     check('site_crawl_target_json_check', sql`${table.target} IS NULL OR json_valid(${table.target})`),
     check('site_crawl_checkpoint_json_check', sql`${table.checkpoint} IS NULL OR json_valid(${table.checkpoint})`),
     check('site_crawl_result_json_check', sql`${table.result} IS NULL OR json_valid(${table.result})`),
+    check('site_crawl_cancelled_check', sql`${table.cancelled} IN (0, 1)`),
   ],
 );

@@ -3,8 +3,16 @@ import { ipcContract, SaveSiteProfileSchema } from '../src/index';
 
 const PROFILE_ID = '10000000-0000-4000-8000-000000000001';
 const profile = {
-  name: 'Example', url: 'https://example.com/gallery', thumbnails: '//a/@href', pagination: '', file: '',
-  kinds: ['image'], minBytes: 0, urlContains: '', maxPages: 20, maxFiles: 1000,
+  name: 'Example',
+  url: 'https://example.com/gallery',
+  thumbnails: '//a/@href',
+  pagination: '',
+  file: '',
+  kinds: ['image'],
+  minBytes: 0,
+  urlContains: '',
+  maxPages: 20,
+  maxFiles: 1000,
 };
 
 describe('background site discovery contracts', () => {
@@ -27,7 +35,11 @@ describe('background site discovery contracts', () => {
       'sites:enqueueCrawl'
     ];
     expect(channel).toBeDefined();
-    expect(channel!.request.safeParse({ profileId: PROFILE_ID, url: 'https://example.com/gallery' }).success).toBe(false);
-    expect(channel!.request.safeParse({ profileId: PROFILE_ID, url: 'https://example.com/gallery', target: null }).success).toBe(true);
+    expect(channel!.request.safeParse({ profileId: PROFILE_ID, url: 'https://example.com/gallery' }).success).toBe(
+      false,
+    );
+    expect(
+      channel!.request.safeParse({ profileId: PROFILE_ID, url: 'https://example.com/gallery', target: null }).success,
+    ).toBe(true);
   });
 });

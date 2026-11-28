@@ -2,6 +2,7 @@ import {
   ANALYZE_FILE_JOB,
   FILE_DOWNLOAD_JOB,
   IMAGE_GENERATE_JOB,
+  SITE_CRAWL_JOB,
   type Changes,
   type JobErrorCode,
   type ResourceClass,
@@ -25,6 +26,7 @@ import {
 } from '@assetforge/core';
 import { createScheduler, DEFAULT_LIMITS, DEFAULT_TOTALS, type PauseGate, type Scheduler } from '@assetforge/jobs';
 import type { ChangeFeed } from './change-feed.js';
+import { createSiteDiscoveryHandler, type SiteDiscoveryRuntime } from './site-discovery.js';
 
 // Kept free of Electron imports. One scheduler per open workspace: the host starts it after a
 // workspace opened and stops it before the workspace closes, so no job touches a closing database.
@@ -105,6 +107,8 @@ export interface JobHostDependencies {
   remote: RemoteFileSource;
   /** The logins of the site profiles for site downloads; without it a site download fails as its profile missing. */
   sites?: SiteAccess;
+  /** Existing profile sessions used by queued gallery discovery. */
+  discovery?: SiteDiscoveryRuntime;
   /** Running jobs per lane of a class; `DEFAULT_LIMITS` without it. */
   limits?: Record<ResourceClass, number>;
   /** Running jobs per class across all its lanes; `DEFAULT_TOTALS` without it. */
@@ -367,6 +371,11 @@ function createWorkspaceScheduler(dependencies: JobHostDependencies, session: Wo
   return createScheduler({
     jobs: session.database.jobs,
     handlers: {
+      ...(dependencies.discovery === undefined
+        ? {}
+        : {
+            [SITE_CRAWL_JOB]: createSiteDiscoveryHandler(session, dependencies.discovery, dependencies.pause),
+          }),
       [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
         session,
         vision: dependencies.vision,
@@ -388,11 +397,14 @@ function createWorkspaceScheduler(dependencies: JobHostDependencies, session: Wo
       }),
     },
     limits: dependencies.limits ?? DEFAULT_LIMITS,
-    totals: dependencies.totals ?? DEFAULT_TOTALS,
+    totals: { ...(dependencies.totals ?? DEFAULT_TOTALS), ...(dependencies.discovery === undefined ? {} : { cpu: 1 }) },
     // A cancel of several rows at once names no job.
     onChange: (jobId) => (jobId === null ? feed.jobs() : feed.job(jobId)),
     pause: dependencies.pause,
-    ...(dependencies.laneLimit === undefined ? {} : { laneLimit: dependencies.laneLimit }),
+    laneLimit: (resourceClass, lane) =>
+      resourceClass === 'cpu' && dependencies.discovery !== undefined
+        ? 1
+        : dependencies.laneLimit?.(resourceClass, lane),
     ...(clock === undefined
       ? {}
       : {

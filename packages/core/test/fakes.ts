@@ -103,6 +103,7 @@ import type {
 import type { WorkspaceHost, WorkspaceRegistry } from '../src/ports/workspace-host.js';
 import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
+import { InMemorySiteCrawlRepository } from './memory-site-crawls.js';
 import { InMemoryPromptRepository, type PromptTagLink } from './memory-prompts.js';
 
 /** In-memory storage. Files live in `files`, directories in `dirs` (relative, `/`-separated). */
@@ -1747,6 +1748,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     },
   );
   readonly analyses = new InMemoryAnalyses(this.files, this.tags, this.proposals);
+  readonly siteCrawls = new InMemorySiteCrawlRepository(this.jobs);
   readonly analysisTargets = new InMemoryAnalysisTargets(this.files, this.assets, this.analyses, this.jobs);
   readonly prompts = new InMemoryPromptRepository(this.tags);
   readonly generations = new InMemoryGenerationRepository(

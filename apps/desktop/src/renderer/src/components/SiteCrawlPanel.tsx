@@ -89,7 +89,7 @@ export function SiteCrawlPanel({ url, locked, onUrlChange, testable, onTest, cra
  * @param props the answer
  * @returns the answer's parts
  */
-function CrawlResultView({ result }: { result: SiteCrawlResult }) {
+export function CrawlResultView({ result, showFiles = true }: { result: SiteCrawlResult; showFiles?: boolean }) {
   const headline = noFilesHeadline(result);
   return (
     <>
@@ -122,7 +122,7 @@ function CrawlResultView({ result }: { result: SiteCrawlResult }) {
           {result.problemsDropped > 0 && <li>{moreProblemsText(result.problemsDropped)}</li>}
         </ul>
       )}
-      {result.files.length > 0 && (
+      {showFiles && result.files.length > 0 && (
         <ul
           aria-label={FOUND_FILES_LABEL}
           className={`h-48 overflow-y-auto rounded-control border p-2 text-sm text-muted ${BORDER}`}

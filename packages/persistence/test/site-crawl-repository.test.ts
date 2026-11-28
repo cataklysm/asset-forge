@@ -71,7 +71,11 @@ afterEach(async () => {
 
 describe('durable site crawl results', () => {
   test('lists lightweight task headers without decoding full review results or checkpoints', async () => {
-    const row = { ...record(10), result: { ...result(uuid(10)), cancelled: true }, checkpoint: { pending: ['detail'] } };
+    const row = {
+      ...record(10),
+      result: { ...result(uuid(10)), cancelled: true },
+      checkpoint: { pending: ['detail'] },
+    };
     await db.siteCrawls.insert(row);
     const sqlite = new Database(path);
     try {
@@ -90,7 +94,13 @@ describe('durable site crawl results', () => {
   test('retains a successful discovery completion marker after reopening and job cleanup', async () => {
     const row = record(10);
     await db.siteCrawls.insert(row, {
-      id: row.id, type: 'site.crawl', resourceClass: 'cpu', fileId: null, lane: 'example.com', payload: { v: 1 }, dedupeKey: null,
+      id: row.id,
+      type: 'site.crawl',
+      resourceClass: 'cpu',
+      fileId: null,
+      lane: 'example.com',
+      payload: { v: 1 },
+      dedupeKey: null,
     });
     await db.jobs.claimNext({ resourceClass: 'cpu', types: ['site.crawl'], now: T0 });
     await db.siteCrawls.update(row.id, { completedAt: T1, result: result(row.id), now: T1 });

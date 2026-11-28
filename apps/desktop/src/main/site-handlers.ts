@@ -19,6 +19,7 @@ import type { JobHost } from './job-host.js';
 import { hasActiveDownloads, refusedDownloadUrl } from './site-profile-downloads.js';
 import { SITE_PROFILE_NOT_FOUND, type SiteProfileStore } from './site-profile-store.js';
 import type { SiteSessions } from './site-sessions.js';
+import { SiteDiscoveryService } from './site-discovery.js';
 
 // The site import channels (spec "The crawl", "Download", "Channels"). Kept free of Electron imports: the windows
 // and sessions are behind SiteSessions. Every channel works without a workspace except `sites:import`. One crawl
@@ -37,6 +38,10 @@ export type SiteHandlers = Pick<
   | 'sites:crawlProgress'
   | 'sites:cancelCrawl'
   | 'sites:import'
+  | 'sites:enqueueCrawl'
+  | 'sites:listCrawls'
+  | 'sites:getCrawl'
+  | 'sites:retryCrawl'
 >;
 
 const ALREADY_RUNNING = 'A site import test is already running';
@@ -54,7 +59,7 @@ export interface SiteHandlerDependencies {
   /** The workspace manager; `sites:import` needs an open workspace. */
   manager: WorkspaceManager;
   /** Told after an import was queued. */
-  jobs: Pick<JobHost, 'changed' | 'wake'>;
+  jobs: Pick<JobHost, 'changed' | 'wake' | 'cancel' | 'resume'>;
   /** Reads `robots.txt` for the crawl. */
   robots: SiteCrawlDependencies['robots'];
   /** The wait between pages; `abortableWait` without one. */
@@ -89,6 +94,7 @@ interface KeptCrawl {
  */
 export function createSiteHandlers(dependencies: SiteHandlerDependencies): SiteHandlers {
   const handlers = new SiteHandlerState(dependencies);
+  const discovery = new SiteDiscoveryService(dependencies);
   return {
     'sites:list': async () => ({ profiles: dependencies.store.list() }),
     'sites:save': async (request) => handlers.save(request),
@@ -97,8 +103,16 @@ export function createSiteHandlers(dependencies: SiteHandlerDependencies): SiteH
     'sites:openCheck': ({ host }) => handlers.openCheck(host),
     'sites:crawl': ({ profileId, url }) => handlers.crawl(profileId, url),
     'sites:crawlProgress': async () => handlers.crawlProgress(),
-    'sites:cancelCrawl': async () => handlers.cancelCrawl(),
-    'sites:import': ({ crawlId, target }) => handlers.importCrawl(crawlId, target),
+    'sites:enqueueCrawl': (request) => discovery.enqueue(request),
+    'sites:listCrawls': (request) => discovery.list(request),
+    'sites:getCrawl': ({ crawlId }) => discovery.get(crawlId),
+    'sites:retryCrawl': ({ crawlId }) => discovery.retry(crawlId),
+    'sites:cancelCrawl': async ({ crawlId }) =>
+      crawlId === undefined ? handlers.cancelCrawl() : discovery.cancel(crawlId),
+    'sites:import': async (request) =>
+      (await discovery.has(request.crawlId))
+        ? discovery.import(request)
+        : handlers.importCrawl(request.crawlId, request.target ?? null),
   };
 }
 
@@ -224,6 +238,7 @@ class SiteHandlerState {
    * @throws InvalidOperationError when a download of the profile is active
    */
   private async removeUnlessDownloading(session: WorkspaceSession, id: string): Promise<void> {
+    if (await session.database.siteCrawls.hasActiveProfile(id)) throw new InvalidOperationError(IN_USE);
     if (await hasActiveDownloads(session, id)) throw new InvalidOperationError(ACTIVE_DOWNLOADS);
     this.remove(id);
   }
@@ -380,7 +395,7 @@ class SiteHandlerState {
    */
   async importCrawl(
     crawlId: string,
-    target: IpcRequest<'sites:import'>['target'],
+    target: Exclude<IpcRequest<'sites:import'>['target'], undefined>,
   ): Promise<IpcResponse<'sites:import'>> {
     const answer = this.kept;
     if (answer === null || answer.crawlId !== crawlId) throw new InvalidOperationError(RUN_AGAIN);
@@ -401,7 +416,7 @@ class SiteHandlerState {
   private async queueImport(
     session: WorkspaceSession,
     answer: KeptCrawl,
-    target: IpcRequest<'sites:import'>['target'],
+    target: Exclude<IpcRequest<'sites:import'>['target'], undefined>,
   ): Promise<IpcResponse<'sites:import'>> {
     // The profile may have been changed or deleted while this waited for the queue.
     const profile = this.store.get(answer.profileId);

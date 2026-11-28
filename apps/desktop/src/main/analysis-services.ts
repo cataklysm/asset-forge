@@ -238,6 +238,12 @@ function createJobs(options: AnalysisServiceOptions, parts: JobParts): { host: J
     generationImages: options.generationImages,
     remote,
     sites: createSiteAccess(siteStore, siteSessions, { remote }),
+    discovery: {
+      store: siteStore,
+      sessions: siteSessions,
+      robots: createRobotsReader(remote),
+      ...(options.siteWait === undefined ? {} : { wait: options.siteWait }),
+    },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     ...(options.totals === undefined ? {} : { totals: options.totals }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),

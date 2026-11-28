@@ -27,6 +27,12 @@ import {
   SITE_LABEL,
   SITE_PROFILE_LABEL,
   SITE_PROFILE_NAME_LABEL,
+  SITE_PARALLEL_LABEL,
+  SITE_PARALLEL_TITLE,
+  SITE_GAP_LABEL,
+  SITE_GAP_TITLE,
+  SITE_TIMEOUT_LABEL,
+  SITE_TIMEOUT_TITLE,
   THUMBNAILS_XPATH_LABEL,
   THUMBNAILS_XPATH_TITLE,
   URL_CONTAINS_LABEL,
@@ -250,6 +256,30 @@ export function SiteProfileForm(props: Props) {
           readOnly={locked}
           numeric
           onChange={(maxFiles) => onDraftChange({ maxFiles })}
+        />
+        <Field
+          label={SITE_PARALLEL_LABEL}
+          title={SITE_PARALLEL_TITLE}
+          value={draft.detailConcurrency}
+          readOnly={locked}
+          numeric
+          onChange={(detailConcurrency) => onDraftChange({ detailConcurrency })}
+        />
+        <Field
+          label={SITE_GAP_LABEL}
+          title={SITE_GAP_TITLE}
+          value={draft.requestGapMs}
+          readOnly={locked}
+          numeric
+          onChange={(requestGapMs) => onDraftChange({ requestGapMs })}
+        />
+        <Field
+          label={SITE_TIMEOUT_LABEL}
+          title={SITE_TIMEOUT_TITLE}
+          value={draft.pageTimeoutSeconds}
+          readOnly={locked}
+          numeric
+          onChange={(pageTimeoutSeconds) => onDraftChange({ pageTimeoutSeconds })}
         />
       </div>
       <div className="flex flex-wrap gap-2">

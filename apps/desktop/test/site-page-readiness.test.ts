@@ -41,7 +41,7 @@ describe('usable extraction readiness', () => {
   });
 
   it('waits for stable URL results when scripts append links after the document loaded', async () => {
-    const { view, calls } = viewFor((call) => call === 1 ? ['/first.jpg'] : ['/first.jpg', '/second.jpg']);
+    const { view, calls } = viewFor((call) => (call === 1 ? ['/first.jpg'] : ['/first.jpg', '/second.jpg']));
     const result = await createPageLoader(view, 'gallery.test', timing).load('https://gallery.test/d/1', request);
     expect(result).toMatchObject({ ok: true, results: { file: ['/first.jpg', '/second.jpg'] } });
     expect(calls()).toBeGreaterThanOrEqual(3);

@@ -59,7 +59,10 @@ export const siteChannels = {
   },
   /** Saved discovery tasks of the open workspace, newest first. */
   'sites:listCrawls': {
-    request: z.object({ limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }),
+    request: z.object({
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
+    }),
     response: z.object({ items: z.array(SiteCrawlTaskSummarySchema), total: z.number().int().min(0) }),
   },
   /** Reads one saved task and recomputes optional filename matches against its captured asset. */

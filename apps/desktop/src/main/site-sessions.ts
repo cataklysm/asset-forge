@@ -1,10 +1,11 @@
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
 import { InvalidOperationError, type PageLoader } from '@assetforge/core';
-import type { SiteProfile } from '@assetforge/contracts';
+import { SITE_DETAIL_CONCURRENCY, SITE_PAGE_TIMEOUT_MS, type SiteProfile } from '@assetforge/contracts';
 import { sessionRequestOptions, type SessionNetRequest, type SessionRequestOptions } from './session-request.js';
 import { createLoginWindow, loadLoginPage } from './site-login-window.js';
 import { createPageLoader, PAGE_TIMING, type PageTiming } from './site-page-loader.js';
 import { createPageView } from './site-page-window.js';
+import { createPagePool } from './site-page-pool.js';
 import { createHostVetter, type HostResolver } from './site-request-filter.js';
 import { harden } from './site-session-hardening.js';
 import { prepareWindow, windowOptions } from './site-window-options.js';
@@ -30,8 +31,8 @@ export interface SiteSessions {
   loginProfileId(): string | null;
   focusLogin(): void;
   /**
-   * A hidden page window for one crawl; `close` destroys it and may be called more than once. `onGone` is called
-   * once when the window goes away, whoever destroyed it, so the crawl can end.
+   * Independent hidden page windows for one crawl, bounded by its profile. `close` destroys them all and may be
+   * called more than once. `onGone` is called once when the pool goes away, so the crawl can end.
    */
   openPage(profile: SiteProfile, onGone?: () => void): { loader: PageLoader; close(): void };
   /** The cookies the profile's session would send to `url`. */
@@ -112,7 +113,12 @@ export function createElectronSiteSessions(dependencies: ElectronSiteSessionsDep
     openLogin: (profile, url) => openLogin(state, profile, url),
     loginProfileId: () => state.login?.profileId ?? null,
     focusLogin: () => focusLogin(state),
-    openPage: (profile, onGone) => openPage(state, profile, onGone),
+    openPage: (profile, onGone) =>
+      createPagePool(
+        (gone) => openPage(state, profile, gone),
+        profile.detailConcurrency ?? SITE_DETAIL_CONCURRENCY.default,
+        onGone,
+      ),
     shutdown: () => shutdown(state),
     cookies: (profileId, url) => sessionCookies(state, profileId, url),
     userAgent: (profileId) => sessionOf(state, profileId).getUserAgent(),
@@ -231,7 +237,12 @@ function openPage(
   });
   const view = createPageView(window, profile.site);
   return {
-    loader: createPageLoader(view, profile.site, state.timing),
+    loader: createPageLoader(view, profile.site, {
+      ...state.timing,
+      totalMs:
+        profile.pageTimeoutMs ??
+        (state.dependencies.timing === undefined ? SITE_PAGE_TIMEOUT_MS.default : state.timing.totalMs),
+    }),
     close: () => destroyWindow(window),
   };
 }

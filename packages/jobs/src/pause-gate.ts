@@ -32,6 +32,13 @@ const FATAL: ReadonlySet<JobErrorCode> = new Set([
  */
 export interface PauseGate {
   /**
+   * Pauses a lane immediately after a source requires user action, preserving its actual failure reason.
+   * @param resourceClass the queue
+   * @param lane the source lane
+   * @param reason the refusal requiring action
+   */
+  pause(resourceClass: ResourceClass, lane: string | null, reason: JobErrorCode): void;
+  /**
    * The code that paused the lane of the class, or null while it may claim.
    *
    * @param resourceClass the class of the lane
@@ -84,6 +91,7 @@ export function createPauseGate(options: PauseGateOptions): PauseGate {
   if (!Number.isInteger(threshold) || threshold < 1) throw new RangeError('The pause threshold must be at least 1');
   const gate = new LanePauses(options, threshold);
   return {
+    pause: (resourceClass, lane, reason) => gate.pause(resourceClass, lane, reason),
     reason: (resourceClass, lane) => gate.reason(resourceClass, lane),
     record: (resourceClass, lane, outcome) => gate.record(resourceClass, lane, outcome),
     resume: (resourceClass, lane) => gate.resume(resourceClass, lane),
@@ -132,6 +140,15 @@ class LanePauses {
     private readonly options: PauseGateOptions,
     private readonly threshold: number,
   ) {}
+
+  /** @param resourceClass queue @param lane source @param reason actual refusal */
+  pause(resourceClass: ResourceClass, lane: string | null, reason: JobErrorCode): void {
+    const reasons = lanesOf(this.reasons, resourceClass);
+    if (reasons.has(lane)) return;
+    lanesOf(this.counts, resourceClass).delete(lane);
+    reasons.set(lane, reason);
+    this.options.onChange?.();
+  }
 
   /**
    * See `PauseGate.reason`.

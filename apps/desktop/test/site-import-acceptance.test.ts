@@ -187,6 +187,8 @@ describe('site import', () => {
       urlContains: '',
       maxPages: 20,
       maxFiles: 1000,
+      // This acceptance case checks transport/session isolation; independent parallel pages have native coverage.
+      detailConcurrency: 1,
     });
     expect(profile.site).toBe('127.0.0.1');
     store = { get: (id) => (id === profile.id ? profile : null) };

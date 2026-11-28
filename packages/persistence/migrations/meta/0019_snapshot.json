@@ -2691,6 +2691,21 @@
           "notNull": false,
           "autoincrement": false
         },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cancelled": {
+          "name": "cancelled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2746,6 +2761,10 @@
         "site_crawl_result_json_check": {
           "name": "site_crawl_result_json_check",
           "value": "\"site_crawl\".\"result\" IS NULL OR json_valid(\"site_crawl\".\"result\")"
+        },
+        "site_crawl_cancelled_check": {
+          "name": "site_crawl_cancelled_check",
+          "value": "\"site_crawl\".\"cancelled\" IN (0, 1)"
         }
       }
     }
