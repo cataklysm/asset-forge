@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AssetSummary } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call } from '../api';
@@ -164,6 +164,11 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
       lastSelected.current = { ...asset, tags: [...tags], coverTags: [...coverTags] };
   });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
+  // A loaded page holds the newest copy, also of an asset selected before this mount.
+  const loadedItem = loadedSelection?.item ?? null;
+  useLayoutEffect(() => {
+    if (loadedItem !== null) lastSelected.current = loadedItem;
+  }, [loadedItem]);
   const selectedAsset =
     loadedSelection?.item ?? (lastSelected.current?.id === state.selectedId ? lastSelected.current : null);
 
@@ -240,7 +245,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           onRetry: paged.retry,
           positionRef: position,
         };
-  const errors = [types.error, projects.error].filter((message): message is string => message !== null);
+  const errors = [types.error, projects.error, library.error].filter((message): message is string => message !== null);
 
   const toolbar = (
     <AssetToolbar

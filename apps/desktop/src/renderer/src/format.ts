@@ -100,3 +100,13 @@ export function formatDuration(ms: number): string {
   const seconds = String(total % 60).padStart(2, '0');
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
+
+/**
+ * The values to show, each once, in the order they first appear (for example the load errors of one view).
+ *
+ * @param values the values, possibly repeated
+ * @returns the distinct values
+ */
+export function distinct<T>(values: Iterable<T>): T[] {
+  return [...new Set(values)];
+}

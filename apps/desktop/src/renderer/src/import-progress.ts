@@ -26,6 +26,8 @@ export function importProgressValue(progress: ImportProgress): number {
 
 /** What a screen shows of its running import. */
 export interface ImportProgressState {
+  /** Whether the screen's `files:import` call is pending (not while the file picker or the ZIP choice is open). */
+  isRunning: boolean;
   /** The last known progress; null while inactive and until the first answer that holds one. */
   progress: ImportProgress | null;
   /** Asks the main process to stop the running import after its current item. */
@@ -88,7 +90,7 @@ export function useImportProgress(active: boolean): ImportProgressState {
   }, []);
 
   // Inactive shows no progress at once, before the effect has cleared the last value.
-  return { progress: active ? progress : null, cancel, cancelRequested };
+  return { isRunning: active, progress: active ? progress : null, cancel, cancelRequested };
 }
 
 /**

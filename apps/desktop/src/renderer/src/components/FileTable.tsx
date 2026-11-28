@@ -1,5 +1,6 @@
 import { useRef, type RefObject } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
+import { showsProposal } from '../file-actions';
 import { formatBytes, formatDateTime } from '../format';
 import { rowCount } from '../gallery';
 import { useElementSize, useVirtualRows, type VirtualRows } from '../hooks/useVirtualRows';
@@ -197,7 +198,7 @@ function FileCells(props: FileViewProps & { file: FileRecord; index: number; isS
       </span>
       <span role="gridcell" className="flex min-w-0 items-center gap-2">
         <span className="truncate font-medium">{file.originalName}</span>
-        {file.hasProposal && <ProposalMarker />}
+        {showsProposal(file) && <ProposalMarker />}
         {file.status !== 'complete' && (
           <span className={`shrink-0 ${file.status === 'failed' ? 'text-danger' : MUTED}`}>{label(file.status)}</span>
         )}

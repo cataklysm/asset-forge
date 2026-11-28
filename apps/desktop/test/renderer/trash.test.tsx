@@ -118,6 +118,23 @@ it('lists the trash with its count', async () => {
   expect(requests.every((r) => r.scope.kind === 'trash')).toBe(true);
 });
 
+it('a trashed file with a tag proposal shows no proposal marker in the grid, the table or the dialog', async () => {
+  const user = userEvent.setup();
+  const proposed = trashedRecord({ originalName: 'proposed.png', hasProposal: true });
+  install([proposed]);
+  render(<Harness />);
+  await screen.findByText('proposed.png');
+  expect(document.querySelector('[data-proposal-marker]')).toBeNull();
+  await user.click(tile('proposed.png'));
+  await user.keyboard('{Enter}');
+  await screen.findByRole('dialog', { name: 'proposed.png' });
+  expect(document.querySelector('[data-proposal-marker]')).toBeNull();
+  await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Show as table' }));
+  await screen.findByText('proposed.png');
+  expect(document.querySelector('[data-proposal-marker]')).toBeNull();
+});
+
 it('Restore from the menu calls files:restoreMany without asking and reloads', async () => {
   const user = userEvent.setup();
   const { hero, loose } = files();

@@ -45,11 +45,16 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
   /** The source being removed and its index, so that focus can move once it is gone. */
   const pendingFocus = useRef<{ id: string; index: number } | null>(null);
 
-  // The input loses focus while it is disabled; it gets it back once the add has finished.
+  // Whether a remove runs; a second remove before it has finished is ignored.
+  const removingRef = useRef(false);
+
+  // The input loses focus while it is disabled; it gets it back once the add has finished, unless the
+  // user has put the focus somewhere else meanwhile. The disabled input may still count as the active element.
   useEffect(() => {
     if (adding || !refocus.current) return;
     refocus.current = false;
-    input.current?.focus();
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body || focused === input.current) input.current?.focus();
   }, [adding]);
 
   // A removed source takes its focused button with it; focus moves to the next source, else the previous one.
@@ -61,14 +66,19 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
     (buttons[pending.index] ?? buttons[pending.index - 1] ?? input.current)?.focus();
   }, [sources]);
 
-  /** Removes a source and remembers where focus goes once it is gone. */
+  /** Removes a source, one at a time, and remembers where focus goes once it is gone. */
   async function remove(id: string, index: number) {
+    if (removingRef.current) return;
+    removingRef.current = true;
+    setCopyFailed(false);
     pendingFocus.current = { id, index };
     try {
       await onRemove(id);
     } catch {
       // Reported by the caller; the source stays and keeps its focus.
       pendingFocus.current = null;
+    } finally {
+      removingRef.current = false;
     }
   }
 
@@ -76,6 +86,7 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
   async function add() {
     const url = text.trim();
     if (url === '' || addingRef.current) return;
+    setCopyFailed(false);
     addingRef.current = true;
     refocus.current = true;
     setAdding(true);
@@ -118,7 +129,10 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
           {sources.map((source, index) => (
             <li key={source.id} className="flex min-w-0 items-center gap-1">
               <Link
-                onFollow={() => void onOpen(source.id).catch(() => {})}
+                onFollow={() => {
+                  setCopyFailed(false);
+                  void onOpen(source.id).catch(() => {});
+                }}
                 title={source.url}
                 className="block min-w-0 flex-1 truncate text-sm"
               >

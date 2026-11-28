@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { expect, it } from 'vitest';
@@ -72,6 +72,43 @@ it('Esc answers null', async () => {
   await user.keyboard('{Escape}');
   await waitFor(() => expect(answer()).toBe('null'));
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+/** Hands out the hook's `choose` and renders its dialog. */
+function Exposed({ onReady }: { onReady(choose: ReturnType<typeof useZipChoice>['choose']): void }) {
+  const zip = useZipChoice();
+  onReady(zip.choose);
+  return <>{zip.dialog}</>;
+}
+
+it('an unmount while the question is open answers null', async () => {
+  let choose: ReturnType<typeof useZipChoice>['choose'] | null = null;
+  const view = render(<Exposed onReady={(value) => (choose = value)} />);
+  let answered: boolean | null | 'none' = 'none';
+  act(() => {
+    void choose!(['C:\\in\\a.zip']).then((value) => (answered = value));
+  });
+  await screen.findByRole('dialog', { name: 'ZIP archive' });
+  view.unmount();
+  await waitFor(() => expect(answered).toBeNull());
+});
+
+it('a second choice while one is open answers the first with null', async () => {
+  let choose: ReturnType<typeof useZipChoice>['choose'] | null = null;
+  render(<Exposed onReady={(value) => (choose = value)} />);
+  let first: boolean | null | 'none' = 'none';
+  let second: boolean | null | 'none' = 'none';
+  act(() => {
+    void choose!(['C:\\in\\a.zip']).then((value) => (first = value));
+  });
+  await screen.findByRole('dialog', { name: 'ZIP archive' });
+  act(() => {
+    void choose!(['C:\\in\\b.zip']).then((value) => (second = value));
+  });
+  await waitFor(() => expect(first).toBeNull());
+  const user = userEvent.setup();
+  await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Unpack' }));
+  await waitFor(() => expect(second).toBe(true));
 });
 
 it('a second choice opens the dialog again', async () => {
