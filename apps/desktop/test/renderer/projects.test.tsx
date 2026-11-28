@@ -135,6 +135,26 @@ it('search, status and tags go into projects:list after the debounce', async () 
   ]);
 });
 
+it('a tag added while the unfiltered list loads supersedes it; its late answer never shows', async () => {
+  const user = userEvent.setup();
+  const unfiltered = deferred<ProjectList>();
+  const api = install({
+    'projects:list': (request) => {
+      if (request.limit === 1) return pageOf([], 2);
+      if (request.tagNames === undefined) return unfiltered.promise;
+      return pageOf([projectSummary({ name: 'Tagged' })]);
+    },
+  });
+  render(<Harness />);
+  await waitFor(() => expect(listRequests(api)).toContainEqual({ limit: 60, offset: 0 }));
+
+  await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Bark{Enter}');
+  expect(await screen.findByText('Tagged')).toBeTruthy();
+  await act(async () => unfiltered.resolve(pageOf([projectSummary({ name: 'Untagged' })])));
+  expect(screen.queryByText('Untagged')).toBeNull();
+  expect(screen.getByText('Tagged')).toBeTruthy();
+});
+
 it('Matching tags shows file-matched tags after an image icon', async () => {
   const project = projectSummary({
     name: 'Forest',
