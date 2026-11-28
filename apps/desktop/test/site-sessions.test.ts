@@ -335,6 +335,33 @@ describe('page loader', () => {
     });
   });
 
+  it('answers timeout when a load replaced within the site never brings a document', async () => {
+    const view = fakeView({
+      navigate: async () => 'aborted',
+      evaluate: () => ({ results: { thumbnails: [] }, counts: { thumbnails: 0 } }),
+    });
+    const started = Date.now();
+    expect(await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'timeout',
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(fast.totalMs - 20);
+  });
+
+  it('answers no_match once the replacing document of a replaced load answered and nothing matches', async () => {
+    const view = fakeView({ evaluate: () => ({ results: { thumbnails: [] }, counts: { thumbnails: 0 } }) });
+    view.navigate = async () => {
+      setTimeout(() => view.answer(200), 20);
+      return 'aborted';
+    };
+    const started = Date.now();
+    expect(await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).toEqual({
+      ok: false,
+      reason: 'no_match',
+    });
+    expect(Date.now() - started).toBeLessThan(fast.totalMs);
+  });
+
   it('answers left_site with the host for a URL off the site and for a refused navigation', async () => {
     const view = fakeView({ navigate: () => new Promise(() => {}) });
     const loader = createPageLoader(view, 'example.com', fast);
