@@ -33,15 +33,8 @@ export const PROJECT_ACTIONS_COLUMN = 'Actions';
 /** A row's button that opens the project. */
 export const OPEN_PROJECT_BUTTON = 'Open';
 
-/**
- * The result count of the filter bar.
- *
- * @param total the matching projects
- * @returns e.g. `1 project`, `3 projects`
- */
-export function projectCount(total: number): string {
-  return `${total} ${total === 1 ? 'project' : 'projects'}`;
-}
+// The result count of the filter bar.
+export { projectCount } from './counts';
 
 /**
  * The accessible name of a row's Open button.

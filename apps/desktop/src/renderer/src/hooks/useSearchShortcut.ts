@@ -11,20 +11,19 @@ function focusSearchField(event: KeyboardEvent, scope: HTMLElement | null): void
   const field = scope?.querySelector<HTMLElement>('[data-search-field]');
   if (field === null || field === undefined) return;
   // An open dialog is modal: the field behind it must not take the focus.
-  const dialog = topmostOpenDialog();
-  if (dialog !== null && !dialog.contains(field)) return;
+  if (isOutsideAnOpenDialog(field)) return;
   event.preventDefault();
   field.focus();
 }
 
 /**
- * The open dialog shown last, which is the one on top.
+ * Whether some open dialog does not hold the element, so the element is behind it.
  *
- * @returns the dialog, or null when none is open
+ * @param element the element to check
+ * @returns true when at least one open dialog does not contain the element
  */
-function topmostOpenDialog(): HTMLDialogElement | null {
-  const open = [...document.querySelectorAll('dialog')].filter((dialog) => dialog.open);
-  return open.at(-1) ?? null;
+function isOutsideAnOpenDialog(element: HTMLElement): boolean {
+  return [...document.querySelectorAll('dialog')].some((dialog) => dialog.open && !dialog.contains(element));
 }
 
 /**

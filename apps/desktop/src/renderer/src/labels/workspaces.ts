@@ -35,13 +35,8 @@ export const CREATE_LOCATION_TITLE = 'Folder the workspace will be created in';
 /** The dialog's confirm button. */
 export const CREATE_WORKSPACE_LABEL = 'Create';
 
-/**
- * '1 workspace' / '3 workspaces'.
- *
- * @param count the number of workspaces
- * @returns the count with the noun in singular or plural
- */
-export const workspaceCount = (count: number) => (count === 1 ? '1 workspace' : `${count} workspaces`);
+// The count beside the list of known workspaces.
+export { workspaceCount } from './counts';
 
 /**
  * The accessible name of a row's Open button: 'Open workspace Old'.
