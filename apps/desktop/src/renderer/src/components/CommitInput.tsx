@@ -41,23 +41,39 @@ export function CommitInput({
 }: Props) {
   const [draft, setDraft] = useState(value);
   const [focused, setFocused] = useState(false);
-  // Enter followed by blur must not save the same text twice.
+  // Enter followed by blur must not save the same text twice, neither while the save runs nor after it
+  // succeeded and before the reload hands in the new value.
   const saving = useRef(false);
+  const committed = useRef<string | null>(null);
+  const previousValue = useRef(value);
 
-  useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    const previous = previousValue.current;
+    const saved = committed.current;
+    previousValue.current = value;
+    committed.current = null;
+    // A new value replaces only a draft the user has not changed since: text typed while the reload was in
+    // flight stays.
+    setDraft((current) => (current === previous || current === saved ? value : current));
+  }, [value]);
 
   async function commit() {
-    if (draft === value || saving.current) return;
+    if (draft === value || draft === committed.current || saving.current) return;
+    const sent = draft;
     saving.current = true;
     let result: boolean | void;
     try {
-      result = await onCommit(draft);
+      result = await onCommit(sent);
     } catch {
       result = false;
     } finally {
       saving.current = false;
     }
-    if (result === false) setDraft(value);
+    if (result === false) {
+      setDraft((current) => (current === sent ? previousValue.current : current));
+      return;
+    }
+    committed.current = sent;
   }
 
   function onKeyDown(event: KeyboardEvent) {
