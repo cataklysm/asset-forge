@@ -476,6 +476,8 @@ class JobScheduler {
         await this.config.jobs.release(job.id, this.iso());
         return null;
       }
+      // A run that ended during the claim may have paused the lane; its job goes back without spending a run.
+      if (await this.releaseIfBarred(job)) continue;
       this.launch(job);
       this.changed(job.id);
     }
@@ -484,6 +486,25 @@ class JobScheduler {
     // resume; only the other lanes need the timer.
     const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
     return next === null ? null : Date.parse(next);
+  }
+
+  /**
+   * Puts a claimed job back when its lane may no longer claim: it was paused, or reached its limit, while the claim
+   * was under way. A failure to tell puts the job back too before it is passed on, so no row stays `running`.
+   *
+   * @param job the job just claimed
+   * @returns true when the job was put back
+   */
+  private async releaseIfBarred(job: Job): Promise<boolean> {
+    let barred: boolean;
+    try {
+      barred = this.excludedLanes(job.resourceClass).includes(job.lane);
+    } catch (cause) {
+      await this.config.jobs.release(job.id, this.iso());
+      throw cause;
+    }
+    if (barred) await this.config.jobs.release(job.id, this.iso());
+    return barred;
   }
 
   /**

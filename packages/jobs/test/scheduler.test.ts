@@ -814,6 +814,39 @@ describe('createScheduler with a pause gate', () => {
     expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
   });
 
+  it('puts back a job whose claim was under way when its lane paused, without spending a run', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    let openClaim: (() => void) | null = null;
+    let claims = 0;
+    const s = setup({
+      handlers: { gpu: gpu.handler },
+      limits: { ...DEFAULT_LIMITS, local_gpu: 2 },
+      pause,
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            // The second claim waits until the test lets it through.
+            if (++claims === 2) await new Promise<void>((resolve) => (openClaim = resolve));
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    const [a, b] = (await s.enqueue('gpu', 'local_gpu', 2)) as [string, string];
+    const starting = s.scheduler.start();
+    await flush();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([a]);
+
+    await failRun(gpu, a, new JobError('provider_unauthorized'));
+    expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
+    openClaim!();
+    await starting;
+    await flush();
+
+    expect(gpu.runs).toHaveLength(1);
+    expect(s.row(b)).toMatchObject({ status: 'queued', attempt: 0 });
+  });
+
   it('keeps the pause for a second scheduler handed the same gate', async () => {
     const gpu = controlled('local_gpu');
     const pause = createPauseGate({});
