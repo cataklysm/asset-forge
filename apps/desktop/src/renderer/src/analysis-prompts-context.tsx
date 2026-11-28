@@ -1,9 +1,21 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react';
 import type { AnalysisPrompt, AnalysisPromptPurpose, SaveAnalysisPrompt } from '@assetforge/contracts';
 import { call } from './api';
 
+/** The prompt used last per purpose. */
 type LastUsed = { tagging: string | null; imagePrompt: string | null };
 
+/** What the analysis prompts context offers. */
 export interface AnalysisPromptsState {
   /** Null until the first answer, or when loading failed. */
   prompts: AnalysisPrompt[] | null;
@@ -11,16 +23,22 @@ export interface AnalysisPromptsState {
   loading: boolean;
   /** True when the last load failed. */
   failed: boolean;
+  /** Lists the prompts again; rejects when they cannot be read. */
   reload(): Promise<void>;
+  /** Saves and takes the answer into the list. */
   save(input: SaveAnalysisPrompt): Promise<AnalysisPrompt>;
+  /** Deletes and drops the prompt from the list and from the ones used last. */
   remove(id: string): Promise<void>;
+  /** Resets to the built-in content of the purpose and takes the answer into the list. */
   reset(id: string): Promise<AnalysisPrompt>;
   /** Records locally what the main process stored after a start, so the next dialog preselects it. */
   noteUsed(purpose: AnalysisPromptPurpose, id: string): void;
 }
 
+/** No prompt used last. */
 const NONE_USED: LastUsed = { tagging: null, imagePrompt: null };
 
+/** The state outside a provider. */
 const EMPTY: AnalysisPromptsState = {
   prompts: null,
   lastUsed: NONE_USED,
@@ -33,19 +51,74 @@ const EMPTY: AnalysisPromptsState = {
   noteUsed: () => {},
 };
 
+/** The analysis prompts of the app. */
 const AnalysisPromptsContext = createContext<AnalysisPromptsState>(EMPTY);
 
+/** What a reload reads and writes. */
+interface PromptsLoading {
+  disposed: MutableRefObject<boolean>;
+  /** Only the newest reload may take its answer. */
+  request: MutableRefObject<number>;
+  setPrompts(prompts: AnalysisPrompt[] | null): void;
+  setLastUsed(lastUsed: LastUsed): void;
+  setLoading(loading: boolean): void;
+  setFailed(failed: boolean): void;
+}
+
+/**
+ * The key of `purpose` in `LastUsed`.
+ *
+ * @param purpose the purpose
+ * @returns the key
+ */
 const lastUsedKey = (purpose: AnalysisPromptPurpose) => (purpose === 'tagging' ? 'tagging' : 'imagePrompt');
 
-/** Puts `prompt` in place of the one with its id, or appends it. */
+/**
+ * Puts `prompt` in place of the one with its id, or appends it.
+ *
+ * @param list the held list; null while none is held
+ * @param prompt the answered prompt
+ * @returns the new list
+ */
 function upsert(list: AnalysisPrompt[] | null, prompt: AnalysisPrompt): AnalysisPrompt[] | null {
   if (list === null) return list;
-  return list.some((p) => p.id === prompt.id) ? list.map((p) => (p.id === prompt.id ? prompt : p)) : [...list, prompt];
+  return list.some((entry) => entry.id === prompt.id)
+    ? list.map((entry) => (entry.id === prompt.id ? prompt : entry))
+    : [...list, prompt];
+}
+
+/**
+ * Lists the prompts again; an older reload arriving later is dropped.
+ *
+ * @param loading the refs and setters
+ * @returns resolves once the answer is taken; rejects when the list cannot be read
+ */
+async function reloadPrompts(loading: PromptsLoading): Promise<void> {
+  const request = ++loading.request.current;
+  loading.setLoading(true);
+  try {
+    const list = await call('analysisPrompts:list', {});
+    if (loading.disposed.current || request !== loading.request.current) return;
+    loading.setPrompts(list.prompts);
+    loading.setLastUsed(list.lastUsed);
+    loading.setFailed(false);
+  } catch (error) {
+    if (request !== loading.request.current) return;
+    if (!loading.disposed.current) {
+      loading.setPrompts(null);
+      loading.setFailed(true);
+    }
+    throw error;
+  } finally {
+    if (!loading.disposed.current && request === loading.request.current) loading.setLoading(false);
+  }
 }
 
 /**
  * The analysis prompts of the app and the ones used last. Loads once on mount; save, remove and
  * reset take the answer into the list without listing again. It does not poll.
+ *
+ * @param props.children the tree that reads the prompts
  */
 export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
   const [prompts, setPrompts] = useState<AnalysisPrompt[] | null>(null);
@@ -56,26 +129,10 @@ export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
   // Only the newest reload may take its answer; an older one arriving later is dropped.
   const reloadRequest = useRef(0);
 
-  const reload = useCallback(async () => {
-    const request = ++reloadRequest.current;
-    setLoading(true);
-    try {
-      const list = await call('analysisPrompts:list', {});
-      if (disposed.current || request !== reloadRequest.current) return;
-      setPrompts(list.prompts);
-      setLastUsed(list.lastUsed);
-      setFailed(false);
-    } catch (e) {
-      if (request !== reloadRequest.current) return;
-      if (!disposed.current) {
-        setPrompts(null);
-        setFailed(true);
-      }
-      throw e;
-    } finally {
-      if (!disposed.current && request === reloadRequest.current) setLoading(false);
-    }
-  }, []);
+  const reload = useCallback(
+    () => reloadPrompts({ disposed, request: reloadRequest, setPrompts, setLastUsed, setLoading, setFailed }),
+    [],
+  );
 
   useEffect(() => {
     disposed.current = false;
@@ -95,7 +152,7 @@ export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
   const remove = useCallback(async (id: string) => {
     await call('analysisPrompts:delete', { id });
     if (disposed.current) return;
-    setPrompts((list) => (list === null ? list : list.filter((p) => p.id !== id)));
+    setPrompts((list) => (list === null ? list : list.filter((entry) => entry.id !== id)));
     setLastUsed((used) => ({
       tagging: used.tagging === id ? null : used.tagging,
       imagePrompt: used.imagePrompt === id ? null : used.imagePrompt,
@@ -120,18 +177,28 @@ export function AnalysisPromptsProvider({ children }: { children: ReactNode }) {
   return <AnalysisPromptsContext.Provider value={value}>{children}</AnalysisPromptsContext.Provider>;
 }
 
-/** The state of the surrounding `AnalysisPromptsProvider`; outside one the empty state. */
+/**
+ * The state of the surrounding `AnalysisPromptsProvider`.
+ *
+ * @returns the state; outside a provider the empty state
+ */
 export function useAnalysisPrompts(): AnalysisPromptsState {
   return useContext(AnalysisPromptsContext);
 }
 
-/** The prompt a dialog preselects: the one used last when it still exists, otherwise the first of the purpose; null when there is none or nothing is loaded. */
+/**
+ * The prompt a dialog preselects: the one used last when it still exists, otherwise the first of the purpose.
+ *
+ * @param state the prompts and the ones used last
+ * @param purpose the purpose of the dialog
+ * @returns the prompt; null when there is none or nothing is loaded
+ */
 export function defaultPromptId(
   state: Pick<AnalysisPromptsState, 'prompts' | 'lastUsed'>,
   purpose: AnalysisPromptPurpose,
 ): string | null {
   if (state.prompts === null) return null;
-  const own = state.prompts.filter((p) => p.purpose === purpose);
+  const own = state.prompts.filter((prompt) => prompt.purpose === purpose);
   const last = state.lastUsed[lastUsedKey(purpose)];
-  return own.find((p) => p.id === last)?.id ?? own[0]?.id ?? null;
+  return own.find((prompt) => prompt.id === last)?.id ?? own[0]?.id ?? null;
 }
