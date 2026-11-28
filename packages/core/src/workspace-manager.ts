@@ -12,6 +12,7 @@ import {
   type WorkspaceSummary,
 } from '@assetforge/contracts';
 import { listWorkspaceBackups, liveLineageOf, resolveBackupTarget } from './backup-listing.js';
+import { backupFolderStatus, deleteOtherLineageBackup } from './backup-status.js';
 import type { BackupFolderStatus, ListedBackup } from './backup-types.js';
 import { DirectoryNotEmptyError, InvalidOperationError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
 import { listFiles } from './file-list.js';
@@ -154,23 +155,27 @@ export class WorkspaceManager {
   }
 
   /**
-   * The state of the backup place of the open workspace.
+   * The state of the backup place of the open workspace. Does not queue.
    *
    * @returns the place, its backups and the last attempt
    */
-  backupStatus(): Promise<BackupFolderStatus> {
-    return Promise.reject(notImplemented());
+  async backupStatus(): Promise<BackupFolderStatus> {
+    const open = this.requireOpen();
+    const liveLineage = await liveLineageOf(this.host, open.summary.id, open.database);
+    return backupFolderStatus(this.host, open.summary, liveLineage, this.backups.state());
   }
 
   /**
-   * Deletes one regular backup of the open workspace.
+   * Deletes one regular backup of another lineage from the backup place of the open workspace. Does not queue.
    *
    * @param source the backup
    * @returns resolves once it is gone
+   * @throws InvalidOperationError when it is not a regular backup of another lineage in the place
    */
-  deleteBackup(source: BackupSource): Promise<void> {
-    void source;
-    return Promise.reject(notImplemented());
+  async deleteBackup(source: BackupSource): Promise<void> {
+    const open = this.requireOpen();
+    const liveLineage = await liveLineageOf(this.host, open.summary.id, open.database);
+    await deleteOtherLineageBackup(this.host, open.summary, liveLineage, source);
   }
 
   /**
@@ -405,15 +410,25 @@ export class WorkspaceManager {
   }
 
   /**
-   * Forgets a workspace, closing it first when it is the open one.
+   * Forgets a workspace, closing it first when it is the open one (without the closing backup) and then making the
+   * final backup from its closed database file. A failed final backup refuses the remove and leaves everything as
+   * it was.
    *
-   * @param input the workspace id and whether its folder goes to the trash
+   * @param input the workspace id, whether its folder goes to the trash, and whether the final backup is left out
    * @returns whether the folder was trashed
+   * @throws BackupError when the final backup failed
    */
-  private async doRemove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
+  private async doRemove(input: {
+    id: string;
+    trashFolder: boolean;
+    skipFinalBackup?: boolean;
+  }): Promise<{ folderTrashed: boolean }> {
     const entry = await this.host.registry.get(input.id);
     if (entry === null) return { folderTrashed: false };
     if (this.open_?.summary.id === input.id) await this.doClose({ skip: true });
+    if (input.skipFinalBackup !== true && (await this.host.databaseExists(input.id))) {
+      await this.backups.finalBackup(entry, BACKUP_QUIT_DEADLINE_MS);
+    }
 
     const folderTrashed = input.trashFolder && (await this.trashFolder(entry.rootPath, input.id));
     await this.host.deleteDatabase(input.id);
@@ -472,13 +487,4 @@ export class WorkspaceManager {
     if (!this.open_) throw new NoWorkspaceOpenError('No workspace is open');
     return this.open_;
   }
-}
-
-/**
- * The error of a backup operation that is not built yet.
- *
- * @returns the error
- */
-function notImplemented(): InvalidOperationError {
-  return new InvalidOperationError('Not implemented');
 }
