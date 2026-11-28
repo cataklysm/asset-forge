@@ -12,6 +12,7 @@ import {
 import { ALERT, BUTTON, FOCUS, INPUT, LABEL } from '../ui';
 import { Dialog } from './Dialog';
 
+/** The props of {@link SavePromptDialog}. */
 interface Props {
   /** The free prompt to save. */
   prompt: string;
@@ -22,12 +23,84 @@ interface Props {
   onClose(): void;
 }
 
-/** A message of a failed call: fixed main-process messages as sent, anything else described. */
+/** How the text is saved: as a new version of the origin, or as a new prompt. */
+type SaveMode = 'version' | 'new';
+
+/**
+ * A message of a failed call: fixed main-process messages as sent, anything else described.
+ *
+ * @param error what the call threw
+ * @returns the message to show
+ */
 function messageOf(error: unknown): string {
   return error instanceof ApiError && error.code !== 'internal_error' ? error.message : describeError(error);
 }
 
-/** Saves a free studio prompt to the library: as a new prompt, or as a new version of the prompt it came from. */
+/**
+ * Stores the text: as a new version of the origin, keeping its defaults, or as a new prompt with the title.
+ *
+ * @param prompt the text
+ * @param title the title of a new prompt
+ * @param origin the origin as it is now, when the text becomes a new version of it; else null
+ * @returns the saved prompt
+ */
+function storePrompt(prompt: string, title: string, origin: PromptDetail | null): Promise<PromptDetail> {
+  if (origin === null) return call('prompts:create', { title, description: '', content: prompt, defaults: {} });
+  return call('prompts:saveVersion', {
+    promptId: origin.id,
+    baseVersionId: origin.currentVersion.id,
+    content: prompt,
+    defaults: Object.fromEntries(origin.currentVersion.variables.map((variable) => [variable.name, variable.defaultValue])),
+  });
+}
+
+/** The props of {@link SaveModeChoice}. */
+interface SaveModeChoiceProps {
+  /** The title of the origin. */
+  title: string;
+  mode: SaveMode;
+  onMode(mode: SaveMode): void;
+}
+
+/**
+ * The choice between a new version of the origin and a new prompt.
+ *
+ * @param props the origin's title, the mode and the callback
+ * @returns the radio group
+ */
+function SaveModeChoice({ title, mode, onMode }: SaveModeChoiceProps) {
+  return (
+    <fieldset className="flex flex-col gap-2 text-sm text-text">
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="radio"
+          name="save-as"
+          className={`accent-accent ${FOCUS}`}
+          checked={mode === 'version'}
+          onChange={() => onMode('version')}
+        />
+        {newVersionOfLabel(title)}
+      </label>
+      <label className="inline-flex items-center gap-2">
+        <input
+          type="radio"
+          name="save-as"
+          className={`accent-accent ${FOCUS}`}
+          checked={mode === 'new'}
+          onChange={() => onMode('new')}
+        />
+        {NEW_LIBRARY_PROMPT_LABEL}
+      </label>
+    </fieldset>
+  );
+}
+
+/**
+ * Saves a free studio prompt to the library: as a new prompt, or as a new version of the prompt it came from.
+ *
+ * @param props the text, its origin and the callbacks
+ * @returns the dialog
+ */
 export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
   const titleId = useId();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -35,7 +108,7 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
   // The origin as it is now; null when there is none or it is gone.
   const [found, setFound] = useState<PromptDetail | null>(null);
   const [looking, setLooking] = useState(origin !== null);
-  const [mode, setMode] = useState<'version' | 'new'>('version');
+  const [mode, setMode] = useState<SaveMode>('version');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -70,18 +143,10 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const detail =
-        asVersion && found !== null
-          ? await call('prompts:saveVersion', {
-              promptId: found.id,
-              baseVersionId: found.currentVersion.id,
-              content: prompt,
-              defaults: Object.fromEntries(found.currentVersion.variables.map((v) => [v.name, v.defaultValue])),
-            })
-          : await call('prompts:create', { title, description: '', content: prompt, defaults: {} });
+      const detail = await storePrompt(prompt, title, asVersion ? found : null);
       if (!disposed.current) onSaved(detail);
-    } catch (e) {
-      if (!disposed.current) setError(messageOf(e));
+    } catch (caught) {
+      if (!disposed.current) setError(messageOf(caught));
     } finally {
       if (!disposed.current) setSaving(false);
     }
@@ -91,35 +156,12 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
     <Dialog open title={SAVE_TO_LIBRARY_LABEL} onClose={onClose} initialFocusRef={titleRef}>
       <form
         className="flex flex-col gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
+        onSubmit={(event) => {
+          event.preventDefault();
           void save();
         }}
       >
-        {found !== null && (
-          <fieldset className="flex flex-col gap-2 text-sm text-text">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="save-as"
-                className={`accent-accent ${FOCUS}`}
-                checked={mode === 'version'}
-                onChange={() => setMode('version')}
-              />
-              {newVersionOfLabel(found.title)}
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="save-as"
-                className={`accent-accent ${FOCUS}`}
-                checked={mode === 'new'}
-                onChange={() => setMode('new')}
-              />
-              {NEW_LIBRARY_PROMPT_LABEL}
-            </label>
-          </fieldset>
-        )}
+        {found !== null && <SaveModeChoice title={found.title} mode={mode} onMode={setMode} />}
         <label htmlFor={titleId} className={LABEL}>
           {PROMPT_TITLE_LABEL}
         </label>
@@ -129,7 +171,7 @@ export function SavePromptDialog({ prompt, origin, onSaved, onClose }: Props) {
           className={INPUT}
           value={title}
           disabled={asVersion}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(event) => setTitle(event.target.value)}
         />
         {error !== null && (
           <p role="alert" className={ALERT}>
