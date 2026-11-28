@@ -13,7 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider } from '@assetforge/contracts';
 import { describeError, ApiError, onStorageUnreachable } from '../api';
 import { useSearchShortcut } from '../hooks/useSearchShortcut';
-import { PROMPTS_LABEL, TRASH_LABEL, trashNavLabel } from '../labels';
+import { PROMPTS_LABEL, TRASH_LABEL, trashNavLabel, RETRY_LABEL } from '../labels';
 import { BORDER, BUTTON, FOCUS, MUTED, WARNING, WORKSPACE_TITLE } from '../ui';
 import { BUSY_TITLE } from './busy-title';
 import { PauseBanner } from './PauseBanner';
@@ -250,7 +250,7 @@ export function AppShell({
                   setReloadKey((key) => key + 1);
                 }}
               >
-                Retry
+                {RETRY_LABEL}
               </button>
             </div>
           )}
