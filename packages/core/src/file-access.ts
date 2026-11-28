@@ -27,8 +27,9 @@ async function completeFile(session: WorkspaceSession, fileId: string): Promise<
 }
 
 /**
- * The absolute path of a file the media protocol serves, refused while the storage cannot be reached, so a dropped
- * share answers "unreachable" instead of a path that then reads as missing.
+ * The absolute path of an original the media protocol serves, refused while the storage cannot be reached, so a
+ * dropped share answers "unreachable" instead of a path that then reads as missing. Previews (served from the cache
+ * while a share is down) and videos (resolved on every range request) skip this check.
  *
  * @param session the open workspace
  * @param relativePath the file's relative path
@@ -53,7 +54,7 @@ export async function resolvePreviewSource(session: WorkspaceSession, fileId: st
   if (file === null) return null;
   const video = videoFormat(file.mimeType);
   if (video === null && !isPreviewable(file.mimeType)) return null;
-  return { sha256: file.sha256!, absolutePath: await reachablePath(session, file.relativePath), video };
+  return { sha256: file.sha256!, absolutePath: await session.storage.absolutePath(file.relativePath), video };
 }
 
 /** The original of a video the media protocol streams. */
@@ -73,7 +74,7 @@ export interface VideoSource {
 export async function resolveVideoSource(session: WorkspaceSession, fileId: string): Promise<VideoSource | null> {
   const file = await completeFile(session, fileId);
   if (file === null || !isVideo(file.mimeType)) return null;
-  return { absolutePath: await reachablePath(session, file.relativePath), mimeType: file.mimeType };
+  return { absolutePath: await session.storage.absolutePath(file.relativePath), mimeType: file.mimeType };
 }
 
 /** The original of an image the renderer decodes itself. */
