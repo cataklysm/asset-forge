@@ -249,6 +249,46 @@ it('the Empty trash confirmation follows a count reload that answers while it is
   expect(await screen.findByRole('dialog', { name: 'Delete 2 files permanently?' })).toBeTruthy();
 });
 
+it('the Empty trash confirmation closes when a count reload finds the trash empty', async () => {
+  const user = userEvent.setup();
+  const { hero } = files();
+  let items = [hero];
+  const held = deferred<void>();
+  let holdCount = false;
+  const api = install(items, {
+    handlers: {
+      'files:list': async (r: ListRequest) => {
+        // The title's count read after the restore is held back.
+        if (holdCount && r.limit === 1) await held.promise;
+        return pageOf(items.slice(r.offset, r.offset + r.limit), items.length);
+      },
+      'files:restoreMany': (r) => {
+        items = items.filter((f) => !r.fileIds.includes(f.id));
+        return { items: r.fileIds.map((fileId) => ({ fileId, file: null, error: null })) };
+      },
+    },
+  });
+  render(<Harness />);
+  await waitFor(() => expect(title()).toBe('Trash1'));
+  holdCount = true;
+  await openMenu(user, 'hero.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Restore' }));
+  await waitFor(() => expect(screen.queryByText('hero.png')).toBeNull());
+  await user.click(screen.getByRole('button', { name: 'Empty trash' }));
+  expect(await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' })).toBeTruthy();
+  // The render between the count and the closing effect must not name zero files either.
+  const titles: string[] = [];
+  const observer = new MutationObserver((records) =>
+    records.forEach((record) => record.removedNodes.forEach((node) => titles.push(node.textContent ?? ''))),
+  );
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  await act(async () => held.resolve());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  observer.disconnect();
+  expect(titles.some((text) => text.includes('Delete 0 files permanently?'))).toBe(false);
+  expect(api.calls.filter((entry) => entry.channel === 'trash:empty')).toHaveLength(0);
+});
+
 it('Empty trash reports failures by count only', async () => {
   const user = userEvent.setup();
   const { hero, loose } = files();
@@ -384,6 +424,39 @@ it('a rejected purge call from the detail dialog shows the message in the dialog
   render(<Harness />);
   const dialog = await purgeInDialog(user);
   expect((await within(dialog).findByRole('alert')).textContent).toContain('cannot be reached');
+});
+
+it('while a confirmed purge runs, Esc and a second confirm do nothing', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  const held = deferred<{ items: { fileId: string; file: null; error: null }[] }>();
+  const api = install([hero, loose], { handlers: { 'files:purgeMany': () => held.promise } });
+  render(<Harness />);
+  await openMenu(user, 'hero.png');
+  await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Delete 1 file permanently?' });
+  const confirm = within(dialog).getByRole('button', { name: 'Delete permanently' }) as HTMLButtonElement;
+  await user.click(confirm);
+  await waitFor(() => expect(confirm.disabled).toBe(true));
+  // A second click on the busy confirmation.
+  fireEvent.click(confirm);
+  await user.keyboard('{Escape}');
+  expect(screen.getByRole('dialog', { name: 'Delete 1 file permanently?' })).toBe(dialog);
+  expect(callsOf(api, 'files:purgeMany')).toEqual([{ fileIds: [hero.id] }]);
+  await act(async () => held.resolve({ items: [{ fileId: hero.id, file: null, error: null }] }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(callsOf(api, 'files:purgeMany')).toHaveLength(1);
+});
+
+it('Delete permanently from the detail dialog purges the file and moves on to the next one', async () => {
+  const user = userEvent.setup();
+  const { hero, loose } = files();
+  const api = install([hero, loose]);
+  render(<Harness />);
+  await purgeInDialog(user);
+  expect(callsOf(api, 'files:purgeMany')).toEqual([{ fileIds: [hero.id] }]);
+  expect(await screen.findByRole('dialog', { name: 'loose.png' })).toBeTruthy();
+  await waitFor(() => expect(title()).toBe('Trash1'));
 });
 
 it('a tag rename reloads the trash list', async () => {

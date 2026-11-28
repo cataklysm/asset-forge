@@ -388,16 +388,22 @@ it('Import as file in the asset screen sends unpackArchives false', async () => 
   ]);
 });
 
-it('Cancel in the ZIP dialog of the asset screen imports nothing and ends the busy state', async () => {
+it.each([
+  [
+    'Cancel',
+    async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) =>
+      user.click(within(dialog).getByRole('button', { name: 'Cancel' })),
+  ],
+  ['Esc', async (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+])('%s in the ZIP dialog of the asset screen imports nothing and ends the busy state', async (_name, dismiss) => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const api = install(asset, { 'dialog:pickFiles': () => ['C:\\in\\pack.zip'], 'files:import': () => [] });
   const onBusyChange = vi.fn();
   render(<Harness id={asset.id} onBusyChange={onBusyChange} />);
   await user.click(await screen.findByRole('button', { name: 'Import files' }));
-  await user.click(
-    within(await screen.findByRole('dialog', { name: 'ZIP archive' })).getByRole('button', { name: 'Cancel' }),
-  );
+  await dismiss(user, await screen.findByRole('dialog', { name: 'ZIP archive' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ZIP archive' })).toBeNull());
   await waitFor(() =>
     expect((screen.getByRole('button', { name: 'Import files' }) as HTMLButtonElement).disabled).toBe(false),
   );
@@ -1664,4 +1670,27 @@ it('a running import in the asset screen shows its progress, reloads the files w
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('a failed load of the asset types is named in the header and Retry loads them again', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  let failures = 1;
+  const api = install(asset, {
+    'assetTypes:list': () => {
+      if (failures > 0) {
+        failures -= 1;
+        throw fakeError('invalid_operation');
+      }
+      return [TYPE];
+    },
+  });
+  render(<Harness id={asset.id} />);
+  const header = (await screen.findByRole('textbox', { name: 'Name' })).closest('header')!;
+  expect((await within(header).findByRole('alert')).textContent).toBe('invalid_operation');
+  await user.click(within(header).getByRole('button', { name: 'Retry' }));
+  const select = within(header).getByRole('combobox', { name: 'Type' }) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(TYPE.id));
+  expect(within(header).queryByRole('alert')).toBeNull();
+  expect(api.calls.filter((entry) => entry.channel === 'assetTypes:list')).toHaveLength(2);
 });

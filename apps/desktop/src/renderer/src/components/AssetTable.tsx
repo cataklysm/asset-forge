@@ -3,7 +3,7 @@ import type { AssetSummary } from '@assetforge/contracts';
 import { formatDateTime } from '../format';
 import { rowCount } from '../gallery';
 import { useElementSize, useVirtualRows, type VirtualRows } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import { label, RETRY_LABEL } from '../labels';
 import { retryIndex, slotAt } from '../paged-list';
 import { formatProgress } from '../progress';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
@@ -128,7 +128,7 @@ function tableRow(props: TableRowsProps, rows: VirtualRows, index: number, start
             onKeyDown={(event) => rows.onItemKeyDown(index, event)}
             onFocus={() => rows.onItemFocus(index)}
           >
-            Retry
+            {RETRY_LABEL}
           </button>
         </span>
       </div>

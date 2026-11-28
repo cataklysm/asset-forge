@@ -256,7 +256,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     );
   }
 
-  const headerErrors = [error, loaded.error, types.error].filter((message): message is string => message !== null);
+  const headerErrors = [error, loaded.error].filter((message): message is string => message !== null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
@@ -265,6 +265,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         assetId={id}
         asset={asset}
         types={types.data}
+        typesError={types.error}
+        onRetryTypes={types.reload}
         onSave={saveAsset}
         onAssetChange={changeAsset}
         reported={reported}

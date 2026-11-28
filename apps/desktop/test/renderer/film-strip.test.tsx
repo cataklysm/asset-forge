@@ -64,3 +64,21 @@ it('virtualises a long list', () => {
   expect(count).toBeGreaterThan(0);
   expect(count).toBeLessThan(100);
 });
+
+it('moving the current index scrolls the strip to its tile', () => {
+  const files = pngs(500);
+  const scrollTo = vi.spyOn(Element.prototype, 'scrollTo');
+  // jsdom lays nothing out; the virtualizer clamps its target to scrollWidth minus clientWidth.
+  const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(500 * 104);
+  try {
+    const { rerender } = render(<FilmStrip list={listOf(files, 0)} />);
+    scrollTo.mockClear();
+    rerender(<FilmStrip list={listOf(files, 400)} />);
+    const lefts = scrollTo.mock.calls.map((call) => (call[0] as ScrollToOptions | undefined)?.left ?? 0);
+    // The tile at 400 starts at 400 × (96 + 8) pixels; `auto` puts its end at the right edge of the 1280 pixel strip.
+    expect(Math.max(0, ...lefts)).toBeGreaterThan(400 * 104 - 1280);
+  } finally {
+    scrollTo.mockRestore();
+    scrollWidth.mockRestore();
+  }
+});

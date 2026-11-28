@@ -9,7 +9,7 @@ import {
   type VirtualRows,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import { label, RETRY_LABEL } from '../labels';
 import { retryIndex, slotAt, type PagedState } from '../paged-list';
 import { formatProgress } from '../progress';
 import { BUTTON, FOCUS, ITEM_HOVER, MUTED, TILE_TITLE } from '../ui';
@@ -215,7 +215,7 @@ function gridCell(props: GridRowsProps, rows: VirtualRows, index: number) {
           onKeyDown={(event) => rows.onItemKeyDown(index, event)}
           onFocus={() => rows.onItemFocus(index)}
         >
-          Retry
+          {RETRY_LABEL}
         </button>
       </div>
     );

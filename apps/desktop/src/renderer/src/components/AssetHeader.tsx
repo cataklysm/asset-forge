@@ -2,7 +2,7 @@ import { AssetStatusSchema, FileRoleSchema, type AssetDetail, type FileRole } fr
 import { ApiError, call, describeError } from '../api';
 import { distinct } from '../format';
 import type { ImportProgressState } from '../import-progress';
-import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
+import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, RETRY_LABEL, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
 import { roleOptions } from '../role-options';
 import { ALERT, BUTTON, PAGE_TITLE, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
@@ -58,6 +58,10 @@ interface Props extends ImportControlsProps {
   asset: AssetDetail;
   /** The asset types for the type select; null while loading. */
   types: Awaited<ReturnType<typeof call<'assetTypes:list'>>> | null;
+  /** The error of the last load of the types; null when it succeeded or still runs. */
+  typesError: string | null;
+  /** Loads the types again. */
+  onRetryTypes(): void;
   /** Saves a change of name, type, status or description; resolves to whether it succeeded. */
   onSave(patch: AssetPatch): Promise<boolean>;
   /** Shows the asset a mutation returned. */
@@ -75,7 +79,7 @@ interface Props extends ImportControlsProps {
  * @returns the header
  */
 export function AssetHeader(props: Props) {
-  const { asset, types, onSave, errors } = props;
+  const { asset, types, typesError, onRetryTypes, onSave, errors } = props;
   return (
     <header className="space-y-2">
       <h1 className="sr-only">{asset.name}</h1>
@@ -115,6 +119,17 @@ export function AssetHeader(props: Props) {
         <ImportControls {...props} />
       </div>
       <AssetFields {...props} />
+      {/* Without types the type select is empty: the failed load is named and can be repeated. */}
+      {typesError !== null && (
+        <div className="flex items-center gap-2">
+          <p role="alert" className={`min-w-0 flex-1 ${ALERT}`}>
+            {typesError}
+          </p>
+          <button type="button" className={BUTTON} onClick={onRetryTypes}>
+            {RETRY_LABEL}
+          </button>
+        </div>
+      )}
       {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
