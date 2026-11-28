@@ -7,14 +7,14 @@ import {
   DOWNLOAD_TOTAL_TIMEOUT_MS,
   MAX_DOWNLOAD_BYTES,
   MAX_DOWNLOAD_REDIRECTS,
-  RemoteFileError,
   type RemoteFile,
   type RemoteFileSource,
   type RemoteOpenOptions,
 } from '@assetforge/core';
 import { bounded, isPublicAddress } from '@assetforge/storage';
-import type { SessionNetRequest } from './session-request.js';
+import { failure } from './session-failure.js';
 import { sessionHop } from './session-hop.js';
+import type { SessionNetRequest } from './session-request.js';
 
 // Site downloads through the profile's own browser session (spec "Browser check"). A hop on the profile's site goes
 // out through Electron's network stack with the session's cookies, so a site that bound its clearance to the browser
@@ -22,16 +22,21 @@ import { sessionHop } from './session-hop.js';
 // Node source. Electron is not imported here: the request is made by `SiteSessions.request`, which tests fake.
 // Nothing here logs, and no error carries a URL, an address, a header or a cause.
 
-
 /** The limits of a session download; the same as those of the Node source. */
 export interface SessionDownloadLimits {
+  /** The most bytes a body may have. */
   maxBytes: number;
+  /** How long a hop may wait for the headers of its answer. */
   headerTimeoutMs: number;
+  /** How long a body may go without data. */
   idleTimeoutMs: number;
+  /** How long the whole download may take. */
   totalTimeoutMs: number;
+  /** The most redirects followed. */
   maxRedirects: number;
 }
 
+/** The default limits of a session download: the download constants of the URL import. */
 export const SESSION_DOWNLOAD_LIMITS: SessionDownloadLimits = {
   maxBytes: MAX_DOWNLOAD_BYTES,
   headerTimeoutMs: DOWNLOAD_HEADER_TIMEOUT_MS,
@@ -40,7 +45,8 @@ export const SESSION_DOWNLOAD_LIMITS: SessionDownloadLimits = {
   maxRedirects: MAX_DOWNLOAD_REDIRECTS,
 };
 
-export interface SessionDownloadDeps {
+/** What `createSessionDownload` is wired with; resolver and limits have defaults. */
+export interface SessionDownloadDependencies {
   /** The site of the profile, null when the profile does not exist. */
   siteOf(profileId: string): string | null;
   /** Starts one GET through the profile's session without following redirects; may throw. */
@@ -49,15 +55,17 @@ export interface SessionDownloadDeps {
   remote: RemoteFileSource;
   /** Resolves a host to its addresses; defaults to the system resolver (all addresses). */
   lookup?: (host: string) => Promise<string[]>;
+  /** Replaces single limits of `SESSION_DOWNLOAD_LIMITS`. */
   limits?: Partial<SessionDownloadLimits>;
 }
 
 /** What `SiteAccess.open` is. */
 export type SessionDownload = (profileId: string, url: string, signal: AbortSignal, options: RemoteOpenOptions) => Promise<RemoteFile>;
 
-export interface Config {
-  siteOf: SessionDownloadDeps['siteOf'];
-  request: SessionDownloadDeps['request'];
+/** The dependencies with every default applied. */
+interface SessionDownloadConfig {
+  siteOf: SessionDownloadDependencies['siteOf'];
+  request: SessionDownloadDependencies['request'];
   remote: RemoteFileSource;
   lookup: (host: string) => Promise<string[]>;
   limits: SessionDownloadLimits;
@@ -76,22 +84,20 @@ async function systemLookup(host: string): Promise<string[]> {
 /**
  * Creates the session download of the site profiles.
  *
- * @param deps the profile lookup, the session request, the plain source and optional resolver and limits
+ * @param dependencies the profile lookup, the session request, the plain source and optional resolver and limits
  * @returns the function `SiteAccess.open` delegates to
  */
-export function createSessionDownload(deps: SessionDownloadDeps): SessionDownload {
-  const config: Config = {
-    siteOf: deps.siteOf,
-    request: deps.request,
-    remote: deps.remote,
-    lookup: deps.lookup ?? systemLookup,
-    limits: { ...SESSION_DOWNLOAD_LIMITS, ...deps.limits },
+export function createSessionDownload(dependencies: SessionDownloadDependencies): SessionDownload {
+  const config: SessionDownloadConfig = {
+    siteOf: dependencies.siteOf,
+    request: dependencies.request,
+    remote: dependencies.remote,
+    lookup: dependencies.lookup ?? systemLookup,
+    limits: { ...SESSION_DOWNLOAD_LIMITS, ...dependencies.limits },
   };
   return (profileId, url, signal, options) => openThroughSession(config, profileId, url, signal, options);
 }
 
-/** A failure without a cause: a cause could carry the URL or an address. */
-export const failure = (kind: 'rejected' | 'unreachable' | 'address_refused' | 'too_large'): RemoteFileError => new RemoteFileError(kind);
 
 /**
  * The hop loop: every hop on the site is vetted and sent through the session; the first hop off the site is handed
@@ -105,7 +111,7 @@ export const failure = (kind: 'rejected' | 'unreachable' | 'address_refused' | '
  * @returns the opened file
  */
 async function openThroughSession(
-  config: Config,
+  config: SessionDownloadConfig,
   profileId: string,
   input: string,
   signal: AbortSignal,
@@ -123,7 +129,10 @@ async function openThroughSession(
     const hopDeadline = Math.min(deadline, Date.now() + limits.headerTimeoutMs);
     await vetHost(current, config, signal, hopDeadline);
     await askHeaders(current, options, signal, hopDeadline);
-    const outcome = await sessionHop(current, profileId, config, signal, deadline, hopDeadline);
+    const outcome = await sessionHop(
+      { url: current, profileId, request: config.request },
+      { limits, signal, deadline, hopDeadline },
+    );
     if (outcome.kind === 'file') return outcome.file;
     if (hop >= limits.maxRedirects || outcome.location === undefined) throw failure('rejected');
     current = parseHop(outcome.location, current);
@@ -160,7 +169,7 @@ function parseHop(text: string, base?: URL): URL {
  * @param until the hop's deadline
  * @returns nothing; throws `address_refused`, or `unreachable` when the host does not resolve
  */
-async function vetHost(url: URL, config: Config, signal: AbortSignal, until: number): Promise<void> {
+async function vetHost(url: URL, config: SessionDownloadConfig, signal: AbortSignal, until: number): Promise<void> {
   let host = url.hostname;
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
   const addresses = isIP(host) !== 0 ? [host] : await bounded(Promise.resolve().then(() => config.lookup(host)), signal, until);
