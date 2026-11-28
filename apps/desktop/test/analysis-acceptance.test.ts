@@ -386,9 +386,19 @@ describe('phase 4b acceptance', () => {
     expect((await h.ok('analysis:getProposal', { fileId: fileId! })).proposal).toEqual(proposal);
 
     const chosen = proposal!.tags.slice(0, 2);
-    expect(await h.ok('analysis:acceptProposal', { fileId: fileId!, names: chosen.map((t) => t.displayName) })).toEqual(
-      {},
-    );
+    const createdAt = proposal!.createdAt;
+    // An accept naming another proposal than the stored one is refused and keeps the stored one.
+    expect(
+      await h.call('analysis:acceptProposal', {
+        fileId: fileId!,
+        createdAt: '2000-01-01T00:00:00.000Z',
+        names: chosen.map((t) => t.displayName),
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+    expect((await h.ok('analysis:getProposal', { fileId: fileId! })).proposal).toEqual(proposal);
+    expect(
+      await h.ok('analysis:acceptProposal', { fileId: fileId!, createdAt, names: chosen.map((t) => t.displayName) }),
+    ).toEqual({});
     const [after] = await filesOf();
     expect(
       after!.tags.map((t) => ({ name: t.name, origin: t.origin })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -397,7 +407,9 @@ describe('phase 4b acceptance', () => {
     expect((await h.ok('analysis:getProposal', { fileId: fileId! })).proposal).toBeNull();
     expect(await h.manager.read((s) => s.database.analyses.get(fileId!))).toMatchObject({ model: MOCK_MODEL });
     // Gone: nothing to accept any more.
-    expect(await h.call('analysis:acceptProposal', { fileId: fileId!, names: [chosen[0]!.name] })).toMatchObject({
+    expect(
+      await h.call('analysis:acceptProposal', { fileId: fileId!, createdAt, names: [chosen[0]!.name] }),
+    ).toMatchObject({
       ok: false,
       error: { code: 'not_found' },
     });

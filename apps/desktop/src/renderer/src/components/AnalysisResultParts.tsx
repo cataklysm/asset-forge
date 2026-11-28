@@ -1,6 +1,8 @@
 import type { ProposalView } from '@assetforge/contracts';
+import type { AppliedTag } from '../analysis-result';
 import {
   ACCEPT_LABEL,
+  APPLIED_TAGS_LABEL,
   DISCARD_LABEL,
   OUT_OF_DATE_LABEL,
   PROMPT_SELECT_LABEL,
@@ -52,6 +54,38 @@ export function ProposedTags({ proposal, off, busy, onToggle }: ProposedTagsProp
         );
       })}
     </div>
+  );
+}
+
+/** The props of `AppliedTags`. */
+interface AppliedTagsProps {
+  tags: readonly AppliedTag[];
+  /** The model of the batch analysis that applied them; null when the job does not record one. */
+  model: string | null;
+}
+
+/**
+ * The AI tags a finished batch analysis applied, read-only, and the model that applied them.
+ *
+ * @param props the tags and the model
+ * @returns the chips and the model
+ */
+export function AppliedTags({ tags, model }: AppliedTagsProps) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2" role="group" aria-label={APPLIED_TAGS_LABEL}>
+        {tags.map((tag) => (
+          <span key={tag.name} title={PROPOSED_TAG_TITLE} className={`${AI_CHIP} max-w-full`}>
+            <span className="truncate">{tag.displayName}</span>
+          </span>
+        ))}
+      </div>
+      {model !== null && (
+        <span className={`${MUTED} truncate text-sm`} title={PROPOSAL_MODEL_TITLE}>
+          {model}
+        </span>
+      )}
+    </>
   );
 }
 

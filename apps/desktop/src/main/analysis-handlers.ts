@@ -153,14 +153,14 @@ async function enqueueIn(
  * Accepts the stored tag proposal of a file.
  *
  * @param manager the workspace manager
- * @param request the file and the accepted names
+ * @param request the file, the creation time of the proposal the owner saw and the accepted names
  * @returns an empty answer
  */
 async function acceptInWorkspace(
   manager: WorkspaceManager,
   request: IpcRequest<'analysis:acceptProposal'>,
 ): Promise<IpcResponse<'analysis:acceptProposal'>> {
-  await manager.exclusive((session) => acceptProposal(session, { fileId: request.fileId, names: request.names }));
+  await manager.exclusive((session) => acceptProposal(session, request));
   return {};
 }
 

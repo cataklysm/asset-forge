@@ -80,9 +80,20 @@ describe('jobViewOf', () => {
       providerId: 'p2',
       providerName: 'RunPod',
       model: 'm',
+      mode: 'apply',
       url: null,
       host: null,
       result: null,
     });
+  });
+
+  it('shows the mode of an analysis job and none for other jobs', () => {
+    const propose = { version: 2, model: 'm', mode: 'propose' };
+    const details = { fileName: null, generation, result: null };
+    expect(jobViewOf(jobOf(ANALYZE_FILE_JOB, propose, 'p2'), details).mode).toBe('propose');
+    expect(jobViewOf(jobOf(ANALYZE_FILE_JOB, { version: 1 }, null), details).mode).toBe('apply');
+    expect(jobViewOf(jobOf(IMAGE_GENERATE_JOB, { v: 1, generationId: 'g' }, 'p1'), details).mode).toBeNull();
+    const download = { v: 1, url: 'https://cdn.example.com/a.png', target: null, skipDuplicates: true };
+    expect(jobViewOf(jobOf(FILE_DOWNLOAD_JOB, download, 'cdn'), details).mode).toBeNull();
   });
 });

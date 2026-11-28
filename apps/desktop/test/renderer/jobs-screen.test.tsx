@@ -61,6 +61,7 @@ function job(p: Partial<JobView> = {}): JobView {
     providerId: null,
     providerName: null,
     model: null,
+    mode: null,
     url: null,
     host: null,
     result: null,

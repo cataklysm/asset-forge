@@ -1246,13 +1246,14 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     return {
       api,
       file,
+      state,
       user,
       async open() {
         await user.click(button('open studio'));
         await screen.findByRole('dialog', { name: studioName });
         await modelsReady();
       },
-      /** Shows the linked dialog over the studio, then raises the studio again (a remount). */
+      /** Shows the linked dialog over the studio, then raises the studio again. */
       async raise() {
         await user.click(button('open linked'));
         await screen.findByRole('dialog', { name: file.originalName });
@@ -1313,7 +1314,7 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     expect(button(GENERATE_BUTTON).title).not.toBe(message);
   });
 
-  it('shows nothing on the next open for a start that failed after the studio was closed', async () => {
+  it('shows a start that failed after the studio was closed when the studio of that source opens again', async () => {
     const message = JOB_ERROR_MESSAGES.provider_rejected;
     const pending = deferred<{ ok: false; code: 'provider_rejected' }>();
     const s = setupRaise({ handlers: { 'generations:start': () => pending.promise } });
@@ -1324,8 +1325,74 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     await act(async () => pending.resolve({ ok: false, code: 'provider_rejected' }));
 
     await s.open();
+    expect(screen.getByRole('alert').textContent).toBe(message);
+    // A change of the form clears it, as it does for a start that failed while the studio was open.
     await s.user.type(promptBox(), 'make it red');
-    expect(button(GENERATE_BUTTON).title).not.toBe(message);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('Esc in the prompt picker closes only the picker, not the studio around it', async () => {
+    const s = setupRaise({ prompts: [hero()] });
+    await s.open();
+    await s.user.click(button(LIBRARY_PROMPT_LABEL));
+    await screen.findByRole('dialog', { name: PROMPTS_LABEL });
+    await s.user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: PROMPTS_LABEL })).toBeNull());
+    expect(screen.getByRole('dialog', { name: `${STUDIO_TITLE} ${s.file.originalName}` })).toBeTruthy();
+  });
+
+  it('a raise keeps the mounted studio with its selected result and an open prompt picker on top', async () => {
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal');
+    try {
+      const s = setupRaise({ prompts: [hero()] });
+      s.state.results = [generation(s.file)];
+      await s.open();
+      const studio = screen.getByRole('dialog', { name: `${STUDIO_TITLE} ${s.file.originalName}` });
+      await s.user.click(await within(studio).findByRole('button', { name: 'file edit 1.png' }));
+      expect(within(studio).getByRole('button', { name: 'Open' })).toBeTruthy();
+      await s.user.click(button(LIBRARY_PROMPT_LABEL));
+      const picker = await screen.findByRole('dialog', { name: PROMPTS_LABEL });
+
+      await s.user.click(button('open linked'));
+      const linked = await screen.findByRole('dialog', { name: s.file.originalName });
+      expect(showModal.mock.contexts.at(-1)).toBe(linked);
+      await s.user.click(button('open studio'));
+
+      // The same elements, shown again above the linked dialog: the studio first, then its picker.
+      expect(screen.getByRole('dialog', { name: `${STUDIO_TITLE} ${s.file.originalName}` })).toBe(studio);
+      expect(screen.getByRole('dialog', { name: PROMPTS_LABEL })).toBe(picker);
+      expect(showModal.mock.contexts.slice(-2)).toEqual([studio, picker]);
+      expect((linked as HTMLDialogElement).open).toBe(true);
+      expect(within(studio).getByRole('button', { name: 'Open' })).toBeTruthy();
+
+      // Esc closes only the picker on top, then only the studio; the linked dialog stays.
+      await s.user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: PROMPTS_LABEL })).toBeNull());
+      expect(screen.getByRole('dialog', { name: `${STUDIO_TITLE} ${s.file.originalName}` })).toBe(studio);
+      await s.user.keyboard('{Escape}');
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: `${STUDIO_TITLE} ${s.file.originalName}` })).toBeNull(),
+      );
+      expect((screen.getByRole('dialog', { name: s.file.originalName }) as HTMLDialogElement).open).toBe(true);
+    } finally {
+      showModal.mockRestore();
+    }
+  });
+
+  it('keeps the save dialog open with what was typed in it across a raise', async () => {
+    const s = setupRaise();
+    await s.open();
+    await s.user.type(promptBox(), 'make it blue');
+    await s.user.click(button(SAVE_TO_LIBRARY_LABEL));
+    const dialog = await screen.findByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL });
+    const title = within(dialog).getAllByRole('textbox')[0] as HTMLInputElement;
+    await s.user.type(title, 'Blue');
+
+    await s.raise();
+
+    expect(screen.getByRole('dialog', { name: SAVE_TO_LIBRARY_LABEL })).toBe(dialog);
+    expect((dialog as HTMLDialogElement).open).toBe(true);
+    expect(title.value).toBe('Blue');
   });
 
   it('keeps the attached library prompt with its values and the chosen model across a raise', async () => {

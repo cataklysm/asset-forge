@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { IdSchema } from './ipc-shared';
+import { AnalysisModeSchema, type AnalysisMode } from './analysis';
 import { AnalysisPromptNameSchema, AnalysisPromptTextSchema, AnalysisTagLimitSchema } from './analysis-prompts';
 import { FileTargetSchema } from './files';
 import { ModelNameSchema, ProviderNameSchema } from './provider-ref';
@@ -102,4 +103,16 @@ export function analysisJobFields(payload: unknown): { providerName: string | nu
   const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
   if (!parsed.success || parsed.data.version === 1) return { providerName: null, model: null };
   return { providerName: parsed.data.version === 4 ? parsed.data.providerName : null, model: parsed.data.model };
+}
+
+/**
+ * Whether an analysis job applies its result or proposes it, for the analysis dialog.
+ *
+ * @param payload the stored payload of any job
+ * @returns the mode of a v2 to v4 payload, `apply` for v1 (phase 4a always applied); null when unparsable
+ */
+export function analysisJobMode(payload: unknown): AnalysisMode | null {
+  const parsed = AnalyzeFilePayloadSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  return parsed.data.version === 1 ? 'apply' : parsed.data.mode;
 }

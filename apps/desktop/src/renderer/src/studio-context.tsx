@@ -88,7 +88,8 @@ function useVariableMemory(): Pick<StudioState, 'recallVariable' | 'rememberVari
 
 /**
  * The generation studio of the workspace, mounted once, and the linked file dialog that shows a
- * source or result followed from the studio or from the generation details of a file.
+ * source or result followed from the studio or from the generation details of a file. Requesting the
+ * one below raises the mounted dialog on top again, so neither loses its state.
  *
  * @param props the tree that uses the studio and the navigation to a library prompt
  */
@@ -99,9 +100,9 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
   const [linked, setLinked] = useState<Linked | null>(null);
   // Only the newest link may open; an older answer arriving later is dropped.
   const linkRequest = useRef(0);
-  const { studioKey, linkedKey, raise, lower, clear } = useDialogStack();
+  const { studioRaise, linkedRaise, raise, lower, clear } = useDialogStack();
   const { starting, guardStart } = useStartGuard();
-  const { draft, keepDraft, startError, setStartError, opened, forget } = useStudioDrafts();
+  const { draft, keepDraft, startError, setStartError, forget } = useStudioDrafts();
   const { recallVariable, rememberVariables } = useVariableMemory();
 
   const { list, noteUsed } = providers;
@@ -111,10 +112,9 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
   const open = useCallback(
     (file: FileRecord) => {
       raise('studio');
-      opened();
       setStudioFile(file);
     },
-    [raise, opened],
+    [raise],
   );
 
   const openFile = useCallback(
@@ -188,11 +188,11 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
       <StudioSessionContext.Provider value={session}>
         {children}
         {studioFile !== null && (
-          <GenerationStudio key={`studio-${studioKey}`} file={studioFile} onClose={closeStudio} onOpenFile={openFile} />
+          <GenerationStudio raise={studioRaise} file={studioFile} onClose={closeStudio} onOpenFile={openFile} />
         )}
         {linked !== null && (
           <FileDetailDialog
-            key={`linked-${linkedKey}`}
+            raise={linkedRaise}
             file={linked.file}
             asset={linked.asset}
             actions={{ cover: null, studio: value }}

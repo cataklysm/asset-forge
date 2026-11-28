@@ -95,19 +95,22 @@ export interface FileAnalysisRepository {
   getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null>;
   /**
    * One transaction, checked in this order: `missing` without a proposal; `trashed`, writing nothing, for a file in
-   * the trash, which keeps its proposal for a restore; `stale` and the proposal deleted when the file is gone, not
-   * complete or its current sha256 differs from the proposal's; `stale` without deleting anything when `sha256`
-   * differs from the proposal's or `tags` is empty or holds a name outside the proposal (the caller read an older
-   * proposal). Otherwise applies exactly `tags` as `apply` does, writes the analysis row from the proposal's
-   * fingerprint and prompt name with `analysedAt = now`, deletes the proposal and answers `accepted`.
+   * the trash, which keeps its proposal for a restore; `stale` without deleting anything when `createdAt` differs
+   * from the stored proposal's (the caller saw another proposal, which may be newer); `stale` and the proposal
+   * deleted when the file is gone, not complete or its current sha256 differs from the proposal's; `stale` without
+   * deleting anything when `sha256` differs from the proposal's or `tags` is empty or holds a name outside the
+   * proposal (the caller read an older proposal). Otherwise applies exactly `tags` as `apply` does, writes the
+   * analysis row from the proposal's fingerprint and prompt name with `analysedAt = now`, deletes the proposal and
+   * answers `accepted`.
    *
-   * @param acceptance the file, the hash the owner saw, the accepted tags with an id for a new tag row each and the
-   *   time
+   * @param acceptance the file, the hash and the creation time of the proposal the owner saw, the accepted tags
+   *   with an id for a new tag row each and the time
    * @returns what happened
    */
   acceptProposal(acceptance: {
     fileId: string;
     sha256: string;
+    createdAt: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
   }): Promise<ProposalAcceptance>;
@@ -151,9 +154,10 @@ export interface AnalysisTargetReader {
   }): Promise<AnalysisTargetEntry[]>;
   /**
    * Disjoint counts over the whole target, for `analysis:preview`: `notAnalysable` the files that are
-   * not analysable; of the analysable ones `alreadyAnalysed` those analysed with the fingerprint,
-   * `alreadyQueued` the rest with an active `vision.analyze_file` job, `analysable` the remainder
-   * (what an enqueue without `force` would queue). Unknown ids of a `files` target are not counted.
+   * not analysable; of the analysable ones `alreadyQueued` those with an active `vision.analyze_file` job (also
+   * when they are analysed, as an enqueue with `force` answers them), `alreadyAnalysed` the rest analysed with the
+   * fingerprint, `analysable` the remainder (what an enqueue without `force` would queue). Unknown ids of a `files`
+   * target are not counted.
    *
    * @param request the target, the fingerprint and the analysable MIME types
    * @returns the four counts

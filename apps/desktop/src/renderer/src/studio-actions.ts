@@ -78,7 +78,7 @@ async function sendEdit(start: EditStart, request: StartRequest): Promise<void> 
 }
 
 /**
- * Starts an edit through the session's guard, so a raise never sends it twice.
+ * Starts an edit through the session's guard, so a reopened studio never sends it twice.
  *
  * @param start the context
  * @param request the request

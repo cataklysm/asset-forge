@@ -40,6 +40,8 @@ interface Props {
   busy: boolean;
   /** Reports whether the draft holds changes that are not saved. */
   onDirtyChange(dirty: boolean): void;
+  /** Reports whether a save or delete is in flight; false again when the editor unmounts. */
+  onSavingChange(saving: boolean): void;
   /** After a successful save; `created` when it was a new prompt. */
   onSaved(detail: PromptDetail, created: boolean): void;
   onTagsChanged(): void;
@@ -217,7 +219,15 @@ async function removePrompt({
  * @param props the prompt, the busy flag and the callbacks
  * @returns the editor
  */
-export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsChanged, onDeleted }: Props) {
+export function PromptEditor({
+  promptId,
+  busy,
+  onDirtyChange,
+  onSavingChange,
+  onSaved,
+  onTagsChanged,
+  onDeleted,
+}: Props) {
   const { detail, setDetail, loadError, draft, setDraft } = usePromptDetail(promptId);
   // An older version shown read-only instead of the draft; null shows the draft.
   const [viewing, setViewing] = useState<PromptVersion | null>(null);
@@ -231,6 +241,9 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
   const loading = promptId !== null && detail === null;
   const dirty = isDirty(loading, detail, draft);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => onSavingChange(saving), [saving, onSavingChange]);
+  // A create remounts the editor and a delete removes it while the save still counts as running.
+  useEffect(() => () => onSavingChange(false), [onSavingChange]);
 
   if (loadError !== null) {
     return (

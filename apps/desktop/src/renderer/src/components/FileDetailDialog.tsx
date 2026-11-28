@@ -45,6 +45,8 @@ interface Props {
   onOpenAsset?(assetId: string): void;
   /** The list of the file browser the dialog was opened from; steps through it. */
   list: ViewerList | null;
+  /** A counter; every change brings the open dialog to the top again, without a remount. */
+  raise?: number;
   /** Closes the dialog. */
   onClose(): void;
 }
@@ -88,7 +90,7 @@ function removeActionOf(file: FileRecord, actions: FileActionContext): (() => vo
 /**
  * The file detail dialog.
  *
- * @param props the file, its asset, the actions, the role control, the list and the callbacks
+ * @param props the file, its asset, the actions, the role control, the list, the raise counter and the callbacks
  * @returns the dialog
  */
 export function FileDetailDialog({
@@ -100,6 +102,7 @@ export function FileDetailDialog({
   onMeasured,
   onOpenAsset,
   list,
+  raise,
   onClose,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -185,7 +188,7 @@ export function FileDetailDialog({
   const browsing = list !== null && list.total >= 2 ? list : null;
 
   return (
-    <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
+    <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail" raise={raise}>
       <div ref={rootRef} className="flex h-full flex-col">
         <DetailHeader
           file={file}

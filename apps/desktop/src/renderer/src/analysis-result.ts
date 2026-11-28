@@ -13,6 +13,12 @@ const FAILED_FALLBACK = JOB_ERROR_MESSAGES.internal_error;
 /** The stored proposal and the newest job of one file, as `analysis:getProposal` answers them. */
 export type Stored = IpcResponse<'analysis:getProposal'>;
 
+/** One AI tag a finished batch analysis applied. */
+export interface AppliedTag {
+  name: string;
+  displayName: string;
+}
+
 /** What the result dialog shows for one file. */
 export interface Shown {
   fileId: string;
@@ -20,6 +26,27 @@ export interface Shown {
   job: JobView | null;
   /** Names switched off; they belong to exactly this proposal. */
   off: ReadonlySet<string>;
+  /** The file's AI tags after a finished batch analysis (`appliedByBatch`); null otherwise. */
+  applied: readonly AppliedTag[] | null;
+}
+
+/**
+ * Whether the job is an analysis started elsewhere, which applies its tags instead of proposing them.
+ *
+ * @param job the job; null for none
+ * @returns true for a job in mode `apply`
+ */
+export const isBatchJob = (job: JobView | null) => job !== null && job.mode === 'apply';
+
+/**
+ * Whether what was read is the end of a batch analysis: its job succeeded and no proposal waits, so the file's AI
+ * tags are its result.
+ *
+ * @param stored the proposal and the newest job
+ * @returns true when the applied tags are to be shown
+ */
+export function appliedByBatch(stored: Stored): boolean {
+  return stored.proposal === null && isBatchJob(stored.job) && stored.job?.status === 'succeeded';
 }
 
 /** No name switched off. */
@@ -65,12 +92,18 @@ const newer = (time: string, other: string) => Date.parse(time) > Date.parse(oth
  * @param setShown the setter of what is shown
  * @param id the file
  * @param stored the answer read for it
+ * @param applied the file's AI tags read with it after a finished batch analysis; null otherwise
  */
-export function takeStored(setShown: Dispatch<SetStateAction<Shown | null>>, id: string, stored: Stored): void {
+export function takeStored(
+  setShown: Dispatch<SetStateAction<Shown | null>>,
+  id: string,
+  stored: Stored,
+  applied: readonly AppliedTag[] | null = null,
+): void {
   setShown((previous) => {
     const same =
       previous !== null && previous.fileId === id && proposalKey(previous.proposal) === proposalKey(stored.proposal);
-    return { fileId: id, proposal: stored.proposal, job: stored.job, off: same ? previous.off : NO_OFF };
+    return { fileId: id, proposal: stored.proposal, job: stored.job, off: same ? previous.off : NO_OFF, applied };
   });
 }
 

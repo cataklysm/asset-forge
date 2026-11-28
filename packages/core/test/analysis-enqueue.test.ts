@@ -294,6 +294,25 @@ describe('previewAnalysis', () => {
       ).analysable,
     ).toBe(1);
   });
+
+  it('counts a file that is analysed and also queued as queued, as a forced enqueue answers it', async () => {
+    const c = await setup();
+    const fresh = await c.importOne('fresh.png');
+    analysed(c, c.file.id);
+    await enqueueAnalysis(c.session, request({ kind: 'files', fileIds: [c.file.id] }, { force: true }));
+    const target: AnalysisTarget = { kind: 'files', fileIds: [c.file.id, fresh.id] };
+
+    expect(await previewAnalysis(c.session, { target, model: MODEL, provider: PROVIDER, entry: ENTRY })).toEqual({
+      analysable: 1,
+      alreadyAnalysed: 0,
+      alreadyQueued: 1,
+      notAnalysable: 0,
+    });
+    expect(await enqueueAnalysis(c.session, request(target, { force: true }))).toEqual({
+      enqueued: 1,
+      skipped: { notFound: 0, notAnalysable: 0, alreadyQueued: 1, alreadyAnalysed: 0 },
+    });
+  });
 });
 
 describe('trashed files', () => {

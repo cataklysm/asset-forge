@@ -308,9 +308,9 @@ describe('the recorded analysis prompt name', () => {
   test('accepting a proposal writes its prompt name to the analysis row', async () => {
     await apply({ promptName: 'General' });
     await db.analyses.propose(proposal('Detail'));
-    expect(await db.analyses.acceptProposal({ fileId: FILE_ID, sha256: SHA, tags: [t('rusty')], now: T2 })).toBe(
-      'accepted',
-    );
+    expect(
+      await db.analyses.acceptProposal({ fileId: FILE_ID, sha256: SHA, createdAt: T1, tags: [t('rusty')], now: T2 }),
+    ).toBe('accepted');
     expect(await db.analyses.get(FILE_ID)).toMatchObject({ promptName: 'Detail', analysedAt: T2 });
   });
 });

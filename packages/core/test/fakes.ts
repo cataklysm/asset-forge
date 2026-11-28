@@ -838,6 +838,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
   async acceptProposal(r: {
     fileId: string;
     sha256: string;
+    createdAt: string;
     tags: readonly { name: string; displayName: string; newId: string }[];
     now: string;
   }): Promise<ProposalAcceptance> {
@@ -845,6 +846,7 @@ class InMemoryAnalyses implements FileAnalysisRepository {
     if (!proposal) return 'missing';
     // The proposal of a trashed file is kept for a restore; only a genuinely stale one is deleted.
     if (this.files.isTrashed(r.fileId)) return 'trashed';
+    if (proposal.createdAt !== r.createdAt) return 'stale';
     if (!this.hasContent(r.fileId, proposal.sha256)) {
       this.proposals.delete(r.fileId);
       return 'stale';
@@ -971,8 +973,8 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
     );
     for (const e of await this.entries(r)) {
       if (!e.analysable) result.notAnalysable++;
-      else if (e.analysed) result.alreadyAnalysed++;
       else if (queued.has(e.fileId)) result.alreadyQueued++;
+      else if (e.analysed) result.alreadyAnalysed++;
       else result.analysable++;
     }
     return result;

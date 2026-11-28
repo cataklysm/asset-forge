@@ -55,6 +55,7 @@ const view = {
   providerId: null,
   providerName: null,
   model: null,
+  mode: null,
   url: 'https://example.com/a.png',
   host: 'example.com',
   result: null,

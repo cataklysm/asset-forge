@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { call, describeError } from '../api';
-import { takeStored, toggledOff, type Shown, type Stored } from '../analysis-result';
+import { appliedByBatch, takeStored, toggledOff, type AppliedTag, type Shown, type Stored } from '../analysis-result';
 
 /** Reads and shows the stored proposal of a file. */
 export interface ProposalReader {
@@ -39,12 +39,30 @@ async function readProposal(reading: Reading, id: string): Promise<Stored | null
   const seq = ++reading.readSeq.current;
   try {
     const stored = await call('analysis:getProposal', { fileId: id });
-    if (seq === reading.readSeq.current && reading.fileIdRef.current === id) takeStored(reading.setShown, id, stored);
+    const applied = appliedByBatch(stored) ? await readAppliedTags(id) : null;
+    if (seq === reading.readSeq.current && reading.fileIdRef.current === id) {
+      takeStored(reading.setShown, id, stored, applied);
+    }
     return stored;
   } catch (error) {
     if (seq === reading.readSeq.current && reading.fileIdRef.current === id) reading.setError(describeError(error));
     return null;
   }
+}
+
+/**
+ * The AI tags the file carries now, read after a batch analysis applied them.
+ *
+ * @param id the file
+ * @returns the AI tags; empty when the file is gone or in the trash; rejects when the read fails
+ */
+async function readAppliedTags(id: string): Promise<AppliedTag[]> {
+  const page = await call('files:list', { scope: { kind: 'all' }, ids: [id], offset: 0, limit: 1 });
+  const record = page.items.find((item) => item.id === id);
+  if (record === undefined) return [];
+  return record.tags
+    .filter((tag) => tag.origin === 'ai')
+    .map((tag) => ({ name: tag.name, displayName: tag.displayName }));
 }
 
 /** The refs and setters an action works with. */

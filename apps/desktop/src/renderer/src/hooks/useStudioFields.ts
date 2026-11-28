@@ -20,8 +20,8 @@ export interface StudioFieldsState {
 }
 
 /**
- * The form fields of the studio. A studio mounted anew by a raise shows the form it had (its entry
- * and model chosen once the entry is selected); a fresh opening starts empty.
+ * The form fields of the studio. A studio mounted while the session still keeps the form of its source
+ * shows that form (its entry and model chosen once the entry is selected); a fresh opening starts empty.
  *
  * @param fileId the source file
  * @param session the studio session
@@ -30,7 +30,7 @@ export interface StudioFieldsState {
  */
 export function useStudioFields(fileId: string, session: StudioSession, choice: ProviderChoice): StudioFieldsState {
   const { providerId, model } = choice;
-  // A studio mounted anew by a raise shows the form it had; a fresh opening starts empty.
+  // A form the session still keeps for the source is shown again; a fresh opening starts empty.
   const [restored] = useState(() => session.draft(fileId));
   const [fields, setFields] = useState<StudioFields>(() =>
     restored !== undefined ? fieldsOf(restored) : freshFields(readSafeMode()),

@@ -287,7 +287,7 @@ describe('analysis target reader', () => {
     expect(await count(all)).toEqual({ analysable: 2, alreadyAnalysed: 2, alreadyQueued: 1, notAnalysable: 2 });
   });
 
-  test('an analysed file counts as analysed, not as queued', async () => {
+  test('an analysed file that is also queued counts as queued, as a forced enqueue answers it', async () => {
     await applyAnalysis(B_REF);
     await db.jobs.enqueue({
       jobs: [
@@ -305,8 +305,8 @@ describe('analysis target reader', () => {
     });
     expect(await count({ kind: 'asset', assetId: ASSET_B })).toEqual({
       analysable: 0,
-      alreadyAnalysed: 1,
-      alreadyQueued: 0,
+      alreadyAnalysed: 0,
+      alreadyQueued: 1,
       notAnalysable: 0,
     });
   });

@@ -105,8 +105,17 @@ const proposal = (o: Partial<Proposal> = {}): Proposal => ({
   ...o,
 });
 
-const accept = (tags: ReturnType<typeof t>[], o: { sha256?: string; now?: string; fileId?: string } = {}) =>
-  db.analyses.acceptProposal({ fileId: o.fileId ?? FILE_ID, sha256: o.sha256 ?? SHA, tags, now: o.now ?? T2 });
+const accept = (
+  tags: ReturnType<typeof t>[],
+  o: { sha256?: string; now?: string; fileId?: string; createdAt?: string } = {},
+) =>
+  db.analyses.acceptProposal({
+    fileId: o.fileId ?? FILE_ID,
+    sha256: o.sha256 ?? SHA,
+    createdAt: o.createdAt ?? T1,
+    tags,
+    now: o.now ?? T2,
+  });
 
 describe('tag proposals', () => {
   test('propose stores the proposal and leaves tags and the analysis row alone', async () => {
@@ -240,6 +249,21 @@ describe('tag proposals', () => {
     expect(await accept([t('metal')], { sha256: OTHER_SHA })).toBe('stale');
     expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal(), stale: false });
     expect(rowCount('file_tag')).toBe(0);
+  });
+
+  test('accept of a proposal other than the one the caller saw answers stale and keeps the newer one', async () => {
+    await db.analyses.propose(proposal({ createdAt: T2 }));
+    expect(await accept([t('metal')], { createdAt: T1 })).toBe('stale');
+    expect(await db.analyses.getProposal(FILE_ID)).toEqual({ ...proposal({ createdAt: T2 }), stale: false });
+    expect(rowCount('file_tag')).toBe(0);
+    expect(await db.analyses.get(FILE_ID)).toBeNull();
+  });
+
+  test('accept of a stale proposal the caller did not see keeps it', async () => {
+    await db.analyses.propose(proposal({ createdAt: T2 }));
+    changeHash(OTHER_SHA);
+    expect(await accept([t('metal')], { createdAt: T1 })).toBe('stale');
+    expect(await db.analyses.getProposal(FILE_ID)).toMatchObject({ createdAt: T2, stale: true });
   });
 
   test('accept of a proposal whose file is no longer complete deletes it and answers stale', async () => {

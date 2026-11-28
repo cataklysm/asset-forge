@@ -225,7 +225,8 @@ async function getProposal(
  * Applies the chosen tags of the stored proposal; a proposal whose file changed is deleted.
  *
  * @param database the workspace database
- * @param request the file, the checksum the caller saw, the chosen tags and the time
+ * @param request the file, the checksum and creation time of the proposal the caller saw, the chosen tags and the
+ *   time
  * @returns what happened, in the order the port describes
  */
 async function acceptProposal(
@@ -241,6 +242,8 @@ async function acceptProposal(
     if (!row) return 'missing';
     // A trashed file keeps its proposal for a restore; nothing is written meanwhile.
     if (inTrash(transaction, request.fileId)) return 'trashed';
+    // The caller saw another proposal, possibly an older one replaced since: the stored one is not touched.
+    if (row.createdAt !== request.createdAt) return 'stale';
     const target = matchingFile(transaction, request.fileId, row.sha256);
     if (!target) {
       transaction.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, request.fileId)).run();

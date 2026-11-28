@@ -59,6 +59,25 @@ const NO_TAG_FILTER: TagFilterState = { tagNames: [], tagLabels: {} };
 const SKELETON_ROWS = 6;
 /** The start of a list shown for the first time: the top, nothing focused. */
 const NO_POSITION: ViewRestore = { scrollOffset: 0, index: null, focus: false };
+/**
+ * The leave guard while a save runs: stay, without asking.
+ *
+ * @returns false
+ */
+const HOLD = async () => false;
+
+/**
+ * The leave guard of the screen: a running save is never discarded, a dirty draft asks.
+ *
+ * @param saving whether a save or delete is in flight
+ * @param dirty whether the draft holds unsaved changes
+ * @param ask asks whether to discard the draft
+ * @returns the guard, or null when the navigation may leave
+ */
+function leaveGuardOf(saving: boolean, dirty: boolean, ask: () => Promise<boolean>): (() => Promise<boolean>) | null {
+  if (saving) return HOLD;
+  return dirty ? ask : null;
+}
 
 /** What {@link usePromptPages} reads the list for. */
 interface PromptPagesInput {
@@ -136,6 +155,8 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   const tagNames = tagFilter.tagNames;
   const [editing, setEditing] = useState<Editing | null>(initialId === null ? null : { id: initialId, serial: 0 });
   const [dirty, setDirty] = useState(false);
+  // A save or delete of the editor is in flight: nothing leaves the editor until it settled.
+  const [saving, setSaving] = useState(false);
   // The open question whether to discard the draft, answered by the dialog.
   const [asking, setAsking] = useState<((discard: boolean) => void) | null>(null);
 
@@ -145,7 +166,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   const pages = usePromptPages({ query, tagNames, renameToken });
 
   const ask = useCallback(() => new Promise<boolean>((resolve) => setAsking(() => resolve)), []);
-  useLeaveGuard(dirty ? ask : null);
+  useLeaveGuard(leaveGuardOf(saving, dirty, ask));
 
   function answer(discard: boolean) {
     asking?.(discard);
@@ -153,6 +174,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }
 
   async function edit(id: string | null) {
+    if (saving) return;
     if (id !== null && editing?.id === id) return;
     if (dirty && !(await ask())) return;
     setDirty(false);
@@ -166,6 +188,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }
 
   const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
+  const onSavingChange = useCallback((next: boolean) => setSaving(next), []);
   // After every save, tag change or delete: the list reloads where it is.
   const refresh = pages.paged.refresh;
   // The serial of the editor shown now, so that a late create answer of an editor left since is not taken.
@@ -195,7 +218,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
     <Page
       title={PROMPTS_LABEL}
       actions={
-        <button type="button" className={BUTTON} disabled={busy} onClick={() => void edit(null)}>
+        <button type="button" className={BUTTON} disabled={busy || saving} onClick={() => void edit(null)}>
           <Plus size={16} aria-hidden />
           {NEW_PROMPT_LABEL}
         </button>
@@ -233,6 +256,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
               promptId={editing.id}
               busy={busy}
               onDirtyChange={onDirtyChange}
+              onSavingChange={onSavingChange}
               onSaved={(detail, created) => onSaved(detail, created, editing.serial)}
               onTagsChanged={refresh}
               onDeleted={onDeleted}

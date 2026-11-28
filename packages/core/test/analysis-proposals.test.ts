@@ -86,6 +86,7 @@ describe('getProposal', () => {
         providerId: 'environment',
         providerName: 'Environment',
         model: MODEL,
+        mode: 'propose',
         url: null,
         host: null,
         result: null,
@@ -149,7 +150,7 @@ describe('acceptProposal', () => {
     await addFileTag(c.session, { fileId: c.file.id, name: 'metal' });
     await proposeFor(c, c.file.id);
 
-    await acceptProposal(c.session, { fileId: c.file.id, names: ['  RED   car ', 'metal'] });
+    await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['  RED   car ', 'metal'] });
 
     expect(c.db.tags.forFile(c.file.id)).toEqual([
       { name: 'metal', displayName: 'metal', origin: 'manual' },
@@ -167,17 +168,19 @@ describe('acceptProposal', () => {
 
   it('answers not_found without a proposal', async () => {
     const c = await setup();
-    await expect(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('refuses with no names or with a name not in the proposal', async () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: [] }));
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal', 'wood'] }));
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['!!!'] }));
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: [] }));
+    await rejectsInvalid(
+      acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal', 'wood'] }),
+    );
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['!!!'] }));
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
     expect(await c.db.analyses.getProposal(c.file.id)).not.toBeNull();
   });
@@ -186,7 +189,7 @@ describe('acceptProposal', () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
     c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }));
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }));
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
     expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
   });
@@ -195,7 +198,7 @@ describe('acceptProposal', () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
     c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['wood'] }));
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['wood'] }));
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
     expect(await c.db.analyses.getProposal(c.file.id)).toBeNull();
   });
@@ -204,7 +207,7 @@ describe('acceptProposal', () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
     c.db.analyses.acceptProposal = async () => 'stale';
-    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }));
+    await rejectsInvalid(acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }));
   });
 
   it('maps each answer of the one repository transaction to its error', async () => {
@@ -212,7 +215,9 @@ describe('acceptProposal', () => {
     await proposeFor(c, c.file.id);
     const answerWith = async (outcome: 'missing' | 'trashed' | 'stale') => {
       c.db.analyses.acceptProposal = async () => outcome;
-      return acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e as Error);
+      return acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }).catch(
+        (e: unknown) => e as Error,
+      );
     };
     const missing = await answerWith('missing');
     expect(missing).toBeInstanceOf(NotFoundError);
@@ -225,8 +230,51 @@ describe('acceptProposal', () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
     const get = vi.spyOn(c.db.files, 'get');
-    await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] });
+    await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] });
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it('refuses a proposal other than the one the caller saw and keeps the stored one', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    const error = await acceptProposal(c.session, {
+      fileId: c.file.id,
+      createdAt: '2026-02-01T00:00:00.000Z',
+      names: ['metal'],
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('The tag proposal is out of date');
+    expect(await c.db.analyses.getProposal(c.file.id)).toMatchObject({ createdAt: CREATED });
+    expect(c.db.tags.forFile(c.file.id)).toEqual([]);
+  });
+
+  it('answers out of date rather than a foreign choice when the caller saw another proposal', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    const error = await acceptProposal(c.session, {
+      fileId: c.file.id,
+      createdAt: '2026-02-01T00:00:00.000Z',
+      names: ['wood'],
+    }).catch((e: unknown) => e);
+    expect((error as Error).message).toBe('The tag proposal is out of date');
+  });
+
+  it('keeps a stale proposal the caller did not see', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
+    await rejectsInvalid(
+      acceptProposal(c.session, { fileId: c.file.id, createdAt: '2026-02-01T00:00:00.000Z', names: ['metal'] }),
+    );
+    expect(await c.db.analyses.getProposal(c.file.id)).toMatchObject({ createdAt: CREATED, stale: true });
+  });
+
+  it('hands the time of the proposal the caller saw to the repository transaction', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    const accept = vi.spyOn(c.db.analyses, 'acceptProposal');
+    await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] });
+    expect(accept.mock.calls[0]![0]).toMatchObject({ createdAt: CREATED });
   });
 });
 
@@ -247,7 +295,9 @@ describe('trashed files', () => {
     const c = await setup();
     await proposeFor(c, c.file.id);
     await trashForTest(c.session, [c.file.id]);
-    const error = await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e);
+    const error = await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }).catch(
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(InvalidOperationError);
     expect((error as Error).message).toBe('The file is in the trash');
     expect(await c.db.analyses.getProposal(c.file.id)).not.toBeNull();
@@ -259,7 +309,9 @@ describe('trashed files', () => {
     await proposeFor(c, c.file.id);
     await trashForTest(c.session, [c.file.id]);
     c.db.files.records.set(c.file.id, { ...c.db.files.records.get(c.file.id)!, sha256: 'f'.repeat(64) });
-    const error = await acceptProposal(c.session, { fileId: c.file.id, names: ['metal'] }).catch((e: unknown) => e);
+    const error = await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names: ['metal'] }).catch(
+      (e: unknown) => e,
+    );
     expect((error as Error).message).toBe('The file is in the trash');
     expect(await c.db.analyses.getProposal(c.file.id)).toMatchObject({ stale: true });
   });
@@ -269,7 +321,9 @@ describe('trashed files', () => {
     await proposeFor(c, c.file.id);
     await trashForTest(c.session, [c.file.id]);
     for (const names of [[], ['not-proposed']]) {
-      const error = await acceptProposal(c.session, { fileId: c.file.id, names }).catch((e: unknown) => e);
+      const error = await acceptProposal(c.session, { fileId: c.file.id, createdAt: CREATED, names }).catch(
+        (e: unknown) => e,
+      );
       expect(error).toBeInstanceOf(InvalidOperationError);
       expect((error as Error).message).toBe('The file is in the trash');
     }
