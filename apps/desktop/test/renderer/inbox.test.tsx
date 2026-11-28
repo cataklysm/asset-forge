@@ -539,6 +539,8 @@ it('assigning in the detail dialog moves on to the following file; assigning the
 
   const second = await screen.findByRole('dialog', { name: 'c2.png' });
   expect(within(second).getByText('1 / 1')).toBeTruthy();
+  // The focus the removed control held goes to the next file's Assign button, not to the body.
+  await waitFor(() => expect(document.activeElement).toBe(within(second).getByRole('button', { name: 'Assign' })));
   expect(callsOf(api, 'files:assign')).toEqual([{ fileId: c1.id, assetId: OAK.id, role: 'texture' }]);
   await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c1.png')).toBeNull());
   expect(screen.queryByText('1 selected')).toBeNull();
@@ -547,6 +549,31 @@ it('assigning in the detail dialog moves on to the following file; assigning the
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(callsOf(api, 'files:assign')).toHaveLength(2);
   await screen.findByText('Inbox is empty');
+});
+
+it('after an assign that moves on to a file without an assign control, the focus goes to the stage', async () => {
+  const user = userEvent.setup();
+  const { c1, f1 } = files();
+  let remaining = [c1, f1];
+  const api = install(remaining, {
+    'files:assign': (r) => {
+      remaining = remaining.filter((f) => f.id !== r.fileId);
+      api.setFiles(remaining);
+      return { ...c1, assetId: r.assetId, role: r.role };
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Enter}');
+  await assignInDialog(user, await screen.findByRole('dialog', { name: 'c1.png' }));
+
+  const next = await screen.findByRole('dialog', { name: 'f1.png' });
+  expect(within(next).queryByRole('button', { name: 'Assign' })).toBeNull();
+  await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  const active = document.activeElement as HTMLElement;
+  expect(next.contains(active)).toBe(true);
+  expect(active.tabIndex).toBe(-1);
 });
 
 const VISION: ProviderView = providerView();
