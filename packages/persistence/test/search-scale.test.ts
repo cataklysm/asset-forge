@@ -16,11 +16,11 @@ import {
   type FileQuery,
   type WorkspaceDatabase,
 } from '@assetforge/core';
-import { fileListSql } from '../src/file-repository.js';
+import { fileListSql } from '../src/file-list.js';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 import { assetTagsSql, matchedTagsSql } from '../src/list-tags.js';
-import { projectListSql, projectMatchedTagsSql } from '../src/project-repository.js';
-import { searchStatements } from '../src/search-index.js';
+import { projectListSql, projectMatchedTagsSql } from '../src/project-list.js';
+import { searchStatements } from '../src/asset-search.js';
 import { registerSqlFunctions } from '../src/sql-functions.js';
 
 const ASSET_COUNT = 10_000;

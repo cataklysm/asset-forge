@@ -68,7 +68,7 @@ to see what a video is and play it where they already look at images.
 - Cover: a video can be chosen as the cover (`setAssetCover` asks `hasThumbnail`). The automatic cover
   prefers images: the earliest complete previewable image as today, and only when the asset has none the
   earliest complete video (same order rule: `importedAt`, then `id`). So no existing asset with an image
-  changes its cover. `automaticCover` (core) and `automaticCovers` (SQL in the asset repository) implement
+  changes its cover. `automaticCover` (core) and `automaticCovers` (SQL in `asset-summaries.ts` of persistence) implement
   the same rule and a test holds them together. Whether a frame can actually be made is not part of the rule
   (a pure MIME rule, as for images); a video without a frame shows the placeholder.
 - "Open externally" follows from the kind (`isOpenable`), so videos get it. Analysis and the studio do not

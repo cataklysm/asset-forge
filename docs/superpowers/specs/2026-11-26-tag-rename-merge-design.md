@@ -32,7 +32,7 @@ Tags come from two sources that do not agree on names: the owner's own tagging (
 ## Constraints
 
 - `CLAUDE.md` architecture rules: use case in `core`, repository in `persistence`, validated IPC, fixed error messages, short transactions.
-- A tag is one row with a unique normalised `name` and a `displayName`; `asset_tag` and `file_tag` link owners to it with an `origin` (`manual` | `ai`). An owner carries a tag at most once and manual wins (`linkAssetTag`, `linkFileTags` in `packages/persistence/src/tag-repository.ts`).
+- A tag is one row with a unique normalised `name` and a `displayName`; `asset_tag` and `file_tag` link owners to it with an `origin` (`manual` | `ai`). An owner carries a tag at most once and manual wins (`linkAssetTag`, `linkFileTags` in `packages/persistence/src/tag-links.ts`).
 - The search index (`asset_search`) holds tag names per asset and is kept in step by `reindexAsset` inside the transaction that changes searchable data.
 - A waiting proposal (`file_analysis_proposal.tags`) stores tag names as JSON text, not as references.
 - UI rules: no explanatory text in the layout (tooltips through `title`), buttons from `ui.ts`, tokens only, labels in `labels.ts`.
