@@ -38,6 +38,8 @@ export const generation = sqliteTable(
   (table) => [
     index('generation_job_id_idx').on(table.jobId),
     index('generation_created_at_idx').on(table.createdAt, table.id),
+    // Deleting a prompt version sets this null (migration 0017).
+    index('generation_prompt_version_id_idx').on(table.promptVersionId),
     check('generation_kind_check', oneOf(table.kind, GENERATION_KINDS)),
     check('generation_status_check', oneOf(table.status, GENERATION_STATUSES)),
     check('generation_provider_kind_check', oneOf(table.providerKind, PROVIDER_KINDS)),

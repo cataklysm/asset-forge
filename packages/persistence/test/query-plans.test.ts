@@ -125,4 +125,43 @@ describe('query plans', () => {
       expect(lines.some((line) => line.includes('TEMP B-TREE'))).toBe(false);
     }
   });
+
+  test('the gallery page without a query walks asset_name_lower_id_idx in its order', async () => {
+    const statements = await ranSelects(() => db.assets.list({ offset: 0, limit: 50 }));
+    const page = statements.find((statement) => /order by lower\(/i.test(statement.source));
+    expect(page).toBeDefined();
+    const lines = planOf(page!);
+    expect(lines.some((line) => line.includes('asset_name_lower_id_idx'))).toBe(true);
+    expect(lines.some((line) => line.includes('TEMP B-TREE'))).toBe(false);
+  });
+
+  test('the inbox page walks file_asset_id_imported_at_id_idx in its order', async () => {
+    const statements = await ranSelects(() => db.files.list({ scope: { kind: 'inbox' }, offset: 0, limit: 100 }));
+    const page = statements.find((statement) => /order by/i.test(statement.source));
+    expect(page).toBeDefined();
+    const lines = planOf(page!);
+    expect(lines.some((line) => line.includes('file_asset_id_imported_at_id_idx'))).toBe(true);
+    expect(lines.some((line) => line.includes('TEMP B-TREE'))).toBe(false);
+  });
+
+  test('the files of an asset come in their order from the same index', async () => {
+    const statements = await ranSelects(() =>
+      db.files.list({ scope: { kind: 'asset', assetId: uuid(20) }, offset: 0, limit: 100 }),
+    );
+    const page = statements.find((statement) => /order by/i.test(statement.source));
+    const lines = planOf(page!);
+    expect(lines.some((line) => line.includes('file_asset_id_imported_at_id_idx'))).toBe(true);
+    expect(lines.some((line) => line.includes('TEMP B-TREE'))).toBe(false);
+  });
+
+  test('clearing a cover and a prompt version reach their rows through an index', () => {
+    const cover = handle.prepare('explain query plan update asset set cover_file_id = null where cover_file_id = ?');
+    expect((cover.all(uuid(10)) as { detail: string }[]).map((row) => row.detail)).toEqual([
+      expect.stringContaining('asset_cover_file_id_idx'),
+    ]);
+    const version = handle.prepare('explain query plan select id from generation where prompt_version_id = ?');
+    expect((version.all(uuid(11)) as { detail: string }[]).map((row) => row.detail)).toEqual([
+      expect.stringContaining('generation_prompt_version_id_idx'),
+    ]);
+  });
 });
