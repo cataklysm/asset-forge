@@ -340,6 +340,17 @@ export class SiteDiscoveryService {
   }
 
   /**
+   * Removes a finished extraction from review history without touching queued downloads or files.
+   * @param crawlId saved task
+   * @returns whether an entry was removed
+   */
+  async remove(crawlId: string): Promise<IpcResponse<'sites:removeCrawl'>> {
+    const removed = await this.dependencies.manager.exclusive((session) => session.database.siteCrawls.remove(crawlId));
+    if (removed) this.changed();
+    return { removed };
+  }
+
+  /**
    * Retries a task after user action or a transient failure.
    * @param crawlId failed or cancelled task
    * @returns whether it was requeued

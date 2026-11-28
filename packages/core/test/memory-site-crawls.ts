@@ -31,6 +31,16 @@ export class InMemorySiteCrawlRepository implements SiteCrawlRepository {
     return row === undefined ? null : copy(row);
   }
 
+  async remove(id: string): Promise<boolean> {
+    if (!this.rows.has(id)) return false;
+    const active = this.jobs.rows.some(
+      (job) =>
+        job.id === id && job.type === SITE_CRAWL_JOB && (ACTIVE_JOB_STATUSES as readonly string[]).includes(job.status),
+    );
+    if (active) throw new InvalidOperationError('Cancel this extraction before removing it');
+    return this.rows.delete(id);
+  }
+
   async list(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlRecord[]; total: number }> {
     const rows = [...this.rows.values()].sort(
       (left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),

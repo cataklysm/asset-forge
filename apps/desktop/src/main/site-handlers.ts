@@ -42,6 +42,7 @@ export type SiteHandlers = Pick<
   | 'sites:listCrawls'
   | 'sites:getCrawl'
   | 'sites:retryCrawl'
+  | 'sites:removeCrawl'
 >;
 
 const ALREADY_RUNNING = 'A site import test is already running';
@@ -107,6 +108,7 @@ export function createSiteHandlers(dependencies: SiteHandlerDependencies): SiteH
     'sites:listCrawls': (request) => discovery.list(request),
     'sites:getCrawl': ({ crawlId }) => discovery.get(crawlId),
     'sites:retryCrawl': ({ crawlId }) => discovery.retry(crawlId),
+    'sites:removeCrawl': ({ crawlId }) => discovery.remove(crawlId),
     'sites:cancelCrawl': async ({ crawlId }) =>
       crawlId === undefined ? handlers.cancelCrawl() : discovery.cancel(crawlId),
     'sites:import': async (request) =>
@@ -148,7 +150,7 @@ class SiteHandlerState {
   }
 
   /**
-   * Refuses a change of a profile that is in use.
+   * Refuses deletion of a profile that is in use.
    *
    * @param profileId the profile's id
    * @throws InvalidOperationError while a crawl or the login window uses it
@@ -180,13 +182,13 @@ class SiteHandlerState {
   }
 
   /**
-   * `sites:save`: a profile in use is not changed.
+   * Saves settings for future extractions. Running crawls keep their captured profile object;
+   * editing settings neither closes a login window nor changes its authenticated session.
    *
    * @param request the profile to save
    * @returns the saved profile
    */
   save(request: IpcRequest<'sites:save'>): IpcResponse<'sites:save'> {
-    if (request.id !== undefined) this.refuseInUse(request.id);
     const profile = this.store.save(request);
     this.forget(profile.id);
     return profile;

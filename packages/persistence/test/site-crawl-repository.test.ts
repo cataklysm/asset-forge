@@ -73,10 +73,15 @@ describe('durable site crawl results', () => {
   test('removes only finished review metadata and preserves the technical job', async () => {
     const row = record(10);
     await db.siteCrawls.insert(row, {
-      id: row.id, type: 'site.crawl', resourceClass: 'cpu', fileId: null, lane: 'example.com',
-      payload: { v: 1, crawlId: row.id }, dedupeKey: null,
+      id: row.id,
+      type: 'site.crawl',
+      resourceClass: 'cpu',
+      fileId: null,
+      lane: 'example.com',
+      payload: { v: 1, crawlId: row.id },
+      dedupeKey: null,
     });
-    const repository = db.siteCrawls as typeof db.siteCrawls & { remove(id: string): Promise<boolean> };
+    const repository = db.siteCrawls;
     expect(repository).toHaveProperty('remove');
     await expect(repository.remove(row.id)).rejects.toMatchObject({ code: 'invalid_operation' });
     await db.jobs.claimNext({ resourceClass: 'cpu', types: ['site.crawl'], now: T0 });

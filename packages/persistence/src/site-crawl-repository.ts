@@ -106,6 +106,7 @@ export function createSiteCrawlRepository(database: BetterSQLite3Database): Site
   return {
     insert: (record, queuedJob) => insertCrawl(database, record, queuedJob),
     get: (id) => getCrawl(database, id),
+    remove: (id) => removeCrawl(database, id),
     list: (page) => listCrawls(database, page),
     listSummaries: (page) => listSummaries(database, page),
     update: (id, patch) => updateCrawl(database, id, patch),
@@ -176,6 +177,28 @@ async function insertCrawl(
 async function getCrawl(database: BetterSQLite3Database, id: string): ReturnType<SiteCrawlRepository['get']> {
   const row = database.select().from(siteCrawl).where(eq(siteCrawl.id, id)).get();
   return row === undefined ? null : read(row);
+}
+
+/**
+ * Removes finished review metadata while retaining the job history and imported content.
+ * The active-job check and deletion share one transaction so retries cannot race the check.
+ * @param database the workspace connection
+ * @param id the crawl
+ * @returns whether the review entry existed
+ * @throws InvalidOperationError while its discovery job is active
+ */
+async function removeCrawl(database: BetterSQLite3Database, id: string): Promise<boolean> {
+  return database.transaction((transaction) => {
+    const existing = transaction.select({ id: siteCrawl.id }).from(siteCrawl).where(eq(siteCrawl.id, id)).get();
+    if (existing === undefined) return false;
+    const active = transaction
+      .select({ id: job.id })
+      .from(job)
+      .where(and(eq(job.id, id), eq(job.type, SITE_CRAWL_JOB), inArray(job.status, [...ACTIVE_JOB_STATUSES])))
+      .get();
+    if (active !== undefined) throw new InvalidOperationError('Cancel this extraction before removing it');
+    return transaction.delete(siteCrawl).where(eq(siteCrawl.id, id)).run().changes > 0;
+  });
 }
 
 /**

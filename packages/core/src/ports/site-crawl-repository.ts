@@ -27,6 +27,13 @@ export interface SiteCrawlRepository {
   insert(record: SiteCrawlRecord, queuedJob?: NewJob): Promise<void>;
   /** @param id the crawl and associated job id @returns saved state or null */
   get(id: string): Promise<SiteCrawlRecord | null>;
+  /**
+   * Removes only saved review/checkpoint metadata; jobs, downloads and files are preserved.
+   * @param id the crawl
+   * @returns whether saved metadata was removed
+   * @throws InvalidOperationError while its associated discovery job is active
+   */
+  remove(id: string): Promise<boolean>;
   /** @param page pagination @returns newest saved tasks first */
   list(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlRecord[]; total: number }>;
   /** @param page pagination @returns lightweight queue metadata without result/checkpoint arrays */

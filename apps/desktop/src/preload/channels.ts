@@ -104,6 +104,7 @@ export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'sites:openLogin': true,
   'sites:save': true,
   'sites:retryCrawl': true,
+  'sites:removeCrawl': true,
   'tags:rename': true,
   'tags:suggest': true,
   'tags:usage': true,

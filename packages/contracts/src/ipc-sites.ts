@@ -75,6 +75,11 @@ export const siteChannels = {
     request: z.object({ crawlId: IdSchema }),
     response: z.object({ retried: z.boolean() }),
   },
+  /** Removes finished extraction review metadata, preserving its downloads, files, profile and session. */
+  'sites:removeCrawl': {
+    request: z.object({ crawlId: IdSchema }),
+    response: z.object({ removed: z.boolean() }),
+  },
   /** The progress of the running crawl; null when none runs. */
   'sites:crawlProgress': {
     request: EmptyRequestSchema,
