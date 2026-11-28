@@ -52,7 +52,8 @@ export interface JobHost extends JobControl {
   paused(): { lane: string | null; reason: JobErrorCode; resourceClass: ResourceClass }[];
   /**
    * Ends the pause of one lane in the given queues only and lets the scheduler claim again. A provider entry id
-   * and a download host may be the same string, so a resume never reaches the queues of the other kind. Never throws.
+   * and a download host may be the same string, so a resume never reaches the queues of the other kind. The change
+   * counter rises only when the lane was paused in one of them. Never throws.
    */
   resume(lane: string | null, classes: readonly ResourceClass[]): void;
 }
@@ -224,21 +225,37 @@ class JobHostRunner {
   }
 
   /**
-   * Ends the pause of one lane in the given queues and lets the scheduler claim again. Never throws.
+   * Ends the pause of one lane in the given queues and lets the scheduler claim again. The change counter
+   * rises only when one of the queues had the lane paused. Never throws.
    *
    * @param lane the lane
    * @param classes the queues
    */
   resume(lane: string | null, classes: readonly ResourceClass[]): void {
+    let hasEnded = false;
     for (const resourceClass of classes) {
       try {
-        this.dependencies.pause.resume(resourceClass, lane);
+        hasEnded = this.resumeOne(resourceClass, lane) || hasEnded;
       } catch (cause) {
         console.error('The job pause could not be ended', cause);
       }
     }
-    this.changed();
+    if (hasEnded) this.changed();
     this.scheduler?.wake();
+  }
+
+  /**
+   * Ends the pause of one lane in one queue; the gate also forgets the failures counted towards a pause.
+   *
+   * @param resourceClass the queue
+   * @param lane the lane
+   * @returns whether the lane was paused there
+   */
+  private resumeOne(resourceClass: ResourceClass, lane: string | null): boolean {
+    const { pause } = this.dependencies;
+    const wasPaused = pause.paused(resourceClass).some((paused) => paused.lane === lane);
+    pause.resume(resourceClass, lane);
+    return wasPaused;
   }
 
   /**
