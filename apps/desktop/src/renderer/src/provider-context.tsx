@@ -22,6 +22,7 @@ import {
   type SaveProvider,
 } from '@assetforge/contracts';
 import { ApiError, call } from './api';
+import { onlyListed, upsert, without, withoutEntry } from './provider-list';
 
 /** The state of one provider entry as the selects and the settings show it. */
 export type ProviderStatus =
@@ -119,50 +120,6 @@ function failureOf(error: unknown): ModelsFailure {
 }
 
 /**
- * `list` with `view` in place of the entry of the same id, or added at the end.
- *
- * @param list the held list; null while none is held
- * @param view the saved entry
- * @returns the new list, null while none is held
- */
-function upsert(list: ProviderList | null, view: ProviderView): ProviderList | null {
-  if (list === null) return list;
-  const providers = list.providers.some((entry) => entry.id === view.id)
-    ? list.providers.map((entry) => (entry.id === view.id ? view : entry))
-    : [...list.providers, view];
-  return { ...list, providers };
-}
-
-/**
- * `record` without key `id`.
- *
- * @param record the record
- * @param id the key to drop
- * @returns the new record; the same object when it has no such key
- */
-function without<T>(record: Record<string, T>, id: string): Record<string, T> {
-  if (!(id in record)) return record;
-  const rest = { ...record };
-  delete rest[id];
-  return rest;
-}
-
-/**
- * `record` with only the keys in `ids`.
- *
- * @param record the record
- * @param ids the keys to keep
- * @returns the new record; the same object when every key is kept
- */
-function onlyListed<T>(record: Record<string, T>, ids: ReadonlySet<string>): Record<string, T> {
-  const dropped = Object.keys(record).filter((id) => !ids.has(id));
-  if (dropped.length === 0) return record;
-  const rest = { ...record };
-  for (const id of dropped) delete rest[id];
-  return rest;
-}
-
-/**
  * The purpose of entry `id`; an entry that is not listed counts as a vision entry.
  *
  * @param list the held list
@@ -172,22 +129,6 @@ function onlyListed<T>(record: Record<string, T>, ids: ReadonlySet<string>): Rec
 function purposeOfEntry(list: ProviderList | null | undefined, id: string): ProviderPurpose {
   const kind = list?.providers.find((entry) => entry.id === id)?.kind;
   return kind === undefined ? 'vision' : purposeOf(kind);
-}
-
-/**
- * `list` without entry `id`, and without it as the entry used last.
- *
- * @param list the held list
- * @param id the deleted entry
- * @returns the new list
- */
-function withoutEntry(list: ProviderList, id: string): ProviderList {
-  return {
-    ...list,
-    providers: list.providers.filter((entry) => entry.id !== id),
-    lastUsedId: list.lastUsedId === id ? null : list.lastUsedId,
-    lastUsedImageId: list.lastUsedImageId === id ? null : list.lastUsedImageId,
-  };
 }
 
 /**
