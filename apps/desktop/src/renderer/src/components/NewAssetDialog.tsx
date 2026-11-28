@@ -4,14 +4,25 @@ import { call, describeError } from '../api';
 import { ALERT, BUTTON, INPUT, SELECT } from '../ui';
 import { Dialog } from './Dialog';
 
+// The dialog that creates an asset.
+
 interface Props {
+  /** Shows the dialog. */
   open: boolean;
+  /** The asset types to choose from; the first is preselected. */
   types: readonly AssetType[];
+  /** Closes the dialog. */
   onClose(): void;
+  /** Receives the new asset's ID. */
   onCreated(id: string): void;
 }
 
-/** Creates an asset from a name and a type. */
+/**
+ * Creates an asset from a name and a type.
+ *
+ * @param props the open state, the types and the callbacks
+ * @returns the dialog
+ */
 export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [typeId, setTypeId] = useState('');
@@ -19,9 +30,10 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
-  const effectiveType = types.some((t) => t.id === typeId) ? typeId : (types[0]?.id ?? '');
+  const effectiveType = types.some((type) => type.id === typeId) ? typeId : (types[0]?.id ?? '');
   const trimmed = name.trim();
 
+  /** Clears the form and closes the dialog. */
   function close() {
     setName('');
     setTypeId('');
@@ -29,6 +41,7 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
     onClose();
   }
 
+  /** Creates the asset once at a time. */
   async function create(event: FormEvent) {
     event.preventDefault();
     if (creating || trimmed === '' || effectiveType === '') return;
@@ -37,8 +50,8 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
     try {
       const asset = await call('assets:create', { name: trimmed, typeId: effectiveType });
       onCreated(asset.id);
-    } catch (e) {
-      setError(describeError(e));
+    } catch (caught) {
+      setError(describeError(caught));
     } finally {
       setCreating(false);
     }
@@ -46,7 +59,7 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
 
   return (
     <Dialog open={open} title="New asset" initialFocusRef={nameRef} onClose={close}>
-      <form className="space-y-3" onSubmit={(e) => void create(e)}>
+      <form className="space-y-3" onSubmit={(event) => void create(event)}>
         {error !== null && (
           <p role="alert" className={ALERT}>
             {error}
@@ -59,17 +72,17 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
           maxLength={200}
           className={`w-full ${INPUT}`}
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(event) => setName(event.target.value)}
         />
         <select
           aria-label="Asset type"
           className={`w-full ${SELECT}`}
           value={effectiveType}
-          onChange={(e) => setTypeId(e.target.value)}
+          onChange={(event) => setTypeId(event.target.value)}
         >
-          {types.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          {types.map((type) => (
+            <option key={type.id} value={type.id}>
+              {type.name}
             </option>
           ))}
         </select>
