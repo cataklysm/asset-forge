@@ -1147,10 +1147,18 @@ class InMemoryAssetWorkflows implements AssetWorkflowRepository {
   readonly workflows = new Map<string, WorkflowRow>(); // by assetId
   readonly steps = new Map<string, StepRow>();
 
+  /** Wired by the database: whether an asset row exists, for the foreign key of `asset_id`. */
+  assetExists: (assetId: string) => boolean = () => true;
+
   constructor(private readonly templates: InMemoryWorkflowTemplates) {}
 
   async insert(w: WorkflowRow, steps: NewWorkflowStep[]): Promise<void> {
     if (this.workflows.has(w.assetId)) throw new Error('UNIQUE constraint failed: asset_workflow.asset_id');
+    if (!this.assetExists(w.assetId)) throw new Error('FOREIGN KEY constraint failed');
+    if (!this.templates.versions.has(w.templateVersionId)) throw new Error('FOREIGN KEY constraint failed');
+    if ([...this.steps.keys()].some((id) => steps.some((s) => s.id === id))) {
+      throw new Error('UNIQUE constraint failed: asset_workflow_step.id');
+    }
     for (const s of steps) {
       if (this.templates.definition(s.stepDefinitionId) === null) throw new Error('FOREIGN KEY constraint failed');
     }
@@ -1706,6 +1714,7 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     this.tags.proposals = this.proposals;
     this.fileOrigins.records = this.files.records;
     this.files.assetName = (assetId) => this.assets.rows.get(assetId)?.name ?? null;
+    this.assetWorkflows.assetExists = (assetId) => this.assets.rows.has(assetId);
     this.files.hasMove = (fileId) => this.fileMoves.rows.has(fileId);
     this.files.hasRunningGeneration = (fileId) =>
       this.jobs.rows.some((j) => j.fileId === fileId && j.type === IMAGE_GENERATE_JOB && j.status === 'running');
