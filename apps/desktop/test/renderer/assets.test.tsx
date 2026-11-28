@@ -552,6 +552,54 @@ it('New asset creates an asset in a dialog and opens it', async () => {
   expect(api.calls.find((c) => c.channel === 'assets:create')?.request).toEqual({ name: 'Birch', typeId: TYPE.id });
 });
 
+it('New asset loads the asset types again when their load failed', async () => {
+  const user = userEvent.setup();
+  let failing = true;
+  const api = install({
+    'assets:list': listOf([]),
+    'assetTypes:list': () => {
+      if (failing) throw fakeError('invalid_operation');
+      return [TYPE];
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('No assets');
+  await screen.findByRole('alert');
+  failing = false;
+  await user.click(screen.getByRole('button', { name: /New asset/ }));
+  const dialog = document.querySelector('dialog')!;
+  const select = within(dialog).getByRole('combobox', { name: 'Asset type' }) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(TYPE.id));
+  expect(api.calls.filter((c) => c.channel === 'assetTypes:list')).toHaveLength(2);
+});
+
+it('the New asset dialog names a failed load of the asset types and retries it', async () => {
+  const user = userEvent.setup();
+  let failures = 2;
+  install({
+    'assets:list': listOf([]),
+    'assetTypes:list': () => {
+      if (failures > 0) {
+        failures -= 1;
+        throw fakeError('invalid_operation');
+      }
+      return [TYPE];
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('No assets');
+  await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', { name: /New asset/ }));
+  const dialog = document.querySelector('dialog')!;
+  await waitFor(() => expect(failures).toBe(0));
+  expect((await within(dialog).findByRole('alert')).textContent).toBe('invalid_operation');
+  expect((within(dialog).getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(within(dialog).getByRole('button', { name: 'Retry' }));
+  const select = within(dialog).getByRole('combobox', { name: 'Asset type' }) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(TYPE.id));
+  expect(within(dialog).queryByRole('alert')).toBeNull();
+});
+
 it('a failed create shows the error in the dialog and Cancel returns focus', async () => {
   const user = userEvent.setup();
   install({
