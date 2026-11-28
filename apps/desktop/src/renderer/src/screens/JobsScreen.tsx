@@ -5,7 +5,6 @@ import { FilterBar } from '../components/FilterBar';
 import { JobTable, type JobTableProps } from '../components/JobTable';
 import { MoveJobsDialog } from '../components/MoveJobsDialog';
 import { Page } from '../components/Page';
-import { pagesForRows } from '../gallery';
 import { usePagedList } from '../hooks/usePagedList';
 import type { ViewHandle, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { useChanges, useJobs } from '../jobs-context';
@@ -19,6 +18,7 @@ import {
 } from '../labels';
 import { useProviders } from '../provider-context';
 import { loadedIds, type PagedState } from '../paged-list';
+import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
 import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
 
 /** The statuses of the status filter. */
@@ -35,8 +35,6 @@ type ProviderEntry = ProviderList['providers'][number];
 type PagedJobs = ReturnType<typeof usePagedList<JobView>>;
 /** The filter of `jobs:list` without paging. */
 type ListRequest = { status?: JobStatus; providerId?: string };
-/** The visible rows of the displayed table. */
-type ShownRows = VisibleRows & { viewKey: string };
 
 /** The newest list state the change listener reads. */
 interface LatestList {
@@ -93,21 +91,6 @@ function applyChanges(latest: MutableRefObject<LatestList>, changes: Changes): v
     // The change must not be lost: the loaded pages are read again instead.
     () => latest.current.paged.refresh(),
   );
-}
-
-/**
- * The pages the table wants: page 0 until the total is known, then the pages of the visible rows of
- * the displayed table (none while another table is about to mount).
- *
- * @param total the total; null while unknown
- * @param rows the visible rows; null before the first report
- * @param viewKey the key of the displayed list
- * @returns the page numbers
- */
-function wantedPages(total: number | null, rows: ShownRows | null, viewKey: string): number[] {
-  if (total === null) return [0];
-  if (rows === null || rows.viewKey !== viewKey) return [];
-  return pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total);
 }
 
 /** What a screen action works with. */
@@ -308,7 +291,7 @@ export function JobsScreen() {
  */
 function jobsBody(state: PagedState<JobView>, table: Omit<JobTableProps, 'total'>) {
   const total = state.total;
-  const failedPage = total === null ? ([...state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
+  const failedPage = failedFirstPage(state);
   if (failedPage !== null) {
     return (
       <div>
