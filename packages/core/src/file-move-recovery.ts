@@ -1,3 +1,4 @@
+import { StorageUnreachableError } from './errors.js';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
 
@@ -42,11 +43,13 @@ export async function recoverFileMoves(
 }
 
 /**
- * The recovery rule for one move row: commit when the target exists and the source is gone, else abort.
+ * The recovery rule for one move row: commit when the target exists and the source is gone, else abort while the
+ * storage is reachable.
  *
  * @param dependencies the storage, the files and the move rows of the workspace
  * @param move the open move row
  * @returns how the row was resolved
+ * @throws StorageUnreachableError when the storage cannot be reached before an abort; the row then stays
  */
 async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: FileMove): Promise<MoveResolution> {
   const file = await dependencies.files.get(move.fileId);
@@ -57,6 +60,10 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
   if (isMoved) {
     await dependencies.fileMoves.commit(move.fileId);
     return 'completed';
+  }
+  // A share that dropped during the checks answers "missing"; never take that for a move that did not happen.
+  if (!(await dependencies.storage.isReachable())) {
+    throw new StorageUnreachableError('The storage of this workspace is not reachable');
   }
   await dependencies.fileMoves.abort(move.fileId);
   return 'discarded';
