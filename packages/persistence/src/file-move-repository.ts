@@ -132,13 +132,13 @@ async function commitMove(database: BetterSQLite3Database, fileId: string): Prom
     if (!current) throw new NotFoundError(`File ${fileId} does not exist`);
     // A refused commit keeps the journal row and the file row as they are.
     refuseAgainstTrash(move.kind, current.deletedAt !== null);
+    // The row was read in this transaction just above, so the update always returns it.
     const row = transaction
       .update(file)
       .set({ relativePath: move.targetRelativePath, ...placementOf(move, current) })
       .where(eq(file.id, fileId))
       .returning()
-      .get();
-    if (!row) throw new NotFoundError(`File ${fileId} does not exist`);
+      .get()!;
     // A trashed file is in no asset, so every chosen cover pointing at it is cleared; a restore
     // never makes it a chosen cover again.
     clearCoverOutside(transaction, fileId, row.assetId);
