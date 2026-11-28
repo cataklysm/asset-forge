@@ -271,6 +271,41 @@ it('Analyse all starts the current asset filter and shows the outcome', async ()
   expect(within(await screen.findByRole('status')).getByText('3 queued')).toBeTruthy();
 });
 
+it('Analyse all carries every gallery filter into the asset filter target', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'assets:list': listOf(many(2)), ...ANALYSIS });
+  const filters = {
+    typeId: TYPE.id,
+    status: 'in_review' as const,
+    projectId: 'project-1',
+    query: '  oak  ',
+    tagNames: ['oak'],
+    fileRole: 'reference' as const,
+    fileKind: 'image' as const,
+  };
+  renderWithProvider({ ...INITIAL, filters });
+  await screen.findByText('Asset 0');
+  await user.click(screen.getByRole('button', { name: 'Analyse all' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(api.calls.some((c) => c.channel === 'analysis:preview')).toBe(true));
+  expect(api.calls.find((c) => c.channel === 'analysis:preview')?.request).toEqual({
+    target: {
+      kind: 'assetFilter',
+      filter: {
+        typeId: TYPE.id,
+        status: 'in_review',
+        projectId: 'project-1',
+        query: 'oak',
+        tagNames: ['oak'],
+        fileRole: 'reference',
+        fileKind: 'image',
+      },
+    },
+    model: 'vision-a',
+    providerId: PROVIDER.id,
+  });
+});
+
 it('Analyse in the Selection column starts the selected asset', async () => {
   const user = userEvent.setup();
   const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
