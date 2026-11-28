@@ -159,19 +159,39 @@ export function WorkspaceShell(props: Props) {
 
 /** What the navigation of the frame changes after the leave guard agreed. */
 interface LeaveTarget {
+  /** The view shown now. */
+  current: View;
   confirmLeave(): Promise<boolean>;
   setError(error: string | null): void;
   setView(view: View): void;
 }
 
 /**
- * Shows another view once the leave guard agreed, dropping the shown error.
+ * Whether two views show the same screen with the same item.
  *
- * @param target the guard and the setters of the frame
+ * @param first one view
+ * @param second the other view
+ * @returns true when both have the same name and item id
+ */
+function sameView(first: View, second: View): boolean {
+  const firstId = 'id' in first ? first.id : undefined;
+  const secondId = 'id' in second ? second.id : undefined;
+  return first.name === second.name && firstId === secondId;
+}
+
+/**
+ * Shows another view once the leave guard agreed, dropping the shown error. The view shown already stays
+ * without asking, since nothing would be left.
+ *
+ * @param target the current view, the guard and the setters of the frame
  * @param view the view to show
- * @returns true when the view was shown, false when the guard held it back
+ * @returns true when the view is shown, false when the guard held it back
  */
 async function leaveTo(target: LeaveTarget, view: View): Promise<boolean> {
+  if (sameView(target.current, view)) {
+    target.setError(null);
+    return true;
+  }
   if (!(await target.confirmLeave())) return false;
   target.setError(null);
   target.setView(view);
@@ -185,7 +205,7 @@ async function leaveTo(target: LeaveTarget, view: View): Promise<boolean> {
  * @param onClosed called after the workspace was closed
  * @returns resolves when done; never rejects
  */
-async function closeWorkspace(target: Omit<LeaveTarget, 'setView'>, onClosed: () => void): Promise<void> {
+async function closeWorkspace(target: Omit<LeaveTarget, 'current' | 'setView'>, onClosed: () => void): Promise<void> {
   if (!(await target.confirmLeave())) return;
   try {
     await call('workspace:close', {});
@@ -305,12 +325,12 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   }
 
   const openPrompt = useCallback(
-    (id: string) => leaveTo({ confirmLeave, setError, setView }, { name: 'prompts', id }),
-    [confirmLeave],
+    (id: string) => leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'prompts', id }),
+    [confirmLeave, view],
   );
   const openSettings = useCallback(
-    () => void leaveTo({ confirmLeave, setError, setView }, { name: 'settings' }),
-    [confirmLeave],
+    () => void leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'settings' }),
+    [confirmLeave, view],
   );
 
   return (
@@ -320,7 +340,9 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         rootPath={workspace.rootPath}
         section={sectionOf(view)}
         busy={busy}
-        onNavigate={(section) => void leaveTo({ confirmLeave, setError, setView }, viewOfSection(section))}
+        onNavigate={(section) =>
+          void leaveTo({ current: view, confirmLeave, setError, setView }, viewOfSection(section))
+        }
         onClose={() => void closeWorkspace({ confirmLeave, setError }, onClosed)}
       >
         {/* The screens bring their own padding. */}
