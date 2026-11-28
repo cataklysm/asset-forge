@@ -6,6 +6,8 @@ import {
   OPEN_WORKSPACE_BUTTON,
   REMOVE_WORKSPACE_LABEL,
   REMOVE_WORKSPACE_TITLE,
+  RESTORE_BACKUP_LABEL,
+  RESTORE_BACKUP_TITLE,
   WORKSPACE_LAST_OPENED_COLUMN,
   WORKSPACE_LOCATION_COLUMN,
   WORKSPACE_NAME_COLUMN,
@@ -21,6 +23,8 @@ interface Props {
   busy: boolean;
   onOpen(workspace: WorkspaceSummary): void;
   onRemove(workspace: WorkspaceSummary): void;
+  /** Opens the restore dialog for the workspace. */
+  onRestore(workspace: WorkspaceSummary): void;
 }
 
 /** Selects the Open buttons of the rows, so the screen can move the focus to a neighbour after a removal. */
@@ -32,7 +36,7 @@ export const WORKSPACE_OPEN_SELECTOR = '[data-workspace-open]';
  * @param props the workspaces, the busy flag and the callbacks
  * @returns the table
  */
-export function WorkspaceTable({ sorted, busy, onOpen, onRemove }: Props) {
+export function WorkspaceTable({ sorted, busy, ...callbacks }: Props) {
   const headerCell = `px-3 py-2 text-left text-sm font-normal ${MUTED}`;
   return (
     <table className={`w-full border-collapse rounded-control border ${BORDER}`}>
@@ -56,7 +60,7 @@ export function WorkspaceTable({ sorted, busy, onOpen, onRemove }: Props) {
         {sorted === null
           ? [0, 1, 2].map((index) => <SkeletonRow key={index} />)
           : sorted.map((workspace) => (
-              <WorkspaceRow key={workspace.id} workspace={workspace} busy={busy} onOpen={onOpen} onRemove={onRemove} />
+              <WorkspaceRow key={workspace.id} workspace={workspace} busy={busy} {...callbacks} />
             ))}
       </tbody>
     </table>
@@ -86,7 +90,7 @@ function SkeletonRow() {
  * @param props the workspace, the busy flag and the callbacks
  * @returns the row
  */
-function WorkspaceRow({ workspace, busy, onOpen, onRemove }: { workspace: WorkspaceSummary } & Omit<Props, 'sorted'>) {
+function WorkspaceRow({ workspace, ...actions }: { workspace: WorkspaceSummary } & Omit<Props, 'sorted'>) {
   return (
     <tr className={`border-b last:border-b-0 ${BORDER}`}>
       <td className="px-3 py-3">
@@ -100,14 +104,14 @@ function WorkspaceRow({ workspace, busy, onOpen, onRemove }: { workspace: Worksp
       </td>
       <td className={`whitespace-nowrap px-3 py-3 ${MUTED}`}>{formatDateTime(workspace.lastOpenedAt)}</td>
       <td className="px-3 py-2">
-        <WorkspaceActions workspace={workspace} busy={busy} onOpen={onOpen} onRemove={onRemove} />
+        <WorkspaceActions workspace={workspace} {...actions} />
       </td>
     </tr>
   );
 }
 
 /**
- * The Open button and the Remove menu of one row.
+ * The Open button and the menu with Restore backup and Remove of one row.
  *
  * @param props the workspace, the busy flag and the callbacks
  * @returns the actions
@@ -117,6 +121,7 @@ function WorkspaceActions({
   busy,
   onOpen,
   onRemove,
+  onRestore,
 }: { workspace: WorkspaceSummary } & Omit<Props, 'sorted'>) {
   return (
     <div className="flex items-center justify-end gap-2">
@@ -133,6 +138,12 @@ function WorkspaceActions({
       <Menu
         label={workspaceActionsLabel(workspace.name)}
         items={[
+          {
+            label: RESTORE_BACKUP_LABEL,
+            disabled: busy,
+            title: RESTORE_BACKUP_TITLE,
+            onSelect: () => onRestore(workspace),
+          },
           {
             label: REMOVE_WORKSPACE_LABEL,
             disabled: busy,

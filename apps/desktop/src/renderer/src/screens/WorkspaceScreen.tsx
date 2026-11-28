@@ -1,12 +1,14 @@
 import { FolderOpen, Plus } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
-import { call, describeError } from '../api';
+import { ApiError, call, describeError } from '../api';
 import { Page } from '../components/Page';
 import { useCreatePathPreview } from '../hooks/useCreatePathPreview';
 import { APP_NAME, NEW_WORKSPACE_LABEL, OPEN_FOLDER_LABEL, WORKSPACES_TITLE, workspaceCount } from '../labels';
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE } from '../ui';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
+import { RestoreDialog } from './RestoreDialog';
+import type { RestoreTarget } from './restore-listing';
 import { WORKSPACE_OPEN_SELECTOR, WorkspaceTable } from './WorkspaceTable';
 
 /** The props of `WorkspaceScreen`. */
@@ -40,14 +42,31 @@ function focusNeighbour(scope: HTMLElement | null, index: number, fallback: HTML
   (buttons[Math.min(index, buttons.length - 1)] ?? fallback)?.focus();
 }
 
+/** The workspace the restore dialog is shown for. */
+interface Restoring {
+  target: RestoreTarget;
+  rootPath: string;
+  databaseExists: boolean;
+}
+
 /**
- * Opens a workspace by its directory.
+ * Opens a workspace by its directory; a missing database offers the restore instead of an error.
  *
  * @param rootPath the workspace directory
- * @returns the opened workspace
+ * @param offerRestore shows the restore dialog for the folder
+ * @returns the opened workspace, or null when the restore dialog was offered
  */
-function openPath(rootPath: string): Promise<WorkspaceSummary> {
-  return call('workspace:open', { rootPath });
+async function openPath(
+  rootPath: string,
+  offerRestore: (restoring: Restoring) => void,
+): Promise<WorkspaceSummary | null> {
+  try {
+    return await call('workspace:open', { rootPath });
+  } catch (failure) {
+    if (!(failure instanceof ApiError) || failure.code !== 'workspace_database_missing') throw failure;
+    offerRestore({ target: { rootPath }, rootPath, databaseExists: false });
+    return null;
+  }
 }
 
 /**
@@ -63,6 +82,7 @@ export function WorkspaceScreen({ onOpened }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [restoring, setRestoring] = useState<Restoring | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const newWorkspaceRef = useRef<HTMLButtonElement>(null);
@@ -145,7 +165,7 @@ export function WorkspaceScreen({ onOpened }: Props) {
   const openExisting = () =>
     run(async () => {
       const rootPath = await call('dialog:pickDirectory', {});
-      return rootPath === null ? null : openPath(rootPath);
+      return rootPath === null ? null : openPath(rootPath, setRestoring);
     });
 
   function cancelCreate() {
@@ -193,8 +213,11 @@ export function WorkspaceScreen({ onOpened }: Props) {
           <WorkspaceTable
             sorted={sorted}
             busy={busy}
-            onOpen={(workspace) => void run(() => openPath(workspace.rootPath))}
+            onOpen={(workspace) => void run(() => openPath(workspace.rootPath, setRestoring))}
             onRemove={(workspace) => void remove(workspace)}
+            onRestore={(workspace) =>
+              setRestoring({ target: { id: workspace.id }, rootPath: workspace.rootPath, databaseExists: true })
+            }
           />
           {sorted !== null && <p className={`mt-3 text-sm ${MUTED}`}>{workspaceCount(count)}</p>}
         </Page>
@@ -214,6 +237,19 @@ export function WorkspaceScreen({ onOpened }: Props) {
         onChooseParent={() => void chooseParent()}
         onCancel={cancelCreate}
       />
+      {restoring !== null && (
+        <RestoreDialog
+          open
+          target={restoring.target}
+          rootPath={restoring.rootPath}
+          databaseExists={restoring.databaseExists}
+          onRestored={(summary) => {
+            setRestoring(null);
+            onOpened(summary);
+          }}
+          onClose={() => setRestoring(null)}
+        />
+      )}
     </div>
   );
 }
