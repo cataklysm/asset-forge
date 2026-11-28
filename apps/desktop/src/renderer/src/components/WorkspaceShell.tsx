@@ -1,7 +1,7 @@
 import { useCallback, useState, type ComponentProps, type ReactNode } from 'react';
 import type { PausedHost, PausedProvider, WorkspaceSummary } from '@assetforge/contracts';
 import { call, describeError } from '../api';
-import { backupFailureOf, useBackupState } from '../hooks/useBackupState';
+import { BackupStateContext, backupFailureOf, useBackupState } from '../hooks/useBackupState';
 import { useCheckHosts } from '../hooks/useCheckHosts';
 import { useShellState } from '../hooks/useShellState';
 import { JobsProvider, useJobs } from '../jobs-context';
@@ -169,9 +169,9 @@ export interface LeaveTarget {
 }
 
 /**
- * Whether a navigation leaves the shown screen alone: it names no item and goes to the screen shown already.
- * A navigation with an item always goes through, since the screen may have moved to another item itself
- * (the Prompts screen keeps its selection to itself).
+ * Whether a navigation leaves the shown screen alone: it names no item or section and goes to the screen shown
+ * already. A navigation with an item always goes through, since the screen may have moved to another item itself
+ * (the Prompts screen keeps its selection to itself), and so does one with a section, which is brought into view.
  *
  * @param current the view shown now
  * @param view the view to show
@@ -179,7 +179,8 @@ export interface LeaveTarget {
  */
 function staysOnView(current: View, view: View): boolean {
   const id = 'id' in view ? view.id : undefined;
-  return id === undefined && current.name === view.name;
+  const section = 'section' in view ? view.section : undefined;
+  return id === undefined && section === undefined && current.name === view.name;
 }
 
 /**
@@ -305,7 +306,8 @@ function screenFor(
     case 'extractions':
       return <ExtractionsScreen onOpenJobs={() => setView({ name: 'jobs' })} />;
     case 'settings':
-      return <SettingsScreen />;
+      // The screen stays mounted, so unsaved provider edits survive; the token brings the Backup section into view.
+      return <SettingsScreen focusBackup={view.section === 'backup' ? visit : null} />;
     default:
       return (
         <ProjectsScreen
@@ -334,7 +336,7 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
   // The inbox reports a running import so closing cannot interrupt the batch.
   const [busy, setBusy] = useState(false);
   const shell = useShellState();
-  const backupFailure = backupFailureOf(useBackupState(true), workspace.id);
+  const backupState = useBackupState(true);
 
   function showAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames' | 'tagLabels'>) {
     shell.setAssetList({
@@ -354,6 +356,8 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
     () => void leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'settings' }),
     [confirmLeave, view, setView],
   );
+  const openBackupSettings = () =>
+    void leaveTo({ current: view, confirmLeave, setError, setView }, { name: 'settings', section: 'backup' });
 
   return (
     <WorkspaceProviders onRenamed={shell.renameInShell}>
@@ -362,7 +366,8 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         rootPath={workspace.rootPath}
         section={sectionOf(view)}
         busy={busy}
-        backupFailure={backupFailure}
+        backupFailure={backupFailureOf(backupState, workspace.id)}
+        onOpenBackupSettings={openBackupSettings}
         onNavigate={(section) =>
           void leaveTo({ current: view, confirmLeave, setError, setView }, viewOfSection(section))
         }
@@ -372,12 +377,14 @@ function WorkspaceFrame({ workspace, onClosed }: Props) {
         {/* A running import keeps the screen, as it does for the navigation: Settings is disabled. */}
         <OpenSettingsProvider onOpenSettings={openSettings} blocked={busy ? BUSY_TITLE : null}>
           <StudioProvider onOpenPrompt={openPrompt}>
-            {error !== null && (
-              <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
-                {error}
-              </p>
-            )}
-            {screenFor(view, { shell, busy, setBusy, setView, showAssets, visit: shown.visit })}
+            <BackupStateContext.Provider value={backupState}>
+              {error !== null && (
+                <p role="alert" className={`mx-6 mt-6 ${ALERT}`}>
+                  {error}
+                </p>
+              )}
+              {screenFor(view, { shell, busy, setBusy, setView, showAssets, visit: shown.visit })}
+            </BackupStateContext.Provider>
           </StudioProvider>
         </OpenSettingsProvider>
       </JobsAppShell>

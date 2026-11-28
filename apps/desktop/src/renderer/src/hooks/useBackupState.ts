@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useEffect, useState } from 'react';
 import { BACKUP_MESSAGES, type BackupAttempt, type BackupState } from '@assetforge/contracts';
 import { call } from '../api';
 import { startPolling } from '../poller';
@@ -13,6 +13,20 @@ export const BACKUP_STATE_POLL_MS = 5000;
  */
 function requestState(): Promise<BackupState> {
   return call('backup:state', {}, { reportUnreachable: false });
+}
+
+/** The backup state the shell polls, for the screens that follow it; null outside a shell or before the first answer. */
+export const BackupStateContext = createContext<BackupState | null>(null);
+
+/**
+ * What of the polled state makes the backup status worth reading again: a backup starting or ending, or a new
+ * last attempt.
+ *
+ * @param state the polled state, or null
+ * @returns a text that changes with them, or null without a state
+ */
+export function backupStateSignal(state: BackupState | null): string | null {
+  return state === null ? null : `${state.running}|${state.last?.at ?? ''}`;
 }
 
 /** One running poll of the backup state. */

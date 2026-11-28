@@ -8,7 +8,7 @@ import { APP_NAME, NEW_WORKSPACE_LABEL, OPEN_FOLDER_LABEL, WORKSPACES_TITLE, wor
 import { ALERT, BORDER, BUTTON, MUTED, PAGE_TITLE } from '../ui';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { RestoreDialog } from './RestoreDialog';
-import type { RestoreTarget } from './restore-listing';
+import { targetKey, type RestoreTarget } from './restore-listing';
 import { WORKSPACE_OPEN_SELECTOR, WorkspaceTable } from './WorkspaceTable';
 
 /** The props of `WorkspaceScreen`. */
@@ -239,6 +239,7 @@ export function WorkspaceScreen({ onOpened }: Props) {
       />
       {restoring !== null && (
         <RestoreDialog
+          key={targetKey(restoring.target)}
           open
           target={restoring.target}
           rootPath={restoring.rootPath}

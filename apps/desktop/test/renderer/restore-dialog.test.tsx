@@ -301,8 +301,16 @@ it('an unreachable place shows the alert above the list and Choose folder stays 
   expect(screen.getByRole('button', { name: 'Choose folder…' }).hasAttribute('disabled')).toBe(false);
 });
 
-it('while the list loads every button is disabled; a failed load shows its message', async () => {
-  const loading = deferred<{ backups: BackupEntry[]; unreachable: boolean }>();
+type Listing = { backups: BackupEntry[]; unreachable: boolean };
+
+function isDisabled(name: string) {
+  return within(screen.getByRole('dialog', { name: 'Restore backup' }))
+    .getByRole('button', { name })
+    .hasAttribute('disabled');
+}
+
+it('while the list loads Restore and Choose folder wait; Cancel stays usable and has the focus', async () => {
+  const loading = deferred<Listing>();
   installFakeApi({ 'workspace:backups': () => loading.promise });
   render(
     <RestoreDialog
@@ -314,11 +322,309 @@ it('while the list loads every button is disabled; a failed load shows its messa
       onClose={() => {}}
     />,
   );
-  for (const name of ['Restore', 'Choose folder…', 'Start empty', 'Cancel'])
-    expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
-  loading.reject(fakeError('workspace_not_found', 'No workspace'));
-  expect(await screen.findByRole('alert')).toBeTruthy();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false));
+  expect(isDisabled('Restore')).toBe(true);
+  expect(isDisabled('Choose folder…')).toBe(true);
+  expect(isDisabled('Start empty')).toBe(false);
+  expect(isDisabled('Cancel')).toBe(false);
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+  loading.resolve({ backups: [NEWEST], unreachable: false });
+  await waitFor(() => expect(isDisabled('Restore')).toBe(false));
+});
+
+it('a failed first listing shows its message with Retry, which lists again', async () => {
+  const user = userEvent.setup();
+  let fail = true;
+  const api = installFakeApi({
+    'workspace:backups': () => {
+      if (fail) throw fakeError('workspace_not_found', 'No workspace');
+      return { backups: [NEWEST], unreachable: false };
+    },
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ rootPath: WORKSPACE.rootPath }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists={false}
+      onRestored={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect((await screen.findByRole('alert')).textContent).toBe('No workspace');
+  fail = false;
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findAllByRole('radio')).toHaveLength(1);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(channelCalls(api, 'workspace:backups')).toEqual([
+    { rootPath: WORKSPACE.rootPath },
+    { rootPath: WORKSPACE.rootPath },
+  ]);
+});
+
+it('Cancel and Esc close the dialog while a listing hangs, and the late answer changes nothing', async () => {
+  const user = userEvent.setup();
+  const hanging: ReturnType<typeof deferred<Listing>>[] = [];
+  const onOpened = vi.fn();
+  installFakeApi({
+    'workspace:list': () => [WORKSPACE],
+    'workspace:open': () => {
+      throw fakeError('workspace_database_missing', DATABASE_MISSING_MESSAGE);
+    },
+    'workspace:backups': () => {
+      const next = deferred<Listing>();
+      hanging.push(next);
+      return next.promise;
+    },
+  });
+  render(<WorkspaceScreen onOpened={onOpened} />);
+  const openButton = await screen.findByRole('button', { name: 'Open workspace Studio' });
+
+  await user.click(openButton);
+  await screen.findByRole('dialog', { name: 'Restore backup' });
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore backup' })).toBeNull());
+
+  await user.click(openButton);
+  await screen.findByRole('dialog', { name: 'Restore backup' });
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore backup' })).toBeNull());
+
+  for (const pending of hanging) pending.resolve({ backups: [NEWEST], unreachable: false });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(screen.queryByRole('dialog', { name: 'Restore backup' })).toBeNull();
+  expect(screen.queryByRole('radio')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(onOpened).not.toHaveBeenCalled();
+});
+
+it('a hanging Choose folder does not hold Cancel back', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const picking = deferred<Listing>();
+  installFakeApi({
+    'workspace:backups': (request) =>
+      request.pickFolder === true ? picking.promise : { backups: [NEWEST], unreachable: false },
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ id: WORKSPACE.id }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists
+      onRestored={() => {}}
+      onClose={onClose}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
+  expect(isDisabled('Restore')).toBe(true);
+  expect(isDisabled('Cancel')).toBe(false);
+  await user.keyboard('{Escape}');
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('while a restore runs Cancel and Esc are held back', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  const restoring = deferred<WorkspaceSummary>();
+  installFakeApi({
+    'workspace:backups': () => ({ backups: [NEWEST], unreachable: false }),
+    'workspace:restore': () => restoring.promise,
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ rootPath: WORKSPACE.rootPath }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists={false}
+      onRestored={() => {}}
+      onClose={onClose}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.click(restoreButton());
+  await waitFor(() => expect(isDisabled('Cancel')).toBe(true));
+  expect(isDisabled('Start empty')).toBe(true);
+  await user.keyboard('{Escape}');
+  expect(onClose).not.toHaveBeenCalled();
+  restoring.resolve(WORKSPACE);
+});
+
+it('a double click on Restore sends one restore', async () => {
+  const user = userEvent.setup();
+  const restoring = deferred<WorkspaceSummary>();
+  const api = installFakeApi({
+    'workspace:backups': () => ({ backups: [NEWEST], unreachable: false }),
+    'workspace:restore': () => restoring.promise,
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ rootPath: WORKSPACE.rootPath }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists={false}
+      onRestored={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.dblClick(restoreButton());
+  restoring.resolve(WORKSPACE);
+  await waitFor(() => expect(isDisabled('Cancel')).toBe(false));
+  expect(channelCalls(api, 'workspace:restore')).toHaveLength(1);
+});
+
+it('a stale refusal on a picked list keeps that list and waits for the folder to be chosen again', async () => {
+  const user = userEvent.setup();
+  const picked = backup('2026-10-01T09:00:00.000Z');
+  const again = backup('2026-10-02T09:00:00.000Z');
+  let pickedListing = [picked];
+  const api = installFakeApi({
+    'workspace:backups': (request) =>
+      request.pickFolder === true
+        ? { backups: pickedListing, unreachable: false }
+        : { backups: [NEWEST], unreachable: false },
+    'workspace:restore': (request) => {
+      if (request.backupId === picked.backupId) throw fakeError('invalid_operation', BACKUP_STALE_MESSAGE);
+      return WORKSPACE;
+    },
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ rootPath: WORKSPACE.rootPath }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists={false}
+      onRestored={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
+  await screen.findByText(new Date(picked.createdAt).toLocaleString());
+  await waitFor(() => expect(isDisabled('Restore')).toBe(false));
+  await user.click(restoreButton());
+
+  expect((await screen.findByRole('alert')).textContent).toBe(BACKUP_STALE_MESSAGE);
+  expect(screen.getAllByRole('radio')).toHaveLength(1);
+  expect(screen.getByText(new Date(picked.createdAt).toLocaleString())).toBeTruthy();
+  expect(isDisabled('Restore')).toBe(true);
+  expect(channelCalls(api, 'workspace:backups')).toHaveLength(2);
+
+  pickedListing = [again];
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
+  await screen.findByText(new Date(again.createdAt).toLocaleString());
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(isDisabled('Restore')).toBe(false);
+});
+
+it('a changed target never shows the listing of the previous one', async () => {
+  const other = backup('2026-09-01T09:00:00.000Z');
+  const second = deferred<Listing>();
+  installFakeApi({
+    'workspace:backups': (request) => ('id' in request ? second.promise : { backups: [NEWEST], unreachable: false }),
+  });
+  const props = { open: true, rootPath: WORKSPACE.rootPath, databaseExists: true, onRestored() {}, onClose() {} };
+  const { rerender } = render(<RestoreDialog {...props} target={{ rootPath: WORKSPACE.rootPath }} />);
+  await screen.findAllByRole('radio');
+  rerender(<RestoreDialog {...props} target={{ id: WORKSPACE.id }} />);
+  expect(screen.queryByRole('radio')).toBeNull();
+  expect(isDisabled('Restore')).toBe(true);
+  second.resolve({ backups: [other], unreachable: false });
+  await screen.findByText(new Date(other.createdAt).toLocaleString());
+});
+
+it('missing database: Restore and Start empty through the workspace screen open the workspace', async () => {
+  const user = userEvent.setup();
+  const onOpened = vi.fn();
+  let missing = true;
+  const api = installFakeApi({
+    'workspace:list': () => [WORKSPACE],
+    'workspace:open': (request) => {
+      if (missing && request.startEmpty !== true)
+        throw fakeError('workspace_database_missing', DATABASE_MISSING_MESSAGE);
+      return WORKSPACE;
+    },
+    'workspace:backups': () => ({ backups: [NEWEST], unreachable: false }),
+    'workspace:restore': () => WORKSPACE,
+  });
+  render(<WorkspaceScreen onOpened={onOpened} />);
+  const openButton = await screen.findByRole('button', { name: 'Open workspace Studio' });
+
+  await user.click(openButton);
+  await screen.findAllByRole('radio');
+  await user.click(restoreButton());
+  await waitFor(() => expect(onOpened).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole('dialog', { name: 'Restore backup' })).toBeNull();
+  expect(channelCalls(api, 'workspace:restore')).toEqual([{ rootPath: WORKSPACE.rootPath, backupId: NEWEST.backupId }]);
+
+  await user.click(openButton);
+  await screen.findAllByRole('radio');
+  await user.click(screen.getByRole('button', { name: 'Start empty' }));
+  const confirm = await screen.findByRole('dialog', { name: 'Start with an empty catalog?' });
+  await user.click(within(confirm).getByRole('button', { name: 'Start empty' }));
+  await waitFor(() => expect(onOpened).toHaveBeenCalledTimes(2));
+  expect(onOpened).toHaveBeenLastCalledWith(WORKSPACE);
+  expect(channelCalls(api, 'workspace:open').at(-1)).toEqual({ rootPath: WORKSPACE.rootPath, startEmpty: true });
+  missing = false;
+});
+
+it('a refused Start empty closes the confirmation, shows the message and frees the buttons', async () => {
+  const user = userEvent.setup();
+  const onRestored = vi.fn();
+  installFakeApi({
+    'workspace:backups': () => ({ backups: [NEWEST], unreachable: false }),
+    'workspace:open': () => {
+      throw fakeError('invalid_operation', 'The workspace could not be started');
+    },
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ rootPath: WORKSPACE.rootPath }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists={false}
+      onRestored={onRestored}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.click(screen.getByRole('button', { name: 'Start empty' }));
+  const confirm = await screen.findByRole('dialog', { name: 'Start with an empty catalog?' });
+  await user.click(within(confirm).getByRole('button', { name: 'Start empty' }));
+
+  expect((await screen.findByRole('alert')).textContent).toBe('The workspace could not be started');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Start with an empty catalog?' })).toBeNull());
+  for (const name of ['Restore', 'Choose folder…', 'Start empty', 'Cancel']) expect(isDisabled(name)).toBe(false);
+  expect(onRestored).not.toHaveBeenCalled();
+});
+
+it('a refused confirmed Restore closes the confirmation, shows the message and frees the buttons', async () => {
+  const user = userEvent.setup();
+  installFakeApi({
+    'workspace:backups': () => ({ backups: [NEWEST], unreachable: false }),
+    'workspace:restore': () => {
+      throw fakeError('validation_failed', 'This backup is damaged');
+    },
+  });
+  render(
+    <RestoreDialog
+      open
+      target={{ id: WORKSPACE.id }}
+      rootPath={WORKSPACE.rootPath}
+      databaseExists
+      onRestored={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findAllByRole('radio');
+  await user.click(restoreButton());
+  const confirm = await screen.findByRole('dialog', { name: 'Restore this backup?' });
+  await user.click(within(confirm).getByRole('button', { name: 'Restore' }));
+
+  expect((await screen.findByRole('alert')).textContent).toBe('This backup is damaged');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore this backup?' })).toBeNull());
+  for (const name of ['Restore', 'Choose folder…', 'Cancel']) expect(isDisabled(name)).toBe(false);
 });
 
 it('Cancel closes the dialog', async () => {

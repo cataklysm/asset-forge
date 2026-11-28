@@ -9,4 +9,4 @@ export type View =
   | { name: 'trash' }
   | { name: 'jobs' }
   | { name: 'extractions' }
-  | { name: 'settings' };
+  | { name: 'settings'; section?: 'backup' };

@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react';
 import { useRef, useState, type RefObject } from 'react';
 import { BACKUP_MESSAGES, type WorkspaceSummary } from '@assetforge/contracts';
 import { call, messageOf } from '../api';
@@ -12,19 +13,14 @@ import {
   RESTORE_CONFIRM_TITLE,
   RESTORE_DIALOG_TITLE,
   RESTORE_LABEL,
+  RETRY_LABEL,
   START_EMPTY_CONFIRM_TITLE,
   START_EMPTY_LABEL,
   START_EMPTY_TITLE,
 } from '../labels';
-import { ALERT, BUTTON } from '../ui';
+import { ALERT, BUTTON, ICON_BUTTON } from '../ui';
 import { BackupRadioList } from './BackupRadioList';
-import {
-  fetchListing,
-  isStale,
-  useBackupListing,
-  type BackupListingControl,
-  type RestoreTarget,
-} from './restore-listing';
+import { isStale, useBackupListing, type BackupListingControl, type RestoreTarget } from './restore-listing';
 
 /** The props of `RestoreDialog`. */
 interface Props {
@@ -48,13 +44,13 @@ type Confirming = 'restore' | 'empty' | null;
 interface RestoreRequest {
   rootPath: string;
   backupId: string;
-  target: RestoreTarget;
   listing: BackupListingControl;
   onRestored(summary: WorkspaceSummary): void;
 }
 
 /**
- * Restores the chosen backup; stale ids load the list again before the refusal is shown.
+ * Restores the chosen backup; a stale refusal lists the place again (or marks a picked list stale) before the
+ * refusal is shown.
  *
  * @param request the folder, the backup id, the listing and the callback
  * @returns resolves once the workspace was opened
@@ -63,7 +59,7 @@ async function restoreBackup(request: RestoreRequest): Promise<void> {
   try {
     request.onRestored(await call('workspace:restore', { rootPath: request.rootPath, backupId: request.backupId }));
   } catch (failure) {
-    if (isStale(failure)) request.listing.show(await fetchListing(request.target, false));
+    if (isStale(failure)) request.listing.refused();
     throw failure;
   }
 }
@@ -79,22 +75,13 @@ async function startEmpty(rootPath: string, onRestored: (summary: WorkspaceSumma
   onRestored(await call('workspace:open', { rootPath, startEmpty: true }));
 }
 
-/**
- * Lists the backups of a folder the user picks and shows them.
- *
- * @param target the workspace by id or folder
- * @param listing the listing that shows the answer
- * @returns resolves once the new listing is shown
- */
-async function chooseFolder(target: RestoreTarget, listing: BackupListingControl): Promise<void> {
-  listing.show(await fetchListing(target, true));
-}
-
 /** The props of `RestoreButtons`. */
 interface ButtonProps {
-  /** A request runs or the list loads: every button is disabled. */
-  locked: boolean;
-  /** A backup is chosen. */
+  /** A restore or an empty start runs: every button is disabled, Cancel too. */
+  opening: boolean;
+  /** A listing request runs: Choose folder and Restore wait for it. */
+  listing: boolean;
+  /** A backup is chosen and its id is still valid. */
   canRestore: boolean;
   /** Start empty is offered only while the database is missing. */
   databaseExists: boolean;
@@ -112,13 +99,13 @@ interface ButtonProps {
  * @returns the button row
  */
 function RestoreButtons(props: ButtonProps) {
-  const { locked } = props;
+  const { opening, listing } = props;
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <button
         type="button"
         className={BUTTON}
-        disabled={locked}
+        disabled={opening || listing}
         title={CHOOSE_FOLDER_TITLE}
         onClick={props.onChooseFolder}
       >
@@ -128,7 +115,7 @@ function RestoreButtons(props: ButtonProps) {
         <button
           type="button"
           className={BUTTON}
-          disabled={locked}
+          disabled={opening}
           title={START_EMPTY_TITLE}
           onClick={props.onStartEmpty}
         >
@@ -138,13 +125,13 @@ function RestoreButtons(props: ButtonProps) {
       <button
         type="button"
         className={BUTTON}
-        disabled={locked || !props.canRestore}
+        disabled={opening || listing || !props.canRestore}
         title={RESTORE_BACKUP_BUTTON_TITLE}
         onClick={props.onRestore}
       >
         {RESTORE_LABEL}
       </button>
-      <button ref={props.cancelRef} type="button" className={BUTTON} disabled={locked} onClick={props.onClose}>
+      <button ref={props.cancelRef} type="button" className={BUTTON} disabled={opening} onClick={props.onClose}>
         {CANCEL_LABEL}
       </button>
     </div>
@@ -152,22 +139,50 @@ function RestoreButtons(props: ButtonProps) {
 }
 
 /**
- * The alert of an unreachable place, the list of backups and the message of the last refusal.
+ * The message of a failed listing request, with Retry when it listed the place of the target.
+ *
+ * @param props the listing and the lock
+ * @returns the alert, or null
+ */
+function ListingFailure({ listing, locked }: { listing: BackupListingControl; locked: boolean }) {
+  if (listing.error === null) return null;
+  return (
+    <div className="flex items-start gap-2">
+      <p role="alert" className={`flex-1 ${ALERT}`}>
+        {listing.error}
+      </p>
+      {listing.retryable && (
+        <button
+          type="button"
+          className={ICON_BUTTON}
+          disabled={locked}
+          title={RETRY_LABEL}
+          aria-label={RETRY_LABEL}
+          onClick={listing.reload}
+        >
+          <RefreshCw size={16} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The props of `ListingView`. */
+interface ListingViewProps {
+  listing: BackupListingControl;
+  markLineage: boolean;
+  locked: boolean;
+  /** The message of the last refused restore or empty start. */
+  message: string | null;
+}
+
+/**
+ * The alert of an unreachable place, the list of backups and the messages of the last failures.
  *
  * @param props the listing, the marker flag, the lock and the message
  * @returns the content above the buttons
  */
-function ListingView({
-  listing,
-  markLineage,
-  locked,
-  message,
-}: {
-  listing: BackupListingControl;
-  markLineage: boolean;
-  locked: boolean;
-  message: string | null;
-}) {
+function ListingView({ listing, markLineage, locked, message }: ListingViewProps) {
   return (
     <>
       {listing.listing?.unreachable === true && (
@@ -184,6 +199,7 @@ function ListingView({
           onSelect={listing.select}
         />
       )}
+      <ListingFailure listing={listing} locked={locked} />
       {message !== null && (
         <p role="alert" className={ALERT}>
           {message}
@@ -193,50 +209,111 @@ function ListingView({
   );
 }
 
+/** What `useRestoreActions` offers. */
+interface RestoreActions {
+  /** A restore or an empty start runs. */
+  opening: boolean;
+  /** The message of the last refused restore or empty start. */
+  error: string | null;
+  confirming: Confirming;
+  setConfirming(confirming: Confirming): void;
+  /** Restores the chosen backup, one run at a time; the confirmation closes when it ends. */
+  restore(): void;
+  /** Starts the workspace empty, one run at a time; the confirmation closes when it ends. */
+  empty(): void;
+  /** Drops the last message and lets the user pick a folder to list. */
+  chooseFolder(): void;
+}
+
+/**
+ * The replacing actions of the dialog, one at a time, and their confirmation.
+ *
+ * @param props the folder and the callback with the opened workspace
+ * @param listing the listing, which a stale refusal reloads or marks
+ * @returns the flags and the actions
+ */
+function useRestoreActions(
+  { rootPath, onRestored }: Pick<Props, 'rootPath' | 'onRestored'>,
+  listing: BackupListingControl,
+): RestoreActions {
+  const { busy: opening, error, setError, run } = useExclusiveRun(messageOf);
+  const [confirming, setConfirming] = useState<Confirming>(null);
+  const selectedId = listing.selectedId;
+  const settle = (action: () => Promise<void>) => void run(action).then(() => setConfirming(null));
+  const restore = () => {
+    if (selectedId !== null) settle(() => restoreBackup({ rootPath, backupId: selectedId, listing, onRestored }));
+  };
+  const empty = () => settle(() => startEmpty(rootPath, onRestored));
+  const chooseFolder = () => {
+    setError(null);
+    listing.pick();
+  };
+  return { opening, error, confirming, setConfirming, restore, empty, chooseFolder };
+}
+
 /**
  * Lists the backups of a workspace and restores one, or starts the workspace empty when its database is missing.
+ * Only a running restore or empty start holds Cancel and Esc back, since its late success would open the workspace
+ * after the dialog closed; a listing that hangs never does.
  *
  * @param props the target, the folder, the database flag and the callbacks
  * @returns the dialog and its confirmations
  */
 export function RestoreDialog({ open, target, rootPath, databaseExists, onRestored, onClose }: Props) {
   const listing = useBackupListing(open, target);
-  const { busy, error, run } = useExclusiveRun(messageOf);
-  const [confirming, setConfirming] = useState<Confirming>(null);
+  const actions = useRestoreActions({ rootPath, onRestored }, listing);
+  const { opening, error, setConfirming, restore, chooseFolder } = actions;
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const locked = busy || listing.loading;
-  const selectedId = listing.selectedId;
-  const settle = (action: () => Promise<void>) => void run(action).then(() => setConfirming(null));
-  const restore = () =>
-    selectedId !== null && settle(() => restoreBackup({ rootPath, backupId: selectedId, target, listing, onRestored }));
-  const empty = () => settle(() => startEmpty(rootPath, onRestored));
-  const message = error ?? listing.loadError;
 
   return (
     <>
-      <Dialog open={open} title={RESTORE_DIALOG_TITLE} onClose={() => !locked && onClose()} initialFocusRef={cancelRef}>
+      <Dialog
+        open={open}
+        title={RESTORE_DIALOG_TITLE}
+        onClose={() => !opening && onClose()}
+        initialFocusRef={cancelRef}
+      >
         <div className="flex flex-col gap-4">
-          <ListingView listing={listing} markLineage={databaseExists} locked={locked} message={message} />
+          <ListingView
+            listing={listing}
+            markLineage={databaseExists}
+            locked={opening || listing.loading}
+            message={error}
+          />
           <RestoreButtons
-            locked={locked}
-            canRestore={selectedId !== null}
+            opening={opening}
+            listing={listing.loading}
+            canRestore={listing.selectedId !== null && !listing.stale}
             databaseExists={databaseExists}
             cancelRef={cancelRef}
-            onChooseFolder={() => void run(() => chooseFolder(target, listing))}
+            onChooseFolder={chooseFolder}
             onStartEmpty={() => setConfirming('empty')}
             onRestore={() => (databaseExists ? setConfirming('restore') : restore())}
             onClose={onClose}
           />
         </div>
       </Dialog>
-      <ConfirmDialog
-        open={confirming !== null}
-        title={confirming === 'empty' ? START_EMPTY_CONFIRM_TITLE : RESTORE_CONFIRM_TITLE}
-        confirmLabel={confirming === 'empty' ? START_EMPTY_LABEL : RESTORE_LABEL}
-        busy={busy}
-        onConfirm={confirming === 'empty' ? empty : restore}
-        onCancel={() => setConfirming(null)}
-      />
+      <ReplaceConfirmation actions={actions} />
     </>
+  );
+}
+
+/**
+ * The question before a restore replaces the database or an empty start drops it.
+ *
+ * @param props the actions of the dialog
+ * @returns the confirmation
+ */
+function ReplaceConfirmation({ actions }: { actions: RestoreActions }) {
+  const { confirming, opening, empty, restore, setConfirming } = actions;
+  return (
+    <ConfirmDialog
+      open={confirming !== null}
+      title={confirming === 'empty' ? START_EMPTY_CONFIRM_TITLE : RESTORE_CONFIRM_TITLE}
+      confirmLabel={confirming === 'empty' ? START_EMPTY_LABEL : RESTORE_LABEL}
+      busy={opening}
+      onConfirm={confirming === 'empty' ? empty : restore}
+      onCancel={() => setConfirming(null)}
+    />
   );
 }

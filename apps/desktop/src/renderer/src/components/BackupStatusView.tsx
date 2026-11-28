@@ -121,6 +121,7 @@ export function OtherLineages({ backups, busy, onDelete }: OtherLineagesProps) {
                 disabled={busy}
                 title={DELETE_BACKUP_TITLE}
                 aria-label={deleteBackupLabel(when)}
+                data-backup-delete=""
                 onClick={() => onDelete(backup)}
               >
                 <Trash2 size={16} aria-hidden />

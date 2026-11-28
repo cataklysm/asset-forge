@@ -1,7 +1,8 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { BACKUP_MESSAGES, type BackupEntry, type BackupStatus } from '@assetforge/contracts';
 import { call, messageOf } from '../api';
 import { formatDateTime } from '../format';
+import { useBackupStatus } from '../hooks/useBackupStatus';
 import { useExclusiveRun } from '../hooks/useExclusiveRun';
 import {
   BACK_UP_NOW_LABEL,
@@ -57,65 +58,104 @@ async function backUpNow(show: ShowStatus): Promise<void> {
   show(await call('backup:status', {}));
 }
 
-/**
- * Deletes one copy of another lineage.
- *
- * @param backupId the id of the copy from the latest status
- * @param show shows the status without it
- * @returns resolves once the answer is shown
- */
-async function deleteBackup(backupId: string, show: ShowStatus): Promise<void> {
-  show(await call('backup:delete', { backupId }));
+/** What the delete of one copy needs. */
+interface DeleteRequest {
+  backup: BackupEntry;
+  /** The copies of other lineages shown when the delete was asked for. */
+  shown: readonly BackupEntry[];
+  show: ShowStatus;
+  /** Receives the row index of the deleted copy once the answer is shown. */
+  onDeleted(index: number): void;
 }
 
 /**
- * Loads the backup status on mount and on every retry.
+ * Deletes one copy of another lineage.
  *
- * @returns the status, whether the last load failed, the setter and the retry
+ * @param request the copy, the shown copies and the callbacks
+ * @returns resolves once the answer is shown
  */
-function useBackupStatus(): { status: BackupStatus | null; failed: boolean; show: ShowStatus; retry(): void } {
-  const [status, setStatus] = useState<BackupStatus | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+async function deleteBackup(request: DeleteRequest): Promise<void> {
+  const index = request.shown.findIndex((other) => other.backupId === request.backup.backupId);
+  request.show(await call('backup:delete', { backupId: request.backup.backupId }));
+  request.onDeleted(Math.max(index, 0));
+}
+
+/** Marks the Delete buttons of the copies of other lineages. */
+const DELETE_BACKUP_SELECTOR = '[data-backup-delete]';
+/** Marks Back up now, which takes the focus when no copy of another lineage is left. */
+const BACK_UP_NOW_SELECTOR = '[data-back-up-now]';
+
+/**
+ * Focuses the Delete button of the row now at `index`, else the last row's, else Back up now.
+ *
+ * @param scope the section
+ * @param index the row index of the deleted copy
+ */
+function focusNeighbour(scope: HTMLElement | null, index: number): void {
+  const buttons = [...(scope?.querySelectorAll<HTMLElement>(DELETE_BACKUP_SELECTOR) ?? [])];
+  (buttons[Math.min(index, buttons.length - 1)] ?? scope?.querySelector<HTMLElement>(BACK_UP_NOW_SELECTOR))?.focus();
+}
+
+/**
+ * Moves the focus after a delete once the confirmation closed, since the deleted row took its button with it.
+ *
+ * @param sectionRef the section
+ * @param confirmOpen whether the confirmation is still open
+ * @returns the setter of the row index to focus next to
+ */
+function useFocusAfterDelete(sectionRef: RefObject<HTMLElement | null>, confirmOpen: boolean): (index: number) => void {
+  // The row index of a deleted copy until the focus moved to its neighbour.
+  const pending = useRef<number | null>(null);
   useEffect(() => {
-    let active = true;
-    call('backup:status', {}).then(
-      (value) => {
-        if (active) setStatus(value);
-      },
-      () => {
-        if (active) setFailed(true);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [attempt]);
-  const retry = () => {
-    setFailed(false);
-    setAttempt((count) => count + 1);
+    if (confirmOpen || pending.current === null) return;
+    focusNeighbour(sectionRef.current, pending.current);
+    pending.current = null;
+  }, [confirmOpen, sectionRef]);
+  return (index) => {
+    pending.current = index;
   };
-  return { status, failed, show: setStatus, retry };
+}
+
+/**
+ * Brings the section into view and its heading into focus whenever the token changes, after the banner's Settings.
+ *
+ * @param headingRef the heading
+ * @param focusToken changes once per request; null asks for nothing
+ */
+function useBringIntoView(headingRef: RefObject<HTMLElement | null>, focusToken: number | null): void {
+  useEffect(() => {
+    const heading = headingRef.current;
+    if (focusToken === null || heading === null) return;
+    heading.scrollIntoView?.({ block: 'start' });
+    heading.focus();
+  }, [focusToken, headingRef]);
 }
 
 /**
  * The Backup section of the settings for the open workspace: the place, the last attempt, the copies and the
- * copies of other lineages.
+ * copies of other lineages. It reads the status again whenever the shell's backup state moves.
  *
+ * @param props a token that brings the section into view and focuses its heading whenever it changes
  * @returns the section
  */
-export function BackupSettings() {
+export function BackupSettings({ focusToken = null }: { focusToken?: number | null }) {
   const headingId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const { status, failed, show, retry } = useBackupStatus();
   const { busy, error, run } = useExclusiveRun(messageOf);
   const [deleting, setDeleting] = useState<BackupEntry | null>(null);
+  const onDeleted = useFocusAfterDelete(sectionRef, deleting !== null);
+  useBringIntoView(headingRef, focusToken);
 
   const confirmDelete = (backup: BackupEntry) =>
-    void run(() => deleteBackup(backup.backupId, show)).then(() => setDeleting(null));
+    void run(() => deleteBackup({ backup, shown: status?.otherLineages ?? [], show, onDeleted })).then(() =>
+      setDeleting(null),
+    );
 
   return (
-    <section aria-labelledby={headingId} className="flex max-w-4xl flex-col gap-4">
-      <h3 id={headingId} className={SECTION_TITLE}>
+    <section ref={sectionRef} aria-labelledby={headingId} className="flex max-w-4xl flex-col gap-4">
+      <h3 ref={headingRef} id={headingId} tabIndex={-1} className={`${SECTION_TITLE} outline-none`}>
         {BACKUP_SECTION_TITLE}
       </h3>
       {status === null ? (
@@ -232,6 +272,7 @@ function LastBackupRow({ status, busy, run, show }: ActionRowProps) {
           className={BUTTON}
           disabled={busy || status.running}
           title={BACK_UP_NOW_TITLE}
+          data-back-up-now=""
           onClick={() => void run(() => backUpNow(show))}
         >
           {BACK_UP_NOW_LABEL}

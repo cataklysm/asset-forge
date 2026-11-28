@@ -5,9 +5,11 @@ import {
   LOCATION_IN_WORKSPACE_MESSAGE,
   type BackupAttempt,
   type BackupEntry,
+  type BackupState,
 } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { BackupSettings } from '../../src/renderer/src/components/BackupSettings';
+import { BackupStateContext } from '../../src/renderer/src/hooks/useBackupState';
 import { backupStatus, deferred, fakeError, installFakeApi } from './fake-api';
 import { nextId } from './fixtures';
 
@@ -155,6 +157,103 @@ it('Delete of another lineage asks first', async () => {
 
   await waitFor(() => expect(screen.queryByRole('button', { name: `Delete backup of ${when}` })).toBeNull());
   expect(channelCalls(api, 'backup:delete')).toEqual([{ backupId: other.backupId }]);
+});
+
+function otherLineage(createdAt: string): BackupEntry {
+  return {
+    backupId: nextId(),
+    createdAt,
+    sizeBytes: 4096,
+    appliedMigrations: 18,
+    origin: 'regular',
+    sameLineage: false,
+  };
+}
+
+async function deleteRow(user: ReturnType<typeof userEvent.setup>, backup: BackupEntry) {
+  const when = new Date(backup.createdAt).toLocaleString();
+  await user.click(await screen.findByRole('button', { name: `Delete backup of ${when}` }));
+  const confirm = await screen.findByRole('dialog', { name: 'Delete this backup?' });
+  await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete this backup?' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('button', { name: `Delete backup of ${when}` })).toBeNull());
+}
+
+it('after a Delete the focus moves to the neighbouring row, then to Back up now', async () => {
+  const user = userEvent.setup();
+  const first = otherLineage('2026-10-01T09:00:00.000Z');
+  const second = otherLineage('2026-10-02T09:00:00.000Z');
+  let others = [first, second];
+  installFakeApi({
+    'backup:status': () => backupStatus({ otherLineages: others }),
+    'backup:delete': ({ backupId }: { backupId: string }) => {
+      others = others.filter((other) => other.backupId !== backupId);
+      return backupStatus({ otherLineages: others });
+    },
+  });
+  render(<BackupSettings />);
+  await deleteRow(user, first);
+  const secondName = `Delete backup of ${new Date(second.createdAt).toLocaleString()}`;
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: secondName })));
+
+  await deleteRow(user, second);
+  await waitFor(() =>
+    expect(document.activeElement).toBe(within(section()).getByRole('button', { name: 'Back up now' })),
+  );
+});
+
+it('reads the status again when the polled backup state moves', async () => {
+  const running: BackupState = { workspaceId: nextId(), running: true, last: null };
+  const done: BackupAttempt = { at: '2026-11-28T09:00:00.000Z', ok: true, code: null, message: null };
+  let status = backupStatus({ running: true });
+  const api = installFakeApi({ 'backup:status': () => status });
+  const view = render(
+    <BackupStateContext.Provider value={running}>
+      <BackupSettings />
+    </BackupStateContext.Provider>,
+  );
+  await screen.findByText('Workspace folder');
+  const button = within(section()).getByRole('button', { name: 'Back up now' });
+  expect(button.hasAttribute('disabled')).toBe(true);
+
+  status = backupStatus({ last: done, count: 1, totalBytes: 1024 });
+  view.rerender(
+    <BackupStateContext.Provider value={{ ...running, running: false, last: done }}>
+      <BackupSettings />
+    </BackupStateContext.Provider>,
+  );
+  expect(await screen.findByText('1 copy, 1.0 KiB')).toBeTruthy();
+  expect(button.hasAttribute('disabled')).toBe(false);
+  expect(channelCalls(api, 'backup:status')).toHaveLength(2);
+
+  // A poll with the same state reads nothing again.
+  view.rerender(
+    <BackupStateContext.Provider value={{ ...running, running: false, last: { ...done } }}>
+      <BackupSettings />
+    </BackupStateContext.Provider>,
+  );
+  const later: BackupAttempt = { ...done, at: '2026-11-28T10:00:00.000Z' };
+  status = backupStatus({ last: later, count: 2, totalBytes: 2048 });
+  view.rerender(
+    <BackupStateContext.Provider value={{ ...running, running: false, last: later }}>
+      <BackupSettings />
+    </BackupStateContext.Provider>,
+  );
+  expect(await screen.findByText('2 copies, 2.0 KiB')).toBeTruthy();
+  expect(channelCalls(api, 'backup:status')).toHaveLength(3);
+});
+
+it('a focus token brings the section heading into focus', async () => {
+  installFakeApi({ 'backup:status': () => backupStatus() });
+  const view = render(<BackupSettings focusToken={null} />);
+  await screen.findByText('Workspace folder');
+  const heading = within(section()).getByRole('heading', { name: 'Backup' });
+  expect(document.activeElement).not.toBe(heading);
+  view.rerender(<BackupSettings focusToken={1} />);
+  expect(document.activeElement).toBe(heading);
+  (document.activeElement as HTMLElement).blur();
+  view.rerender(<BackupSettings focusToken={2} />);
+  expect(document.activeElement).toBe(heading);
 });
 
 it('a failed load shows its message with Retry', async () => {

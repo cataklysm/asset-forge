@@ -70,6 +70,8 @@ interface Props {
   onOpenCheck?(host: string): Promise<void>;
   /** The reason of a failed last backup of the open workspace; null shows no backup line. */
   backupFailure?: string | null;
+  /** Opens the Backup section of the settings from the backup line; without it the line opens Settings. */
+  onOpenBackupSettings?(): void;
   /** Opens one section. */
   onNavigate(section: Section): void;
   /** Closes the workspace. */
@@ -260,6 +262,7 @@ export function AppShell({
   checkHosts = NO_CHECK_HOSTS,
   onOpenCheck = RESOLVED,
   backupFailure = null,
+  onOpenBackupSettings,
   onNavigate,
   onClose,
   children,
@@ -309,7 +312,11 @@ export function AppShell({
             />
           )}
           {backupFailure !== null && (
-            <BackupBanner message={backupFailure} busy={busy} onSettings={() => onNavigate('settings')} />
+            <BackupBanner
+              message={backupFailure}
+              busy={busy}
+              onSettings={onOpenBackupSettings ?? (() => onNavigate('settings'))}
+            />
           )}
           <main ref={mainRef} key={reloadKey} className="flex min-h-0 flex-1 flex-col overflow-auto">
             <StorageReturnContext.Provider value={reloadKey}>{children}</StorageReturnContext.Provider>{' '}

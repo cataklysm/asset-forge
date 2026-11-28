@@ -55,13 +55,13 @@ function openShell(state: () => BackupState) {
     'assetTypes:list': () => [],
     'projects:list': () => ({ items: [], total: 0 }),
   });
-  render(
+  const view = render(
     <WorkspaceShell
       workspace={{ id: WORKSPACE_ID, name: 'W', rootPath: 'root', lastOpenedAt: '2026-01-01T00:00:00.000Z' }}
       onClosed={() => {}}
     />,
   );
-  return api;
+  return { calls: api.calls, unmount: view.unmount };
 }
 
 async function nextPoll() {
@@ -77,6 +77,57 @@ it('failed last attempt shows the line with Settings that navigates', async () =
   const banner = line.closest('[role="alert"]') as HTMLElement;
   await user.click(within(banner).getByRole('button', { name: 'Settings' }));
   expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy();
+  const backup = screen.getByRole('heading', { name: 'Backup' });
+  await waitFor(() => expect(document.activeElement).toBe(backup));
+
+  // On Settings already, Settings in the line brings the section into view again.
+  (document.activeElement as HTMLElement).blur();
+  await user.click(within(banner).getByRole('button', { name: 'Settings' }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Backup' })));
+});
+
+it('the main navigation to Settings leaves the focus alone', async () => {
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  openShell(() => FAILED);
+  await screen.findByText(LINE);
+  const nav = screen.getByRole('navigation');
+  await user.click(within(nav).getByRole('link', { name: 'Settings' }));
+  expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy();
+  expect(document.activeElement).not.toBe(screen.getByRole('heading', { name: 'Backup' }));
+});
+
+it('an unmount while the first request runs asks nothing more', async () => {
+  let resolveFirst: (state: BackupState) => void = () => {};
+  const first = new Promise<BackupState>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const api = installFakeApi({ 'backup:state': () => first, 'jobs:summary': () => IDLE });
+  const view = render(
+    <WorkspaceShell
+      workspace={{ id: WORKSPACE_ID, name: 'W', rootPath: 'root', lastOpenedAt: '2026-01-01T00:00:00.000Z' }}
+      onClosed={() => {}}
+    />,
+  );
+  const stateCalls = () => api.calls.filter((entry) => entry.channel === 'backup:state').length;
+  await waitFor(() => expect(stateCalls()).toBe(1));
+  view.unmount();
+  resolveFirst(FAILED);
+  await nextPoll();
+  await nextPoll();
+  expect(stateCalls()).toBe(1);
+});
+
+it('an unmount while polling asks nothing more', async () => {
+  const api = openShell(() => FAILED);
+  await screen.findByText(LINE);
+  await nextPoll();
+  const stateCalls = () => api.calls.filter((entry) => entry.channel === 'backup:state').length;
+  const before = stateCalls();
+  expect(before).toBeGreaterThanOrEqual(2);
+  api.unmount();
+  await nextPoll();
+  await nextPoll();
+  expect(stateCalls()).toBe(before);
 });
 
 it('a later success hides it', async () => {
