@@ -2,7 +2,10 @@ import { check, index, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-
 import { asset } from './assets.js';
 import { APPROVAL_STATUSES, PRIORITIES, PROJECT_STATUSES, oneOf } from './vocabulary.js';
 
-export const project = sqliteTable(
+// The projects and their n:m assignments to assets.
+
+/** A project. */
+export const project =sqliteTable(
   'project',
   {
     id: text('id').primaryKey(),
@@ -12,10 +15,11 @@ export const project = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (t) => [check('project_status_check', oneOf(t.status, PROJECT_STATUSES))],
+  (table) => [check('project_status_check', oneOf(table.status, PROJECT_STATUSES))],
 );
 
-export const projectAsset = sqliteTable(
+/** The assignment of an asset to a project with its project-specific data; removing it never touches the asset. */
+export const projectAsset =sqliteTable(
   'project_asset',
   {
     projectId: text('project_id')
@@ -31,10 +35,10 @@ export const projectAsset = sqliteTable(
     assignedAt: text('assigned_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.projectId, t.assetId] }),
-    index('project_asset_asset_id_idx').on(t.assetId),
-    check('project_asset_priority_check', oneOf(t.priority, PRIORITIES)),
-    check('project_asset_approval_status_check', oneOf(t.approvalStatus, APPROVAL_STATUSES)),
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.assetId] }),
+    index('project_asset_asset_id_idx').on(table.assetId),
+    check('project_asset_priority_check', oneOf(table.priority, PRIORITIES)),
+    check('project_asset_approval_status_check', oneOf(table.approvalStatus, APPROVAL_STATUSES)),
   ],
 );

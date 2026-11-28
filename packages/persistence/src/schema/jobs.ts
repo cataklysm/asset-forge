@@ -3,6 +3,8 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-o
 import { file } from './files.js';
 import { JOB_STATUSES, RESOURCE_CLASSES, oneOf } from './vocabulary.js';
 
+// The job queue.
+
 /** The persistent job queue. `payload` is JSON; `error_message` is the fixed message of `error_code`. */
 export const job = sqliteTable(
   'job',
@@ -27,17 +29,17 @@ export const job = sqliteTable(
     /** What a succeeded job produced besides its file (`JobResult`); null on an ordinary result. */
     result: text('result'),
   },
-  (t) => [
-    index('job_claim_idx').on(t.status, t.resourceClass, t.createdAt, t.id),
+  (table) => [
+    index('job_claim_idx').on(table.status, table.resourceClass, table.createdAt, table.id),
     // At most one active job per dedupe key; finished jobs keep theirs.
     uniqueIndex('job_active_dedupe_idx')
-      .on(t.dedupeKey)
-      .where(oneOf(t.status, ACTIVE_JOB_STATUSES)),
+      .on(table.dedupeKey)
+      .where(oneOf(table.status, ACTIVE_JOB_STATUSES)),
     // The newest job of a type for one file (`latestForFile`).
-    index('job_file_id_type_created_at_idx').on(t.fileId, t.type, t.createdAt, t.id),
+    index('job_file_id_type_created_at_idx').on(table.fileId, table.type, table.createdAt, table.id),
     // Waiting and active jobs per lane (`waitingByLane`, `countActiveInLane`, `rerouteWaiting`).
-    index('job_provider_id_status_idx').on(t.providerId, t.status),
-    check('job_resource_class_check', oneOf(t.resourceClass, RESOURCE_CLASSES)),
-    check('job_status_check', oneOf(t.status, JOB_STATUSES)),
+    index('job_provider_id_status_idx').on(table.providerId, table.status),
+    check('job_resource_class_check', oneOf(table.resourceClass, RESOURCE_CLASSES)),
+    check('job_status_check', oneOf(table.status, JOB_STATUSES)),
   ],
 );

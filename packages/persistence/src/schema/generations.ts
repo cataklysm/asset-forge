@@ -3,9 +3,12 @@ import { file } from './files.js';
 import { promptVersion } from './prompts.js';
 import { GENERATION_KINDS, GENERATION_STATUSES, PROVIDER_KINDS, oneOf } from './vocabulary.js';
 
+// The image generations with the files they read and wrote.
+
 /**
  * An image generation (edit or upscale). `parameters` is JSON (`GenerationParametersSchema`). `job_id` names the
- * current job and has no foreign key: the job row may be cleared, or deleted with a purged file, while the generation stays.
+ * current job and has no foreign key: the job row may be cleared, or deleted with a purged file, while the
+ * generation stays.
  */
 export const generation = sqliteTable(
   'generation',
@@ -32,16 +35,21 @@ export const generation = sqliteTable(
     /** JSON `{ "v": 1, "values": { <name>: <value> } }`. */
     promptVariables: text('prompt_variables'),
   },
-  (t) => [
-    index('generation_job_id_idx').on(t.jobId),
-    index('generation_created_at_idx').on(t.createdAt, t.id),
-    check('generation_kind_check', oneOf(t.kind, GENERATION_KINDS)),
-    check('generation_status_check', oneOf(t.status, GENERATION_STATUSES)),
-    check('generation_provider_kind_check', oneOf(t.providerKind, PROVIDER_KINDS)),
+  (table) => [
+    index('generation_job_id_idx').on(table.jobId),
+    index('generation_created_at_idx').on(table.createdAt, table.id),
+    check('generation_kind_check', oneOf(table.kind, GENERATION_KINDS)),
+    check('generation_status_check', oneOf(table.status, GENERATION_STATUSES)),
+    check('generation_provider_kind_check', oneOf(table.providerKind, PROVIDER_KINDS)),
   ],
 );
 
-/** A file a generation read or wrote, as it was then; a purge sets `file_id` null and keeps checksum and name. */
+/**
+ * A file a generation read or wrote, as it was then; a purge sets `file_id` null and keeps checksum and name.
+ *
+ * @param name the table name, which also names its file index
+ * @returns the table of inputs or outputs
+ */
 const generationFile = (name: 'generation_input' | 'generation_output') =>
   sqliteTable(
     name,
@@ -54,8 +62,13 @@ const generationFile = (name: 'generation_input' | 'generation_output') =>
       sha256: text('sha256').notNull(),
       originalName: text('original_name').notNull(),
     },
-    (t) => [primaryKey({ columns: [t.generationId, t.position] }), index(`${name}_file_id_idx`).on(t.fileId)],
+    (table) => [
+      primaryKey({ columns: [table.generationId, table.position] }),
+      index(`${name}_file_id_idx`).on(table.fileId),
+    ],
   );
 
+/** The source files of a generation. */
 export const generationInput = generationFile('generation_input');
+/** The result files of a generation. */
 export const generationOutput = generationFile('generation_output');

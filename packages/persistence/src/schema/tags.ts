@@ -3,14 +3,18 @@ import { asset } from './assets.js';
 import { file } from './files.js';
 import { TAG_ORIGINS, oneOf } from './vocabulary.js';
 
-export const tag = sqliteTable('tag', {
+// The tags and their links to assets and files; prompt tags live with the prompts.
+
+/** A tag: the normalised `name` is unique, `display_name` is how it is shown. */
+export const tag =sqliteTable('tag', {
   id: text('id').primaryKey(),
   name: text('name').notNull().unique(),
   displayName: text('display_name').notNull(),
   createdAt: text('created_at').notNull(),
 });
 
-export const assetTag = sqliteTable(
+/** A tag an asset carries itself, with its origin (`manual` or `ai`). */
+export const assetTag =sqliteTable(
   'asset_tag',
   {
     assetId: text('asset_id')
@@ -22,14 +26,15 @@ export const assetTag = sqliteTable(
     origin: text('origin', { enum: TAG_ORIGINS }).notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.assetId, t.tagId, t.origin] }),
-    index('asset_tag_tag_id_idx').on(t.tagId),
-    check('asset_tag_origin_check', oneOf(t.origin, TAG_ORIGINS)),
+  (table) => [
+    primaryKey({ columns: [table.assetId, table.tagId, table.origin] }),
+    index('asset_tag_tag_id_idx').on(table.tagId),
+    check('asset_tag_origin_check', oneOf(table.origin, TAG_ORIGINS)),
   ],
 );
 
-export const fileTag = sqliteTable(
+/** A tag a file carries, with its origin (`manual` or `ai`). */
+export const fileTag =sqliteTable(
   'file_tag',
   {
     fileId: text('file_id')
@@ -41,9 +46,9 @@ export const fileTag = sqliteTable(
     origin: text('origin', { enum: TAG_ORIGINS }).notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.fileId, t.tagId, t.origin] }),
-    index('file_tag_tag_id_idx').on(t.tagId),
-    check('file_tag_origin_check', oneOf(t.origin, TAG_ORIGINS)),
+  (table) => [
+    primaryKey({ columns: [table.fileId, table.tagId, table.origin] }),
+    index('file_tag_tag_id_idx').on(table.tagId),
+    check('file_tag_origin_check', oneOf(table.origin, TAG_ORIGINS)),
   ],
 );

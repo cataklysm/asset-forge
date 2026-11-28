@@ -4,7 +4,11 @@ import { asset } from './assets.js';
 import { FILE_MOVE_KINDS, FILE_ROLES, IMPORT_STATUSES, oneOf } from './vocabulary.js';
 import { storage } from './workspace.js';
 
-export const file = sqliteTable(
+// The files: the file rows, the URLs they were downloaded from, the journal of their moves and the tombstones of
+// purged ones.
+
+/** A file of the workspace with its storage and relative path; in an asset with a role, in the inbox, or trashed. */
+export const file =sqliteTable(
   'file',
   {
     id: text('id').primaryKey(),
@@ -31,19 +35,19 @@ export const file = sqliteTable(
     trashedAssetId: text('trashed_asset_id').references(() => asset.id, { onDelete: 'set null' }),
     trashedRole: text('trashed_role', { enum: FILE_ROLES }),
   },
-  (t) => [
-    uniqueIndex('file_storage_id_relative_path_unique').on(t.storageId, t.relativePath),
-    index('file_deleted_at_idx').on(t.deletedAt),
-    index('file_sha256_idx').on(t.sha256),
-    index('file_status_idx').on(t.status),
-    index('file_imported_at_idx').on(t.importedAt),
-    index('file_asset_id_role_idx').on(t.assetId, t.role),
-    index('file_asset_id_kind_idx').on(t.assetId, t.kind),
+  (table) => [
+    uniqueIndex('file_storage_id_relative_path_unique').on(table.storageId, table.relativePath),
+    index('file_deleted_at_idx').on(table.deletedAt),
+    index('file_sha256_idx').on(table.sha256),
+    index('file_status_idx').on(table.status),
+    index('file_imported_at_idx').on(table.importedAt),
+    index('file_asset_id_role_idx').on(table.assetId, table.role),
+    index('file_asset_id_kind_idx').on(table.assetId, table.kind),
     // The complete files of one asset (search reindex); without it `file_status_idx` wins and reads every complete file.
-    index('file_asset_id_status_idx').on(t.assetId, t.status),
-    check('file_status_check', oneOf(t.status, IMPORT_STATUSES)),
-    check('file_role_check', oneOf(t.role, FILE_ROLES)),
-    check('file_asset_role_check', sql`(${t.assetId} is null) = (${t.role} is null)`),
+    index('file_asset_id_status_idx').on(table.assetId, table.status),
+    check('file_status_check', oneOf(table.status, IMPORT_STATUSES)),
+    check('file_role_check', oneOf(table.role, FILE_ROLES)),
+    check('file_asset_role_check', sql`(${table.assetId} is null) = (${table.role} is null)`),
   ],
 );
 
@@ -58,10 +62,14 @@ export const fileOrigin = sqliteTable(
     url: text('url').notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [uniqueIndex('file_origin_file_id_url_unique').on(t.fileId, t.url), index('file_origin_url_idx').on(t.url)],
+  (table) => [
+    uniqueIndex('file_origin_file_id_url_unique').on(table.fileId, table.url),
+    index('file_origin_url_idx').on(table.url),
+  ],
 );
 
-export const fileMove = sqliteTable(
+/** The journal of a file move in progress: at most one per file, resolved on open when it was left behind. */
+export const fileMove =sqliteTable(
   'file_move',
   {
     fileId: text('file_id')
@@ -73,9 +81,9 @@ export const fileMove = sqliteTable(
     createdAt: text('created_at').notNull(),
     kind: text('kind', { enum: FILE_MOVE_KINDS }).notNull().default('relocate'),
   },
-  (t) => [
-    check('file_move_target_role_check', oneOf(t.targetRole, FILE_ROLES)),
-    check('file_move_target_check', sql`(${t.targetAssetId} is null) = (${t.targetRole} is null)`),
+  (table) => [
+    check('file_move_target_role_check', oneOf(table.targetRole, FILE_ROLES)),
+    check('file_move_target_check', sql`(${table.targetAssetId} is null) = (${table.targetRole} is null)`),
   ],
 );
 

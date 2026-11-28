@@ -1,6 +1,8 @@
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { tag } from './tags.js';
 
+// The prompt library: prompts, their immutable versions and their tags.
+
 /** A prompt of the library. `title_key` is the lower-cased title and keeps titles unique regardless of case. */
 export const prompt = sqliteTable(
   'prompt',
@@ -12,7 +14,7 @@ export const prompt = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (t) => [uniqueIndex('prompt_title_key_unique').on(t.titleKey)],
+  (table) => [uniqueIndex('prompt_title_key_unique').on(table.titleKey)],
 );
 
 /**
@@ -31,7 +33,7 @@ export const promptVersion = sqliteTable(
     variables: text('variables').notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [uniqueIndex('prompt_version_prompt_id_number_unique').on(t.promptId, t.number)],
+  (table) => [uniqueIndex('prompt_version_prompt_id_number_unique').on(table.promptId, table.number)],
 );
 
 /** Tags of a prompt; always manual, so there is no origin column. */
@@ -46,5 +48,8 @@ export const promptTag = sqliteTable(
       .references(() => tag.id),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.promptId, t.tagId] }), index('prompt_tag_tag_id_idx').on(t.tagId)],
+  (table) => [
+    primaryKey({ columns: [table.promptId, table.tagId] }),
+    index('prompt_tag_tag_id_idx').on(table.tagId),
+  ],
 );

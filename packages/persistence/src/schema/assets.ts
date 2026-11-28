@@ -13,7 +13,11 @@ import { file } from './files.js';
 import { ASSET_STATUSES, RELATION_KINDS, oneOf } from './vocabulary.js';
 import { workflowTemplate } from './workflows.js';
 
-export const assetType = sqliteTable('asset_type', {
+// The assets: their types, the asset rows, their source URLs, their typed relations and their rows in the search
+// index.
+
+/** An asset type; the built-in ones are inserted on open, with an optional default workflow template. */
+export const assetType =sqliteTable('asset_type', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
   name: text('name').notNull(),
@@ -22,6 +26,7 @@ export const assetType = sqliteTable('asset_type', {
   defaultWorkflowTemplateId: text('default_workflow_template_id').references(() => workflowTemplate.id),
 });
 
+/** The central object; `cover_file_id` is the chosen cover, null for the automatic one. */
 export const asset = sqliteTable(
   'asset',
   {
@@ -36,10 +41,10 @@ export const asset = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (t) => [
-    index('asset_type_id_idx').on(t.typeId),
-    index('asset_status_idx').on(t.status),
-    check('asset_status_check', oneOf(t.status, ASSET_STATUSES)),
+  (table) => [
+    index('asset_type_id_idx').on(table.typeId),
+    index('asset_status_idx').on(table.status),
+    check('asset_status_check', oneOf(table.status, ASSET_STATUSES)),
   ],
 );
 
@@ -54,9 +59,10 @@ export const assetSource = sqliteTable(
     url: text('url').notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [uniqueIndex('asset_source_asset_id_url_unique').on(t.assetId, t.url)],
+  (table) => [uniqueIndex('asset_source_asset_id_url_unique').on(table.assetId, table.url)],
 );
 
+/** A typed relation from one asset to another; never from an asset to itself. */
 export const assetRelation = sqliteTable(
   'asset_relation',
   {
@@ -69,11 +75,11 @@ export const assetRelation = sqliteTable(
     kind: text('kind', { enum: RELATION_KINDS }).notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [
-    primaryKey({ columns: [t.fromAssetId, t.toAssetId, t.kind] }),
-    index('asset_relation_to_asset_id_idx').on(t.toAssetId),
-    check('asset_relation_kind_check', oneOf(t.kind, RELATION_KINDS)),
-    check('asset_relation_not_self_check', sql`${t.fromAssetId} <> ${t.toAssetId}`),
+  (table) => [
+    primaryKey({ columns: [table.fromAssetId, table.toAssetId, table.kind] }),
+    index('asset_relation_to_asset_id_idx').on(table.toAssetId),
+    check('asset_relation_kind_check', oneOf(table.kind, RELATION_KINDS)),
+    check('asset_relation_not_self_check', sql`${table.fromAssetId} <> ${table.toAssetId}`),
   ],
 );
 

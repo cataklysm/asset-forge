@@ -5,7 +5,8 @@ import { STEP_STATES, oneOf } from './vocabulary.js';
 
 // Workflows. Template, version and step definition rows are immutable once written.
 
-export const workflowTemplate = sqliteTable('workflow_template', {
+/** A workflow template, identified by its stable key. */
+export const workflowTemplate =sqliteTable('workflow_template', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
   name: text('name').notNull(),
@@ -13,6 +14,7 @@ export const workflowTemplate = sqliteTable('workflow_template', {
   createdAt: text('created_at').notNull(),
 });
 
+/** A numbered version of a template; workflows run on a version, never on the template. */
 export const workflowTemplateVersion = sqliteTable(
   'workflow_template_version',
   {
@@ -23,10 +25,13 @@ export const workflowTemplateVersion = sqliteTable(
     version: integer('version').notNull(),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [uniqueIndex('workflow_template_version_template_id_version_unique').on(t.templateId, t.version)],
+  (table) => [
+    uniqueIndex('workflow_template_version_template_id_version_unique').on(table.templateId, table.version),
+  ],
 );
 
-export const workflowStepDefinition = sqliteTable(
+/** A step of a template version, at a position and with a key unique within the version. */
+export const workflowStepDefinition =sqliteTable(
   'workflow_step_definition',
   {
     id: text('id').primaryKey(),
@@ -38,12 +43,13 @@ export const workflowStepDefinition = sqliteTable(
     name: text('name').notNull(),
     mandatory: integer('mandatory', { mode: 'boolean' }).notNull(),
   },
-  (t) => [
-    uniqueIndex('workflow_step_definition_version_position_unique').on(t.templateVersionId, t.position),
-    uniqueIndex('workflow_step_definition_version_key_unique').on(t.templateVersionId, t.key),
+  (table) => [
+    uniqueIndex('workflow_step_definition_version_position_unique').on(table.templateVersionId, table.position),
+    uniqueIndex('workflow_step_definition_version_key_unique').on(table.templateVersionId, table.key),
   ],
 );
 
+/** The workflow of an asset (at most one) on one template version. */
 export const assetWorkflow = sqliteTable('asset_workflow', {
   id: text('id').primaryKey(),
   assetId: text('asset_id')
@@ -56,6 +62,7 @@ export const assetWorkflow = sqliteTable('asset_workflow', {
   createdAt: text('created_at').notNull(),
 });
 
+/** The state and notes of one step of an asset's workflow; `completed_at` is set exactly while the step is done. */
 export const assetWorkflowStep = sqliteTable(
   'asset_workflow_step',
   {
@@ -71,9 +78,9 @@ export const assetWorkflowStep = sqliteTable(
     updatedAt: text('updated_at').notNull(),
     completedAt: text('completed_at'),
   },
-  (t) => [
-    uniqueIndex('asset_workflow_step_workflow_definition_unique').on(t.assetWorkflowId, t.stepDefinitionId),
-    check('asset_workflow_step_state_check', oneOf(t.state, STEP_STATES)),
-    check('asset_workflow_step_completed_check', sql`(${t.state} = 'done') = (${t.completedAt} is not null)`),
+  (table) => [
+    uniqueIndex('asset_workflow_step_workflow_definition_unique').on(table.assetWorkflowId, table.stepDefinitionId),
+    check('asset_workflow_step_state_check', oneOf(table.state, STEP_STATES)),
+    check('asset_workflow_step_completed_check', sql`(${table.state} = 'done') = (${table.completedAt} is not null)`),
   ],
 );

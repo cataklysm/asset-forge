@@ -1,6 +1,8 @@
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { file } from './files.js';
 
+// The AI analysis of files: the record of the latest analysis and the waiting tag proposal.
+
 /** Provenance of the latest analysis of a file; replaced by the next one. */
 export const fileAnalysis = sqliteTable('file_analysis', {
   fileId: text('file_id')
@@ -15,7 +17,10 @@ export const fileAnalysis = sqliteTable('file_analysis', {
   analysedAt: text('analysed_at').notNull(),
 });
 
-/** A tag proposal waiting for the owner; one per file, replaced by the next one. `tags` is a JSON array of `{ name, displayName }`. */
+/**
+ * A tag proposal waiting for the owner; one per file, replaced by the next one. `tags` is a JSON array of
+ * `{ name, displayName }`.
+ */
 export const fileAnalysisProposal = sqliteTable('file_analysis_proposal', {
   fileId: text('file_id')
     .primaryKey()
