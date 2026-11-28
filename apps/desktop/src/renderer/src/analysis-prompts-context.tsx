@@ -250,7 +250,7 @@ const PROVIDER_MISSING = 'This provider does not exist';
  * @param providers the reload of the provider entries
  * @param dropChoice drops the dialog's prompt choice; it checks itself whether the dialog still wants it
  */
-export function recoverMissingPrompt(
+export function recoverMissingChoice(
   error: unknown,
   prompts: Pick<AnalysisPromptsState, 'reload'>,
   providers: { reload(): Promise<void> },

@@ -3,7 +3,7 @@ import { useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
 import {
   effectivePromptId,
-  recoverMissingPrompt,
+  recoverMissingChoice,
   useAnalysisPrompts,
   type AnalysisPromptsState,
 } from '../analysis-prompts-context';
@@ -131,7 +131,7 @@ async function startAnalysis(effects: StartEffects, request: StartRequest): Prom
     effects.onClose();
   } catch (error) {
     effects.setError(describeError(error));
-    recoverMissingPrompt(error, effects.prompts, effects.providers, effects.dropPromptChoice);
+    recoverMissingChoice(error, effects.prompts, effects.providers, effects.dropPromptChoice);
   } finally {
     effects.startingRef.current = false;
     effects.setStarting(false);
