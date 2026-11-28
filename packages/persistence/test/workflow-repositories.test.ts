@@ -331,6 +331,30 @@ describe('asset workflow repository', () => {
       ['Lamp', null],
     ]);
   });
+
+  test('the asset list and the workflow detail count progress the same way', async () => {
+    await seedWorkflow();
+    // Steps 71 and 72 are mandatory, 73 and 74 optional; each round sets one state per step.
+    const rounds = [
+      ['done', 'done', 'done', 'done'],
+      ['done', 'skipped', 'done', 'not_started'],
+      ['in_progress', 'done', 'skipped', 'done'],
+      ['skipped', 'in_progress', 'in_progress', 'done'],
+      ['not_started', 'not_started', 'not_started', 'not_started'],
+    ] as const;
+    for (const states of rounds) {
+      for (const [index, state] of states.entries()) {
+        await db.assetWorkflows.updateStep(uuid(71 + index), {
+          state,
+          completedAt: state === 'done' ? LATER : null,
+          updatedAt: LATER,
+        });
+      }
+      const detail = (await db.assetWorkflows.getByAsset(uuid(1)))!.progress;
+      const listed = (await db.assets.list({ limit: 10, offset: 0 })).items[0]?.workflowProgress;
+      expect(listed).toEqual(detail);
+    }
+  });
 });
 
 describe('asset type default template', () => {
