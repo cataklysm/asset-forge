@@ -1,6 +1,6 @@
 import { ModelNameSchema, type VisionRequestOptions } from '@assetforge/contracts';
-import { JobError, type VisionProvider } from '@assetforge/core';
-import { createJsonRequester, statusOf, type JsonRequest } from './json-request.js';
+import type { VisionProvider } from '@assetforge/core';
+import { createJsonRequester, type JsonRequest } from './json-request.js';
 import { listTimeoutOf } from './list-timeout.js';
 import type { OllamaVisionOptions } from './ollama-vision.js';
 import { composeBody, DEFAULT_REQUEST_OPTIONS, openAiFixedFields } from './request-options.js';
@@ -17,11 +17,11 @@ const OPENAI_DEEP_KEYS = ['chat_template_kwargs', 'extra_body'] as const;
 /** `listModels` keeps at most this many models, the same bound as the Ollama adapter. */
 const MAX_LISTED_MODELS = 100;
 
-/** The status a server without structured output answers a `response_format` with. */
-const REFUSED_FORMAT_STATUS = 400;
-
-/** What `createOpenAiVision` is configured with: the same options as the Ollama adapter. */
-export type OpenAiVisionOptions = OllamaVisionOptions;
+/**
+ * What `createOpenAiVision` is configured with: the options of the Ollama adapter and whether tagging asks for
+ * structured output (`response_format` `json_schema`); true without it.
+ */
+export type OpenAiVisionOptions = OllamaVisionOptions & { structuredOutput?: boolean };
 
 /** One leading think block after optional whitespace. */
 const LEADING_THINK = /^\s*<think>[\s\S]*?<\/think>/;
@@ -134,7 +134,7 @@ export function createOpenAiVision(options: OpenAiVisionOptions): VisionProvider
   };
 }
 
-/** The configured limits, the fixed body fields, the requester and the format memory of one entry. */
+/** The configured limits, the fixed body fields, the requester and the structured output switch of one entry. */
 class OpenAiVision {
   /** The time limit of a chat request. */
   private readonly timeoutMs: number;
@@ -146,47 +146,34 @@ class OpenAiVision {
   private readonly fixed: ReturnType<typeof openAiFixedFields>;
   /** Sends one request. */
   private readonly request: JsonRequester;
-  /** Models whose server refused `response_format` and accepted the request without it. */
-  private readonly withoutFormat = new Set<string>();
+  /** Whether tagging sends `response_format`. */
+  private readonly structuredOutput: boolean;
 
   /**
    * @param options the options the provider was created with
    */
-  constructor(private readonly options: OpenAiVisionOptions) {
+  constructor(options: OpenAiVisionOptions) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.listTimeoutMs = listTimeoutOf(options.listTimeoutMs, this.timeoutMs);
     this.requestOptions = options.requestOptions ?? DEFAULT_REQUEST_OPTIONS;
     this.fixed = openAiFixedFields(this.requestOptions);
     this.request = createJsonRequester(options);
+    this.structuredOutput = options.structuredOutput ?? true;
   }
 
   /**
-   * Tags an image with `response_format` `json_schema`; after an HTTP 400 once more without it, remembered per model.
+   * Tags an image, with `response_format` `json_schema` when structured output is on. A refused format fails like
+   * any other HTTP 400 and is never repeated: an entry whose server has no structured output turns the option off,
+   * and the prompt's JSON format line asks for the answer.
    *
    * @param request the image, the prompt, the schema, the model and the signal
    * @returns the parsed answer
    */
-  async analyzeImage({ image, prompt, schema, model, signal }: Parameters<VisionProvider['analyzeImage']>[0]) {
-    const input = { image, prompt, model, signal };
-    if (this.withoutFormat.has(model)) return this.chat(input, parseTagging);
-
-    const responseFormat = {
-      response_format: { type: 'json_schema', json_schema: { name: 'tags', strict: true, schema } },
-    };
-    try {
-      // Silent: only the final outcome is reported, and a refused format may still be repeated.
-      return await this.chat(input, parseTagging, responseFormat, true);
-    } catch (error) {
-      if (!(error instanceof JobError)) throw error;
-      if (statusOf(error) !== REFUSED_FORMAT_STATUS) {
-        this.options.onFailure?.(error.code, statusOf(error));
-        throw error;
-      }
-    }
-    // A server without structured output: the prompt carries the JSON format line, so ask once more without it.
-    const result = await this.chat(input, parseTagging);
-    this.withoutFormat.add(model);
-    return result;
+  analyzeImage({ image, prompt, schema, model, signal }: Parameters<VisionProvider['analyzeImage']>[0]) {
+    const responseFormat = this.structuredOutput
+      ? { response_format: { type: 'json_schema', json_schema: { name: 'tags', strict: true, schema } } }
+      : {};
+    return this.chat({ image, prompt, model, signal }, parseTagging, responseFormat);
   }
 
   /**
@@ -215,25 +202,24 @@ class OpenAiVision {
    * @param input the image, the prompt, the model and the signal
    * @param interpret turns the answer's text into the result
    * @param extraOwn further fields of the adapter's own, such as `response_format`
-   * @param silent when true, a failure is not reported
    * @returns the result
    */
   private chat<T>(
     input: ChatInput,
     interpret: (text: string) => T,
     extraOwn: Record<string, unknown> = {},
-    silent = false,
   ): Promise<T> {
     const url = `data:image/jpeg;base64,${Buffer.from(input.image).toString('base64')}`;
+    // Without structured output no format is sent at all, not even one that `extra` sets.
+    const { response_format: _format, ...extraWithoutFormat } = this.requestOptions.extra;
     const request: JsonRequest = {
       path: '/chat/completions',
       signal: input.signal,
       timeoutMs: this.timeoutMs,
-      silent,
       // The adapter's own fields come last: `extra` can never change the model, the stream or the format.
       body: composeBody(
         this.fixed,
-        this.requestOptions.extra,
+        this.structuredOutput ? this.requestOptions.extra : extraWithoutFormat,
         {
           model: input.model,
           stream: false,

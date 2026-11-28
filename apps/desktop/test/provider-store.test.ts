@@ -1031,6 +1031,7 @@ const CUSTOM = {
   maxTokens: 512,
   extra: '{"top_p":0.9}',
   parallelRequests: 4,
+  structuredOutput: true,
 } as const;
 
 describe('provider store: version 4 and options', () => {
@@ -1244,6 +1245,28 @@ describe('provider store: version 4 and options', () => {
       s.save(openai({ id: o.id, options: { ...DEFAULT_PROVIDER_OPTIONS, parallelRequests: 64 } })).options
         ?.parallelRequests,
     ).toBe(64);
+  });
+
+  it('reads a version 4 entry without structured output as on and keeps the file as it is', () => {
+    const { structuredOutput: _omit, ...withoutField } = DEFAULT_PROVIDER_OPTIONS;
+    writeFile(4, [
+      { ...v3Entries[0], options: { ...withoutField, temperature: 0.5 } },
+      { ...v3Entries[1], options: null },
+    ]);
+    const before = readFileSync(settingsFile(), 'utf8');
+    const s = store();
+    expect(s.get(PREPARED)?.options).toEqual({ ...DEFAULT_PROVIDER_OPTIONS, temperature: 0.5, structuredOutput: true });
+    expect(readFileSync(settingsFile(), 'utf8')).toBe(before);
+    expect(readdirSync(dir).filter((n) => n.startsWith('provider-settings.json.corrupt-'))).toEqual([]);
+  });
+
+  it('round-trips structured output off through save and list', () => {
+    const s = store();
+    const o = s.save(openai({ options: { ...DEFAULT_PROVIDER_OPTIONS, structuredOutput: false } }));
+    expect(o.options?.structuredOutput).toBe(false);
+    expect(readSettings().providers[0].options.structuredOutput).toBe(false);
+    expect(store().get(o.id)?.options?.structuredOutput).toBe(false);
+    expect(readSettings().version).toBe(4);
   });
 
   it.each([0, 65, 1.5])('refuses a parallel requests value of %s and writes nothing', (parallelRequests) => {

@@ -44,7 +44,9 @@ export const MAX_TOKENS_MAX = 100_000;
 /**
  * The request options of a vision entry. `maxTokens` null is not sent; `extra` is the JSON text as
  * typed, empty or a JSON object (see `parseExtraParameters`). `parallelRequests` bounds the analysis jobs of the
- * entry that run at once; it is never part of a request.
+ * entry that run at once; it is never part of a request. `structuredOutput` decides whether an `openai` entry's
+ * tagging sends `response_format` `json_schema`; it means nothing on `ollama`, whose request always carries `format`,
+ * and stays at its default there.
  */
 export const ProviderOptionsSchema = z.object({
   temperature: z.number().min(TEMPERATURE_MIN).max(TEMPERATURE_MAX),
@@ -52,6 +54,7 @@ export const ProviderOptionsSchema = z.object({
   maxTokens: z.number().int().min(MAX_TOKENS_MIN).max(MAX_TOKENS_MAX).nullable(),
   extra: z.string().max(PROVIDER_EXTRA_MAX),
   parallelRequests: ParallelRequestsSchema,
+  structuredOutput: z.boolean(),
 });
 /** The request options of a vision entry. */
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
@@ -63,6 +66,7 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   maxTokens: null,
   extra: '',
   parallelRequests: PARALLEL_REQUESTS_DEFAULT,
+  structuredOutput: true,
 });
 
 /** What an adapter is built with: the fixed fields and the parsed extra object. */

@@ -445,7 +445,14 @@ const RESPONSE_FORMAT = 'The extra parameters must not set response_format';
 
 const TUNED = providerView({
   name: 'Tuned',
-  options: { temperature: 0.7, thinking: 'on', maxTokens: 512, extra: '{"top_k":40}', parallelRequests: 6 },
+  options: {
+    temperature: 0.7,
+    thinking: 'on',
+    maxTokens: 512,
+    extra: '{"top_k":40}',
+    parallelRequests: 6,
+    structuredOutput: true,
+  },
 });
 const VLLM = providerView({
   kind: 'openai',
@@ -569,6 +576,33 @@ it('a Venice entry shows no parallel requests field', async () => {
   expect(screen.queryByText('Parallel requests')).toBeNull();
 });
 
+it('Structured output is a checkbox of OpenAI-compatible entries only, explained by a tooltip', async () => {
+  const user = userEvent.setup();
+  install({ providers: [LOCAL, VLLM] });
+  renderSection();
+  await loaded();
+  expect(screen.queryByLabelText('Structured output')).toBeNull();
+  await user.click(within(list()).getByRole('button', { name: 'vLLM' }));
+  const checkbox = screen.getByLabelText('Structured output') as HTMLInputElement;
+  expect([checkbox.type, checkbox.checked]).toEqual(['checkbox', true]);
+  const title = checkbox.closest('label')!.getAttribute('title')!;
+  expect(title).toBe('Ask the server for the tag answer as a JSON schema; turn off for servers that refuse it');
+  expect(screen.queryByText(title)).toBeNull();
+});
+
+it('Save sends structured output off for an OpenAI-compatible entry and keeps it', async () => {
+  const user = userEvent.setup();
+  const { api, fake } = install({ providers: [VLLM] });
+  renderSection();
+  await loaded();
+  await user.click(screen.getByLabelText('Structured output'));
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect((callsOf(api, 'providers:save')[0]!.request as SaveRequest).options?.structuredOutput).toBe(false);
+  await waitFor(() => expect(fake.state.providers[0]!.options?.structuredOutput).toBe(false));
+  expect((screen.getByLabelText('Structured output') as HTMLInputElement).checked).toBe(false);
+});
+
 it('Save sends the typed options, and an empty token field as null', async () => {
   const user = userEvent.setup();
   const { api, fake } = install({ providers: [TUNED] });
@@ -586,6 +620,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     maxTokens: 256,
     extra: '{"top_p":0.9}',
     parallelRequests: 6,
+    structuredOutput: true,
   });
   await waitFor(() => expect(fake.state.providers[0]!.options?.maxTokens).toBe(256));
   await retype(user, 'Max. answer tokens', '');
@@ -597,6 +632,7 @@ it('Save sends the typed options, and an empty token field as null', async () =>
     maxTokens: null,
     extra: '{"top_p":0.9}',
     parallelRequests: 6,
+    structuredOutput: true,
   });
 });
 

@@ -37,9 +37,12 @@ interface AdapterOptions {
 /** What `createVeniceImage` accepts; typed structurally so this file names no concrete image adapter. */
 export type ImageAdapterFactory = (options: AdapterOptions) => ImageProvider;
 
-/** What `createOllamaVision` and `createOpenAiVision` accept; typed structurally like `ImageAdapterFactory`. */
+/**
+ * What `createOllamaVision` and `createOpenAiVision` accept; typed structurally like `ImageAdapterFactory`.
+ * `structuredOutput` is passed to an `openai` entry's factory only.
+ */
 export type VisionAdapterFactory = (
-  options: AdapterOptions & { requestOptions: VisionRequestOptions },
+  options: AdapterOptions & { requestOptions: VisionRequestOptions; structuredOutput?: boolean },
 ) => VisionProvider;
 
 /** The adapters of the provider entries and their model lists. */
@@ -164,6 +167,7 @@ class ProviderAdapters {
     const adapter = this.options.createVision[entry.kind]({
       ...this.adapterOptions(entry, 'Vision'),
       requestOptions: requestOptionsOf(visionEntry),
+      ...(entry.kind === 'openai' ? { structuredOutput: entry.options!.structuredOutput } : {}),
     });
     this.visionAdapters.set(entry.id, adapter);
     return adapter;

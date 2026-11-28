@@ -49,6 +49,8 @@ export interface ProviderDraft {
   maxTokens: string;
   extra: string;
   parallelRequests: string;
+  /** Whether an `openai` entry's tagging sends `response_format`; kept unchanged for `ollama`. */
+  structuredOutput: boolean;
 }
 
 /** The kinds a new entry can take, in the order the select offers them. */
@@ -88,6 +90,7 @@ export function draftOf(view: ProviderView | null): ProviderDraft {
     maxTokens: options.maxTokens === null ? '' : String(options.maxTokens),
     extra: options.extra,
     parallelRequests: String(options.parallelRequests),
+    structuredOutput: options.structuredOutput,
   };
 }
 
@@ -166,6 +169,7 @@ const optionsOf = (draft: ProviderDraft): ProviderOptions => ({
   maxTokens: maxTokensOf(draft.maxTokens)!,
   extra: draft.extra,
   parallelRequests: parallelRequestsOf(draft.parallelRequests)!,
+  structuredOutput: draft.structuredOutput,
 });
 
 /**

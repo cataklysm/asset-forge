@@ -29,6 +29,8 @@ import {
   PROVIDER_KIND_TITLE,
   REMOVE_KEY_LABEL,
   REMOVE_KEY_TITLE,
+  STRUCTURED_OUTPUT_LABEL,
+  STRUCTURED_OUTPUT_TITLE,
   TAGGING_MODEL_TITLE,
   TEMPERATURE_LABEL,
   TEMPERATURE_TITLE,
@@ -37,7 +39,7 @@ import {
   THINKING_TITLE,
 } from '../labels';
 import { KINDS, THINKING, maxTokensOf, parallelRequestsOf, temperatureOf, type ProviderDraft } from '../provider-draft';
-import { ALERT, BUTTON_INLINE, INPUT, LABEL, MUTED, SELECT } from '../ui';
+import { ALERT, BUTTON_INLINE, FOCUS, INPUT, LABEL, MUTED, SELECT } from '../ui';
 import { ModelSelect } from './ModelSelect';
 import { NumberField } from './NumberField';
 
@@ -231,6 +233,19 @@ export function VisionFields({ entryId, draft, locked, extraMessage, update }: V
         invalid={parallelRequestsOf(draft.parallelRequests) === null}
         onChange={(parallelRequests) => update({ parallelRequests })}
       />
+
+      {draft.kind === 'openai' && (
+        <label className="flex items-center gap-2 text-sm text-text" title={STRUCTURED_OUTPUT_TITLE}>
+          <input
+            type="checkbox"
+            className={`accent-accent ${FOCUS}`}
+            checked={draft.structuredOutput}
+            disabled={locked}
+            onChange={(event) => update({ structuredOutput: event.target.checked })}
+          />
+          <span>{STRUCTURED_OUTPUT_LABEL}</span>
+        </label>
+      )}
 
       <div className="flex flex-col gap-1">
         <label className="flex flex-col gap-1" title={EXTRA_PARAMETERS_TITLE}>

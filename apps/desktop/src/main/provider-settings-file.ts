@@ -2,6 +2,7 @@ import { copyFileSync, readdirSync, readFileSync, renameSync, rmSync } from 'nod
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
+  DEFAULT_PROVIDER_OPTIONS,
   isVisionKind,
   MAX_PROVIDERS,
   ModelNameSchema,
@@ -109,11 +110,12 @@ const MarkerSchema = z.object({ id: z.uuid(), origin: z.string() }).nullable();
 const V3EntrySchema = z.object(V3EntryShape).refine(entryRules);
 
 /**
- * Stored options: a missing or broken `parallelRequests` (written before the field existed, or edited by hand) reads
- * as the default, so the entry is kept. The IPC schema has no such default.
+ * Stored options: a missing or broken `parallelRequests` or `structuredOutput` (written before the field existed, or
+ * edited by hand) reads as the default, so the entry is kept. The IPC schema has no such default.
  */
 const StoredOptionsSchema = ProviderOptionsSchema.extend({
   parallelRequests: ParallelRequestsSchema.catch(PARALLEL_REQUESTS_DEFAULT),
+  structuredOutput: z.boolean().catch(DEFAULT_PROVIDER_OPTIONS.structuredOutput),
 });
 
 const V4EntrySchema = z

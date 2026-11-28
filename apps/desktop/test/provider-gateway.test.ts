@@ -9,6 +9,7 @@ import {
   createOpenAiVision,
   createVeniceImage,
   type OllamaVisionOptions,
+  type OpenAiVisionOptions,
   type VeniceImageOptions,
 } from '@assetforge/providers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -140,15 +141,15 @@ describe('provider gateway against two mock providers', () => {
 });
 
 describe('provider gateway with a fake adapter', () => {
-  let created: OllamaVisionOptions[];
+  let created: OpenAiVisionOptions[];
   /** The factory kind of every adapter built, in the order of `created`. */
   let kinds: string[];
   let listCalls: Map<string, number>;
   let listResult: (baseUrl: string) => Promise<{ name: string; vision: boolean | null }[]>;
 
   const fakeCreate = (options: OllamaVisionOptions): VisionProvider => fakeAdapter('ollama', options);
-  const fakeCreateOpenAi = (options: OllamaVisionOptions): VisionProvider => fakeAdapter('openai', options);
-  function fakeAdapter(kind: string, options: OllamaVisionOptions): VisionProvider {
+  const fakeCreateOpenAi = (options: OpenAiVisionOptions): VisionProvider => fakeAdapter('openai', options);
+  function fakeAdapter(kind: string, options: OpenAiVisionOptions): VisionProvider {
     created.push(options);
     kinds.push(kind);
     return {
@@ -193,7 +194,14 @@ describe('provider gateway with a fake adapter', () => {
   it('hands the factory the parsed request options and rebuilds the adapter when they change', () => {
     const a = store.save(
       openaiInput({
-        options: { temperature: 0.4, thinking: 'on', maxTokens: 300, extra: '{"top_k":20}', parallelRequests: 8 },
+        options: {
+          temperature: 0.4,
+          thinking: 'on',
+          maxTokens: 300,
+          extra: '{"top_k":20}',
+          parallelRequests: 8,
+          structuredOutput: true,
+        },
       }),
     );
     const o = store.save(input());
@@ -210,13 +218,22 @@ describe('provider gateway with a fake adapter', () => {
     store.save(
       openaiInput({
         id: a.id,
-        options: { temperature: 1, thinking: 'off', maxTokens: null, extra: '', parallelRequests: 1 },
+        options: {
+          temperature: 1,
+          thinking: 'off',
+          maxTokens: null,
+          extra: '',
+          parallelRequests: 1,
+          structuredOutput: false,
+        },
       }),
     );
     const rebuilt = g.vision(a.id);
     expect(rebuilt).not.toBe(first);
     expect(kinds).toEqual(['openai', 'ollama', 'openai']);
     expect(created[2]!.requestOptions).toEqual({ temperature: 1, thinking: 'off', maxTokens: null, extra: {} });
+    // Structured output reaches the openai factory only; the ollama entry gets nothing about it.
+    expect(created.map((options) => options.structuredOutput)).toEqual([true, undefined, false]);
   });
 
   it('builds an entry whose stored extra parameters fail the rule with no extra parameters', () => {

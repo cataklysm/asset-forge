@@ -85,6 +85,11 @@ export const EXTRA_PARAMETERS_TITLE = 'A JSON object merged into every request o
 export const PARALLEL_REQUESTS_LABEL = 'Parallel requests';
 export const PARALLEL_REQUESTS_TITLE = 'Analysis requests sent at the same time';
 export const PARALLEL_REQUESTS_INVALID = `The parallel requests must be a whole number from ${PARALLEL_REQUESTS_MIN} to ${PARALLEL_REQUESTS_MAX}`;
+/** The checkbox of an `openai` entry that decides whether tagging sends `response_format`. */
+export const STRUCTURED_OUTPUT_LABEL = 'Structured output';
+/** The tooltip of `STRUCTURED_OUTPUT_LABEL`. */
+export const STRUCTURED_OUTPUT_TITLE =
+  'Ask the server for the tag answer as a JSON schema; turn off for servers that refuse it';
 export const PROVIDER_STATE_LABEL = 'State';
 export const FROM_ENVIRONMENT = 'From environment';
 export const FROM_ENVIRONMENT_TITLE = 'The provider comes from the environment and cannot be changed here';
