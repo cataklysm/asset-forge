@@ -115,7 +115,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - The asset row mapper is duplicated in three repositories.
 - `safeErrorMessage` lives in `import-file.ts` although file moves use it too.
 - The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
-- The session and the import context are built from near-identical lambdas in the workspace manager.
+- The session and the import context are built from near-identical lambdas in the workspace manager (`workspace-manager.ts` builds the session, `workspace-import.ts` the import context).
 - "Details" is removed from the dialog menu by its label, with dummy `onDetails` handlers in both hosts.
 - `ROLES = FileRoleSchema.options` is declared six times in the renderer; `{ name: section } as View` in `WorkspaceShell`.
 - The tag-id lookup is triplicated in persistence; `ipc.ts` and `library-handlers.ts` import each other.
@@ -130,6 +130,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
 - Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
 - Core file readability pass (2026-11-28): the journaled move exists twice, as `moveJournaled` in `asset-files.ts` and `moveAndCommit` in `file-trash.ts` (begin, move, abort on failure, commit), and `assignFiles` repeats the per-item batch loop that `eachFile` in `file-trash.ts` holds; merging them needs one shared module both use. The URL rule's import (`normalizeDownloadUrl`) lives in `url-import.ts`, so `file-origins.ts` and `site-crawl.ts` depend on the queueing module for a pure rule. `ImportRun` in `import-file.ts` and `ArchiveRun` in `import-archive.ts` are plain mutable records passed between steps rather than classes; turning them into classes would move the journaled order into methods, which this pass avoided.
+- Core domain readability pass (2026-11-28): the asset check exists four times, exported from `tags.ts` (used by `asset-sources.ts`) and as private copies in `assignments.ts`, `relations.ts` and `workflows.ts` (the last one returns the asset). The import context for `importStream` is built in three places with small differences (`SourceImport` in `workspace-import.ts` passes `session.newId` unbound, `generationImportContext` in `generation-handler.ts` and `importContextOf` in `download-handler.ts` wrap it in a lambda). `jobs.ts` holds both the job port types and the job use cases but stays one file because `url-import.ts`, `file-trash.ts` and the three download files, which this pass leaves alone, import from it. `settleGenerationOfJob` stays in `generations.ts` because `file-trash.ts` imports it. `errors.ts` keeps `CREDENTIAL_STORE_UNAVAILABLE_MESSAGE` on one line of 131 characters.
 
 ## Tooling and tests
 
@@ -396,7 +397,7 @@ Found in the final review and not fixed:
 - Test gaps: Esc in the "ZIP archive" choice dialog is tested only in the inbox; `openEntry` racing `close()` is untested; `apps/desktop/test/import-result.test.ts` imports renderer test helpers (`test/renderer/fake-api.ts`, `fixtures.ts`).
 - `useZipChoice` leaves a pending promise when the screen unmounts or `choose` is called twice.
 - `AssetScreen` has no synchronous re-entry guard like the inbox's `importingRef`.
-- Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-manager.ts`).
+- Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-import.ts`).
 - The acceptance test for an entry with a wrong declared size only checks that the error carries no workspace path, not the exact fixed message.
 - An entry whose file name is longer than 255 characters and has a refused extension answers `This archive entry cannot be imported`, not the refused-type message (the length check comes first).
 

@@ -22,122 +22,270 @@ import { foldSearchWord } from './search.js';
 import type { WorkspaceSession } from './session.js';
 import { tagName } from './tags.js';
 
+/** The refusal of a title, description, text or default value over its limit. */
 const TOO_LONG = 'This text is too long';
+/** The refusal of an unknown prompt. */
 const PROMPT_MISSING = 'This prompt does not exist';
+/** The refusal of a version saved on top of one that is no longer current. */
 const PROMPT_CHANGED = 'This prompt was changed in the meantime';
 
-/** Titles are unique regardless of case. */
+/** The cleaned title and description of a prompt. */
+interface PromptHead {
+  /** The trimmed title. */
+  title: string;
+  /** The title in the form that is unique. */
+  titleKey: string;
+  /** The trimmed description. */
+  description: string;
+}
+
+/** The cleaned text of a prompt version. */
+interface PromptVersionText {
+  /** The trimmed content. */
+  content: string;
+  /** The variables of the content with their defaults. */
+  variables: PromptVariable[];
+}
+
+/**
+ * Titles are unique regardless of case.
+ *
+ * @param title the title
+ * @returns the form that is compared
+ */
 export const promptTitleKey = (title: string) => title.trim().toLowerCase();
 
-function cleanHead(r: { title: string; description: string }): { title: string; titleKey: string; description: string } {
-  const title = r.title.trim();
+/**
+ * The trimmed title and description.
+ *
+ * @param request the title and the description as typed
+ * @returns them cleaned, with the title key
+ * @throws `ValidationFailedError` for an empty title or a text over its limit
+ */
+function cleanHead(request: { title: string; description: string }): PromptHead {
+  const title = request.title.trim();
   if (title === '') throw new ValidationFailedError('A prompt needs a title');
   if (title.length > PROMPT_TITLE_MAX) throw new ValidationFailedError(TOO_LONG);
-  const description = r.description.trim();
+  const description = request.description.trim();
   if (description.length > PROMPT_DESCRIPTION_MAX) throw new ValidationFailedError(TOO_LONG);
   return { title, titleKey: promptTitleKey(title), description };
 }
 
-/** The trimmed content and the variables core stores for it. */
-function cleanVersion(r: { content: string; defaults: PromptDefaults }): { content: string; variables: PromptVariable[] } {
-  const content = r.content.trim();
+/**
+ * The trimmed content and the variables core stores for it.
+ *
+ * @param request the content and the default values as typed
+ * @returns them cleaned
+ * @throws `ValidationFailedError` for an empty text, a text or default over its limit or too many variables
+ */
+function cleanVersion(request: { content: string; defaults: PromptDefaults }): PromptVersionText {
+  const content = request.content.trim();
   if (content === '') throw new ValidationFailedError('A prompt needs a text');
   if (content.length > GENERATION_PROMPT_MAX) throw new ValidationFailedError(TOO_LONG);
   if (parsePromptVariables(content).length > MAX_PROMPT_VARIABLES) {
     throw new ValidationFailedError(`A prompt can have at most ${MAX_PROMPT_VARIABLES} variables`);
   }
-  const variables = buildPromptVariables(content, r.defaults);
-  if (variables.some((v) => v.defaultValue.length > PROMPT_VARIABLE_VALUE_MAX)) throw new ValidationFailedError(TOO_LONG);
+  const variables = buildPromptVariables(content, request.defaults);
+  if (variables.some((variable) => variable.defaultValue.length > PROMPT_VARIABLE_VALUE_MAX)) {
+    throw new ValidationFailedError(TOO_LONG);
+  }
   return { content, variables };
 }
 
-const sameVariables = (a: readonly PromptVariable[], b: readonly PromptVariable[]) =>
-  a.length === b.length && a.every((v, i) => v.name === b[i]!.name && v.defaultValue === b[i]!.defaultValue);
+/**
+ * Whether two variable lists have the same names and defaults in the same order.
+ *
+ * @param left one list
+ * @param right the other list
+ * @returns true when they are equal
+ */
+function sameVariables(left: readonly PromptVariable[], right: readonly PromptVariable[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((variable, i) => variable.name === right[i]!.name && variable.defaultValue === right[i]!.defaultValue)
+  );
+}
 
-export async function getPrompt(s: WorkspaceSession, promptId: string): Promise<PromptDetail> {
-  const prompt = await s.database.prompts.get(promptId);
+/**
+ * A prompt that must exist.
+ *
+ * @param session the open workspace
+ * @param promptId the prompt
+ * @returns its detail
+ * @throws `NotFoundError` otherwise
+ */
+export async function getPrompt(session: WorkspaceSession, promptId: string): Promise<PromptDetail> {
+  const prompt = await session.database.prompts.get(promptId);
   if (prompt === null) throw new NotFoundError(PROMPT_MISSING);
   return prompt;
 }
 
-/** Query words split on whitespace and folded; a tag name that is no valid tag answers an empty page. */
-export async function listPrompts(s: WorkspaceSession, r: ListPrompts): Promise<PromptPage> {
-  const words = [...new Set((r.query ?? '').split(/\s+/u).filter((w) => w !== '').map(foldSearchWord))];
+/**
+ * The distinct query words, split on whitespace and folded.
+ *
+ * @param query the query as typed
+ * @returns the words
+ */
+function queryWords(query: string): string[] {
+  return [...new Set(query.split(/\s+/u).filter((word) => word !== '').map(foldSearchWord))];
+}
+
+/**
+ * The distinct normalised tag names of a filter.
+ *
+ * @param typed the tag names as typed
+ * @returns them; null when one is no valid tag
+ */
+function filterTagNames(typed: readonly string[]): string[] | null {
   const tagNames: string[] = [];
-  for (const typed of r.tagNames ?? []) {
-    const name = normalizeTagName(typed);
-    if (name === null) return { items: [], total: 0 };
+  for (const entry of typed) {
+    const name = normalizeTagName(entry);
+    if (name === null) return null;
     if (!tagNames.includes(name)) tagNames.push(name);
   }
-  return s.database.prompts.list({ words, tagNames, offset: r.offset, limit: r.limit });
+  return tagNames;
 }
 
-export async function createPrompt(s: WorkspaceSession, r: CreatePrompt): Promise<PromptDetail> {
-  const head = cleanHead(r);
-  const version = cleanVersion(r);
-  const id = s.newId();
-  const created = await s.database.prompts.create({
+/**
+ * One page of prompts. Query words are split on whitespace and folded; a tag name that is no valid tag answers an
+ * empty page.
+ *
+ * @param session the open workspace
+ * @param request the filter and the page
+ * @returns the page
+ */
+export async function listPrompts(session: WorkspaceSession, request: ListPrompts): Promise<PromptPage> {
+  const words = queryWords(request.query ?? '');
+  const tagNames = filterTagNames(request.tagNames ?? []);
+  if (tagNames === null) return { items: [], total: 0 };
+  return session.database.prompts.list({ words, tagNames, offset: request.offset, limit: request.limit });
+}
+
+/**
+ * Creates a prompt with its first version.
+ *
+ * @param session the open workspace
+ * @param request the title, description, content and defaults
+ * @returns the new prompt
+ * @throws `ValidationFailedError` for a field that fails its rule or a title already used
+ */
+export async function createPrompt(session: WorkspaceSession, request: CreatePrompt): Promise<PromptDetail> {
+  const head = cleanHead(request);
+  const version = cleanVersion(request);
+  const id = session.newId();
+  const created = await session.database.prompts.create({
     id,
     ...head,
-    version: { id: s.newId(), ...version },
-    now: s.now().toISOString(),
+    version: { id: session.newId(), ...version },
+    now: session.now().toISOString(),
   });
   if (!created) throw new ValidationFailedError('This title is already used');
-  return getPrompt(s, id);
+  return getPrompt(session, id);
 }
 
-/** Title and description only; the text changes through `savePromptVersion`. */
-export async function updatePrompt(s: WorkspaceSession, r: UpdatePrompt): Promise<PromptDetail> {
-  const head = cleanHead(r);
-  const outcome = await s.database.prompts.update({ id: r.promptId, ...head, now: s.now().toISOString() });
+/**
+ * Changes the title and description only; the text changes through `savePromptVersion`.
+ *
+ * @param session the open workspace
+ * @param request the prompt, the title and the description
+ * @returns the changed prompt
+ * @throws `ValidationFailedError` for a field that fails its rule or a title already used, `NotFoundError` for an
+ *   unknown prompt
+ */
+export async function updatePrompt(session: WorkspaceSession, request: UpdatePrompt): Promise<PromptDetail> {
+  const head = cleanHead(request);
+  const outcome = await session.database.prompts.update({
+    id: request.promptId,
+    ...head,
+    now: session.now().toISOString(),
+  });
   if (outcome === 'missing') throw new NotFoundError(PROMPT_MISSING);
   if (outcome === 'title_taken') throw new ValidationFailedError('This title is already used');
-  return getPrompt(s, r.promptId);
+  return getPrompt(session, request.promptId);
 }
 
 /**
  * A new version on top of `baseVersionId`, which must be the current one. Content and variables equal to the
  * current version's write nothing and answer the unchanged prompt.
+ *
+ * @param session the open workspace
+ * @param request the prompt, the base version, the content and the defaults
+ * @returns the prompt
+ * @throws `NotFoundError` for an unknown prompt, `InvalidOperationError` for a base that is not current,
+ *   `ValidationFailedError` for a text that fails its rule
  */
-export async function savePromptVersion(s: WorkspaceSession, r: SavePromptVersion): Promise<PromptDetail> {
-  const prompt = await getPrompt(s, r.promptId);
-  if (prompt.currentVersion.id !== r.baseVersionId) throw new InvalidOperationError(PROMPT_CHANGED);
-  const version = cleanVersion(r);
+export async function savePromptVersion(session: WorkspaceSession, request: SavePromptVersion): Promise<PromptDetail> {
+  const prompt = await getPrompt(session, request.promptId);
+  if (prompt.currentVersion.id !== request.baseVersionId) throw new InvalidOperationError(PROMPT_CHANGED);
+  const version = cleanVersion(request);
   const current = prompt.currentVersion;
   if (version.content === current.content && sameVariables(version.variables, current.variables)) return prompt;
-  const outcome = await s.database.prompts.addVersion({
-    promptId: r.promptId,
-    baseVersionId: r.baseVersionId,
-    version: { id: s.newId(), ...version },
-    now: s.now().toISOString(),
+  const outcome = await session.database.prompts.addVersion({
+    promptId: request.promptId,
+    baseVersionId: request.baseVersionId,
+    version: { id: session.newId(), ...version },
+    now: session.now().toISOString(),
   });
   if (outcome === 'missing') throw new NotFoundError(PROMPT_MISSING);
   if (outcome === 'stale') throw new InvalidOperationError(PROMPT_CHANGED);
-  return getPrompt(s, r.promptId);
+  return getPrompt(session, request.promptId);
 }
 
-export async function deletePrompt(s: WorkspaceSession, promptId: string): Promise<void> {
-  if (!(await s.database.prompts.remove(promptId))) throw new NotFoundError(PROMPT_MISSING);
+/**
+ * Deletes a prompt with its versions and tag links.
+ *
+ * @param session the open workspace
+ * @param promptId the prompt
+ * @returns resolves once it is gone
+ * @throws `NotFoundError` for an unknown prompt
+ */
+export async function deletePrompt(session: WorkspaceSession, promptId: string): Promise<void> {
+  if (!(await session.database.prompts.remove(promptId))) throw new NotFoundError(PROMPT_MISSING);
 }
 
-export async function addPromptTag(s: WorkspaceSession, r: { promptId: string; name: string }): Promise<PromptDetail> {
-  const tag = tagName(r.name);
-  const outcome = await s.database.prompts.addTag({
-    promptId: r.promptId,
+/**
+ * Adds a manual tag to a prompt.
+ *
+ * @param session the open workspace
+ * @param request the prompt and the tag as typed
+ * @returns the prompt
+ * @throws `ValidationFailedError` for an invalid tag or a full tag list, `NotFoundError` for an unknown prompt
+ */
+export async function addPromptTag(
+  session: WorkspaceSession,
+  request: { promptId: string; name: string },
+): Promise<PromptDetail> {
+  const tag = tagName(request.name);
+  const outcome = await session.database.prompts.addTag({
+    promptId: request.promptId,
     ...tag,
-    newId: s.newId(),
-    now: s.now().toISOString(),
+    newId: session.newId(),
+    now: session.now().toISOString(),
     max: MAX_PROMPT_TAGS,
   });
   if (outcome === 'missing') throw new NotFoundError(PROMPT_MISSING);
   if (outcome === 'limit') throw new ValidationFailedError('This prompt cannot take more tags');
-  return getPrompt(s, r.promptId);
+  return getPrompt(session, request.promptId);
 }
 
-/** A tag the prompt does not carry is a no-op. */
-export async function removePromptTag(s: WorkspaceSession, r: { promptId: string; name: string }): Promise<PromptDetail> {
-  const tag = tagName(r.name);
-  const outcome = await s.database.prompts.removeTag({ promptId: r.promptId, name: tag.name, now: s.now().toISOString() });
+/**
+ * Removes a tag from a prompt; a tag the prompt does not carry is a no-op.
+ *
+ * @param session the open workspace
+ * @param request the prompt and the tag as typed
+ * @returns the prompt
+ * @throws `ValidationFailedError` for an invalid tag, `NotFoundError` for an unknown prompt
+ */
+export async function removePromptTag(
+  session: WorkspaceSession,
+  request: { promptId: string; name: string },
+): Promise<PromptDetail> {
+  const tag = tagName(request.name);
+  const outcome = await session.database.prompts.removeTag({
+    promptId: request.promptId,
+    name: tag.name,
+    now: session.now().toISOString(),
+  });
   if (outcome === 'missing') throw new NotFoundError(PROMPT_MISSING);
-  return getPrompt(s, r.promptId);
+  return getPrompt(session, request.promptId);
 }

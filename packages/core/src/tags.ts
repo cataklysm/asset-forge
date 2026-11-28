@@ -14,7 +14,13 @@ import { NotFoundError, ValidationFailedError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
 import type { WorkspaceSession } from './session.js';
 
-/** The key and the display spelling of a tag; throws `validation_failed` for a tag without a letter or digit or a too long one. */
+/**
+ * The key and the display spelling of a tag.
+ *
+ * @param input the tag as typed
+ * @returns the normalised name and the cleaned display name
+ * @throws `ValidationFailedError` for a tag without a letter or digit or a too long one
+ */
 export function tagName(input: string): { name: string; displayName: string } {
   const name = normalizeTagName(input);
   if (name === null) {
@@ -23,126 +29,202 @@ export function tagName(input: string): { name: string; displayName: string } {
   return { name, displayName: cleanTagText(input) };
 }
 
-/** How much the tag named by `r.name` (free text) touches; a text that is no valid tag name answers `exists: false`. */
-export async function tagUsage(s: WorkspaceSession, r: { name: string }): Promise<TagUsage> {
-  const name = normalizeTagName(r.name);
+/**
+ * How much the tag named by `request.name` (free text) touches.
+ *
+ * @param session the open workspace
+ * @param request the tag as typed
+ * @returns the counts; a text that is no valid tag name or an unknown tag answers `exists: false`
+ */
+export async function tagUsage(session: WorkspaceSession, request: { name: string }): Promise<TagUsage> {
+  const name = normalizeTagName(request.name);
   if (name === null) return { exists: false, name: '', displayName: '', assets: 0, files: 0, prompts: 0 };
-  const usage = await s.database.tags.usage(name);
+  const usage = await session.database.tags.usage(name);
   if (usage === null) return { exists: false, name, displayName: '', assets: 0, files: 0, prompts: 0 };
   return { exists: true, name, ...usage };
 }
 
 /**
- * Renames the tag `r.from` workspace-wide to `r.to`; onto an existing other tag only with `merge`
- * (otherwise `invalid_operation`). An unknown `from` fails with `not_found`, an invalid `to` with `validation_failed`.
+ * Renames the tag `request.from` workspace-wide to `request.to`; onto an existing other tag only with `merge`
+ * (otherwise `invalid_operation`).
+ *
+ * @param session the open workspace
+ * @param request the source tag, the target as typed and whether a merge is allowed
+ * @returns the kept tag and whether it was merged
+ * @throws `NotFoundError` for an unknown `from`, `ValidationFailedError` for an invalid `to`
  */
 export async function renameTag(
-  s: WorkspaceSession,
-  r: { from: string; to: string; merge: boolean },
+  session: WorkspaceSession,
+  request: { from: string; to: string; merge: boolean },
 ): Promise<TagRenameResult> {
-  const from = normalizeTagName(r.from);
+  const from = normalizeTagName(request.from);
   if (from === null) throw new NotFoundError('Tag does not exist');
-  const tag = tagName(r.to);
-  const { merged } = await s.database.tags.rename({ from, ...tag, merge: r.merge });
+  const tag = tagName(request.to);
+  const { merged } = await session.database.tags.rename({ from, ...tag, merge: request.merge });
   return { ...tag, merged };
 }
 
+/**
+ * The tags that start with a prefix.
+ *
+ * @param session the open workspace
+ * @param request the prefix as typed and the most suggestions wanted
+ * @returns the suggestions
+ */
 export function suggestTags(
-  s: WorkspaceSession,
-  r: { prefix: string; limit: number },
+  session: WorkspaceSession,
+  request: { prefix: string; limit: number },
 ): Promise<TagSuggestion[]> {
-  return s.database.tags.suggest({ prefix: normalizeTagPrefix(r.prefix), limit: r.limit });
+  return session.database.tags.suggest({ prefix: normalizeTagPrefix(request.prefix), limit: request.limit });
 }
 
-/** Throws `not_found` for an unknown asset. */
-export async function requireAsset(s: WorkspaceSession, assetId: string): Promise<void> {
-  if ((await s.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
+/**
+ * Refuses an unknown asset.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @returns resolves when it exists
+ * @throws `NotFoundError` (`not_found`) otherwise
+ */
+export async function requireAsset(session: WorkspaceSession, assetId: string): Promise<void> {
+  if ((await session.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
 }
 
-async function requireFile(s: WorkspaceSession, fileId: string): Promise<FileRecord> {
-  const file = await s.database.files.get(fileId);
+/**
+ * A file that must exist.
+ *
+ * @param session the open workspace
+ * @param fileId the file
+ * @returns its record
+ * @throws `NotFoundError` otherwise
+ */
+async function requireFile(session: WorkspaceSession, fileId: string): Promise<FileRecord> {
+  const file = await session.database.files.get(fileId);
   if (file === null) throw new NotFoundError(`File ${fileId} does not exist`);
   return file;
 }
 
+/**
+ * Adds a manual tag to an asset.
+ *
+ * @param session the open workspace
+ * @param request the asset and the tag as typed
+ * @returns the asset's detail
+ * @throws `ValidationFailedError` for an invalid tag, `NotFoundError` for an unknown asset
+ */
 export async function addAssetTag(
-  s: WorkspaceSession,
-  r: { assetId: string; name: string },
+  session: WorkspaceSession,
+  request: { assetId: string; name: string },
 ): Promise<AssetDetail> {
-  const tag = tagName(r.name);
-  await requireAsset(s, r.assetId);
-  await s.database.tags.addToAsset({
-    assetId: r.assetId,
+  const tag = tagName(request.name);
+  await requireAsset(session, request.assetId);
+  await session.database.tags.addToAsset({
+    assetId: request.assetId,
     ...tag,
     origin: 'manual',
-    newId: s.newId(),
-    now: s.now().toISOString(),
+    newId: session.newId(),
+    now: session.now().toISOString(),
   });
-  return getAssetDetail(s, r.assetId);
+  return getAssetDetail(session, request.assetId);
 }
 
+/**
+ * Removes a tag from an asset.
+ *
+ * @param session the open workspace
+ * @param request the asset and the tag as typed
+ * @returns the asset's detail
+ * @throws `ValidationFailedError` for an invalid tag, `NotFoundError` for an unknown asset
+ */
 export async function removeAssetTag(
-  s: WorkspaceSession,
-  r: { assetId: string; name: string },
+  session: WorkspaceSession,
+  request: { assetId: string; name: string },
 ): Promise<AssetDetail> {
-  const tag = tagName(r.name);
-  await requireAsset(s, r.assetId);
-  await s.database.tags.removeFromAsset({ assetId: r.assetId, name: tag.name });
-  return getAssetDetail(s, r.assetId);
+  const tag = tagName(request.name);
+  await requireAsset(session, request.assetId);
+  await session.database.tags.removeFromAsset({ assetId: request.assetId, name: tag.name });
+  return getAssetDetail(session, request.assetId);
 }
 
+/**
+ * Adds a manual tag to a complete file outside the trash.
+ *
+ * @param session the open workspace
+ * @param request the file and the tag as typed
+ * @returns the file's record
+ * @throws `ValidationFailedError` for an invalid tag or an incomplete file, `NotFoundError` for an unknown file,
+ *   the trash refusal for a trashed one
+ */
 export async function addFileTag(
-  s: WorkspaceSession,
-  r: { fileId: string; name: string },
+  session: WorkspaceSession,
+  request: { fileId: string; name: string },
 ): Promise<FileRecord> {
-  const tag = tagName(r.name);
-  const file = await requireFile(s, r.fileId);
+  const tag = tagName(request.name);
+  const file = await requireFile(session, request.fileId);
   requireLiveFile(file);
-  if (file.status !== 'complete') throw new ValidationFailedError(`File ${r.fileId} is not completely imported`);
-  await s.database.tags.addToFile({
-    fileId: r.fileId,
+  if (file.status !== 'complete') throw new ValidationFailedError(`File ${request.fileId} is not completely imported`);
+  await session.database.tags.addToFile({
+    fileId: request.fileId,
     ...tag,
     origin: 'manual',
-    newId: s.newId(),
-    now: s.now().toISOString(),
+    newId: session.newId(),
+    now: session.now().toISOString(),
   });
-  return requireFile(s, r.fileId);
+  return requireFile(session, request.fileId);
 }
 
 /**
  * Adds one manual tag to several files, all or nothing: an unknown file fails with `not_found`
  * and a file that is not completely imported with `validation_failed`, and then no file is tagged.
- * Returns the records in request order.
+ *
+ * @param session the open workspace
+ * @param request the files and the tag as typed
+ * @returns the records in request order
  */
 export async function addFileTags(
-  s: WorkspaceSession,
-  r: { fileIds: readonly string[]; name: string },
+  session: WorkspaceSession,
+  request: { fileIds: readonly string[]; name: string },
 ): Promise<FileRecord[]> {
-  const tag = tagName(r.name);
-  return s.database.tags.addToFiles({
-    fileIds: r.fileIds,
+  const tag = tagName(request.name);
+  return session.database.tags.addToFiles({
+    fileIds: request.fileIds,
     ...tag,
     origin: 'manual',
-    newId: s.newId(),
-    now: s.now().toISOString(),
+    newId: session.newId(),
+    now: session.now().toISOString(),
   });
 }
 
-/** Removes one manual tag from several files, all or nothing like `addFileTags`; an AI assignment of the tag goes too. */
+/**
+ * Removes one manual tag from several files, all or nothing like `addFileTags`; an AI assignment of the tag goes too.
+ *
+ * @param session the open workspace
+ * @param request the files and the tag as typed
+ * @returns the records in request order
+ */
 export async function removeFileTags(
-  s: WorkspaceSession,
-  r: { fileIds: readonly string[]; name: string },
+  session: WorkspaceSession,
+  request: { fileIds: readonly string[]; name: string },
 ): Promise<FileRecord[]> {
-  const tag = tagName(r.name);
-  return s.database.tags.removeFromFiles({ fileIds: r.fileIds, name: tag.name });
+  const tag = tagName(request.name);
+  return session.database.tags.removeFromFiles({ fileIds: request.fileIds, name: tag.name });
 }
 
+/**
+ * Removes a tag from a file outside the trash.
+ *
+ * @param session the open workspace
+ * @param request the file and the tag as typed
+ * @returns the file's record
+ * @throws `ValidationFailedError` for an invalid tag, `NotFoundError` for an unknown file, the trash refusal for a
+ *   trashed one
+ */
 export async function removeFileTag(
-  s: WorkspaceSession,
-  r: { fileId: string; name: string },
+  session: WorkspaceSession,
+  request: { fileId: string; name: string },
 ): Promise<FileRecord> {
-  const tag = tagName(r.name);
-  requireLiveFile(await requireFile(s, r.fileId));
-  await s.database.tags.removeFromFile({ fileId: r.fileId, name: tag.name });
-  return requireFile(s, r.fileId);
+  const tag = tagName(request.name);
+  requireLiveFile(await requireFile(session, request.fileId));
+  await session.database.tags.removeFromFile({ fileId: request.fileId, name: tag.name });
+  return requireFile(session, request.fileId);
 }
