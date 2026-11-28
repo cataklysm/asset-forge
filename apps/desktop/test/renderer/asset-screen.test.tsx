@@ -1665,3 +1665,26 @@ it('a running import in the asset screen shows its progress, reloads the files w
     vi.useRealTimers();
   }
 });
+
+it('a failed load of the asset types is named in the header and Retry loads them again', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  let failures = 1;
+  const api = install(asset, {
+    'assetTypes:list': () => {
+      if (failures > 0) {
+        failures -= 1;
+        throw fakeError('invalid_operation');
+      }
+      return [TYPE];
+    },
+  });
+  render(<Harness id={asset.id} />);
+  const header = (await screen.findByRole('textbox', { name: 'Name' })).closest('header')!;
+  expect((await within(header).findByRole('alert')).textContent).toBe('invalid_operation');
+  await user.click(within(header).getByRole('button', { name: 'Retry' }));
+  const select = within(header).getByRole('combobox', { name: 'Type' }) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(TYPE.id));
+  expect(within(header).queryByRole('alert')).toBeNull();
+  expect(api.calls.filter((entry) => entry.channel === 'assetTypes:list')).toHaveLength(2);
+});
