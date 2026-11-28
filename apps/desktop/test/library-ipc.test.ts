@@ -967,6 +967,16 @@ describe('workflow IPC', () => {
     expect(confirmWorkflow).not.toHaveBeenCalled();
   });
 
+  it('workflows:remove answers not_found for an unknown asset without asking', async () => {
+    await openWorkspace();
+    confirmWorkflow.mockClear().mockResolvedValue(true);
+    expect(await call('workflows:remove', { assetId: uuid })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
+    expect(confirmWorkflow).not.toHaveBeenCalled();
+  });
+
   it('workflows:updateStep rejects unknown patch keys as invalid_request', async () => {
     await openWorkspace();
     const asset = await createAsset('landscape');
