@@ -107,3 +107,9 @@ The owner explicitly authorized merge, commit and push after reviewing the initi
 - Repeated the native Electron smoke with three independent pages and delayed URL attributes: passed.
 
 The merge history and remote `main` identify the final integration commits; no force push or history rewrite is part of this integration.
+
+## Dialog overflow regression
+
+The owner reported that eligible-file results expand the dialog indefinitely. A native layout check reproduced this at a 1280 × 800 content viewport with 70 candidates: the file-list wrapper measured 2671 px high, dialog scroll content reached 3857 px, and the Close button began at y=3820, outside the viewport. The check failed the requirement that the file list leave room for controls and scroll internally.
+
+This visual regression is verified with real browser geometry, not jsdom class-name assertions. The isolated fixture and screenshots stay outside the repository and reuse the committed native smoke runner.
