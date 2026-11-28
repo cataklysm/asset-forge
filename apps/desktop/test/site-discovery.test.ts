@@ -89,6 +89,45 @@ describe('durable gallery discovery', () => {
     expect(jobs.items.every((job) => job.type === 'site.crawl')).toBe(true);
   });
 
+  it('removes an imported extraction without cancelling pending downloads or deleting its profile or files', async () => {
+    const saved = await open();
+    const fileId = await h!.importPng({ name: 'existing.png', width: 8, height: 8 });
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await ready(crawlId);
+    h!.services.pause.pause('io', saved.site, 'download_browser_check');
+    expect((await h!.ok('sites:import', { crawlId, selectedUrls: ['https://example.com/photo.jpg'] })).queued).toBe(1);
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('imported');
+    const before = await h!.manager.read((session) => session.database.jobs.listByStatus('queued'));
+    expect(before).toHaveLength(1);
+    expect(before[0]?.type).toBe('file.download');
+    const removed = await h!.call('sites:removeCrawl' as Parameters<Harness['call']>[0], { crawlId });
+    expect(removed).toEqual({ ok: true, value: { removed: true } });
+    expect(await h!.ok('sites:listCrawls', {})).toEqual({ items: [], total: 0 });
+    expect(await h!.manager.read((session) => session.database.jobs.listByStatus('queued'))).toEqual(before);
+    expect(await h!.manager.read((session) => session.database.files.get(fileId))).not.toBeNull();
+    expect((await h!.ok('sites:list', {})).profiles.some((item) => item.id === saved.id)).toBe(true);
+    expect(await h!.call('sites:removeCrawl' as Parameters<Harness['call']>[0], { crawlId }))
+      .toEqual({ ok: true, value: { removed: false } });
+  });
+
+  it('requires explicit cancellation before removing an active extraction', async () => {
+    let started!: () => void;
+    const begun = new Promise<void>((resolve) => { started = resolve; });
+    const saved = await open((_url, request) => new Promise((resolve) => {
+      started();
+      request.signal.addEventListener('abort', () => resolve({ ok: false, reason: 'failed' }), { once: true });
+    }));
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await begun;
+    expect(await h!.call('sites:removeCrawl' as Parameters<Harness['call']>[0], { crawlId }))
+      .toMatchObject({ ok: false, error: { code: 'invalid_operation' } });
+    expect((await h!.ok('sites:getCrawl', { crawlId })).status).toBe('running');
+    await h!.ok('sites:cancelCrawl', { crawlId });
+    await h!.until((summary) => summary.cancelled === 1);
+    expect(await h!.call('sites:removeCrawl' as Parameters<Harness['call']>[0], { crawlId }))
+      .toEqual({ ok: true, value: { removed: true } });
+  });
+
   it('retains completed review results when the workspace is closed and reopened', async () => {
     const saved = await open();
     const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });

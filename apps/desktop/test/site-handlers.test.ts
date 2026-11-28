@@ -171,9 +171,8 @@ describe('site handlers', () => {
       message: 'Another login window is open',
     });
     // The profile of the open window can be neither changed nor deleted.
-    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toEqual({
-      code: 'invalid_operation',
-      message: 'This profile is in use',
+    expect(await h!.ok('sites:save', { ...profileRequest(), id: a.id, maxFiles: 123 })).toMatchObject({
+      id: a.id, maxFiles: 123,
     });
     expect(await error('sites:delete', { id: a.id })).toEqual({
       code: 'invalid_operation',
@@ -206,9 +205,9 @@ describe('site handlers', () => {
       code: 'invalid_operation',
       message: 'A site import test is already running',
     });
-    // A crawling profile is in use as well.
-    expect(await error('sites:save', { ...profileRequest(), id: a.id })).toMatchObject({
-      message: 'This profile is in use',
+    // The active crawl keeps its captured settings while future extractions use the saved edit.
+    expect(await h!.ok('sites:save', { ...profileRequest(), id: a.id, maxFiles: 123 })).toMatchObject({
+      id: a.id, maxFiles: 123,
     });
     expect(await h!.ok('sites:crawlProgress', {})).toEqual({ pages: 0, files: 0, cancelling: false });
     expect(await h!.ok('sites:cancelCrawl', {})).toEqual({ cancelling: true });
