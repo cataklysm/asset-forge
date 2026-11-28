@@ -132,6 +132,12 @@ describe('slotAt', () => {
     expect(slotAt(s, 61)).toEqual({ kind: 'failed', page: 1 });
   });
 
+  it('a failed page keeps the failure text for its slots', () => {
+    const s = rejectPage(stateWithLoading([1]), 'k', 1, PAGE_SIZE, 'The folder cannot be reached.');
+    expect(s.pages.get(1)).toEqual({ status: 'failed', message: 'The folder cannot be reached.' });
+    expect(slotAt(s, 61)).toEqual({ kind: 'failed', page: 1, message: 'The folder cannot be reached.' });
+  });
+
   it('is placeholder for invalid indexes and short pages', () => {
     const loaded = stateWithLoaded([0]);
     expect(slotAt(loaded, -1)).toEqual({ kind: 'placeholder' });

@@ -296,8 +296,8 @@ function ProjectsToolbar({ filters, total, allError, setFilter }: ToolbarProps) 
 
 /** The props of `ProjectListBody`. */
 interface ListBodyProps {
-  /** The failed first page, which takes the place of the list. */
-  failedPage: number | null;
+  /** The failed first page with its failure text, which takes the place of the list. */
+  failedPage: { page: number; message: string | null } | null;
   total: number | null;
   /** The table props, or null for an empty list. */
   tableProps: ProjectTableProps | null;
@@ -316,8 +316,13 @@ interface ListBodyProps {
 function ProjectListBody({ failedPage, total, tableProps, filtered, viewKey, onRetry }: ListBodyProps) {
   if (failedPage !== null) {
     return (
-      <div>
-        <button type="button" className={BUTTON} onClick={() => onRetry(failedPage)}>
+      <div className="flex flex-col items-start gap-3">
+        {failedPage.message !== null && (
+          <p role="alert" className={ALERT}>
+            {failedPage.message}
+          </p>
+        )}
+        <button type="button" className={BUTTON} onClick={() => onRetry(failedPage.page)}>
           {RETRY_LABEL}
         </button>
       </div>

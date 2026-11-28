@@ -188,10 +188,10 @@ function TableRow(props: TableRowProps) {
       <div
         role="row"
         aria-rowindex={index + 2}
-        className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
+        className={`absolute inset-x-0 flex items-center gap-3 border-b px-2 ${BORDER}`}
         style={style}
       >
-        <span role="gridcell">
+        <span role="gridcell" className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             data-index={index}
@@ -206,6 +206,11 @@ function TableRow(props: TableRowProps) {
           >
             {RETRY_LABEL}
           </button>
+          {slot.message !== undefined && (
+            <span title={slot.message} className="truncate text-sm text-danger">
+              {slot.message}
+            </span>
+          )}
         </span>
       </div>
     );

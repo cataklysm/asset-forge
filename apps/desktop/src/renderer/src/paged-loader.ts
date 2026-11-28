@@ -1,3 +1,4 @@
+import { describeError } from './api';
 import {
   acceptPage,
   dropPages,
@@ -283,7 +284,8 @@ export class PagedLoader<T> {
       promise.then(
         (result) =>
           this.settle(round, counted, () => acceptPage(this.state, requestKey, page, result.items, result.total)),
-        () => this.settle(round, counted, () => rejectPage(this.state, requestKey, page)),
+        (error: unknown) =>
+          this.settle(round, counted, () => rejectPage(this.state, requestKey, page, PAGE_SIZE, describeError(error))),
       );
     }
   }

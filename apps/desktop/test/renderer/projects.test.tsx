@@ -436,12 +436,14 @@ it('a failed first page shows Retry', async () => {
   let fail = true;
   install({
     'projects:list': (request) => {
-      if (fail && request.limit === 60) throw fakeError('internal_error');
+      if (fail && request.limit === 60) throw fakeError('storage_full');
       return listOf([projectSummary({ name: 'Back' })])(request);
     },
   });
   render(<Harness />);
   const retry = await screen.findByRole('button', { name: 'Retry' });
+  // The failure is named beside Retry.
+  expect(screen.getByRole('alert').textContent).toBe('There is not enough free space in this folder.');
   fail = false;
   await user.click(retry);
   expect(await screen.findByText('Back')).toBeTruthy();
@@ -469,6 +471,8 @@ it('a focused placeholder row that turns into Retry hands the focus to the Retry
   await act(async () => second.reject(fakeError('internal_error')));
   const retry = await screen.findByRole('button', { name: 'Retry' });
   await waitFor(() => expect(document.activeElement).toBe(retry));
+  // The row names the failure beside Retry.
+  expect(within(retry.closest<HTMLElement>('[role=gridcell]')!).getByText('internal_error')).toBeTruthy();
 });
 
 it('the focus of a row coming back from its project does not take the focus from the search field', async () => {

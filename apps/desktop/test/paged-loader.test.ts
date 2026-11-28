@@ -255,7 +255,7 @@ describe('PagedLoader', () => {
     h.loader.setWanted([0]);
     h.calls[0]!.reject();
     await flush();
-    expect(slotAt(h.loader.state, 0)).toEqual({ kind: 'failed', page: 0 });
+    expect(slotAt(h.loader.state, 0)).toEqual({ kind: 'failed', page: 0, message: 'boom' });
     h.loader.retry(0);
     expect(h.calls).toHaveLength(2);
     h.calls[1]!.resolve(10);
@@ -312,7 +312,7 @@ describe('PagedLoader', () => {
     await flush();
     expect(h.loader.pending).toBe(false);
     expect(h.loader.displayed.key).toContain('B');
-    expect(slotAt(h.loader.displayed, 0)).toEqual({ kind: 'failed', page: 0 });
+    expect(slotAt(h.loader.displayed, 0)).toEqual({ kind: 'failed', page: 0, message: 'boom' });
     h.loader.retry(0);
     h.calls.at(-1)!.resolve(5);
     await flush();
@@ -363,7 +363,7 @@ describe('PagedLoader', () => {
     await flush();
     h.calls[1]!.reject();
     await expect(done).resolves.toBeUndefined();
-    expect(slotAt(h.loader.state, 60)).toEqual({ kind: 'failed', page: 1 });
+    expect(slotAt(h.loader.state, 60)).toEqual({ kind: 'failed', page: 1, message: 'boom' });
   });
 
   it('loadThrough rejects when the key changes meanwhile', async () => {
@@ -636,10 +636,10 @@ describe('PagedLoader.refresh', () => {
     h.loader.setWanted([0, 1]);
     h.calls.at(-1)!.reject();
     await flush();
-    expect(slotAt(h.loader.state, PAGE_SIZE)).toEqual({ kind: 'failed', page: 1 });
+    expect(slotAt(h.loader.state, PAGE_SIZE)).toEqual({ kind: 'failed', page: 1, message: 'boom' });
     h.loader.refresh();
     expect(h.open.map((c) => c.offset)).toEqual([0, PAGE_SIZE]);
-    expect(slotAt(h.loader.displayed, PAGE_SIZE)).toEqual({ kind: 'failed', page: 1 });
+    expect(slotAt(h.loader.displayed, PAGE_SIZE)).toEqual({ kind: 'failed', page: 1, message: 'boom' });
     h.open[1]!.resolve(200);
     await flush();
     expect(slotAt(h.loader.displayed, PAGE_SIZE).kind).toBe('loaded');
