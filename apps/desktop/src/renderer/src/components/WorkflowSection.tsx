@@ -1,69 +1,30 @@
-import { useState } from 'react';
-import { WorkflowStepStateSchema, type AssetWorkflow } from '@assetforge/contracts';
-import { call, describeError } from '../api';
-import { useLoad } from '../hooks/useLoad';
+import { WorkflowStepStateSchema, type AssetWorkflow, type WorkflowTemplate } from '@assetforge/contracts';
+import { useWorkflow, type StepPatch } from '../hooks/useWorkflow';
 import { label } from '../labels';
-import { formatProgress, pickTemplate } from '../progress';
+import { formatProgress } from '../progress';
 import { ALERT, BORDER, BUTTON, MUTED, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
 
+/** The props of `WorkflowSection`. */
 interface Props {
   assetId: string;
+  /** The asset's type, whose default template is preselected. */
   assetTypeId: string;
 }
 
+/** One step of a workflow. */
+type Step = AssetWorkflow['steps'][number];
+
+/**
+ * The Workflow tab of the asset screen: the running workflow with its steps, or the template
+ * select to start one.
+ *
+ * @param props the asset and its type
+ * @returns the section
+ */
 export function WorkflowSection({ assetId, assetTypeId }: Props) {
-  const [error, setError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState('');
-  // The workflow returned by a mutation replaces the loaded one without a reload.
-  const [override, setOverride] = useState<{
-    assetId: string;
-    workflow: AssetWorkflow | null;
-  } | null>(null);
-
-  const loaded = useLoad(() => call('workflows:get', { assetId }), [assetId]);
-  const templates = useLoad(() => call('workflowTemplates:list', {}), []);
-  const types = useLoad(() => call('assetTypes:list', {}), []);
-
-  const workflow = override?.assetId === assetId ? override.workflow : loaded.data;
-  const resolved = override?.assetId === assetId || !loaded.loading;
-
-  async function run(action: () => Promise<void>): Promise<boolean> {
-    setError(null);
-    try {
-      await action();
-      return true;
-    } catch (e) {
-      setError(describeError(e));
-      return false;
-    }
-  }
-
-  const updateStep = (
-    stepId: string,
-    patch: { state?: AssetWorkflow['steps'][number]['state']; notes?: string },
-  ) =>
-    run(async () => {
-      const updated = await call('workflows:updateStep', { stepId, patch });
-      setOverride({ assetId, workflow: updated });
-    });
-
-  const templateItems = templates.data ?? [];
-  const typeDefault =
-    (types.data ?? []).find((t) => t.id === assetTypeId)?.defaultWorkflowTemplateId ?? null;
-  // Until both lists have settled (success or failure) nothing is preselected or startable.
-  const ready = !templates.loading && !types.loading;
-  const effectiveTemplate = ready
-    ? pickTemplate(
-        templateItems.map((t) => t.id),
-        chosen,
-        typeDefault,
-      )
-    : '';
-
-  const loadErrors = [loaded, templates, types]
-    .map((l) => l.error)
-    .filter((e): e is string => e !== null);
+  const state = useWorkflow(assetId, assetTypeId);
+  const { workflow, resolved, error } = state;
 
   return (
     <section className="space-y-3" aria-label="Workflow">
@@ -72,114 +33,152 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
           {error}
         </p>
       )}
-      {loadErrors.map((message) => (
+      {state.loadErrors.map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
       ))}
 
       {workflow ? (
-        <>
-          <p>
-            {workflow.templateName} <span className={MUTED}>v{workflow.templateVersion}</span>{' '}
-            {formatProgress(workflow.progress)}
-          </p>
-          <progress
-            aria-label="Workflow progress"
-            value={workflow.progress.done}
-            max={workflow.progress.total}
-          />
-          <ul className="space-y-2">
-            {workflow.steps.map((step) => (
-              <li
-                key={step.id}
-                className={`flex flex-wrap items-center gap-2 border-b pb-2 ${BORDER}`}
-              >
-                <span>{step.name}</span>
-                {!step.mandatory && <span className={MUTED}>Optional</span>}
-                <select
-                  className={SELECT}
-                  aria-label={`State of ${step.name}`}
-                  value={step.state}
-                  onChange={(e) =>
-                    void updateStep(step.id, {
-                      state: WorkflowStepStateSchema.parse(e.target.value),
-                    })
-                  }
-                >
-                  {WorkflowStepStateSchema.options
-                    .filter((s) => s !== 'skipped' || !step.mandatory || step.state === 'skipped')
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {label(s)}
-                      </option>
-                    ))}
-                </select>
-                <CommitInput
-                  label={`Notes for ${step.name}`}
-                  multiline
-                  variant="inline"
-                  placeholder="Notes"
-                  className="min-w-64 flex-1"
-                  value={step.notes}
-                  maxLength={5000}
-                  onCommit={(notes) => updateStep(step.id, { notes })}
-                />
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            className={BUTTON}
-            title="Step states and notes are deleted; asks first"
-            onClick={() =>
-              void run(async () => {
-                const { removed } = await call('workflows:remove', { assetId });
-                if (!removed) return;
-                setOverride({ assetId, workflow: null });
-              })
-            }
-          >
-            Remove workflow
-          </button>
-        </>
+        <RunningWorkflow workflow={workflow} updateStep={state.updateStep} remove={state.remove} />
       ) : (
         !resolved && <p className={MUTED}>Loading…</p>
       )}
 
-      {!workflow && resolved && loaded.error === null && (
-        <div className="flex items-center gap-2">
-          <select
-            className={SELECT}
-            aria-label="Workflow template"
-            value={effectiveTemplate}
-            disabled={!ready}
-            onChange={(e) => setChosen(e.target.value)}
-          >
-            {templateItems.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={effectiveTemplate === ''}
-            onClick={() =>
-              void run(async () => {
-                const started = await call('workflows:start', {
-                  assetId,
-                  templateId: effectiveTemplate,
-                });
-                setOverride({ assetId, workflow: started });
-              })
-            }
-          >
-            Start workflow
-          </button>
-        </div>
+      {!workflow && resolved && state.loadError === null && (
+        <StartWorkflow
+          templates={state.templates}
+          effectiveTemplate={state.effectiveTemplate}
+          ready={state.ready}
+          choose={state.choose}
+          start={state.start}
+        />
       )}
     </section>
+  );
+}
+
+/** The props of `RunningWorkflow`. */
+interface RunningWorkflowProps {
+  workflow: AssetWorkflow;
+  updateStep(stepId: string, patch: StepPatch): Promise<boolean>;
+  remove(): Promise<boolean>;
+}
+
+/**
+ * The template, the progress, the steps and Remove workflow.
+ *
+ * @param props the workflow and its actions
+ * @returns the workflow parts
+ */
+function RunningWorkflow({ workflow, updateStep, remove }: RunningWorkflowProps) {
+  return (
+    <>
+      <p>
+        {workflow.templateName} <span className={MUTED}>v{workflow.templateVersion}</span>{' '}
+        {formatProgress(workflow.progress)}
+      </p>
+      <progress
+        aria-label="Workflow progress"
+        value={workflow.progress.done}
+        max={workflow.progress.total}
+      />
+      <ul className="space-y-2">
+        {workflow.steps.map((step) => (
+          <StepItem key={step.id} step={step} updateStep={updateStep} />
+        ))}
+      </ul>
+      <button
+        type="button"
+        className={BUTTON}
+        title="Step states and notes are deleted; asks first"
+        onClick={() => void remove()}
+      >
+        Remove workflow
+      </button>
+    </>
+  );
+}
+
+/**
+ * One step: its name, Optional, the state select and the notes. `skipped` is offered only for an
+ * optional step, or for a mandatory one that already is skipped.
+ *
+ * @param props the step and the update
+ * @returns the list entry
+ */
+function StepItem({ step, updateStep }: { step: Step; updateStep: RunningWorkflowProps['updateStep'] }) {
+  return (
+    <li className={`flex flex-wrap items-center gap-2 border-b pb-2 ${BORDER}`}>
+      <span>{step.name}</span>
+      {!step.mandatory && <span className={MUTED}>Optional</span>}
+      <select
+        className={SELECT}
+        aria-label={`State of ${step.name}`}
+        value={step.state}
+        onChange={(event) =>
+          void updateStep(step.id, {
+            state: WorkflowStepStateSchema.parse(event.target.value),
+          })
+        }
+      >
+        {WorkflowStepStateSchema.options
+          .filter((state) => state !== 'skipped' || !step.mandatory || step.state === 'skipped')
+          .map((state) => (
+            <option key={state} value={state}>
+              {label(state)}
+            </option>
+          ))}
+      </select>
+      <CommitInput
+        label={`Notes for ${step.name}`}
+        multiline
+        variant="inline"
+        placeholder="Notes"
+        className="min-w-64 flex-1"
+        value={step.notes}
+        maxLength={5000}
+        onCommit={(notes) => updateStep(step.id, { notes })}
+      />
+    </li>
+  );
+}
+
+/** The props of `StartWorkflow`. */
+interface StartWorkflowProps {
+  templates: WorkflowTemplate[];
+  effectiveTemplate: string;
+  /** Whether templates and asset types have settled. */
+  ready: boolean;
+  choose(templateId: string): void;
+  start(): Promise<boolean>;
+}
+
+/**
+ * The template select and Start workflow.
+ *
+ * @param props the templates, the effective choice and the actions
+ * @returns the start row
+ */
+function StartWorkflow({ templates, effectiveTemplate, ready, choose, start }: StartWorkflowProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className={SELECT}
+        aria-label="Workflow template"
+        value={effectiveTemplate}
+        disabled={!ready}
+        onChange={(event) => choose(event.target.value)}
+      >
+        {templates.map((template) => (
+          <option key={template.id} value={template.id}>
+            {template.name}
+          </option>
+        ))}
+      </select>
+      <button type="button" className={BUTTON} disabled={effectiveTemplate === ''} onClick={() => void start()}>
+        Start workflow
+      </button>
+    </div>
   );
 }
