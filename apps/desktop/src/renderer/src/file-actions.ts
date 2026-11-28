@@ -62,6 +62,8 @@ export interface FileActionContext {
   onPurge?(): void;
   /** Offers Generate from image and the upscales for a complete previewable file; disabled with its `blocked` as tooltip. */
   studio?: StudioState;
+  /** True while another action of the host runs behind the same guard: the cover, Detach and Delete items are disabled. */
+  actionBusy?: boolean;
 }
 
 /**
@@ -129,17 +131,29 @@ function studioItems(file: FileRecord, context: FileActionContext): MenuItem[] {
 function coverItems(file: FileRecord, context: FileActionContext): MenuItem[] {
   const { cover, onSetCover } = context;
   if (cover === null || onSetCover === undefined) return [];
+  const disabled = busyFlag(context);
   if (cover.isChosen)
     return [
       {
         label: 'Use automatic cover',
         title: 'Return to the first image as the cover',
         onSelect: () => onSetCover(null),
+        ...disabled,
       },
     ];
   if (file.status !== 'complete' || !file.thumbnail) return [];
   const title = file.kind === 'video' ? 'Show this video as the asset cover' : 'Show this image as the asset cover';
-  return [{ label: 'Use as cover', title, onSelect: () => onSetCover(file.id) }];
+  return [{ label: 'Use as cover', title, onSelect: () => onSetCover(file.id), ...disabled }];
+}
+
+/**
+ * The disabled flag of an item behind the host's guard while another action runs.
+ *
+ * @param context what the host offers
+ * @returns `{ disabled: true }` while the host is busy, else nothing
+ */
+function busyFlag(context: FileActionContext): { disabled?: true } {
+  return context.actionBusy === true ? { disabled: true } : {};
 }
 
 /**
@@ -170,10 +184,16 @@ export function fileMenuItems(file: FileRecord, context: FileActionContext): Men
   if (complete && file.openable) items.push({ label: 'Open externally', onSelect: shell('files:openExternal') });
   if (complete) items.push({ label: 'Show in folder', onSelect: shell('files:showInFolder') });
   items.push(...analysisItems(file, context), ...studioItems(file, context), ...coverItems(file, context));
+  const disabled = busyFlag(context);
   if (context.onDetach !== undefined)
-    items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: context.onDetach });
+    items.push({
+      label: 'Detach',
+      title: 'The file is kept and moves to the inbox',
+      onSelect: context.onDetach,
+      ...disabled,
+    });
   if (context.onDelete !== undefined && file.status !== 'pending') {
-    items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: context.onDelete });
+    items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: context.onDelete, ...disabled });
   }
   return items;
 }

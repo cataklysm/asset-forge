@@ -73,7 +73,8 @@ function guarded<A extends unknown[]>(
 }
 
 /**
- * The action of the Delete key: Delete permanently for a trashed file, nothing for a pending one, else Delete.
+ * The action of the Delete key: Delete permanently for a trashed file, nothing for a pending one or while the
+ * host's guarded actions are busy (as the More menu's Delete is disabled then), else Delete.
  *
  * @param file the shown record
  * @param actions the dialog's actions
@@ -81,7 +82,7 @@ function guarded<A extends unknown[]>(
  */
 function removeActionOf(file: FileRecord, actions: FileActionContext): (() => void) | undefined {
   if (file.deletedAt !== null) return actions.onPurge;
-  return file.status !== 'pending' ? actions.onDelete : undefined;
+  return file.status !== 'pending' && actions.actionBusy !== true ? actions.onDelete : undefined;
 }
 
 /**

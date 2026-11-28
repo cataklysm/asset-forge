@@ -18,6 +18,7 @@ import { runExclusive } from '../exclusive';
 import { fileMenuItems } from '../file-actions';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
+import { useExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { useFileDialog } from '../hooks/useFileDialog';
 import { useKeptScrollOffset } from '../hooks/useKeptScrollOffset';
 import { useLoad } from '../hooks/useLoad';
@@ -75,9 +76,9 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const detail = useFileDialog(containerRef);
   // Synchronous guard: a second activation before the re-render must not start a second import.
   const importingRef = useRef(false);
-  // The same for the deletes: one guard for a single delete and the selection's delete, so that they never overlap.
-  const acting = useRef(false);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  // The same for the deletes: one guard for a single delete and the selection's delete, so that they never overlap;
+  // its busy flag disables the controls of both while either runs.
+  const acting = useExclusiveGuard();
   const trash = useTrash();
   const zipChoice = useZipChoice();
   const [urlImportOpen, setUrlImportOpen] = useState(false);
@@ -186,7 +187,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   /** One file to the trash (menu, dialog); one at a time. A failure rejects for the caller to show. */
   function remove(file: FileRecord): Promise<void> {
-    return runExclusive(acting, async () => {
+    return acting.run(async () => {
       const { firstError } = await runFileBatch('files:trashMany', [file]);
       throwFirst(firstError);
       moved([file.id]);
@@ -198,8 +199,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   function deleteSelected(): Promise<void> {
     const files = [...selection.selected.values()];
     if (files.length === 0) return Promise.resolve();
-    return runExclusive(
-      acting,
+    return acting.run(
       async () => {
         try {
           const { doneIds, failures } = await runFileBatch('files:trashMany', files);
@@ -210,13 +210,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           setError(describeError(caught));
         }
       },
-      {
-        onStart: () => {
-          setDeleteBusy(true);
-          setError(null);
-        },
-        onEnd: () => setDeleteBusy(false),
-      },
+      { onStart: () => setError(null) },
     );
   }
 
@@ -289,7 +283,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           <button
             type="button"
             className={BUTTON}
-            disabled={deleteBusy}
+            disabled={acting.busy}
             title={DELETE_SELECTION_TITLE}
             onClick={() => void deleteSelected()}
           >
@@ -315,6 +309,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
               onDetails: () => detail.open(file),
               ...fileActions(file),
               onError: setError,
+              actionBusy: acting.busy,
               onDelete: () => {
                 setError(null);
                 remove(file).catch((caught: unknown) => setError(describeError(caught)));
@@ -340,6 +335,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
                     cover: null,
                     ...fileActions(shown),
                     onError: setError,
+                    actionBusy: acting.busy,
                     onDelete: () => remove(shown),
                   }}
                   roleControl={<AssignFileControl file={shown} onAssigned={() => moved([shown.id])} fullWidth />}

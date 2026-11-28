@@ -1116,22 +1116,59 @@ it('pressing Delete twice sends one request', async () => {
   expect(callsOf(api, 'files:trashMany')).toHaveLength(1);
 });
 
-it('the selection Delete waits for a running single delete instead of sending a second request', async () => {
+/** The selection bar's batch buttons. */
+function batchButtons(): HTMLButtonElement[] {
+  const bar = screen.getByText('2 selected').parentElement!;
+  return ['Add tags', 'Set role', 'Detach', 'Delete'].map(
+    (name) => within(bar).getByRole('button', { name }) as HTMLButtonElement,
+  );
+}
+
+it.each([
+  ['succeeds', false],
+  ['fails', true],
+])('the batch buttons are disabled while a single delete runs and enabled once it %s', async (_, failing) => {
   const user = userEvent.setup();
   const asset = assetDetail();
   const files = threeFiles(asset);
+  const c = files[2]!;
   const pending = deferred<IpcResponse<'files:trashMany'>>();
   const api = install(asset, { 'files:list': listOf(files), 'files:trashMany': () => pending.promise });
   render(<Harness id={asset.id} />);
   await screen.findByText('a.png');
   await user.click(tile('a.png'));
-  await user.click(within(tile('a.png')).getByRole('button', { name: 'File actions' }));
+  await user.keyboard('{Shift>}');
+  await user.click(tile('b.png'));
+  await user.keyboard('{/Shift}');
+  expect(batchButtons().map((button) => button.disabled)).toEqual([false, false, false, false]);
+  await user.click(within(tile('c.png')).getByRole('button', { name: 'File actions' }));
   await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(batchButtons().map((button) => button.disabled)).toEqual([true, true, true, true]));
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [c.id] }]);
+  await act(async () =>
+    failing ? pending.reject(new Error('boom')) : pending.resolve(trashAnswer(files)({ fileIds: [c.id] })),
+  );
+  await waitFor(() => expect(batchButtons().map((button) => button.disabled)).toEqual([false, false, false, false]));
+  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [c.id] }]);
+});
+
+it('the tile menu Delete is disabled while a batch delete runs', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const files = threeFiles(asset);
+  const pending = deferred<IpcResponse<'files:trashMany'>>();
+  install(asset, { 'files:list': listOf(files), 'files:trashMany': () => pending.promise });
+  render(<Harness id={asset.id} />);
+  await screen.findByText('a.png');
+  await user.click(tile('a.png'));
   await user.click(screen.getByRole('button', { name: 'Delete' }));
-  expect(callsOf(api, 'files:trashMany')).toEqual([{ fileIds: [files[0]!.id] }]);
-  pending.resolve(trashAnswer(files)({ fileIds: [files[0]!.id] }));
-  await waitFor(() => expect(screen.queryByText('1 selected')).toBeNull());
-  expect(callsOf(api, 'files:trashMany')).toHaveLength(1);
+  await user.click(within(tile('c.png')).getByRole('button', { name: 'File actions' }));
+  for (const name of ['Detach', 'Delete'])
+    expect(screen.getByRole('menuitem', { name }).getAttribute('aria-disabled')).toBe('true');
+  await user.keyboard('{Escape}');
+  await act(async () => pending.resolve(trashAnswer(files)({ fileIds: [files[0]!.id] })));
+  await user.click(within(tile('c.png')).getByRole('button', { name: 'File actions' }));
+  expect(screen.getByRole('menuitem', { name: 'Delete' }).getAttribute('aria-disabled')).toBeNull();
 });
 
 it('no dialog opens on Delete', async () => {
