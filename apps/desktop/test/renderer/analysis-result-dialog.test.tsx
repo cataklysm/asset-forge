@@ -745,7 +745,7 @@ describe('AnalysisResultDialog prompt choice', () => {
     await user.selectOptions(promptSelect(), TAG_DETAIL.id);
     const lists = callsOf(api, 'analysisPrompts:list').length;
     await user.click(button('Analyse'));
-    expect((await screen.findByRole('alert')).textContent).toBe('This item no longer exists.');
+    expect((await screen.findByRole('alert')).textContent).toBe('The analysis prompt does not exist');
     await waitFor(() => expect(promptSelect().value).toBe(TAG_DEFAULT.id));
     expect(callsOf(api, 'analysisPrompts:list').length).toBeGreaterThan(lists);
     expect(

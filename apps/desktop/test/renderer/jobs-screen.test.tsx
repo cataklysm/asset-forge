@@ -440,6 +440,37 @@ it('a page button that lost the focus while its action ran gets it back', async 
   expect(document.activeElement).toBe(button);
 });
 
+it('a page button the owner left after its focus came back is not focused again by a later poll', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  const pending = deferred<{ cancelled: number }>();
+  let summary: JobSummary = { ...IDLE, queued: 1, failed: 1, succeeded: 1, changes: 1 };
+  const api = install({ 'jobs:list': listOf([job()]), 'jobs:cancelAll': () => pending.promise });
+  api.set('jobs:summary', () => summary);
+  renderScreen();
+  await screen.findByText('rock.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  button.focus();
+  await user.keyboard('{Enter}');
+  button.blur();
+  await act(async () => {
+    pending.resolve({ cancelled: 1 });
+    await pending.promise;
+  });
+  await waitFor(() => expect(document.activeElement).toBe(button));
+  button.blur();
+  expect(document.activeElement).toBe(document.body);
+  summary = { ...IDLE, queued: 1, changes: 2 };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+  });
+  await waitFor(() =>
+    expect((screen.getByRole('button', { name: 'Clear finished' }) as HTMLButtonElement).disabled).toBe(true),
+  );
+  expect(document.activeElement).toBe(document.body);
+});
+
 it('a page button that the summary after its action disables hands the focus to the first enabled page button', async () => {
   const user = userEvent.setup();
   let summary: JobSummary = { ...IDLE, failed: 1, changes: 1 };
@@ -477,6 +508,74 @@ it('a rejected retry shows the alert above the table', async () => {
   expect(
     alert.compareDocumentPosition(screen.getByRole('grid', { name: 'Jobs' })) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
+});
+
+it('a rejected action still polls the summary and reloads the list', async () => {
+  const user = userEvent.setup();
+  const api = install(
+    {
+      'jobs:list': listOf([job()]),
+      'jobs:cancelAll': () => {
+        throw fakeError('invalid_operation');
+      },
+    },
+    { ...IDLE, queued: 1 },
+  );
+  renderScreen();
+  await screen.findByText('rock.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  const lists = listCalls(api).length;
+  const summaries = api.calls.filter((c) => c.channel === 'jobs:summary').length;
+  await user.click(button);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(lists));
+  expect(api.calls.filter((c) => c.channel === 'jobs:summary').length).toBeGreaterThan(summaries);
+});
+
+/** 200 queued jobs named `job <n>.png`, newest first as the list answers them. */
+const manyJobs = () => Array.from({ length: 200 }, (_, i) => job({ fileName: `job ${i}.png` }));
+
+it('a reload after an action keeps the scroll position of the table', async () => {
+  const user = userEvent.setup();
+  const api = install(
+    { 'jobs:list': listOf(manyJobs()), 'jobs:cancelAll': () => ({ cancelled: 0 }) },
+    {
+      ...IDLE,
+      queued: 200,
+    },
+  );
+  renderScreen();
+  await screen.findByText('job 0.png');
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+  // Row 100 of 48 px at the top.
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await screen.findByText('job 100.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  api.calls.length = 0;
+  await user.click(button);
+  await waitFor(() => expect(listCalls(api).map((c) => (c.request as ListRequest).offset)).toContain(60));
+  expect(await screen.findByText('job 100.png')).toBeTruthy();
+  expect(screen.queryByText('job 0.png')).toBeNull();
+});
+
+it('a status change starts the table at the top again', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'jobs:list': listOf(manyJobs()) });
+  renderScreen();
+  await screen.findByText('job 0.png');
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await screen.findByText('job 100.png');
+  api.calls.length = 0;
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Queued');
+  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(0));
+  expect(await screen.findByText('job 0.png')).toBeTruthy();
+  expect((listCalls(api)[0]!.request as ListRequest).offset).toBe(0);
+  expect(screen.queryByText('job 100.png')).toBeNull();
 });
 
 it('a second click while an action runs sends nothing and the page actions wait for it', async () => {

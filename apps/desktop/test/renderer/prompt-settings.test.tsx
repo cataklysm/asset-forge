@@ -241,6 +241,26 @@ it('the entries and New are disabled while an action runs, so its failure shows 
   expect(entry('Tagging', 'Default').disabled).toBe(false);
 });
 
+it('while an action runs the other actions are disabled, so nothing is sent twice', async () => {
+  const pending = deferred<AnalysisPrompt>();
+  const { api } = install({ 'analysisPrompts:save': () => pending.promise });
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.type(field('Text'), ' and more');
+  await userEvent.click(button('Save'));
+  for (const name of ['Save', 'Reset', 'Delete']) expect(button(name).disabled).toBe(true);
+  await userEvent.click(button('Save'));
+  await userEvent.click(button('Reset'));
+  await userEvent.click(button('Delete'));
+  expect(requestsOf(api, 'analysisPrompts:save')).toHaveLength(1);
+  expect(requestsOf(api, 'analysisPrompts:reset')).toHaveLength(0);
+  expect(requestsOf(api, 'analysisPrompts:delete')).toHaveLength(0);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await act(async () => pending.resolve({ ...DETAILED, text: 'Describe the person precisely and more' }));
+  await waitFor(() => expect(button('Reset').disabled).toBe(false));
+});
+
 it('the message of a refused action goes when another prompt is selected', async () => {
   install();
   renderSection();

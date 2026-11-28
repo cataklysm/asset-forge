@@ -206,6 +206,43 @@ it('a failed model list shows the fixed message of its code and keeps the stored
   expect(select('Tagging model').value).toBe('vision-b');
 });
 
+it('a superseded model list that succeeds after the newer one does not replace it', async () => {
+  const first = deferred<ListModelsResult>();
+  let calls = 0;
+  const fake = fakeProviders(
+    { providers: [STORED] },
+    {
+      [STORED.id]: () => {
+        calls += 1;
+        return calls === 1 ? first.promise : MODELS;
+      },
+    },
+  );
+  installFakeApi(fake.handlers);
+  let loadModels: ((providerId: string, refresh?: boolean) => Promise<void>) | null = null;
+  function Probe() {
+    loadModels = useProviders().loadModels;
+    return null;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+      <SettingsScreen />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(field('Base URL').value).not.toBe(''));
+  await waitFor(() => expect(calls).toBe(1));
+  // A second request for the same entry, as a save or a dialog sends it, while the first is still out.
+  await act(async () => {
+    await loadModels!(STORED.id, true);
+  });
+  await waitFor(() => expect(optionTexts(select('Tagging model'))).toContain('alpha-unknown'));
+  await act(async () => first.resolve({ ok: true, models: [{ name: 'old-model', vision: true }] }));
+  expect(optionTexts(select('Tagging model'))).toContain('alpha-unknown');
+  expect(optionTexts(select('Tagging model'))).not.toContain('old-model');
+  expect(optionTexts(select('Prompt model'))).not.toContain('old-model');
+});
+
 it('canStoreKey false disables the key field with a title', async () => {
   install({ providers: [{ ...STORED, hasApiKey: false }], canStoreKey: false });
   renderScreen();

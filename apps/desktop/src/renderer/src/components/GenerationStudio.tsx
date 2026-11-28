@@ -6,7 +6,7 @@ import { useStudioPrompt } from '../hooks/useStudioPrompt';
 import { useStudioReads } from '../hooks/useStudioReads';
 import { useStudioStatus } from '../hooks/useStudioStatus';
 import { useJobs } from '../jobs-context';
-import { CLOSE_LABEL, NO_IMAGE_PROVIDER_TITLE, SOURCE_IMAGE_LABEL, STUDIO_TITLE } from '../labels';
+import { CLOSE_LABEL, LINKED_FILE_FAILED, NO_IMAGE_PROVIDER_TITLE, SOURCE_IMAGE_LABEL, STUDIO_TITLE } from '../labels';
 import { formatLabel } from '../media-url';
 import { useImageProviderChoice } from '../provider-choice';
 import { useProviders } from '../provider-context';
@@ -20,7 +20,7 @@ import {
   upscaleFile,
   type ResultContext,
 } from '../studio-actions';
-import { useStudio, useStudioSession } from '../studio-context';
+import { useStudio, useStudioSession } from '../studio-session';
 import { editBlocked, hasImageProvider, imageModelOf } from '../studio-gate';
 import { constrain } from '../studio-state';
 import { ALERT, BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
@@ -36,8 +36,8 @@ export interface GenerationStudioProps {
   /** The source image. */
   file: FileRecord;
   onClose(): void;
-  /** Opens a result (or the source) in the file detail dialog. */
-  onOpenFile(fileId: string): void;
+  /** Opens a result (or the source) in the file detail dialog; rejects when the file cannot be read. */
+  onOpenFile(fileId: string): Promise<void>;
 }
 
 /**
@@ -111,17 +111,24 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
       setStarting: status.setStarting,
       setStartError,
       refresh,
+      noteUsed: providers.noteUsed,
       onStarted,
     };
     void startEdit(start, editRequestOf(file.id, providerId, model, form));
   }
 
   const act = (action: () => Promise<void>) => runAction({ busy, setBusy, setActionError, disposed }, action);
-  const context: ResultContext = { session, disposed, setActionError, refresh, changed };
+  const context: ResultContext = { session, disposed, setActionError, refresh, noteUsed: providers.noteUsed, changed };
   const upscale = (fileId: string, scale: UpscaleScale) => act(() => upscaleFile(context, providerId, fileId, scale));
   const retry = (generation: Generation) => act(() => retryGeneration(context, generation));
   const remove = (generation: Generation) => act(() => removeGeneration(context, generation));
   const trash = (fileId: string) => act(() => trashResult(context, fileId, selectedFileId, () => setSelectedId(null)));
+  const openResult = (fileId: string) => {
+    setActionError(null);
+    onOpenFile(fileId).catch(() => {
+      if (!disposed.current) setActionError(LINKED_FILE_FAILED);
+    });
+  };
 
   const prompt = useStudioPrompt({
     fileId: file.id,
@@ -188,7 +195,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
               upscales={upscales}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onOpen={onOpenFile}
+              onOpen={openResult}
               onUpscale={(fileId, scale) => void upscale(fileId, scale)}
               upscaleBlocked={upscaleBlocked}
               onUseSettings={applySettings}

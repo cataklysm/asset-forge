@@ -1,6 +1,9 @@
 import type { Changes, JobSummary } from '@assetforge/contracts';
 import { call } from './api';
 
+// Background polls never raise the storage banner: it would come back on every tick after a dismiss.
+const QUIET = { reportUnreachable: false } as const;
+
 /** What the poller hands on. */
 export interface JobPollerHandlers {
   /** Takes every answered summary. */
@@ -47,7 +50,7 @@ export class JobPoller {
     }
     this.inFlight = true;
     this.again = false;
-    call('jobs:summary', {})
+    call('jobs:summary', {}, QUIET)
       .then(
         (next) => this.takeSummary(next),
         // The last state stays; the next tick tries again.
@@ -87,7 +90,7 @@ export class JobPoller {
    * @returns resolves once the request settled
    */
   private readChanges(): Promise<void> {
-    return call('changes:since', { cursor: this.cursor }).then(
+    return call('changes:since', { cursor: this.cursor }, QUIET).then(
       (changes) => {
         if (this.disposed) return;
         this.cursor = changes.cursor;

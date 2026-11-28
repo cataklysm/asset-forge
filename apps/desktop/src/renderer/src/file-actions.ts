@@ -2,7 +2,7 @@ import type { FileRecord } from '@assetforge/contracts';
 import { analysable } from './analysis';
 import { call, describeError } from './api';
 import type { MenuItem } from './components/Menu';
-import type { StudioState } from './studio-context';
+import type { StudioState } from './studio-session';
 import {
   ANALYSE_LABEL,
   ANALYSE_TITLE,
@@ -101,7 +101,8 @@ function analysisItems(file: FileRecord, context: FileActionContext): MenuItem[]
 }
 
 /**
- * Generate from image and the two upscales, for a complete previewable file.
+ * Generate from image and the two upscales, for a complete previewable file; the upscales are disabled while one of
+ * the file is being started.
  *
  * @param file the file
  * @param context what the host offers
@@ -111,12 +112,13 @@ function studioItems(file: FileRecord, context: FileActionContext): MenuItem[] {
   const { studio } = context;
   if (studio === undefined || file.status !== 'complete' || !file.previewable) return [];
   const items = [blockable(studio.blocked, GENERATE_LABEL, GENERATE_TITLE, () => studio.open(file))];
+  // While an upscale of the file is being started both scales are disabled; a click would be ignored.
+  const busy = studio.upscaling(file.id) ? { disabled: true as const } : {};
   for (const scale of [2, 4] as const) {
-    items.push(
-      blockable(studio.blocked, upscaleLabel(scale), UPSCALE_TITLE, () => {
-        studio.upscale(file, scale).catch((error: unknown) => context.onError?.(describeError(error)));
-      }),
-    );
+    const item = blockable(studio.blocked, upscaleLabel(scale), UPSCALE_TITLE, () => {
+      studio.upscale(file, scale).catch((error: unknown) => context.onError?.(describeError(error)));
+    });
+    items.push({ ...item, ...busy });
   }
   return items;
 }

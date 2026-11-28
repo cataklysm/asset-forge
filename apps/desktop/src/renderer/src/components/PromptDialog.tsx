@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
 import {
   effectivePromptId,
-  recoverMissingPrompt,
+  recoverMissingChoice,
+  startErrorMessage,
   useAnalysisPrompts,
   type AnalysisPromptsState,
 } from '../analysis-prompts-context';
-import { call, describeError } from '../api';
+import { call } from '../api';
 import {
   CANCEL_LABEL,
   CLOSE_LABEL,
@@ -126,10 +127,10 @@ async function describeImage(effects: DescribeEffects, describe: DescribeRequest
     else if (result.code === 'busy') effects.setError(PROMPT_BUSY_MESSAGE);
     else if (result.code !== 'cancelled') effects.setError(JOB_ERROR_MESSAGES[result.code]);
   } catch (error) {
-    recoverMissingPrompt(error, prompts, providers, () => {
+    recoverMissingChoice(error, prompts, providers, () => {
       if (request.current === requestId) effects.dropChosenPrompt();
     });
-    if (request.current === requestId) effects.setError(describeError(error));
+    if (request.current === requestId) effects.setError(startErrorMessage(error));
   } finally {
     if (request.current === requestId) {
       request.current = null;

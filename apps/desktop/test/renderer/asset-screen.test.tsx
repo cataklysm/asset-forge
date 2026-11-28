@@ -1036,6 +1036,70 @@ it('files tab: Analyse all sends the asset scope with the current filters', asyn
   });
 });
 
+it('files tab: the debounced search reaches Analyse all', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'texture' });
+  const api = install(asset, { 'files:list': listOf([leaf]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
+  await screen.findByText('leaf.png');
+  await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'leaf');
+  await waitFor(() =>
+    expect(callsOf(api, 'files:list').some((r) => (r as { query?: string }).query === 'leaf')).toBe(true),
+  );
+  await user.click(screen.getByRole('button', { name: 'Analyse all' }));
+  await screen.findByRole('dialog', { name: 'Analyse' });
+  await waitFor(() => expect(callsOf(api, 'analysis:preview')).toHaveLength(1));
+  expect(callsOf(api, 'analysis:preview')[0]).toEqual({
+    target: { kind: 'fileFilter', filter: { scope: { kind: 'asset', assetId: asset.id }, query: 'leaf' } },
+    model: 'vision-a',
+    providerId: VISION.id,
+  });
+});
+
+it('files tab: the Proposals toggle lists only files with a proposal and blocks Analyse all', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const plain = fileRecord({ originalName: 'plain.png', assetId: asset.id, role: 'reference' });
+  const proposed = fileRecord({
+    originalName: 'proposed.png',
+    assetId: asset.id,
+    role: 'reference',
+    hasProposal: true,
+  });
+  const api = install(asset, {
+    'files:list': (r) => listOf(r.hasProposal === true ? [proposed] : [plain, proposed])(r),
+    ...analysisHandlers(),
+  });
+  renderWithProvider(asset.id);
+  await screen.findByText('plain.png');
+  const toggle = screen.getByRole('button', { name: 'Proposals' });
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  await user.click(toggle);
+  await waitFor(() => expect(screen.queryByText('plain.png')).toBeNull());
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText('proposed.png')).toBeTruthy();
+  expect(callsOf(api, 'files:list').some((r) => (r as { hasProposal?: boolean }).hasProposal === true)).toBe(true);
+  const all = screen.getByRole('button', { name: 'Analyse all' }) as HTMLButtonElement;
+  expect(all.disabled).toBe(true);
+  expect(all.title).toBe('Turn off the proposal filter to analyse all');
+});
+
+it('files tab: Image to prompt in the detail dialog menu opens the prompt dialog', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail();
+  const leaf = fileRecord({ originalName: 'leaf.png', assetId: asset.id, role: 'reference' });
+  install(asset, { 'files:list': listOf([leaf]), ...analysisHandlers() });
+  renderWithProvider(asset.id);
+  await screen.findByText('leaf.png');
+  await user.click(tile('leaf.png'));
+  await user.keyboard('{Enter}');
+  const detail = await screen.findByRole('dialog', { name: 'leaf.png | Oak tree' });
+  await user.click(within(detail).getByRole('button', { name: 'More' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Image to prompt' }));
+  expect(await screen.findByRole('dialog', { name: 'Image to prompt' })).toBeTruthy();
+});
+
 it('the header Analyse starts the whole asset', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();
