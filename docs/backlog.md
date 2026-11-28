@@ -13,9 +13,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 - `JsonWorkspaceRegistry` read-modify-write is unserialized and quarantine on read is racy; it drops unknown keys in `settings.json`.
 - `database.close()` throwing inside the `open` error path masks the original error.
-- The remembered import directory (`import-directory.ts`) is checked with a synchronous `statSync` in the main process before the file picker opens. A disconnected mapped drive or an unreachable SMB share can block that call for several seconds; an asynchronous check with a short limit would keep the event loop free. The unchanged-directory comparison is a plain string compare, so a different spelling of the same Windows path is written again (harmless).
-- `isInside` rejects valid names that start with `..` (e.g. `..config`); compare against `..` and `..` + separator.
-- A failed move leaves an empty target parent directory.
+- The remembered import directory is compared with the stored one as a plain string, so a different spelling of the same directory (case, trailing separator) is rewritten (`import-directory.ts`).
 - `LocalStorage.move` checks for the target and then renames; a target created in between can be replaced.
 - A file move whose commit fails leaves the file row pointing at the old path until the workspace is opened again.
 - `assignAsset` checks for an existing assignment and then inserts (not one statement); `addRelation` returns a `createdAt` that was not stored when the relation already existed.
@@ -33,8 +31,8 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Nothing guards against editing a built-in workflow template definition without raising its version; such an edit never reaches existing workspaces.
 - Workflow use cases assert that the workflow they just wrote can be read back; a failure there surfaces as `internal_error`.
 - Preview requests are not cancelled when a tile scrolls away; the worker queue is only served newest first. A tile that is revisited while its job is still queued keeps its old place at the bottom of that queue and is served after everything requested in between.
-- When the preview worker module cannot load, every queued job starts a fresh worker and logs its own failure line; one scroll can print hundreds of identical lines.
-- The session failure memory of the preview service also remembers worker timeouts and crashes, and it is unbounded.
+- When the preview worker module cannot load, every queued job still starts a fresh worker; the failure line is logged once until a worker answers again.
+- The session failure memory of the preview service also remembers worker timeouts and crashes (the pool reports every failure as the same `none`/`null`); it now keeps at most `MAX_REMEMBERED_FAILURES` (10 000) keys per memory, the oldest forgotten first.
 - No index on `asset.cover_file_id`.
 - `setCover` is not a guarded UPDATE and `getAssetDetail` reads in two steps; both are safe only under serialised writes.
 - The derived-data rebuild still runs on the main process while a workspace opens (about 1.7 s at 10 000 assets); it yields to the event loop between batches of 500, but each batch blocks it. The step also runs on every new workspace.
@@ -58,7 +56,6 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Channel allowlist in the preload, so unknown channels fail there instead of at `ipcMain`.
 - Track dialog-granted paths: `files:import` and `workspace:open` currently accept any absolute path sent by the renderer.
 - Permission request handler on the session.
-- `shutting_down` is returned before the sender check.
 
 ## Renderer
 
@@ -67,79 +64,55 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `resultToken` of the jobs context has no reader left; `changeToken` is still read by `AnalysisResultDialog`, `GenerationDetails` and `GenerationStudio`. Remove the former or move the three dialogs to `useChanges`.
 - Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
 - The project member table still uses a pager of 50 that resets on navigation.
-- `CommitInput`: Enter followed by blur can save twice before the reload; the draft reset can overwrite typing while a reload is in flight.
-- The load-error lists of the screens are keyed by their message, so two identical errors share a React key.
+- The load-error list of `ProjectsScreen` is keyed by its message, so two identical errors share a React key.
 - The type select on the asset form is empty when loading the asset types fails.
-- The "Importing…" label is shown while the file picker is still open.
-- `formatBytes(1048575)` yields `1024.0 KiB`; no guard for NaN or negative values.
-- A file whose placement failed counts as failed on the asset screen although it was imported into the inbox (the inbox screen counts it as imported).
 - No settings for the cache size and location; the preview worker timeout (30 s) is a constant.
 - The preview failure memory is per session and is not invalidated when a file changes.
 - `Cache-Control` max-age on previews assumes the content of a file ID never changes (true until working-file re-hashing in phase 6).
-- Two saves of the same workflow step in flight: the response that arrives last wins.
-- A workflow without mandatory steps renders `<progress max="0">`.
-- Removing a workflow clears the local state instead of reloading it.
 - `CoverImage` keeps a failed id per instance, so non-virtualised tiles stay on the format tile after the storage returns until the user navigates away and back.
 - A paged loader re-activated after an inactive settle would keep stale loading entries.
 - Focus is lost when a focused placeholder becomes a Retry button.
 - Multi-file Detach is a renderer loop over `files:unassign`.
 - The project member table has no cover (the contract lacks it).
 - Tag filter chips show the normalised name, not the display name.
-- `ProjectListState` has no opened index, so focus does not return to the project row after Back.
 - After assigning a file from the inbox detail dialog, focus is lost when its tile leaves the list.
 - The assign busy guard of the inbox selection column does not survive a remount of the column.
 - Body text uses Tailwind `text-sm` (14 px) in buttons and tables where the design names 15 px.
 - Retry on the storage banner during an import remounts the page and clears the busy block; navigation and "Import files" are free while the main process still imports, and the result strip is lost.
-- Ctrl+F ignores an open modal: it swallows the key and focuses the field behind the dialog.
-- A stale `assets:get` can overwrite a newer mutation result on the asset screen, and `fileCountError` stays after a successful reload.
 - `FileBrowser` refreshes the selection from the last rendered props instead of a functional update; `usePagedList` has side effects in render, and `retry` and `loadThrough` act on the non-displayed state.
-- Batch tag changes on the asset Files tab bypass the `batching` guard, `nameOf` there closes over the render-time selection (the inbox uses a ref), and cover and detach from the menu have no busy guard.
-- `AssignFileControl.assign` has no in-flight guard; two different picks in quick succession make the second fail with a domain error.
+- The asset Files tab batch tag changes bypass the action guard (the tags dialog is modal; a guard would silently drop a typed tag).
 - Ctrl+A after a failed page silently selects a partial result; a failed first page shows Retry without a message (assets, projects, file browser).
-- A stale assign failure strip in the inbox selection column stays for later selections.
 - The Selection column is empty after a remount while the selected page is not loaded.
-- A failing asset-type load is silent in `ProjectDetails`, and so is a failing library count in `AssetsScreen`.
 - Candidate, not verified: the tile menu in the last visible row and the "More" menu at the bottom of the file dialog panel may be clipped.
-- `TagCombobox` ignores IME composition, can keep a stale active option, and `aria-controls` points at a list that is not rendered; `TagFilter` loses focus at 10 tags.
-- The row "Open" link has `tabIndex -1`; focus is not restored to a neighbour after a removal; the Workspaces screen has no `h1`.
 - Image viewer, left out on purpose: neighbouring files are not preloaded; 16-bit and wide-gamut TIFF are converted to 8-bit sRGB in the PNG rendition; the viewer cannot be opened from the asset gallery (only from file lists).
 - Image viewer zoom: a fast Ctrl+wheel can lose zoom steps; `devicePixelRatio` is read at render only (no `matchMedia` resolution listener), so "100 %" is stale after a monitor or scaling change until the next render; a `reduced` rendition at 100 % is upscaled by a non-integer factor.
-- Image viewer browsing: stepping on and a pending `show` wait until Retry when the slot's own page failed; focus falls to `body` when the focused Previous/Next button becomes disabled at the end of the list, after which the shortcut keys only work again after a click into the dialog; `ViewerList.want` has a new identity on every render.
-- Image viewer layout: Fit uses the whole-number `clientWidth`/`clientHeight` of the frame, so at a fractional `devicePixelRatio` the fitted box can be up to half a CSS pixel larger than the real stage and loses an edge pixel (measure with `getBoundingClientRect` and floor to the device grid); a rotated layer can sit half a device pixel off the box; the stage's own position on screen may be off the device grid; Ctrl+wheel over an on-stage arrow does not zoom; the on-stage arrows make the focus loss on a disabled Previous/Next button more likely; the dialog header is a `<header>` and so a banner landmark; the tag input is named "Add image tag" for non-image files too; a horizontal film-strip scrollbar clips the tiles; the toolbar is cut off in very narrow windows; in the inbox the heading "Assign" sits above a button "Assign". Untested: Fit ignoring a client area shrunk by scrollbars; no on-stage arrows for a list of one file.
-- Small inconsistencies: the asset breadcrumb is "Assets" only while the project one adds the name; `AssetsScreen` does not refresh `lastSelected` from a loaded page as `ProjectsScreen` does; role selects use `INPUT` instead of `SELECT`.
+- Image viewer browsing: stepping on and a pending `show` wait until Retry when the slot's own page failed; `ViewerList.want` has a new identity on every render.
+- Image viewer layout: Fit uses the whole-number `clientWidth`/`clientHeight` of the frame, so at a fractional `devicePixelRatio` the fitted box can be up to half a CSS pixel larger than the real stage and loses an edge pixel (measure with `getBoundingClientRect` and floor to the device grid); a rotated layer can sit half a device pixel off the box; the stage's own position on screen may be off the device grid; Ctrl+wheel over an on-stage arrow does not zoom; the tag input is named "Add image tag" for non-image files too; a horizontal film-strip scrollbar clips the tiles; the toolbar is cut off in very narrow windows; in the inbox the heading "Assign" sits above a button "Assign". Untested: Fit ignoring a client area shrunk by scrollbars; no on-stage arrows for a list of one file.
+- Small inconsistencies: the asset breadcrumb is "Assets" only while the project one adds the name.
 
 ## Code structure
 
 - Readability for a human developer (owner's request, 2026-11-27): the code is hard to follow and to extend by hand. Wanted as a rule for new code and as a pass over the existing code, without behaviour changes: every function documented with a description, its parameters and its return value; no promise-returning functions defined inside other functions where a named module-level function or a small state machine does the job; large files split by responsibility (`site-sessions.ts` done in the readability pilot, `provider-store.ts`, `FileBrowser.tsx`, `start()` in `index.ts`); descriptive names instead of one-letter ones, also in tests; a developer guide (`docs/architecture.md`) with one request traced from click to database and recipes for common extensions; Prettier and ESLint to hold the rule.
-- Readability pilot leftovers (2026-11-28): the hop rules `parseHop`, `vetHost` and the header callback exist twice, in `packages/storage/src/url-source.ts` and `apps/desktop/src/main/site-download.ts` (sharing them needs a new storage export); `download-handler.ts` is close to 400 lines, most of it doc comments; `sessionHop` and `fetchHop` stay promise executors with small closures; `PageLoad.poll` sets `isPolling` once and never resets it, so the poll started by `dom-ready` is the only one of a load (behaviour kept); the session hop is not pinned to the vetted address (the session's request filter vets the host a second time, by design).
-- Renderer AI readability leftovers (2026-11-28): hard-coded texts that are not in `labels.ts`: `Settings` (`SettingsButton`, `SettingsScreen`); `Cancel`, `Proposed tags`, `AI tag`, `Model`, `Out of date`, `Accept`, `Discard`, `Analyse again`, `Analyse` (`AnalysisResultDialog`, the constants in `analysis-result.ts`); `Cancel`, `Start` and `ANALYSIS_START_TITLE` (`AnalysisStartDialog`); `Generate`, `Cancel`, `Copy`, `Close`, `Prompt` and its constants (`PromptDialog`); `Jobs`, `Cancel all`, `Retry failed`, `Clear finished`, `Retry`, `No jobs`, `All`, `Status`, the column headers, `Cancel job`, `Retry job`, `Next try at`, `Actions`, `Jobs in this workspace` (`JobsScreen`, `JobTable`); the `Prompt` section label (`PromptEditor`). The `messageOf` rule (fixed message unless `internal_error`) exists three times (`PromptEditor`, `SavePromptDialog`, `studio-actions.ts`). `MAX_ATTEMPTS` in `JobTable.tsx` copies the scheduler's constant from `packages/jobs` and can drift. `JobsScreen`, `GenerationStudio` and `StudioForm` keep component bodies over 40 lines, almost all of it JSX.
-- The asset row mapper is duplicated in three repositories.
-- `safeErrorMessage` lives in `import-file.ts` although file moves use it too.
+- Readability pilot leftovers (2026-11-28): `download-handler.ts` is close to 400 lines, most of it doc comments; `sessionHop` and `fetchHop` stay promise executors with small closures; `PageLoad.poll` sets `isPolling` once and never resets it, so the poll started by `dom-ready` is the only one of a load (behaviour kept); the session hop is not pinned to the vetted address (the session's request filter vets the host a second time, by design).
+- Renderer AI readability leftovers (2026-11-28): The `messageOf` rule (fixed message unless `internal_error`) exists three times (`PromptEditor`, `SavePromptDialog`, `studio-actions.ts`). `MAX_ATTEMPTS` in `JobTable.tsx` copies the scheduler's constant from `packages/jobs` and can drift. `JobsScreen`, `GenerationStudio` and `StudioForm` keep component bodies over 40 lines, almost all of it JSX.
 - The workflow progress rule exists three times: `progressOf` in the adapter, the SQL of the asset list, and the in-memory fake.
-- The session and the import context are built from near-identical lambdas in the workspace manager (`workspace-manager.ts` builds the session, `workspace-import.ts` the import context).
-- "Details" is removed from the dialog menu by its label, with dummy `onDetails` handlers in both hosts.
-- `ROLES = FileRoleSchema.options` is declared six times in the renderer; `{ name: section } as View` in `WorkspaceShell`.
-- The tag-id lookup is triplicated in persistence; `ipc.ts` and `library-handlers.ts` import each other.
+- `ROLES = FileRoleSchema.options` with its option list is still declared in several renderer files; one shared role select is missing.
+- `ipc.ts` and `library-handlers.ts` import each other.
 - `AssetsScreen`, `AssetScreen` and `FileBrowser` are large and want splitting.
 - `TagList` is called with `Number.MAX_SAFE_INTEGER` in the file dialog instead of a "show all" option.
 - `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
-- The preview worker pool doc comments still say "none" for failed jobs.
 - Core ports split (2026-11-28, `packages/core/src/ports/`): the type names `StorageRef`, `GenerationFileRef`, `GenerationPromptRef` and `WorkspaceMeta` (and the field `NewGeneration.promptRef`) keep the short forms `Ref` and `Meta`, which the style file does not list as established; renaming them touches persistence, desktop and the core bodies. `GenerationRow` is a plain alias of the contracts type `Generation` and could go. `RemoteFileError` takes `retryAfterMs` as a positional parameter beside an options object holding `cause` and `status`. The repository methods still take their arguments as inline object types (one per method) rather than named request types, so implementers repeat them. `JobRepository` documents `FILE_DOWNLOAD_JOB` and `analysisJobFields`/`downloadJobFields` behaviour, so the persistence port knows two job types by name.
-- Contracts: the `FileIdsSchema` refine message `duplicate ids` is lower case, unlike every other message.
-- Contracts: `prompts.ts` re-exports `PROMPT_VARIABLE_NAME_MAX` and `PROMPT_VARIABLE_VALUE_MAX` from `prompt-template.ts`, so the index exposes them through two files.
 - Contracts: `AssignManyResultSchema` is only an alias of `FileBatchResultSchema`.
-- Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
-- Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
-- Core file readability pass (2026-11-28): the journaled move exists twice, as `moveJournaled` in `asset-files.ts` and `moveAndCommit` in `file-trash.ts` (begin, move, abort on failure, commit), and `assignFiles` repeats the per-item batch loop that `eachFile` in `file-trash.ts` holds; merging them needs one shared module both use. The URL rule's import (`normalizeDownloadUrl`) lives in `url-import.ts`, so `file-origins.ts` and `site-crawl.ts` depend on the queueing module for a pure rule. `ImportRun` in `import-file.ts` and `ArchiveRun` in `import-archive.ts` are plain mutable records passed between steps rather than classes; turning them into classes would move the journaled order into methods, which this pass avoided.
-- Core domain readability pass (2026-11-28): the asset check exists four times, exported from `tags.ts` (used by `asset-sources.ts`) and as private copies in `assignments.ts`, `relations.ts` and `workflows.ts` (the last one returns the asset). The import context for `importStream` is built in three places with small differences (`SourceImport` in `workspace-import.ts` passes `session.newId` unbound, `generationImportContext` in `generation-handler.ts` and `importContextOf` in `download-handler.ts` wrap it in a lambda). `jobs.ts` holds both the job port types and the job use cases but stays one file because `url-import.ts`, `file-trash.ts` and the three download files, which this pass leaves alone, import from it. `settleGenerationOfJob` stays in `generations.ts` because `file-trash.ts` imports it. `errors.ts` keeps `CREDENTIAL_STORE_UNAVAILABLE_MESSAGE` on one line of 131 characters.
-- Readability pass over jobs, media, providers and storage (2026-11-28), doubtful spots kept as they are: the doc of `MAX_LINE` in `packages/media/src/video-diagnostics.ts` says a longer line is cut, but a complete line inside one chunk passes whole whatever its length, and only a line spanning chunks beyond 4096 characters is dropped; `json-request.ts` hands the HTTP status or the declared length as the `cause` of a redirect, a failed status and a too large answer (`fail('provider_rejected', response.status)`), so the cause is a number, not an error; `LIST_MODELS_TIMEOUT_MS` lives in `ollama-vision.ts` although the OpenAI and Venice adapters use it too, and `OpenAiVisionOptions` is a plain alias of `OllamaVisionOptions`; `LocalFileSystemStorage.move` throws a plain `Error` with the relative target path for an existing target, outside the translated errors; `realpathOfDeepestAncestor` (`workspace-paths.ts`) and `readDirectory` (`zip-archive-reader.ts`) keep their nested try blocks and listener closures, and `ZipArchiveReader.open` keeps the descriptor steps inline, because moving them into awaited helpers would add microtask ticks.
-- Persistence: in `job-repository.ts`, `finish` and `setOutcome` call `fromRunning` with the outer database handle inside `database.transaction(...)` instead of the transaction handle; with better-sqlite3 this is the same connection and works, but it departs from the convention. `settle` in `generation-repository.ts` relies on the same thing by design: it writes through the database handle while it runs inside the job repository's transaction.
+- Core file readability pass (2026-11-28): `ImportRun` in `import-file.ts` and `ArchiveRun` in `import-archive.ts` are plain mutable records passed between steps rather than classes; turning them into classes would move the journaled order into methods, which this pass avoided.
+- Core domain readability pass (2026-11-28): `settleGenerationOfJob` stays in `generations.ts` because `file-trash.ts` imports it.
+- Readability pass over jobs, media, providers and storage (2026-11-28), doubtful spots kept as they are: `OpenAiVisionOptions` is a plain alias of `OllamaVisionOptions`; `realpathOfDeepestAncestor` (`workspace-paths.ts`) and `readDirectory` (`zip-archive-reader.ts`) keep their nested try blocks and listener closures, and `ZipArchiveReader.open` keeps the descriptor steps inline, because moving them into awaited helpers would add microtask ticks.
+- Persistence: `settle` in `generation-repository.ts` writes through the database handle while it runs inside the job repository's transaction (by design; with better-sqlite3 this is the same connection).
 - Persistence: `purge` in `file-repository.ts` stamps the tombstone with `new Date()` instead of a time passed in by the caller, so it is the only write in the package that reads the clock itself.
 - Persistence: several SQL template lines are longer than 120 characters (`asset-filters.ts`, `project-list.ts`, `prompt-rows.ts`, `tag-repository.ts`, `tag-rename.ts`); they were left as they are so the SQL text stays unchanged.
 - Persistence: the select key `n` of the count statements (`count()` results in `asset-source-repository.ts`, `file-origin-repository.ts`, `project-asset-repository.ts`, `project-list.ts`, `prompt-repository.ts`) was kept, since it names a column alias in the generated SQL.
-- Renderer shell readability pass (2026-11-28): texts written in place instead of coming from `labels/`: `Loading…` (`App`, `ProjectDetails`, `WorkflowSection`, `ProjectScreen`), `Workspaces`, `Retry`, `Settings`, the navigation names and `Main` (`AppShell`, `PauseBanner`), `Previous`, `Next`, `of` and `Pagination` (`Pager`), `Clear filters` (`FilterBar`), `Ctrl+F` (`SearchField`), `AI tag`, `Remove AI tag …` and `Remove …` (`TagChip`), `Image tags`, `Asset tags` and `Prompt tags` (`TagList`), `+ Add tag` and the `Add … tag` names (`TagRow`), `Tags` and `At most 10 tags` (`TagFilter`), and every text of `WorkspaceScreen`, `CreateWorkspaceDialog`, `WorkspaceTable`, `ProjectsScreen`, `NewProjectDialog`, `ProjectTable`, `ProjectDetails`, `ProjectScreen`, `ProjectMembers`, `AssignmentFields` and `WorkflowSection`; `INVALID_TAG` (now in `hooks/useTagRowEdit.ts`) and `BUSY_TITLE` (now in `components/busy-title.ts`) are texts outside `labels/`.
-- Renderer shell readability pass: `WorkspaceScreen`, `ProjectsScreen` and `ProjectScreen` keep bodies of about 80–120 lines, because their state, refs and render-phase writes (`restore`, `lastSelected`, `setWanted` during render in `ProjectsScreen`) were left in the component to keep their order; a `useProjectList` hook would hold them. `ProjectsScreen` writes refs and calls `setWanted` during render, which works but is outside the React rules for pure renders. `WorkspaceShell` passes `{ name: section } as View`. `ProjectScreen` loads at most 200 members for the picker's exclusion list, so a project with more members offers some of them again. The title of Remove workflow says "asks first" while the renderer sends `workflows:remove` at once (the native confirmation lives in the main process). `labels/counts.ts` is internal and not re-exported from `labels.ts`.
-- Desktop main readability pass (2026-11-28): `openFile` in `media-file.ts` closes the handle a second time in its `catch` when the `handle.close()` for an unsatisfiable range throws inside the `try` (behaviour kept). Several site channels whose work is synchronous (for example `sites:list`, `sites:crawlProgress`, `sites:cancelCrawl`) are still wrapped in `async` handlers. `provider-store.ts` stays one file of about 300 code lines because load, save, delete and the key handling share one serial write order. The provider store and its gateway still take an `env` option (short form kept, it mirrors `process.env`). CLAUDE.md still names `JobHostDeps.laneLimit`; the type is now `JobHostDependencies`.
+- Renderer shell readability pass (2026-11-28): UI texts still written in place: `Loading…` in `App`, `ProjectDetails`, `WorkflowSection` and `ProjectScreen`; `AppShell` and `PauseBanner` (Workspaces, Retry, Settings, the navigation names, Main); `TagChip` (AI tag, Remove …), `TagList` (Image/Asset/Prompt tags), `TagRow` (+ Add tag), `TagFilter` (Tags, At most 10 tags); `NewProjectDialog`, `ProjectDetails`, `ProjectScreen`, `ProjectMembers`, `AssignmentFields` and `WorkflowSection`; `INVALID_TAG` in `hooks/useTagRowEdit.ts` and `BUSY_TITLE` in `components/busy-title.ts`.
+- Renderer shell readability pass: `ProjectsScreen` (114 lines), the `TableRow` of `ProjectTable` (71) and `ProjectsToolbar` (42) are over the 40-line guide, and `ProjectsScreen` writes refs during render (`restore`, `lastSelected`, `lastToken`).
+- Desktop main readability pass (2026-11-28): Several site channels whose work is synchronous (for example `sites:list`, `sites:crawlProgress`, `sites:cancelCrawl`) are still wrapped in `async` handlers. `provider-store.ts` stays one file of about 300 code lines because load, save, delete and the key handling share one serial write order. The provider store and its gateway still take an `env` option (short form kept, it mirrors `process.env`).
 - Renderer files lane readability pass (2026-11-28): the component bodies of `FileBrowser`, `FileDetailDialog`, `AssetScreen`, `AssetsScreen`, `InboxScreen` and `SiteImportDialog` and the `Stage` of `ImageStage` stay over 40 lines, because they are hook wiring in a fixed order plus flat JSX; `useVirtualRows` is about 95 lines for the same reason. The nested JSX ternaries in `FileListBody`, the stage of `FileDetailDialog` and the body of `AssetsScreen` stay. `ROLES = FileRoleSchema.options` with its option list is still declared per file (`FileRoleControls` now has one `roleOptions()` for its two selects, `InboxSelection` keeps its own); one shared role select needs a component outside this lane. `messageOf` lives in `UrlImportDialog.tsx` although the site import, the studio, the prompt editor, `SavePromptDialog` and the provider settings import it from there (it belongs beside `describeError` in `api.ts`, which is outside this lane). The `disposed` ref of `UrlImportDialog` and the `live`/`active` flags of `FileOrigins` and `AssetSelection` could become one small hook. Splitting a hook body into smaller hooks moved `useState` slots (React state order inside the same component), which is invisible but not literally the same fiber layout; the `useId` strings of the inputs moved into `SiteProfileForm` differ from before.
 
 ## Tooling and tests
@@ -177,20 +150,14 @@ Deferred by design:
 Found during the build:
 
 - Tag cleaning (`cleanTagText`, shared by manual and AI tags) does not strip control and format characters (`\p{Cc}`, `\p{Cf}`: NUL, zero-width characters, bidi overrides), so a model answer can produce invisible or visually spoofed tags. Fixing it changes stored names and needs a `DERIVED_DATA_VERSION` bump.
-- Scheduler (`packages/jobs/src/scheduler.ts`): a cancel during `stop` is dropped instead of marking the run cancelled; a failing pass skips the remaining resource classes and keeps the old timer; non-`JobError` causes during `stop` are not logged; the delay fallback is unreachable.
-- Scheduler: a thrown `claimNext` or `nextRunAfter` in a pass (e.g. a corrupt `payload` JSON) stalls that resource class until the next wake.
 - Scheduler: when `recover()` or `settle` fails, the rows stay `running` until the next workspace open; retry the recovery on the next wake.
-- Scheduler: a job that a pass has claimed but not yet launched misses a cancel (`cancelPending` returns 0 and no active run exists yet); re-check `active` after `cancelPending` returned 0.
 - A handler that ignores its abort signal hangs `stop` and with it the workspace close and quit.
 - `pool.jpeg` is not abortable (up to 30 s), so a workspace close during an analysis can wait that long.
-- Job repository: a cancelled `retry_wait` job keeps its `run_after` and its old error.
 - The "an AI assignment yields to any existing one" rule is coded twice (`FileAnalysisRepository.apply` and `linkFileTags`).
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
-- The preview worker pool doc comments do not mention the `jpeg` job and its `null` result.
 - `ollama-vision.ts` keeps the JSON parse error as the cause of `invalid_response`, and a `SyntaxError` message can quote part of the answer; nothing logs it (the failure log line carries only the code and the HTTP status), and nothing must start to.
 - Jobs screen: a page button activated by keyboard is disabled while its action runs, so focus falls to `body`; restore focus to it afterwards.
-- `scheduler.ts`: `startDone` and `starting` hold the same promise once `start()` ran; one of them is redundant.
-- Inbox and asset screen (`InboxScreen.tsx:39,78`, `AssetScreen.tsx:59,66`): the `importResult` state also holds the analysis counts (rename to `result`); the counts of a start replace an import failure list in the shared strip even when it was not read yet.
+- Inbox and asset screen: the counts of a start replace an import failure list in the shared strip even when it was not read yet.
 - `file-actions.ts`: the doc comment of `fileMenuItems` is wrapped unevenly.
 - `resultToken` (`apps/desktop/src/renderer/src/jobs-context.tsx`) misses a success when finished jobs are cleared in the same poll window, because `succeeded` does not rise then.
 - A `storage_unreachable` answer to `jobs:summary` would raise the storage banner again on every poll (`apps/desktop/src/renderer/src/api.ts`, `jobs-context.tsx`).
@@ -203,7 +170,6 @@ Tests:
 - The core tag tests lack the asset-tag cases of the manual-wins fake.
 - Missing persistence tests: `FileAnalysisRepository.apply` for an inbox file, rejection of an unknown `job.file_id` by the foreign key.
 - Mock provider: its test does not pin the style tag or that the tags come from the vocabulary; scripted numeric and `'hang'` failures bypass `delayMs` and are consumed before the model and image checks.
-- Ollama adapter: the `closedPortUrl` test can flake.
 - Tag cleaning: no test pins that control and format characters pass `cleanTagText` (see above).
 - No test pins the content of `ANALYSIS_PROMPT` (`packages/core/src/analysis.ts`); the analysis test only checks that it is sent.
 - Renderer: the theme contrast test in `tags.test.tsx` reads `index.css` through `process.cwd()` (use `import.meta.url` like `theme.test.ts`).
@@ -231,7 +197,6 @@ Provider adapter (`packages/providers/src/ollama-vision.ts`):
 
 - Models beyond the first 100 of `/api/tags` are dropped silently.
 - `invalid_response` for a `message.content` that is not JSON is logged with HTTP status 200.
-- A timeout that fires after the answer arrived relabels the outcome as `provider_timeout`.
 - A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
 - A failure while building the request headers throws `provider_unauthorized` directly instead of going through `fail`, so an abort at that point would be reported as `provider_unauthorized`; not reachable today, because `throwIfAborted` runs just before and the header build is synchronous.
 
@@ -241,19 +206,15 @@ Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
 Main process (`apps/desktop/src/main`):
 
-- Cancelled Image2Prompt runs keep running in the media worker pool until they settle; the set of settling runs is unbounded, so repeated Generate and Cancel can pile them up (pass the signal into `images.jpeg` or cap the set).
-- `JobHost.resume()` always calls `changed()` and `wake()`, so `changes` rises on every save or delete of a provider entry even when the queue is not paused (`job-host.ts`).
 - The provider id reaches core by two routes: `composition.ts` hands `OLLAMA_PROVIDER` to the job host (the fingerprint of a run), and `job-handlers.ts` imports it for `analysis:preview` and `analysis:enqueue`. `OLLAMA_PROVIDER` stays the one adapter kind and the provider id of the fingerprint, not an entry id, so the same model through two entries counts as already analysed; a second kind of provider must keep both routes equal.
 
 Mock provider (`docker/mock-provider/server.mjs`):
 
-- Every request, including the image body and the headers, is kept in memory for the life of the process (`server.mjs:83`). Possible fix: record only when a `record` option is set, or cap the array.
 
 Scheduler and pause gate (`packages/jobs`):
 
 - With a class limit of 2 or more, a claim already in flight when the pause trips still starts its job.
 - The gate records an outcome before the job's result is stored, so a failing store still counts.
-- The pause threshold of `createPauseGate` is not validated.
 
 Persistence:
 
@@ -261,7 +222,6 @@ Persistence:
 - A wrong `sha256` passed to the repository's `acceptProposal` deletes a valid proposal (core always passes the stored one).
 - The proposal reader (`parseTags` in `file-analysis-repository.ts`) returns an empty tag list for stored JSON that does not parse or is not an array and drops malformed entries, where the list readers throw; it does not validate tag names.
 - No query-plan test for the reader page statement or the new index `job (file_id, type, created_at, id)`.
-- The analysis target reader (`analysis-target-reader.ts:17-26`) answers an empty target for a filter tag name that does not normalise (no letter or digit, too long), so `analysis:preview` and `analysis:enqueue` answer zero counts where `files:list` and `assets:list` reject the same filter with `validation_failed`.
 - No test pins that the reader's SQL predicate (`analysableSql` over `PREVIEWABLE_MIME_TYPES`: complete, listed MIME type, checksum present) agrees with `isAnalysable` in core (`analysis.ts:57`) and with the renderer's `analysable` (`file.previewable`, which `isPreviewable` derives, without the checksum); unverified beyond reading the code.
 
 Renderer:
@@ -269,9 +229,7 @@ Renderer:
 - Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract, which carries only `fileId` and `names`.
 - The preview counts a file that is analysed and also queued only as `alreadyAnalysed`, so with "Analyse again" the start dialog counts it under "To analyse" (`wouldEnqueue`, `AnalysisStartDialog.tsx:41-42`) while "Already queued" shows 0; the enqueue with `force` then answers it as `alreadyQueued` and the strip shows "0 queued, 1 already queued". There is no dedicated dialog state for 0 enqueued (only the strip).
 - A propose request for a file that already has an active apply job is shown as the dialog's own job (`AnalysisResultDialog.tsx:166-175`, `packages/core/src/analysis-enqueue.ts:74`): the dedupe key is per file, the enqueue answers `alreadyQueued`, and the dialog treats that as success. After "Analyse all", opening one of its files and clicking Analyse shows Queued or Running; on success the tags are applied without review and the dialog ends empty. Possible fix: carry `mode` in the `JobView` of `analysis:getProposal` and show a fixed "already being analysed in a batch" state.
-- The prompt dialog shows the tagging wording of the shared provider gate: `NO_VISION_MODEL` and `MODEL_NOT_VISION` (`labels.ts:88,91`) say "analyse images".
-- `ModelSelect` shows a failed model list twice on the Settings screen, and a stale refresh error stays visible after a good list arrived.
-- The prompt dialog loses focus when its state changes (Generate disabled, Cancel unmounted).
+- `ModelSelect`: a stale refresh error might stay visible after a good list arrived. Not reproduced: `loadEntryModels` clears the answer at the start of each request, and only the newest request writes.
 - The result dialog's busy state can flicker for one frame after a file switch.
 
 Renderer tests:
@@ -297,13 +255,7 @@ Deferred by design:
 
 Found during the build — core and persistence:
 
-- The port doc comments in `packages/core/src/ports/` (`file-repositories.ts`, `tag-repository.ts`, `analysis-repositories.ts`) do not describe the new refusals and skips (a move commit or placement on a trashed file is refused, trashed files are left out of the inbox and workspace-wide queries, tag suggestions, duplicate detection and analysis targets).
 - A stale move row that the repository refuses to commit (a move onto a trashed file) is not deleted; it is retried and refused again on every workspace open, and a restore or purge of that file that resolves it fails with the same refusal.
-- `analysis:discardProposal` has no trash guard (`packages/core/src/analysis-proposals.ts`, `discardProposal`): it deletes the waiting proposal of a trashed file, which a restore should bring back. The renderer does not offer it in the trash.
-- The commit of a move (`packages/persistence/src/file-move-repository.ts`) has a dead `NotFoundError` branch after the update (the row was read in the same transaction just before).
-- A purge that loses a race to another purge answers "The file is not in the trash" although the file is gone.
-- `purgeFiles` (`packages/core/src/file-trash.ts`) deletes the tombstone after `remove` returned, but `remove` also returns without error when the storage dropped just before. The binary then stays in the trash directory with neither a row nor a tombstone and no sweep removes it (leaked disk space, no data loss). Delete the tombstone only when the storage is still reachable afterwards, as the sweep does.
-- `resolveFileMove` (`packages/core/src/file-move-recovery.ts`) treats a storage that drops between the reachability check and its `exists` calls as "target missing" and aborts the move row. A purge that follows can then leave a restored binary outside the trash without a row. Re-check reachability before the abort, or after a discarded row in restore and purge.
 - Binaries left in `.assetforge/trash/` by a purge before migration `0009` have no tombstone and are never swept.
 
 Found during the build — main process and jobs:
@@ -316,11 +268,7 @@ Found during the build — main process and jobs:
 Found during the build — renderer:
 
 - The `Delete` key acts only while a file item has focus, narrower than the design's "when focus is not in an input".
-- A failed `trash:summary` is swallowed and not retried (`trash-context.tsx`); the badge stays stale or missing until the next delete, restore or purge.
-- `throwFirst` (`apps/desktop/src/renderer/src/trash-actions.ts`) rethrows the first per-item failure by message and drops its error code.
-- The single delete and the selection delete have separate busy guards (the inbox selection Delete has its own); an overlap reports "already in the trash".
 - A failed single restore shows the error message instead of the count strip; the Empty trash count can be one reload behind.
-- Trash tiles and table rows still show the proposal marker, hinting at Review tags, which the trash does not offer.
 - The nine-column trash table may be too wide; the Confirm/Cancel order differs between the confirm dialog and other dialogs.
 - `TrashScreen`'s `exclusive` returns without clearing the pending confirmation when an action is already running, and a replaced pending confirmation with `settle` would stay unsettled (both unreachable while the buttons are disabled and the dialog is modal).
 - Import order in the touched renderer files is not consistent.
@@ -345,24 +293,13 @@ Found during the build — main process:
 
 - `markUsed` in `apps/desktop/src/main/analysis-prompts.ts` catches around `load()` as well, so a prompt file that cannot be read while the prompt used last is stored is logged as the write warning instead of failing.
 - After a failed write of the prompt used last, the store keeps the previous value in memory too, so the dialogs preselect the earlier prompt until the next successful write.
-- The `TOO_MANY` message is built from `ANALYSIS_PROMPTS_PER_PURPOSE` instead of being a literal fixed string (same text today).
 
 Found during the build — renderer:
 
-- A save or reset answer in `PromptSettings` can be overwritten by an older list answer still in flight; save, delete and reset should supersede a pending reload (bump `reloadRequest` in `analysis-prompts-context.tsx`).
-- Reset drops text typed into the editor while the call runs.
-- An error of a prompt action outlives a change of the selected prompt.
-- A tag limit typed as `015` counts as an unsaved change of `15`.
-- The unsaved-changes marker in the prompt list is `aria-hidden`, so a screen reader does not learn of unsaved changes.
-- The Image to prompt dialog names both the prompt select and the result text "Prompt".
-- While the analysis prompts load, the start button's tooltip of the three dialogs is `START_LOADING`, "The provider settings are loading", instead of a text about the prompts.
 - A failed prompt reload leaves the three analysis dialogs on "The analysis prompts could not be read" with no Retry or Settings action in the dialog; the only retry is in Settings > Prompts.
 - Reset in the Prompts settings overwrites a saved text without confirmation, while Delete confirms (owner's call).
 - A hand-edited `analysis-prompts.json` with more than 50 prompts per purpose or duplicate names is accepted on load; only ids are checked for uniqueness.
-- A choice whose prompt vanished from the list through a reload shows "choose a prompt" instead of falling back to the default.
-- The `not_found` handling (reload and drop the choice) is copied in the three dialogs.
 - A `not_found` start shows the generic "This item no longer exists." text.
-- `promptGate` does not check the purpose of the chosen id (the main process does).
 
 Tests:
 
@@ -405,9 +342,6 @@ Found in the final review and not fixed:
 - A stored entry with a wrong declared size and an archive with strong encryption fail the whole archive (`This file is not a readable ZIP archive`) instead of one entry.
 - The result strip is neither bounded nor virtualised; one import can show up to 5000 failure lines.
 - Test gaps: Esc in the "ZIP archive" choice dialog is tested only in the inbox; `openEntry` racing `close()` is untested; `apps/desktop/test/import-result.test.ts` imports renderer test helpers (`test/renderer/fake-api.ts`, `fixtures.ts`).
-- `useZipChoice` leaves a pending promise when the screen unmounts or `choose` is called twice.
-- `AssetScreen` has no synchronous re-entry guard like the inbox's `importingRef`.
-- Three variants of "last path segment" exist (`import-file.ts`, `import-archive.ts`, `workspace-import.ts`).
 - The acceptance test for an entry with a wrong declared size only checks that the error carries no workspace path, not the exact fixed message.
 - An entry whose file name is longer than 255 characters and has a refused extension answers `This archive entry cannot be imported`, not the refused-type message (the length check comes first).
 
@@ -424,9 +358,6 @@ Deferred by design:
 
 Found in the final review and not fixed:
 
-- Remove has no in-flight guard: a double click on `Remove source` sends two requests and the second shows a not-found alert.
-- After an add the `Add URL` input takes focus again even when the user has moved focus elsewhere meanwhile.
-- The alert of a failed copy stays until a later copy succeeds.
 - Test gaps: the scroll threshold of the list and the double-Enter guard are tested only through class names and `disabled` (jsdom cannot measure layout).
 - Writing a source and touching the asset's `updated_at` are two statements, not one transaction (as for tags).
 - An `assets:get` reload already in flight can briefly show the asset without a source that was just added (the same pattern as for tags).
@@ -457,7 +388,7 @@ Deferred by design:
 - Options are not part of the fingerprint: a file analysed before a change counts as analysed until `force`.
 - A request in flight keeps the options it was built with; a save applies from the next request.
 - The `openai` adapter and its request options were tested only against the mock provider, never against a real vLLM server.
-- The option limits (temperature 0 to 2, tokens 1 to 100 000) are repeated as literals in the renderer form and are not exported as constants from contracts.
+- The renderer form repeats the vision option limits as literals (`MAX_TOKENS_MAX` in `apps/desktop/src/renderer/src/provider-draft.ts`, used by `ProviderFields.tsx`, and the temperature bounds); it should import `TEMPERATURE_MIN`, `TEMPERATURE_MAX`, `MAX_TOKENS_MIN` and `MAX_TOKENS_MAX` from `packages/contracts/src/provider-settings.ts`.
 
 Found in the final review and not fixed:
 
@@ -470,21 +401,15 @@ Found in the final review and not fixed:
 - A key file in the old form is bound to the origin its entry has at the first start with the new code; an edit of the base URL by hand before that start is trusted once.
 - Windows DPAPI is per user: the origin binding does not protect against code running as the same user.
 - The API key is decrypted on every `providers:list` (for `hasApiKey`), not only per request.
-- Focus is lost after deleting an entry in Settings.
 - The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
 - Key temporary files are swept only at start.
 - The waiting count in the move dialog is not refreshed while it is open.
 - Jobs of a deleted provider cannot be filtered on the Jobs screen.
 - The result dialog re-checks all entries and drops a manual provider pick on every file switch.
-- `listTimeoutMs` is not clamped.
 - `assignLane` with a rewrite that answers `undefined` behaves differently in the SQLite repository and the in-memory repository of the core tests; `rerouteWaiting` does not refuse the same lane itself (the host does).
-- `list({ lane: null })` matches no row in the SQLite repository; `nextRunAfter(types, [])` is not pinned by a test.
-- `pause.paused(rc)` is called unguarded when the scheduler computes the excluded lanes.
-- No test for a caller abort of `listModels`; `MAX_TIMER_MS` is a magic value on the model-list request.
+- `nextRunAfter(types, [])` is not pinned by a test.
 - `listWaitingLanes` runs one query per lane.
-- Model-list answers of entries that no longer exist stay in the renderer's provider context.
 - `internal_error` on the model list with a stored model (no Settings offer) is untested in the start dialog.
-- Move jobs dialog: the source name shows `Removed provider` until the lanes arrive; an old refusal stays visible after the source changes; a failed lane lookup leaves the disabled Move without a tooltip.
 - `shell.test.tsx` no longer asserts the Settings button for `provider_not_configured` nor the path from the banner to the Settings screen through `WorkspaceShell`.
 - The acceptance test pins "one job at a time per provider" weakly; no desktop test runs a v1 job to success; no desktop test queues a job in environment mode.
 - `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
@@ -502,7 +427,6 @@ Found in the final review and not fixed:
 - The guard that refuses deleting a provider entry with active jobs sees only the open workspace; jobs of that entry in another workspace fail later with `provider_not_configured`.
 - Tag edits in a file dialog opened from a link (source or result) do not reach the host list until it reloads; the linked dialog shows the asset name as plain text.
 - Opening a result from inside the studio does nothing visible when the file can no longer be read.
-- The upscales of the previously selected result show briefly under a newly selected one; the two result loads share one error slot.
 - A circular import between `studio-context`, `FileDetailDialog` and `GenerationDetails`.
 - No desktop test with a JPEG or WebP provider answer; a job found `running` after a crash is tested only in `packages/jobs`.
 - An upscale of an upscale is reachable only through that file's own studio.
@@ -528,18 +452,13 @@ Found in the final review and not fixed:
 - `promptTitleKey` (`packages/core/src/prompts.ts`) and `variableKey` (`packages/contracts/src/prompt-template.ts`) do not NFC-normalise, unlike tags (`cleanTagText`): a title or variable typed once composed and once decomposed counts as two.
 - `PromptDefaultsSchema` (`packages/contracts/src/prompts.ts`) has a `.refine` without a message; it is a transport bound only. Tests are missing for a defaults record of 40 keys, for a value of exactly 2000 characters and for a key that differs only by whitespace.
 - The list search (`prompts:list`) does not cap the number of query words: a query of 200 characters can produce about 100 `instr` terms. A cap (for example 20 words) would bound the query.
-- The correlated subqueries in `packages/persistence/src/prompt-rows.ts` (`isCurrent`, `matchesWord`, `carriesTag`) use plain Drizzle column references instead of `qualified()`; this works but departs from the convention.
 - `generation.prompt_version_id` has no index, so deleting a prompt scans the generations.
 - `migration-0013.test.ts` checks the latest schema, not the state at `0013`.
 - `generations:start` with a library version reads the version, then loads the model list, then writes the record. A prompt deleted in between fails the foreign key and answers `internal_error` instead of `not_found`; nothing is written. `startGeneration` has an overlong doc comment line, and core has no test for two value keys that name one variable.
 - `prompts-ipc.test.ts` types list items as `PromptDetail` instead of the summary type.
-- Prompts screen: a late answer of a `create` can still run its `onSaved` and replace a later selection; navigating to Prompts itself asks about unsaved changes and Discard then does nothing; a second guard question overwrites the resolver of the first.
+- Prompts screen: navigating to Prompts itself asks about unsaved changes, and Discard then does nothing. A second guard question overwrites the resolver of the first; this cannot be reached while the modal question is open, the first promise just stays pending.
 - Some `aria-label` strings in the new components are literals outside `labels.ts` (the existing pattern); the analysis label constants carry an `ANALYSIS_` prefix while the library's do not. The screen's list code is copied from `ProjectsScreen`. No test asserts that the screen has no explanatory paragraph.
-- Studio: `promptSeq` is bumped only in a passive effect on a file change, so a late `prompts:get` could attach to the new file (compare `file.id` or bump in the render reset). A rejection of `loadCurrent` is unguarded and visible only as a tooltip. `value_too_long` maps to `VARIABLE_MISSING_TITLE`, which is unreachable by typing. `SavePromptDialog` loses focus when the title input becomes disabled in version mode. `messageOf` exists in three files and `pickPrompt` wraps errors only to unwrap them. `GenerationStudio` grew a prompt state machine (a `useStudioPrompt` hook is a candidate).
-- A tag change made while a prompt is being saved can be overwritten in the editor's local detail by `setDetail(next)` in `PromptEditor.tsx` (tag editing is disabled only by `busy`; the tag is stored, the display is stale until reload).
-- `onOpenPrompt` is optional on `StudioProvider` (`studio-context.tsx`); without a handler the dialogs close and nothing is navigated to. Make it required.
-- `GenerationDetails.tsx` uses the non-null assertion `generation.promptId!`.
-- `openPrompt` in `studio-context.tsx` has no catch on the guard promise; a rejected guard is an unhandled rejection.
+- Studio: `promptSeq` is bumped only in a passive effect on a file change, so a late `prompts:get` could attach to the new file (compare `file.id` or bump in the render reset; not reproducible in a test). A failed `loadCurrent` shows only as the start error, a tooltip. `value_too_long` maps to `VARIABLE_MISSING_TITLE`, which typing cannot reach. `pickPrompt` wraps errors only to unwrap them.
 - No test follows the details link with a dirty Prompts draft; the `WorkspaceShell` `openPrompt` callback is untested.
 - Missing renderer tests: `Use settings` falling back to the resolved text, a stale picker answer, a stale `Use settings` from one library prompt to another, and Space on a list row.
 
@@ -628,10 +547,35 @@ Known gaps:
 
 Not covered by any automated check: the real windows. The hidden page window, the login window and the session glue are tested with fakes, the extraction script under jsdom (whose XPath errors differ from Chromium's). The owner checks by hand: a login that survives a restart, a real gallery with pagination and detail pages, a file behind the login, a file on another host, a `robots.txt` disallow, the window title staying `<profile name> – <host>`, a navigation to a private address being refused, `loadURL` rejecting with `ERR_ABORTED` when a navigation is replaced, `will-redirect` firing in a hidden window, and the partition being empty after a profile is deleted. For the browser check (spec "Browser check"; the session download, `sites:openCheck` and the requeue are tested only with fakes, and whether the session's request filter applies to `net.request` is not verified): a real site answering `cf-mitigated: challenge`, the lane pausing with `Open site`, passing the check in the login window, Resume repeating the refused downloads, and those downloads arriving through the session. The owner's check is pending.
 
+## Found while clearing the small items (2026-11-28)
+
+- Cancelled Image2Prompt runs still hold a media worker until the model JPEG is made (`MAX_SETTLING_RUNS` only caps the set); passing the signal into `images.jpeg` needs core and media.
+- `emptyTrash` in `packages/core/src/file-trash.ts` drops the per-item errors, so `trash:empty` cannot log their codes, and it counts a lost purge race (`not_found`) as failed.
+- A timed-out `stat` of the remembered import directory keeps a libuv thread busy on a hung share; keep one check in flight per directory.
+- Renaming a provider that is not paused no longer raises the change counter (invisible today, since no list shows the provider name from the feed).
+- The in-memory job fake (`packages/core/test/memory-jobs.ts`): `cancelPending` and `cancelPendingOfFile` should also clear `runAfter`, `errorCode` and `errorMessage`, as the SQLite repository now does.
+- The port `JobRepository.list` declares `lane?: string` while the SQLite repository also matches `null` (the test casts); widen it to `string | null`.
+- The in-memory analysis target reader in `packages/core/test` should reject a filter tag that does not normalise with `validation_failed`, as the SQLite reader now does.
+- Contracts: local count and id schema copies remain in `files.ts`, `tags.ts`, `ipc-jobs.ts`, `jobs.ts`, `prompts.ts`, `library.ts` and `workflows.ts`.
+- `recoverFileMoves` keeps open move rows when the storage is unreachable (intended); no test at that level pins it.
+- The literal `'The storage of this workspace is not reachable'` is duplicated in `file-move-recovery.ts` and `file-trash.ts`.
+- `resolveFileMove` has a narrow edge between `exists(target)` and `exists(source)` when the storage drops exactly there.
+- Two doc comments in `packages/core/src/ports/analysis-repositories.ts` are wrapped awkwardly.
+- Scheduler: a resource class whose pass keeps throwing logs `Job scheduler pass failed` every 5 s without the class or a job id. `json-request.ts` `send` and the scheduler file are still over the guides.
+- Scheduler: a user cancel during `stop` now ends a running `image.generate` as `cancelled` instead of `provider_outcome_unknown`; the "failed while stopping" log line skips only errors that are exactly `signal.reason`.
+- Mock provider: the capped request record (1000 requests) still holds the full Base64 image body of every `/api/chat` request.
+- `packages/providers/test/refused-port.ts` relies on 127.0.0.2 being a loopback address (not so on macOS by default), and its doc comment wrongly says no other test can listen on the port.
+- `removeEmptyDirectories` in `local-storage.ts` relies on the serial queue (two parallel moves could race); `vetHost` and `askHeaders` in `site-download.ts` are one-line wrappers.
+- Renderer lists: a failed page entry (`PageEntry` `failed`) carries no error message, so the projects list, the gallery and the file browser show only Retry. Carry the message through `rejectPage`/`PagedLoader` and show it beside Retry.
+- `labels/*.ts`: constants are prefixed by subject (`OPEN_WORKSPACE_BUTTON`, `OPEN_PROJECT_BUTTON`) because `studio.ts` already exports `OPEN_LABEL` and `REMOVE_LABEL` and everything is re-exported from the flat `labels.ts`; a naming rule for shared verbs would avoid future clashes.
+- `TagFilter`: the input at 10 tags is `readOnly` but looks enabled. The focus return to a project row uses the position (the wrong row after a reorder). The pending focus in `useVirtualRows` can take the focus from the search field.
+- `CoverImage` remembers a failed id for good; it needs a "storage reachable again" signal from the shell.
+- The detail dialog's menu items and Delete key being disabled while the action guard is set have no dialog-level test.
+- Prompt editor: Save stays enabled while a prompt tag change is still in flight. A save started then can answer with a detail that predates the tag change and replace the shown detail. The tag is stored; the display is stale until a reload.
+- Prompt editor: a failed relist after a successful save sets the prompt list to null; Discard while a create is in flight still creates the prompt; a failed Open prompt from the generation details is silent.
+- Analysis dialogs: `recoverMissingPrompt` treats any `not_found` (including an unknown provider id) as a missing prompt. `takeList` (model lists) drops a new entry's answer when a reload's list predates the save.
+- Jobs screen: `useFocusReturn` can lose the focus again when the summary reload disables the button.
+
 ## Not covered by any automated check
 
-The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the `shutting_down` response, the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
-
-## Flaky tests
-
-- `packages/providers/test/venice-image.test.ts > maps a refused connection to provider_unreachable` failed once in a full parallel run on 2026-11-27 and passed alone and in the next full run. It connects to a port that was just closed (`closedPort()`); another test server running in parallel can take that port in between.
+The native confirmation for removing a workflow, native file and directory dialogs (and therefore the "Choose location", "Open existing folder" and "Import files" buttons end to end), window appearance, focusing the existing window on a second launch, the wiring of the `shutting_down` refusal in `handleIpc` (the answer itself is tested through `ipcRefusal`), the rejected-invoke path to `ApiError`, `formatDateTime`, the rendered messages for `unsupported_format_version` and `workspace_mismatch`, and keyboard-only operation beyond the tag rows, the file selection, menus, tabs and the dialog focus return. Phase 4b: the production `SecretCodec` over Electron `safeStorage` (`apps/desktop/src/main/secret-codec.ts`); the tests use a fake codec.
