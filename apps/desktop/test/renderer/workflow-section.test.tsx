@@ -29,6 +29,8 @@ function workflowOf(steps: { name: string; mandatory: boolean; state?: 'not_star
       mandatory: step.mandatory,
       state: step.state ?? 'not_started',
       notes: '',
+      updatedAt: '2026-11-28T00:00:00.000Z',
+      completedAt: null,
     })),
   };
 }
