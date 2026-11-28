@@ -365,12 +365,15 @@ class InMemoryTags implements TagRepository {
 
   /** Throws for an unknown or incomplete file before anything is written, like one transaction. */
   private async requireCompleteFiles(fileIds: readonly string[]): Promise<void> {
-    for (const id of fileIds) {
+    // Mirrors the database: every id is looked up first, then completeness, then the trash.
+    const records = fileIds.map((id) => {
       const rec = this.files!.records.get(id);
       if (!rec) throw new NotFoundError(`File ${id} does not exist`);
-      if (rec.status !== 'complete') throw new ValidationFailedError(`File ${id} is not completely imported`);
-      if (rec.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
-    }
+      return rec;
+    });
+    const incomplete = records.find((rec) => rec.status !== 'complete');
+    if (incomplete) throw new ValidationFailedError(`File ${incomplete.id} is not completely imported`);
+    if (records.some((rec) => rec.deletedAt !== null)) throw new InvalidOperationError('The file is in the trash');
   }
 
   private async recordsOf(fileIds: readonly string[]): Promise<FileRecord[]> {
