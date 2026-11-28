@@ -2,6 +2,7 @@
 export * from './labels/analysis';
 export * from './labels/analysis-dialogs';
 export * from './labels/analysis-prompts';
+export * from './labels/asset-screen';
 export * from './labels/common';
 export * from './labels/files';
 export * from './labels/import';

@@ -19,7 +19,15 @@ import { useLoad } from '../hooks/useLoad';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useChanges } from '../jobs-context';
-import { ASSETS_BREADCRUMB_LINK } from '../labels';
+import {
+  ASSET_SECTIONS_LABEL,
+  ASSETS_BREADCRUMB_LINK,
+  FILES_TAB_LABEL,
+  LOADING_LABEL,
+  PROJECTS_TAB_LABEL,
+  RELATIONS_TAB_LABEL,
+  WORKFLOW_TAB_LABEL,
+} from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
 import { ALERT, MUTED } from '../ui';
@@ -248,7 +256,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
             {loaded.error}
           </p>
         ) : (
-          <p className={MUTED}>Loading…</p>
+          <p className={MUTED}>{LOADING_LABEL}</p>
         )}
       </div>
     );
@@ -285,14 +293,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
       )}
 
       <Tabs<AssetTab>
-        label="Asset sections"
+        label={ASSET_SECTIONS_LABEL}
         active={tab}
         onChange={onTabChange}
         tabs={[
-          { id: 'files', label: 'Files', count: fileCount },
-          { id: 'workflow', label: 'Workflow' },
-          { id: 'projects', label: 'Projects', count: assignments.data?.length ?? null },
-          { id: 'relations', label: 'Relations', count: relations.data?.length ?? null },
+          { id: 'files', label: FILES_TAB_LABEL, count: fileCount },
+          { id: 'workflow', label: WORKFLOW_TAB_LABEL },
+          { id: 'projects', label: PROJECTS_TAB_LABEL, count: assignments.data?.length ?? null },
+          { id: 'relations', label: RELATIONS_TAB_LABEL, count: relations.data?.length ?? null },
         ]}
       >
         {tab === 'files' && (
