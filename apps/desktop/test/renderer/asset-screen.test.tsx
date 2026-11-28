@@ -466,6 +466,29 @@ it('selection bar: Set role uses files:assignMany with the same asset', async ()
   await waitFor(() => expect(callsOf(api, 'files:list').length).toBeGreaterThan(before));
 });
 
+it('selection bar: a Set role failure names the file after the selection was cleared while it ran', async () => {
+  const asset = assetDetail();
+  const pending = deferred<IpcResponse<'files:assignMany'>>();
+  const { user, c1, c2 } = await selectThree(asset, { 'files:assignMany': () => pending.promise });
+  await user.click(screen.getByRole('button', { name: 'Set role' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Set role' });
+  await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Role' }), 'concept');
+  await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear selection', hidden: true }));
+  await waitFor(() => expect(screen.queryByText('3 selected')).toBeNull());
+  await act(async () =>
+    pending.resolve({
+      items: [
+        { fileId: c1.id, file: { ...c1, role: 'concept' }, error: null },
+        { fileId: c2.id, file: null, error: { code: 'not_found', message: 'This file does not exist' } },
+      ],
+    }),
+  );
+  const strip = await screen.findByRole('alert');
+  expect(strip.textContent).toContain('c2.png');
+  expect(strip.textContent).not.toContain(c2.id);
+});
+
 it('selection bar: Detach unassigns each file and lists failures per file', async () => {
   const asset = assetDetail();
   const { user, api, c1, c2 } = await selectThree(asset, {

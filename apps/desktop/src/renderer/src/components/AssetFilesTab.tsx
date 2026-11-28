@@ -67,6 +67,18 @@ async function unassignEach(files: readonly FileRecord[]): Promise<{ detached: s
 }
 
 /**
+ * The name a batch failure shows: the file's name in the selection as it is now, else as it was sent.
+ *
+ * @param selection the current selection
+ * @param sent the names of the files sent with the batch, by id
+ * @param fileId the failed file
+ * @returns its name; the id only when neither knows it
+ */
+function nameOf(selection: FileSelection, sent: ReadonlyMap<string, string>, fileId: string): string {
+  return selection.selected.get(fileId)?.originalName ?? sent.get(fileId) ?? fileId;
+}
+
+/**
  * The asset's files: the file browser with its own filters, view and selection (none of them
  * persisted), the selection bar (Add tags, Analyse, Set role, Detach, Delete) and the file detail
  * dialog.
@@ -178,15 +190,16 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       },
     });
 
-  // Batch answers arrive later; names come from the selection as it is then (as in the inbox).
+  // Batch answers arrive later; names come from the selection as it is then (as in the inbox), else from the files
+  // that were sent.
   const latestSelection = useRef(selection);
   useLayoutEffect(() => {
     latestSelection.current = selection;
   }, [selection]);
-  const nameOf = (fileId: string) => latestSelection.current.selected.get(fileId)?.originalName ?? fileId;
 
   const applyRole = () =>
     batch(async () => {
+      const sent = new Map(eligible.map((file) => [file.id, file.originalName]));
       let items;
       try {
         ({ items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role: batchRole }));
@@ -194,7 +207,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
         setDialogError(describeError(caught));
         return;
       }
-      const failures = assignFailures(items, nameOf);
+      const failures = assignFailures(items, (fileId) => nameOf(latestSelection.current, sent, fileId));
       const changed = items.flatMap((item) => (item.file === null ? [] : [item.file]));
       setSelection((current) => refreshSelected(current, changed));
       setResult(batchResult(changed.length, 'updated', failures));
