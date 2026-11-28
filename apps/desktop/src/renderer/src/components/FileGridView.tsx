@@ -10,10 +10,13 @@ import { Menu } from './Menu';
 import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 
+// The files as tiles in rows that fill the width, virtualised by row.
+
+/** The width of a tile; also the skeleton's. */
 export const TILE_WIDTH = 200;
 const FRAME_HEIGHT = 150;
 const GAP = 16;
-// Frame (150) + padding 12 + name 24 + meta 20 + 8 + chips 26 + padding 12 = 252.
+/** The height of a tile; also the skeleton's. Frame (150) + padding 12 + name 24 + meta 20 + 8 + chips 26 + padding 12 = 252. */
 export const TILE_HEIGHT = 260;
 const ROW_HEIGHT = TILE_HEIGHT + GAP;
 // Room for the focus ring of the first row and column.
@@ -24,6 +27,12 @@ const BADGE =
 // Shows the magnifier while the pointer is over the tile or focus is inside it.
 const REVEAL = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100';
 
+/**
+ * The files as tiles. The rows mount once the scroll area has a size.
+ *
+ * @param props the shared view props
+ * @returns the scrollable listbox
+ */
 export function FileGridView(props: FileViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(scrollRef);
@@ -43,9 +52,16 @@ export function FileGridView(props: FileViewProps) {
   );
 }
 
-function GridRows(
-  props: FileViewProps & { scrollRef: RefObject<HTMLDivElement | null>; columns: number; height: number },
-) {
+/** The props of the rendered rows: the view's props plus the scroll area, the columns and its height. */
+type GridRowsProps = FileViewProps & { scrollRef: RefObject<HTMLDivElement | null>; columns: number; height: number };
+
+/**
+ * The rows of tiles in the viewport.
+ *
+ * @param props the view's props, the scroll area, the columns and the height
+ * @returns the rows
+ */
+function GridRows(props: GridRowsProps) {
   const { viewKey, paged, total, restore, onRows, onRetry, positionRef, scrollRef, columns, height } = props;
   const rows = useVirtualRows({
     scrollRef,
@@ -85,9 +101,17 @@ function GridRows(
   );
 }
 
-function GridItem(
-  props: FileViewProps & { rows: ReturnType<typeof useVirtualRows>; index: number; paged: PagedState<FileRecord> },
-) {
+/** The props of one tile: the view's props plus the row windowing and the list index. */
+type GridItemProps = FileViewProps & { rows: ReturnType<typeof useVirtualRows>; index: number; paged: PagedState<FileRecord> };
+
+/**
+ * One tile: Retry for a failed page, a placeholder while unloaded, else the file with its picture, checkbox, menu,
+ * magnifier, name, meta line and tags.
+ *
+ * @param props the view's props, the row windowing and the list index
+ * @returns the tile
+ */
+function GridItem(props: GridItemProps) {
   const { rows, index, paged, total, showRole, showOrigin, coverFileId, selected, onRetry } = props;
   const slot = slotAt(paged, index);
   const tabbable = index === rows.tabbableIndex;
@@ -107,7 +131,7 @@ function GridItem(
             rows.refocus(index);
             onRetry(slot.page);
           }}
-          onKeyDown={(e) => rows.onItemKeyDown(index, e)}
+          onKeyDown={(event) => rows.onItemKeyDown(index, event)}
           onFocus={() => rows.onItemFocus(index)}
         >
           Retry
