@@ -510,6 +510,74 @@ it('a rejected retry shows the alert above the table', async () => {
   ).toBeTruthy();
 });
 
+it('a rejected action still polls the summary and reloads the list', async () => {
+  const user = userEvent.setup();
+  const api = install(
+    {
+      'jobs:list': listOf([job()]),
+      'jobs:cancelAll': () => {
+        throw fakeError('invalid_operation');
+      },
+    },
+    { ...IDLE, queued: 1 },
+  );
+  renderScreen();
+  await screen.findByText('rock.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  const lists = listCalls(api).length;
+  const summaries = api.calls.filter((c) => c.channel === 'jobs:summary').length;
+  await user.click(button);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(lists));
+  expect(api.calls.filter((c) => c.channel === 'jobs:summary').length).toBeGreaterThan(summaries);
+});
+
+/** 200 queued jobs named `job <n>.png`, newest first as the list answers them. */
+const manyJobs = () => Array.from({ length: 200 }, (_, i) => job({ fileName: `job ${i}.png` }));
+
+it('a reload after an action keeps the scroll position of the table', async () => {
+  const user = userEvent.setup();
+  const api = install(
+    { 'jobs:list': listOf(manyJobs()), 'jobs:cancelAll': () => ({ cancelled: 0 }) },
+    {
+      ...IDLE,
+      queued: 200,
+    },
+  );
+  renderScreen();
+  await screen.findByText('job 0.png');
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+  // Row 100 of 48 px at the top.
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await screen.findByText('job 100.png');
+  const button = screen.getByRole('button', { name: 'Cancel all' }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  api.calls.length = 0;
+  await user.click(button);
+  await waitFor(() => expect(listCalls(api).map((c) => (c.request as ListRequest).offset)).toContain(60));
+  expect(await screen.findByText('job 100.png')).toBeTruthy();
+  expect(screen.queryByText('job 0.png')).toBeNull();
+});
+
+it('a status change starts the table at the top again', async () => {
+  const user = userEvent.setup();
+  const api = install({ 'jobs:list': listOf(manyJobs()) });
+  renderScreen();
+  await screen.findByText('job 0.png');
+  const grid = screen.getByRole('grid', { name: 'Jobs' });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 4800 });
+  fireEvent.scroll(grid);
+  await screen.findByText('job 100.png');
+  api.calls.length = 0;
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Queued');
+  await waitFor(() => expect(listCalls(api).length).toBeGreaterThan(0));
+  expect(await screen.findByText('job 0.png')).toBeTruthy();
+  expect((listCalls(api)[0]!.request as ListRequest).offset).toBe(0);
+  expect(screen.queryByText('job 100.png')).toBeNull();
+});
+
 it('a second click while an action runs sends nothing and the page actions wait for it', async () => {
   const user = userEvent.setup();
   const pending = deferred<Record<string, never>>();
