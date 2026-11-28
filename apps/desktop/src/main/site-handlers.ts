@@ -18,7 +18,7 @@ import {
   normalizeSourceUrl,
   NotFoundError,
   siteGalleryUrl,
-  type SiteCrawlDeps,
+  type SiteCrawlDependencies,
   type WorkspaceManager,
   type WorkspaceSession,
 } from '@assetforge/core';
@@ -124,8 +124,8 @@ export function createSiteHandlers(deps: {
   sessions: SiteSessions;
   manager: WorkspaceManager;
   jobs: Pick<JobHost, 'changed' | 'wake'>;
-  robots: SiteCrawlDeps['robots'];
-  wait?: SiteCrawlDeps['wait'];
+  robots: SiteCrawlDependencies['robots'];
+  wait?: SiteCrawlDependencies['wait'];
   newId?: () => string;
   /** One line with at most a profile id and a fixed code. */
   log?: (line: string) => void;
