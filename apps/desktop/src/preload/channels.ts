@@ -32,6 +32,12 @@ export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'assignments:listByProject': true,
   'assignments:remove': true,
   'assignments:update': true,
+  'backup:changeLocation': true,
+  'backup:delete': true,
+  'backup:now': true,
+  'backup:resetLocation': true,
+  'backup:state': true,
+  'backup:status': true,
   'changes:since': true,
   'dialog:pickDirectory': true,
   'dialog:pickFiles': true,
@@ -117,6 +123,7 @@ export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'workflows:start': true,
   'workflows:updateStep': true,
   'workflowTemplates:list': true,
+  'workspace:backups': true,
   'workspace:close': true,
   'workspace:create': true,
   'workspace:current': true,
@@ -124,6 +131,7 @@ export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'workspace:open': true,
   'workspace:remove': true,
   'workspace:resolveCreatePath': true,
+  'workspace:restore': true,
 };
 
 /**

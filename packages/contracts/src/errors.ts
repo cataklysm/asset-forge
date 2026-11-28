@@ -26,6 +26,10 @@ export const ErrorCodeSchema = z.enum([
   'forbidden_sender',
   'credential_store_unavailable',
   'provider_not_configured',
+  'backup_location_unreachable',
+  'backup_no_space',
+  'backup_failed',
+  'workspace_database_missing',
 ]);
 /** A code of `AssetForgeError`. */
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;

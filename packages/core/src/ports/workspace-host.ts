@@ -3,6 +3,7 @@ import type { LineLog } from '../log-line.js';
 import type { ImageProbe, VideoProbe } from './media-probes.js';
 import type { ArchiveReader, SourceFiles } from './source-files.js';
 import type { Storage } from './storage.js';
+import type { BackupTimers, WorkspaceBackups } from './workspace-backups.js';
 import type { WorkspaceDatabase } from './workspace-database.js';
 
 // What the host (the desktop app, later the server) gives the workspace manager.
@@ -68,6 +69,17 @@ export interface WorkspaceHost {
    * @param workspaceId the workspace
    */
   deleteDatabase(workspaceId: string): Promise<void>;
+  /**
+   * Whether the local database file of a workspace exists, without opening or creating it.
+   *
+   * @param workspaceId the workspace
+   * @returns true when the file is there
+   */
+  databaseExists(workspaceId: string): Promise<boolean>;
+  /** The backup operations: snapshots, the place of the copies and the restore. */
+  backups: WorkspaceBackups;
+  /** The timers of the hourly backup; the global timers without it. */
+  timers?: BackupTimers;
   /**
    * Recoverable removal of a workspace folder.
    *

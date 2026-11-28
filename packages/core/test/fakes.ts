@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, IMAGE_GENERATE_JOB, MAX_FILE_ORIGINS } from '@assetforge/contracts';
 import type {
@@ -42,6 +42,7 @@ import { tagName } from '../src/tags.js';
 import {
   ArchiveNotReadableError,
   ArchiveTooLargeError,
+  BackupError,
   InvalidOperationError,
   NotFoundError,
   SourceNotReadableError,
@@ -102,6 +103,10 @@ import type {
   WorkspaceMetaRepository,
 } from '../src/ports/workspace-database.js';
 import type { WorkspaceHost, WorkspaceRegistry } from '../src/ports/workspace-host.js';
+import type { DatabaseSnapshot } from '../src/ports/workspace-backups.js';
+import { FakeWorkspaceBackups } from './memory-backups.js';
+
+export { FAKE_LINEAGE_ID, FakeWorkspaceBackups, type BackupCall } from './memory-backups.js';
 import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 import { InMemorySiteCrawlRepository } from './memory-site-crawls.js';
@@ -255,9 +260,9 @@ class InMemoryMeta implements WorkspaceMetaRepository {
     return this.current;
   }
 
-  async init(meta: WorkspaceMeta): Promise<void> {
+  async init(meta: Omit<WorkspaceMeta, 'lineageId'>): Promise<void> {
     if (this.current !== null) throw new InvalidOperationError('The workspace row already exists');
-    this.current = meta;
+    this.current = { ...meta, lineageId: randomBytes(16).toString('hex') };
   }
 }
 
@@ -1821,6 +1826,29 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     }
   }
 
+  /** What `changeCount` answers; tests raise it to stand for writes. */
+  changes = 0;
+  /** While set, `snapshot` throws it. */
+  snapshotFailure: Error | null = null;
+  /** How often `snapshot` ran. */
+  snapshotCalls = 0;
+  /** Answers the snapshots; shared with the fake host's backups so discards are counted there. */
+  snapshotFake = new FakeWorkspaceBackups();
+
+  changeCount(): number {
+    return this.changes;
+  }
+
+  /** A snapshot of the workspace row with the current change count; needs the row. */
+  async snapshot(options: { signal: AbortSignal }): Promise<DatabaseSnapshot> {
+    this.snapshotCalls++;
+    if (this.snapshotFailure !== null) throw this.snapshotFailure;
+    const meta = this.meta.current;
+    if (meta === null || options.signal.aborted) throw new BackupError('backup_failed');
+    const facts = { workspaceId: meta.id, lineageId: meta.lineageId, formatVersion: meta.formatVersion };
+    return this.snapshotFake.snapshotOf({ ...facts, appliedMigrations: 0, newerThanApp: false }, this.changes);
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }
@@ -2040,8 +2068,13 @@ export function createFakeHost(): {
   sources: FakeSourceFiles;
   archives: FakeArchives;
   trash: { paths: string[]; failNext: boolean };
+  backups: FakeWorkspaceBackups;
+  /** Workspace ids whose local database `databaseExists` reports missing; empty by default. */
+  missingDatabases: Set<string>;
 } {
   const trash = { paths: [] as string[], failNext: false };
+  const backups = new FakeWorkspaceBackups();
+  const missingDatabases = new Set<string>();
   const storages = new Map<string, InMemoryStorage>();
   const databases = new Map<string, InMemoryDatabase>();
   const sources = new FakeSourceFiles();
@@ -2066,6 +2099,7 @@ export function createFakeHost(): {
       let db = databases.get(workspaceId);
       if (!db) {
         db = new InMemoryDatabase();
+        db.snapshotFake = backups;
         databases.set(workspaceId, db);
       }
       db.closed = false;
@@ -2074,6 +2108,10 @@ export function createFakeHost(): {
     async deleteDatabase(workspaceId) {
       databases.delete(workspaceId);
     },
+    async databaseExists(workspaceId) {
+      return !missingDatabases.has(workspaceId);
+    },
+    backups,
     async moveToTrash(rootPath) {
       if (trash.failNext) {
         trash.failNext = false;
@@ -2085,5 +2123,5 @@ export function createFakeHost(): {
     newId: () => crypto.randomUUID(),
     now: () => new Date(),
   };
-  return { host, probe, videoProbe, storages, databases, sources, archives, trash };
+  return { host, probe, videoProbe, storages, databases, sources, archives, trash, backups, missingDatabases };
 }

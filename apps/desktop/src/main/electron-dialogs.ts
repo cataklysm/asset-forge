@@ -69,6 +69,19 @@ export class ElectronDialogs implements Dialogs {
   }
 
   /**
+   * Asks whether a workspace may be removed although its final backup failed. Not built yet: always declines.
+   *
+   * @param workspace the workspace to remove
+   * @param message the fixed message of the failed backup
+   * @returns false
+   */
+  async confirmRemoveWithoutBackup(workspace: WorkspaceSummary, message: string): Promise<boolean> {
+    void workspace;
+    void message;
+    return false;
+  }
+
+  /**
    * Asks whether the workflow of an asset may be removed.
    *
    * @param assetName the asset's name, shown in the dialog

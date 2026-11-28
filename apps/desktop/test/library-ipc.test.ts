@@ -45,6 +45,7 @@ beforeEach(async () => {
       pickDirectory: async () => null,
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWithoutBackup: async () => false,
       confirmRemoveWorkflow: confirmWorkflow,
     },
     { ...noopHost, openExternal },

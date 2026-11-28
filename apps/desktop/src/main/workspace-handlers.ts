@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import {
   errorLogLine,
+  InvalidOperationError,
   SerialQueue,
   workspaceFolderName,
   writeLine,
@@ -72,6 +73,7 @@ export function createWorkspaceHandlers(
     'workspace:open': (request) => lifecycle.run(() => manager.open(request)),
     'workspace:remove': (request) => lifecycle.remove(request),
     'workspace:close': () => lifecycle.close(),
+    ...UNBUILT_BACKUP_HANDLERS,
     ...createFileHandlers({ manager, host, jobs }),
     ...createLibraryHandlers({ manager, dialogs, host }),
     ...createAnalysisHandlers({
@@ -175,6 +177,37 @@ class WorkspaceLifecycle {
     return null;
   }
 }
+
+/**
+ * The handler of a backup channel that is not built yet.
+ *
+ * @returns never; always rejects with `invalid_operation`
+ */
+async function backupChannelNotBuilt(): Promise<never> {
+  throw new InvalidOperationError('Not implemented');
+}
+
+/** The backup channels until they are built: each one refuses. */
+const UNBUILT_BACKUP_HANDLERS: Pick<
+  IpcHandlers,
+  | 'workspace:backups'
+  | 'workspace:restore'
+  | 'backup:state'
+  | 'backup:status'
+  | 'backup:changeLocation'
+  | 'backup:resetLocation'
+  | 'backup:now'
+  | 'backup:delete'
+> = {
+  'workspace:backups': backupChannelNotBuilt,
+  'workspace:restore': backupChannelNotBuilt,
+  'backup:state': backupChannelNotBuilt,
+  'backup:status': backupChannelNotBuilt,
+  'backup:changeLocation': backupChannelNotBuilt,
+  'backup:resetLocation': backupChannelNotBuilt,
+  'backup:now': backupChannelNotBuilt,
+  'backup:delete': backupChannelNotBuilt,
+};
 
 /**
  * Calls one lifecycle hook. The hooks never reject by contract; a broken one must not fail the channel either.

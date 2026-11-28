@@ -505,7 +505,8 @@ export function noChanges(p: Partial<Changes> = {}): Changes {
  * Every handler not given falls back to an `internal_error`, except the `analysisPrompts:*` ones (see
  * `fakeAnalysisPrompts`), the `providers:*` ones with no entry (see `fakeProviders`), the
  * `generations:*` ones (see `fakeGenerationDefaults`), the origin channels of files without
- * origins (see `fakeFileOrigins`) and `changes:since`, which answers no change (see `noChanges`).
+ * origins (see `fakeFileOrigins`), `changes:since`, which answers no change (see `noChanges`),
+ * `workspace:backups`, which answers no backups, and `backup:state`, which answers no open workspace.
  */
 export function installFakeApi(handlers: FakeHandlers): {
   calls: { channel: IpcChannel; request: unknown }[];
@@ -517,6 +518,8 @@ export function installFakeApi(handlers: FakeHandlers): {
     ...fakeGenerationDefaults(),
     ...fakeFileOrigins({}).handlers,
     'changes:since': () => noChanges(),
+    'workspace:backups': () => ({ backups: [], unreachable: false }),
+    'backup:state': () => ({ workspaceId: null, running: false, last: null }),
     ...handlers,
   };
   const calls: { channel: IpcChannel; request: unknown }[] = [];

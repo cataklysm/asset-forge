@@ -247,7 +247,13 @@ describe('WorkspaceManager lifecycle', () => {
     const created = await manager.create({ name: 'Demo', rootPath: ROOT });
     await manager.close();
     const db = databases.get(created.id)!;
-    db.meta.current = { id: crypto.randomUUID(), formatVersion: 1, name: 'Other', createdAt: new Date().toISOString() };
+    db.meta.current = {
+      id: crypto.randomUUID(),
+      formatVersion: 1,
+      name: 'Other',
+      createdAt: new Date().toISOString(),
+      lineageId: '',
+    };
     db.closed = false;
     await expect(manager.open({ rootPath: ROOT })).rejects.toBeInstanceOf(WorkspaceMismatchError);
     expect(manager.current()).toBeNull();
@@ -260,7 +266,13 @@ describe('WorkspaceManager lifecycle', () => {
     const created = await manager.create({ name: 'Demo', rootPath: ROOT });
     await manager.close();
     const db = databases.get(created.id)!;
-    db.meta.current = { id: crypto.randomUUID(), formatVersion: 1, name: 'Other', createdAt: new Date().toISOString() };
+    db.meta.current = {
+      id: crypto.randomUUID(),
+      formatVersion: 1,
+      name: 'Other',
+      createdAt: new Date().toISOString(),
+      lineageId: '',
+    };
     db.close = async () => {
       throw new Error('close failed');
     };

@@ -3,6 +3,7 @@ import type { IpcError } from './errors';
 import { analysisChannels } from './ipc-analysis';
 import { analysisPromptChannels } from './ipc-analysis-prompts';
 import { assetChannels } from './ipc-assets';
+import { backupChannels } from './ipc-backup';
 import { changeChannels } from './ipc-changes';
 import { dialogChannels } from './ipc-dialogs';
 import { fileChannels } from './ipc-files';
@@ -29,6 +30,7 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: IpcError
  */
 export const ipcContract = {
   ...workspaceChannels,
+  ...backupChannels,
   ...importChannels,
   ...siteChannels,
   ...fileChannels,

@@ -1,4 +1,10 @@
-import type { ErrorCode } from '@assetforge/contracts';
+import {
+  BACKUP_MESSAGES,
+  DATABASE_MISSING_MESSAGE,
+  DATABASE_UPDATE_FAILED_MESSAGE,
+  type BackupFailureCode,
+  type ErrorCode,
+} from '@assetforge/contracts';
 
 /**
  * An error whose code and message are forwarded to the renderer. The message never carries a cause, path, URL or
@@ -93,6 +99,47 @@ export class ArchiveTooLargeError extends ValidationFailedError {
   /** @param options the cause, kept for logs only */
   constructor(options?: { cause?: unknown }) {
     super('This archive is too large to unpack', options);
+  }
+}
+
+/** A failed backup; the message is always the fixed one of its code, never a path or a cause. */
+export class BackupError extends AssetForgeError {
+  /** The reason, narrowed to the backup failure codes. */
+  declare readonly code: BackupFailureCode;
+
+  /**
+   * @param code the reason
+   * @param options the cause, kept for logs only
+   */
+  constructor(code: BackupFailureCode, options?: { cause?: unknown }) {
+    const known = backupFailureCodeOf(code);
+    super(known, BACKUP_MESSAGES[known], options);
+  }
+}
+
+/**
+ * Narrows a code at run time, so a code from outside the table can never produce a message that is not fixed.
+ *
+ * @param code the code the caller passed
+ * @returns the code when it is a backup failure code, otherwise `backup_failed`
+ */
+function backupFailureCodeOf(code: string): BackupFailureCode {
+  return Object.hasOwn(BACKUP_MESSAGES, code) ? (code as BackupFailureCode) : 'backup_failed';
+}
+
+/** A workspace folder whose database is not on this machine; the renderer then offers the restore. */
+export class WorkspaceDatabaseMissingError extends AssetForgeError {
+  /** @param options the cause, kept for logs only */
+  constructor(options?: { cause?: unknown }) {
+    super('workspace_database_missing', DATABASE_MISSING_MESSAGE, options);
+  }
+}
+
+/** A migration that failed and was rolled back, so the database is unchanged. */
+export class DatabaseUpdateFailedError extends InvalidOperationError {
+  /** @param options the cause, kept for logs only */
+  constructor(options?: { cause?: unknown }) {
+    super(DATABASE_UPDATE_FAILED_MESSAGE, options);
   }
 }
 

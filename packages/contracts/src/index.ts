@@ -1,4 +1,5 @@
 export * from './workspace';
+export * from './backup';
 export * from './files';
 export * from './ipc';
 export * from './errors';

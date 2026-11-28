@@ -22,28 +22,28 @@ export function createMetaRepository(database: BetterSQLite3Database): Workspace
  * @returns the row; null before `init`
  */
 async function getMeta(database: BetterSQLite3Database): Promise<WorkspaceMeta | null> {
-  return (
-    database
-      .select({
-        id: workspace.id,
-        formatVersion: workspace.formatVersion,
-        name: workspace.name,
-        createdAt: workspace.createdAt,
-      })
-      .from(workspace)
-      .limit(1)
-      .get() ?? null
-  );
+  const row = database
+    .select({
+      id: workspace.id,
+      formatVersion: workspace.formatVersion,
+      name: workspace.name,
+      createdAt: workspace.createdAt,
+    })
+    .from(workspace)
+    .limit(1)
+    .get();
+  // The lineage column comes with the next migration; until then every row answers an empty lineage.
+  return row === undefined ? null : { ...row, lineageId: '' };
 }
 
 /**
  * Writes the workspace row; refused when it exists.
  *
  * @param database the workspace database
- * @param meta the row
+ * @param meta the row without the lineage
  * @returns nothing
  */
-async function initMeta(database: BetterSQLite3Database, meta: WorkspaceMeta): Promise<void> {
+async function initMeta(database: BetterSQLite3Database, meta: Omit<WorkspaceMeta, 'lineageId'>): Promise<void> {
   database.transaction((transaction) => {
     if (transaction.select({ id: workspace.id }).from(workspace).limit(1).get()) {
       throw new InvalidOperationError('The workspace row already exists');

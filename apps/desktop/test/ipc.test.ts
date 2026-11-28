@@ -21,6 +21,7 @@ const dialogs: Dialogs = {
   pickDirectory: async () => null,
   pickFiles: async () => [],
   confirmRemoveWorkspace: async () => choice,
+  confirmRemoveWithoutBackup: async () => false,
   confirmRemoveWorkflow: async () => false,
 };
 
@@ -83,6 +84,7 @@ describe('dispatch', () => {
         pickDirectory: async () => 'D:\\picked',
         pickFiles: async () => ['D:\\a.png'],
         confirmRemoveWorkspace: async () => 'cancel',
+        confirmRemoveWithoutBackup: async () => false,
         confirmRemoveWorkflow: async () => false,
       },
       noopHost,

@@ -56,7 +56,7 @@ describe('workspace database', () => {
     expect((await stat(dbPath)).isFile()).toBe(true);
     expect(await d.meta.get()).toBeNull();
     await d.meta.init(meta);
-    expect(await d.meta.get()).toEqual(meta);
+    expect(await d.meta.get()).toMatchObject(meta);
   });
 
   test('reopening applies migrations idempotently and keeps data', async () => {
@@ -65,7 +65,7 @@ describe('workspace database', () => {
     await d.files.insertPending(pending(1));
     await d.close();
     d = await open();
-    expect(await d.meta.get()).toEqual(meta);
+    expect(await d.meta.get()).toMatchObject(meta);
     expect((await d.files.list({ limit: 10, offset: 0, scope: { kind: 'all' } })).total).toBe(1);
   });
 
@@ -166,7 +166,7 @@ describe('workspace database', () => {
     const d = await open();
     await d.meta.init(meta);
     await expect(d.meta.init({ ...meta, id: uuid(9) })).rejects.toBeInstanceOf(InvalidOperationError);
-    expect(await d.meta.get()).toEqual(meta);
+    expect(await d.meta.get()).toMatchObject(meta);
   });
 
   test('a list page and its total come from one snapshot', async () => {

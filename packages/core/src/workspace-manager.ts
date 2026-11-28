@@ -1,4 +1,6 @@
 import type {
+  BackupAttempt,
+  BackupState,
   FileList,
   FileRecord,
   FileTarget,
@@ -6,10 +8,12 @@ import type {
   ImportResult,
   WorkspaceSummary,
 } from '@assetforge/contracts';
-import { DirectoryNotEmptyError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
+import type { BackupFolderStatus, ListedBackup } from './backup-types.js';
+import { DirectoryNotEmptyError, InvalidOperationError, NoWorkspaceOpenError, TrashFailedError } from './errors.js';
 import { listFiles } from './file-list.js';
 import { planMeasurement, probeMeasurement, storeMeasurement } from './measure-file.js';
 import type { FileQuery } from './ports/file-repositories.js';
+import type { BackupSource } from './ports/workspace-backups.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 import { SerialQueue } from './serial-queue.js';
 import type { WorkspaceSession } from './session.js';
@@ -65,19 +69,21 @@ export class WorkspaceManager {
   /**
    * Opens the workspace in a folder; the open one is closed first.
    *
-   * @param input the folder
+   * @param input the folder, and `startEmpty` to start with an empty database when the local one is missing
    * @returns the opened workspace
    */
-  open(input: { rootPath: string }): Promise<WorkspaceSummary> {
+  open(input: { rootPath: string; startEmpty?: boolean }): Promise<WorkspaceSummary> {
     return this.queue.run(() => this.doOpen(input));
   }
 
   /**
    * Closes the open workspace; no-op when none is open.
    *
+   * @param options `backupDeadlineMs` bounds the final backup before the close
    * @returns resolves once it is closed
    */
-  close(): Promise<void> {
+  close(options?: { backupDeadlineMs?: number }): Promise<void> {
+    void options;
     return this.queue.run(() => this.doClose());
   }
 
@@ -86,11 +92,75 @@ export class WorkspaceManager {
    * workspace folder goes to the operating system's trash first, so a failure there leaves
    * everything untouched. A folder that no longer holds this workspace is never trashed.
    *
-   * @param input the workspace id and whether its folder goes to the trash
+   * @param input the workspace id, whether its folder goes to the trash, and `skipFinalBackup` to remove it without
+   *   the final backup
    * @returns whether the folder was trashed
    */
-  remove(input: { id: string; trashFolder: boolean }): Promise<{ folderTrashed: boolean }> {
+  remove(input: { id: string; trashFolder: boolean; skipFinalBackup?: boolean }): Promise<{ folderTrashed: boolean }> {
     return this.queue.run(() => this.doRemove(input));
+  }
+
+  /**
+   * The backups a workspace can be restored from: the copies before pending migrations and the regular backups.
+   *
+   * @param request the workspace by id or folder, and a further directory the user picked
+   * @returns the backups, newest first, and whether the backup place could not be listed
+   */
+  listBackups(request: {
+    workspace: { id: string } | { rootPath: string };
+    extraDirectory: string | null;
+  }): Promise<{ backups: ListedBackup[]; unreachable: boolean }> {
+    void request;
+    return Promise.reject(notImplemented());
+  }
+
+  /**
+   * Replaces the local database of a closed workspace by a backup and opens it.
+   *
+   * @param request the workspace folder and the backup
+   * @returns the opened workspace
+   */
+  restore(request: { rootPath: string; source: BackupSource }): Promise<WorkspaceSummary> {
+    void request;
+    return Promise.reject(notImplemented());
+  }
+
+  /**
+   * Makes a backup of the open workspace now.
+   *
+   * @returns the attempt
+   */
+  backupNow(): Promise<BackupAttempt> {
+    return Promise.reject(notImplemented());
+  }
+
+  /**
+   * The backup state of the open workspace. Does not queue.
+   *
+   * @returns the state; `workspaceId` null when none is open
+   */
+  backupState(): BackupState {
+    throw notImplemented();
+  }
+
+  /**
+   * The state of the backup place of the open workspace.
+   *
+   * @returns the place, its backups and the last attempt
+   */
+  backupStatus(): Promise<BackupFolderStatus> {
+    return Promise.reject(notImplemented());
+  }
+
+  /**
+   * Deletes one regular backup of the open workspace.
+   *
+   * @param source the backup
+   * @returns resolves once it is gone
+   */
+  deleteBackup(source: BackupSource): Promise<void> {
+    void source;
+    return Promise.reject(notImplemented());
   }
 
   /**
@@ -313,4 +383,13 @@ export class WorkspaceManager {
     if (!this.open_) throw new NoWorkspaceOpenError('No workspace is open');
     return this.open_;
   }
+}
+
+/**
+ * The error of a backup operation that is not built yet.
+ *
+ * @returns the error
+ */
+function notImplemented(): InvalidOperationError {
+  return new InvalidOperationError('Not implemented');
 }

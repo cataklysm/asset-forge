@@ -28,6 +28,14 @@ export interface Dialogs {
    */
   confirmRemoveWorkspace(workspace: WorkspaceSummary): Promise<RemoveChoice>;
   /**
+   * Asks whether a workspace may be removed although its final backup failed.
+   *
+   * @param workspace the workspace to remove
+   * @param message the fixed message of the failed backup
+   * @returns true when the user chose to remove it anyway
+   */
+  confirmRemoveWithoutBackup(workspace: WorkspaceSummary, message: string): Promise<boolean>;
+  /**
    * Asks whether the workflow of an asset may be removed.
    *
    * @param assetName the asset's name, shown in the dialog

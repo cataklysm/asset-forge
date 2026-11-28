@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { WorkspaceDatabase } from '@assetforge/core';
+import { BackupError, type WorkspaceDatabase } from '@assetforge/core';
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrateWithBackup, type BackupOptions } from './migrate-with-backup.js';
@@ -122,8 +122,21 @@ function workspaceDatabase(
     async ensureDerivedData() {
       await ensureDerivedData(database, options.derivedData);
     },
+    changeCount() {
+      return (sqlite.prepare('select total_changes() as n').get() as { n: number }).n;
+    },
+    snapshot: snapshotNotBuilt,
     async close() {
       if (sqlite.open) sqlite.close();
     },
   };
+}
+
+/**
+ * The snapshot until it is built: always fails.
+ *
+ * @returns never; always rejects with `backup_failed`
+ */
+async function snapshotNotBuilt(): Promise<never> {
+  throw new BackupError('backup_failed');
 }

@@ -98,6 +98,7 @@ async function setup(failures: MockFailure[] = [], firstEntry?: () => never): Pr
       pickDirectory: async () => null,
       pickFiles: async () => [],
       confirmRemoveWorkspace: async () => 'cancel',
+      confirmRemoveWithoutBackup: async () => false,
       confirmRemoveWorkflow: async () => false,
     },
     {

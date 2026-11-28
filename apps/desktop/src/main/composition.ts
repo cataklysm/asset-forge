@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { WorkspaceManager, type ImageProbe, type LineLog, type VideoProbe, type WorkspaceHost } from '@assetforge/core';
+import {
+  BackupError,
+  WorkspaceManager,
+  type ImageProbe,
+  type LineLog,
+  type VideoProbe,
+  type WorkspaceBackups,
+  type WorkspaceHost,
+} from '@assetforge/core';
 import { WorkspaceSummarySchema } from '@assetforge/contracts';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
@@ -54,6 +62,8 @@ export function createWorkspaceHost(options: CompositionOptions): WorkspaceHost 
     openDatabase: async (workspaceId) =>
       openWorkspaceDatabase(join(databaseDirectory(userDataPath, workspaceId), 'assetforge.sqlite'), migrationsFolder),
     deleteDatabase: (workspaceId) => deleteDatabaseDirectory(userDataPath, workspaceId),
+    databaseExists: async () => true,
+    backups: unbuiltBackups,
     moveToTrash: options.moveToTrash ?? noTrash,
     newId: () => randomUUID(),
     now: () => new Date(),
@@ -95,6 +105,27 @@ function databaseDirectory(userDataPath: string, workspaceId: string): string {
 async function deleteDatabaseDirectory(userDataPath: string, workspaceId: string): Promise<void> {
   await rm(databaseDirectory(userDataPath, workspaceId), { recursive: true, force: true });
 }
+
+/**
+ * A backup operation that is not wired yet.
+ *
+ * @returns never; always rejects with `backup_failed`
+ */
+async function backupNotWired(): Promise<never> {
+  throw new BackupError('backup_failed');
+}
+
+/** The backup port until its adapters are wired: every operation fails as `backup_failed`. */
+const unbuiltBackups: WorkspaceBackups = {
+  snapshotClosed: backupNotWired,
+  localLineage: backupNotWired,
+  listLocal: backupNotWired,
+  stageRestore: backupNotWired,
+  locationOf: backupNotWired,
+  write: backupNotWired,
+  list: backupNotWired,
+  remove: backupNotWired,
+};
 
 /** The trash without a host implementation: always refuses. */
 async function noTrash(): Promise<void> {

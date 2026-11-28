@@ -12,6 +12,7 @@ import type { SiteCrawlRepository } from './site-crawl-repository.js';
 import type { ProjectAssetRepository, ProjectRepository } from './project-repositories.js';
 import type { PromptRepository } from './prompt-repository.js';
 import type { TagRepository } from './tag-repository.js';
+import type { DatabaseSnapshot } from './workspace-backups.js';
 import type { AssetWorkflowRepository, WorkflowTemplateRepository } from './workflow-repositories.js';
 
 // The database of one workspace: every repository, and the two rows that describe the workspace itself.
@@ -53,6 +54,8 @@ export interface WorkspaceMeta {
   name: string;
   /** When the workspace was created. */
   createdAt: string;
+  /** The lineage of this database (32 hex characters), drawn by persistence when the row is written. */
+  lineageId: string;
 }
 
 /** The single description row of the workspace. */
@@ -64,11 +67,11 @@ export interface WorkspaceMetaRepository {
    */
   get(): Promise<WorkspaceMeta | null>;
   /**
-   * Writes the description row; rejects with InvalidOperationError when a row exists.
+   * Writes the description row with a new lineage; rejects with InvalidOperationError when a row exists.
    *
-   * @param meta the row
+   * @param meta the row without the lineage
    */
-  init(meta: WorkspaceMeta): Promise<void>;
+  init(meta: Omit<WorkspaceMeta, 'lineageId'>): Promise<void>;
 }
 
 /** The open database of one workspace: one repository per subject. Implemented outside core. */
@@ -118,6 +121,20 @@ export interface WorkspaceDatabase {
    * the stamp is written last, so an interrupted run is redone on the next open.
    */
   ensureDerivedData(): Promise<void>;
+  /**
+   * The number of rows changed through this connection since it was opened; tells whether a backup is due.
+   *
+   * @returns the count
+   */
+  changeCount(): number;
+  /**
+   * Copies the open database into a local temporary file and checks the copy.
+   *
+   * @param options `signal` aborts the copy; the temporary file is removed then
+   * @returns the checked snapshot
+   * @throws BackupError when the copy fails or fails its check
+   */
+  snapshot(options: { signal: AbortSignal }): Promise<DatabaseSnapshot>;
   /** Closes the database. */
   close(): Promise<void>;
 }
