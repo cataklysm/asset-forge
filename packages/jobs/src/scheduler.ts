@@ -476,7 +476,8 @@ class JobScheduler {
       if (next !== null) earliest = Math.min(earliest ?? Infinity, next);
     }
     // A recovery that failed again is tried after the first retry delay, even when nothing else wakes the scheduler.
-    if (this.recoveryPending) earliest = Math.min(earliest ?? Infinity, this.config.now().getTime() + RETRY_DELAYS_MS[0]);
+    if (this.recoveryPending)
+      earliest = Math.min(earliest ?? Infinity, this.config.now().getTime() + RETRY_DELAYS_MS[0]);
     this.cancelTimer();
     if (earliest !== null) this.armTimer(earliest);
   }
