@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { JOB_ERROR_MESSAGES, type ResourceClass } from '@assetforge/contracts';
-import type { NewJob, WorkspaceDatabase } from '@assetforge/core';
+import { InvalidOperationError, type NewJob, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T0 = '2026-01-01T00:00:00.000Z';
@@ -870,6 +870,39 @@ describe('job lanes', () => {
     expect(await db.jobs.get(uuid(13))).toMatchObject({ lane: null, payload: { keep: false } });
     expect(await db.jobs.get(uuid(14))).toMatchObject({ lane: 'a', payload: { keep: false } });
     expect(await db.jobs.get(uuid(15))).toMatchObject({ lane: null, payload: { keep: false } });
+  });
+
+  test('assignLane leaves a row whose rewrite answers undefined as it is, like null', async () => {
+    await enqueueInOrder(laned(10, null, { keep: true }), laned(11, null, { keep: false }));
+    const changed = await db.jobs.assignLane({
+      type: TYPE,
+      lane: 'b',
+      rewrite: (p) => ((p as { keep: boolean }).keep ? undefined : { ...(p as object), laned: true }),
+      now: LATER,
+    });
+    expect(changed).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ lane: null, payload: { keep: true }, updatedAt: T0 });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ lane: 'b', payload: { keep: false, laned: true } });
+  });
+
+  test('rerouteWaiting whose rewrite answers undefined changes no row', async () => {
+    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }));
+    const before = handle.prepare('select * from job order by id').all();
+    const rewrite = (p: unknown) => ((p as { n: number }).n === 2 ? undefined : p);
+    await expect(
+      db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER }),
+    ).rejects.toThrow('A job payload must be JSON');
+    expect(handle.prepare('select * from job order by id').all()).toEqual(before);
+  });
+
+  test('rerouteWaiting refuses the same lane and changes no row', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'a'));
+    setStatus(11, 'retry_wait', RA);
+    const before = handle.prepare('select * from job order by id').all();
+    await expect(
+      db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'a', rewrite: (p) => p, now: LATER }),
+    ).rejects.toThrow(InvalidOperationError);
+    expect(handle.prepare('select * from job order by id').all()).toEqual(before);
   });
 
   test('waitingByLane counts queued and retry_wait jobs per lane', async () => {

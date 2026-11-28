@@ -1,5 +1,5 @@
 import { FILE_DOWNLOAD_JOB, FINISHED_JOB_STATUSES, JobStatusSchema, type JobStatus } from '@assetforge/contracts';
-import type { Job, JobRepository, NewJob } from '@assetforge/core';
+import { InvalidOperationError, type Job, type JobRepository, type NewJob } from '@assetforge/core';
 import {
   and,
   asc,
@@ -605,16 +605,30 @@ async function countActiveInLane(database: BetterSQLite3Database, type: string, 
 }
 
 /**
+ * A rewritten payload as stored JSON.
+ *
+ * @param payload what the rewrite answered
+ * @returns the JSON text; undefined when the value has no JSON form (`undefined`, a function)
+ */
+function payloadText(payload: unknown): string | undefined {
+  return JSON.stringify(payload) as string | undefined;
+}
+
+/**
  * Moves the waiting jobs of a type from one lane to another, rewriting each payload, as fresh queued jobs.
  *
  * @param database the workspace database
  * @param input the job type, both lanes, the payload rewrite and the time
  * @returns the number of jobs moved
+ * @throws InvalidOperationError when both lanes are the same; an Error when a rewrite answers no JSON value, and then
+ *   no row changes
  */
 async function rerouteWaiting(
   database: BetterSQLite3Database,
   { type, fromLane, toLane, rewrite, now }: Parameters<JobRepository['rerouteWaiting']>[0],
 ): Promise<number> {
+  // A move onto its own lane would only reset the attempts of its retry_wait jobs.
+  if (fromLane === toLane) throw new InvalidOperationError('Jobs cannot be moved onto the same lane');
   // `rewrite` runs inside the transaction, so a throw rolls every row back.
   return database.transaction((transaction) => {
     const rows = transaction
@@ -625,7 +639,9 @@ async function rerouteWaiting(
       .all();
     let moved = 0;
     for (const row of rows) {
-      const payload = JSON.stringify(rewrite(JSON.parse(row.payload) as unknown));
+      const payload = payloadText(rewrite(JSON.parse(row.payload) as unknown));
+      // An undefined payload would leave the old one in place under the new lane; refuse it and roll back.
+      if (payload === undefined) throw new Error('A job payload must be JSON');
       moved += transaction
         .update(job)
         .set({
@@ -645,8 +661,8 @@ async function rerouteWaiting(
 }
 
 /**
- * Gives the active jobs of a type without a lane this lane, rewriting each payload; a job whose rewrite answers null
- * stays without one.
+ * Gives the active jobs of a type without a lane this lane, rewriting each payload; a job whose rewrite answers null,
+ * or a value without a JSON form such as undefined, stays without one.
  *
  * @param database the workspace database
  * @param input the job type, the lane, the payload rewrite and the time
@@ -665,11 +681,12 @@ async function assignLane(
       .all();
     let changed = 0;
     for (const row of rows) {
-      const payload = rewrite(JSON.parse(row.payload) as unknown);
-      if (payload === null) continue;
+      const answer = rewrite(JSON.parse(row.payload) as unknown);
+      const payload = answer === null ? undefined : payloadText(answer);
+      if (payload === undefined) continue;
       changed += transaction
         .update(job)
-        .set({ providerId: lane, payload: JSON.stringify(payload), updatedAt: now })
+        .set({ providerId: lane, payload, updatedAt: now })
         .where(and(eq(job.id, row.id), isNull(job.providerId), isActive))
         .run().changes;
     }
