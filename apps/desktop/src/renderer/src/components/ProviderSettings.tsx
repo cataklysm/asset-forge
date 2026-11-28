@@ -9,6 +9,7 @@ import {
   NEW_PROVIDER_TITLE,
   PROVIDER_LIMIT_TITLE,
   PROVIDERS_LIST_LABEL,
+  PROVIDERS_RELOAD_FAILED,
   PROVIDERS_TITLE,
   SETTINGS_LOAD_FAILED,
   deleteProviderTitle,
@@ -172,7 +173,7 @@ function EntryColumn({ list, selection, busy, select, columnRef }: EntryColumnPr
  * selected one. Read-only when the environment sets the entry.
  */
 export function ProviderSettings() {
-  const { list, loading, failed, reload, save, remove } = useProviders();
+  const { list, loading, failed, reloadFailed, reload, save, remove } = useProviders();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const { busy, error, setError, run } = useExclusiveRun(messageOf);
@@ -231,6 +232,13 @@ export function ProviderSettings() {
         />
       ) : (
         <div className="flex flex-col gap-4">
+          {reloadFailed && !loading && (
+            <SettingsLoadState
+              failed
+              failedMessage={PROVIDERS_RELOAD_FAILED}
+              onRetry={() => void reload().catch(() => {})}
+            />
+          )}
           {error !== null && (
             <p role="alert" className={ALERT}>
               {error}

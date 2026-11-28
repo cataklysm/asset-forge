@@ -63,6 +63,12 @@ export const NO_KEY_STORE_TITLE = 'The system credential store is not available,
 export const KEY_STORED = 'Stored';
 export const REMOVE_KEY_LABEL = 'Remove key';
 export const REMOVE_KEY_TITLE = 'Deletes the stored key on save';
+/** Shown in place of `KEY_STORED` while the stored key is to be deleted on save. */
+export const KEY_REMOVAL_PENDING = 'Removed on save';
+/** The action that withdraws a pending key removal. */
+export const UNDO_REMOVE_KEY_LABEL = 'Undo';
+/** The tooltip of `UNDO_REMOVE_KEY_LABEL`. */
+export const UNDO_REMOVE_KEY_TITLE = 'Keeps the stored key';
 export const TIMEOUT_LABEL = 'Timeout (s)';
 export const TIMEOUT_TITLE = `Seconds to wait for one answer (${VISION_TIMEOUT_MIN_SECONDS}–${VISION_TIMEOUT_MAX_SECONDS})`;
 export const TIMEOUT_INVALID = `The timeout must be a whole number from ${VISION_TIMEOUT_MIN_SECONDS} to ${VISION_TIMEOUT_MAX_SECONDS}`;
@@ -107,3 +113,5 @@ export function deleteProviderTitle(name: string): string {
 
 /** A failed load of the provider settings; not the same as "not configured". */
 export const SETTINGS_LOAD_FAILED = 'The provider settings could not be read';
+/** Shown above a held provider list whose reload failed. */
+export const PROVIDERS_RELOAD_FAILED = 'The provider list could not be reloaded';

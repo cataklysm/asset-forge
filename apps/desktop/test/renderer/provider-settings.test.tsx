@@ -12,7 +12,7 @@ import {
 } from '@assetforge/contracts';
 import { expect, it } from 'vitest';
 import { ProviderSettings } from '../../src/renderer/src/components/ProviderSettings';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
 const TEST_KEY = 'test-key-not-real';
@@ -720,4 +720,80 @@ it('a Venice entry is saved without options', async () => {
   await user.click(button('Save'));
   await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
   expect('options' in (callsOf(api, 'providers:save')[0]!.request as SaveRequest)).toBe(false);
+});
+
+const RELOAD_FAILED = 'The provider list could not be reloaded';
+
+/** Renders the section with a hook into the provider context, so a test can reload the list. */
+function renderWithReload() {
+  const handle: { reload: () => Promise<void> } = { reload: async () => {} };
+  function Reloader() {
+    handle.reload = useProviders().reload;
+    return null;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <Reloader />
+      <ProviderSettings />
+    </ProviderSettingsProvider>,
+  );
+  return handle;
+}
+
+it('a failed reload of a held list shows a retry while the list stays usable', async () => {
+  const user = userEvent.setup();
+  const fake = fakeProviders({ providers: [LOCAL, RUNPOD] }, { [LOCAL.id]: MODELS });
+  let failing = false;
+  installFakeApi({
+    ...fake.handlers,
+    'providers:list': (request) => {
+      if (failing) throw fakeError('internal_error');
+      return fake.handlers['providers:list']!(request);
+    },
+  });
+  const handle = renderWithReload();
+  await loaded();
+  expect(screen.queryByText(RELOAD_FAILED)).toBeNull();
+  failing = true;
+  await act(() => handle.reload().catch(() => {}));
+  expect(screen.getByRole('alert').textContent).toBe(RELOAD_FAILED);
+  expect(field('Name').value).toBe('Local');
+  await user.click(within(list()).getByRole('button', { name: 'RunPod' }));
+  expect(field('Name').value).toBe('RunPod');
+  failing = false;
+  await user.click(button('Retry'));
+  await waitFor(() => expect(screen.queryByText(RELOAD_FAILED)).toBeNull());
+  expect(entryNames()).toEqual(['Local', 'RunPod']);
+});
+
+it('Remove key shows the pending removal with an undo that keeps the key', async () => {
+  const user = userEvent.setup();
+  const { api } = install();
+  renderSection();
+  await loaded();
+  await user.click(button('Remove key'));
+  expect(screen.getByText('Removed on save')).toBeTruthy();
+  expect(button('Undo').title).toBe('Keeps the stored key');
+  await user.click(button('Undo'));
+  expect(screen.queryByText('Removed on save')).toBeNull();
+  expect(screen.getByText('Stored')).toBeTruthy();
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect('apiKey' in (callsOf(api, 'providers:save')[0]!.request as SaveRequest)).toBe(false);
+});
+
+it('a key typed after Remove key replaces the pending removal', async () => {
+  const user = userEvent.setup();
+  const { api } = install();
+  renderSection();
+  await loaded();
+  await user.click(button('Remove key'));
+  await user.type(field('API key'), TEST_KEY);
+  expect(screen.queryByText('Removed on save')).toBeNull();
+  await user.clear(field('API key'));
+  expect(screen.getByText('Removed on save')).toBeTruthy();
+  await user.type(field('API key'), TEST_KEY);
+  await user.click(button('Save'));
+  await waitFor(() => expect(callsOf(api, 'providers:save')).toHaveLength(1));
+  expect((callsOf(api, 'providers:save')[0]!.request as SaveRequest).apiKey).toBe(TEST_KEY);
 });
