@@ -2,7 +2,9 @@ import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
 import { ChecksumMismatchError, safeErrorMessage } from './errors.js';
 import { lastPathSegment } from './file-names.js';
+import { logImportFailure, type ImportOperation } from './import-log.js';
 import { isRefusedImportName, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
+import type { LineLog } from './log-line.js';
 import { fileKind, hasThumbnail, isOpenable, isPreviewable, mimeFromFileName } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository } from './ports/file-repositories.js';
@@ -29,6 +31,8 @@ export interface ImportContext {
    * @returns the time
    */
   now(): Date;
+  /** Takes one line per unexpected failure; nothing is logged without it. */
+  log?: LineLog;
 }
 
 /**
@@ -147,6 +151,7 @@ export async function importFile(
   try {
     opened = await context.sources.open(sourcePath);
   } catch (error) {
+    logImportFailure(context.log, 'import', {}, error);
     return { sourcePath, entryName: null, file: null, error: messageOf(error), duplicateOf: [] };
   }
   if (opened.sizeBytes !== undefined) hooks.onSize?.(opened.sizeBytes);
@@ -190,6 +195,7 @@ export async function importStream(
   } catch (error) {
     // The storage adapter does not destroy a source it never started piping; release the handle.
     source.stream.destroy();
+    logImportFailure(context.log, operationOf(run), { file: run.id }, error);
     return resultWithoutFile(run, messageOf(error), []);
   }
   try {
@@ -340,6 +346,7 @@ async function deletePendingQuietly(run: ImportRun): Promise<void> {
 async function failRun(run: ImportRun, error: unknown): Promise<ImportResult> {
   const { context, source, options } = run;
   const message = messageOf(error);
+  logImportFailure(context.log, operationOf(run), { file: run.id }, error);
   // Read before our own destroy, which ends the stream without an error.
   const ended = run.streamError ?? (source.stream.errored == null ? null : { error: source.stream.errored });
   source.stream.destroy();
@@ -363,6 +370,17 @@ async function failRun(run: ImportRun, error: unknown): Promise<ImportResult> {
     height: null,
   });
   return { ...resultWithoutFile(run, message, []), file };
+}
+
+/**
+ * What the run imports, for the log line of an unexpected failure.
+ *
+ * @param run the running import
+ * @returns `download` for a body with an origin, `archive entry` for an entry, else `import`
+ */
+function operationOf(run: ImportRun): ImportOperation {
+  if (run.options.origin !== undefined) return 'download';
+  return run.source.entryName === null ? 'import' : 'archive entry';
 }
 
 /**
