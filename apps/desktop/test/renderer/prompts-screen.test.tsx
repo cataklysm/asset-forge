@@ -78,6 +78,22 @@ it('the list shows the title, the first line and the tags, pages and reloads for
   await waitFor(() => expect(within(list()).queryByText('Prompt 5')).toBeNull());
 });
 
+it('the screen carries no explanatory paragraph: only state lines and alerts', async () => {
+  const user = userEvent.setup();
+  install([promptDetail({ title: 'Hero', content: 'A {{subject}} in the rain' })]);
+  const { container } = render(<PromptsScreen busy={false} />);
+  await option('Hero');
+  const paragraphs = () =>
+    Array.from(container.querySelectorAll('p'))
+      .filter((p) => p.getAttribute('role') !== 'alert')
+      .map((p) => p.textContent);
+  expect(paragraphs()).toEqual(['No prompt selected']);
+  await openPrompt(user, 'Hero');
+  expect(paragraphs()).toEqual([]);
+  await user.click(screen.getByRole('button', { name: 'New' }));
+  expect(paragraphs()).toEqual([]);
+});
+
 it('the tag filter goes into prompts:list', async () => {
   const user = userEvent.setup();
   const { api } = install([promptDetail({ title: 'Hero', tags: [tagOf('Shop')] }), promptDetail({ title: 'Other' })]);
