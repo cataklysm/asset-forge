@@ -245,7 +245,7 @@ export function AnalysisStartDialog({
   const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
   const blocked =
     providerBlocked ??
-    promptGate(prompts, promptId) ??
+    promptGate(prompts, promptId, 'tagging') ??
     countsBlocked(previewError, previewing || preview === null, nothingToDo);
   const canStart = blocked === null && !starting && target !== null;
 

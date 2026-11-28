@@ -222,7 +222,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
 
   const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
   const gate = providerGate(providers, providerId, model, 'prompt');
-  const blocked = gate.blocked ?? promptGate(prompts, promptId);
+  const blocked = gate.blocked ?? promptGate(prompts, promptId, 'image_prompt');
   const canGenerate =
     blocked === null && !running && file !== null && providerId !== null && model !== null && promptId !== null;
 

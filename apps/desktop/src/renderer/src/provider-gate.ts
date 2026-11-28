@@ -1,4 +1,10 @@
-import { JOB_ERROR_MESSAGES, purposeOf, type ProviderPurpose, type VisionModel } from '@assetforge/contracts';
+import {
+  JOB_ERROR_MESSAGES,
+  purposeOf,
+  type AnalysisPromptPurpose,
+  type ProviderPurpose,
+  type VisionModel,
+} from '@assetforge/contracts';
 import type { AnalysisPromptsState } from './analysis-prompts-context';
 import {
   CHOOSE_MODEL,
@@ -11,6 +17,7 @@ import {
   PROVIDER_CHECKING,
   PROVIDER_STATE_LABELS,
   PROMPTS_LOAD_FAILED,
+  PROMPTS_LOADING,
   SETTINGS_LOAD_FAILED,
   START_LOADING,
 } from './labels';
@@ -22,15 +29,18 @@ import type { ProvidersState } from './provider-context';
  *
  * @param state the loaded analysis prompts
  * @param promptId the chosen prompt; null when none is chosen
+ * @param purpose the purpose of the dialog; a prompt of the other purpose cannot start
  * @returns the reason, null when a start can go ahead
  */
 export function promptGate(
   state: Pick<AnalysisPromptsState, 'prompts' | 'loading' | 'failed'>,
   promptId: string | null,
+  purpose: AnalysisPromptPurpose,
 ): string | null {
   if (state.failed) return PROMPTS_LOAD_FAILED;
-  if (state.prompts === null) return START_LOADING;
-  if (promptId === null || !state.prompts.some((prompt) => prompt.id === promptId)) return CHOOSE_PROMPT;
+  if (state.prompts === null) return PROMPTS_LOADING;
+  if (promptId === null || !state.prompts.some((prompt) => prompt.id === promptId && prompt.purpose === purpose))
+    return CHOOSE_PROMPT;
   return null;
 }
 

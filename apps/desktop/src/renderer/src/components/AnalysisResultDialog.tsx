@@ -154,7 +154,7 @@ export function AnalysisResultDialog({
 
   // Why Analyse cannot start, as its tooltip; null when it can.
   const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
-  const blocked = providerBlocked ?? promptGate(prompts, promptId);
+  const blocked = providerBlocked ?? promptGate(prompts, promptId, 'tagging');
   const current = shown !== null && shown.fileId === fileId ? shown : null;
 
   const analyseRow: AnalyseRowProps = {

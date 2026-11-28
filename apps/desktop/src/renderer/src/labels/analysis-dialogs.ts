@@ -11,6 +11,9 @@ export const NOT_ANALYSABLE = 'This file cannot be analysed';
 /** Tooltip of the disabled Accept and of the marker of a stale proposal. */
 export const STALE_TITLE = 'The file changed after the analysis';
 
+/** Tooltip of the start button of the three analysis dialogs while the analysis prompts load (`promptGate`). */
+export const PROMPTS_LOADING = 'The analysis prompts are loading';
+
 /** The start dialog (AnalysisStartDialog). */
 export const ANALYSIS_START_TITLE = 'Analyse';
 export const START_LABEL = 'Start';
