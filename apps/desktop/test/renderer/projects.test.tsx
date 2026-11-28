@@ -771,6 +771,47 @@ it('a member page kept from an earlier visit that is past the end moves to the l
   expect(screen.queryByRole('navigation', { name: 'Pagination' })).toBeNull();
 });
 
+it('the shell keeps the member page of the project left last, and starts another project on its first page', async () => {
+  const user = userEvent.setup();
+  const [forest, desert] = [projectSummary({ name: 'Forest' }), projectSummary({ name: 'Desert' })];
+  const members = new Map(
+    [forest!, desert!].map((entry) => [
+      entry.id,
+      Array.from({ length: 120 }, (_, i) => member(entry.id, `${entry.name} member ${i}`)),
+    ]),
+  );
+  install({
+    'projects:list': listOf([forest!, desert!]),
+    'projects:get': ({ id }) => {
+      const found = [forest!, desert!].find((entry) => entry.id === id)!;
+      return { id, name: found.name, description: '', status: 'active', createdAt: NOW, updatedAt: NOW };
+    },
+    'assignments:listByProject': ({ projectId, limit, offset }) =>
+      pageOf(members.get(projectId)!.slice(offset, offset + limit), 120),
+    'assignments:listByAsset': () => [],
+  });
+  render(
+    <WorkspaceShell workspace={{ id: nextId(), name: 'W', rootPath: 'root', lastOpenedAt: NOW }} onClosed={() => {}} />,
+  );
+  /** Opens a project from the projects list and waits for the given member. */
+  const open = async (name: string, shown: string) => {
+    await user.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: /Projects/ }));
+    await within(await screen.findByRole('grid', { name: 'Projects' })).findByText(name);
+    await user.dblClick(rowOf(name));
+    expect(await screen.findByText(shown)).toBeTruthy();
+  };
+
+  await open('Forest', 'Forest member 0');
+  await user.click(
+    within(screen.getByRole('navigation', { name: 'Pagination' })).getByRole('button', { name: 'Next' }),
+  );
+  expect(await screen.findByText('Forest member 50')).toBeTruthy();
+
+  await open('Forest', 'Forest member 50');
+  expect(screen.queryByText('Forest member 0')).toBeNull();
+  await open('Desert', 'Desert member 0');
+});
+
 /** The projects list inside a `TagsProvider` whose renames rewrite the filters, as the workspace shell does. */
 function RenamingHarness(props: { initial: ProjectListState; tag: { name: string; displayName: string } }) {
   const [state, setState] = useState(props.initial);
