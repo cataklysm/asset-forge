@@ -27,8 +27,8 @@ export interface ProjectTableProps {
   tagged: boolean;
   selectedId: string | null;
   onSelect(project: ProjectSummary): void;
-  /** Opens a project; the scroll offset is kept for the way back. */
-  onOpen(project: ProjectSummary, scrollOffset: number): void;
+  /** Opens a project; the scroll offset and its row index are kept for the way back. */
+  onOpen(project: ProjectSummary, scrollOffset: number, index: number): void;
   /** Called with the rows in view, so their pages can be loaded. */
   onRows(rows: VisibleRows): void;
   /** Loads a failed page again. */
@@ -204,7 +204,7 @@ function TableRow(props: TableRowProps) {
   function onKeyDown(event: KeyboardEvent) {
     if (isPlainEnter(event)) {
       event.preventDefault();
-      if (project) onOpen(project, rows.scrollOffset());
+      if (project) onOpen(project, rows.scrollOffset(), index);
       return;
     }
     rows.onItemKeyDown(index, event);
@@ -227,7 +227,7 @@ function TableRow(props: TableRowProps) {
         if (project) onSelect(project);
       }}
       onDoubleClick={() => {
-        if (project) onOpen(project, rows.scrollOffset());
+        if (project) onOpen(project, rows.scrollOffset(), index);
       }}
       onKeyDown={onKeyDown}
       onFocus={() => {
@@ -236,7 +236,7 @@ function TableRow(props: TableRowProps) {
       }}
     >
       {project !== null && (
-        <ProjectCells project={project} tagged={tagged} onOpen={() => onOpen(project, rows.scrollOffset())} />
+        <ProjectCells project={project} tagged={tagged} onOpen={() => onOpen(project, rows.scrollOffset(), index)} />
       )}
     </div>
   );

@@ -69,7 +69,7 @@ function useKeepPositionOnLeave(
     () => () => {
       const current = latest.current;
       if (opened.current || position.current?.viewKey !== current.viewKey) return;
-      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset });
+      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset, openedIndex: null });
     },
     [],
   );
@@ -95,7 +95,12 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   const key = listKey(effective, String(renameToken));
 
   // Where the next mounted table starts; read once by each table when it mounts.
-  const restore = useRef<ViewRestore>({ scrollOffset: state.scrollOffset, index: null, focus: false });
+  // Back from a project, its row takes the focus again.
+  const restore = useRef<ViewRestore>({
+    scrollOffset: state.scrollOffset,
+    index: state.openedIndex,
+    focus: state.openedIndex !== null,
+  });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastToken = useRef(renameToken);
   const [rows, setRows] = useState<ReportedRows | null>(null);
@@ -133,7 +138,7 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
 
   function setFilter(change: Partial<ProjectFilters>) {
     restore.current = { scrollOffset: 0, index: null, focus: false };
-    onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0 });
+    onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0, openedIndex: null });
   }
 
   const onRows = useCallback((visible: VisibleRows) => setRows((old) => nextRows(old, visible, viewKey)), [viewKey]);
@@ -143,10 +148,10 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     if (state.selectedId !== project.id) onStateChange({ ...state, selectedId: project.id });
   }
 
-  function openProject(project: ProjectSummary, scrollOffset: number) {
+  function openProject(project: ProjectSummary, scrollOffset: number, index: number) {
     opened.current = true;
     lastSelected.current = project;
-    onStateChange({ ...state, scrollOffset, selectedId: project.id });
+    onStateChange({ ...state, scrollOffset, openedIndex: index, selectedId: project.id });
     onOpen(project.id);
   }
 
