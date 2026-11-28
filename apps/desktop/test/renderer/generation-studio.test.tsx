@@ -42,7 +42,7 @@ import {
   TRASHED_MARK,
   UPSCALES_LABEL,
 } from '../../src/renderer/src/labels';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
+import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
 import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
 import { SAFE_MODE_KEY } from '../../src/renderer/src/studio-state';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
@@ -1344,4 +1344,47 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     await s.open();
     expect(promptBox().value).toBe('');
   });
+});
+
+it('an accepted upscale from outside the studio records the entry the main process chose', async () => {
+  const file = fileRecord({ originalName: 'file.png' });
+  const other: ProviderView = { ...VENICE, id: nextId(), name: 'Venice B' };
+  const state = { results: [], byFile: {}, summary: IDLE };
+  installFakeApi({
+    ...studioHandlers(file, { providers: [VENICE, other] }, state),
+    'generations:start': () => ({
+      ok: true,
+      generation: generation(file, {
+        kind: 'upscale',
+        status: 'pending',
+        jobStatus: 'queued',
+        outputs: [],
+        providerId: other.id,
+      }),
+    }),
+  });
+  let lastUsedImageId: string | null | undefined;
+  function Upscaler() {
+    const studio = useStudio();
+    lastUsedImageId = useProviders().list?.lastUsedImageId;
+    return (
+      <button type="button" onClick={() => void studio.upscale(file, 2)}>
+        upscale
+      </button>
+    );
+  }
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <TagsProvider>
+          <StudioProvider onOpenPrompt={async () => true}>
+            <Upscaler />
+          </StudioProvider>
+        </TagsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  await waitFor(() => expect(lastUsedImageId).toBe(VENICE.id));
+  await userEvent.setup().click(button('upscale'));
+  await waitFor(() => expect(lastUsedImageId).toBe(other.id));
 });

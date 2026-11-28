@@ -375,6 +375,21 @@ it('noteUsed makes the entry the default', async () => {
   expect(defaultProviderId(state!)).toBe(RUNPOD.id);
 });
 
+it('noteUsed of an id the list does not hold records nothing', async () => {
+  installFakeApi(fakeProviders({ providers: [LOCAL, RUNPOD], lastUsedId: RUNPOD.id }).handlers);
+  render(
+    <ProviderSettingsProvider>
+      <Probe />
+    </ProviderSettingsProvider>,
+  );
+  await waitFor(() => expect(state!.list).not.toBeNull());
+  const before = state!.list;
+  act(() => state!.noteUsed('00000000-0000-4000-8000-0000000000ff'));
+  expect(state!.list).toBe(before);
+  expect(state!.list!.lastUsedId).toBe(RUNPOD.id);
+  expect(state!.list!.lastUsedImageId).toBeNull();
+});
+
 // --- defaults ---
 
 const listOf = (p: Partial<ProviderList>): Pick<ProvidersState, 'list'> => ({

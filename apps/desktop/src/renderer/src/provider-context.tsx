@@ -311,7 +311,8 @@ export function ProviderSettingsProvider({ children }: { children: ReactNode }) 
   const noteUsed = useCallback(
     (id: string) => {
       const current = listRef.current;
-      if (current === null) return;
+      // An id the list does not hold has no known purpose: it is never recorded.
+      if (current === null || !current.providers.some((entry) => entry.id === id)) return;
       const slot = purposeOfEntry(current, id) === 'image' ? 'lastUsedImageId' : 'lastUsedId';
       if (current[slot] !== id) takeList({ ...current, [slot]: id });
     },
