@@ -133,6 +133,17 @@ it('a draft survives switching entries, with the marker shown meanwhile', async 
   expect(screen.queryByTitle('Unsaved changes')).toBeNull();
 });
 
+it('a tag limit typed with a leading zero is not an unsaved change of the same number', async () => {
+  install();
+  renderSection();
+  await loaded();
+  await userEvent.click(entry('Tagging', 'Detailed'));
+  await userEvent.clear(field('Tag limit'));
+  await userEvent.type(field('Tag limit'), '025');
+  expect(within(entry('Tagging', 'Detailed')).queryByTitle('Unsaved changes')).toBeNull();
+  expect(button('Save').disabled).toBe(true);
+});
+
 it('New creates "New prompt", then "New prompt 2", with the built-in content, and selects it', async () => {
   const { api } = install();
   renderSection();

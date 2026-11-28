@@ -48,7 +48,10 @@ export function tagLimitOf(text: string): number | null {
 export function changed(prompt: AnalysisPrompt, draft: AnalysisPromptDraft | undefined): boolean {
   if (draft === undefined) return false;
   if (draft.name.trim() !== prompt.name || draft.text.trim() !== prompt.text) return true;
-  return prompt.purpose === 'tagging' && draft.maxTags.trim() !== String(prompt.maxTags);
+  if (prompt.purpose !== 'tagging') return false;
+  // A limit typed with leading zeros is sent as its number; anything else that is not one counts as changed.
+  const limit = tagLimitOf(draft.maxTags);
+  return limit === null ? draft.maxTags.trim() !== String(prompt.maxTags) : limit !== prompt.maxTags;
 }
 
 /**
