@@ -11,9 +11,8 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 ## Correctness and robustness
 
-- `LocalStorage.move` checks for the target and then renames; a target created in between can be replaced.
 - A file move whose commit fails leaves the file row pointing at the old path until the workspace is opened again.
-- Quitting the application waits for a running import; reads are not ordered against `close`.
+- Reads are not ordered against `close`.
 - File names are truncated by code points, so long non-ASCII names can exceed a 255-byte limit (ext4, Samba).
 - The same folder reached through a drive letter and a UNC path is reported as `workspace_duplicate`.
 - `EPERM` from a locked file is reported as `storage_access_denied`.
@@ -23,16 +22,12 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `createAsset` inserts the asset and then starts its default workflow; the two are not atomic, so a failure in between leaves an asset without the workflow of its type.
 - A built-in template whose version row is missing is only repaired the next time the workspace is opened.
 - Preview requests are not cancelled when a tile scrolls away; that needs a cancel signal from the renderer.
-- When the preview worker module cannot load, every queued job still starts a fresh worker; the failure line is logged once until a worker answers again.
 - The session failure memory of the preview service also remembers worker timeouts and crashes (the pool reports every failure as the same `none`/`null`); it now keeps at most `MAX_REMEMBERED_FAILURES` (10 000) keys per memory, the oldest forgotten first.
 - The derived-data rebuild still runs on the main process while a workspace opens (about 1.7 s at 10 000 assets); it yields to the event loop between batches of 500, but each batch blocks it. The step also runs on every new workspace.
 - `asset_search_map` rowids: once assets can be deleted, the FTS row and the map row must be deleted together; otherwise rowid reuse attaches a stale index row to a new asset.
-- `FileKindSchema.catch('other')` in the file repository hides an invalid stored kind.
 - The search plans rely on `cross join` to fix the join order in the tag filter; the scale test guards it.
 - `files:assignMany` holds the exclusive workspace queue for the whole batch.
 - Tags stored before the letter-or-digit rule that consist only of symbols cannot be removed through the UI; a symbol-only name in the tag filter is rejected with `validation_failed`.
-- Unused tag rows are never deleted (a merge deletes only its source row).
-- `InMemoryStorage.absolutePath` and `LocalStorage.absolutePath` behave differently when the storage is unreachable.
 - Decoder byte limit of 256 MiB: an uncompressed 16-bit RGBA 8K TIFF (about 265 MB) gets neither dimensions nor a preview. Raising the limit is an owner decision.
 
 ## IPC and security
@@ -43,17 +38,12 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 
 - In-place list updates (`docs/superpowers/specs/2026-11-27-in-place-list-updates-design.md`), known limits: a patch replaces loaded rows and never adds or removes one, so with a status filter on the Jobs screen a job that left the filter keeps its row, a job that entered it does not appear, and pages loaded afterwards are shifted, until the filter is set again or a `jobs` change refreshes the list; the same holds for a file list with a filter the analysis moves a file into or out of (for example Proposals). The asset gallery, the projects list, the prompts list and the asset header (cover, tags) do not react to background jobs. More than 100 changed loaded records in one poll fall back to a refresh of the visible pages. An action on the Jobs screen reloads through its key and is followed by one redundant in-place refresh from the feed.
 - In-place list updates, not checked in the running app: whether the virtualised grid keeps its visual position when a refresh changes the total above the visible area, and how a large analysis batch feels on the asset Files tab and the Jobs screen.
-- Lists used as pickers and filters (projects in the asset list, asset and project pickers) load at most 200 entries.
 - The project member table still pages by 50 instead of scrolling endlessly like the other lists.
 - No settings for the cache size and location; the preview worker timeout (30 s) is a constant.
 - The failed-measurement memory of `measureVideo` is keyed by format and source path, so a video changed in place keeps its failed measurement for the session.
 - `Cache-Control` max-age on previews assumes the content of a file ID never changes (true until working-file re-hashing in phase 6).
-- `CoverImage` keeps a failed id per instance, so non-virtualised tiles stay on the format tile after the storage returns until the user navigates away and back.
 - Focus is lost when a focused placeholder becomes a Retry button.
 - Multi-file Detach is a renderer loop over `files:unassign`.
-- The project member table has no cover (the contract lacks it).
-- Tag filter chips show the normalised name, not the display name.
-- Body text uses Tailwind `text-sm` (14 px) in buttons and tables where the design names 15 px.
 - Retry on the storage banner during an import remounts the page and clears the busy block; navigation and "Import files" are free while the main process still imports, and the result strip is lost.
 - The asset Files tab batch tag changes bypass the action guard (the tags dialog is modal; a guard would silently drop a typed tag).
 - The Selection column is empty after a remount while the selected page is not loaded.
@@ -61,7 +51,7 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - Image viewer, left out on purpose: neighbouring files are not preloaded; 16-bit and wide-gamut TIFF are converted to 8-bit sRGB in the PNG rendition; the viewer cannot be opened from the asset gallery (only from file lists).
 - Image viewer zoom: a fast Ctrl+wheel can lose zoom steps; a `reduced` rendition at 100 % is upscaled by a non-integer factor.
 - Image viewer browsing: `ViewerList.want` has a new identity on every render.
-- Image viewer layout: Fit uses the whole-number `clientWidth`/`clientHeight` of the frame, so at a fractional `devicePixelRatio` the fitted box can be up to half a CSS pixel larger than the real stage and loses an edge pixel (measure with `getBoundingClientRect` and floor to the device grid); a rotated layer can sit half a device pixel off the box; the stage's own position on screen may be off the device grid; Ctrl+wheel over an on-stage arrow does not zoom; the tag input is named "Add image tag" for non-image files too; a horizontal film-strip scrollbar clips the tiles; the toolbar is cut off in very narrow windows; in the inbox the heading "Assign" sits above a button "Assign". Untested: Fit ignoring a client area shrunk by scrollbars; no on-stage arrows for a list of one file.
+- Image viewer layout: Fit uses the whole-number `clientWidth`/`clientHeight` of the frame, so at a fractional `devicePixelRatio` the fitted box can be up to half a CSS pixel larger than the real stage and loses an edge pixel (measure with `getBoundingClientRect` and floor to the device grid); a rotated layer can sit half a device pixel off the box; the stage's own position on screen may be off the device grid; Ctrl+wheel over an on-stage arrow does not zoom; the tag input is named "Add image tag" for non-image files too; a horizontal film-strip scrollbar clips the tiles; the toolbar is cut off in very narrow windows. Untested: Fit ignoring a client area shrunk by scrollbars; no on-stage arrows for a list of one file.
 
 ## Code structure
 
@@ -97,8 +87,6 @@ Deferred by design:
 
 Found during the build:
 
-- Tag cleaning (`cleanTagText`, shared by manual and AI tags) does not strip control and format characters (`\p{Cc}`, `\p{Cf}`: NUL, zero-width characters, bidi overrides), so a model answer can produce invisible or visually spoofed tags. Fixing it changes stored names and needs a `DERIVED_DATA_VERSION` bump.
-- A handler that ignores its abort signal hangs `stop` and with it the workspace close and quit.
 - `pool.jpeg` is not abortable (up to 30 s), so a workspace close during an analysis can wait that long.
 - Nothing ties `errorMessage` to the fixed message of `errorCode` in the contract schema; the stored pair is only correct because every writer uses `JOB_ERROR_MESSAGES`.
 - Inbox and asset screen: the counts of a start replace an import failure list in the shared strip even when it was not read yet.
@@ -129,7 +117,6 @@ Deferred by design:
 Provider adapter (`packages/providers/src/ollama-vision.ts`):
 
 - Models beyond the first 100 of `/api/tags` are dropped silently.
-- A host with a trailing dot counts as a different origin, so the stored key is deleted on such a change.
 
 Provider settings (`apps/desktop/src/main/provider-store.ts`):
 
@@ -146,14 +133,10 @@ Scheduler and pause gate (`packages/jobs`):
 
 Persistence:
 
-- The proposal reader (`parseTags` in `file-analysis-repository.ts`) returns an empty tag list for stored JSON that does not parse or is not an array and drops malformed entries, where the list readers throw; it does not validate tag names.
 - No test pins that the renderer's `analysable` (`file.previewable`, without the checksum) agrees with `isAnalysable` in core; the reader's SQL predicate is pinned against core.
 
 Renderer:
 
-- Accept can race a newer proposal of the same file; the fix needs the proposal's `createdAt` in the `analysis:acceptProposal` contract, which carries only `fileId` and `names`.
-- The preview counts a file that is analysed and also queued only as `alreadyAnalysed`, so with "Analyse again" the start dialog counts it under "To analyse" (`wouldEnqueue`, `AnalysisStartDialog.tsx:41-42`) while "Already queued" shows 0; the enqueue with `force` then answers it as `alreadyQueued` and the strip shows "0 queued, 1 already queued". There is no dedicated dialog state for 0 enqueued (only the strip).
-- A propose request for a file that already has an active apply job is shown as the dialog's own job (`AnalysisResultDialog.tsx:166-175`, `packages/core/src/analysis-enqueue.ts:74`): the dedupe key is per file, the enqueue answers `alreadyQueued`, and the dialog treats that as success. After "Analyse all", opening one of its files and clicking Analyse shows Queued or Running; on success the tags are applied without review and the dialog ends empty. Possible fix: carry `mode` in the `JobView` of `analysis:getProposal` and show a fixed "already being analysed in a batch" state.
 - The result dialog's busy state can flicker for one frame after a file switch.
 
 Renderer tests:
@@ -183,8 +166,6 @@ Found during the build — main process and jobs:
 
 Found during the build — renderer:
 
-- The `Delete` key acts only while a file item has focus, narrower than the design's "when focus is not in an input".
-- A failed single restore shows the error message instead of the count strip.
 - The nine-column trash table may be too wide; the Confirm/Cancel order differs between the confirm dialog and other dialogs.
 - Import order in the touched renderer files is not consistent.
 
@@ -245,9 +226,7 @@ Deferred by design:
 Found in the final review and not fixed:
 
 - A stored entry with a wrong declared size and an archive with strong encryption fail the whole archive (`This file is not a readable ZIP archive`) instead of one entry.
-- The result strip is neither bounded nor virtualised; one import can show up to 5000 failure lines.
 - Test gaps: `openEntry` racing `close()` in the ZIP import is untested (main).
-- An entry whose file name is longer than 255 characters and has a refused extension answers `This archive entry cannot be imported`, not the refused-type message (the length check comes first).
 
 ## Asset sources
 
@@ -293,32 +272,22 @@ Deferred by design:
 
 Found in the final review and not fixed:
 
-- A failed reload with a list already held is visible only to the caller.
-- A pending key removal is not shown and cannot be undone before saving.
-- The OpenAI-compatible adapter retries every HTTP 400 once without `response_format`, also one caused by the context length or an unknown extra parameter: that sends the image a second time, and after a success the model stays without `response_format` until the entry is saved again.
 - A `.corrupt-*` copy beside `provider-settings.json` blocks the key-file sweep until someone removes the copy by hand; there is no cleanup of old copies and no hint in Settings that entries were left out.
 - A settings file with a newer version number is set aside like an unreadable one; after a downgrade the entries are gone from the list (the keys stay).
 - A key file in the old form is bound to the origin its entry has at the first start with the new code; an edit of the base URL by hand before that start is trusted once.
 - Windows DPAPI is per user: the origin binding does not protect against code running as the same user.
 - The API key is decrypted on every `providers:list` (for `hasApiKey`), not only per request.
-- The delete guard is check-then-act: a job queued at that moment fails as not configured and can be moved.
-- Jobs of a deleted provider cannot be filtered on the Jobs screen.
 - The acceptance test pins one job at a time per provider only through a fixed 100 ms pause (parallel-requests test).
 - `providers:list` decrypts every stored key on each call to answer `hasApiKey`.
-- Moving jobs into a paused target lane leaves them waiting there with no hint in the dialog.
 
 ## Generation studio
 
 - The Venice adapter was built from the vendor's documentation and tested only against the mock provider. The price shape in `pricing`, the `/image/edit` request (experimental at the vendor) and the answer types are assumptions until they are checked with the real service.
 - The full-size rendition sent to the provider is capped at 8192 px per edge (`PREVIEW_EDGE.full`), so a larger image that is not sent as is arrives downscaled; the result is smaller than the source then.
 - Upscale checks only the pixel bounds of the app and of the input; the provider's own upscale limits are not read.
-- Result names (`<source name> edit <n>`, `<source name> <scale>x`) may repeat after a generation was removed or its file purged.
-- An image that is still too large for the provider after the rendition (or whose rendition cannot be produced) is refused only when the job runs (`file_unavailable`), not at start as the design says.
 - The guard that refuses deleting a provider entry with active jobs sees only the open workspace; jobs of that entry in another workspace fail later with `provider_not_configured`.
 - Tag edits in a file dialog opened from a link (source or result) do not reach the host list until it reloads; the linked dialog shows the asset name as plain text.
 - A JPEG or WebP answer of the image provider is not tested end to end; the mock only produces PNG (needs `docker/mock-provider`).
-- An upscale of an upscale is reachable only through that file's own studio.
-- The studio still remounts on a raise and restores a draft; the results selection, an open prompt picker and the save dialog are lost on a raise, and a start error that arrives after the studio was closed is dropped.
 - A row stuck in `running` for an `image.generate` job (scheduler never started) blocks the purge of its source until the next recovery.
 - `generations:retry` on a generation that was cancelled because its source went to the trash is a new paid run after a restore; nothing marks why it was cancelled.
 - Not checked in the running app: the Generate lock and the kept form across a raise, a source trashed during a real generation, and the purge refusal.
@@ -384,7 +353,6 @@ Deferred by design:
 
 Found while building:
 
-- `db:generate` for migration `0016` wanted to rebuild the `generation` table, because its CHECK on `provider_kind` in the Drizzle schema includes `openai` while no migration ever added it. Migration `0016` leaves the old CHECK in place; that is harmless since generations only store `venice`, but the schema and the database disagree until a migration rebuilds the table.
 
 Not covered by any automated check: real playback (decoding in Chromium), seeking through the `video/` route of the media protocol, the poster and the arrow, `Shift`+arrow and `Space` keys against the element's own key handling, fullscreen of the stage with a playing video, and volume and mute carried over between videos. The owner checks these by hand.
 
@@ -409,10 +377,6 @@ Deferred by design:
 Known gaps:
 
 - Deleting a profile clears the partition's storage, cache and auth cache, but the partition directory stays on disk.
-- A profile left out of a damaged `site-profiles.json` keeps its partition's cookies, and nothing in the app can clear them.
-- A profile stored with a single-label site before the rule existed still loads; the rule applies on save.
-- A slow redirect inside the site that never arrives can be reported as `no_thumbnails` instead of `timeout`: the page loader counts the page as loaded once the replaced navigation settles as aborted.
-- `off_site` links are listed as problems but have no counter of their own.
 - `download_login_not_sent` also covers HTTP 407 and 451 from a host outside the site, because the downloader reports them as one refusal.
 - A crawl and its kept answer live in memory only; nothing survives a restart, and one crawl runs at a time for the whole app.
 
@@ -420,13 +384,8 @@ Not covered by any automated check: the real windows. The hidden page window, th
 
 ## Found while clearing the small items (2026-11-28)
 
-- Cancelled Image2Prompt runs still hold a media worker until the model JPEG is made (`MAX_SETTLING_RUNS` only caps the set); passing the signal into `images.jpeg` needs core and media.
 - Scheduler: `scheduler.ts` is still over the file guide.
-- `PromptsScreen` and `JobsScreen` (`paged-view.ts` `failedFirstPage`) still show only Retry for a failed page; show the failure message beside it (`PageFailure.tsx`).
-- `labels/*.ts`: constants are prefixed by subject (`OPEN_WORKSPACE_BUTTON`, `OPEN_PROJECT_BUTTON`) because `studio.ts` already exports `OPEN_LABEL` and `REMOVE_LABEL` and everything is re-exported from the flat `labels.ts`; a naming rule for shared verbs would avoid future clashes.
-- `CoverImage` remembers a failed id for good; it needs a "storage reachable again" signal from the shell.
 - The detail dialog's menu items and Delete key being disabled while the action guard is set have no dialog-level test.
-- Prompt library: Discard while a create is in flight still creates the prompt (the request cannot be taken back).
 
 ## Found while clearing the backlog (2026-11-28)
 
@@ -452,6 +411,28 @@ Not covered by any automated check: the real windows. The hidden page window, th
 - Prompts screen: the remount on `openPrompt` of a prompt already opened by link (the `visit` counter in `WorkspaceFrame`) is not covered by a test; nothing in the UI reaches it while the Prompts screen is shown.
 - No test pins the progress of a workflow that has only optional steps (`{ done: 0, total: 0 }`).
 - The persistence test `search.test.ts > a committed file move reindexes both assets` builds a `Storage` stub without `isReachable`; it breaks as soon as `recoverFileMoves` checks reachability on the commit path.
+- `unboundOrigins` in `apps/desktop/src/main/provider-keys.ts` and the legacy marker comparison in `provider-settings-load.ts` still compare origins strictly; they do not use `isSameKeyOrigin`, so the trailing-dot equivalence does not reach them.
+- A tag name that only a waiting proposal holds has no tag row any more, so `tags:rename` answers `not_found` for it; the proposal is rewritten only when its tag exists somewhere.
+- Migrations that rebuild a table referenced by `ON DELETE CASCADE` must park and recreate the child tables (`PRAGMA foreign_keys=OFF` is a no-op inside the single migration transaction; see migration `0018`). This is not written down outside that migration.
+- Tag cleaning removes every format character, also ZWJ and ZWNJ: emoji joined by ZWJ fall apart and two tags that differ only in such a character were merged by the derived-data step of version 3.
+- The tag cleaning of derived-data version 3 removes a stored tag without a letter or digit together with its links; such a tag could only come from the hour before the letter-or-digit rule existed.
+- A dangling foreign key in a generation child row would make migration `0018` fail on every start (`internal_error`); unreachable while `foreign_keys = ON` was always set.
+- Stop deadline: a handler abandoned at the deadline can still call `JobEffects` and reach the change feed of the next workspace (a harmless refresh); its database writes throw on the closed database.
+- Stop deadline: a requeued job abandoned at the deadline could run twice if the same workspace is reopened while the old handler still runs.
+- Site partitions: Chromium keeps the partition directory after `clearStorageData`, so an ownerless partition is cleared again on every start; deleting the directory itself is open.
+- Site partitions: the on-disk mapping `persist:site-<id>` to `Partitions/site-<id>` is assumed and not checked against a real Electron; needs a manual check.
+- Structured output: the option is stored on `ollama` entries too, where it stays `true` and is ignored.
+- Structured output: nothing detects a server that refuses `response_format`; every tagging job on it fails as `provider_rejected` until the owner turns the option off.
+- Provider settings: switching to another entry drops a pending key removal without asking.
+- `StorageReturnContext` changes only on the storage banner's Retry, which already remounts the page; a storage that comes back without Retry leaves `CoverImage` on the format tile.
+- An image that fails without a failing IPC call (a broken cached preview) raises no storage banner, so nothing signals its return.
+- `ProjectFilter`: a filter naming a project deleted meanwhile shows an empty chip (`projects:get` fails and the error is not shown); the chip can still be removed.
+- `SearchPicker` shows only the first 10 matches and has no hint that there are more.
+- Possibly flaky: `assets.test.tsx`, the list-state round trip failed once and passed on the rerun.
+- Other places that put listeners on a `<dialog>` element should be checked for events passed on from a nested dialog (`Dialog` now compares `event.target` with `event.currentTarget`).
+- Generation studio: the per-source form draft is read only when the studio is mounted while the session still keeps the form; since a raise no longer remounts it is practically unused. Drop it or keep the form after a real close (needs a decision).
+- Generation studio: scroll positions inside the studio and the look of the re-show on a raise (`close()` then `showModal()`) are tested only in jsdom; needs a manual check.
+- `analysis:enqueue` without `force` still counts a file that is analysed and also queued as `alreadyAnalysed`, while the preview counts it as queued; making them agree needs `queued` on `AnalysisTargetEntry`.
 
 ## Not covered by any automated check
 

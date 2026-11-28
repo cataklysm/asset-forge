@@ -72,7 +72,7 @@ A core port `ImageProvider`:
 
 The adapter `packages/providers/src/venice-image.ts` sends the image as a multipart file, asks for PNG, streams the answer (capped at 100 MiB) and maps errors to job error codes (below). The provider gateway builds it per entry like the vision adapter. `providers:listImageModels { providerId, refresh }` mirrors `providers:listModels`, with the same 10 s bound and cache rules.
 
-The image sent is the original file when it is JPEG, PNG or WebP of at most 25 MB; otherwise a full-size lossless rendition from the media worker pool. A picture outside Venice's pixel bounds, or still over 25 MB, is refused before anything is sent (`This image cannot be sent to the provider`).
+The image sent is the original file when it is JPEG, PNG or WebP of at most 25 MB; otherwise a full-size lossless rendition from the media worker pool. A picture outside Venice's pixel bounds is refused at the start (`This image cannot be sent to the provider`); one that is still over 25 MB after the rendition, or whose rendition cannot be made, fails the job when it runs (`file_unavailable`), before anything is sent.
 
 ### Data (migration `0013`)
 

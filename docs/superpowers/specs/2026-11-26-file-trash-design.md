@@ -117,7 +117,7 @@ Single-file actions use the batch channels with one ID. All run under the worksp
 
 ### Renderer
 
-- **Delete** in the file menu, the file detail dialog and the selection bars of the asset Files tab and the inbox, next to Detach where that exists. The `Delete` key deletes the current selection of a `FileBrowser` when focus is not in an input. No confirmation. The result strip reports the counts as it does for other batch actions.
+- **Delete** in the file menu, the file detail dialog and the selection bars of the asset Files tab and the inbox, next to Detach where that exists. The `Delete` key deletes the current selection of a `FileBrowser` while a file item has focus. No confirmation. The result strip reports the counts as it does for other batch actions.
 - In the detail dialog, deleting the shown file moves on to the next file of the viewer list, or closes the dialog when it was the last.
 - A **Trash** navigation entry with the count, placed after Inbox. The screen is a `FileBrowser` over the scope `trash` (grid and table, endless, multi-select, search and filters, viewer). The table shows the deletion date and the origin (asset name or Inbox). Tags are shown read-only; Analyse, Review tags, Image to prompt, Assign, Detach, cover and the tag editors are not offered.
 - Actions there: **Restore** and **Delete permanently** in the file menu, detail dialog and selection bar; **Empty trash** in the header. Delete permanently and Empty trash ask for confirmation through the shared dialog, naming the number of files; Restore does not.
