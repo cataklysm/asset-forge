@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { WorkspaceManager, type ImageProbe, type VideoProbe, type WorkspaceHost } from '@assetforge/core';
+import { WorkspaceManager, type ImageProbe, type LineLog, type VideoProbe, type WorkspaceHost } from '@assetforge/core';
 import { WorkspaceSummarySchema } from '@assetforge/contracts';
 import { openWorkspaceDatabase } from '@assetforge/persistence';
 import { LocalFileSystemStorage, NodeSourceFiles, ZipArchiveReader } from '@assetforge/storage';
@@ -29,6 +29,8 @@ export interface CompositionOptions {
   imageProbe?: ImageProbe;
   /** Reads video size and duration (the frame tool in the app). Defaults to a probe that never measures. */
   videoProbe?: VideoProbe;
+  /** One main-console line per unexpected import failure and per recovery on open; nothing is logged without it. */
+  log?: LineLog;
 }
 
 const WorkspaceIdSchema = WorkspaceSummarySchema.shape.id;
@@ -55,6 +57,7 @@ export function createWorkspaceHost(options: CompositionOptions): WorkspaceHost 
     moveToTrash: options.moveToTrash ?? noTrash,
     newId: () => randomUUID(),
     now: () => new Date(),
+    ...(options.log === undefined ? {} : { log: options.log }),
   };
 }
 
