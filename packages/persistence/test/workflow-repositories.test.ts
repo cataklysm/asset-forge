@@ -298,6 +298,29 @@ describe('asset workflow repository', () => {
     await expect(db.assetWorkflows.remove(uuid(1))).resolves.toBe(false);
   });
 
+  test('a new template version leaves a workflow on the old version unchanged', async () => {
+    await seedWorkflow();
+    await db.assetWorkflows.updateStep(uuid(71), { state: 'done', completedAt: LATER, updatedAt: LATER });
+    const before = await db.assetWorkflows.getByAsset(uuid(1));
+    await db.workflowTemplates.insertVersion({
+      id: uuid(80),
+      templateId: TEMPLATE,
+      version: 2,
+      steps: [
+        { id: uuid(81), position: 0, key: 'concept', name: 'Concept art', mandatory: false },
+        { id: uuid(82), position: 1, key: 'rigging', name: 'Rigging', mandatory: true },
+      ],
+      createdAt: LATER,
+    });
+    expect(await db.workflowTemplates.latestVersion(TEMPLATE)).toMatchObject({ version: 2 });
+    const after = await db.assetWorkflows.getByAsset(uuid(1));
+    expect(after).toEqual(before);
+    expect(after).toMatchObject({ templateVersion: 1, progress: { done: 1, total: 2 } });
+    expect(after?.steps.map((step) => step.key)).toEqual(['concept', 'modeling', 'polish', 'extras']);
+    const list = await db.assets.list({ limit: 10, offset: 0 });
+    expect(list.items[0]?.workflowProgress).toEqual({ done: 1, total: 2 });
+  });
+
   test('asset list carries workflow progress', async () => {
     await seedWorkflow();
     await db.assets.insert(asset(2, 'Lamp'));
