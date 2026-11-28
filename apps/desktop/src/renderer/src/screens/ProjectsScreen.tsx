@@ -1,15 +1,13 @@
 import { Plus } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { ProjectStatusSchema, type ProjectSummary } from '@assetforge/contracts';
-import { call, describeError } from '../api';
-import { Dialog } from '../components/Dialog';
+import { call } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { Page } from '../components/Page';
 import { ProjectDetails } from '../components/ProjectDetails';
 import { ProjectTable, type ProjectTableProps } from '../components/ProjectTable';
 import { SearchField } from '../components/SearchField';
 import { TagFilter } from '../components/TagFilter';
-import { pagesForRows } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useLoad } from '../hooks/useLoad';
 import { usePagedList } from '../hooks/usePagedList';
@@ -26,19 +24,63 @@ import {
 } from '../list-state';
 import { findLoaded } from '../paged-list';
 import { useTags } from '../tags-context';
-import { ALERT, BUTTON, INPUT, MUTED, SELECT } from '../ui';
+import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
+import { NewProjectDialog } from './NewProjectDialog';
+import { failedFirstPage, hasMatchedTags, nextRows, wantedPages, type ReportedRows } from './projects-list';
 
+/** The project statuses of the status filter. */
 const STATUSES = ProjectStatusSchema.options;
+/** The skeleton rows while the first page loads. */
 const SKELETON_ROWS = 6;
 
+/** The props of `ProjectsScreen`. */
 interface Props {
+  /** The filters, selection and scroll offset kept across navigation. */
   state: ProjectListState;
   onStateChange(next: ProjectListState): void;
   onOpen(id: string): void;
   onOpenAsset(id: string): void;
+  /** Shows the gallery with these filters. */
   onShowAssets(filters: Pick<AssetFilters, 'projectId' | 'tagNames'>): void;
 }
 
+/** The source of the scroll position of the mounted table. */
+type PositionRef = RefObject<{ viewKey: string; get(): ViewPosition } | null>;
+
+/**
+ * Leaving the screen another way than by opening a project still keeps the position.
+ *
+ * @param opened set once a project was opened
+ * @param position the source of the current position
+ * @param state the list state
+ * @param onStateChange stores the list state
+ * @param viewKey the key of the displayed list
+ */
+function useKeepPositionOnLeave(
+  opened: RefObject<boolean>,
+  position: PositionRef,
+  state: ProjectListState,
+  onStateChange: Props['onStateChange'],
+  viewKey: string,
+) {
+  const latest = useRef({ state, onStateChange, viewKey });
+  latest.current = { state, onStateChange, viewKey };
+  useEffect(
+    () => () => {
+      const current = latest.current;
+      if (opened.current || position.current?.viewKey !== current.viewKey) return;
+      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset });
+    },
+    [],
+  );
+}
+
+/**
+ * The projects screen: search, status and tag filters, the virtualised table and the details column.
+ *
+ * @param props the list state and the navigation callbacks
+ * @returns the page
+ */
 export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onShowAssets }: Props) {
   const [creating, setCreating] = useState(false);
   // The title shows the number of all projects, independent of the filters.
@@ -56,7 +98,7 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   const restore = useRef<ViewRestore>({ scrollOffset: state.scrollOffset, index: null, focus: false });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastToken = useRef(renameToken);
-  const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
+  const [rows, setRows] = useState<ReportedRows | null>(null);
 
   const fetchPage = useCallback(
     (offset: number, limit: number) => call('projects:list', { limit, offset, ...toProjectQuery(effective) }),
@@ -76,26 +118,11 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     const current = position.current?.viewKey === viewKey ? position.current.get() : null;
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: null, focus: false };
   }
-  const nextWanted =
-    total === null
-      ? [0]
-      : rows !== null && rows.viewKey === viewKey
-        ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
-        : [];
+  const nextWanted = wantedPages(total, rows, viewKey);
   if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
 
-  // Leaving the screen another way than by opening a project still keeps the position.
   const opened = useRef(false);
-  const latest = useRef({ state, onStateChange, viewKey });
-  latest.current = { state, onStateChange, viewKey };
-  useEffect(
-    () => () => {
-      const current = latest.current;
-      if (opened.current || position.current?.viewKey !== current.viewKey) return;
-      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset });
-    },
-    [],
-  );
+  useKeepPositionOnLeave(opened, position, state, onStateChange, viewKey);
 
   // The selected project as last seen, for when no loaded page holds it (any more).
   const lastSelected = useRef<ProjectSummary | null>(null);
@@ -109,19 +136,7 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0 });
   }
 
-  const onRows = useCallback(
-    (visible: VisibleRows) =>
-      setRows((old) =>
-        old !== null &&
-        old.viewKey === viewKey &&
-        old.firstRow === visible.firstRow &&
-        old.lastRow === visible.lastRow &&
-        old.columns === visible.columns
-          ? old
-          : { ...visible, viewKey },
-      ),
-    [viewKey],
-  );
+  const onRows = useCallback((visible: VisibleRows) => setRows((old) => nextRows(old, visible, viewKey)), [viewKey]);
 
   function select(project: ProjectSummary) {
     lastSelected.current = project;
@@ -135,13 +150,6 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     onOpen(project.id);
   }
 
-  const failedPage =
-    total === null ? ([...paged.state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
-  // The Matching tags column follows the displayed list (whose items carry `matchedTags` only
-  // when it was filtered by tags), not a tag filter whose results are still loading.
-  const tagged = [...paged.state.pages.values()].some(
-    (entry) => entry.status === 'loaded' && entry.items[0]?.matchedTags !== undefined,
-  );
   const tableProps: ProjectTableProps | null =
     total === null || total === 0
       ? null
@@ -150,7 +158,8 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
           paged: paged.state,
           total,
           restore: restore.current,
-          tagged,
+          // The Matching tags column follows the displayed list, not a tag filter whose results are still loading.
+          tagged: hasMatchedTags(paged.state),
           selectedId: state.selectedId,
           onSelect: select,
           onOpen: openProject,
@@ -159,7 +168,68 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
           positionRef: position,
         };
 
-  const toolbar = (
+  return (
+    <Page
+      title="Projects"
+      count={all.data?.total ?? null}
+      countTitle="Projects in the workspace"
+      actions={
+        <button type="button" className={BUTTON} onClick={() => setCreating(true)}>
+          <Plus size={16} aria-hidden />
+          New project
+        </button>
+      }
+      toolbar={<ProjectsToolbar filters={filters} total={total} allError={all.error} setFilter={setFilter} />}
+      detail={
+        <ProjectDetails
+          project={selectedProject}
+          tagNames={filters.tagNames}
+          onOpenAsset={onOpenAsset}
+          onShowAll={() => {
+            if (selectedProject !== null) onShowAssets({ projectId: selectedProject.id, tagNames: [...filters.tagNames] });
+          }}
+        />
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
+        <ProjectListBody
+          failedPage={failedFirstPage(paged.state)}
+          total={total}
+          tableProps={tableProps}
+          filtered={hasFilters(effective)}
+          viewKey={viewKey}
+          onRetry={paged.retry}
+        />
+      </div>
+      <NewProjectDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={(id) => {
+          setCreating(false);
+          onOpen(id);
+        }}
+      />
+    </Page>
+  );
+}
+
+/** The props of `ProjectsToolbar`. */
+interface ToolbarProps {
+  filters: ProjectFilters;
+  total: number | null;
+  /** The message of the failed count of all projects. */
+  allError: string | null;
+  setFilter(change: Partial<ProjectFilters>): void;
+}
+
+/**
+ * The search, status and tag filters with the result count and Clear filters.
+ *
+ * @param props the filters, the total, the count error and the filter setter
+ * @returns the toolbar
+ */
+function ProjectsToolbar({ filters, total, allError, setFilter }: ToolbarProps) {
+  return (
     <div className="flex flex-col gap-3">
       <FilterBar
         resultCount={total === null ? null : `${total} ${total === 1 ? 'project' : 'projects'}`}
@@ -176,12 +246,12 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
             className={SELECT}
             aria-label="Status"
             value={filters.status}
-            onChange={(e) => setFilter({ status: STATUSES.find((s) => s === e.target.value) ?? '' })}
+            onChange={(event) => setFilter({ status: STATUSES.find((status) => status === event.target.value) ?? '' })}
           >
             <option value="">All statuses</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {label(s)}
+            {STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {label(status)}
               </option>
             ))}
           </select>
@@ -192,143 +262,53 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
           />
         </>
       </FilterBar>
-      {all.error !== null && (
+      {allError !== null && (
         <p role="alert" className={ALERT}>
-          {all.error}
+          {allError}
         </p>
       )}
     </div>
   );
+}
 
-  return (
-    <Page
-      title="Projects"
-      count={all.data?.total ?? null}
-      countTitle="Projects in the workspace"
-      actions={
-        <button type="button" className={BUTTON} onClick={() => setCreating(true)}>
-          <Plus size={16} aria-hidden />
-          New project
+/** The props of `ProjectListBody`. */
+interface ListBodyProps {
+  /** The failed first page, which takes the place of the list. */
+  failedPage: number | null;
+  total: number | null;
+  /** The table props, or null for an empty list. */
+  tableProps: ProjectTableProps | null;
+  /** Whether a filter is applied, for the empty text. */
+  filtered: boolean;
+  viewKey: string;
+  onRetry(page: number): void;
+}
+
+/**
+ * Retry, the skeleton, the empty text or the table.
+ *
+ * @param props the list state and the retry
+ * @returns the list content
+ */
+function ProjectListBody({ failedPage, total, tableProps, filtered, viewKey, onRetry }: ListBodyProps) {
+  if (failedPage !== null) {
+    return (
+      <div>
+        <button type="button" className={BUTTON} onClick={() => onRetry(failedPage)}>
+          Retry
         </button>
-      }
-      toolbar={toolbar}
-      detail={
-        <ProjectDetails
-          project={selectedProject}
-          tagNames={filters.tagNames}
-          onOpenAsset={onOpenAsset}
-          onShowAll={() => {
-            if (selectedProject !== null) onShowAssets({ projectId: selectedProject.id, tagNames: [...filters.tagNames] });
-          }}
-        />
-      }
-    >
-      <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
-        {failedPage !== null ? (
-          <div>
-            <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-              Retry
-            </button>
-          </div>
-        ) : total === null ? (
-          <div className="flex flex-col gap-2" aria-busy="true">
-            {Array.from({ length: SKELETON_ROWS }, (_, i) => (
-              <div key={i} data-skeleton="" className="h-10 animate-pulse rounded-control bg-raised" />
-            ))}
-          </div>
-        ) : tableProps === null ? (
-          <p className={MUTED}>{hasFilters(effective) ? 'No matching projects' : 'No projects'}</p>
-        ) : (
-          <ProjectTable key={viewKey} {...tableProps} />
-        )}
       </div>
-      <NewProjectDialog
-        open={creating}
-        onClose={() => setCreating(false)}
-        onCreated={(id) => {
-          setCreating(false);
-          onOpen(id);
-        }}
-      />
-    </Page>
-  );
-}
-
-interface DialogProps {
-  open: boolean;
-  onClose(): void;
-  onCreated(id: string): void;
-}
-
-/** Creates a project from a name and an optional description. */
-function NewProjectDialog({ open, onClose, onCreated }: DialogProps) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
-  const trimmed = name.trim();
-
-  function close() {
-    setName('');
-    setDescription('');
-    setError(null);
-    onClose();
+    );
   }
-
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (creating || trimmed === '') return;
-    setCreating(true);
-    setError(null);
-    try {
-      const text = description.trim();
-      const project = await call('projects:create', { name: trimmed, ...(text !== '' && { description: text }) });
-      setName('');
-      setDescription('');
-      onCreated(project.id);
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      setCreating(false);
-    }
+  if (total === null) {
+    return (
+      <div className="flex flex-col gap-2" aria-busy="true">
+        {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+          <div key={index} data-skeleton="" className="h-10 animate-pulse rounded-control bg-raised" />
+        ))}
+      </div>
+    );
   }
-
-  return (
-    <Dialog open={open} title="New project" initialFocusRef={nameRef} onClose={close}>
-      <form className="space-y-3" onSubmit={(e) => void create(e)}>
-        {error !== null && (
-          <p role="alert" className={ALERT}>
-            {error}
-          </p>
-        )}
-        <input
-          ref={nameRef}
-          aria-label="Project name"
-          placeholder="Project name"
-          maxLength={200}
-          className={`w-full ${INPUT}`}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <textarea
-          aria-label="Description"
-          placeholder="Description"
-          maxLength={5000}
-          rows={3}
-          className={`h-auto w-full py-1.5 ${INPUT}`}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <div className="flex justify-end gap-2">
-          <button type="button" className={BUTTON} onClick={close}>
-            Cancel
-          </button>
-          <button type="submit" className={BUTTON} disabled={creating || trimmed === ''}>
-            Create
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
+  if (tableProps === null) return <p className={MUTED}>{filtered ? 'No matching projects' : 'No projects'}</p>;
+  return <ProjectTable key={viewKey} {...tableProps} />;
 }
