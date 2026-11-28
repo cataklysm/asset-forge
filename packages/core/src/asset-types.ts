@@ -14,22 +14,33 @@ export const BUILT_IN_ASSET_TYPES: readonly { key: string; name: string }[] = [
   { key: 'other', name: 'Other' },
 ];
 
-/** Adds the built-in types whose key is not present yet; existing rows keep their IDs. */
-export async function ensureBuiltInAssetTypes(ctx: {
+/**
+ * Adds the built-in types whose key is not present yet; existing rows keep their IDs.
+ *
+ * @param context the open database and the id source
+ * @returns resolves once the missing types are inserted
+ */
+export async function ensureBuiltInAssetTypes(context: {
   database: WorkspaceDatabase;
   newId(): string;
 }): Promise<void> {
-  const types: AssetType[] = BUILT_IN_ASSET_TYPES.map((t, sortOrder) => ({
-    id: ctx.newId(),
-    key: t.key,
-    name: t.name,
+  const types: AssetType[] = BUILT_IN_ASSET_TYPES.map((type, sortOrder) => ({
+    id: context.newId(),
+    key: type.key,
+    name: type.name,
     sortOrder,
     builtIn: true,
     defaultWorkflowTemplateId: null,
   }));
-  await ctx.database.assetTypes.insertMissing(types);
+  await context.database.assetTypes.insertMissing(types);
 }
 
-export function listAssetTypes(s: WorkspaceSession): Promise<AssetType[]> {
-  return s.database.assetTypes.list();
+/**
+ * The asset types of the workspace.
+ *
+ * @param session the open workspace
+ * @returns them in sort order
+ */
+export function listAssetTypes(session: WorkspaceSession): Promise<AssetType[]> {
+  return session.database.assetTypes.list();
 }
