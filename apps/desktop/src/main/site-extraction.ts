@@ -73,12 +73,19 @@ export const EXTRACT_SCRIPT = `function (input) {
   return { results: results, counts: counts, baseUrl: typeof baseUrl === 'string' ? baseUrl : '' };
 }`;
 
-/** The code handed to the isolated world: the script applied to its input, the input a JSON string literal. */
+/**
+ * The code handed to the isolated world: the script applied to its input, the input a JSON string literal.
+ *
+ * @param queries the XPath expressions by name
+ * @param limits the most values per query and the longest value
+ * @returns the code to evaluate
+ */
 export function extractionCode(queries: Record<string, string>, limits = EXTRACT_LIMITS): string {
   const input = JSON.stringify({ queries, maxResults: limits.maxResults, maxLength: limits.maxLength });
   return `(${EXTRACT_SCRIPT})(${JSON.stringify(input)})`;
 }
 
+/** The two shapes the script answers; anything else is not read. */
 const ExtractionSchema = z.union([
   z.object({ invalid: z.string() }),
   z.object({
@@ -88,6 +95,7 @@ const ExtractionSchema = z.union([
   }),
 ]);
 
+/** What an extraction read: the name of an invalid query, or the strings and match counts per query. */
 export type Extraction =
   | { kind: 'invalid'; query: string }
   | { kind: 'results'; results: Record<string, string[]>; counts: Record<string, number>; baseUrl: string };
@@ -96,6 +104,11 @@ export type Extraction =
  * Reads what the page answered, trusting none of it: only the names asked for, only strings, cut at the limits
  * again. Null for anything else. A base URL that is not a string or longer than the value limit reads as `''`; the
  * crawl decides whether it is usable.
+ *
+ * @param raw the value the isolated world answered
+ * @param names the names of the queries asked
+ * @param limits the most values per query and the longest value
+ * @returns the extraction, or null for an answer of another shape
  */
 export function readExtraction(raw: unknown, names: readonly string[], limits = EXTRACT_LIMITS): Extraction | null {
   const parsed = ExtractionSchema.safeParse(raw);
