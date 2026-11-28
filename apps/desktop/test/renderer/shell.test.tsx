@@ -11,7 +11,13 @@ import {
 import { expect, it, vi } from 'vitest';
 import { call } from '../../src/renderer/src/api';
 import { AppShell } from '../../src/renderer/src/components/AppShell';
-import { JobsAppShell, WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
+import {
+  JobsAppShell,
+  leaveTo,
+  WorkspaceShell,
+  type LeaveTarget,
+} from '../../src/renderer/src/components/WorkspaceShell';
+import type { View } from '../../src/renderer/src/nav';
 import { JOB_POLL_MS, JobsProvider, sameSummary } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakePrompts, installFakeApi, promptDetail, type FakeHandlers } from './fake-api';
@@ -955,6 +961,40 @@ it('a dirty prompt draft asks before the main navigation leaves; cancel stays, d
     }),
   );
   await waitFor(() => expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-current')).toBe('page'));
+});
+
+/** A leave target on `current` whose guard answers `agree`, recording what it was asked. */
+function leaveTarget(current: View, agree = true) {
+  const target = {
+    current,
+    confirmLeave: vi.fn(async () => agree),
+    setError: vi.fn(),
+    setView: vi.fn(),
+  } satisfies LeaveTarget;
+  return target;
+}
+
+it('opening prompt A again after the Prompts screen moved from A to B by itself asks the guard and shows A', async () => {
+  // The shell still holds A: the screen switched to B internally.
+  const target = leaveTarget({ name: 'prompts', id: 'A' });
+  expect(await leaveTo(target, { name: 'prompts', id: 'A' })).toBe(true);
+  expect(target.confirmLeave).toHaveBeenCalledTimes(1);
+  expect(target.setView).toHaveBeenCalledWith({ name: 'prompts', id: 'A' });
+
+  const held = leaveTarget({ name: 'prompts', id: 'A' }, false);
+  expect(await leaveTo(held, { name: 'prompts', id: 'A' })).toBe(false);
+  expect(held.setView).not.toHaveBeenCalled();
+});
+
+it('a navigation without an item to the screen shown already changes nothing and asks nothing', async () => {
+  for (const current of [{ name: 'prompts' }, { name: 'prompts', id: 'A' }, { name: 'jobs' }] as View[]) {
+    const target = leaveTarget(current);
+    const view = { name: current.name } as View;
+    expect(await leaveTo(target, view)).toBe(true);
+    expect(target.confirmLeave).not.toHaveBeenCalled();
+    expect(target.setView).not.toHaveBeenCalled();
+    expect(target.setError).toHaveBeenCalledWith(null);
+  }
 });
 
 it('choosing Prompts while the prompts screen shows asks nothing and keeps the draft', async () => {
