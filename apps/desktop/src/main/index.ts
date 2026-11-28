@@ -15,6 +15,7 @@ import {
 } from '@assetforge/media';
 import { createAnalysisServices, type AnalysisServices } from './analysis-services.js';
 import { restrictAppPermissions } from './app-permissions.js';
+import { closeApp } from './app-shutdown.js';
 import { createWorkspaceManager } from './composition.js';
 import { ElectronDialogs } from './electron-dialogs.js';
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
@@ -175,7 +176,7 @@ function start(): void {
         isFilePage: appUrl.startsWith('file:'),
       });
       registerMediaProtocol(manager, previews);
-      openMainWindow(state, siteSessions, windowOptions);
+      openMainWindow(parts, windowOptions);
       // Sessions exist only once the app is ready; the sweep never rejects and logs no path, URL or cookie.
       void services.sweepSitePartitions(createSitePartitionDirectory(app.getPath('userData')));
     })
@@ -242,18 +243,10 @@ function beforeQuit(parts: AppParts, event: Electron.Event): void {
   event.preventDefault();
   if (state.shutdown === 'closing') return;
   state.shutdown = 'closing';
-  parts.siteSessions.shutdown();
-  // A describe request is cancelled and jobs stop before their database closes; workspaceClosing never rejects.
-  parts.services
-    .workspaceClosing()
-    .then(() => parts.manager.close())
-    .catch((error: unknown) => console.error('Closing the workspace failed', error))
-    .then(() => parts.previews.close())
-    .catch((error: unknown) => console.error('Closing the preview service failed', error))
-    .finally(() => {
-      state.shutdown = 'closed';
-      app.quit();
-    });
+  void closeApp({ ...parts, logError: (message, error) => console.error(message, error) }).finally(() => {
+    state.shutdown = 'closed';
+    app.quit();
+  });
 }
 
 /**
@@ -276,17 +269,19 @@ function registerMediaProtocol(manager: WorkspaceManager, previews: PreviewServi
 }
 
 /**
- * Opens the main window; closing it ends a running crawl and closes the login window.
+ * Opens the main window; closing it ends a running crawl, closes the login window and stops a running import after
+ * the item in progress, since the app quits with its last window.
  *
- * @param state the shared state
- * @param siteSessions the site windows and sessions
+ * @param parts the parts of the running app
  * @param windowOptions how the main window loads
  */
-function openMainWindow(state: AppState, siteSessions: ElectronSiteSessions, windowOptions: MainWindowOptions): void {
+function openMainWindow(parts: AppParts, windowOptions: MainWindowOptions): void {
+  const { state } = parts;
   state.mainWindow = createMainWindow(windowOptions);
   state.mainWindow.on('closed', () => {
     state.mainWindow = null;
-    siteSessions.shutdown();
+    parts.siteSessions.shutdown();
+    parts.manager.cancelImport();
   });
 }
 
