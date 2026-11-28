@@ -1,11 +1,10 @@
+import { ACTIVE_JOB_STATUSES, ANALYZE_FILE_JOB, type AnalysisPreview, type AnalysisTarget } from '@assetforge/contracts';
 import {
-  ACTIVE_JOB_STATUSES,
-  ANALYZE_FILE_JOB,
-  normalizeTagName,
-  type AnalysisPreview,
-  type AnalysisTarget,
-} from '@assetforge/contracts';
-import type { AnalysisFingerprint, AnalysisTargetEntry, AnalysisTargetReader } from '@assetforge/core';
+  tagName,
+  type AnalysisFingerprint,
+  type AnalysisTargetEntry,
+  type AnalysisTargetReader,
+} from '@assetforge/core';
 import { and, asc, eq, gt, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { fileListWhere } from './file-list.js';
@@ -21,26 +20,20 @@ const fileSha256 = qualified(file, file.sha256);
 type AssetFilterTarget = Extract<AnalysisTarget, { kind: 'assetFilter' }>['filter'];
 
 /**
- * Normalised, distinct tag names; null when one of them is not a valid tag name, so nothing can
- * match. Idempotent for names the core already normalised.
+ * Normalised, distinct tag names, refused like the file and asset lists refuse them (`tagName`).
+ * Idempotent for names the core already normalised.
  *
  * @param names the tag names of a filter
- * @returns the normalised names; undefined without names, null for an invalid one
+ * @returns the normalised names; undefined without names; throws ValidationFailedError for an invalid one
  */
-function normalisedTagNames(names: readonly string[] | undefined): string[] | undefined | null {
+function normalisedTagNames(names: readonly string[] | undefined): string[] | undefined {
   if (names === undefined) return undefined;
-  const result = new Set<string>();
-  for (const typed of names) {
-    const name = normalizeTagName(typed);
-    if (name === null) return null;
-    result.add(name);
-  }
-  return [...result];
+  return [...new Set(names.map((typed) => tagName(typed).name))];
 }
 
 /**
  * The WHERE over the outer `file` row that selects the files of the target, built from the filters
- * of the file and asset lists. Null when nothing can match (no ids, an unknown or invalid tag).
+ * of the file and asset lists. Null when nothing can match (no ids, an unknown tag).
  *
  * @param transaction the read transaction
  * @param target the analysis target
@@ -55,7 +48,6 @@ function targetWhere(transaction: IndexTransaction, target: AnalysisTarget): { w
     case 'fileFilter': {
       const { tagNames, ...rest } = target.filter;
       const names = normalisedTagNames(tagNames);
-      if (names === null) return null;
       return fileListWhere(transaction, { ...rest, ...(names !== undefined && { tagNames: names }) });
     }
     case 'assetFilter':
@@ -73,7 +65,6 @@ function targetWhere(transaction: IndexTransaction, target: AnalysisTarget): { w
 function assetFilterWhere(transaction: IndexTransaction, filter: AssetFilterTarget): { where: SQL | undefined } | null {
   const { tagNames, ...rest } = filter;
   const names = normalisedTagNames(tagNames);
-  if (names === null) return null;
   const assetIds = matchingAssetIds(transaction, { ...rest, ...(names !== undefined && { tagNames: names }) });
   if (assetIds === null) return null;
   // `query` and `tagNames` select assets; `fileRole` and `fileKind` also narrow their files.
