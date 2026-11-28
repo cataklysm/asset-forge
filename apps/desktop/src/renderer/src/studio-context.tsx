@@ -258,12 +258,7 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
       <StudioSessionContext.Provider value={session}>
         {children}
         {studioFile !== null && (
-          <GenerationStudio
-            key={`studio-${studioKey}`}
-            file={studioFile}
-            onClose={closeStudio}
-            onOpenFile={(fileId) => void openFile(fileId).catch(() => {})}
-          />
+          <GenerationStudio key={`studio-${studioKey}`} file={studioFile} onClose={closeStudio} onOpenFile={openFile} />
         )}
         {linked !== null && (
           <FileDetailDialog

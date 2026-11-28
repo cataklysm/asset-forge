@@ -22,6 +22,7 @@ import {
   DELETED_MARK,
   EDIT_PROMPT_TEXT_LABEL,
   LIBRARY_PROMPT_LABEL,
+  LINKED_FILE_FAILED,
   NEWER_VERSION_TITLE,
   newVersionOfLabel,
   PROMPTS_LABEL,
@@ -143,6 +144,8 @@ interface Options {
   /** The library prompts. */
   prompts?: PromptDetail[];
   handlers?: FakeHandlers;
+  /** What opening a result does; resolves by default. */
+  openFile?: (fileId: string) => Promise<void>;
 }
 
 function studioHandlers(
@@ -185,7 +188,7 @@ function setup(options: Options = {}) {
   const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
   const api = installFakeApi(studioHandlers(file, options, state));
   const onClose = vi.fn();
-  const onOpenFile = vi.fn();
+  const onOpenFile = vi.fn(options.openFile ?? (async (_fileId: string) => {}));
   const ui = (shown: FileRecord) => (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -368,6 +371,17 @@ describe('GenerationStudio', () => {
     const { api, file: source } = setup({ results: [older, newer] });
     await waitFor(() => expect(tileNames()).toEqual(['newer.png', 'older.png']));
     expect(callsOf(api, 'generations:forFile')[0]!.request).toEqual({ fileId: source.id });
+  });
+
+  it('a result that cannot be opened says so in the studio', async () => {
+    const file = fileRecord();
+    const ready = generation(file);
+    setup({ results: [ready], openFile: () => Promise.reject(new Error('gone')) });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Open'));
+    expect((await screen.findByRole('alert')).textContent).toBe(LINKED_FILE_FAILED);
   });
 
   it('a selected ready result opens, upscales and deletes', async () => {
