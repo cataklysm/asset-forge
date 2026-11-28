@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import type { AssetView } from '../list-state';
-import { NO_MATCHING_FILES_TEXT, RETRY_LABEL } from '../labels';
-import { BUTTON, MUTED } from '../ui';
+import { NO_MATCHING_FILES_TEXT } from '../labels';
+import { MUTED } from '../ui';
 import { FileGridView, TILE_HEIGHT, TILE_WIDTH } from './FileGridView';
 import { FileTable } from './FileTable';
 import type { FileViewProps } from './FileTile';
+import { ListRetry } from './PageFailure';
 
 // The list part of the file browser: Retry, the skeleton, the empty text or the grid or table view.
 
@@ -15,8 +16,8 @@ const SKELETON_TILES = 6;
 export interface FileListBodyProps {
   /** A page load is under way. */
   pending: boolean;
-  /** A failed page while the total is unknown; null when none failed. */
-  failedPage: number | null;
+  /** A failed page while the total is unknown, with its failure text; null when none failed. */
+  failedPage: { page: number; message: string | null } | null;
   /** The number of files in the list; null while unknown. */
   total: number | null;
   /** The view's props; null while the list is unknown or empty. */
@@ -44,11 +45,7 @@ export function FileListBody(props: FileListBodyProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-busy={props.pending || undefined}>
       {failedPage !== null ? (
-        <div>
-          <button type="button" className={BUTTON} onClick={() => props.onRetry(failedPage)}>
-            {RETRY_LABEL}
-          </button>
-        </div>
+        <ListRetry failed={failedPage} onRetry={props.onRetry} />
       ) : total === null ? (
         <div className="flex flex-wrap gap-4" aria-busy="true">
           {Array.from({ length: SKELETON_TILES }, (_, i) => (

@@ -9,6 +9,7 @@ import { formatProgress } from '../progress';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
 import { itemHandlers, matchedNames, type AssetViewProps } from './AssetGrid';
 import { CoverImage } from './CoverImage';
+import { PageFailureText } from './PageFailure';
 import { TagList } from './TagList';
 
 // The table view of the asset gallery.
@@ -115,7 +116,7 @@ function tableRow(props: TableRowsProps, rows: VirtualRows, index: number, start
         className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
         style={style}
       >
-        <span role="gridcell">
+        <span role="gridcell" className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             data-index={index}
@@ -130,6 +131,7 @@ function tableRow(props: TableRowsProps, rows: VirtualRows, index: number, start
           >
             {RETRY_LABEL}
           </button>
+          <PageFailureText message={slot.message} />
         </span>
       </div>
     );

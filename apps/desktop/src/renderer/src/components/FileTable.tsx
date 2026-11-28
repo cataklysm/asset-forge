@@ -10,6 +10,7 @@ import { retryIndex, slotAt } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
 import { fileItemHandlers, fileOrigin, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { Menu } from './Menu';
+import { PageFailureText } from './PageFailure';
 import { ProposalMarker } from './ProposalMarker';
 import { TagList } from './TagList';
 
@@ -137,7 +138,7 @@ function TableRow(props: TableRowProps) {
         className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
         style={style}
       >
-        <span role="gridcell">
+        <span role="gridcell" className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             data-index={index}
@@ -152,6 +153,7 @@ function TableRow(props: TableRowProps) {
           >
             {RETRY_LABEL}
           </button>
+          <PageFailureText message={slot.message} />
         </span>
       </div>
     );

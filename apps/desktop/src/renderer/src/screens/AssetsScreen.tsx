@@ -10,6 +10,7 @@ import { AssetTable } from '../components/AssetTable';
 import { AssetToolbar } from '../components/AssetToolbar';
 import { NewAssetDialog } from '../components/NewAssetDialog';
 import { Page } from '../components/Page';
+import { ListRetry } from '../components/PageFailure';
 import { pagesForRows } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useLoad } from '../hooks/useLoad';
@@ -26,8 +27,8 @@ import {
   type AssetView,
 } from '../list-state';
 import { findLoaded, PAGE_SIZE } from '../paged-list';
+import { failedFirstEntry } from '../paged-view';
 import { useRenamed, useTags } from '../tags-context';
-import { RETRY_LABEL } from '../labels';
 import { BUTTON, MUTED } from '../ui';
 import { renameInSummary } from './summary-rename';
 
@@ -229,8 +230,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
     openAsset(loadedSelection?.index ?? null, selectedAsset, scrollOffset);
   }
 
-  const failedPage =
-    total === null ? ([...paged.state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
+  const failedPage = failedFirstEntry(paged.state);
   const filtered = hasFilters(effective);
   const viewProps: AssetViewProps | null =
     total === null || total === 0
@@ -299,11 +299,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
     >
       <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
         {failedPage !== null ? (
-          <div>
-            <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-              {RETRY_LABEL}
-            </button>
-          </div>
+          <ListRetry failed={failedPage} onRetry={paged.retry} />
         ) : total === null ? (
           <div className="flex flex-wrap gap-4" aria-busy="true">
             {Array.from({ length: SKELETON_TILES }, (_, i) => (

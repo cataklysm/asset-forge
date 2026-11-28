@@ -40,20 +40,6 @@ export function nextRows(old: ReportedRows | null, visible: VisibleRows, viewKey
 }
 
 /**
- * The failed page that takes the place of the whole list, while the total is unknown.
- *
- * @param state the paged list
- * @returns the first failed page with its failure text (null without one), or null
- */
-export function failedFirstPage(state: PagedState<ProjectSummary>): { page: number; message: string | null } | null {
-  if (state.total !== null) return null;
-  for (const [page, entry] of state.pages) {
-    if (entry.status === 'failed') return { page, message: entry.message ?? null };
-  }
-  return null;
-}
-
-/**
  * Whether the displayed list was filtered by tags: its items then carry `matchedTags`.
  *
  * @param state the paged list

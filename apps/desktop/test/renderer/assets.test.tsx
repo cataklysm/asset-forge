@@ -490,12 +490,14 @@ it('empty library, no result and boot failure states', async () => {
   let fail = true;
   install({
     'assets:list': (request) => {
-      if (fail && request.limit === 60) throw fakeError('internal_error');
+      if (fail && request.limit === 60) throw fakeError('storage_full');
       return listOf([assetSummary({ name: 'Back', typeId: TYPE.id })])(request);
     },
   });
   render(<Harness />);
   const retry = await screen.findByRole('button', { name: 'Retry' });
+  // The failure is named beside Retry.
+  expect(screen.getByText('There is not enough free space in this folder.').getAttribute('role')).toBe('alert');
   fail = false;
   await user.click(retry);
   expect(await screen.findByText('Back')).toBeTruthy();
@@ -507,15 +509,36 @@ it('a failed page shows a Retry slot in the gallery', async () => {
   let fail = true;
   install({
     'assets:list': (request) => {
-      if (fail && request.offset === 60) throw fakeError('internal_error');
+      if (fail && request.offset === 60) throw fakeError('storage_full');
       return listOf(items)(request);
     },
   });
   render(<Harness initial={{ ...INITIAL, scrollOffset: 4400 }} />);
   const retry = await screen.findByRole('button', { name: 'Retry' });
+  // The slot names the failure beside Retry.
+  expect(within(retry.parentElement!).getByText('There is not enough free space in this folder.')).toBeTruthy();
   fail = false;
   await user.click(retry);
   expect(await screen.findByText('Asset 65')).toBeTruthy();
+});
+
+it('a failed page in the table view names the failure beside Retry', async () => {
+  const items = many(200);
+  install({
+    'assets:list': (request) => {
+      if (request.offset === 60) throw fakeError('storage_full');
+      return listOf(items)(request);
+    },
+  });
+  window.localStorage.setItem('assetforge.assets.view', 'table');
+  try {
+    render(<Harness initial={{ ...INITIAL, scrollOffset: 60 * 48 }} />);
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    const cell = retry.closest<HTMLElement>('[role=gridcell]')!;
+    expect(within(cell).getByText('There is not enough free space in this folder.')).toBeTruthy();
+  } finally {
+    window.localStorage.clear();
+  }
 });
 
 it('project names that fail to load show an alert inside the column', async () => {

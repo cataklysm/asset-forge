@@ -24,6 +24,7 @@ import {
 } from '../labels';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
+import { PageFailureText } from './PageFailure';
 import { TagList } from './TagList';
 
 /** The props of `ProjectTable`. */
@@ -275,11 +276,7 @@ function retryRow({ index, top, page, message, rows, onRetry }: RetryRowProps) {
         >
           {RETRY_LABEL}
         </button>
-        {message !== undefined && (
-          <span title={message} className="truncate text-sm text-danger">
-            {message}
-          </span>
-        )}
+        <PageFailureText message={message} />
       </span>
     </div>
   );

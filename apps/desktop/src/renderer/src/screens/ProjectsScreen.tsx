@@ -4,6 +4,7 @@ import { ProjectStatusSchema } from '@assetforge/contracts';
 import { call } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { Page } from '../components/Page';
+import { ListRetry } from '../components/PageFailure';
 import { ProjectDetails } from '../components/ProjectDetails';
 import { ProjectTable, type ProjectTableProps } from '../components/ProjectTable';
 import { SearchField } from '../components/SearchField';
@@ -20,13 +21,12 @@ import {
   PROJECT_TAG_FILTER_TITLE,
   PROJECTS_COUNT_TITLE,
   PROJECTS_TITLE,
-  RETRY_LABEL,
   SEARCH_PROJECTS_LABEL,
 } from '../labels';
 import { hasFilters, NO_PROJECT_FILTERS, type AssetFilters, type ProjectFilters } from '../list-state';
+import { failedFirstEntry } from '../paged-view';
 import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
 import { NewProjectDialog } from './NewProjectDialog';
-import { failedFirstPage } from './projects-list';
 import { useProjectsScreen, type ProjectsScreenInput } from './use-projects-screen';
 
 /** The project statuses of the status filter. */
@@ -75,7 +75,7 @@ export function ProjectsScreen(props: Props) {
     >
       <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
         <ProjectListBody
-          failedPage={failedFirstPage(paged.state)}
+          failedPage={failedFirstEntry(paged.state)}
           total={total}
           tableProps={tableProps}
           filtered={hasFilters(effective)}
@@ -209,20 +209,7 @@ interface ListBodyProps {
  * @returns the list content
  */
 function ProjectListBody({ failedPage, total, tableProps, filtered, viewKey, onRetry }: ListBodyProps) {
-  if (failedPage !== null) {
-    return (
-      <div className="flex flex-col items-start gap-3">
-        {failedPage.message !== null && (
-          <p role="alert" className={ALERT}>
-            {failedPage.message}
-          </p>
-        )}
-        <button type="button" className={BUTTON} onClick={() => onRetry(failedPage.page)}>
-          {RETRY_LABEL}
-        </button>
-      </div>
-    );
-  }
+  if (failedPage !== null) return <ListRetry failed={failedPage} onRetry={onRetry} />;
   if (total === null) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true">
