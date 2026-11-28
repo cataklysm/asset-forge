@@ -270,7 +270,7 @@ export function StudioProvider({ children, onOpenPrompt }: StudioProviderProps) 
             key={`linked-${linkedKey}`}
             file={linked.file}
             asset={linked.asset}
-            actions={{ cover: null, onDetails: () => {}, studio: value }}
+            actions={{ cover: null, studio: value }}
             roleControl={null}
             onFileChange={(next) => changeLinked(next.id, () => next)}
             onMeasured={(id, size) => changeLinked(id, (file) => ({ ...file, ...size }))}
