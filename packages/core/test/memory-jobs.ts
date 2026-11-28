@@ -36,6 +36,29 @@ const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r
   !(excludeLanes ?? []).includes(r.lane);
 
 /**
+ * A copy of a payload as the SQLite repository stores and reads it: through JSON, so `undefined` members,
+ * functions, dates and the like do not survive unchanged.
+ *
+ * @param payload the payload a caller hands in
+ * @returns the payload after a JSON round trip
+ */
+function jsonCopy(payload: unknown): unknown {
+  return JSON.parse(JSON.stringify(payload)) as unknown;
+}
+
+/**
+ * The payload a rewrite leaves stored. A rewrite that answers `undefined` keeps the stored payload, because the
+ * SQLite repository then sets the column to `JSON.stringify(undefined)`, which its query builder leaves out.
+ *
+ * @param stored the payload stored before the rewrite
+ * @param rewritten what the rewrite answered
+ * @returns the payload to store
+ */
+function keptOrCopied(stored: unknown, rewritten: unknown): unknown {
+  return rewritten === undefined ? stored : jsonCopy(rewritten);
+}
+
+/**
  * Snapshots `rows` and answers a function that puts them back as they were. Restores in place, so
  * references callers hold to a row stay valid.
  */
@@ -76,6 +99,12 @@ export class InMemoryJobRepository implements JobRepository {
   }
 
   async enqueue({ jobs, now }: { jobs: readonly NewJob[]; now: string }): Promise<string[]> {
+    // One transaction, as in SQLite: an id collision inserts none of the jobs.
+    return this.inTransaction(() => this.insertAll(jobs, now));
+  }
+
+  /** Inserts the jobs of one `enqueue` call; throws on an id collision. */
+  private insertAll(jobs: readonly NewJob[], now: string): string[] {
     const inserted: string[] = [];
     for (const j of jobs) {
       if (j.dedupeKey !== null && this.keyHeld(j.dedupeKey)) continue;
@@ -85,7 +114,7 @@ export class InMemoryJobRepository implements JobRepository {
         ...j,
         // The SQLite column is nullable; a caller that leaves the lane out stores null.
         lane: j.lane ?? null,
-        payload: structuredClone(j.payload),
+        payload: jsonCopy(j.payload),
         status: 'queued',
         attempt: 0,
         runAfter: null,
@@ -348,9 +377,11 @@ export class InMemoryJobRepository implements JobRepository {
     offset: number;
     status?: JobStatus;
     lane?: string | null;
+    ids?: readonly string[];
   }): Promise<{ items: JobView[]; total: number }> {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
+      .filter((r) => q.ids === undefined || q.ids.includes(r.id))
       .sort((a, b) => oldestFirst(b, a));
     const items = matching.slice(q.offset, q.offset + q.limit).map((r): JobView => {
       const download = r.type === FILE_DOWNLOAD_JOB;
@@ -403,7 +434,7 @@ export class InMemoryJobRepository implements JobRepository {
   }): Promise<number> {
     const moving = this.rows.filter((row) => row.type === r.type && row.lane === r.fromLane && isWaiting(row.status));
     // Rewrite every payload first, so a throwing rewrite changes nothing, as a rolled-back transaction would.
-    const payloads = moving.map((row) => structuredClone(r.rewrite(structuredClone(row.payload))));
+    const payloads = moving.map((row) => keptOrCopied(row.payload, r.rewrite(jsonCopy(row.payload))));
     moving.forEach((row, i) => {
       Object.assign(row, {
         lane: r.toLane,
@@ -426,10 +457,10 @@ export class InMemoryJobRepository implements JobRepository {
   }): Promise<number> {
     const candidates = this.rows.filter((row) => row.type === r.type && row.lane === null && isActive(row.status));
     const changes = candidates
-      .map((row) => ({ row, payload: r.rewrite(structuredClone(row.payload)) }))
+      .map((row) => ({ row, payload: r.rewrite(jsonCopy(row.payload)) }))
       .filter((c) => c.payload !== null);
     for (const { row, payload } of changes) {
-      Object.assign(row, { lane: r.lane, payload: structuredClone(payload), updatedAt: r.now });
+      Object.assign(row, { lane: r.lane, payload: keptOrCopied(row.payload, payload), updatedAt: r.now });
     }
     return changes.length;
   }
