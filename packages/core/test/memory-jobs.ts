@@ -11,6 +11,7 @@ import {
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
+import { InvalidOperationError } from '../src/errors.js';
 import type { Job, NewJob } from '../src/job-types.js';
 import type { JobRepository } from '../src/ports/job-repository.js';
 
@@ -47,15 +48,14 @@ function jsonCopy(payload: unknown): unknown {
 }
 
 /**
- * The payload a rewrite leaves stored. A rewrite that answers `undefined` keeps the stored payload, because the
- * SQLite repository then sets the column to `JSON.stringify(undefined)`, which its query builder leaves out.
+ * A rewritten payload after the JSON round trip the SQLite repository applies.
  *
- * @param stored the payload stored before the rewrite
  * @param rewritten what the rewrite answered
- * @returns the payload to store
+ * @returns the payload to store; undefined when the value has no JSON form (`undefined`, a function)
  */
-function keptOrCopied(stored: unknown, rewritten: unknown): unknown {
-  return rewritten === undefined ? stored : jsonCopy(rewritten);
+function rewrittenCopy(rewritten: unknown): unknown {
+  const text = JSON.stringify(rewritten) as string | undefined;
+  return text === undefined ? undefined : (JSON.parse(text) as unknown);
 }
 
 /**
@@ -432,9 +432,14 @@ export class InMemoryJobRepository implements JobRepository {
     rewrite: (payload: unknown) => unknown;
     now: string;
   }): Promise<number> {
+    if (r.fromLane === r.toLane) throw new InvalidOperationError('Jobs cannot be moved onto the same lane');
     const moving = this.rows.filter((row) => row.type === r.type && row.lane === r.fromLane && isWaiting(row.status));
     // Rewrite every payload first, so a throwing rewrite changes nothing, as a rolled-back transaction would.
-    const payloads = moving.map((row) => keptOrCopied(row.payload, r.rewrite(jsonCopy(row.payload))));
+    const payloads = moving.map((row) => {
+      const payload = rewrittenCopy(r.rewrite(jsonCopy(row.payload)));
+      if (payload === undefined) throw new Error('A job payload must be JSON');
+      return payload;
+    });
     moving.forEach((row, i) => {
       Object.assign(row, {
         lane: r.toLane,
@@ -457,10 +462,13 @@ export class InMemoryJobRepository implements JobRepository {
   }): Promise<number> {
     const candidates = this.rows.filter((row) => row.type === r.type && row.lane === null && isActive(row.status));
     const changes = candidates
-      .map((row) => ({ row, payload: r.rewrite(jsonCopy(row.payload)) }))
-      .filter((c) => c.payload !== null);
+      .map((row) => {
+        const answer = r.rewrite(jsonCopy(row.payload));
+        return { row, payload: answer === null ? undefined : rewrittenCopy(answer) };
+      })
+      .filter((c) => c.payload !== undefined);
     for (const { row, payload } of changes) {
-      Object.assign(row, { lane: r.lane, payload: keptOrCopied(row.payload, payload), updatedAt: r.now });
+      Object.assign(row, { lane: r.lane, payload, updatedAt: r.now });
     }
     return changes.length;
   }
