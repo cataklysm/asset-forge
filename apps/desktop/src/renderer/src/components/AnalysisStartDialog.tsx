@@ -3,11 +3,12 @@ import { useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
 import {
   effectivePromptId,
-  recoverMissingPrompt,
+  recoverMissingChoice,
+  startErrorMessage,
   useAnalysisPrompts,
   type AnalysisPromptsState,
 } from '../analysis-prompts-context';
-import { call, describeError } from '../api';
+import { call } from '../api';
 import { useAnalysisPreview } from '../hooks/useAnalysisPreview';
 import { useJobs } from '../jobs-context';
 import {
@@ -130,8 +131,8 @@ async function startAnalysis(effects: StartEffects, request: StartRequest): Prom
     effects.onStarted(result);
     effects.onClose();
   } catch (error) {
-    effects.setError(describeError(error));
-    recoverMissingPrompt(error, effects.prompts, effects.providers, effects.dropPromptChoice);
+    effects.setError(startErrorMessage(error));
+    recoverMissingChoice(error, effects.prompts, effects.providers, effects.dropPromptChoice);
   } finally {
     effects.startingRef.current = false;
     effects.setStarting(false);

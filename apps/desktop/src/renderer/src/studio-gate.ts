@@ -1,5 +1,11 @@
 import { GENERATION_PROMPT_MAX, purposeOf, type ImageModel } from '@assetforge/contracts';
-import { NO_IMAGE_PROVIDER_TITLE, PROMPT_LENGTH_TITLE, PROMPT_TOO_LONG_TITLE, VARIABLE_MISSING_TITLE } from './labels';
+import {
+  NO_IMAGE_PROVIDER_TITLE,
+  PROMPT_LENGTH_TITLE,
+  PROMPT_TOO_LONG_TITLE,
+  VARIABLE_MISSING_TITLE,
+  VARIABLE_TOO_LONG_TITLE,
+} from './labels';
 import type { ProvidersState } from './provider-context';
 import { imageProviderGate } from './provider-gate';
 import { preview } from './studio-prompt';
@@ -43,7 +49,8 @@ export function hasImageProvider(providers: Pick<ProvidersState, 'list'>): boole
 function promptBlocked(form: StudioForm, imageModel: ImageModel | null): string | null {
   const limit = Math.min(imageModel?.promptCharacterLimit ?? GENERATION_PROMPT_MAX, GENERATION_PROMPT_MAX);
   const shown = form.attached === null ? null : preview(form.attached);
-  if (shown?.blocked != null) return VARIABLE_MISSING_TITLE;
+  if (shown?.blocked === 'value_too_long') return VARIABLE_TOO_LONG_TITLE;
+  if (shown?.blocked === 'missing') return VARIABLE_MISSING_TITLE;
   const promptLength = (shown?.text ?? form.prompt).trim().length;
   if (promptLength < 1 || promptLength > GENERATION_PROMPT_MAX) return PROMPT_LENGTH_TITLE;
   return promptLength > limit ? PROMPT_TOO_LONG_TITLE : null;

@@ -34,7 +34,7 @@ import {
   refreshSelected,
   type FileSelection,
 } from '../selection';
-import { useStudio } from '../studio-context';
+import { useStudio } from '../studio-session';
 import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';

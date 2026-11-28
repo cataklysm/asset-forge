@@ -20,7 +20,7 @@ import {
   RESULTS_LABEL,
   TRASHED_MARK,
 } from '../labels';
-import { useStudio } from '../studio-context';
+import { useStudio } from '../studio-session';
 import { ALERT, ICON_BUTTON_INLINE, LABEL, MUTED, PANEL_TITLE } from '../ui';
 import { Link } from './Link';
 

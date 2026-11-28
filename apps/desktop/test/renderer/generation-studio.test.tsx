@@ -15,6 +15,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { GenerationStudio } from '../../src/renderer/src/components/GenerationStudio';
+import type { MenuItem } from '../../src/renderer/src/components/Menu';
+import { fileMenuItems } from '../../src/renderer/src/file-actions';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import {
   attachedPromptLabel,
@@ -22,6 +24,7 @@ import {
   DELETED_MARK,
   EDIT_PROMPT_TEXT_LABEL,
   LIBRARY_PROMPT_LABEL,
+  LINKED_FILE_FAILED,
   NEWER_VERSION_TITLE,
   newVersionOfLabel,
   PROMPTS_LABEL,
@@ -40,9 +43,12 @@ import {
   SAFE_MODE_LABEL,
   TRASHED_MARK,
   UPSCALES_LABEL,
+  UPSCALE_TITLE,
+  upscaleLabel,
 } from '../../src/renderer/src/labels';
-import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
-import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
+import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
+import { StudioProvider } from '../../src/renderer/src/studio-context';
+import { useStudio } from '../../src/renderer/src/studio-session';
 import { SAFE_MODE_KEY } from '../../src/renderer/src/studio-state';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import {
@@ -143,6 +149,8 @@ interface Options {
   /** The library prompts. */
   prompts?: PromptDetail[];
   handlers?: FakeHandlers;
+  /** What opening a result does; resolves by default. */
+  openFile?: (fileId: string) => Promise<void>;
 }
 
 function studioHandlers(
@@ -185,7 +193,7 @@ function setup(options: Options = {}) {
   const state = { results: options.results ?? [], byFile: options.byFile ?? {}, summary: IDLE };
   const api = installFakeApi(studioHandlers(file, options, state));
   const onClose = vi.fn();
-  const onOpenFile = vi.fn();
+  const onOpenFile = vi.fn(options.openFile ?? (async (_fileId: string) => {}));
   const ui = (shown: FileRecord) => (
     <JobsProvider>
       <ProviderSettingsProvider>
@@ -368,6 +376,17 @@ describe('GenerationStudio', () => {
     const { api, file: source } = setup({ results: [older, newer] });
     await waitFor(() => expect(tileNames()).toEqual(['newer.png', 'older.png']));
     expect(callsOf(api, 'generations:forFile')[0]!.request).toEqual({ fileId: source.id });
+  });
+
+  it('a result that cannot be opened says so in the studio', async () => {
+    const file = fileRecord();
+    const ready = generation(file);
+    setup({ results: [ready], openFile: () => Promise.reject(new Error('gone')) });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Open'));
+    expect((await screen.findByRole('alert')).textContent).toBe(LINKED_FILE_FAILED);
   });
 
   it('a selected ready result opens, upscales and deletes', async () => {
@@ -655,6 +674,35 @@ describe('GenerationStudio', () => {
     expect(combobox(EDIT_MODEL_LABEL).value).toBe('res-only');
   });
 
+  it('an accepted start makes its entry the one preselected for the next file', async () => {
+    const other: ProviderView = { ...VENICE, id: nextId(), name: 'Venice B', editModel: 'mock-edit' };
+    const { api, file, rerender } = setup({
+      providers: [VENICE, other],
+      handlers: {
+        'generations:start': (request) => ({
+          ok: true,
+          generation: generation(file, {
+            status: 'pending',
+            jobStatus: 'queued',
+            outputs: [],
+            providerId: request.providerId ?? VENICE.id,
+          }),
+        }),
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.selectOptions(combobox('Provider'), other.id);
+    await waitFor(() => expect(optionsOf(combobox(EDIT_MODEL_LABEL))).toContain('mock-edit'));
+    await user.type(promptBox(), 'make it blue');
+    await user.click(button(GENERATE_BUTTON));
+    await waitFor(() => expect(callsOf(api, 'generations:start')).toHaveLength(1));
+
+    rerender(fileRecord({ id: 'other', originalName: 'other.png' }));
+    await waitFor(() => expect(promptBox().value).toBe(''));
+    expect(combobox('Provider').value).toBe(other.id);
+  });
+
   it('another file starts from a fresh state', async () => {
     const made = generation(fileRecord());
     const { rerender } = setup({
@@ -804,6 +852,25 @@ describe('GenerationStudio with library prompts', () => {
       safeMode: true,
     });
     expect('prompt' in request).toBe(false);
+  });
+
+  it('a picked prompt whose answer arrives after the studio switched to another file is not attached there', async () => {
+    const prompt = hero();
+    const pending = deferred<PromptDetail>();
+    const { rerender } = setup({ prompts: [prompt], handlers: { 'prompts:get': () => pending.promise } });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(button(LIBRARY_PROMPT_LABEL));
+    const picker = await screen.findByRole('dialog', { name: PROMPTS_LABEL });
+    await user.click(await within(picker).findByText('Hero shot'));
+    // The answer arrives in the same act as the switch, so only the superseded load keeps it out.
+    await act(async () => {
+      rerender(fileRecord({ originalName: 'other.png' }));
+      pending.resolve(prompt);
+      await pending.promise;
+    });
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+    expect(promptBox().readOnly).toBe(false);
   });
 
   it('a resolved text over the model limit blocks Generate with the prompt length reason', async () => {
@@ -1049,6 +1116,71 @@ describe('GenerationStudio with library prompts', () => {
     expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
   });
 
+  it('Use settings of a library result whose prompt is gone leaves its resolved text as the free prompt', async () => {
+    const file = fileRecord();
+    const made = generation(file, {
+      prompt: 'A back of a villain',
+      promptId: nextId(),
+      promptVersionId: nextId(),
+      promptTitle: 'Gone shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'back', who: 'a villain' },
+    });
+    const { api } = setup({ results: [made] });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
+    await user.click(button('Use settings'));
+    await waitFor(() => expect(callsOf(api, 'prompts:get')).toHaveLength(1));
+    expect(promptBox().value).toBe('A back of a villain');
+    expect(promptBox().readOnly).toBe(false);
+    expect(screen.queryByText(attachedPromptLabel('Gone shot', 1))).toBeNull();
+  });
+
+  it('a late answer of an earlier Use settings does not replace the library prompt of a later one', async () => {
+    const first = hero();
+    const second = promptDetail({ title: 'Villain shot', content: 'A {{who}} at dusk' });
+    const file = fileRecord();
+    const fromFirst = generation(file, {
+      createdAt: '2026-01-02T00:00:00.000Z',
+      prompt: 'A side of a hero',
+      promptId: first.id,
+      promptVersionId: first.currentVersion.id,
+      promptTitle: 'Hero shot',
+      promptVersionNumber: 1,
+      promptVariables: { view: 'side', who: 'a hero' },
+    });
+    fromFirst.outputs[0]!.name = 'first.png';
+    const fromSecond = generation(file, {
+      prompt: 'A rogue at dusk',
+      promptId: second.id,
+      promptVersionId: second.currentVersion.id,
+      promptTitle: 'Villain shot',
+      promptVersionNumber: 1,
+      promptVariables: { who: 'rogue' },
+    });
+    fromSecond.outputs[0]!.name = 'second.png';
+    const pendingFirst = deferred<PromptDetail>();
+    setup({
+      prompts: [first, second],
+      results: [fromFirst, fromSecond],
+      handlers: {
+        'prompts:get': ({ promptId }) => (promptId === first.id ? pendingFirst.promise : structuredClone(second)),
+      },
+    });
+    await modelsReady();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'first.png' }));
+    await user.click(button('Use settings'));
+    await user.click(screen.getByRole('button', { name: 'second.png' }));
+    await user.click(button('Use settings'));
+    await screen.findByText(attachedPromptLabel('Villain shot', 1));
+    await act(async () => pendingFirst.resolve(structuredClone(first)));
+    expect(screen.getByText(attachedPromptLabel('Villain shot', 1))).toBeTruthy();
+    expect(screen.queryByText(attachedPromptLabel('Hero shot', 1))).toBeNull();
+    expect(textbox('who').value).toBe('rogue');
+  });
+
   it('a not_found start shows the message and keeps the prompt and its values', async () => {
     setup({
       prompts: [hero()],
@@ -1218,4 +1350,84 @@ describe('GenerationStudio raised over the linked file dialog', () => {
     await s.open();
     expect(promptBox().value).toBe('');
   });
+});
+
+it('the file menu shows both upscales disabled while an upscale of that file is being started', async () => {
+  const file = fileRecord({ originalName: 'file.png' });
+  const other = fileRecord({ originalName: 'other.png' });
+  const state = { results: [], byFile: {}, summary: IDLE };
+  const pending = deferred<{ ok: false; code: 'provider_unreachable' }>();
+  installFakeApi({ ...studioHandlers(file, {}, state), 'generations:start': () => pending.promise });
+  let menu: (target: FileRecord) => MenuItem[] = () => [];
+  let start = () => {};
+  function Host() {
+    const studio = useStudio();
+    menu = (target) => fileMenuItems(target, { cover: null, studio });
+    start = () => void studio.upscale(file, 2).catch(() => {});
+    return null;
+  }
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <TagsProvider>
+          <StudioProvider onOpenPrompt={async () => true}>
+            <Host />
+          </StudioProvider>
+        </TagsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  const upscales = (target: FileRecord) =>
+    menu(target).filter((item) => item.label === upscaleLabel(2) || item.label === upscaleLabel(4));
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([undefined, undefined]));
+  act(() => start());
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([true, true]));
+  expect(upscales(file).map((item) => item.title)).toEqual([UPSCALE_TITLE, UPSCALE_TITLE]);
+  // Another file is not affected.
+  expect(upscales(other).map((item) => item.disabled)).toEqual([undefined, undefined]);
+  await act(async () => pending.resolve({ ok: false, code: 'provider_unreachable' }));
+  await waitFor(() => expect(upscales(file).map((item) => item.disabled)).toEqual([undefined, undefined]));
+});
+
+it('an accepted upscale from outside the studio records the entry the main process chose', async () => {
+  const file = fileRecord({ originalName: 'file.png' });
+  const other: ProviderView = { ...VENICE, id: nextId(), name: 'Venice B' };
+  const state = { results: [], byFile: {}, summary: IDLE };
+  installFakeApi({
+    ...studioHandlers(file, { providers: [VENICE, other] }, state),
+    'generations:start': () => ({
+      ok: true,
+      generation: generation(file, {
+        kind: 'upscale',
+        status: 'pending',
+        jobStatus: 'queued',
+        outputs: [],
+        providerId: other.id,
+      }),
+    }),
+  });
+  let lastUsedImageId: string | null | undefined;
+  function Upscaler() {
+    const studio = useStudio();
+    lastUsedImageId = useProviders().list?.lastUsedImageId;
+    return (
+      <button type="button" onClick={() => void studio.upscale(file, 2)}>
+        upscale
+      </button>
+    );
+  }
+  render(
+    <JobsProvider>
+      <ProviderSettingsProvider>
+        <TagsProvider>
+          <StudioProvider onOpenPrompt={async () => true}>
+            <Upscaler />
+          </StudioProvider>
+        </TagsProvider>
+      </ProviderSettingsProvider>
+    </JobsProvider>,
+  );
+  await waitFor(() => expect(lastUsedImageId).toBe(VENICE.id));
+  await userEvent.setup().click(button('upscale'));
+  await waitFor(() => expect(lastUsedImageId).toBe(other.id));
 });

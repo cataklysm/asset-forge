@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ProviderChoice } from '../provider-choice';
-import type { StudioSession } from '../studio-context';
+import type { StudioSession } from '../studio-session';
 import { fieldsOf, freshFields, type PendingModel, type StudioFields } from '../studio-fields';
 import { readSafeMode } from '../studio-state';
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { IpcRequest, JobSummary, ListModelsResult, WaitingByProvider } from '@assetforge/contracts';
 import { expect, it, vi } from 'vitest';
 import { MoveJobsDialog } from '../../src/renderer/src/components/MoveJobsDialog';
-import { JobsProvider } from '../../src/renderer/src/jobs-context';
+import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
 import { deferred, fakeError, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 
@@ -295,6 +295,44 @@ it('an OpenAI-compatible source is offered in the From select', async () => {
     ).toEqual(['vLLM']),
   );
   await waitFor(() => expect(targetSelect(dialog).value).toBe(LOCAL.id));
+});
+
+it('the waiting count follows the jobs while the dialog is open, and a failed re-read keeps it', async () => {
+  vi.useFakeTimers();
+  try {
+    let summary = IDLE;
+    let waiting = 312;
+    let fail = false;
+    install({
+      'jobs:summary': () => summary,
+      'jobs:waitingByProvider': () => {
+        if (fail) throw fakeError('internal_error', 'boom');
+        return [{ providerId: LOCAL.id, providerName: 'Local Ollama', waiting }];
+      },
+    });
+    const { dialog } = renderDialog(LOCAL.id);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(within(dialog).getByText('312 waiting')).toBeTruthy();
+
+    waiting = 290;
+    summary = { ...IDLE, succeeded: 22, changes: 22 };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    expect(within(dialog).getByText('290 waiting')).toBeTruthy();
+
+    fail = true;
+    summary = { ...IDLE, succeeded: 23, changes: 23 };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(JOB_POLL_MS);
+    });
+    expect(within(dialog).getByText('290 waiting')).toBeTruthy();
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('Cancel closes without a request', async () => {

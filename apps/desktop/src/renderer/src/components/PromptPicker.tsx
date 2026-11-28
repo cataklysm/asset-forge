@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
 import type { PromptSummary } from '@assetforge/contracts';
-import { call, describeError } from '../api';
+import { call, messageOf } from '../api';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { usePagedList } from '../hooks/usePagedList';
 import {
@@ -18,7 +18,7 @@ import { SearchField } from './SearchField';
 
 /** The props of {@link PromptPicker}. */
 interface Props {
-  /** Loads and attaches the prompt; a rejection's message is shown in the picker. */
+  /** Loads and attaches the prompt; a rejection's forwarded message is shown in the picker. */
   onPick(promptId: string): Promise<void>;
   onClose(): void;
 }
@@ -94,7 +94,7 @@ export function PromptPicker({ onPick, onClose }: Props) {
     try {
       await onPick(prompt.id);
     } catch (caught) {
-      setError(describeError(caught));
+      setError(messageOf(caught));
     } finally {
       picking.current = false;
     }

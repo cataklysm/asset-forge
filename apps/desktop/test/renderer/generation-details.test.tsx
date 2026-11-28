@@ -8,7 +8,8 @@ import { Menu } from '../../src/renderer/src/components/Menu';
 import { fileMenuItems } from '../../src/renderer/src/file-actions';
 import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import { ProviderSettingsProvider } from '../../src/renderer/src/provider-context';
-import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
+import { StudioProvider } from '../../src/renderer/src/studio-context';
+import { useStudio } from '../../src/renderer/src/studio-session';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import { deferred, fakeProviders, installFakeApi, providerView, type FakeHandlers } from './fake-api';
 import { fileRecord, nextId, trashedRecord } from './fixtures';
@@ -377,7 +378,7 @@ it('a source that cannot be read shows the fixed message beside its link', async
   expect(screen.queryByRole('dialog', { name: 'oak.png' })).toBeNull();
 });
 
-it('a second Upscale 4× while the first start is in flight sends nothing', async () => {
+it('a second Upscale 4× while the first start is in flight is disabled and sends nothing', async () => {
   const file = fileRecord();
   const start = deferred<{ ok: true; generation: Generation }>();
   const api = install({ 'generations:start': () => start.promise });
@@ -390,9 +391,13 @@ it('a second Upscale 4× while the first start is in flight sends nothing', asyn
   let user = await openMenu();
   await user.click(screen.getByRole('menuitem', { name: 'Upscale 4×' }));
   user = await openMenu();
-  await user.click(screen.getByRole('menuitem', { name: 'Upscale 4×' }));
+  // The entry shows disabled while the first start is in flight; a click on it sends nothing.
+  const second = screen.getByRole('menuitem', { name: 'Upscale 4×' });
+  expect(second.getAttribute('aria-disabled') === 'true' || (second as HTMLButtonElement).disabled).toBe(true);
+  await user.click(second);
   const starts = () => api.calls.filter((c) => c.channel === 'generations:start');
   expect(starts()).toHaveLength(1);
+  await user.keyboard('{Escape}');
   await act(async () => start.resolve({ ok: true, generation: generation({ kind: 'upscale' }) }));
   // Once the first start answered, another one may go out.
   user = await openMenu();

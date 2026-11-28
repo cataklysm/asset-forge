@@ -35,13 +35,7 @@ export const JOBS_CREATED_HEADER = 'Created';
 /** The header of the error column. */
 export const JOBS_ERROR_HEADER = 'Error';
 
-/**
- * '1 job' / '12 jobs'.
- *
- * @param count the number of jobs
- * @returns the count with the noun in singular or plural
- */
-export const jobCount = (count: number) => `${count} ${count === 1 ? 'job' : 'jobs'}`;
+export { jobCount } from './counts';
 
 /**
  * 'Next try at 28.11.2026, 10:15'.

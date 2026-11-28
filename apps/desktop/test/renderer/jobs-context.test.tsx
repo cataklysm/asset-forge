@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import type { Changes, JobSummary } from '@assetforge/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onStorageUnreachable } from '../../src/renderer/src/api';
 import { JOB_POLL_MS, JobsProvider, useChanges, useJobs, type JobState } from '../../src/renderer/src/jobs-context';
 import { deferred, fakeError, installFakeApi, noChanges } from './fake-api';
 
@@ -84,6 +85,33 @@ describe('JobsProvider', () => {
     });
     expect(summaryCalls(api)).toBe(2);
     expect(latest().active).toBe(1);
+  });
+
+  it('a storage_unreachable answer to the polls does not raise the storage banner', async () => {
+    const reported = vi.fn();
+    const unsubscribe = onStorageUnreachable(reported);
+    let summaryFails = true;
+    const api = installFakeApi({
+      'jobs:summary': () => {
+        if (summaryFails) throw fakeError('storage_unreachable');
+        return IDLE;
+      },
+      'changes:since': () => {
+        throw fakeError('storage_unreachable');
+      },
+    });
+    render(
+      <JobsProvider>
+        <Probe />
+      </JobsProvider>,
+    );
+    await settle();
+    await tick();
+    summaryFails = false;
+    await tick();
+    expect(api.calls.some((c) => c.channel === 'changes:since')).toBe(true);
+    expect(reported).not.toHaveBeenCalled();
+    unsubscribe();
   });
 
   it('changeToken rises only when changes moved', async () => {
