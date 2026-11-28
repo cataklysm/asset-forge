@@ -14,6 +14,9 @@ import {
   type JobOutcome,
   type JobRepository,
 } from '@assetforge/core';
+import { LaneHolds } from './lane-holds.js';
+import { LaneRotation } from './lane-rotation.js';
+import { LeftoverRows } from './recovery-steps.js';
 import type { PauseGate } from './pause-gate.js';
 
 /** Running jobs per lane of a class, unless `laneLimit` answers another limit for the lane. */
@@ -266,6 +269,16 @@ class JobScheduler {
   private passAgain = false;
   /** The timer of the earliest `run_after`, if one is pending. */
   private timer: TimerSlot | null = null;
+  /** A recovery or a stored outcome failed, so rows may be left `running`; the next pass recovers them. */
+  private recoveryPending = false;
+  /** The classes whose last pass failed; a failure streak is logged once. */
+  private readonly failingClasses = new Set<ResourceClass>();
+  /** The lanes held after a job asked for a wait. */
+  private readonly laneHolds = new LaneHolds();
+  /** The rows this scheduler left `running` itself, so the recovery knows whether they ran. */
+  private readonly leftovers = new LeftoverRows();
+  /** The order the lanes of a class with a total were served in. */
+  private readonly rotation = new LaneRotation();
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -379,6 +392,7 @@ class JobScheduler {
     try {
       await this.recover();
     } catch (cause) {
+      this.recoveryPending = true;
       this.config.log('Interrupted jobs could not be recovered', cause);
     }
     if (this.stopping) return;
@@ -388,19 +402,69 @@ class JobScheduler {
   }
 
   /**
-   * Puts every job found `running` back to `queued`, or fails it with the interrupted code under
-   * `onInterrupted: 'fail'`.
+   * Recovers the rows a failed recovery or a failed store of an outcome left `running`, when there are any. A failure
+   * is logged and tried again on the next pass.
+   *
+   * @returns resolves once the recovery is done or its failure logged
+   */
+  private async recoverLeftovers(): Promise<void> {
+    if (!this.recoveryPending) return;
+    this.recoveryPending = false;
+    try {
+      await this.recover();
+    } catch (cause) {
+      this.recoveryPending = true;
+      this.config.log('Interrupted jobs could not be recovered', cause);
+    }
+  }
+
+  /**
+   * Handles every job found `running` that this scheduler is not running, by the step `LeftoverRows.stepOf` picks.
    *
    * @returns resolves once every such job is handled or a stop began
    */
   private async recover(): Promise<void> {
     for (const job of await this.config.jobs.listByStatus('running')) {
       if (this.stopping) break;
-      const changedRow =
-        this.config.handlers[job.type]?.onInterrupted === 'fail'
-          ? await this.finishJob(job, { status: 'failed', errorCode: this.interruptedCodeOf(job) })
-          : await this.config.jobs.release(job.id, this.iso());
+      // A launched run stores its own outcome.
+      if (this.active.has(job.id)) continue;
+      const changedRow = await this.recoverRow(job);
+      this.leftovers.forget(job.id);
       if (changedRow) this.changed(job.id);
+    }
+  }
+
+  /**
+   * Applies the recovery step of one row found `running`.
+   *
+   * @param job the row
+   * @returns resolves to whether the row changed
+   */
+  private recoverRow(job: Job): Promise<boolean> {
+    const step = this.leftovers.stepOf(job, this.config.handlers[job.type]?.onInterrupted === 'fail');
+    const errorCode = this.interruptedCodeOf(job);
+    if (step === 'release') return this.config.jobs.release(job.id, this.iso());
+    if (step === 'retry')
+      return this.config.jobs.scheduleRetry(job.id, { errorCode, runAfter: this.iso(), now: this.iso() });
+    return this.finishJob(job, { status: 'failed', errorCode });
+  }
+
+  /**
+   * Puts a claimed job that was not launched back to `queued`. When that fails, the row is left for the recovery of
+   * a later pass, which knows it never ran. A put-back that fails while stopping is not recovered in this session:
+   * the mark lives in memory only, so at the next open the row counts as interrupted, and a job of an
+   * `onInterrupted: 'fail'` handler ends `failed` with its interrupted code.
+   *
+   * @param job the claimed job
+   * @returns resolves once the job is back; rejects with the cause of a failed put-back
+   */
+  private async putBack(job: Job): Promise<void> {
+    try {
+      await this.config.jobs.release(job.id, this.iso());
+    } catch (cause) {
+      this.leftovers.addUnlaunched(job.id);
+      this.recoveryPending = true;
+      throw cause;
     }
   }
 
@@ -414,6 +478,7 @@ class JobScheduler {
     try {
       do {
         this.passAgain = false;
+        await this.recoverLeftovers();
         try {
           await this.pass();
         } catch (cause) {
@@ -439,13 +504,17 @@ class JobScheduler {
       let next: number | null;
       try {
         next = await this.passClass(resourceClass, types);
+        this.failingClasses.delete(resourceClass);
       } catch (cause) {
-        this.config.log('Job scheduler pass failed', cause);
+        this.reportPassFailure(resourceClass, cause);
         next = this.config.now().getTime() + RETRY_DELAYS_MS[0]!;
       }
       if (this.stopping) return;
       if (next !== null) earliest = Math.min(earliest ?? Infinity, next);
     }
+    // A recovery that failed again is tried after the first retry delay, even when nothing else wakes the scheduler.
+    if (this.recoveryPending)
+      earliest = Math.min(earliest ?? Infinity, this.config.now().getTime() + RETRY_DELAYS_MS[0]);
     this.cancelTimer();
     if (earliest !== null) this.armTimer(earliest);
   }
@@ -465,25 +534,95 @@ class JobScheduler {
       if (this.stopping) return null;
       // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
       if (this.atTotal(resourceClass)) return null;
-      const job = await this.config.jobs.claimNext({
-        resourceClass,
-        types,
-        now: this.iso(),
-        excludeLanes: this.excludedLanes(resourceClass),
-      });
+      const job = await this.claim(resourceClass, types);
       if (!job) break;
       if (this.stopping) {
-        await this.config.jobs.release(job.id, this.iso());
+        await this.putBack(job);
         return null;
       }
+      // A run that ended during the claim may have paused the lane; its job goes back without spending a run.
+      if (await this.releaseIfBarred(job)) continue;
       this.launch(job);
+      this.rotation.record(resourceClass, job.lane);
       this.changed(job.id);
     }
     if (this.stopping) return null;
     // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
     // resume; only the other lanes need the timer.
     const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
-    return next === null ? null : Date.parse(next);
+    // A held lane is excluded above, so the end of its hold needs a timer of its own.
+    const holdEnd = this.laneHolds.earliestEnd(resourceClass, this.config.now().getTime());
+    const candidates = [next === null ? null : Date.parse(next), holdEnd].filter((time) => time !== null);
+    return candidates.length === 0 ? null : Math.min(...candidates);
+  }
+
+  /**
+   * Claims the next job of a class. Under a class total the lanes take turns: the lanes served recently are left out
+   * as long as another lane has a claimable job, the one served longest ago given back first.
+   *
+   * @param resourceClass the class
+   * @param types the job types of the class
+   * @returns the claimed job; null when no lane that may claim has one
+   */
+  private async claim(resourceClass: ResourceClass, types: string[]): Promise<Job | null> {
+    const excluded = this.excludedLanes(resourceClass);
+    const rotating = this.config.totals[resourceClass] !== undefined;
+    const attempts = rotating ? this.rotation.preferences(resourceClass) : [[]];
+    for (const [index, served] of attempts.entries()) {
+      const job = await this.config.jobs.claimNext({
+        resourceClass,
+        types,
+        now: this.iso(),
+        excludeLanes: [...excluded, ...served],
+      });
+      if (job || this.stopping) return job;
+      if (index > 0) this.forgetIdleLane(resourceClass, attempts[index - 1]!);
+    }
+    return null;
+  }
+
+  /**
+   * Drops from the rotation the lane that a claim finding nothing gave back, when it has no running job: it has
+   * nothing to claim, so leaving it out of later claims would only cost queries.
+   *
+   * @param resourceClass the class of the claim
+   * @param previous the lanes the claim before left out; its last lane is the one given back
+   */
+  private forgetIdleLane(resourceClass: ResourceClass, previous: (string | null)[]): void {
+    if (previous.length === 0) return;
+    const lane = previous[previous.length - 1] as string | null;
+    if (!this.runningOf(resourceClass).has(lane)) this.rotation.forget(resourceClass, lane);
+  }
+
+  /**
+   * Logs the failed pass of a class, naming the class, once until a pass of that class succeeds again.
+   *
+   * @param resourceClass the class whose pass failed
+   * @param cause the error the pass threw
+   */
+  private reportPassFailure(resourceClass: ResourceClass, cause: unknown): void {
+    if (this.failingClasses.has(resourceClass)) return;
+    this.failingClasses.add(resourceClass);
+    this.config.log(`Job scheduler pass failed for class ${resourceClass}`, cause);
+  }
+
+  /**
+   * Puts a claimed job back when its lane may no longer claim: it was paused, or reached its limit, while the claim
+   * was under way. A failure to tell puts the job back too before it is passed on, so no row stays `running`.
+   *
+   * @param job the job just claimed
+   * @returns true when the job was put back
+   */
+  private async releaseIfBarred(job: Job): Promise<boolean> {
+    let barred: boolean;
+    try {
+      barred = this.excludedLanes(job.resourceClass).includes(job.lane);
+    } catch (cause) {
+      await this.putBack(job);
+      throw cause;
+    }
+    if (barred) await this.putBack(job);
+    return barred;
   }
 
   /**
@@ -525,6 +664,9 @@ class JobScheduler {
       settled: false,
       done: Promise.resolve(),
     };
+    // A put-back whose answer was lost may have been written: the row was queued again and is launched now, so its
+    // never-launched mark must not outlive this launch.
+    this.leftovers.forget(job.id);
     this.active.set(job.id, run);
     run.done = this.runJob(job, run, handler);
   }
@@ -549,6 +691,9 @@ class JobScheduler {
     try {
       await this.settle(job, run, outcome);
     } catch (cause) {
+      // The row may still be `running`; the next pass recovers it, spending the attempt of this run.
+      this.leftovers.addUnsettled(job.id);
+      this.recoveryPending = true;
       this.config.log('Job outcome could not be stored', cause);
     }
     this.active.delete(job.id);
@@ -588,15 +733,30 @@ class JobScheduler {
       return this.finish(job, { status: 'failed', errorCode: 'internal_error' });
     }
     if (!isRetryableJobError(error.code)) return this.finish(job, { status: 'failed', errorCode: error.code });
+    return this.settleRetryable(job, error);
+  }
+
+  /**
+   * Stores the outcome of a run that failed with a retryable code: a retry, or the end after the last run. A wait the
+   * error asks for holds the lane, in memory before anything is written and then in the database.
+   *
+   * @param job the job of the run
+   * @param error the retryable error
+   * @returns resolves once the outcome and the lane hold are written
+   */
+  private async settleRetryable(job: Job, error: JobError): Promise<void> {
     const wait = error.retryAfterMs;
+    const now = this.config.now().getTime();
+    const holdEnd = job.attempt >= MAX_ATTEMPTS ? now + (wait ?? 0) : now + retryDelayMs(job.attempt, wait);
+    // Held in memory first: no claim in the window before the rows below are written takes a job of the lane.
+    if (wait !== null) this.laneHolds.hold(job.resourceClass, job.lane, holdEnd);
+    const until = new Date(holdEnd).toISOString();
     if (job.attempt >= MAX_ATTEMPTS) {
       await this.finish(job, { status: 'failed', errorCode: error.code });
-      if (wait !== null) await this.holdLane(job, new Date(this.config.now().getTime() + wait).toISOString());
-      return;
+    } else {
+      await this.config.jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter: until, now: this.iso() });
     }
-    const runAfter = new Date(this.config.now().getTime() + retryDelayMs(job.attempt, wait)).toISOString();
-    await this.config.jobs.scheduleRetry(job.id, { errorCode: error.code, runAfter, now: this.iso() });
-    if (wait !== null) await this.holdLane(job, runAfter);
+    if (wait !== null) await this.holdLane(job, until);
   }
 
   /**
@@ -815,7 +975,7 @@ class JobScheduler {
   }
 
   /**
-   * Lanes the class may not claim from: the paused ones and those already running their limit.
+   * Lanes the class may not claim from: the paused ones, the held ones and those already running their limit.
    *
    * @param resourceClass the class
    * @returns the excluded lanes, paused ones first
@@ -824,6 +984,7 @@ class JobScheduler {
     const excluded = new Set<string | null>(
       this.options.pause ? this.options.pause.paused(resourceClass).map((entry) => entry.lane) : [],
     );
+    for (const lane of this.laneHolds.held(resourceClass, this.config.now().getTime())) excluded.add(lane);
     for (const [lane, count] of this.runningOf(resourceClass)) {
       if (count >= this.limitOf(resourceClass, lane)) excluded.add(lane);
     }

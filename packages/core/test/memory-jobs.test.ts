@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { InvalidOperationError } from '../src/errors.js';
 import type { NewJob } from '../src/job-types.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 
@@ -240,6 +241,56 @@ describe('InMemoryJobRepository lanes', () => {
     expect((await repo.list({ limit: 10, offset: 0, lane: 'a', status: 'failed' })).total).toBe(0);
     expect((await repo.list({ limit: 10, offset: 0, lane: 'b' })).items[0]?.createdAt).toBe(T1);
     expect((await repo.list({ limit: 10, offset: 0 })).items[0]?.createdAt).toBe(T2);
+  });
+});
+
+describe('InMemoryJobRepository as the SQLite repository behaves', () => {
+  it('list with ids narrows the page and the total to those jobs within the other filters', async () => {
+    const repo = await repoWith([job('a1', 'a'), job('a2', 'a'), job('b1', 'b')]);
+    setStatus(repo, 'a2', 'failed');
+    const chosen = await repo.list({ limit: 10, offset: 0, ids: ['a1', 'a2', 'missing'] });
+    expect(chosen.total).toBe(2);
+    expect(chosen.items.map((item) => item.id)).toEqual(['a2', 'a1']);
+    expect((await repo.list({ limit: 10, offset: 0, ids: ['a1', 'b1'], lane: 'b' })).items.map((i) => i.id)).toEqual([
+      'b1',
+    ]);
+    expect((await repo.list({ limit: 10, offset: 0, ids: ['a1', 'a2'], status: 'failed' })).total).toBe(1);
+  });
+
+  it('enqueue with an id collision inserts none of the jobs of the call', async () => {
+    const repo = await repoWith([job('a1', 'a')]);
+    await expect(repo.enqueue({ jobs: [job('fresh', 'a'), job('a1', 'a')], now: LATER })).rejects.toThrow('UNIQUE');
+    expect(repo.rows.map((r) => r.id)).toEqual(['a1']);
+  });
+
+  it('stores payloads through JSON, so an undefined member is dropped', async () => {
+    const repo = await repoWith([job('a1', 'a', { kept: 1, dropped: undefined })]);
+    expect(Object.keys(row(repo, 'a1').payload as object)).toEqual(['kept']);
+  });
+
+  it('a rewrite answering undefined refuses rerouteWaiting and is skipped by assignLane', async () => {
+    const repo = await repoWith([job('a1', 'a', { n: 1 }), job('a2', 'a', { n: 3 }), job('n1', null, { n: 2 })]);
+    const rewrite = (payload: unknown) => ((payload as { n: number }).n === 3 ? undefined : payload);
+    await expect(repo.rerouteWaiting({ type: T, fromLane: 'a', toLane: 'b', rewrite, now: LATER })).rejects.toThrow(
+      'A job payload must be JSON',
+    );
+    expect(row(repo, 'a1')).toMatchObject({ lane: 'a', payload: { n: 1 } });
+    expect(await repo.assignLane({ type: T, lane: 'c', rewrite: () => undefined, now: LATER })).toBe(0);
+    expect(row(repo, 'n1')).toMatchObject({ lane: null, payload: { n: 2 } });
+  });
+
+  it('rerouteWaiting refuses the same lane', async () => {
+    const repo = await repoWith([job('a1', 'a')]);
+    await expect(
+      repo.rerouteWaiting({ type: T, fromLane: 'a', toLane: 'a', rewrite: (p) => p, now: LATER }),
+    ).rejects.toThrow(new InvalidOperationError('Jobs cannot be moved onto the same lane'));
+  });
+
+  it('nextRunAfter with an empty exclusion list excludes no lane', async () => {
+    const repo = await repoWith([job('n1', null), job('a1', 'a')]);
+    setStatus(repo, 'n1', 'retry_wait', '2026-11-26T10:05:00.000Z');
+    setStatus(repo, 'a1', 'retry_wait', '2026-11-26T10:10:00.000Z');
+    expect(await repo.nextRunAfter([T], [])).toBe('2026-11-26T10:05:00.000Z');
   });
 });
 

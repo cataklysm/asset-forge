@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { JOB_ERROR_MESSAGES, type ResourceClass } from '@assetforge/contracts';
-import type { NewJob, WorkspaceDatabase } from '@assetforge/core';
+import { InvalidOperationError, type NewJob, type WorkspaceDatabase } from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const T0 = '2026-01-01T00:00:00.000Z';
@@ -134,6 +134,19 @@ describe('job repository', () => {
     ).toThrow(/UNIQUE/);
   });
 
+  test('enqueue skips a job for an unknown file, and below it the foreign key refuses one', async () => {
+    expect(await enqueue(T0, newJob(10), newJob(11, { fileId: uuid(99) }))).toEqual([uuid(10)]);
+    expect(await db.jobs.get(uuid(11))).toBeNull();
+    expect(() =>
+      handle
+        .prepare(
+          `insert into job (id, type, resource_class, status, file_id, payload, attempt, created_at, updated_at)
+           values (?, ?, 'local_gpu', 'queued', ?, '{}', 0, ?, ?)`,
+        )
+        .run(uuid(12), TYPE, uuid(99), T0, T0),
+    ).toThrow(/FOREIGN KEY/);
+  });
+
   test('claimNext takes the oldest job by created_at, then id', async () => {
     await enqueue(T1, newJob(12));
     await enqueue(T0, newJob(11), newJob(10));
@@ -222,6 +235,23 @@ describe('job repository', () => {
       errorMessage: null,
       finishedAt: T2,
     });
+  });
+
+  test('a stored message never reaches the reader: the message is the one of the code read', async () => {
+    await enqueue(T0, newJob(10), newJob(11));
+    handle
+      .prepare("update job set status = 'failed', error_code = ?, error_message = ? where id = ?")
+      .run('not_a_code', 'leaked text', uuid(10));
+    handle
+      .prepare("update job set status = 'failed', error_code = ?, error_message = ? where id = ?")
+      .run('provider_timeout', 'an older text', uuid(11));
+    const unexpected = { errorCode: 'internal_error', errorMessage: JOB_ERROR_MESSAGES.internal_error };
+    const timeout = { errorCode: 'provider_timeout', errorMessage: JOB_ERROR_MESSAGES.provider_timeout };
+    expect(await db.jobs.get(uuid(10))).toMatchObject(unexpected);
+    expect(await db.jobs.get(uuid(11))).toMatchObject(timeout);
+    const { items } = await db.jobs.list({ offset: 0, limit: 10 });
+    expect(items.find((item) => item.id === uuid(10))).toMatchObject(unexpected);
+    expect(items.find((item) => item.id === uuid(11))).toMatchObject(timeout);
   });
 
   test('cancelPending cancels one or all pending jobs and leaves running and finished ones alone', async () => {
@@ -705,6 +735,52 @@ describe('job lanes', () => {
     expect(await db.jobs.nextRunAfter([TYPE], ['a', 'b'])).toBe(T9);
   });
 
+  test('nextRunAfter with an empty exclusion list leaves out no lane', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, null));
+    setStatus(10, 'retry_wait', RA);
+    setStatus(11, 'retry_wait', T9);
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(await db.jobs.nextRunAfter([TYPE]));
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(T9);
+    setStatus(11, 'queued');
+    expect(await db.jobs.nextRunAfter([TYPE], [])).toBe(RA);
+  });
+
+  test('payloads are stored through JSON: undefined members drop and later mutations do not reach the row', async () => {
+    const payload = { version: 1, gone: undefined, nested: { n: 1 } };
+    await enqueueInOrder(laned(10, 'a', payload), laned(11, null, payload));
+    payload.nested.n = 2;
+    const read = await db.jobs.get(uuid(10));
+    expect(read?.payload).toEqual({ version: 1, nested: { n: 1 } });
+    expect(Object.keys(read?.payload as object)).not.toContain('gone');
+    (read?.payload as { nested: { n: number } }).nested.n = 3;
+    expect((await db.jobs.get(uuid(10)))?.payload).toEqual({ version: 1, nested: { n: 1 } });
+
+    // A rewrite gets its own copy: mutating the argument changes nothing, only the answer is stored.
+    await db.jobs.rerouteWaiting({
+      type: TYPE,
+      fromLane: 'a',
+      toLane: 'b',
+      rewrite: (p) => {
+        (p as { nested: { n: number } }).nested.n = 4;
+        return { moved: true, dropped: undefined };
+      },
+      now: LATER,
+    });
+    expect((await db.jobs.get(uuid(10)))?.payload).toEqual({ moved: true });
+    await db.jobs.assignLane({
+      type: TYPE,
+      lane: 'c',
+      rewrite: (p) => {
+        (p as { nested: { n: number } }).nested.n = 5;
+        return null;
+      },
+      now: LATER,
+    });
+    const untouched = await db.jobs.get(uuid(11));
+    expect(untouched?.lane).toBeNull();
+    expect(untouched?.payload).toEqual({ version: 1, nested: { n: 1 } });
+  });
+
   test('rerouteWaiting moves the queued and retry_wait jobs of a lane and leaves the others', async () => {
     await enqueueInOrder(
       laned(10, 'a', { n: 'q' }),
@@ -840,6 +916,39 @@ describe('job lanes', () => {
     expect(await db.jobs.get(uuid(13))).toMatchObject({ lane: null, payload: { keep: false } });
     expect(await db.jobs.get(uuid(14))).toMatchObject({ lane: 'a', payload: { keep: false } });
     expect(await db.jobs.get(uuid(15))).toMatchObject({ lane: null, payload: { keep: false } });
+  });
+
+  test('assignLane leaves a row whose rewrite answers undefined as it is, like null', async () => {
+    await enqueueInOrder(laned(10, null, { keep: true }), laned(11, null, { keep: false }));
+    const changed = await db.jobs.assignLane({
+      type: TYPE,
+      lane: 'b',
+      rewrite: (p) => ((p as { keep: boolean }).keep ? undefined : { ...(p as object), laned: true }),
+      now: LATER,
+    });
+    expect(changed).toBe(1);
+    expect(await db.jobs.get(uuid(10))).toMatchObject({ lane: null, payload: { keep: true }, updatedAt: T0 });
+    expect(await db.jobs.get(uuid(11))).toMatchObject({ lane: 'b', payload: { keep: false, laned: true } });
+  });
+
+  test('rerouteWaiting whose rewrite answers undefined changes no row', async () => {
+    await enqueueInOrder(laned(10, 'a', { n: 1 }), laned(11, 'a', { n: 2 }));
+    const before = handle.prepare('select * from job order by id').all();
+    const rewrite = (p: unknown) => ((p as { n: number }).n === 2 ? undefined : p);
+    await expect(
+      db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'b', rewrite, now: LATER }),
+    ).rejects.toThrow('A job payload must be JSON');
+    expect(handle.prepare('select * from job order by id').all()).toEqual(before);
+  });
+
+  test('rerouteWaiting refuses the same lane and changes no row', async () => {
+    await enqueueInOrder(laned(10, 'a'), laned(11, 'a'));
+    setStatus(11, 'retry_wait', RA);
+    const before = handle.prepare('select * from job order by id').all();
+    await expect(
+      db.jobs.rerouteWaiting({ type: TYPE, fromLane: 'a', toLane: 'a', rewrite: (p) => p, now: LATER }),
+    ).rejects.toThrow(InvalidOperationError);
+    expect(handle.prepare('select * from job order by id').all()).toEqual(before);
   });
 
   test('waitingByLane counts queued and retry_wait jobs per lane', async () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { WorkspaceSummarySchema } from './workspace';
-import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
+import { type ChannelContracts, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
 /** The workspace channels: list, create, open, close and remove workspaces and resolve the path of a new one. */
 export const workspaceChannels = {
@@ -30,7 +30,7 @@ export const workspaceChannels = {
    * dialog owned by the host. `removed` is false when the user cancelled.
    */
   'workspace:remove': {
-    request: z.object({ id: z.uuid() }),
+    request: z.object({ id: IdSchema }),
     response: z.object({ removed: z.boolean(), folderTrashed: z.boolean() }),
   },
   'workspace:close': {

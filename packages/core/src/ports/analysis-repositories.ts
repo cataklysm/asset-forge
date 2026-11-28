@@ -56,9 +56,9 @@ export interface FileAnalysisRepository {
   get(fileId: string): Promise<FileAnalysis | null>;
   /**
    * One transaction. Writes nothing unless the file exists, is complete, is not in the trash and has this sha256.
-   * Otherwise: deletes every
-   * `ai` assignment of the file, inserts an `ai` assignment for each tag the file does not carry manually (creating
-   * missing tags), upserts the analysis row, deletes a waiting proposal of the file and reindexes the file's asset.
+   * Otherwise: deletes every `ai` assignment of the file, inserts an `ai` assignment for each tag the file does not
+   * carry manually (creating missing tags), upserts the analysis row, deletes a waiting proposal of the file and
+   * reindexes the file's asset.
    *
    * @param result the file, the analysed hash, the tags with an id for a new tag row each, the fingerprint, the prompt
    *   name and the time
@@ -77,8 +77,7 @@ export interface FileAnalysisRepository {
   }): Promise<boolean>;
   /**
    * One transaction. Writes nothing unless the file exists, is complete, is not in the trash and has this sha256;
-   * otherwise stores the
-   * proposal, replacing an older one. Tags and the analysis row stay untouched.
+   * otherwise stores the proposal, replacing an older one. Tags and the analysis row stay untouched.
    *
    * @param proposal the proposal
    * @returns false when nothing was written
@@ -92,11 +91,11 @@ export interface FileAnalysisRepository {
    */
   getProposal(fileId: string): Promise<(Proposal & { stale: boolean }) | null>;
   /**
-   * One transaction. False when there is no proposal or it is stale (the file is gone, not complete
-   * or its sha256 differs from `sha256` / the proposal's; a stale proposal is deleted). False without writing
-   * anything for a file in the trash, which keeps its proposal for a restore. Otherwise applies
-   * exactly `tags` as `apply` does, writes the analysis row from the proposal's fingerprint and prompt name with
-   * `analysedAt = now`, deletes the proposal and returns true.
+   * One transaction. False when there is no proposal or it is stale (the file is gone, not complete or its sha256
+   * differs from `sha256` / the proposal's; a stale proposal is deleted). False without writing anything for a file
+   * in the trash, which keeps its proposal for a restore. Otherwise applies exactly `tags` as `apply` does, writes
+   * the analysis row from the proposal's fingerprint and prompt name with `analysedAt = now`, deletes the proposal
+   * and returns true.
    *
    * @param acceptance the file, the hash the owner saw, the accepted tags with an id for a new tag row each and the
    *   time

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { FileRoleSchema, type Asset, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import type { ExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { label } from '../labels';
 import { roleOptions } from '../role-options';
 import { eligibleFiles, NONE_ELIGIBLE, sharedTags, type FileSelection } from '../selection';
@@ -16,6 +17,11 @@ interface Props {
   selection: FileSelection;
   /** The shared tag input; the selection bar's "Add tags" focuses it. */
   tagInputRef: RefObject<HTMLInputElement | null>;
+  /**
+   * The host's guard of the batch assign. It lives in the host because the column unmounts when the selection
+   * empties, and a remounted column must still see an assign that runs.
+   */
+  assignGuard: ExclusiveGuard;
   /** After an assign: the files that moved to the asset. The host drops them and reloads. */
   onAssigned(movedIds: string[]): void;
   /**
@@ -62,6 +68,50 @@ function markerOf(file: FileRecord, assignError: string | undefined): Marker | n
       : null;
 }
 
+/** The batch assign's request. */
+interface AssignRequest {
+  /** The eligible files. */
+  fileIds: string[];
+  /** The picked asset. */
+  assetId: string;
+  /** The picked role. */
+  role: FileRole;
+}
+
+/** What the batch assign reports to. */
+interface AssignDependencies {
+  /** The selection as it is when the answer arrives; names come from it. */
+  latest: { readonly current: FileSelection };
+  /** Shows the per-file failures, or clears the strip. */
+  setResult(result: { title: string; failures: ResultFailure[] } | null): void;
+  /** Shows a failure of the whole request. */
+  setError(message: string): void;
+  /** Receives the files that moved. */
+  onAssigned(movedIds: string[]): void;
+}
+
+/**
+ * Sends the batch assign and reports its answer.
+ *
+ * @param request the files, asset and role
+ * @param dependencies where the answer is reported
+ * @returns settles once the answer was reported
+ */
+async function sendAssign(request: AssignRequest, dependencies: AssignDependencies): Promise<void> {
+  const nameOf = (fileId: string) => dependencies.latest.current.selected.get(fileId)?.originalName ?? fileId;
+  try {
+    const { items } = await call('files:assignMany', request);
+    const failures = assignFailures(items, nameOf);
+    const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
+    dependencies.setResult(
+      failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
+    );
+    dependencies.onAssigned(moved);
+  } catch (caught) {
+    dependencies.setError(describeError(caught));
+  }
+}
+
 /**
  * The Selection column of the inbox: the size of the selection, its shared image tags, the batch
  * assign to an asset and the selected names. Files that are not completely imported are marked
@@ -70,14 +120,11 @@ function markerOf(file: FileRecord, assignError: string | undefined): Marker | n
  * @param props the selection, the tag input and the callbacks
  * @returns the column
  */
-export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChanged }: Props) {
+export function InboxSelection({ selection, tagInputRef, assignGuard, onAssigned, onFilesChanged }: Props) {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [role, setRole] = useState<FileRole>('reference');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
-  // Synchronous guard: a second activation before the re-render must not send a second request.
-  const assigning = useRef(false);
   const assignId = useId();
   // Assign answers arrive later; names come from the selection as it is then.
   const latest = useRef(selection);
@@ -101,27 +148,16 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
     onFilesChanged(items);
   }
 
-  /** Assigns every eligible file to the picked asset, once at a time, and reports per-file failures. */
-  async function assign() {
-    if (assigning.current || asset === null || eligibleIds.length === 0) return;
-    assigning.current = true;
-    setBusy(true);
-    setError(null);
-    const nameOf = (fileId: string) => latest.current.selected.get(fileId)?.originalName ?? fileId;
-    try {
-      const { items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role });
-      const failures = assignFailures(items, nameOf);
-      const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
-      setResult(
-        failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures },
-      );
-      onAssigned(moved);
-    } catch (caught) {
-      setError(describeError(caught));
-    } finally {
-      assigning.current = false;
-      setBusy(false);
-    }
+  /**
+   * Assigns every eligible file to the picked asset, once at a time, and reports per-file failures.
+   *
+   * @returns settles when the assign ended or was ignored
+   */
+  function assign(): Promise<void> {
+    if (asset === null || eligibleIds.length === 0) return Promise.resolve();
+    const request = { fileIds: eligibleIds, assetId: asset.id, role };
+    const dependencies = { latest, setResult, setError, onAssigned };
+    return assignGuard.run(() => sendAssign(request, dependencies), { onStart: () => setError(null) });
   }
 
   const noneEligible = eligible.length === 0;
@@ -165,7 +201,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
           <button
             type="button"
             className={BUTTON}
-            disabled={noneEligible || asset === null || busy}
+            disabled={noneEligible || asset === null || assignGuard.busy}
             title={noneEligible ? NONE_ELIGIBLE : asset === null ? 'Pick an asset first' : undefined}
             onClick={() => void assign()}
           >

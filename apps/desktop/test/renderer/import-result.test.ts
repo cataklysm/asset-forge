@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { importTitle, isZipPath } from '../src/renderer/src/import-result.js';
-import { importFailures } from '../src/renderer/src/components/ResultStrip.js';
-import { importResultOf } from './renderer/fake-api.js';
-import { fileRecord } from './renderer/fixtures.js';
+import { importTitle, isZipPath } from '../../src/renderer/src/import-result.js';
+import { importFailures } from '../../src/renderer/src/components/ResultStrip.js';
+import { importResultOf } from './fake-api.js';
+import { fileRecord } from './fixtures.js';
 
 describe('isZipPath', () => {
   it.each([

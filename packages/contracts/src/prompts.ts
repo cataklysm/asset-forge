@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { IdSchema } from './ipc-shared';
+import { PageRequestSchema, pageOf } from './paging';
 import { PROMPT_VARIABLE_NAME_MAX, PROMPT_VARIABLE_VALUE_MAX } from './prompt-template';
 import { TagAssignmentSchema } from './tags';
 
@@ -25,7 +27,7 @@ export const PromptVariableSchema = z.object({
 
 /** An immutable version of a library prompt; the current version is the highest number. */
 export const PromptVersionSchema = z.object({
-  id: z.uuid(),
+  id: IdSchema,
   number: z.number().int().min(1),
   content: z.string(),
   variables: z.array(PromptVariableSchema),
@@ -36,7 +38,7 @@ export type PromptVersion = z.infer<typeof PromptVersionSchema>;
 
 /** A library prompt as the prompt list shows it, with its current version. */
 export const PromptSummarySchema = z.object({
-  id: z.uuid(),
+  id: IdSchema,
   title: z.string(),
   description: z.string(),
   tags: z.array(TagAssignmentSchema),
@@ -57,25 +59,22 @@ export type PromptDetail = z.infer<typeof PromptDetailSchema>;
 /** Default values by variable name (matched regardless of case). */
 export const PromptDefaultsSchema = z
   .record(z.string().max(200), z.string().max(PROMPT_VARIABLE_VALUE_MAX))
-  .refine((defaults) => Object.keys(defaults).length <= DEFAULTS_TRANSPORT_KEYS);
+  .refine((defaults) => Object.keys(defaults).length <= DEFAULTS_TRANSPORT_KEYS, {
+    message: `At most ${DEFAULTS_TRANSPORT_KEYS} default values`,
+  });
 /** Default values by variable name. */
 export type PromptDefaults = z.infer<typeof PromptDefaultsSchema>;
 
 /** The request of `prompts:list`: search words, tags that must all be present, and the page. */
-export const ListPromptsSchema = z.object({
+export const ListPromptsSchema = PageRequestSchema.extend({
   query: z.string().max(200).optional(),
   tagNames: z.array(z.string().max(200)).max(20).optional(),
-  offset: z.number().int().min(0),
-  limit: z.number().int().min(1).max(200),
 });
 /** The request of `prompts:list`. */
 export type ListPrompts = z.infer<typeof ListPromptsSchema>;
 
 /** One page of the prompt list and the number of prompts the whole list holds. */
-export const PromptPageSchema = z.object({
-  items: z.array(PromptSummarySchema),
-  total: z.number().int().min(0),
-});
+export const PromptPageSchema = pageOf(PromptSummarySchema);
 /** One page of the prompt list. */
 export type PromptPage = z.infer<typeof PromptPageSchema>;
 
@@ -91,7 +90,7 @@ export type CreatePrompt = z.infer<typeof CreatePromptSchema>;
 
 /** The request of `prompts:update`: title and description only, which are not versioned. */
 export const UpdatePromptSchema = z.object({
-  promptId: z.uuid(),
+  promptId: IdSchema,
   title: z.string().max(TITLE_TRANSPORT_MAX),
   description: z.string().max(DESCRIPTION_TRANSPORT_MAX),
 });
@@ -100,8 +99,8 @@ export type UpdatePrompt = z.infer<typeof UpdatePromptSchema>;
 
 /** The request of `prompts:saveVersion`; `baseVersionId` must be the current version. */
 export const SavePromptVersionSchema = z.object({
-  promptId: z.uuid(),
-  baseVersionId: z.uuid(),
+  promptId: IdSchema,
+  baseVersionId: IdSchema,
   content: z.string().max(CONTENT_TRANSPORT_MAX),
   defaults: PromptDefaultsSchema,
 });

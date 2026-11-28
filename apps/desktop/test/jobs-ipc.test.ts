@@ -27,6 +27,7 @@ import { createWorkspaceHandlers } from '../src/main/workspace-handlers.js';
 import { createChangeFeed } from '../src/main/change-feed.js';
 import { createJobHost, type JobHost } from '../src/main/job-host.js';
 import type { ProviderStore } from '../src/main/provider-store.js';
+import { chatContents } from './analysis-harness.js';
 import { hangingRemote, mockProviderEntry, noGenerations, servicesWithPrompts } from './idle-job-host.js';
 
 let base: string;
@@ -416,12 +417,6 @@ describe('analysis:enqueue with an analysis prompt', () => {
     });
   }
 
-  function chatContents(): string[] {
-    return mock!.requests
-      .filter((r) => r.path === '/api/chat')
-      .map((r) => (r.body as { messages: { content: string }[] }).messages[0]!.content);
-  }
-
   it('copies the chosen prompt into the payload and remembers it as used last', async () => {
     await setup(['hang']);
     await ok('workspace:create', { name: 'Test', rootPath: join(base, 'workspace') });
@@ -498,7 +493,7 @@ describe('analysis:enqueue with an analysis prompt', () => {
       const [blocker, fileId] = await importImages(2);
       await ok('analysis:enqueue', filesRequest([blocker!]));
       // The blocker hangs at the provider, so the second job waits in the queue.
-      await until((s) => s.running === 1 && chatContents().length === 1);
+      await until((s) => s.running === 1 && chatContents(mock!).length === 1);
       const prompt = await ok('analysisPrompts:save', armour);
       await ok('analysis:enqueue', { ...filesRequest([fileId!]), promptId: prompt.id });
 
@@ -509,8 +504,8 @@ describe('analysis:enqueue with an analysis prompt', () => {
       await ok('jobs:cancel', { jobId: running!.id });
       await until((s) => s.succeeded === 1);
 
-      expect(chatContents()).toHaveLength(2);
-      expect(chatContents()[1]).toBe(composeTaggingRequest({ text: 'Only armour.', maxTags: 3 }));
+      expect(chatContents(mock!)).toHaveLength(2);
+      expect(chatContents(mock!)[1]).toBe(composeTaggingRequest({ text: 'Only armour.', maxTags: 3 }));
     });
   }
 

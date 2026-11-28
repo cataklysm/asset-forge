@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ipcContract, type IpcChannel, type PromptDetail } from '@assetforge/contracts';
+import { ipcContract, type IpcChannel, type PromptDetail, type PromptSummary } from '@assetforge/contracts';
 import type { WorkspaceManager } from '@assetforge/core';
 import { MIGRATIONS_FOLDER } from '@assetforge/persistence';
 import { createWorkspaceManager } from '../src/main/composition.js';
@@ -85,7 +85,7 @@ describe('prompts IPC', () => {
 
     const listed = await ok('prompts:list', { ...page, query: 'DUSK' });
     expect(listed).toMatchObject({ total: 1, items: [{ id: hero.id }] });
-    expect((await ok('prompts:list', { ...page, tagNames: ['night'] })).items.map((p: PromptDetail) => p.id)).toEqual([
+    expect((await ok('prompts:list', { ...page, tagNames: ['night'] })).items.map((p: PromptSummary) => p.id)).toEqual([
       hero.id,
     ]);
     expect((await ok('prompts:list', page)).total).toBe(2);

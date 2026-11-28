@@ -5,6 +5,7 @@ import { showsProposal } from '../file-actions';
 import { columnsForWidth, rowItems } from '../gallery';
 import { useElementSize, useVirtualRows } from '../hooks/useVirtualRows';
 import { retryIndex, slotAt, type PagedState } from '../paged-list';
+import { RETRY_LABEL } from '../labels';
 import { BUTTON, FOCUS, ICON_BUTTON, ITEM_HOVER, MUTED, TILE_TITLE } from '../ui';
 import { FileFrame, fileItemHandlers, fileMeta, ITEM_CONTROL, SelectBox, type FileViewProps } from './FileTile';
 import { Menu } from './Menu';
@@ -139,7 +140,7 @@ function GridItem(props: GridItemProps) {
           onKeyDown={(event) => rows.onItemKeyDown(index, event)}
           onFocus={() => rows.onItemFocus(index)}
         >
-          Retry
+          {RETRY_LABEL}
         </button>
       </div>
     );

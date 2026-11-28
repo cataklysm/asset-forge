@@ -281,6 +281,13 @@ export async function filesBelow(dir: string): Promise<{ path: string; text: str
   return out;
 }
 
+/** The first message text of every Ollama chat request the mock received, in order. */
+export function chatContents(mock: MockProvider): string[] {
+  return mock.requests
+    .filter((r) => r.path === '/api/chat')
+    .map((r) => (r.body as { messages: { content: string }[] }).messages[0]!.content);
+}
+
 /**
  * Two in-process mocks, each requiring its own key: A takes `TEST_KEY`, B takes `TEST_KEY_2`. A request
  * with the other key, or with none, gets 401.

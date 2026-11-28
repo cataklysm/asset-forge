@@ -61,6 +61,74 @@ const VOCABULARY = [
 const VIEWS = ['front view', 'side view', 'three-quarter view', 'top view', 'close-up'];
 const STYLES = ['photorealistic', 'stylized', 'concept art', 'line drawing', 'pixel art'];
 
+/** The words the first six tags come from, the views of the seventh and the styles of the eighth. */
+export const MOCK_VOCABULARY = Object.freeze([...VOCABULARY]);
+export const MOCK_VIEWS = Object.freeze([...VIEWS]);
+export const MOCK_STYLES = Object.freeze([...STYLES]);
+
+/**
+ * What the request record keeps of an image instead of its Base64: the SHA-256 of its bytes.
+ *
+ * @param bytes the image's bytes
+ * @returns `sha256:<hex>`
+ */
+export function mockImageDigest(bytes) {
+  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+/**
+ * The digest of an image given as Base64.
+ *
+ * @param text the Base64 text
+ * @returns `sha256:<hex>` of the decoded bytes
+ */
+function digestOfBase64(text) {
+  return mockImageDigest(Buffer.from(text, 'base64'));
+}
+
+/**
+ * One part of an OpenAI message as recorded: the data of an image data URL replaced by its digest.
+ *
+ * @param part the content part
+ * @returns the part, copied when it carried an image
+ */
+function recordedPart(part) {
+  const url = part?.type === 'image_url' ? part.image_url?.url : undefined;
+  const comma = typeof url === 'string' && url.startsWith('data:') ? url.indexOf(',') : -1;
+  if (comma < 0) return part;
+  return {
+    ...part,
+    image_url: { ...part.image_url, url: url.slice(0, comma + 1) + digestOfBase64(url.slice(comma + 1)) },
+  };
+}
+
+/**
+ * One chat message as recorded: Ollama `images` and OpenAI image parts replaced by their digests.
+ *
+ * @param message the message
+ * @returns the message, copied when it carried an image
+ */
+function recordedMessage(message) {
+  if (!message || typeof message !== 'object') return message;
+  const copy = { ...message };
+  if (Array.isArray(message.images)) {
+    copy.images = message.images.map((image) => (typeof image === 'string' ? digestOfBase64(image) : image));
+  }
+  if (Array.isArray(message.content)) copy.content = message.content.map(recordedPart);
+  return copy;
+}
+
+/**
+ * A parsed body as recorded, so the capped record never holds the Base64 of every image sent.
+ *
+ * @param body the parsed body
+ * @returns the body, copied with digests when its messages carried images
+ */
+function recordedBody(body) {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return body;
+  return { ...body, messages: body.messages.map(recordedMessage) };
+}
+
 /** Picks six distinct vocabulary words, one view and one style from the image hash. */
 function tagsFor(imageBytes) {
   const hash = createHash('sha256').update(imageBytes).digest();
@@ -331,11 +399,27 @@ export async function startMockProvider(options = {}) {
     timers.add(timer);
   }
 
-  /** `POST /v1/chat/completions`, after the key check; consumes the shared failure queue. */
-  function openAiChat(response, body) {
+  /**
+   * Takes the next scripted failure for a chat, before its model or image is checked, and answers it: `hang` never
+   * answers, a status answers after `delayMs` like a real answer would.
+   *
+   * @param response the chat's response
+   * @returns `failure`, the one taken (undefined when none is left), and `answered`, true when it was answered here
+   */
+  function takeFailure(response) {
     const failure = failures.shift();
-    if (failure === 'hang') return;
-    if (typeof failure === 'number') return sendJson(response, failure, { error: 'mock failure' });
+    if (failure === 'hang') return { failure, answered: true };
+    if (typeof failure === 'number') {
+      answerLater(() => sendJson(response, failure, { error: 'mock failure' }));
+      return { failure, answered: true };
+    }
+    return { failure, answered: false };
+  }
+
+  /** `POST /v1/chat/completions`, after the key check; every chat consumes the shared failure queue first. */
+  function openAiChat(response, body) {
+    const { failure, answered } = takeFailure(response);
+    if (answered) return;
 
     const request = body && typeof body === 'object' ? body : {};
     if (!OPENAI_CHAT_MODELS.includes(request.model)) {
@@ -354,7 +438,8 @@ export async function startMockProvider(options = {}) {
       return sendJson(response, 400, { error: { message: 'no image supplied', type: 'invalid_request_error' } });
 
     const bytes = Buffer.from(image, 'base64');
-    // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets the JSON.
+    // With the refusal switch on, a request without `response_format` stands for the caller's fallback and gets
+    // the JSON.
     const isJson = request.response_format?.type === 'json_schema' || (!hasFormat && refuseResponseFormat);
     const message =
       failure === 'invalid'
@@ -464,7 +549,11 @@ export async function startMockProvider(options = {}) {
           body = raw;
         }
       }
-      record(requests, { method: incoming.method ?? '', path, body, headers: { ...incoming.headers } }, maxRecorded);
+      record(
+        requests,
+        { method: incoming.method ?? '', path, body: recordedBody(body), headers: { ...incoming.headers } },
+        maxRecorded,
+      );
 
       if (apiKey !== null && incoming.headers.authorization !== `Bearer ${apiKey}`) {
         sendJson(response, 401, { error: 'unauthorized' });
@@ -493,12 +582,8 @@ export async function startMockProvider(options = {}) {
         return;
       }
 
-      const failure = failures.shift();
-      if (failure === 'hang') return;
-      if (typeof failure === 'number') {
-        sendJson(response, failure, { error: 'mock failure' });
-        return;
-      }
+      const { failure, answered } = takeFailure(response);
+      if (answered) return;
 
       const request = body && typeof body === 'object' ? body : {};
       if (request.model !== MOCK_MODEL) {

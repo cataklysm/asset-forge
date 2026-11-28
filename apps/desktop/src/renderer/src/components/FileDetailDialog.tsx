@@ -205,6 +205,7 @@ export function FileDetailDialog({
             items={items}
             onChangeTag={changeTag}
             onOpenAsset={onOpenAsset}
+            focusFallbackRef={stageFocus.areaRef}
           />
           <div ref={stageBox} className="flex min-w-0 flex-1 flex-col bg-surface">
             {staged && (

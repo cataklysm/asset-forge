@@ -1,6 +1,6 @@
 import { IMAGE_GENERATE_JOB, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { resolvePendingFileMove } from './file-move-recovery.js';
-import { InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
+import { InvalidOperationError, NotFoundError } from './errors.js';
 import { eachFile, type FileBatchItem } from './file-batch.js';
 import { settleGenerationOfJob } from './generations.js';
 import { moveAndCommit } from './journaled-move.js';
@@ -8,6 +8,7 @@ import type { JobControl } from './job-types.js';
 import { cancelJob } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
 import type { WorkspaceSession } from './session.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /** Where a restored file goes: its relative path, and its asset and role (both null in the inbox). */
 interface RestorePlacement {
@@ -44,19 +45,6 @@ async function requireFile(session: WorkspaceSession, fileId: string): Promise<F
  */
 export function requireLiveFile(file: FileRecord): void {
   if (file.deletedAt !== null) throw new InvalidOperationError('The file is in the trash');
-}
-
-/**
- * Refuses while the storage of the workspace cannot be reached.
- *
- * @param session the open workspace
- * @returns resolves when the storage is reachable
- * @throws StorageUnreachableError otherwise
- */
-async function requireReachable(session: WorkspaceSession): Promise<void> {
-  if (!(await session.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
 }
 
 /**
@@ -169,7 +157,7 @@ async function trashFile(session: WorkspaceSession, control: JobControl, fileId:
   const file = await requireFile(session, fileId);
   if (file.status === 'pending') throw new InvalidOperationError('The file is still being imported');
   if (file.deletedAt !== null) throw new InvalidOperationError('The file is already in the trash');
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
 
   if (file.status === 'failed') {
     await removeFailedImport(session, file);
@@ -216,7 +204,7 @@ async function isBinaryPresent(session: WorkspaceSession, file: FileRecord): Pro
   try {
     const exists = await session.storage.exists(file.relativePath);
     // A share that dropped after the first check also answers "missing": never trash as missing then.
-    if (!exists) await requireReachable(session);
+    if (!exists) await requireReachableStorage(session.storage);
     return exists;
   } catch (error) {
     await session.database.fileMoves.abort(file.id).catch(() => undefined);
@@ -245,7 +233,7 @@ export function restoreFiles(session: WorkspaceSession, fileIds: readonly string
 async function restoreFile(session: WorkspaceSession, fileId: string): Promise<FileRecord> {
   const trashed = await requireFile(session, fileId);
   if (trashed.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   const file = await afterPendingMove(session, trashed);
   // An earlier restore whose commit failed has just been completed.
   if (file.deletedAt === null) return file;
@@ -274,7 +262,7 @@ async function restoreFile(session: WorkspaceSession, fileId: string): Promise<F
 async function requireBinaryToRestore(session: WorkspaceSession, file: FileRecord): Promise<void> {
   if (await session.storage.exists(file.relativePath)) return;
   // A storage that dropped after the first check answers the storage error, not "missing".
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   throw new InvalidOperationError('The file is missing on disk and cannot be restored');
 }
 
@@ -328,7 +316,7 @@ export function purgeFiles(
 async function purgeFile(session: WorkspaceSession, control: JobControl, fileId: string): Promise<null> {
   const trashed = await requireFile(session, fileId);
   if (trashed.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
-  await requireReachable(session);
+  await requireReachableStorage(session.storage);
   await refuseRunningGeneration(session, trashed.id);
   const file = await afterPendingMove(session, trashed);
   // An earlier restore whose commit failed has just been completed: the file is live again.
@@ -373,25 +361,52 @@ async function removePurgedBinary(session: WorkspaceSession, file: FileRecord): 
 }
 
 /**
- * Purges every file in the trash in chunks.
+ * Purges every file in the trash in chunks. A file whose row is already gone when its turn comes (another purge won
+ * the race) counts as neither purged nor failed: it left the trash as asked.
  *
  * @param session the open workspace
  * @param control the job control that stops running jobs of the files
+ * @param onFailure called once per file that could not be purged, with its error, so the host can log the code
  * @returns how many files were purged and how many failed
  */
 export async function emptyTrash(
   session: WorkspaceSession,
   control: JobControl,
+  onFailure?: (fileId: string, error: Error) => void,
 ): Promise<{ purged: number; failed: number }> {
   const ids = await session.database.files.listTrashedIds();
   const result = { purged: 0, failed: 0 };
   for (let i = 0; i < ids.length; i += EMPTY_CHUNK) {
     for (const item of await purgeFiles(session, control, ids.slice(i, i + EMPTY_CHUNK))) {
-      if (item.error === null) result.purged++;
-      else result.failed++;
+      countPurgeItem(result, item, onFailure);
     }
   }
   return result;
+}
+
+/**
+ * Counts one purge result of `emptyTrash`.
+ *
+ * @param result the counts so far, updated in place
+ * @param item the result of one purge
+ * @param onFailure called for an item that failed
+ */
+function countPurgeItem(
+  result: { purged: number; failed: number },
+  item: FileBatchItem,
+  onFailure: ((fileId: string, error: Error) => void) | undefined,
+): void {
+  if (item.error === null) {
+    result.purged++;
+    return;
+  }
+  if (item.error instanceof NotFoundError) return;
+  result.failed++;
+  try {
+    onFailure?.(item.fileId, item.error);
+  } catch {
+    // A failing report never changes the outcome of the purge.
+  }
 }
 
 /**

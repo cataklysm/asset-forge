@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import type { AssetType } from '@assetforge/contracts';
 import { call, describeError } from '../api';
+import { RETRY_LABEL } from '../labels';
 import { ALERT, BUTTON, INPUT, SELECT } from '../ui';
 import { Dialog } from './Dialog';
 
@@ -11,6 +12,10 @@ interface Props {
   open: boolean;
   /** The asset types to choose from; the first is preselected. */
   types: readonly AssetType[];
+  /** The error of the last load of the types; null when it succeeded or still runs. */
+  typesError: string | null;
+  /** Loads the types again. */
+  onRetryTypes(): void;
   /** Closes the dialog. */
   onClose(): void;
   /** Receives the new asset's ID. */
@@ -23,7 +28,7 @@ interface Props {
  * @param props the open state, the types and the callbacks
  * @returns the dialog
  */
-export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
+export function NewAssetDialog({ open, types, typesError, onRetryTypes, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [typeId, setTypeId] = useState('');
   const [creating, setCreating] = useState(false);
@@ -86,6 +91,17 @@ export function NewAssetDialog({ open, types, onClose, onCreated }: Props) {
             </option>
           ))}
         </select>
+        {/* Without types nothing can be created: the failed load is named and can be repeated. */}
+        {types.length === 0 && typesError !== null && (
+          <div className="flex items-center gap-2">
+            <p role="alert" className={`min-w-0 flex-1 ${ALERT}`}>
+              {typesError}
+            </p>
+            <button type="button" className={BUTTON} onClick={onRetryTypes}>
+              {RETRY_LABEL}
+            </button>
+          </div>
+        )}
         <div className="flex justify-end gap-2">
           <button type="button" className={BUTTON} onClick={close}>
             Cancel

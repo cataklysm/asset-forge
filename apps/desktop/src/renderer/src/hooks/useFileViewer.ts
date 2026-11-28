@@ -174,7 +174,8 @@ function askViewer(tracking: ViewerTracking, latest: MutableRefObject<BrowserLat
 }
 
 /**
- * Shows the file at an index: at once when its page is loaded, otherwise once it is (a pending `show`).
+ * Shows the file at an index: at once when its page is loaded, otherwise once it is (a pending `show`); a failed page
+ * is requested again.
  *
  * @param tracking the tracking state
  * @param latest the values of the latest render
@@ -192,6 +193,8 @@ function showIndex(tracking: ViewerTracking, latest: MutableRefObject<BrowserLat
   const target = Math.min(Math.max(0, Math.trunc(index)), count - 1);
   const slot = slotAt(state, target);
   if (slot.kind !== 'loaded') {
+    // The list's Retry sits behind the viewer: stepping into a failed page asks for it again.
+    if (slot.kind === 'failed') latest.current.paged.retry(slot.page);
     tracking.setPendingShow({ index: target });
     return;
   }

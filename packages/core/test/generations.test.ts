@@ -10,6 +10,7 @@ import {
   cancelAllJobs,
   clearFinishedJobs,
   createPrompt,
+  deletePrompt,
   InvalidOperationError,
   JobError,
   listGenerationsForFile,
@@ -335,6 +336,32 @@ describe('startGeneration from a prompt version', () => {
       'This prompt version does not exist',
     );
     expect(t.providers.modelCalls).toEqual([]);
+  });
+
+  it('answers not_found when the prompt is deleted while the model list loads', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t);
+    const listModels = t.providers.models.bind(t.providers);
+    t.providers.models = async (id) => {
+      await deletePrompt(t.session, prompt.id);
+      return listModels(id);
+    };
+    await refused(
+      t,
+      fromVersion(t.file.id, prompt.currentVersion.id, { view: 'side' }),
+      NotFoundError,
+      'This prompt version does not exist',
+    );
+  });
+
+  it('refuses two values that name one variable in different spellings', async () => {
+    const t = await setup();
+    const prompt = await libraryPrompt(t);
+    await refused(
+      t,
+      fromVersion(t.file.id, prompt.currentVersion.id, { view: 'side', VIEW: 'front' }),
+      ValidationFailedError,
+    );
   });
 
   it('applies the model limit to the resolved text', async () => {

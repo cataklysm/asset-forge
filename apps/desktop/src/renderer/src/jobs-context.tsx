@@ -13,14 +13,12 @@ export interface JobState {
   active: number;
   /** Rises whenever a poll saw `changes` move. */
   changeToken: number;
-  /** Rises whenever a poll saw `changes` move and `succeeded` rise. */
-  resultToken: number;
   /** Polls now (after the user changed jobs). */
   refresh(): void;
 }
 
 /** The job state outside a provider. */
-const EMPTY: JobState = { summary: null, active: 0, changeToken: 0, resultToken: 0, refresh: () => {} };
+const EMPTY: JobState = { summary: null, active: 0, changeToken: 0, refresh: () => {} };
 
 /** The polled job state. */
 const JobsContext = createContext<JobState>(EMPTY);
@@ -38,7 +36,6 @@ const ChangesContext = createContext<Subscribe>(() => () => {});
 interface Polled {
   summary: JobSummary | null;
   changeToken: number;
-  resultToken: number;
 }
 
 /**
@@ -93,8 +90,8 @@ function sameField(left: JobSummary, right: JobSummary, key: keyof JobSummary): 
 }
 
 /**
- * The polled state after a new summary: unchanged when the summary is the same, the tokens raised when
- * `changes` moved.
+ * The polled state after a new summary: unchanged when the summary is the same, the change token raised
+ * when `changes` moved.
  *
  * @param current the state so far
  * @param next the answered summary
@@ -108,7 +105,6 @@ function nextPolled(current: Polled, next: JobSummary): Polled {
   return {
     summary: next,
     changeToken: current.changeToken + (moved ? 1 : 0),
-    resultToken: current.resultToken + (moved && next.succeeded > previous.succeeded ? 1 : 0),
   };
 }
 
@@ -136,7 +132,7 @@ function deliver(listeners: ReadonlySet<ChangeListener>, changes: Changes): void
  * @param props.children the tree that reads the job state
  */
 export function JobsProvider({ children }: { children: ReactNode }) {
-  const [polled, setPolled] = useState<Polled>({ summary: null, changeToken: 0, resultToken: 0 });
+  const [polled, setPolled] = useState<Polled>({ summary: null, changeToken: 0 });
   const control = useRef<{ poll(): void } | null>(null);
   const listeners = useRef(new Set<ChangeListener>());
 

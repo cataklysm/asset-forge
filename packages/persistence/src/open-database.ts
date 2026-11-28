@@ -54,8 +54,22 @@ export async function openWorkspaceDatabase(
     migrate(database, { migrationsFolder });
     return workspaceDatabase(sqlite, database, options);
   } catch (error) {
-    sqlite.close();
+    closeQuietly(sqlite);
     throw error;
+  }
+}
+
+/**
+ * Closes a connection whose open failed. A failing close is swallowed, so the caller sees why the open failed.
+ *
+ * @param sqlite the connection
+ * @returns nothing
+ */
+function closeQuietly(sqlite: Database.Database): void {
+  try {
+    sqlite.close();
+  } catch {
+    // The open error is the one that matters; a close that fails as well adds nothing the caller can act on.
   }
 }
 

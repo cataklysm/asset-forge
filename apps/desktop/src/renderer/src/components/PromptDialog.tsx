@@ -126,7 +126,7 @@ async function describeImage(effects: DescribeEffects, describe: DescribeRequest
     else if (result.code === 'busy') effects.setError(PROMPT_BUSY_MESSAGE);
     else if (result.code !== 'cancelled') effects.setError(JOB_ERROR_MESSAGES[result.code]);
   } catch (error) {
-    recoverMissingPrompt(error, prompts, () => {
+    recoverMissingPrompt(error, prompts, providers, () => {
       if (request.current === requestId) effects.dropChosenPrompt();
     });
     if (request.current === requestId) effects.setError(describeError(error));

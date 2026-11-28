@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -50,7 +50,7 @@ interface Settle {
  * What the open confirmation will do. A purge with `settle` reports its failure there instead of
  * in the screen's strip or alert, which the full-window viewer covers.
  */
-type Pending = { kind: 'purge'; files: FileRecord[]; settle?: Settle } | { kind: 'empty'; total: number };
+type Pending = { kind: 'purge'; files: FileRecord[]; settle?: Settle } | { kind: 'empty' };
 
 /** The props of the trash screen. */
 interface Props {
@@ -94,6 +94,12 @@ export function TrashScreen({ state, onStateChange }: Props) {
   // The title and Empty trash use the number of all files in the trash, independent of the filters.
   const all = useLoad(() => call('files:list', { limit: 1, offset: 0, scope: TRASH }), [reloadToken]);
   const total = all.data?.total ?? null;
+
+  // An open Empty trash confirmation has nothing left to do once a count reload finds the trash empty.
+  const nothingToEmpty = pending?.kind === 'empty' && total === 0 && !busy;
+  useEffect(() => {
+    if (nothingToEmpty) setPending(null);
+  }, [nothingToEmpty]);
 
   // Leaving the screen keeps the filters (already in `state`) and the scroll offset.
   useKeptScrollOffset(positionRef, state, onStateChange);
@@ -213,7 +219,7 @@ export function TrashScreen({ state, onStateChange }: Props) {
           className={BUTTON}
           disabled={total === null || total === 0 || busy}
           title={EMPTY_TRASH_TITLE}
-          onClick={() => total !== null && setPending({ kind: 'empty', total })}
+          onClick={() => setPending({ kind: 'empty' })}
         >
           {EMPTY_TRASH_LABEL}
         </button>
@@ -302,9 +308,11 @@ export function TrashScreen({ state, onStateChange }: Props) {
           }}
         />
         <ConfirmDialog
-          open={pending !== null}
+          // Closed in the same render that finds the trash empty, so the title never names zero files.
+          open={pending !== null && !nothingToEmpty}
+          // Empty trash names the count as it is now: a reload that answers while the dialog is open updates it.
           title={
-            pending === null ? '' : purgeConfirmTitle(pending.kind === 'purge' ? pending.files.length : pending.total)
+            pending === null ? '' : purgeConfirmTitle(pending.kind === 'purge' ? pending.files.length : (total ?? 0))
           }
           confirmLabel={pending?.kind === 'empty' ? EMPTY_TRASH_LABEL : PURGE_LABEL}
           busy={busy}

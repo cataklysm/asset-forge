@@ -106,11 +106,27 @@ export async function retryJob(session: WorkspaceSession, jobId: string): Promis
   if (job.status !== 'failed' && job.status !== 'cancelled') {
     throw new InvalidOperationError('Only a failed or cancelled job can be retried');
   }
-  if (job.fileId !== null && (await session.database.files.get(job.fileId))?.deletedAt != null) {
+  await refuseTrashedFile(session, job.fileId);
+  const retried = await session.database.jobs.retry({ id: jobId, now: session.now().toISOString() });
+  if (retried > 0) return;
+  // The repository skips a trashed file's job too; a trash that landed after the first look says so.
+  await refuseTrashedFile(session, job.fileId);
+  throw new InvalidOperationError('The file of this job already has an active job');
+}
+
+/**
+ * Refuses a retry for a file in the trash.
+ *
+ * @param session the open workspace
+ * @param fileId the job's file; null for a job without one
+ * @returns resolves when the file is not in the trash
+ * @throws `InvalidOperationError` when it is
+ */
+async function refuseTrashedFile(session: WorkspaceSession, fileId: string | null): Promise<void> {
+  if (fileId === null) return;
+  if ((await session.database.files.get(fileId))?.deletedAt != null) {
     throw new InvalidOperationError('The file of this job is in the trash');
   }
-  const retried = await session.database.jobs.retry({ id: jobId, now: session.now().toISOString() });
-  if (retried === 0) throw new InvalidOperationError('The file of this job already has an active job');
 }
 
 /**

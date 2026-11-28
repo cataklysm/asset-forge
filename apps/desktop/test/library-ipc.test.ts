@@ -783,7 +783,15 @@ describe('library IPC', () => {
       const session = await manager.read(async (s) => s);
       vi.spyOn(session.database.files, 'purge').mockRejectedValueOnce(new Error(`disk failure at ${base}`));
       const exclusive = vi.spyOn(manager, 'exclusive');
-      expect(await ok('trash:empty', {})).toEqual({ purged: 2, failed: 1 });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        expect(await ok('trash:empty', {})).toEqual({ purged: 2, failed: 1 });
+        // The left file by id and code only: neither the cause's message nor the path reaches the log.
+        const [left] = (await ok('files:list', { ...page, scope: { kind: 'trash' } })).items;
+        expect(warn.mock.calls).toEqual([[`Emptying the trash left file ${left!.id}: internal_error`]]);
+      } finally {
+        warn.mockRestore();
+      }
       expect(exclusive).toHaveBeenCalled();
       expect(await ok('trash:summary', {})).toEqual({ count: 1 });
       expect(await ok('trash:empty', {})).toEqual({ purged: 1, failed: 0 });
@@ -964,6 +972,16 @@ describe('workflow IPC', () => {
     await ok('workflows:remove', { assetId: asset.id });
     confirmWorkflow.mockClear();
     expect(await ok('workflows:remove', { assetId: asset.id })).toEqual({ removed: false });
+    expect(confirmWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('workflows:remove answers not_found for an unknown asset without asking', async () => {
+    await openWorkspace();
+    confirmWorkflow.mockClear().mockResolvedValue(true);
+    expect(await call('workflows:remove', { assetId: uuid })).toMatchObject({
+      ok: false,
+      error: { code: 'not_found' },
+    });
     expect(confirmWorkflow).not.toHaveBeenCalled();
   });
 

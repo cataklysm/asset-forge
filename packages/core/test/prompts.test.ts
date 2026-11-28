@@ -5,6 +5,7 @@ import {
   deletePrompt,
   getPrompt,
   listPrompts,
+  MAX_PROMPT_QUERY_WORDS,
   promptTitleKey,
   removePromptTag,
   savePromptVersion,
@@ -311,6 +312,22 @@ describe('listPrompts', () => {
     expect(await titles({ query: '   ' })).toEqual(['Über Kopf', 'Plain']);
     expect(await titles({ tagNames: [' NIGHT '] })).toEqual(['Über Kopf']);
     expect(await listPrompts(session, { ...page, tagNames: ['!!!'] })).toEqual({ items: [], total: 0 });
+  });
+
+  it('hands at most 20 words to the repository and leaves out a word contained in another', async () => {
+    const { session } = await setup();
+    const prompts = session.database.prompts;
+    const asked: (readonly string[])[] = [];
+    const list = prompts.list.bind(prompts);
+    prompts.list = async (q) => {
+      asked.push(q.words);
+      return list(q);
+    };
+    await listPrompts(session, { offset: 0, limit: 10, query: 'car Carpet pet x' });
+    expect(asked[0]).toEqual(['carpet', 'x']);
+    const many = Array.from({ length: 30 }, (_, index) => `w${String(index).padStart(2, '0')}`).join(' ');
+    await listPrompts(session, { offset: 0, limit: 10, query: many });
+    expect(asked[1]).toHaveLength(MAX_PROMPT_QUERY_WORDS);
   });
 });
 

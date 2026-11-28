@@ -251,6 +251,22 @@ describe('importFile', () => {
     expect([...db.files.records.values()].map((r) => r.status)).toEqual(['failed']);
   });
 
+  it('ignores a failed removal while cleaning up and still removes the next path', async () => {
+    const { ctx, sources, storage, db } = await setup();
+    sources.set('/src/a.png', Buffer.from('x'));
+    const files = Object.create(ctx.files) as ImportContext['files'];
+    files.markComplete = async () => {
+      throw new Error('commit failed');
+    };
+    storage.failNext('remove', new Error('locked'));
+    const result = await importFile({ ...ctx, files }, '/src/a.png');
+
+    expect(result.file!.status).toBe('failed');
+    expect(result.error).toBe('Import failed');
+    expect(inboxEntries(storage)).toEqual([]);
+    expect([...db.files.records.values()].map((r) => r.status)).toEqual(['failed']);
+  });
+
   describe('error text', () => {
     const ABSOLUTE = 'C:\\Users\\someone\\workspace\\.assetforge\\staging\\x.part';
     const errnoError = (code: unknown) =>

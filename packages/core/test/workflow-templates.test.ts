@@ -41,6 +41,58 @@ describe('built-in workflow templates', () => {
     }
   });
 
+  // Every released template version, as `key@version` → its steps (`key:name:m` for mandatory, `:o` for
+  // optional). A changed definition never reaches existing workspaces unless its version is raised: add the new
+  // version here and keep the old lines.
+  const RELEASED_VERSIONS: Record<string, string[]> = {
+    'character@1': [
+      'references_collected:References collected:m',
+      'references_prepared:References prepared:o',
+      'character_views_generated:Character views generated:m',
+      'model_created:3D model created:m',
+      'retopology_completed:Retopology completed:o',
+      'textures_materials_created:Textures / materials created:m',
+      'rigging_completed:Rigging completed:o',
+      'approved:Approved:m',
+    ],
+    'landscape@1': [
+      'references_collected:References collected:m',
+      'concept_images_created:Concept images created:m',
+      'terrain_created:Terrain created:m',
+      'materials_created:Materials created:m',
+      'vegetation_details_added:Vegetation and details added:o',
+      'approved:Approved:m',
+    ],
+    'object@1': [
+      'references_collected:References collected:m',
+      'concept_images_created:Concept images created:m',
+      'model_created:3D model created:m',
+      'textures_materials_created:Textures / materials created:m',
+      'approved:Approved:m',
+    ],
+    'material@1': [
+      'references_collected:References collected:m',
+      'texture_set_created:Texture set created:m',
+      'material_assembled:Material assembled:m',
+      'approved:Approved:m',
+    ],
+    'basic@1': [
+      'references_collected:References collected:o',
+      'work_completed:Work completed:m',
+      'approved:Approved:m',
+    ],
+  };
+
+  it('a built-in definition is never edited without raising its version', () => {
+    for (const template of BUILT_IN_WORKFLOW_TEMPLATES) {
+      const released = `${template.key}@${template.version}`;
+      const steps = template.steps.map((s) => `${s.key}:${s.name}:${s.mandatory ? 'm' : 'o'}`);
+      expect(steps, `${released}: raise the version and add it to RELEASED_VERSIONS`).toEqual(
+        RELEASED_VERSIONS[released],
+      );
+    }
+  });
+
   it('opening a workspace installs five templates at version 1 and sets every type default', async () => {
     const { db, manager } = await setup();
     const templates = await manager.read(listWorkflowTemplates);

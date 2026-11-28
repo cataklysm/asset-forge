@@ -18,7 +18,7 @@ import {
 } from '../labels';
 import { preview } from '../studio-prompt';
 import type { StudioForm as Form } from '../studio-state';
-import { BUTTON, BUTTON_INLINE, FOCUS, INPUT, LABEL, SELECT, TEXTAREA } from '../ui';
+import { ALERT, BUTTON, BUTTON_INLINE, FOCUS, INPUT, LABEL, SELECT, TEXTAREA } from '../ui';
 import { EditModelSelect } from './ModelSelect';
 import { ProviderSelect } from './ProviderSelect';
 
@@ -316,6 +316,11 @@ export function StudioForm(props: Props) {
         />
         {SAFE_MODE_LABEL}
       </label>
+      {startError !== null && (
+        <p role="alert" className={ALERT}>
+          {startError}
+        </p>
+      )}
       <div>
         <button
           type="button"

@@ -21,9 +21,7 @@ let seen: JobState[] = [];
 function Probe() {
   const state = useJobs();
   seen.push(state);
-  return (
-    <output aria-label="Jobs">{`active ${state.active} changes ${state.changeToken} results ${state.resultToken}`}</output>
-  );
+  return <output aria-label="Jobs">{`active ${state.active} changes ${state.changeToken}`}</output>;
 }
 
 const latest = () => seen.at(-1)!;
@@ -88,7 +86,7 @@ describe('JobsProvider', () => {
     expect(latest().active).toBe(1);
   });
 
-  it('changeToken rises only when changes moved; resultToken only when succeeded rose as well', async () => {
+  it('changeToken rises only when changes moved', async () => {
     let next: JobSummary = { ...IDLE, queued: 2, changes: 5 };
     installFakeApi({ 'jobs:summary': () => next });
     render(
@@ -99,7 +97,6 @@ describe('JobsProvider', () => {
     await settle();
     // The first answer is the baseline.
     expect(latest().changeToken).toBe(0);
-    expect(latest().resultToken).toBe(0);
 
     // Nothing moved.
     await tick();
@@ -109,26 +106,22 @@ describe('JobsProvider', () => {
     next = { ...IDLE, queued: 1, running: 1, changes: 6 };
     await tick();
     expect(latest().changeToken).toBe(1);
-    expect(latest().resultToken).toBe(0);
 
     // A job succeeded.
     next = { ...IDLE, queued: 1, succeeded: 1, changes: 7 };
     await tick();
     expect(latest().changeToken).toBe(2);
-    expect(latest().resultToken).toBe(1);
 
     // Finished jobs cleared: the counts drop without a status change.
     next = { ...IDLE, queued: 1, changes: 7 };
     await tick();
     expect(latest().summary).toEqual(next);
     expect(latest().changeToken).toBe(2);
-    expect(latest().resultToken).toBe(1);
 
-    // succeeded rose without changes moving: no result.
+    // succeeded rose without changes moving: no change.
     next = { ...IDLE, queued: 1, succeeded: 3, changes: 7 };
     await tick();
     expect(latest().changeToken).toBe(2);
-    expect(latest().resultToken).toBe(1);
   });
 
   it('an unchanged answer keeps the same state object', async () => {
@@ -216,7 +209,7 @@ describe('JobsProvider', () => {
     await tick();
     expect(summaryCalls(api)).toBe(4);
     expect(latest().active).toBe(0);
-    expect(latest().resultToken).toBe(1);
+    expect(latest().changeToken).toBe(1);
   });
 
   it('refresh polls now, and once more after a poll that is still pending', async () => {
@@ -387,7 +380,7 @@ describe('JobsProvider', () => {
   it('outside a provider useJobs gives the empty state with a no-op refresh', () => {
     const api = installFakeApi({});
     render(<Probe />);
-    expect(latest()).toMatchObject({ summary: null, active: 0, changeToken: 0, resultToken: 0 });
+    expect(latest()).toMatchObject({ summary: null, active: 0, changeToken: 0 });
     act(() => latest().refresh());
     expect(api.calls).toHaveLength(0);
   });

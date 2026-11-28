@@ -4,7 +4,7 @@ import { showsProposal } from '../file-actions';
 import { formatBytes, formatDateTime } from '../format';
 import { rowCount } from '../gallery';
 import { useElementSize, useVirtualRows, type VirtualRows } from '../hooks/useVirtualRows';
-import { DELETED_LABEL, label, ORIGIN_LABEL } from '../labels';
+import { DELETED_LABEL, label, ORIGIN_LABEL, RETRY_LABEL } from '../labels';
 import { formatLabel } from '../media-url';
 import { retryIndex, slotAt } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
@@ -150,7 +150,7 @@ function TableRow(props: TableRowProps) {
             onKeyDown={(event) => rows.onItemKeyDown(index, event)}
             onFocus={() => rows.onItemFocus(index)}
           >
-            Retry
+            {RETRY_LABEL}
           </button>
         </span>
       </div>

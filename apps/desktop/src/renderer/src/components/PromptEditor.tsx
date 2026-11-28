@@ -224,6 +224,8 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Tag changes in flight: their answer replaces the detail, so a save or delete waits for them.
+  const [tagging, setTagging] = useState(0);
   const textId = useId();
 
   const loading = promptId !== null && detail === null;
@@ -243,9 +245,14 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
 
   async function changeTags(channel: 'prompts:addTag' | 'prompts:removeTag', name: string) {
     if (detail === null) return;
-    const next = await call(channel, { promptId: detail.id, name });
-    setDetail(next);
-    onTagsChanged();
+    setTagging((count) => count + 1);
+    try {
+      const next = await call(channel, { promptId: detail.id, name });
+      setDetail(next);
+      onTagsChanged();
+    } finally {
+      setTagging((count) => count - 1);
+    }
   }
 
   function adoptVersion(version: PromptVersion) {
@@ -329,7 +336,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
         canDelete={detail !== null}
         dirty={dirty}
         saving={saving}
-        busy={busy}
+        busy={busy || tagging > 0}
         onAdopt={adoptVersion}
         onSave={() => void savePrompt({ detail, draft, setDetail, setDraft, setSaving, setError, onSaved })}
         onDelete={() => setConfirmingDelete(true)}

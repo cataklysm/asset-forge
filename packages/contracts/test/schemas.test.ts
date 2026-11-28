@@ -5,7 +5,7 @@ import {
   AssetRelationViewSchema,
   AssetSummarySchema,
   AssetWorkflowSchema,
-  AssignManyResultSchema,
+  cleanTagText,
   FileBatchResultSchema,
   FileRecordSchema,
   FileScopeSchema,
@@ -528,6 +528,15 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName('3d')).toBe('3d');
     expect(normalizeTagName('ÄÖ')).toBe('äö');
   });
+
+  it('keeps control and format characters as they are (stripping them needs a derived-data step)', () => {
+    // Pins the current rule, so a change to it is a deliberate one: NUL, zero-width space, right-to-left override.
+    for (const code of [0x0, 0x200b, 0x202e]) {
+      const text = `a${String.fromCodePoint(code)}b`;
+      expect(cleanTagText(` ${text} `)).toBe(text);
+      expect(normalizeTagName(text)).toBe(text);
+    }
+  });
 });
 
 describe('tag channels', () => {
@@ -623,8 +632,8 @@ describe('trash channels', () => {
     ).toBe(true);
   });
 
-  it('AssignManyResultSchema is the neutral batch result', () => {
-    expect(AssignManyResultSchema).toBe(FileBatchResultSchema);
+  it('files:assignMany answers the neutral batch result', () => {
+    expect(ipcContract['files:assignMany'].response).toBe(FileBatchResultSchema);
   });
 
   it('trash:empty and trash:summary take an empty request and answer counts', () => {

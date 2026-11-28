@@ -195,6 +195,40 @@ describe('manual wins', () => {
     });
     expect((await removeFileTag(ctx.session, { fileId: a, name: 'oak' })).tags).toEqual([]);
   });
+
+  it('adding by hand over an ai tag of an asset leaves one manual assignment', async () => {
+    const ctx = await setup();
+    const aiTag = (newId: number) =>
+      ctx.db.tags.addToAsset({
+        assetId: ctx.asset.id,
+        name: 'oak',
+        displayName: 'Oak',
+        origin: 'ai',
+        newId: uuid(newId),
+        now: T1,
+      });
+    await aiTag(900);
+    expect((await addAssetTag(ctx.session, { assetId: ctx.asset.id, name: 'Oak' })).tags).toEqual([
+      { name: 'oak', displayName: 'Oak', origin: 'manual' },
+    ]);
+    await aiTag(901);
+    expect((await getAssetDetail(ctx.session, ctx.asset.id)).tags).toEqual([
+      { name: 'oak', displayName: 'Oak', origin: 'manual' },
+    ]);
+  });
+
+  it('removing by hand removes an ai tag from an asset', async () => {
+    const ctx = await setup();
+    await ctx.db.tags.addToAsset({
+      assetId: ctx.asset.id,
+      name: 'oak',
+      displayName: 'Oak',
+      origin: 'ai',
+      newId: uuid(900),
+      now: T1,
+    });
+    expect((await removeAssetTag(ctx.session, { assetId: ctx.asset.id, name: 'oak' })).tags).toEqual([]);
+  });
 });
 
 describe('file tag batches', () => {
@@ -255,6 +289,17 @@ describe('file tag batches', () => {
       NotFoundError,
     );
     expect((await ctx.session.database.files.get(a))!.tags).toHaveLength(1);
+  });
+
+  it('a batch answers an unknown file before an incomplete one, whatever their order', async () => {
+    const ctx = await setup();
+    const pending = await addFile(ctx, 2, 'pending');
+    await expect(addFileTags(ctx.session, { fileIds: [pending, UNKNOWN_ID], name: 'oak' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(removeFileTags(ctx.session, { fileIds: [pending, UNKNOWN_ID], name: 'oak' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it('an invalid tag name fails with validation_failed before any lookup', async () => {

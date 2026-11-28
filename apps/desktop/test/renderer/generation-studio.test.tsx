@@ -678,15 +678,17 @@ describe('GenerationStudio', () => {
     expect(screen.queryByRole('button', { name: 'Use settings' })).toBeNull();
   });
 
-  it('a field change clears the start error', async () => {
+  it('a failed start shows its message beside Generate, and a field change clears it', async () => {
     setup({ handlers: { 'generations:start': () => ({ ok: false, code: 'provider_rejected' }) } });
     await modelsReady();
     const user = userEvent.setup();
     await user.type(promptBox(), 'make it blue');
     await user.click(button(GENERATE_BUTTON));
     await waitFor(() => expect(button(GENERATE_BUTTON).title).toBe(JOB_ERROR_MESSAGES.provider_rejected));
+    expect(screen.getByRole('alert').textContent).toBe(JOB_ERROR_MESSAGES.provider_rejected);
     await user.type(promptBox(), '!');
     expect(button(GENERATE_BUTTON).title).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('a failed results load clears on the next successful read', async () => {

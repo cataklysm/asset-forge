@@ -14,6 +14,7 @@ import {
   type PreviewService,
 } from '@assetforge/media';
 import { createAnalysisServices, type AnalysisServices } from './analysis-services.js';
+import { restrictAppPermissions } from './app-permissions.js';
 import { createWorkspaceManager } from './composition.js';
 import { ElectronDialogs } from './electron-dialogs.js';
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
@@ -24,7 +25,7 @@ import { createWorkspaceHandlers } from './workspace-handlers.js';
 import { createSafeStorageCodec } from './secret-codec.js';
 import type { SessionNetRequest } from './session-request.js';
 import { createElectronSiteSessions, type ElectronSiteSessions } from './site-sessions.js';
-import { getAppUrl, isAppUrl } from './app-url.js';
+import { getAppUrl, isAppOrigin, isAppUrl } from './app-url.js';
 import { findOriginalIn, findSourceIn, findVideoIn, handleMediaRequest } from './media-protocol.js';
 import { openFile } from './media-file.js';
 import { MEDIA_SCHEME, MEDIA_SCHEME_PRIVILEGES } from './media-routes.js';
@@ -163,6 +164,15 @@ function start(): void {
   app
     .whenReady()
     .then(() => {
+      // The main window's session grants only what the app page uses; site sessions are hardened on their own. This
+      // must stay on the default session and before openMainWindow: until a handler is installed, Electron grants
+      // every permission, so a window opened first could be answered by that default.
+      restrictAppPermissions(session.defaultSession, {
+        mainContents: () => state.mainWindow?.webContents ?? null,
+        isAppUrl: (url) => isAppUrl(url, appUrl),
+        isAppOrigin: (origin) => isAppOrigin(origin, appUrl),
+        isFilePage: appUrl.startsWith('file:'),
+      });
       registerMediaProtocol(manager, previews);
       openMainWindow(state, siteSessions, windowOptions);
     })

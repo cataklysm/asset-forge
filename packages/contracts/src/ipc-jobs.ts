@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { JobStatusSchema, JobSummarySchema, JobViewSchema, WaitingByProviderSchema } from './jobs';
 import { PageRequestSchema, pageOf } from './paging';
 import { ModelNameSchema, ProviderIdSchema } from './provider-ref';
-import { type ChannelContracts, ChosenIdsSchema, EmptyRequestSchema, IdSchema } from './ipc-shared';
+import { type ChannelContracts, ChosenIdsSchema, CountSchema, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
 /** The job channels: the job list and summary, cancel, retry, resume and moving waiting jobs to another provider. */
 export const jobChannels = {
@@ -27,7 +27,7 @@ export const jobChannels = {
   /** Every queued, waiting and running job. */
   'jobs:cancelAll': {
     request: EmptyRequestSchema,
-    response: z.object({ cancelled: z.number().int().nonnegative() }),
+    response: z.object({ cancelled: CountSchema }),
   },
   /** `invalid_operation` unless the job is failed or cancelled and its file has no active job. */
   'jobs:retry': {
@@ -37,7 +37,7 @@ export const jobChannels = {
   /** Every failed or cancelled job whose file has no active job. */
   'jobs:retryFailed': {
     request: EmptyRequestSchema,
-    response: z.object({ retried: z.number().int().nonnegative() }),
+    response: z.object({ retried: CountSchema }),
   },
   /** Waiting analysis jobs per provider; `providerId` null is the jobs without one. */
   'jobs:waitingByProvider': {
@@ -61,11 +61,11 @@ export const jobChannels = {
       toProviderId: ProviderIdSchema,
       model: ModelNameSchema,
     }),
-    response: z.object({ moved: z.number().int().min(0) }),
+    response: z.object({ moved: CountSchema }),
   },
   /** Deletes every succeeded, failed and cancelled job. */
   'jobs:clearFinished': {
     request: EmptyRequestSchema,
-    response: z.object({ removed: z.number().int().nonnegative() }),
+    response: z.object({ removed: CountSchema }),
   },
 } as const satisfies ChannelContracts;

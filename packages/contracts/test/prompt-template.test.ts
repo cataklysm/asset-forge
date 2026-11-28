@@ -26,11 +26,40 @@ describe('buildPromptVariables', () => {
       { name: 'pose', defaultValue: '' },
     ]);
   });
+
+  test('a default whose key differs only by whitespace is dropped', () => {
+    expect(buildPromptVariables('{{ view }}', { ' view': 'front' })).toEqual([{ name: 'view', defaultValue: '' }]);
+  });
 });
 
 describe('variableKey', () => {
   test('lower-cases', () => {
     expect(variableKey('ViEw')).toBe('view');
+  });
+
+  test('a composed and a decomposed spelling share one key', () => {
+    expect(variableKey('Caf\u00e9')).toBe(variableKey('Cafe\u0301'));
+  });
+
+  test('one variable typed composed and decomposed is parsed once, in its first spelling', () => {
+    expect(parsePromptVariables('{{Caf\u00e9}} {{cafe\u0301}}')).toEqual(['Caf\u00e9']);
+  });
+
+  test('a decomposed name is a variable, taken in NFC', () => {
+    expect(parsePromptVariables('{{Cafe\u0301}} {{caf\u00e9}}')).toEqual(['Caf\u00e9']);
+    expect(
+      resolvePromptText('A {{Cafe\u0301}}', [{ name: 'Caf\u00e9', defaultValue: '' }], { 'caf\u00e9': 'v' }),
+    ).toEqual({ ok: true, text: 'A v', values: { 'Caf\u00e9': 'v' } });
+  });
+
+  test('a value given in the other composition resolves the variable', () => {
+    expect(
+      resolvePromptText('{{Caf\u00e9}}', [{ name: 'Caf\u00e9', defaultValue: '' }], { 'cafe\u0301': 'v' }),
+    ).toEqual({
+      ok: true,
+      text: 'v',
+      values: { 'Caf\u00e9': 'v' },
+    });
   });
 });
 
@@ -64,6 +93,10 @@ describe('resolvePromptText', () => {
 
   test('a value for an unknown variable is refused', () => {
     expect(resolvePromptText('x', [], { a: 'v' })).toEqual({ ok: false, reason: 'unknown' });
+  });
+
+  test('a value whose key differs only by whitespace is refused as unknown', () => {
+    expect(resolvePromptText('{{a}}', a, { ' a': 'v' })).toEqual({ ok: false, reason: 'unknown' });
   });
 
   test('two keys for one variable are refused', () => {

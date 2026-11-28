@@ -182,7 +182,9 @@ export interface JobRepository {
   countActiveInLane(type: string, lane: string): Promise<number>;
   /**
    * One transaction. Every job of this type and `fromLane` in `queued` or `retry_wait` gets `toLane`, the payload
-   * `rewrite` answers, status `queued`, attempt 0, and run_after and the error cleared.
+   * `rewrite` answers, status `queued`, attempt 0, and run_after and the error cleared. Refused, changing nothing,
+   * when both lanes are the same (InvalidOperationError `Jobs cannot be moved onto the same lane`) and when a rewrite
+   * answers a value without a JSON form such as undefined (Error `A job payload must be JSON`).
    *
    * @param reroute the job type, the source lane (`null` is the jobs without one), the target lane, the payload
    *   rewrite and the time
@@ -197,7 +199,8 @@ export interface JobRepository {
   }): Promise<number>;
   /**
    * One transaction. Every active job of this type without a lane gets `lane` and the payload `rewrite` answers;
-   * a row for which `rewrite` answers null is left as it is. Status and attempt stay.
+   * a row for which `rewrite` answers null, or a value without a JSON form such as undefined, is left as it is.
+   * Status and attempt stay.
    *
    * @param assignment the job type, the lane, the payload rewrite and the time
    * @returns how many jobs changed

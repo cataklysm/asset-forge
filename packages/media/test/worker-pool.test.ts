@@ -93,6 +93,19 @@ describe('createWorkerPool', () => {
     expect(order).toEqual(['a', 'd', 'c', 'b']);
   });
 
+  it('serves a waiting render asked for again before those requested in between', async () => {
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
+    const order: string[] = [];
+    const runs = ['a', 'b', 'c', 'd'].map((name) => p.run(job(name)).then(() => order.push(name)));
+    // 'b' scrolled back into view while it still waits.
+    p.prioritize(job('b').targetPath);
+    p.prioritize(job('a').targetPath);
+    p.prioritize('not-queued');
+    await Promise.all(runs);
+    // 'a' is already running and keeps its place; 'b' moves before 'd' and 'c'.
+    expect(order).toEqual(['a', 'b', 'd', 'c']);
+  });
+
   it('ignores null and foreign messages from a worker', async () => {
     const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000 });
     expect(await p.run(job('a-noise'))).toBe('none');

@@ -22,6 +22,7 @@ const UP_TO_0012 = [
   '0011_eager_wonder_man',
   '0012_clear_kate_bishop',
 ];
+const UP_TO_0013 = [...UP_TO_0012, '0013_swift_purple_man'];
 const TS = '2026-01-01T00:00:00.000Z';
 const TYPE = 'vision.analyze_file';
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -29,17 +30,21 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0
 let dir: string;
 let dbPath: string;
 
-/** Applies only the migrations up to 0012, the way the vision providers build left the database. */
-async function createDatabaseUpTo0012(): Promise<void> {
-  const folder = join(dir, 'upto0012-migrations');
+/**
+ * Applies only the given migrations to a new database.
+ *
+ * @param tags the migrations to apply, in journal order
+ */
+async function createDatabaseUpTo(tags: readonly string[]): Promise<void> {
+  const folder = join(dir, `upto-${tags.length}-migrations`);
   await mkdir(join(folder, 'meta'), { recursive: true });
-  for (const tag of UP_TO_0012) {
+  for (const tag of tags) {
     await copyFile(join(MIGRATIONS_FOLDER, `${tag}.sql`), join(folder, `${tag}.sql`));
   }
   const journal = JSON.parse(await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')) as {
     entries: { tag: string }[];
   };
-  journal.entries = journal.entries.filter((e) => UP_TO_0012.includes(e.tag));
+  journal.entries = journal.entries.filter((e) => tags.includes(e.tag));
   await writeFile(join(folder, 'meta', '_journal.json'), JSON.stringify(journal));
   const sqlite = new Database(dbPath);
   try {
@@ -87,8 +92,39 @@ afterEach(async () => {
 });
 
 describe('migration 0013', () => {
+  test('at 0013 the generation table has its own columns and no foreign key', async () => {
+    await createDatabaseUpTo(UP_TO_0013);
+    const check = new Database(dbPath);
+    try {
+      expect(columnNames(check, 'generation')).toEqual([
+        'id',
+        'kind',
+        'status',
+        'error_code',
+        'provider_id',
+        'provider_name',
+        'provider_kind',
+        'model',
+        'prompt',
+        'parameters',
+        'job_id',
+        'created_at',
+        'finished_at',
+      ]);
+      expect(check.pragma('foreign_key_list(generation)')).toEqual([]);
+      for (const table of ['generation_input', 'generation_output']) {
+        expect(columnNames(check, table)).toEqual(['generation_id', 'position', 'file_id', 'sha256', 'original_name']);
+        expect(indexColumns(check, `${table}_file_id_idx`)).toEqual(['file_id']);
+      }
+      expect(indexColumns(check, 'generation_job_id_idx')).toEqual(['job_id']);
+      expect(indexColumns(check, 'generation_created_at_idx')).toEqual(['created_at', 'id']);
+    } finally {
+      check.close();
+    }
+  });
+
   test('0013 adds the generation tables and indexes and leaves the old rows untouched', async () => {
-    await createDatabaseUpTo0012();
+    await createDatabaseUpTo(UP_TO_0012);
     seed();
 
     const db = await openWorkspaceDatabase(dbPath, MIGRATIONS_FOLDER);

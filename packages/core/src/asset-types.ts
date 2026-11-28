@@ -15,7 +15,8 @@ export const BUILT_IN_ASSET_TYPES: readonly { key: string; name: string }[] = [
 ];
 
 /**
- * Adds the built-in types whose key is not present yet; existing rows keep their IDs.
+ * Adds the built-in types whose key is not present yet; existing rows keep their IDs, and an id is drawn only for
+ * a missing type.
  *
  * @param context the open database and the id source
  * @returns resolves once the missing types are inserted
@@ -24,15 +25,20 @@ export async function ensureBuiltInAssetTypes(context: {
   database: WorkspaceDatabase;
   newId(): string;
 }): Promise<void> {
-  const types: AssetType[] = BUILT_IN_ASSET_TYPES.map((type, sortOrder) => ({
-    id: context.newId(),
-    key: type.key,
-    name: type.name,
-    sortOrder,
-    builtIn: true,
-    defaultWorkflowTemplateId: null,
-  }));
-  await context.database.assetTypes.insertMissing(types);
+  const present = new Set((await context.database.assetTypes.list()).map((type) => type.key));
+  const types: AssetType[] = [];
+  BUILT_IN_ASSET_TYPES.forEach((type, sortOrder) => {
+    if (present.has(type.key)) return;
+    types.push({
+      id: context.newId(),
+      key: type.key,
+      name: type.name,
+      sortOrder,
+      builtIn: true,
+      defaultWorkflowTemplateId: null,
+    });
+  });
+  if (types.length > 0) await context.database.assetTypes.insertMissing(types);
 }
 
 /**

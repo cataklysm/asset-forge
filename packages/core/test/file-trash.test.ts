@@ -457,6 +457,15 @@ describe('purgeFiles', () => {
     expect(unknown!.error).toBeInstanceOf(NotFoundError);
   });
 
+  it('purging a failed file that is a chosen cover clears the cover like the set null rule', async () => {
+    const { db, asset, importOne } = await setup();
+    const cover = await importOne('a.png', { assetId: asset.id, role: 'reference' });
+    await db.assets.setCover(asset.id, cover.id, 'x');
+    await db.files.markFailed(cover.id, 'Import was interrupted');
+    expect(await db.files.purge(cover.id)).toBe(true);
+    expect(await db.assets.getCover(asset.id)).toEqual({ coverFileId: null, coverIsChosen: false });
+  });
+
   it('restore of a live file is refused and of an unknown id is not_found', async () => {
     const { session, importOne } = await setup();
     const file = await importOne('a.png');
@@ -596,6 +605,41 @@ describe('emptyTrash', () => {
     expect(await emptyTrash(session, control)).toEqual({ purged: 449, failed: 1 });
     expect(await trashCount(session)).toBe(1);
     expect(await storage.list(TRASH_DIR)).toHaveLength(1);
+  });
+
+  it('hands each failure to onFailure and does not count a file another purge removed first', async () => {
+    const { session, db, importOne, control } = await setup();
+    const failing = await importOne('fail.png');
+    const raced = await importOne('raced.png');
+    const kept = await importOne('ok.png');
+    ok(await trashFiles(session, control, [failing.id, raced.id, kept.id]));
+    const original = db.files.purge.bind(db.files);
+    vi.spyOn(db.files, 'purge').mockImplementation(async (id) => {
+      if (id === failing.id) throw new Error('database is locked');
+      if (id !== raced.id) return original(id);
+      // Another purge won the race: the row is gone when this one runs.
+      await original(id);
+      return false;
+    });
+    const failures: [string, string][] = [];
+
+    const result = await emptyTrash(session, control, (fileId, error) => failures.push([fileId, error.message]));
+
+    expect(result).toEqual({ purged: 1, failed: 1 });
+    expect(failures).toEqual([[failing.id, 'database is locked']]);
+  });
+
+  it('a throwing onFailure changes nothing', async () => {
+    const { session, db, importOne, control } = await setup();
+    const failing = await importOne('fail.png');
+    ok(await trashFiles(session, control, [failing.id]));
+    vi.spyOn(db.files, 'purge').mockRejectedValue(new Error('database is locked'));
+
+    const result = await emptyTrash(session, control, () => {
+      throw new Error('log failed');
+    });
+
+    expect(result).toEqual({ purged: 0, failed: 1 });
   });
 });
 

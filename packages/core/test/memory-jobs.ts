@@ -11,6 +11,7 @@ import {
   type JobStatus,
   type JobView,
 } from '@assetforge/contracts';
+import { InvalidOperationError } from '../src/errors.js';
 import type { Job, NewJob } from '../src/job-types.js';
 import type { JobRepository } from '../src/ports/job-repository.js';
 
@@ -34,6 +35,28 @@ const cancelledFields = (now: string) => ({
 });
 const notExcluded = (excludeLanes: readonly (string | null)[] | undefined) => (r: Job) =>
   !(excludeLanes ?? []).includes(r.lane);
+
+/**
+ * A copy of a payload as the SQLite repository stores and reads it: through JSON, so `undefined` members,
+ * functions, dates and the like do not survive unchanged.
+ *
+ * @param payload the payload a caller hands in
+ * @returns the payload after a JSON round trip
+ */
+function jsonCopy(payload: unknown): unknown {
+  return JSON.parse(JSON.stringify(payload)) as unknown;
+}
+
+/**
+ * A rewritten payload after the JSON round trip the SQLite repository applies.
+ *
+ * @param rewritten what the rewrite answered
+ * @returns the payload to store; undefined when the value has no JSON form (`undefined`, a function)
+ */
+function rewrittenCopy(rewritten: unknown): unknown {
+  const text = JSON.stringify(rewritten) as string | undefined;
+  return text === undefined ? undefined : (JSON.parse(text) as unknown);
+}
 
 /**
  * Snapshots `rows` and answers a function that puts them back as they were. Restores in place, so
@@ -76,6 +99,12 @@ export class InMemoryJobRepository implements JobRepository {
   }
 
   async enqueue({ jobs, now }: { jobs: readonly NewJob[]; now: string }): Promise<string[]> {
+    // One transaction, as in SQLite: an id collision inserts none of the jobs.
+    return this.inTransaction(() => this.insertAll(jobs, now));
+  }
+
+  /** Inserts the jobs of one `enqueue` call; throws on an id collision. */
+  private insertAll(jobs: readonly NewJob[], now: string): string[] {
     const inserted: string[] = [];
     for (const j of jobs) {
       if (j.dedupeKey !== null && this.keyHeld(j.dedupeKey)) continue;
@@ -85,7 +114,7 @@ export class InMemoryJobRepository implements JobRepository {
         ...j,
         // The SQLite column is nullable; a caller that leaves the lane out stores null.
         lane: j.lane ?? null,
-        payload: structuredClone(j.payload),
+        payload: jsonCopy(j.payload),
         status: 'queued',
         attempt: 0,
         runAfter: null,
@@ -348,9 +377,11 @@ export class InMemoryJobRepository implements JobRepository {
     offset: number;
     status?: JobStatus;
     lane?: string | null;
+    ids?: readonly string[];
   }): Promise<{ items: JobView[]; total: number }> {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
+      .filter((r) => q.ids === undefined || q.ids.includes(r.id))
       .sort((a, b) => oldestFirst(b, a));
     const items = matching.slice(q.offset, q.offset + q.limit).map((r): JobView => {
       const download = r.type === FILE_DOWNLOAD_JOB;
@@ -401,9 +432,14 @@ export class InMemoryJobRepository implements JobRepository {
     rewrite: (payload: unknown) => unknown;
     now: string;
   }): Promise<number> {
+    if (r.fromLane === r.toLane) throw new InvalidOperationError('Jobs cannot be moved onto the same lane');
     const moving = this.rows.filter((row) => row.type === r.type && row.lane === r.fromLane && isWaiting(row.status));
     // Rewrite every payload first, so a throwing rewrite changes nothing, as a rolled-back transaction would.
-    const payloads = moving.map((row) => structuredClone(r.rewrite(structuredClone(row.payload))));
+    const payloads = moving.map((row) => {
+      const payload = rewrittenCopy(r.rewrite(jsonCopy(row.payload)));
+      if (payload === undefined) throw new Error('A job payload must be JSON');
+      return payload;
+    });
     moving.forEach((row, i) => {
       Object.assign(row, {
         lane: r.toLane,
@@ -426,10 +462,13 @@ export class InMemoryJobRepository implements JobRepository {
   }): Promise<number> {
     const candidates = this.rows.filter((row) => row.type === r.type && row.lane === null && isActive(row.status));
     const changes = candidates
-      .map((row) => ({ row, payload: r.rewrite(structuredClone(row.payload)) }))
-      .filter((c) => c.payload !== null);
+      .map((row) => {
+        const answer = r.rewrite(jsonCopy(row.payload));
+        return { row, payload: answer === null ? undefined : rewrittenCopy(answer) };
+      })
+      .filter((c) => c.payload !== undefined);
     for (const { row, payload } of changes) {
-      Object.assign(row, { lane: r.lane, payload: structuredClone(payload), updatedAt: r.now });
+      Object.assign(row, { lane: r.lane, payload, updatedAt: r.now });
     }
     return changes.length;
   }
