@@ -603,8 +603,38 @@ describe('createScheduler', () => {
     await s.enqueue('c', 'cpu');
     await s.scheduler.start();
     expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
-    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
     expect(s.timers.map((timer) => timer.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+  });
+
+  it('logs a class whose pass keeps failing once per failure streak', async () => {
+    const cpu = controlled('cpu');
+    let failing = true;
+    const s = setup({
+      handlers: { c: cpu.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            if (failing) throw new Error('corrupt payload');
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    await s.scheduler.start();
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
+
+    failing = false;
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    failing = true;
+    s.scheduler.wake();
+    await flush();
+    expect(s.logged.map((entry) => entry.message)).toEqual([
+      'Job scheduler pass failed for class cpu',
+      'Job scheduler pass failed for class cpu',
+    ]);
   });
 
   it('serves the other classes when the pause gate throws for one', async () => {
@@ -624,7 +654,7 @@ describe('createScheduler', () => {
     await s.scheduler.start();
     expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
     expect(cpu.runs).toHaveLength(0);
-    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
   });
 
   it('recovers on the next pass the job whose outcome could not be stored', async () => {

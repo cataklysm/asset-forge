@@ -268,6 +268,8 @@ class JobScheduler {
   private timer: TimerSlot | null = null;
   /** A recovery or a stored outcome failed, so rows may be left `running`; the next pass recovers them. */
   private recoveryPending = false;
+  /** The classes whose last pass failed; a failure streak is logged once. */
+  private readonly failingClasses = new Set<ResourceClass>();
 
   /**
    * @param options the options as passed; `onChange`, `pause` and `laneLimit` are read from them at every use
@@ -462,8 +464,9 @@ class JobScheduler {
       let next: number | null;
       try {
         next = await this.passClass(resourceClass, types);
+        this.failingClasses.delete(resourceClass);
       } catch (cause) {
-        this.config.log('Job scheduler pass failed', cause);
+        this.reportPassFailure(resourceClass, cause);
         next = this.config.now().getTime() + RETRY_DELAYS_MS[0]!;
       }
       if (this.stopping) return;
@@ -511,6 +514,18 @@ class JobScheduler {
     // resume; only the other lanes need the timer.
     const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
     return next === null ? null : Date.parse(next);
+  }
+
+  /**
+   * Logs the failed pass of a class, naming the class, once until a pass of that class succeeds again.
+   *
+   * @param resourceClass the class whose pass failed
+   * @param cause the error the pass threw
+   */
+  private reportPassFailure(resourceClass: ResourceClass, cause: unknown): void {
+    if (this.failingClasses.has(resourceClass)) return;
+    this.failingClasses.add(resourceClass);
+    this.config.log(`Job scheduler pass failed for class ${resourceClass}`, cause);
   }
 
   /**
