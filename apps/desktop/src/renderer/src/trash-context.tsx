@@ -65,7 +65,7 @@ function createSummaryLoader(setCount: (count: number) => void): SummaryLoader {
         // The last count stays; the request is tried again a few times.
         () => {
           failures += 1;
-          if (failures <= TRASH_SUMMARY_RETRIES) retryTimer = setTimeout(load, TRASH_SUMMARY_RETRY_MS);
+          if (!disposed && failures <= TRASH_SUMMARY_RETRIES) retryTimer = setTimeout(load, TRASH_SUMMARY_RETRY_MS);
         },
       )
       .finally(() => {

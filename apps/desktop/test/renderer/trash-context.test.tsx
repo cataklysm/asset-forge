@@ -146,6 +146,31 @@ it('a lasting failure stops trying after the retries', async () => {
   }
 });
 
+it('a request failing after unmount arms no retry', async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = deferred<TrashSummary>();
+    const api = installFakeApi({ 'trash:summary': () => pending.promise });
+    const { unmount } = render(
+      <TrashProvider>
+        <Probe />
+      </TrashProvider>,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(summaryCalls(api)).toHaveLength(1);
+    unmount();
+    await act(async () => {
+      pending.reject(fakeError('internal_error'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.advanceTimersByTimeAsync(TRASH_SUMMARY_RETRY_MS * 2));
+    expect(summaryCalls(api)).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('useTrash outside a provider is inert', async () => {
   const user = userEvent.setup();
   const api = installFakeApi({ 'trash:summary': () => ({ count: 9 }) });
