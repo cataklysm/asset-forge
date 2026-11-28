@@ -30,7 +30,7 @@ import { ensureBuiltInAssetTypes } from './asset-types.js';
 import { ensureBuiltInWorkflowTemplates } from './workflow-templates.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
-import { isZipArchive } from './media-types.js';
+import { isZipArchive } from './import-refusals.js';
 import { planMeasurement, probeMeasurement, storeMeasurement } from './measure-file.js';
 import { MANIFEST_PATH } from './paths.js';
 import { recoverIncompleteImports } from './recover-imports.js';

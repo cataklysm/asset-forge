@@ -1,8 +1,8 @@
 import type { Readable } from 'node:stream';
 import type { FileRecord, ImportResult } from '@assetforge/contracts';
-import { AssetForgeError, ChecksumMismatchError, ValidationFailedError } from './errors.js';
-import { mimeFromFileName, sanitizeFileName } from './file-names.js';
-import { fileKind, hasThumbnail, isOpenable, isPreviewable, isRefusedImport } from './media-types.js';
+import { AssetForgeError, ChecksumMismatchError } from './errors.js';
+import { isRefusedImportName, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
+import { fileKind, hasThumbnail, isOpenable, isPreviewable, mimeFromFileName } from './media-types.js';
 import { inboxPath, stagingPath } from './paths.js';
 import type { FileRepository } from './ports/file-repositories.js';
 import type { ImageProbe } from './ports/media-probes.js';
@@ -28,18 +28,6 @@ export function safeErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AssetForgeError) return error.message;
   const code = (error as { code?: unknown } | null | undefined)?.code;
   return typeof code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${fallback} (${code})` : fallback;
-}
-
-/** Message of the result for a file whose type is never imported; contains no path. */
-export const REFUSED_IMPORT_MESSAGE: string = new ValidationFailedError('This file type cannot be imported').message;
-
-/**
- * True when a source or archive entry of this name is never imported: by its own name, or by the
- * name it would be stored under, since truncation can drop a long fake extension and expose a
- * refused one (`<96 × a>.exe.<16 × b>` is stored as `<96 × a>.exe`).
- */
-export function isRefusedImportName(fileName: string): boolean {
-  return isRefusedImport(fileName) || isRefusedImport(sanitizeFileName(fileName));
 }
 
 const messageOf = (error: unknown) => safeErrorMessage(error, 'Import failed');

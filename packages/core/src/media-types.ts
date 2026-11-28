@@ -47,13 +47,6 @@ export const FILE_KIND_EXTENSIONS: Readonly<Record<Exclude<FileKind, 'other'>, r
   video: ['mp4', 'm4v', 'webm'],
 };
 
-/** Extensions (lower case, no dot) of programs, installers and shortcuts that are never imported. */
-export const REFUSED_IMPORT_EXTENSIONS: readonly string[] = [
-  'exe', 'com', 'scr', 'msi', 'msp', 'msix', 'appx', 'appinstaller', 'bat', 'cmd', 'ps1', 'psm1', 'psd1', 'vbs',
-  'vbe', 'jse', 'wsf', 'wsh', 'ws', 'wsc', 'sct', 'hta', 'cpl', 'dll', 'sys', 'lnk', 'url', 'pif', 'reg', 'jar',
-  'app', 'dmg', 'pkg', 'appimage', 'iso', 'vhd',
-];
-
 /** Lower-case extension of an on-disk name after stripping trailing dots and spaces; null when none. */
 export function diskExtension(fileName: string): string | null {
   const trimmed = fileName.replace(/[. ]+$/, '');
@@ -79,35 +72,46 @@ export function fileKind(fileName: string): FileKind {
   return 'other';
 }
 
-/** Last extension after stripping trailing dots and spaces, lower case; unlike `diskExtension` a leading dot counts. */
-export function importExtension(fileName: string): string | null {
-  const trimmed = fileName.replace(/[. ]+$/, '');
-  const dot = trimmed.lastIndexOf('.');
-  if (dot < 0) return null;
-  const extension = trimmed.slice(dot + 1);
-  return extension === '' ? null : extension.toLowerCase();
-}
-
-/**
- * True when the name, or its part before the first `:` (an NTFS alternate data stream such as
- * `a.exe::$DATA` or `a.exe:stream`, where Windows opens the main stream), has a refused extension.
- */
-export function isRefusedImport(fileName: string): boolean {
-  const refused = (name: string) => {
-    const extension = importExtension(name);
-    return extension !== null && REFUSED_IMPORT_EXTENSIONS.includes(extension);
-  };
-  const colon = fileName.indexOf(':');
-  return refused(fileName) || (colon >= 0 && refused(fileName.slice(0, colon)));
-}
-
-/** True for a ZIP archive by its name; decides both which sources are unpacked and that entries are not. */
-export function isZipArchive(fileName: string): boolean {
-  return importExtension(fileName) === 'zip';
-}
-
 /** A file can be opened externally when its kind is image, model, document or video, except SVG. */
 export function isOpenable(relativePath: string): boolean {
   const name = diskName(relativePath);
   return fileKind(name) !== 'other' && diskExtension(name) !== 'svg';
+}
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  exr: 'image/x-exr',
+  gif: 'image/gif',
+  avif: 'image/avif',
+  blend: 'application/x-blender',
+  glb: 'model/gltf-binary',
+  gltf: 'model/gltf+json',
+  fbx: 'application/octet-stream',
+  obj: 'model/obj',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  json: 'application/json',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+};
+
+const OCTET_STREAM = 'application/octet-stream';
+
+/**
+ * The MIME type stored for a file of this name. A video type follows the same extension rule as `fileKind`, so a
+ * name has a video type exactly when its kind is `video`.
+ */
+export function mimeFromFileName(name: string): string {
+  if (fileKind(name) === 'video') return MIME_BY_EXTENSION[diskExtension(name)!]!;
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return OCTET_STREAM;
+  const type = MIME_BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? OCTET_STREAM;
+  return isVideo(type) ? OCTET_STREAM : type;
 }

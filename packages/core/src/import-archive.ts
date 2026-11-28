@@ -1,14 +1,7 @@
 import type { ImportResult } from '@assetforge/contracts';
 import { ArchiveTooLargeError, ValidationFailedError } from './errors.js';
-import {
-  importStream,
-  isRefusedImportName,
-  REFUSED_IMPORT_MESSAGE,
-  safeErrorMessage,
-  type ImportContext,
-  type ImportOptions,
-} from './import-file.js';
-import { isZipArchive } from './media-types.js';
+import { importStream, safeErrorMessage, type ImportContext, type ImportOptions } from './import-file.js';
+import { isRefusedImportName, isZipArchive, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
 import type { ArchiveEntry, ArchiveReader } from './ports/source-files.js';
 
 /** At most this many entries (directories included) per `files:import` call, over all its archives. */

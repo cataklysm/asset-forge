@@ -1,5 +1,3 @@
-import { diskExtension, fileKind, isVideo } from './media-types.js';
-
 const MAX_LENGTH = 100;
 const MAX_EXTENSION_LENGTH = 10;
 
@@ -48,42 +46,4 @@ export function workspaceFolderName(name: string): string {
   const cleaned = trim([...replaced].slice(0, MAX_LENGTH).join(''));
   if (cleaned === '' || /^_+$/.test(cleaned)) return PLACEHOLDER_FOLDER;
   return WINDOWS_DEVICE_NAME.test(cleaned) ? `_${cleaned}` : cleaned;
-}
-
-const MIME_BY_EXTENSION: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  tif: 'image/tiff',
-  tiff: 'image/tiff',
-  exr: 'image/x-exr',
-  gif: 'image/gif',
-  avif: 'image/avif',
-  blend: 'application/x-blender',
-  glb: 'model/gltf-binary',
-  gltf: 'model/gltf+json',
-  fbx: 'application/octet-stream',
-  obj: 'model/obj',
-  pdf: 'application/pdf',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  json: 'application/json',
-  mp4: 'video/mp4',
-  m4v: 'video/mp4',
-  webm: 'video/webm',
-};
-
-const OCTET_STREAM = 'application/octet-stream';
-
-/**
- * The MIME type stored for a file of this name. A video type follows the same extension rule as `fileKind`, so a
- * name has a video type exactly when its kind is `video`.
- */
-export function mimeFromFileName(name: string): string {
-  if (fileKind(name) === 'video') return MIME_BY_EXTENSION[diskExtension(name)!]!;
-  const dot = name.lastIndexOf('.');
-  if (dot < 0) return OCTET_STREAM;
-  const type = MIME_BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? OCTET_STREAM;
-  return isVideo(type) ? OCTET_STREAM : type;
 }

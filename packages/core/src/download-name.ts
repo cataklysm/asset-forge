@@ -1,5 +1,6 @@
 import { sanitizeFileName } from './file-names.js';
-import { fileKind, importExtension } from './media-types.js';
+import { importExtension } from './import-refusals.js';
+import { fileKind } from './media-types.js';
 
 /** Extensions appended to a name the application does not know, by the content type of the answer. */
 const EXTENSION_BY_CONTENT_TYPE: Readonly<Record<string, string>> = {
