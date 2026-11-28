@@ -339,7 +339,7 @@ export class InMemoryJobRepository implements JobRepository {
     limit: number;
     offset: number;
     status?: JobStatus;
-    lane?: string;
+    lane?: string | null;
   }): Promise<{ items: JobView[]; total: number }> {
     const matching = this.rows
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
