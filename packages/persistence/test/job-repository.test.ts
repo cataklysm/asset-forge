@@ -134,6 +134,19 @@ describe('job repository', () => {
     ).toThrow(/UNIQUE/);
   });
 
+  test('enqueue skips a job for an unknown file, and below it the foreign key refuses one', async () => {
+    expect(await enqueue(T0, newJob(10), newJob(11, { fileId: uuid(99) }))).toEqual([uuid(10)]);
+    expect(await db.jobs.get(uuid(11))).toBeNull();
+    expect(() =>
+      handle
+        .prepare(
+          `insert into job (id, type, resource_class, status, file_id, payload, attempt, created_at, updated_at)
+           values (?, ?, 'local_gpu', 'queued', ?, '{}', 0, ?, ?)`,
+        )
+        .run(uuid(12), TYPE, uuid(99), T0, T0),
+    ).toThrow(/FOREIGN KEY/);
+  });
+
   test('claimNext takes the oldest job by created_at, then id', async () => {
     await enqueue(T1, newJob(12));
     await enqueue(T0, newJob(11), newJob(10));
