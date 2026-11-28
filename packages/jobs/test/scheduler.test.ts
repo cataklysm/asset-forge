@@ -603,8 +603,38 @@ describe('createScheduler', () => {
     await s.enqueue('c', 'cpu');
     await s.scheduler.start();
     expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
-    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
     expect(s.timers.map((timer) => timer.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+  });
+
+  it('logs a class whose pass keeps failing once per failure streak', async () => {
+    const cpu = controlled('cpu');
+    let failing = true;
+    const s = setup({
+      handlers: { c: cpu.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            if (failing) throw new Error('corrupt payload');
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    await s.scheduler.start();
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
+
+    failing = false;
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    failing = true;
+    s.scheduler.wake();
+    await flush();
+    expect(s.logged.map((entry) => entry.message)).toEqual([
+      'Job scheduler pass failed for class cpu',
+      'Job scheduler pass failed for class cpu',
+    ]);
   });
 
   it('serves the other classes when the pause gate throws for one', async () => {
@@ -624,7 +654,74 @@ describe('createScheduler', () => {
     await s.scheduler.start();
     expect(io.runs.map((run) => run.job.id)).toEqual([ioJob]);
     expect(cpu.runs).toHaveLength(0);
-    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed']);
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job scheduler pass failed for class cpu']);
+  });
+
+  it('recovers on the next pass the job whose outcome could not be stored', async () => {
+    for (const policy of ['requeue', 'fail'] as const) {
+      const h = controlled('cpu', policy, { interruptedCode: 'provider_outcome_unknown' });
+      const failure = new Error('disk');
+      let failures = 1;
+      const s = setup({
+        handlers: { t: h.handler },
+        repo: (fake) =>
+          Object.assign(Object.create(fake) as InMemoryJobRepository, {
+            async finish(id: string, end: Parameters<JobRepository['finish']>[1]) {
+              if (failures-- > 0) throw failure;
+              return fake.finish(id, end);
+            },
+          }),
+      });
+      const [a] = (await s.enqueue('t', 'cpu')) as [string];
+      await s.scheduler.start();
+      h.runOf(a).resolve();
+      await flush();
+
+      expect(s.logged).toEqual([{ message: 'Job outcome could not be stored', cause: failure }]);
+      if (policy === 'requeue') {
+        // Put back as a restart would, and run again.
+        expect(h.runs).toHaveLength(2);
+        expect(s.row(a)).toMatchObject({ status: 'running', attempt: 1 });
+        h.runOf(a).resolve();
+      } else {
+        // Never repeated: it ends with the interrupted code.
+        expect(h.runs).toHaveLength(1);
+        expect(s.row(a)).toMatchObject({ status: 'failed', errorCode: 'provider_outcome_unknown' });
+      }
+      await s.scheduler.stop();
+    }
+  });
+
+  it('tries a failed recovery again on the next pass and after the first delay', async () => {
+    const h = controlled('cpu');
+    const failure = new Error('locked');
+    let failures = 2;
+    const s = setup({
+      handlers: { t: h.handler },
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async listByStatus(status: Parameters<JobRepository['listByStatus']>[0]) {
+            if (failures-- > 0) throw failure;
+            return fake.listByStatus(status);
+          },
+        }),
+    });
+    const [a] = (await s.enqueue('t', 'cpu')) as [string];
+    // Left `running` by an earlier session.
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso(), excludeLanes: [] });
+    await s.scheduler.start();
+    expect(s.logged.map((entry) => entry.message)).toEqual([
+      'Interrupted jobs could not be recovered',
+      'Interrupted jobs could not be recovered',
+    ]);
+    expect(h.runs).toHaveLength(0);
+    expect(s.timers.map((timer) => timer.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+
+    s.advance(RETRY_DELAYS_MS[0]);
+    await s.fireTimer();
+    expect(h.runs.map((run) => run.job.id)).toEqual([a]);
+    expect(s.row(a)).toMatchObject({ status: 'running', attempt: 1 });
+    expect(s.logged).toHaveLength(2);
   });
 
   it('makes no repository call after stop resolves', async () => {
@@ -812,6 +909,39 @@ describe('createScheduler with a pause gate', () => {
     expect(s.row(b).status).toBe('succeeded');
     expect(s.row(c).status).toBe('queued');
     expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
+  });
+
+  it('puts back a job whose claim was under way when its lane paused, without spending a run', async () => {
+    const gpu = controlled('local_gpu');
+    const pause = createPauseGate({});
+    let openClaim: (() => void) | null = null;
+    let claims = 0;
+    const s = setup({
+      handlers: { gpu: gpu.handler },
+      limits: { ...DEFAULT_LIMITS, local_gpu: 2 },
+      pause,
+      repo: (fake) =>
+        Object.assign(Object.create(fake) as InMemoryJobRepository, {
+          async claimNext(request: Parameters<JobRepository['claimNext']>[0]) {
+            // The second claim waits until the test lets it through.
+            if (++claims === 2) await new Promise<void>((resolve) => (openClaim = resolve));
+            return fake.claimNext(request);
+          },
+        }),
+    });
+    const [a, b] = (await s.enqueue('gpu', 'local_gpu', 2)) as [string, string];
+    const starting = s.scheduler.start();
+    await flush();
+    expect(gpu.runs.map((r) => r.job.id)).toEqual([a]);
+
+    await failRun(gpu, a, new JobError('provider_unauthorized'));
+    expect(pause.reason('local_gpu', null)).toBe('provider_unauthorized');
+    openClaim!();
+    await starting;
+    await flush();
+
+    expect(gpu.runs).toHaveLength(1);
+    expect(s.row(b)).toMatchObject({ status: 'queued', attempt: 0 });
   });
 
   it('keeps the pause for a second scheduler handed the same gate', async () => {
@@ -1690,6 +1820,29 @@ describe('lane hold', () => {
     h.runOf(a3).resolve();
     await flush();
     expect([a1, a2, a3].map((id) => s.row(id).status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
+  });
+
+  it('claims no job enqueued or retried into a held lane before the hold ends', async () => {
+    const h = controlled('io');
+    const s = setup({ handlers: { dl: h.handler }, limits: { ...DEFAULT_LIMITS, io: 1 } });
+    const [a1] = (await s.enqueue('dl', 'io', 1, 'a')) as [string];
+    await s.scheduler.start();
+    h.runOf(a1).reject(new JobError('download_throttled', { retryAfterMs: 120_000 }));
+    await flush();
+
+    // Neither a new job nor one the user retries is touched by the hold in the database.
+    const [a2] = (await s.enqueue('dl', 'io', 1, 'a')) as [string];
+    const [b1] = (await s.enqueue('dl', 'io', 1, 'b')) as [string];
+    s.scheduler.wake();
+    await flush();
+    expect(s.row(a2)).toMatchObject({ status: 'queued', attempt: 0 });
+    expect(s.row(b1).status).toBe('running');
+    expect(s.timers.map((x) => x.ms)).toEqual([120_000 - 2]);
+
+    s.advance(120_000 - 2);
+    h.runOf(b1).resolve();
+    await s.fireTimer();
+    expect(s.row(a1)).toMatchObject({ status: 'running', attempt: 2 });
   });
 
   it('reports a hold that moved waiting jobs as a change of several rows', async () => {

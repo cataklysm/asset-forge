@@ -39,6 +39,11 @@ const OAK = assetSummary({ name: 'Oak' });
 
 type ListRequest = IpcRequest<'files:list'>;
 
+/** Lets every answer and render that is already queued run, without waiting real time. */
+async function settleQueued(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) await act(async () => {});
+}
+
 /** Serves the files that `current()` returns, page by page; with `ids` only those. */
 function listOf(current: () => FileRecord[]) {
   return (request: ListRequest) => {
@@ -230,6 +235,32 @@ it('the assign failure strip goes once no failed file is selected any more', asy
   expect(within(column()).queryByRole('alert')).toBeNull();
 });
 
+it('an assign that runs still blocks the Assign button after the column was closed and opened again', async () => {
+  const user = userEvent.setup();
+  const { c1 } = files();
+  const answer = deferred<IpcResponse<'files:assignMany'>>();
+  const api = install([c1], { 'files:assignMany': () => answer.promise });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await pickAsset(user);
+  await user.click(within(column()).getByRole('button', { name: 'Assign 1 file' }));
+  // Clearing the selection unmounts the column; selecting again mounts a new one.
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull());
+  await user.click(tile('c1.png'));
+  await pickAsset(user);
+  const again = within(column()).getByRole('button', { name: 'Assign 1 file' }) as HTMLButtonElement;
+  expect(again.disabled).toBe(true);
+  fireEvent.click(again);
+  expect(callsOf(api, 'files:assignMany')).toHaveLength(1);
+
+  await act(async () =>
+    answer.resolve({ items: [{ fileId: c1.id, file: { ...c1, assetId: OAK.id, role: 'reference' }, error: null }] }),
+  );
+  expect(callsOf(api, 'files:assignMany')).toHaveLength(1);
+});
+
 it('shared image tags show only tags every eligible file carries; removing one removes it from all', async () => {
   const user = userEvent.setup();
   const c1 = fileRecord({ originalName: 'c1.png', tags: [tagOf('oak'), tagOf('bark')] });
@@ -268,7 +299,7 @@ it('a late shared-tag answer does not bring back a cleared selection', async () 
 
   answer.resolve({ items: [c1, c2].map((f) => ({ ...f, tags: [] })) });
   await waitFor(() => expect(screen.getByText('c1.png')).toBeTruthy());
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settleQueued();
   expect(screen.queryByRole('complementary')).toBeNull();
   expect(screen.queryByText('2 selected')).toBeNull();
 });
@@ -513,6 +544,8 @@ it('assigning in the detail dialog moves on to the following file; assigning the
 
   const second = await screen.findByRole('dialog', { name: 'c2.png' });
   expect(within(second).getByText('1 / 1')).toBeTruthy();
+  // The focus the removed control held goes to the next file's Assign button, not to the body.
+  await waitFor(() => expect(document.activeElement).toBe(within(second).getByRole('button', { name: 'Assign' })));
   expect(callsOf(api, 'files:assign')).toEqual([{ fileId: c1.id, assetId: OAK.id, role: 'texture' }]);
   await waitFor(() => expect(within(screen.getByRole('listbox', { name: 'Files' })).queryByText('c1.png')).toBeNull());
   expect(screen.queryByText('1 selected')).toBeNull();
@@ -521,6 +554,31 @@ it('assigning in the detail dialog moves on to the following file; assigning the
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(callsOf(api, 'files:assign')).toHaveLength(2);
   await screen.findByText('Inbox is empty');
+});
+
+it('after an assign that moves on to a file without an assign control, the focus goes to the stage', async () => {
+  const user = userEvent.setup();
+  const { c1, f1 } = files();
+  let remaining = [c1, f1];
+  const api = install(remaining, {
+    'files:assign': (r) => {
+      remaining = remaining.filter((f) => f.id !== r.fileId);
+      api.setFiles(remaining);
+      return { ...c1, assetId: r.assetId, role: r.role };
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('c1.png');
+  await user.click(tile('c1.png'));
+  await user.keyboard('{Enter}');
+  await assignInDialog(user, await screen.findByRole('dialog', { name: 'c1.png' }));
+
+  const next = await screen.findByRole('dialog', { name: 'f1.png' });
+  expect(within(next).queryByRole('button', { name: 'Assign' })).toBeNull();
+  await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  const active = document.activeElement as HTMLElement;
+  expect(next.contains(active)).toBe(true);
+  expect(active.tabIndex).toBe(-1);
 });
 
 const VISION: ProviderView = providerView();

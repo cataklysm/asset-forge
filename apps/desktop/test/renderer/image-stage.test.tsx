@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -109,6 +109,35 @@ it('100% shows one image pixel per device pixel, drawn unsmoothed', () => {
   expect(large(file)!.style.width).toBe('3200px');
 });
 
+it('100% follows a change of the device pixel ratio without another render', () => {
+  const listeners = new Map<string, Set<() => void>>();
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: (query: string) => ({
+      addEventListener: (_type: string, listener: () => void) => {
+        if (!listeners.has(query)) listeners.set(query, new Set());
+        listeners.get(query)!.add(listener);
+      },
+      removeEventListener: (_type: string, listener: () => void) => listeners.get(query)?.delete(listener),
+    }),
+  });
+  try {
+    const file = png(4000, 2000);
+    render(<Viewer file={file} />);
+    fireEvent.click(button('100%'));
+    expect(large(file)!.style.width).toBe('4000px');
+
+    setDpr(1.25);
+    act(() => {
+      for (const listener of [...(listeners.get('(resolution: 1dppx)') ?? [])]) listener();
+    });
+    expect(large(file)!.style.width).toBe('3200px');
+    expect(listeners.get('(resolution: 1dppx)')?.size ?? 0).toBe(0);
+    expect(listeners.get('(resolution: 1.25dppx)')?.size).toBe(1);
+  } finally {
+    Reflect.deleteProperty(window, 'matchMedia');
+  }
+});
 it('zoom steps from the effective percentage and stays at the ends', () => {
   render(<Viewer file={png(4000, 2000)} />);
   fireEvent.click(button('Zoom in'));

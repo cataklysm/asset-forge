@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ANALYZE_FILE_JOB, DEFAULT_PROVIDER_OPTIONS, type JobSummary, type ProviderView } from '@assetforge/contracts';
-import { MOCK_MODEL, type MockProvider } from '../../../docker/mock-provider/server.mjs';
+import { MOCK_MODEL, startMockProvider, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createProviderStore } from '../src/main/provider-store.js';
 import { providerLaneLimit } from '../src/main/lane-limits.js';
 import {
@@ -220,6 +220,37 @@ describe('several vision providers', () => {
       expect(chats(mocks!.b)).toEqual([]);
     });
 
+    it('run on the first entry: v1 and v3 apply their tags, v2 asks for its own model', async () => {
+      mocks = await startTwoMocks();
+      await h.provider({ name: 'First', url: mocks.a.url, apiKey: TEST_KEY, taggingModel: MOCK_MODEL });
+      await h.provider({ name: 'Second', url: mocks.b.url, apiKey: TEST_KEY_2, taggingModel: MOCK_MODEL });
+      const fileIds = await unroutedJobs();
+
+      await h.ok('workspace:open', { rootPath: workspaceRoot() });
+      // The v2 job keeps its own model, which the mock does not serve, and is not retried.
+      await h.until((s) => s.succeeded === 2 && s.failed === 1 && active(s) === 0);
+      const jobs = (await h.ok('jobs:list', page)).items;
+      expect(jobs.find((j) => j.fileId === fileIds[1])).toMatchObject({
+        status: 'failed',
+        errorCode: 'provider_rejected',
+      });
+      expect(
+        chats(mocks.a)
+          .map((r) => (r.body as { model: string }).model)
+          .sort(),
+      ).toEqual(['legacy-model', MOCK_MODEL, MOCK_MODEL].sort());
+      expect(chats(mocks.b)).toEqual([]);
+      const files = (await h.ok('files:list', { ...page, scope: { kind: 'all' } })).items;
+      const aiTags = (fileId: string) => files.find((f) => f.id === fileId)!.tags.filter((t) => t.origin === 'ai');
+      // v1 runs with the legacy text and limit 20, so all eight tags of the mock stay; v3 with its prompt and limit.
+      expect(aiTags(fileIds[0]!)).toHaveLength(8);
+      expect(aiTags(fileIds[2]!)).toHaveLength(3);
+      const sentTexts = chats(mocks.a).map((r) => JSON.stringify((r.body as { messages: unknown }).messages));
+      const v3Text = sentTexts.find((text) => text.includes('Only armour.'));
+      expect(v3Text).toContain('Give at most 3 tags.');
+      expect(sentTexts.filter((text) => text.includes('Only armour.'))).toHaveLength(1);
+    });
+
     it('stay without an entry, fail as not configured on the lane without a provider, and resume there', async () => {
       await unroutedJobs();
       await h.ok('workspace:open', { rootPath: workspaceRoot() });
@@ -366,6 +397,34 @@ describe('several vision providers', () => {
       { providerId: b.id, providerName: 'Renamed', kind: 'ollama', reason: 'provider_unauthorized' },
     ]);
     expect(chats(mocks.a).filter((r) => r.headers['authorization'] === `Bearer ${TEST_KEY}`)).toHaveLength(1);
+  });
+});
+
+describe('a vision provider from the environment', () => {
+  let h: Harness | undefined;
+  let mock: MockProvider | undefined;
+
+  afterEach(async () => {
+    await h?.close();
+    await mock?.close();
+    h = undefined;
+    mock = undefined;
+  });
+
+  it('queues on the environment entry, runs the jobs without a key and lists them on its lane', async () => {
+    mock = await startMockProvider({ port: 0 });
+    h = await createHarness({ env: { ASSETFORGE_VISION_BASE_URL: mock.url, ASSETFORGE_VISION_MODEL: MOCK_MODEL } });
+    await h.ok('workspace:create', { name: 'Environment', rootPath: join(h.base, 'workspace') });
+    const fileIds = await h.importImages(2);
+    const request = { target: { kind: 'files' as const, fileIds }, model: MOCK_MODEL, mode: 'apply' as const };
+
+    expect(await h.ok('analysis:enqueue', { ...request, force: false })).toMatchObject({ enqueued: 2 });
+    await h.until((s) => s.succeeded === 2 && active(s) === 0);
+    const lane = (await h.ok('jobs:list', { ...page, providerId: 'environment' })).items;
+    expect(lane.map((j) => j.fileId).sort()).toEqual([...fileIds].sort());
+    const chats = mock.requests.filter((r) => r.path === '/api/chat');
+    expect(chats).toHaveLength(2);
+    expect(chats.some((r) => r.headers['authorization'] !== undefined)).toBe(false);
   });
 });
 

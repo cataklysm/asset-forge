@@ -44,3 +44,24 @@ export function isAppUrl(target: string, appUrl: string): boolean {
   }
   return next.origin === app.origin;
 }
+
+/**
+ * Whether an origin, as Electron hands it to a permission check, is the app's. For http(s) the same origin; for the
+ * built `file:` renderer any `file:` origin on the same host, because a file origin carries no path.
+ *
+ * @param origin the origin to check
+ * @param appUrl the URL of the app page
+ * @returns true when the origin is the app's
+ */
+export function isAppOrigin(origin: string, appUrl: string): boolean {
+  let next: URL;
+  let app: URL;
+  try {
+    next = new URL(origin);
+    app = new URL(appUrl);
+  } catch {
+    return false;
+  }
+  if (app.protocol === 'file:') return next.protocol === 'file:' && next.host === app.host;
+  return next.origin === app.origin;
+}

@@ -1403,6 +1403,39 @@ it('the header lists the sources; add, remove and open send their requests', asy
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('a read of the asset that started before a source was added does not hide the source', async () => {
+  const user = userEvent.setup();
+  const asset = assetDetail({ sources: [] });
+  const file = fileRecord({ originalName: 'a.png', assetId: asset.id, role: 'reference' });
+  const fake = fakeAssetSources(asset);
+  const api = install(asset, {
+    ...fake.handlers,
+    'files:list': listOf([file]),
+    'files:trashMany': (r) => ({
+      items: r.fileIds.map((fileId) => ({
+        fileId,
+        file: { ...file, assetId: null, role: null, deletedAt: NOW },
+        error: null,
+      })),
+    }),
+  });
+  render(<Harness id={asset.id} />);
+  const block = await screen.findByRole('group', { name: 'Sources' });
+  await screen.findByText('a.png');
+  // A delete reads the asset again; that read is held back.
+  const stale = deferred<AssetDetail>();
+  api.set('assets:get', () => stale.promise);
+  await user.click(within(tile('a.png')).getByRole('button', { name: 'File actions' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+  await waitFor(() => expect(callsOf(api, 'assets:get').length).toBe(2));
+
+  await user.type(within(block).getByRole('textbox', { name: 'Add URL' }), 'https://textures.example.com/wood{Enter}');
+  const link = { name: 'https://textures.example.com/wood' };
+  expect(await within(block).findByRole('link', link)).toBeTruthy();
+  await act(async () => stale.resolve({ ...asset, sources: [] }));
+  expect(within(block).getByRole('link', link)).toBeTruthy();
+});
+
 it('adding a duplicate source shows the error in the header and keeps the text', async () => {
   const user = userEvent.setup();
   const asset = assetDetail({ sources: [sourceOf('https://example.org/')] });

@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
+import { useDevicePixelRatio } from '../hooks/useDevicePixelRatio';
 import { useElementSize } from '../hooks/useVirtualRows';
 import { previewUrl, viewUrl } from '../media-url';
 import { ALERT, FOCUS } from '../ui';
@@ -272,7 +273,7 @@ function Stage({ file, onControls }: Props) {
   const canActual = large !== null;
   // The basis of every percentage: the stored size, or the preview's own size when that is all there is.
   const image: Size = large !== null ? { width: file.width ?? 0, height: file.height ?? 0 } : natural;
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = useDevicePixelRatio();
   const fit = zoom.mode === 'fit';
   const layout = layoutOf({ image, frame, client, zoom, rotation, dpr });
   const { exact, box, stage, offset } = layout;

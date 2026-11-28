@@ -241,6 +241,23 @@ describe('analysis target reader', () => {
     expect(await analysedOf(A_CONCEPT)).toBe(false);
   });
 
+  test.each([
+    ['analysis row', applyAnalysis],
+    ['waiting proposal', proposeFor],
+  ] as const)('every fingerprint field of the %s decides on its own', async (_name, record) => {
+    await record(A_REF);
+    expect(await analysedOf(A_REF)).toBe(true);
+    expect(await analysedOf(A_REF, { ...FP, provider: 'other' })).toBe(false);
+    expect(await analysedOf(A_REF, { ...FP, model: 'llava' })).toBe(false);
+    expect(await analysedOf(A_REF, { ...FP, promptVersion: FP.promptVersion + 1 })).toBe(false);
+    handle.prepare('update file set sha256 = ? where id = ?').run('b'.repeat(64), A_REF);
+    expect(await analysedOf(A_REF)).toBe(false);
+    handle.prepare('update file set sha256 = ? where id = ?').run(SHA, A_REF);
+    expect(await analysedOf(A_REF)).toBe(true);
+    handle.prepare('update file set sha256 = null where id = ?').run(A_REF);
+    expect(await analysedOf(A_REF)).toBe(false);
+  });
+
   test('count splits the target into disjoint groups and counts active jobs as queued', async () => {
     await applyAnalysis(A_REF);
     await proposeFor(A_CONCEPT);

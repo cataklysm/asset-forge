@@ -79,6 +79,8 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   // The same for the deletes: one guard for a single delete and the selection's delete, so that they never overlap;
   // its busy flag disables the controls of both while either runs.
   const acting = useExclusiveGuard();
+  // The batch assign of the Selection column; kept here because the column unmounts when the selection empties.
+  const assigning = useExclusiveGuard();
   const trash = useTrash();
   const zipChoice = useZipChoice();
   const [urlImportOpen, setUrlImportOpen] = useState(false);
@@ -251,6 +253,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           <InboxSelection
             selection={selection}
             tagInputRef={tagInputRef}
+            assignGuard={assigning}
             onAssigned={moved}
             onFilesChanged={filesChanged}
           />

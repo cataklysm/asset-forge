@@ -11,13 +11,36 @@ import { existingTags } from './tag-lookup.js';
 
 // The rows of the asset list: counts, workflow progress, cover and tags of each asset.
 
-const workflowAssetId = qualified(assetWorkflow, assetWorkflow.assetId);
+/** A mandatory step row counts 1, any other row (including the null row of a workflow without steps) 0. */
+const isMandatory = sql`coalesce(${workflowStepDefinition.mandatory}, 0) = 1`;
 
-/** `from ... where ...` over the mandatory step rows of the outer asset's workflow. */
-const mandatoryStepsOfOuterAsset = sql`from ${assetWorkflowStep}
-  join ${assetWorkflow} on ${qualified(assetWorkflow, assetWorkflow.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.assetWorkflowId)}
-  join ${workflowStepDefinition} on ${qualified(workflowStepDefinition, workflowStepDefinition.id)} = ${qualified(assetWorkflowStep, assetWorkflowStep.stepDefinitionId)}
-  where ${workflowAssetId} = ${outerAssetId} and ${qualified(workflowStepDefinition, workflowStepDefinition.mandatory)} = 1`;
+/**
+ * Workflow progress of each given asset in one statement: done and total mandatory steps. Assets without a
+ * workflow are missing from the map.
+ *
+ * @param transaction the database or the caller's transaction
+ * @param assetIds the assets
+ * @returns the progress by asset id
+ */
+function workflowProgresses(
+  transaction: Pick<BetterSQLite3Database, 'select'>,
+  assetIds: readonly string[],
+): Map<string, { done: number; total: number }> {
+  if (assetIds.length === 0) return new Map();
+  const rows = transaction
+    .select({
+      assetId: assetWorkflow.assetId,
+      done: sql<number>`coalesce(sum(${isMandatory} and ${assetWorkflowStep.state} = 'done'), 0)`,
+      total: sql<number>`coalesce(sum(${isMandatory}), 0)`,
+    })
+    .from(assetWorkflow)
+    .leftJoin(assetWorkflowStep, eq(assetWorkflowStep.assetWorkflowId, assetWorkflow.id))
+    .leftJoin(workflowStepDefinition, eq(workflowStepDefinition.id, assetWorkflowStep.stepDefinitionId))
+    .where(inArray(assetWorkflow.assetId, [...assetIds]))
+    .groupBy(assetWorkflow.assetId)
+    .all();
+  return new Map(rows.map((row) => [row.assetId, { done: row.done, total: row.total }] as const));
+}
 
 /**
  * Automatic cover of each given asset in one statement, the same rule as `automaticCover` in core:
@@ -86,23 +109,24 @@ export function summaries(
       updatedAt: asset.updatedAt,
       projectCount: sql<number>`(select count(*) from ${projectAsset} where ${qualified(projectAsset, projectAsset.assetId)} = ${outerAssetId})`,
       fileCount: sql<number>`(select count(*) from ${file} where ${qualified(file, file.assetId)} = ${outerAssetId})`,
-      hasWorkflow: sql<number>`exists (select 1 from ${assetWorkflow} where ${workflowAssetId} = ${outerAssetId})`,
-      workflowDone: sql<number>`(select count(*) ${mandatoryStepsOfOuterAsset} and ${qualified(assetWorkflowStep, assetWorkflowStep.state)} = 'done')`,
-      workflowTotal: sql<number>`(select count(*) ${mandatoryStepsOfOuterAsset})`,
       chosenCover: asset.coverFileId,
     })
     .from(asset)
     .where(where)
     .orderBy(sql`lower(${asset.name})`, asc(asset.id));
   const rows = page === undefined ? query.all() : query.limit(page.limit).offset(page.offset).all();
-  // One statement for the whole page, not one per asset.
+  // One statement each for the whole page, not one per asset.
+  const progress = workflowProgresses(
+    transaction,
+    rows.map((row) => row.id),
+  );
   const automatic = automaticCovers(
     transaction,
     rows.filter((row) => row.chosenCover === null).map((row) => row.id),
   );
-  return rows.map(({ hasWorkflow, workflowDone, workflowTotal, chosenCover, ...row }) => ({
+  return rows.map(({ chosenCover, ...row }) => ({
     ...row,
-    workflowProgress: hasWorkflow ? { done: workflowDone, total: workflowTotal } : null,
+    workflowProgress: progress.get(row.id) ?? null,
     coverFileId: chosenCover ?? automatic.get(row.id) ?? null,
   }));
 }
