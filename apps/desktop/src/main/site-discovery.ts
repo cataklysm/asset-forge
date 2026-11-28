@@ -66,9 +66,12 @@ async function summaryOf(
   record: SiteCrawlRecord | SiteCrawlSummaryRecord,
 ): Promise<SiteCrawlTaskSummary> {
   const job = await session.database.jobs.get(record.id);
+  const downloads = await session.database.siteCrawls.downloadProgress(record.id);
   let status: SiteCrawlTaskSummary['status'];
-  if (record.importedAt !== null) status = 'imported';
-  else if (job?.status === 'running') status = 'running';
+  if (record.importedAt !== null) {
+    if (downloads === null || downloads.queued + downloads.running + downloads.waiting > 0) status = 'imported';
+    else status = downloads.failed + downloads.cancelled > 0 ? 'import_failed' : 'completed';
+  } else if (job?.status === 'running') status = 'running';
   else if (job?.status === 'queued') status = 'queued';
   else if (job?.status === 'retry_wait' || job?.status === 'waiting_remote') status = 'waiting';
   else if (job?.status === 'failed') status = 'failed';
@@ -87,6 +90,7 @@ async function summaryOf(
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     status,
+    downloads,
     errorCode: job?.errorCode ?? null,
     errorMessage: job?.errorMessage ?? null,
     progress: record.progress,
@@ -261,7 +265,7 @@ async function importDiscovery(
 ): Promise<IpcResponse<'sites:import'>> {
   const record = await requireCrawl(session, request.crawlId);
   const task = await summaryOf(session, record);
-  if (!['ready', 'cancelled', 'imported'].includes(task.status) || record.result === null)
+  if (!['ready', 'cancelled', 'imported', 'completed', 'import_failed'].includes(task.status) || record.result === null)
     throw new InvalidOperationError(NOT_READY);
   if (dependencies.store.get(record.profile.id) === null) throw new NotFoundError(SITE_PROFILE_NOT_FOUND);
   if (record.target !== null) await requireAsset(session, record.target.assetId);
@@ -272,12 +276,13 @@ async function importDiscovery(
     target: record.target,
     skipDuplicates: true,
     site: {
+      crawlId: record.id,
       profileId: record.profile.id,
       site: record.profile.site,
       filter: { kinds: [...record.profile.kinds], minBytes: record.profile.minBytes },
     },
   });
-  if (urls.length > 0) {
+  if (queued.queued + queued.alreadyImported + queued.alreadyQueued > 0) {
     await recordGallerySource(session, record);
     const now = session.now().toISOString();
     await session.database.siteCrawls.update(record.id, { importedAt: now, now });
@@ -347,6 +352,15 @@ export class SiteDiscoveryService {
   async remove(crawlId: string): Promise<IpcResponse<'sites:removeCrawl'>> {
     const removed = await this.dependencies.manager.exclusive((session) => session.database.siteCrawls.remove(crawlId));
     if (removed) this.changed();
+    return { removed };
+  }
+
+  /** @returns number of completed import reviews removed without touching content or download jobs */
+  async clearCompleted(): Promise<IpcResponse<'sites:clearCompletedCrawls'>> {
+    const removed = await this.dependencies.manager.exclusive((session) =>
+      session.database.siteCrawls.clearCompleted(),
+    );
+    if (removed > 0) this.changed();
     return { removed };
   }
 

@@ -166,6 +166,19 @@ export const SiteImportCandidateSchema = z.object({
 export type SiteImportCandidate = z.infer<typeof SiteImportCandidateSchema>;
 
 /** A durable discovery task as shown by the site-import review UI. */
+export const SiteCrawlDownloadsSchema = z.object({
+  total: CountSchema,
+  queued: CountSchema,
+  running: CountSchema,
+  waiting: CountSchema,
+  succeeded: CountSchema,
+  failed: CountSchema,
+  cancelled: CountSchema,
+});
+/** Download outcomes retained independently of the technical job history. */
+export type SiteCrawlDownloads = z.infer<typeof SiteCrawlDownloadsSchema>;
+
+/** A durable discovery task as shown by the site-import review UI. */
 export const SiteCrawlTaskSchema = z.object({
   crawlId: IdSchema,
   jobId: IdSchema,
@@ -177,7 +190,19 @@ export const SiteCrawlTaskSchema = z.object({
   targetAssetName: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
-  status: z.enum(['queued', 'running', 'waiting', 'ready', 'failed', 'cancelled', 'imported']),
+  status: z.enum([
+    'queued',
+    'running',
+    'waiting',
+    'ready',
+    'failed',
+    'cancelled',
+    'imported',
+    'completed',
+    'import_failed',
+  ]),
+  /** Null for pre-tracking imports and tasks that have not imported anything. */
+  downloads: SiteCrawlDownloadsSchema.nullable().optional(),
   errorCode: JobErrorCodeSchema.nullable(),
   errorMessage: z.string().nullable(),
   progress: SiteCrawlProgressSchema,

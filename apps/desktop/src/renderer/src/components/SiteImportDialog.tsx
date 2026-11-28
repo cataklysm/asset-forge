@@ -17,9 +17,6 @@ import {
   SITE_REVIEW_EMPTY,
   SITE_REVIEW_LABEL,
   siteImportOutcomeText,
-  SITE_REMOVE_EXTRACTION_LABEL,
-  SITE_REMOVE_EXTRACTION_TITLE,
-  SITE_REMOVE_EXTRACTION_DESCRIPTION,
   SITE_PROFILE_UNAVAILABLE,
   SITE_SAVE_BEFORE_SWITCH_HINT,
 } from '../labels';
@@ -85,7 +82,6 @@ export function SiteImportWorkspace({
   const [refreshToken, setRefreshToken] = useState(0);
   const [busy, setBusy] = useState<SiteImportBusy>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<SiteCrawlTask | null>(null);
   const [profileFocusRequested, setProfileFocusRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<UrlImportResult | null>(null);
@@ -101,6 +97,7 @@ export function SiteImportWorkspace({
           selectedSummary.errorCode,
           selectedSummary.errorMessage,
           selectedSummary.progress,
+          selectedSummary.downloads,
         ]);
   const selected = useCrawlTask(selectedCrawlId, selectedRevision, refreshToken);
 
@@ -294,11 +291,9 @@ export function SiteImportWorkspace({
       });
     });
 
-  const removeExtraction = () =>
+  const removeExtraction = (task: SiteCrawlTask | null) =>
     run('remove', () => {
-      const task = confirmRemove;
       if (task === null) return Promise.resolve();
-      setConfirmRemove(null);
       return call('sites:removeCrawl', { crawlId: task.crawlId }).then(() => {
         if (disposed.current) return;
         setSelectedCrawlId((current) => (current === task.crawlId ? null : current));
@@ -367,7 +362,7 @@ export function SiteImportWorkspace({
                   onCancel={() => void cancel()}
                   onLogIn={() => void taskLogin()}
                   onRetry={() => void retry()}
-                  onRemove={() => setConfirmRemove(selected.task)}
+                  onRemove={() => void removeExtraction(selected.task)}
                   onEditProfile={() => void editTaskProfile()}
                   onExtractAgain={() => void extractAgain()}
                   canExtractAgain={taskProfileExists && !profileHasUnsavedChanges}
@@ -424,15 +419,6 @@ export function SiteImportWorkspace({
           onCancel={() => setConfirmDelete(false)}
         />
       )}
-      <ConfirmDialog
-        open={confirmRemove !== null}
-        title={SITE_REMOVE_EXTRACTION_TITLE}
-        description={SITE_REMOVE_EXTRACTION_DESCRIPTION}
-        confirmLabel={SITE_REMOVE_EXTRACTION_LABEL}
-        busy={busy === 'remove'}
-        onConfirm={() => void removeExtraction()}
-        onCancel={() => setConfirmRemove(null)}
-      />
     </>
   );
 }

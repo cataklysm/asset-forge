@@ -105,6 +105,7 @@ export const idleServices: AppServices = {
     'sites:retryCrawl': notUsed,
     'sites:restartCrawl': notUsed,
     'sites:removeCrawl': notUsed,
+    'sites:clearCompletedCrawls': notUsed,
   },
 };
 

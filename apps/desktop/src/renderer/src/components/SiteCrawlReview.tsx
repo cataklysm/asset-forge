@@ -8,7 +8,6 @@ import {
   SITE_AVAILABLE_LABEL,
   SITE_CLEAR_SELECTION_LABEL,
   SITE_IMPORT_SELECTED_LABEL,
-  SITE_INBOX_TARGET_LABEL,
   SITE_PRESENT_LABEL,
   SITE_RESUME_LABEL,
   SITE_REMOVE_EXTRACTION_LABEL,
@@ -27,6 +26,9 @@ import {
 } from '../labels';
 import { ALERT, BORDER, BUTTON, FOCUS, MUTED, PANEL_TITLE } from '../ui';
 import { CrawlResultView } from './SiteCrawlPanel';
+import { ExtractionDetail } from './ExtractionDetail';
+import { crawlTargetLabel } from './extraction-presentation';
+export { crawlTargetLabel } from './extraction-presentation';
 
 /** Candidate rows rendered at once; selection spans the complete saved result. */
 const CANDIDATE_PAGE_SIZE = 50;
@@ -36,16 +38,6 @@ export interface SiteImportSelection {
   selectedUrls: string[];
   skipExistingNames: boolean;
   includeExistingUrls: string[];
-}
-
-/**
- * Human-readable captured destination of a task, independent of the current navigation context.
- *
- * @param task its saved destination
- * @returns the destination label
- */
-export function crawlTargetLabel(task: Pick<SiteCrawlTask, 'target' | 'targetAssetName'>): string {
-  return task.target === null ? SITE_INBOX_TARGET_LABEL : `${task.targetAssetName ?? 'Asset'} · ${task.target.role}`;
 }
 
 /**
@@ -99,6 +91,7 @@ interface Props {
   profileHasUnsavedChanges: boolean;
   actionsInMenu?: boolean;
   onSelectionChange?(selection: SiteImportSelection): void;
+  onOpenJobs?(): void;
 }
 
 /**
@@ -121,6 +114,7 @@ export function SiteCrawlReview({
   profileHasUnsavedChanges,
   actionsInMenu = false,
   onSelectionChange,
+  onOpenJobs,
 }: Props) {
   const [skipExistingNames, setSkipExistingNames] = useState(task.target !== null);
   const [selected, setSelected] = useState(() => eligibleUrls(task, task.target !== null));
@@ -141,7 +135,8 @@ export function SiteCrawlReview({
     setPage(0);
   }, [task, skipExistingNames, selectionKey]);
   const active = task.status === 'queued' || task.status === 'running' || task.status === 'waiting';
-  const reviewable = task.result !== null && ['ready', 'cancelled', 'imported'].includes(task.status);
+  const reviewable =
+    task.result !== null && ['ready', 'cancelled', 'imported', 'completed', 'import_failed'].includes(task.status);
   const retryable = task.status === 'failed' || task.status === 'cancelled' || task.status === 'waiting';
   const first = page * CANDIDATE_PAGE_SIZE;
   const rows = task.candidates.slice(first, first + CANDIDATE_PAGE_SIZE);
@@ -153,6 +148,29 @@ export function SiteCrawlReview({
       return next;
     });
   };
+  if (actionsInMenu)
+    return (
+      <ExtractionDetail
+        task={task}
+        busy={busy}
+        selected={selected}
+        skipExistingNames={skipExistingNames}
+        page={page}
+        pageSize={CANDIDATE_PAGE_SIZE}
+        reviewable={reviewable}
+        onToggle={toggle}
+        onSkipNames={setSkipExistingNames}
+        onPage={setPage}
+        onSelectAll={() => setSelected(eligibleUrls(task, skipExistingNames))}
+        onClearSelection={() => setSelected(new Set())}
+        onImport={() => onImport(siteImportSelection(task, selected, skipExistingNames))}
+        onEditProfile={onEditProfile}
+        onClear={onRemove}
+        onLogIn={onLogIn}
+        onRetry={onRetry}
+        onOpenJobs={onOpenJobs}
+      />
+    );
   return (
     <section aria-label="Extraction details" className="flex min-w-0 flex-col gap-3">
       <div className={`flex flex-col gap-1 rounded-control border p-3 ${BORDER}`}>

@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import type { SiteCrawlTaskSummary } from '@assetforge/contracts';
 import { formatDateTime, shortUrl } from '../format';
 import { useMenu } from '../hooks/useMenu';
-import { crawlProgressText, SITE_TASK_STATUS } from '../labels';
+import { extractionTitle, processedDownloads } from './extraction-presentation';
+import { ExtractionProgress, ExtractionStatus } from './ExtractionStatus';
 import { BORDER, FOCUS, ICON_BUTTON_INLINE, MUTED } from '../ui';
 import type { MenuItem } from './Menu';
 import { crawlTargetLabel } from './SiteCrawlReview';
@@ -57,7 +58,7 @@ export function SiteExtractionCard({ task, selected, items, onSelect }: Props) {
 
   return (
     <li
-      className={`relative shrink-0 rounded-control border ${selected ? 'border-accent bg-nav-active' : `${BORDER} bg-surface hover:bg-raised`}`}
+      className={`relative shrink-0 rounded-tile border transition-colors ${selected ? 'border-accent/60 bg-accent-soft/60' : 'border-transparent bg-surface/50 hover:border-line hover:bg-raised/60'}`}
       onContextMenu={(event) => {
         event.preventDefault();
         setPoint({ x: event.clientX, y: event.clientY });
@@ -73,25 +74,36 @@ export function SiteExtractionCard({ task, selected, items, onSelect }: Props) {
       <button
         type="button"
         aria-label={`Select extraction ${task.galleryUrl}`}
+        aria-describedby={`${menuId}-status`}
         aria-pressed={selected}
-        className={`flex w-full min-w-0 flex-col gap-2 rounded-control p-3 pr-12 text-left ${FOCUS}`}
+        className={`flex w-full min-w-0 flex-col gap-2.5 rounded-tile p-3.5 pr-10 text-left ${FOCUS}`}
         onClick={onSelect}
       >
-        <span className="w-full truncate text-sm font-semibold">{task.profileName}</span>
-        <span className="w-full truncate text-xs" title={task.galleryUrl}>
-          {shortUrl(task.galleryUrl)}
+        <span className="w-full truncate text-sm font-semibold capitalize" title={task.galleryUrl}>
+          {extractionTitle(task)}
         </span>
-        <span className={`w-full truncate text-xs ${MUTED}`}>{crawlTargetLabel(task)}</span>
-        <span className="text-xs">{SITE_TASK_STATUS[task.status]}</span>
-        <span className={`text-xs tabular-nums ${MUTED}`}>
-          {crawlProgressText(task.progress.pages, task.progress.files)}
+        <span
+          className={`w-full truncate text-xs ${MUTED}`}
+          title={`${shortUrl(task.galleryUrl)} · ${formatDateTime(task.createdAt)}`}
+        >
+          {task.profileName} · {crawlTargetLabel(task)}
         </span>
-        <span className={`text-xs ${MUTED}`}>{formatDateTime(task.createdAt)}</span>
+        <span id={`${menuId}-status`} className="flex w-full flex-wrap items-center justify-between gap-2">
+          <ExtractionStatus task={task} />
+          <span className={`text-[11px] tabular-nums ${MUTED}`}>
+            {task.downloads == null
+              ? `${task.progress.files} files`
+              : `${processedDownloads(task)} / ${task.downloads.total}`}
+          </span>
+        </span>
+        <span className="w-full">
+          <ExtractionProgress task={task} />
+        </span>
       </button>
       <button
         ref={menu.triggerRef}
         type="button"
-        className={`absolute right-2 top-2 ${ICON_BUTTON_INLINE}`}
+        className={`absolute right-1.5 top-2 border-transparent bg-transparent ${ICON_BUTTON_INLINE}`}
         aria-label={label}
         title={label}
         aria-haspopup="menu"

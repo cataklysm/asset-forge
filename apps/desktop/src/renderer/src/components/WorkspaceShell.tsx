@@ -302,7 +302,7 @@ function screenFor(
     case 'jobs':
       return <JobsScreen />;
     case 'extractions':
-      return <ExtractionsScreen />;
+      return <ExtractionsScreen onOpenJobs={() => setView({ name: 'jobs' })} />;
     case 'settings':
       return <SettingsScreen />;
     default:

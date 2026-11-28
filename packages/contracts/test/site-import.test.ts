@@ -206,6 +206,7 @@ describe('site profile schemas', () => {
       'sites:retryCrawl',
       'sites:restartCrawl',
       'sites:removeCrawl',
+      'sites:clearCompletedCrawls',
       'sites:crawlProgress',
       'sites:cancelCrawl',
       'sites:import',

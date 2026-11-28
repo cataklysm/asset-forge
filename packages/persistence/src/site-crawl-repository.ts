@@ -18,7 +18,8 @@ import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { SQLiteUpdateSetSource } from 'drizzle-orm/sqlite-core';
 import { insertJob } from './job-repository.js';
-import { job, siteCrawl } from './schema.js';
+import { job, siteCrawl, siteCrawlDownload } from './schema.js';
+import { clearCompletedCrawls, crawlDownloadProgress, enqueueCrawlDownloads } from './site-crawl-downloads.js';
 
 /** A crawl stores URL metadata, never binary files; cap any one serialized snapshot at 32 MiB. */
 const MAX_CRAWL_JSON_BYTES = 32 * 1024 * 1024;
@@ -108,6 +109,9 @@ export function createSiteCrawlRepository(database: BetterSQLite3Database): Site
     get: (id) => getCrawl(database, id),
     remove: (id) => removeCrawl(database, id),
     restart: (id, profile, now) => restartCrawl(database, id, profile, now),
+    enqueueDownloads: (id, jobs, knownUrls, now) => enqueueCrawlDownloads(database, id, jobs, knownUrls, now),
+    downloadProgress: (id) => crawlDownloadProgress(database, id),
+    clearCompleted: () => clearCompletedCrawls(database),
     list: (page) => listCrawls(database, page),
     listSummaries: (page) => listSummaries(database, page),
     update: (id, patch) => updateCrawl(database, id, patch),
@@ -238,6 +242,7 @@ async function restartCrawl(
     ) {
       throw new InvalidOperationError('Cancel this extraction before restarting it');
     }
+    transaction.delete(siteCrawlDownload).where(eq(siteCrawlDownload.crawlId, id)).run();
     transaction
       .update(siteCrawl)
       .set({

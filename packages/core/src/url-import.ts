@@ -24,7 +24,7 @@ export interface UrlImportRequest {
    * They all share the lane `site` (the profile's site), whatever host a file is on, so the host limits them as
    * one queue.
    */
-  site?: { profileId: string; site: string; filter: SiteFilter };
+  site?: { profileId: string; site: string; filter: SiteFilter; crawlId?: string };
 }
 
 /**
@@ -54,8 +54,13 @@ export async function enqueueUrlImport(session: WorkspaceSession, request: UrlIm
     }
     jobs.push(downloadJob(session, url, request));
   }
-  if (jobs.length === 0) return result;
-  const inserted = await session.database.jobs.enqueue({ jobs, now: session.now().toISOString() });
+  const crawlId = request.site?.crawlId;
+  if (jobs.length === 0 && crawlId === undefined) return result;
+  const now = session.now().toISOString();
+  const inserted =
+    crawlId === undefined
+      ? await session.database.jobs.enqueue({ jobs, now })
+      : await session.database.siteCrawls.enqueueDownloads(crawlId, jobs, [...known], now);
   result.queued = inserted.length;
   result.alreadyQueued += jobs.length - inserted.length;
   return result;

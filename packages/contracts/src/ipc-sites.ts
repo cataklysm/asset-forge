@@ -85,6 +85,11 @@ export const siteChannels = {
     request: z.object({ crawlId: IdSchema }),
     response: z.object({ removed: z.boolean() }),
   },
+  /** Clears successfully completed imports only; preserves downloads, files and profiles. */
+  'sites:clearCompletedCrawls': {
+    request: EmptyRequestSchema,
+    response: z.object({ removed: z.number().int().min(0) }),
+  },
   /** The progress of the running crawl; null when none runs. */
   'sites:crawlProgress': {
     request: EmptyRequestSchema,

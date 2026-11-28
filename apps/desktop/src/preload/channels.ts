@@ -106,6 +106,7 @@ export const KNOWN_CHANNELS: Readonly<Record<IpcChannel, true>> = {
   'sites:retryCrawl': true,
   'sites:restartCrawl': true,
   'sites:removeCrawl': true,
+  'sites:clearCompletedCrawls': true,
   'tags:rename': true,
   'tags:suggest': true,
   'tags:usage': true,

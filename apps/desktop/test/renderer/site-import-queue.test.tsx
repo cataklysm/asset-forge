@@ -149,20 +149,15 @@ it('keeps importing disabled for a failed extraction with partial candidates', a
   expect(screen.getByRole('button', { name: /Retry|Resume/ })).toBeTruthy();
 });
 
-it('offers a deliberate way to remove an imported extraction without cancelling its downloads', async () => {
+it('removes an imported extraction directly without cancelling its downloads', async () => {
   const task = taskOf(profileOf(), { status: 'imported' });
   const { api, user } = setup([task]);
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Remove extraction' }));
-  const confirmation = await screen.findByRole('dialog', { name: 'Remove extraction?' });
-  expect(
-    within(confirmation).getByText('Only saved extraction results are removed. Queued downloads continue in Jobs.'),
-  ).toBeTruthy();
+  expect(screen.queryByRole('dialog', { name: 'Remove extraction?' })).toBeNull();
+  await waitFor(() => expect(within(taskList()).queryAllByRole('listitem')).toHaveLength(0));
   expect(requests(api, 'sites:cancelCrawl')).toEqual([]);
-  expect(requests(api, 'sites:removeCrawl')).toEqual([]);
-  await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
-  expect(within(taskList()).getAllByRole('listitem')).toHaveLength(1);
-  expect(requests(api, 'sites:removeCrawl')).toEqual([]);
+  expect(requests(api, 'sites:removeCrawl')).toEqual([{ crawlId: task.crawlId }]);
 });
 
 it('loads the selected extraction live profile for editing instead of the first profile', async () => {
@@ -196,13 +191,12 @@ it('restarts the same extraction using its captured destination rather than curr
   expect(state.tasks[0]).toMatchObject({ crawlId: task.crawlId, target: captured, status: 'queued', result: null });
 });
 
-it('removes only confirmed extraction history and leaves downloads and profile alone', async () => {
+it('clears extraction history immediately and leaves downloads and profile alone', async () => {
   const task = taskOf(profileOf(), { status: 'imported' });
   const { api, state, user } = setup([task]);
   await user.click(await within(taskList()).findByRole('button'));
   await user.click(await screen.findByRole('button', { name: 'Remove extraction' }));
-  const confirmation = await screen.findByRole('dialog', { name: 'Remove extraction?' });
-  await user.click(within(confirmation).getByRole('button', { name: 'Remove extraction' }));
+  expect(screen.queryByRole('dialog', { name: 'Remove extraction?' })).toBeNull();
   await waitFor(() => expect(within(taskList()).queryAllByRole('listitem')).toHaveLength(0));
   expect(state.tasks).toEqual([]);
   expect(requests(api, 'sites:removeCrawl')).toEqual([{ crawlId: task.crawlId }]);

@@ -127,6 +127,8 @@ export const SITE_TASK_STATUS = {
   failed: 'Failed',
   cancelled: 'Cancelled',
   imported: 'Import queued',
+  completed: 'Completed',
+  import_failed: 'Needs attention',
 } as const;
 
 /**

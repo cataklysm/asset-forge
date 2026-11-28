@@ -1,11 +1,11 @@
-import { Plus } from 'lucide-react';
+import { Eraser, Plus, ScanSearch } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SiteCrawlTaskSummary, UrlImportResult } from '@assetforge/contracts';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { MenuItem } from '../components/Menu';
 import { SiteCrawlReview, type SiteImportSelection } from '../components/SiteCrawlReview';
 import {
   cancelExtraction,
+  clearCompletedExtractions,
   importExtraction,
   openExtractionLogin,
   refreshExtractions,
@@ -15,6 +15,7 @@ import {
   type ExtractionPageActions,
 } from '../components/extraction-page-actions';
 import { SiteExtractionCard } from '../components/SiteExtractionCard';
+import { EXTRACTION_PRIMARY, EXTRACTION_SECONDARY } from '../components/ExtractionDetail';
 import { SiteImportDialog } from '../components/SiteImportDialog';
 import { CRAWL_TASK_PAGE_SIZE, useCrawlTask, useCrawlTasks } from '../components/site-crawl-tasks';
 import { runSiteAction, type SiteImportBusy } from '../components/site-import-actions';
@@ -23,8 +24,6 @@ import {
   CRAWL_CANCEL_LABEL,
   SITE_EXTRACT_AGAIN_LABEL,
   SITE_REMOVE_EXTRACTION_LABEL,
-  SITE_REMOVE_EXTRACTION_TITLE,
-  SITE_REMOVE_EXTRACTION_DESCRIPTION,
   SITE_REMOVE_ACTIVE_TITLE,
   SITE_REVIEW_EMPTY,
   SITE_REVIEW_TEXT,
@@ -40,7 +39,7 @@ import { ALERT, BORDER, BUTTON, MUTED } from '../ui';
  *
  * @returns an independently scrolling card list and exactly one selected extraction's details
  */
-export function ExtractionsScreen() {
+export function ExtractionsScreen({ onOpenJobs }: { onOpenJobs?(): void } = {}) {
   const tasks = useCrawlTasks();
   const jobs = useJobs();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,9 +47,9 @@ export function ExtractionsScreen() {
   const summary = tasks.items.find((task) => task.crawlId === selectedId);
   const selected = useCrawlTask(selectedId, summary === undefined ? undefined : JSON.stringify(summary), revision);
   const [configuration, setConfiguration] = useState<{ profileId?: string } | null>(null);
-  const [removing, setRemoving] = useState<SiteCrawlTaskSummary | null>(null);
   const [busy, setBusy] = useState<SiteImportBusy>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{ crawlId: string; result: UrlImportResult } | null>(null);
   const selection = useRef<{ crawlId: string; value: SiteImportSelection } | null>(null);
   const acting = useRef(false);
@@ -69,6 +68,7 @@ export function ExtractionsScreen() {
     setSelectedId(crawlId);
     setOutcome(null);
     setError(null);
+    setNotice(null);
   };
   const captureSelection = useCallback(
     (value: SiteImportSelection) => {
@@ -87,12 +87,26 @@ export function ExtractionsScreen() {
     imported: (crawlId, result) => {
       setSelectedId(crawlId);
       setOutcome({ crawlId, result });
+      if (result.invalid.length > 0) setNotice(`${result.invalid.length} addresses could not be queued.`);
+      else if (result.queued + result.alreadyImported + result.alreadyQueued === 0)
+        setNotice('No new files to import.');
     },
     removed: (crawlId) => {
-      setRemoving(null);
       setSelectedId((current) => (current === crawlId ? null : current));
       if (selection.current?.crawlId === crawlId) selection.current = null;
       setOutcome((current) => (current?.crawlId === crawlId ? null : current));
+    },
+    cleared: (removed) => {
+      const completedId = selected.task?.status === 'completed' ? selected.task.crawlId : null;
+      if (removed > 0 && completedId !== null) {
+        setSelectedId((current) => (current === completedId ? null : current));
+        if (selection.current?.crawlId === completedId) selection.current = null;
+      }
+      setNotice(
+        removed === 0
+          ? 'No completed imports to clear.'
+          : `Cleared ${removed} completed ${removed === 1 ? 'extraction' : 'extractions'}.`,
+      );
     },
   };
   const refresh = () => refreshExtractions(actionState);
@@ -100,8 +114,7 @@ export function ExtractionsScreen() {
     run('import', () => importExtraction(actionState, crawlId, explicit));
   const restart = (crawlId: string) => run('queue', () => restartExtraction(actionState, crawlId));
   const cancel = (crawlId: string) => run('cancel', () => cancelExtraction(actionState, crawlId));
-  const remove = () =>
-    removing === null ? Promise.resolve() : run('remove', () => removeExtraction(actionState, removing.crawlId));
+  const remove = (crawlId: string) => run('remove', () => removeExtraction(actionState, crawlId));
   const itemsOf = (task: SiteCrawlTaskSummary): MenuItem[] => {
     const active = ['queued', 'running', 'waiting'].includes(task.status);
     return [
@@ -111,16 +124,22 @@ export function ExtractionsScreen() {
         onSelect: () => void restart(task.crawlId),
       },
       {
-        label: SITE_REMOVE_EXTRACTION_LABEL,
+        label: ['imported', 'completed', 'import_failed'].includes(task.status)
+          ? 'Clear entry'
+          : SITE_REMOVE_EXTRACTION_LABEL,
         disabled: busy !== null || active,
         title: active ? SITE_REMOVE_ACTIVE_TITLE : undefined,
-        onSelect: () => setRemoving(task),
+        onSelect: () => void remove(task.crawlId),
       },
-      {
-        label: CRAWL_CANCEL_LABEL,
-        disabled: busy !== null || !active || task.progress.cancelling,
-        onSelect: () => void cancel(task.crawlId),
-      },
+      ...(active
+        ? [
+            {
+              label: CRAWL_CANCEL_LABEL,
+              disabled: busy !== null || !active || task.progress.cancelling,
+              onSelect: () => void cancel(task.crawlId),
+            },
+          ]
+        : []),
       ...(task.status === 'ready'
         ? [
             {
@@ -136,15 +155,28 @@ export function ExtractionsScreen() {
   const task = selected.task;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)]">
-        <aside aria-label={SITE_TASKS_LABEL} className={`flex min-h-0 min-w-0 flex-col gap-3 border-r p-4 ${BORDER}`}>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)]">
+        <aside
+          aria-label={SITE_TASKS_LABEL}
+          className={`flex min-h-0 min-w-0 flex-col gap-3 border-r bg-surface/30 p-4 ${BORDER}`}
+        >
           <div className="flex shrink-0 items-center justify-between gap-2">
-            <button type="button" className={BUTTON} onClick={() => setConfiguration({})}>
+            <button type="button" className={EXTRACTION_PRIMARY} onClick={() => setConfiguration({})}>
               <Plus size={16} aria-hidden />
               New extraction
             </button>
             <span className={`text-xs tabular-nums ${MUTED}`}>{tasks.total}</span>
           </div>
+          <button
+            type="button"
+            className={`self-start ${EXTRACTION_SECONDARY}`}
+            title="Clears completed imports; keeps files and Jobs"
+            disabled={busy !== null || tasks.total === 0}
+            onClick={() => void run('remove', () => clearCompletedExtractions(actionState))}
+          >
+            <Eraser size={13} aria-hidden />
+            Clear completed
+          </button>
           <ul
             aria-label={SITE_TASKS_LABEL}
             className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-1"
@@ -186,9 +218,12 @@ export function ExtractionsScreen() {
             </div>
           )}
         </aside>
-        <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-5">
+        <div className="flex min-h-0 min-w-0 flex-col px-6 py-5">
           {task === null ? (
-            <p className={`text-sm ${MUTED}`}>{SITE_REVIEW_EMPTY}</p>
+            <div className={`flex flex-1 flex-col items-center justify-center gap-3 text-center text-sm ${MUTED}`}>
+              <ScanSearch size={30} aria-hidden className="text-line-strong" />
+              <p>{selectedId === null ? SITE_REVIEW_EMPTY : 'Loading extraction…'}</p>
+            </div>
           ) : (
             <SiteCrawlReview
               key={task.crawlId}
@@ -200,15 +235,16 @@ export function ExtractionsScreen() {
               onCancel={() => void cancel(task.crawlId)}
               onLogIn={() => void run('login', () => openExtractionLogin(task))}
               onRetry={() => void run('retry', () => retryExtraction(actionState, task.crawlId))}
-              onRemove={() => setRemoving(task)}
+              onRemove={() => void remove(task.crawlId)}
               onEditProfile={() => setConfiguration({ profileId: task.profileId })}
               onExtractAgain={() => void restart(task.crawlId)}
               canExtractAgain
               profileHasUnsavedChanges={false}
+              onOpenJobs={onOpenJobs}
             />
           )}
           {outcome !== null && outcome.crawlId === selectedId && (
-            <p role="status" className="mt-3 text-sm">
+            <p role="status" className="sr-only">
               {siteImportOutcomeText(
                 outcome.result.queued,
                 outcome.result.alreadyImported,
@@ -241,15 +277,11 @@ export function ExtractionsScreen() {
           }}
         />
       )}
-      <ConfirmDialog
-        open={removing !== null}
-        title={SITE_REMOVE_EXTRACTION_TITLE}
-        description={SITE_REMOVE_EXTRACTION_DESCRIPTION}
-        confirmLabel={SITE_REMOVE_EXTRACTION_LABEL}
-        busy={busy === 'remove'}
-        onConfirm={() => void remove()}
-        onCancel={() => setRemoving(null)}
-      />
+      {notice !== null && (
+        <p role="status" className={`shrink-0 px-6 py-2 text-xs ${MUTED}`}>
+          {notice}
+        </p>
+      )}
     </div>
   );
 }

@@ -141,6 +141,13 @@
       "when": 1795869231760,
       "tag": "0019_panoramic_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1795879480394,
+      "tag": "0020_tranquil_nightshade",
+      "breakpoints": true
     }
   ]
 }

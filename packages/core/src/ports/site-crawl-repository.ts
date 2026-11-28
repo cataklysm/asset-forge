@@ -1,4 +1,10 @@
-import type { FileTarget, SiteCrawlProgress, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
+import type {
+  FileTarget,
+  SiteCrawlDownloads,
+  SiteCrawlProgress,
+  SiteCrawlResult,
+  SiteProfile,
+} from '@assetforge/contracts';
 import type { NewJob } from '../job-types.js';
 
 /** Saved discovery state, independent of the dialog and technical job retention. */
@@ -43,6 +49,12 @@ export interface SiteCrawlRepository {
    * @throws InvalidOperationError while its discovery job is active
    */
   restart(id: string, profile: SiteProfile, now: string): Promise<boolean>;
+  /** @param id existing crawl @param jobs new download requests @param knownUrls already imported URLs @param now import time @returns inserted job IDs; tracks shared pending downloads too */
+  enqueueDownloads(id: string, jobs: readonly NewJob[], knownUrls: readonly string[], now: string): Promise<string[]>;
+  /** @param id extraction @returns durable counters or null before tracking/import */
+  downloadProgress(id: string): Promise<SiteCrawlDownloads | null>;
+  /** @returns number of successfully completed import reviews cleared; never clears failures or running work */
+  clearCompleted(): Promise<number>;
   /** @param page pagination @returns newest saved tasks first */
   list(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlRecord[]; total: number }>;
   /** @param page pagination @returns lightweight queue metadata without result/checkpoint arrays */

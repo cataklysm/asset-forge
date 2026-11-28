@@ -70,6 +70,77 @@ afterEach(async () => {
 });
 
 describe('durable site crawl results', () => {
+  test('tracks already imported URLs as completed without creating a download job', async () => {
+    const row = { ...record(30), completedAt: T0 };
+    await db.siteCrawls.insert(row);
+    expect(await db.siteCrawls.enqueueDownloads(row.id, [], ['https://example.com/known.jpg'], T1)).toEqual([]);
+    expect(await db.siteCrawls.downloadProgress(row.id)).toEqual({
+      total: 1,
+      queued: 0,
+      running: 0,
+      waiting: 0,
+      succeeded: 1,
+      failed: 0,
+      cancelled: 0,
+    });
+    expect((await db.jobs.list({ limit: 10, offset: 0 })).total).toBe(0);
+    expect(await db.siteCrawls.clearCompleted()).toBe(1);
+    expect(await db.siteCrawls.get(row.id)).toBeNull();
+    expect(await db.siteCrawls.downloadProgress(row.id)).toBeNull();
+  });
+
+  test('rolls back download insertion, lineage and import markers if any request is invalid', async () => {
+    const row = record(30);
+    await db.siteCrawls.insert(row);
+    const job: NewJob = {
+      id: uuid(31),
+      type: 'file.download',
+      resourceClass: 'io',
+      fileId: null,
+      lane: profile.site,
+      payload: { v: 1, url: 'https://example.com/a.jpg', target: null, skipDuplicates: true },
+      dedupeKey: 'url:https://example.com/a.jpg',
+    };
+    await expect(
+      db.siteCrawls.enqueueDownloads(row.id, [job, { ...job, id: uuid(32), payload: {} }], [], T1),
+    ).rejects.toMatchObject({ code: 'validation_failed' });
+    expect(await db.jobs.get(job.id)).toBeNull();
+    expect(await db.siteCrawls.downloadProgress(row.id)).toBeNull();
+    expect(await db.siteCrawls.get(row.id)).toMatchObject({ importedAt: null, updatedAt: T0 });
+  });
+
+  test('preserves terminal download outcomes after deleting job history and keeps failures out of bulk cleanup', async () => {
+    for (const n of [30, 40]) {
+      await db.siteCrawls.insert(record(n));
+      await db.siteCrawls.enqueueDownloads(
+        uuid(n),
+        [
+          {
+            id: uuid(n + 1),
+            type: 'file.download',
+            resourceClass: 'io',
+            fileId: null,
+            lane: profile.site,
+            payload: { v: 1, url: `https://example.com/${n}.jpg`, target: null, skipDuplicates: true },
+            dedupeKey: `url:https://example.com/${n}.jpg`,
+          },
+        ],
+        [],
+        T0,
+      );
+      await db.jobs.claimNext({ resourceClass: 'io', types: ['file.download'], now: T0 });
+      await db.jobs.finish(uuid(n + 1), {
+        status: n === 30 ? 'succeeded' : 'failed',
+        errorCode: n === 30 ? null : 'download_forbidden',
+        now: T1,
+      });
+    }
+    await db.jobs.clearFinished();
+    expect(await db.siteCrawls.downloadProgress(uuid(30))).toMatchObject({ succeeded: 1, total: 1 });
+    expect(await db.siteCrawls.downloadProgress(uuid(40))).toMatchObject({ failed: 1, total: 1 });
+    expect(await db.siteCrawls.clearCompleted()).toBe(1);
+    expect(await db.siteCrawls.get(uuid(40))).not.toBeNull();
+  });
   test.each(['queued', 'running', 'retry_wait', 'waiting_remote'])(
     'refuses restart atomically while the technical job is %s',
     async (status) => {

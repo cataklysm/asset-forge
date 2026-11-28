@@ -21,6 +21,7 @@ export interface ExtractionPageActions {
   choose(crawlId: string): void;
   imported(crawlId: string, result: UrlImportResult): void;
   removed(crawlId: string): void;
+  cleared(removed: number): void;
 }
 
 /**
@@ -93,6 +94,19 @@ export async function removeExtraction(state: ExtractionPageActions, crawlId: st
   if (state.owner.disposed.current) return;
   state.removed(crawlId);
   if (state.tasks.items.length === 1 && state.tasks.page > 0) state.tasks.setPage(state.tasks.page - 1);
+  await refreshExtractions(state);
+}
+
+/**
+ * Clears completed imports in one request, preserving failures, active work and all imported content.
+ * @param state mounted page
+ * @returns after cleanup and refresh
+ */
+export async function clearCompletedExtractions(state: ExtractionPageActions): Promise<void> {
+  const { removed } = await call('sites:clearCompletedCrawls', {});
+  if (state.owner.disposed.current) return;
+  state.cleared(removed);
+  state.tasks.setPage(0);
   await refreshExtractions(state);
 }
 

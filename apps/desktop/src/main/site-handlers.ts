@@ -44,6 +44,7 @@ export type SiteHandlers = Pick<
   | 'sites:retryCrawl'
   | 'sites:restartCrawl'
   | 'sites:removeCrawl'
+  | 'sites:clearCompletedCrawls'
 >;
 
 const ALREADY_RUNNING = 'A site import test is already running';
@@ -111,6 +112,7 @@ export function createSiteHandlers(dependencies: SiteHandlerDependencies): SiteH
     'sites:retryCrawl': ({ crawlId }) => discovery.retry(crawlId),
     'sites:restartCrawl': ({ crawlId }) => discovery.restart(crawlId),
     'sites:removeCrawl': ({ crawlId }) => discovery.remove(crawlId),
+    'sites:clearCompletedCrawls': () => discovery.clearCompleted(),
     'sites:cancelCrawl': async ({ crawlId }) =>
       crawlId === undefined ? handlers.cancelCrawl() : discovery.cancel(crawlId),
     'sites:import': async (request) =>

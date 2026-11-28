@@ -112,6 +112,38 @@ describe('durable gallery discovery', () => {
     expect((await h!.ok('sites:list', {})).profiles).toHaveLength(1);
   });
 
+  it('does not invent completion for legacy imports without lineage and still allows clearing their review', async () => {
+    const saved = await open();
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    await ready(crawlId);
+    await h!.manager.read((session) =>
+      session.database.siteCrawls.update(crawlId, {
+        importedAt: session.now().toISOString(),
+        now: session.now().toISOString(),
+      }),
+    );
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({ status: 'imported', downloads: null });
+    expect(await h!.ok('sites:clearCompletedCrawls', {})).toEqual({ removed: 0 });
+    expect(await h!.ok('sites:removeCrawl', { crawlId })).toEqual({ removed: true });
+  });
+
+  it('keeps the result ready when every selected URL is refused before any download is queued', async () => {
+    const saved = await open();
+    const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
+    const task = await ready(crawlId);
+    const longUrl = `https://example.com/${'a'.repeat(2100)}.jpg`;
+    await h!.manager.read((session) =>
+      session.database.siteCrawls.update(crawlId, {
+        result: { ...task.result!, files: [longUrl] },
+        now: session.now().toISOString(),
+      }),
+    );
+    const result = await h!.ok('sites:import', { crawlId, selectedUrls: [longUrl] });
+    expect(result.queued).toBe(0);
+    expect(result.invalid).toHaveLength(1);
+    expect(await h!.ok('sites:getCrawl', { crawlId })).toMatchObject({ status: 'ready', downloads: null });
+  });
+
   it('keeps failed imports for review and follows a download retry back to completion', async () => {
     const saved = await open();
     const { crawlId } = await h!.ok('sites:enqueueCrawl', { profileId: saved.id, url: URL, target: null });
