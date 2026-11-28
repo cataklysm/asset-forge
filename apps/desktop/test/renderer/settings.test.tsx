@@ -201,7 +201,7 @@ it('a failed model list shows the fixed message of its code and keeps the stored
   install({ providers: [STORED] }, { ok: false, code: 'provider_unauthorized' });
   renderScreen();
   await waitFor(() => expect(field('Base URL').value).not.toBe(''));
-  expect((await screen.findAllByText(JOB_ERROR_MESSAGES.provider_unauthorized)).length).toBeGreaterThan(0);
+  expect(await screen.findAllByText(JOB_ERROR_MESSAGES.provider_unauthorized)).toHaveLength(1);
   expect(screen.getByText('key refused')).toBeTruthy();
   expect(select('Tagging model').value).toBe('vision-b');
 });

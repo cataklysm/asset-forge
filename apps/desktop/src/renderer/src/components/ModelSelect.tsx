@@ -12,6 +12,8 @@ interface Props {
   value: string | null;
   onChange(model: string | null): void;
   disabled?: boolean;
+  /** Shows why the list could not be loaded below the select; off where another select of the entry shows it. */
+  showFailure?: boolean;
 }
 
 /** One option of a model select. */
@@ -132,19 +134,20 @@ function ordered(models: readonly VisionModel[]): VisionModel[] {
  * The models of vision entry `providerId` (`ollama` or `openai`) as a select: models without vision cannot be chosen, and
  * `value` stays shown and selected even when it is not (or not yet) in the list. It preselects nothing itself.
  *
- * @param props the entry, the purpose and the selected model with its setter
+ * @param props the entry, the purpose, the selected model with its setter and whether a failure is shown
  */
-export function ModelSelect({ providerId, purpose, value, onChange, disabled = false }: Props) {
+export function ModelSelect({ providerId, purpose, value, onChange, disabled = false, showFailure = true }: Props) {
   const { models } = useProviders();
   const answer = providerId === null ? undefined : models[providerId];
   const list = answer !== undefined && answer.ok ? ordered(answer.models) : [];
+  const failed = showFailure && answer !== undefined && !answer.ok;
   return (
     <ModelListSelect
       label={MODEL_PURPOSE_LABELS[purpose]}
       providerId={providerId}
       options={list.map((model) => ({ name: model.name, disabled: model.vision === false }))}
       loading={providerId !== null && answer === undefined}
-      message={answer !== undefined && !answer.ok ? JOB_ERROR_MESSAGES[answer.code] : null}
+      message={failed ? JOB_ERROR_MESSAGES[answer.code] : null}
       value={value}
       onChange={onChange}
       disabled={disabled}

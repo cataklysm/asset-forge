@@ -178,6 +178,8 @@ export function VisionFields({ entryId, draft, locked, extraMessage, update }: V
           purpose="prompt"
           value={draft.promptModel}
           disabled={locked}
+          // Both selects read the same list: its failure is shown once, below the tagging model.
+          showFailure={false}
           onChange={(promptModel) => update({ promptModel })}
         />
       </div>
