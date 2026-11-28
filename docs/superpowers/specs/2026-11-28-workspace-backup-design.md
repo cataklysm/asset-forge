@@ -140,9 +140,11 @@ Channels (all work without an open workspace):
 
 - `workspace:backups { id | rootPath, pickFolder? }` → the backups found for that workspace in the local database
   directory (pre-migration copies), the configured or default place and, with `pickFolder`, a directory the user
-  picks in a native dialog opened by the main process: `{ backupId, createdAt, sizeBytes, appliedMigrations, origin:
-  'pre_migration' | 'regular', sameLineage }[]`, newest first. `backupId` is an opaque id bound to this listing in the
-  main process; the renderer never sends a path to be read, and a stale id answers `Load the backups again`.
+  picks in a native dialog opened by the main process: `{ backups, unreachable }`, where `backups` is
+  `{ backupId, createdAt, sizeBytes, appliedMigrations, origin: 'pre_migration' | 'regular', sameLineage }[]`, newest
+  first, and `unreachable` says that the configured or default place could not be listed. `backupId` is an opaque id
+  bound to this listing in the main process; the renderer never sends a path to be read, and a stale id answers
+  `Load the backups again`.
 - `workspace:restore { rootPath, backupId }` → a lifecycle step like open (jobs stopped, notifications sent, the copy
   check `rejectCopy` applied): the backup is copied to the local database directory as a temporary file and checked
   there (`quick_check`, workspace id equal to the manifest's, schema not newer than the app); then, with no connection
