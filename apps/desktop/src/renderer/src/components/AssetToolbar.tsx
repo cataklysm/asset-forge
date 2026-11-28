@@ -1,5 +1,6 @@
 import { LayoutGrid, List, type LucideIcon } from 'lucide-react';
 import { AssetStatusSchema, FileRoleSchema, type AssetType, type ProjectSummary } from '@assetforge/contracts';
+import { distinct } from '../format';
 import { ANALYSE_ASSETS_TITLE, FILE_KIND_OPTIONS, label } from '../labels';
 import { hasFilters, NO_FILTERS, type AssetFilters, type AssetView } from '../list-state';
 import { ALERT, ICON_BUTTON, SELECT } from '../ui';
@@ -69,7 +70,7 @@ export function AssetToolbar(props: Props) {
         <SearchRow {...props} />
         <FileRow filters={filters} onFilterChange={onFilterChange} />
       </FilterBar>
-      {[...new Set(errors)].map((message) => (
+      {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>

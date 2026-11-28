@@ -1,5 +1,6 @@
 import { AssetStatusSchema, FileRoleSchema, type AssetDetail, type FileRole } from '@assetforge/contracts';
 import { ApiError, call, describeError } from '../api';
+import { distinct } from '../format';
 import type { ImportProgressState } from '../import-progress';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
 import { ALERT, BUTTON, PAGE_TITLE, SELECT } from '../ui';
@@ -115,7 +116,7 @@ export function AssetHeader(props: Props) {
         <ImportControls {...props} />
       </div>
       <AssetFields {...props} />
-      {[...new Set(errors)].map((message) => (
+      {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>

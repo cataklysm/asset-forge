@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { RelationKindSchema, type AssetDetail, type RelationKind } from '@assetforge/contracts';
 import { call } from '../api';
 import { attempt } from '../attempt';
+import { distinct } from '../format';
 import { useLoad } from '../hooks/useLoad';
 import { relationLabel } from '../labels';
 import { ALERT, BORDER, BUTTON, MUTED, SELECT } from '../ui';
@@ -50,7 +51,7 @@ export function ProjectsPanel({ asset, assignments, disabled, onOpenProject }: P
 
   return (
     <div className="space-y-3 pt-4">
-      {[...new Set(errors)].map((message) => (
+      {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
@@ -142,7 +143,7 @@ export function RelationsPanel({ assetId, relations, disabled, onOpenAsset }: Re
 
   return (
     <div className="space-y-3 pt-4">
-      {[...new Set(errors)].map((message) => (
+      {distinct(errors).map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
