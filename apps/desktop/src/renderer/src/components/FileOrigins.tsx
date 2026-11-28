@@ -6,10 +6,15 @@ import { COPY_SOURCE_FAILED, COPY_SOURCE_TITLE, FILE_ORIGINS_LABEL } from '../la
 import { ALERT, ICON_BUTTON_INLINE, PANEL_TITLE } from '../ui';
 import { Link } from './Link';
 
+// The download origins of a file in the details column.
+
 /**
  * The addresses a file was downloaded from, in the file details column. An origin opens through
  * `files:openOrigin` with its ID only: no anchor ever carries the address. Nothing shows while the
  * list loads, when it is empty or when it could not be loaded.
+ *
+ * @param props the file
+ * @returns the section, or nothing
  */
 export function FileOrigins({ fileId }: { fileId: string }) {
   const [loaded, setLoaded] = useState<{ fileId: string; origins: readonly FileOrigin[] } | null>(null);
@@ -30,6 +35,7 @@ export function FileOrigins({ fileId }: { fileId: string }) {
     };
   }, [fileId]);
 
+  /** Copies an address to the clipboard. */
   async function copy(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -39,12 +45,13 @@ export function FileOrigins({ fileId }: { fileId: string }) {
     }
   }
 
+  /** Asks the main process to open an origin in the browser. */
   async function open(originId: string) {
     setFailure(null);
     try {
       await call('files:openOrigin', { fileId, originId });
-    } catch (e) {
-      setFailure(describeError(e));
+    } catch (caught) {
+      setFailure(describeError(caught));
     }
   }
 
