@@ -386,13 +386,28 @@ async function purgeFile(session: WorkspaceSession, control: JobControl, fileId:
   // An earlier restore whose commit failed has just been completed: the file is live again.
   if (file.deletedAt === null) throw new InvalidOperationError(NOT_IN_TRASH);
   await cancelJobsOnPurge(session, control, file.id);
-  if (!(await session.database.files.purge(file.id))) throw new InvalidOperationError(NOT_IN_TRASH);
-  await removePurgedBinary(session, file);
+  if (!(await session.database.files.purge(file.id))) await refuseUnpurged(session, file.id);
+  else await removePurgedBinary(session, file);
   return null;
 }
 
 /**
- * Removes the binary of a purged file from the trash directory, then its tombstone; best effort.
+ * Explains why the repository purged nothing: the row is gone (another purge won the race) or not in the trash.
+ *
+ * @param session the open workspace
+ * @param fileId the file
+ * @returns never resolves
+ * @throws NotFoundError when the row is gone, else InvalidOperationError
+ */
+async function refuseUnpurged(session: WorkspaceSession, fileId: string): Promise<never> {
+  await requireFile(session, fileId);
+  throw new InvalidOperationError(NOT_IN_TRASH);
+}
+
+/**
+ * Removes the binary of a purged file from the trash directory, then its tombstone; best effort. The tombstone
+ * stays when the storage is no longer reachable afterwards, because a dropped share answers `remove` without an
+ * error and without removing anything.
  *
  * @param session the open workspace
  * @param file the purged file as it was read
@@ -402,6 +417,7 @@ async function removePurgedBinary(session: WorkspaceSession, file: FileRecord): 
   if (!file.relativePath.startsWith(`${TRASH_DIR}/`)) return;
   try {
     await session.storage.remove(file.relativePath);
+    if (!(await session.storage.isReachable())) return;
     await session.database.files.forgetPurge(file.id);
   } catch {
     // The tombstone stays; the sweep on the next open removes the binary and then the tombstone.
