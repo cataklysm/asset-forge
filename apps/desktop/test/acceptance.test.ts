@@ -1000,7 +1000,8 @@ describe('ZIP import acceptance', () => {
         ['liar.png', 'failed'],
         ['honest.png', 'complete'],
       ]);
-      expect(results[0]!.error).toEqual(expect.any(String));
+      // The size check fails while the entry is streamed, which the import answers with its generic fixed text.
+      expect(results[0]!.error).toBe('Import failed');
       expect(results[0]!.error).not.toContain(base);
       expect(results[1]!.error).toBeNull();
       expect(await readFile(join(workspaceRoot, results[1]!.file!.relativePath), 'utf8')).toBe('honest pixels');
