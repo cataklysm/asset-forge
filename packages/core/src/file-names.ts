@@ -25,7 +25,9 @@ export function lastPathSegment(path: string): string {
  * @returns the safe file name
  */
 export function sanitizeFileName(name: string): string {
-  const replaced = lastPathSegment(name).replace(/[. ]+$/, '').replace(/[^\p{L}\p{N}._-]+/gu, '_');
+  const replaced = lastPathSegment(name)
+    .replace(/[. ]+$/, '')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '_');
   const cleaned = cleanStem(replaced);
   if (cleaned === '') return PLACEHOLDER_STEM;
   return truncateKeepingExtension(cleaned);
