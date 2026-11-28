@@ -229,7 +229,8 @@ function cancelHookOf(handlers: Record<string, JobHandler>): { settled?: (job: J
  * @returns the usual delay for the attempt, or the asked wait when it is longer
  */
 function retryDelayMs(attempt: number, retryAfterMs: number | null): number {
-  const usual = RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length) - 1] ?? RETRY_DELAYS_MS[1];
+  // `attempt` is at least 1 after a claim; the clamp keeps the index inside the table either way.
+  const usual = RETRY_DELAYS_MS[Math.min(Math.max(attempt, 1), RETRY_DELAYS_MS.length) - 1]!;
   return retryAfterMs === null ? usual : Math.max(usual, retryAfterMs);
 }
 
@@ -250,9 +251,7 @@ class JobScheduler {
   private started = false;
   /** `stop` was called; nothing new is claimed. */
   private stopping = false;
-  /** The running or finished start, which `stop` waits for. */
-  private startDone: Promise<void> = Promise.resolve();
-  /** The start in progress or done, so a second `start` waits for it. */
+  /** The start in progress or done, so a second `start` and `stop` wait for it; null before the first `start`. */
   private starting: Promise<void> | null = null;
   /** The running or last run of passes, which `start` and `stop` wait for. */
   private passDone: Promise<void> = Promise.resolve();
@@ -284,7 +283,7 @@ class JobScheduler {
     if (this.stopping) return;
     // Set synchronously, so a second call while recovery runs waits for it instead of recovering again.
     if (this.starting) return this.starting;
-    this.startDone = this.starting = this.recoverThenClaim();
+    this.starting = this.recoverThenClaim();
     await this.starting;
   }
 
@@ -306,20 +305,37 @@ class JobScheduler {
    * @returns resolves once the cancel is written; a running job is only aborted, its end is written by its run
    */
   async cancel(jobId: string, cancelOptions?: CancelOptions): Promise<void> {
-    if (this.stopping) return;
+    const pendingOnly = cancelOptions?.pendingOnly === true;
     const run = this.active.get(jobId);
+    if (this.stopping) {
+      // The stop has aborted the run already; marking it makes its end `cancelled` instead of a requeue.
+      if (run && !pendingOnly && !run.settled) run.cancelled = true;
+      return;
+    }
     // A pending-only cancel goes to the database, which ends the job only while it is still pending.
-    if (run && cancelOptions?.pendingOnly !== true) {
+    if (run && !pendingOnly) {
       if (!run.settled) {
-        run.cancelled = true;
-        run.controller.abort();
+        this.abortRun(run);
         return;
       }
       // The handler is done and keeps its outcome, but a retry it is still storing is cancelled once stored.
       await this.tracked(this.cancelAfterRun(jobId, run));
       return;
     }
-    await this.tracked(this.cancelPendingJob(jobId));
+    const cancelled = await this.tracked(this.cancelPendingJob(jobId));
+    // A pass may have claimed the job while the cancel was written and launched it since.
+    const launched = this.active.get(jobId);
+    if (!cancelled && !pendingOnly && launched && !launched.settled) this.abortRun(launched);
+  }
+
+  /**
+   * Marks a run cancelled and aborts its handler; its end is written by the run.
+   *
+   * @param run the active run
+   */
+  private abortRun(run: ActiveRun): void {
+    run.cancelled = true;
+    run.controller.abort();
   }
 
   /**
@@ -341,7 +357,7 @@ class JobScheduler {
     this.stopping = true;
     this.cancelTimer();
     for (const run of this.active.values()) run.controller.abort();
-    await this.startDone;
+    await this.starting;
     await this.passDone;
     // A pass that was in progress may have launched a run before it saw `stopping`.
     for (const run of this.active.values()) run.controller.abort();
@@ -408,43 +424,61 @@ class JobScheduler {
    * One pass: claims and launches jobs per class until the class is at its total or has nothing claimable, then
    * arms the timer for the earliest `run_after` of the lanes that may claim.
    *
-   * @returns resolves once the pass is done; returns early once a stop began
+   * @returns resolves once the pass is done; returns early once a stop began. A class that fails is logged and
+   *   tried again after the first retry delay, while the other classes are still served.
    */
   private async pass(): Promise<void> {
     let earliest: number | null = null;
     for (const [resourceClass, types] of this.typesOf) {
       if (types.length === 0 || this.config.limits[resourceClass] <= 0) continue;
-      // The excluded lanes are worked out again before every claim: a run may end or a lane pause in between.
-      let isFull = false;
-      for (;;) {
-        if (this.stopping) return;
-        // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
-        isFull = this.atTotal(resourceClass);
-        if (isFull) break;
-        const job = await this.config.jobs.claimNext({
-          resourceClass,
-          types,
-          now: this.iso(),
-          excludeLanes: this.excludedLanes(resourceClass),
-        });
-        if (!job) break;
-        if (this.stopping) {
-          await this.config.jobs.release(job.id, this.iso());
-          return;
-        }
-        this.launch(job);
-        this.changed(job.id);
+      let next: number | null;
+      try {
+        next = await this.passClass(resourceClass, types);
+      } catch (cause) {
+        this.config.log('Job scheduler pass failed', cause);
+        next = this.config.now().getTime() + RETRY_DELAYS_MS[0]!;
       }
       if (this.stopping) return;
-      if (isFull) continue;
-      // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
-      // resume; only the other lanes need the timer.
-      const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
-      if (next !== null) earliest = Math.min(earliest ?? Infinity, Date.parse(next));
+      if (next !== null) earliest = Math.min(earliest ?? Infinity, next);
     }
-    if (this.stopping) return;
     this.cancelTimer();
     if (earliest !== null) this.armTimer(earliest);
+  }
+
+  /**
+   * The part of a pass for one class: claims and launches its jobs until it is at its total or has nothing
+   * claimable.
+   *
+   * @param resourceClass the class
+   * @param types the job types of the class
+   * @returns the earliest `run_after` of the lanes that may claim, in milliseconds since the epoch; null when the
+   *   class needs no timer or a stop began
+   */
+  private async passClass(resourceClass: ResourceClass, types: string[]): Promise<number | null> {
+    // The excluded lanes are worked out again before every claim: a run may end or a lane pause in between.
+    for (;;) {
+      if (this.stopping) return null;
+      // A class at its total gets a pass when one of its runs ends; it needs no timer meanwhile.
+      if (this.atTotal(resourceClass)) return null;
+      const job = await this.config.jobs.claimNext({
+        resourceClass,
+        types,
+        now: this.iso(),
+        excludeLanes: this.excludedLanes(resourceClass),
+      });
+      if (!job) break;
+      if (this.stopping) {
+        await this.config.jobs.release(job.id, this.iso());
+        return null;
+      }
+      this.launch(job);
+      this.changed(job.id);
+    }
+    if (this.stopping) return null;
+    // A full lane gets a pass when one of its jobs ends and a paused one when the caller wakes the scheduler after
+    // resume; only the other lanes need the timer.
+    const next = await this.config.jobs.nextRunAfter(types, this.excludedLanes(resourceClass));
+    return next === null ? null : Date.parse(next);
   }
 
   /**
@@ -531,6 +565,10 @@ class JobScheduler {
     if (outcome.ok) return this.finish(job, { status: 'succeeded' });
     const { error } = outcome;
     if (this.stopping) {
+      // The abort of the stop itself is expected; anything else foreign is a handler fault worth seeing.
+      if (!(error instanceof JobError) && error !== run.controller.signal.reason) {
+        this.config.log(`Job ${job.id} of type ${job.type} failed while stopping`, error);
+      }
       // Work with an unclear outcome is never put back: a later run could repeat it. A run that ended with a final
       // code keeps it; one that was cut off, or could have been retried but for the stop, takes the interrupted code.
       if (this.config.handlers[job.type]!.onInterrupted === 'fail') {
@@ -651,12 +689,12 @@ class JobScheduler {
    * Cancels one job in the database, which ends it only while it is pending.
    *
    * @param jobId the job
-   * @returns resolves once the cancel is written
+   * @returns whether the job was pending and is cancelled now
    */
-  private async cancelPendingJob(jobId: string): Promise<void> {
-    if ((await this.config.jobs.cancelPending({ id: jobId, now: this.iso(), ...this.cancelHook })) > 0) {
-      this.changed(jobId);
-    }
+  private async cancelPendingJob(jobId: string): Promise<boolean> {
+    if ((await this.config.jobs.cancelPending({ id: jobId, now: this.iso(), ...this.cancelHook })) === 0) return false;
+    this.changed(jobId);
+    return true;
   }
 
   /**
@@ -701,8 +739,7 @@ class JobScheduler {
       }
       // Cancelled by an earlier call; not counted again.
       if (run.cancelled) continue;
-      run.cancelled = true;
-      run.controller.abort();
+      this.abortRun(run);
       running++;
     }
     return { running, ending, endingIds };

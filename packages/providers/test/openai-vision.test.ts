@@ -1,4 +1,3 @@
-import { createServer } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { JobError } from '@assetforge/core';
 import type { JobErrorCode } from '@assetforge/contracts';
@@ -14,6 +13,7 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createOpenAiVision, OPENAI_PROVIDER, stripThinking, type OpenAiVisionOptions } from '../src/index.js';
+import { refusedUrl, releaseRefusedPorts } from './refused-port.js';
 
 const KEY = 'test-key-not-real';
 const image = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x10, 0x7f, 0x80, 0xfe]);
@@ -28,6 +28,7 @@ const signal = () => new AbortController().signal;
 let provider: MockProvider | undefined;
 
 afterEach(async () => {
+  await releaseRefusedPorts();
   await provider?.close();
   provider = undefined;
 });
@@ -92,15 +93,6 @@ function recording(answer: (call: Call) => Response | Promise<Response>): { fetc
 
 function bodyOf(call: Call): Record<string, unknown> {
   return JSON.parse(String(call.init.body)) as Record<string, unknown>;
-}
-
-async function closedPortUrl(): Promise<string> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return `http://127.0.0.1:${port}`;
 }
 
 const STUB_BASE = 'http://127.0.0.1:1/v1';
@@ -487,7 +479,7 @@ describe('transport parity with the ollama adapter', () => {
   });
 
   it('maps a closed port to provider_unreachable', async () => {
-    const url = await closedPortUrl();
+    const url = await refusedUrl();
     const { adapter, reports } = vision({ baseUrl: `${url}/v1` });
     await expectCode(analyze(adapter), 'provider_unreachable');
     expect(reports).toEqual([['provider_unreachable', null]]);

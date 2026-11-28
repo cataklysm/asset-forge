@@ -206,6 +206,32 @@ describe('file-system error mapping', () => {
     await expect(storage.writeText('workspace.json', 'x')).rejects.toBeInstanceOf(StorageFullError);
   });
 
+  it('refuses an existing move target with a fixed message without the path', async () => {
+    await storage.writeText('inbox/secret-a.txt', 'A');
+    await storage.writeText('inbox/secret-b.txt', 'B');
+    const error = await storage.move('inbox/secret-a.txt', 'inbox/secret-b.txt').catch((e: unknown) => e);
+    expect((error as NodeJS.ErrnoException).code).toBe('EEXIST');
+    expect((error as Error).message).toBe('The target already exists');
+  });
+
+  it('removes the target directories it created when the rename fails', async () => {
+    await storage.writeText('inbox/a.txt', 'A');
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(errno('EBUSY', path.join(root, 'inbox', 'a.txt')));
+    await expect(storage.move('inbox/a.txt', 'assets/new-asset/sub/a.txt')).rejects.toThrow();
+    expect(await storage.list('assets')).toEqual([]);
+    expect((await fs.stat(path.join(root, 'assets'))).isDirectory()).toBe(true);
+    expect(await storage.readText('inbox/a.txt')).toBe('A');
+  });
+
+  it('keeps an existing empty target directory when the rename fails', async () => {
+    await storage.writeText('inbox/a.txt', 'A');
+    await fs.mkdir(path.join(root, 'assets', 'existing'));
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(errno('EBUSY', path.join(root, 'inbox', 'a.txt')));
+    await expect(storage.move('inbox/a.txt', 'assets/existing/new/a.txt')).rejects.toThrow();
+    expect(await storage.list('assets/existing')).toEqual([]);
+    expect((await fs.stat(path.join(root, 'assets', 'existing'))).isDirectory()).toBe(true);
+  });
+
   it('passes other errors through unchanged', async () => {
     const cause = errno('EBUSY', path.join(root, 'inbox', 'a.txt'));
     await storage.writeText('inbox/a.txt', 'A');
@@ -312,6 +338,14 @@ describe('path escape', () => {
     for (const p of ['', '.', './/.']) {
       await expect(storage.readText(p)).rejects.toThrow(new PathEscapeError('Path resolves to the workspace root'));
     }
+  });
+
+  it('accepts names that only start with two dots', async () => {
+    await storage.writeText('..config', 'A');
+    await storage.writeText('inbox/..b.txt', 'B');
+    expect(await storage.readText('..config')).toBe('A');
+    expect(await storage.readText('inbox/..b.txt')).toBe('B');
+    expect(await fs.readFile(path.join(root, '..config'), 'utf8')).toBe('A');
   });
 
   it('rejects both arguments of move', async () => {

@@ -112,12 +112,24 @@ describe('createWorkerPool', () => {
     expect(await p.run(job('b'))).toBe('ok');
   });
 
-  it('a worker that fails to start fails its job and logs one line without the path', async () => {
+  it('logs the same failure again only after a worker answered in between', async () => {
+    const log = vi.fn<(line: string) => void>();
+    const p = pool({ workerUrl: crashUrl, size: 1, timeoutMs: 5_000, log });
+    expect(await p.run(job('a-throw'))).toBe('none');
+    expect(await p.run(job('b-throw'))).toBe('none');
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(await p.run(job('c'))).toBe('ok');
+    expect(await p.run(job('d-throw'))).toBe('none');
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+
+  it('a worker that fails to start fails every job and logs one line without the path', async () => {
     const log = vi.fn<(line: string) => void>();
     const p = pool({ workerUrl: brokenUrl, size: 1, timeoutMs: 5_000, log });
     expect(await p.run(job('a'))).toBe('none');
     expect(await p.run(job('b'))).toBe('none');
-    expect(log).toHaveBeenCalledTimes(2);
+    expect(await p.run(job('c'))).toBe('none');
+    expect(log).toHaveBeenCalledTimes(1);
     for (const [line] of log.mock.calls) {
       expect(line).not.toContain('\n');
       expect(line).not.toContain('broken-worker');

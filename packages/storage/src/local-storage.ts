@@ -156,17 +156,25 @@ export class LocalFileSystemStorage implements Storage {
    *
    * @param from the workspace path of the file
    * @param to the workspace path it moves to
-   * @returns resolves once it moved; rejects with an `EEXIST` error when the target exists
+   * @returns resolves once it moved; rejects with an `EEXIST` error when the target exists. A failed rename removes
+   *   the directories this call created for the target again.
    */
   move(from: string, to: string): Promise<void> {
     return this.guarded(to, async () => {
       const sourcePath = await this.resolve(from);
       const targetPath = await this.resolve(to);
       if (await this.pathExists(targetPath)) {
-        throw Object.assign(new Error(`Target already exists: ${to}`), { code: 'EEXIST' });
+        // A fixed text: the caller maps it to its own message, and a path never belongs in an error.
+        throw Object.assign(new Error('The target already exists'), { code: 'EEXIST' });
       }
+      const created = await missingDirectories(path.dirname(targetPath));
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.rename(sourcePath, targetPath);
+      try {
+        await fs.rename(sourcePath, targetPath);
+      } catch (error) {
+        await removeEmptyDirectories(created);
+        throw error;
+      }
     });
   }
 
@@ -333,5 +341,45 @@ export class LocalFileSystemStorage implements Storage {
       throw new PathEscapeError('Path escapes the workspace');
     }
     return target;
+  }
+}
+
+/**
+ * The directories that a recursive `mkdir` of `directory` would create: `directory` and its parents up to the
+ * nearest one that exists. Their own answer of `mkdir` is not used because on Windows it comes back as a `\\?\`
+ * path.
+ *
+ * @param directory an absolute path
+ * @returns the missing directories, the deepest first; empty when `directory` exists
+ */
+async function missingDirectories(directory: string): Promise<string[]> {
+  const missing: string[] = [];
+  for (let current = directory; ; current = path.dirname(current)) {
+    try {
+      await fs.lstat(current);
+      return missing;
+    } catch (error) {
+      if (!isNotFound(error)) return missing;
+    }
+    if (path.dirname(current) === current) return missing;
+    missing.push(current);
+  }
+}
+
+/**
+ * Removes directories that a failed move created, in the given order. Only empty directories go (`rmdir`), so
+ * whatever another writer put there in the meantime stays; the first failure ends the walk, and no failure is
+ * reported.
+ *
+ * @param directories the directories, the deepest first
+ * @returns resolves once the walk ended
+ */
+async function removeEmptyDirectories(directories: readonly string[]): Promise<void> {
+  for (const directory of directories) {
+    try {
+      await fs.rmdir(directory);
+    } catch {
+      return;
+    }
   }
 }

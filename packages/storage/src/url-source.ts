@@ -1,5 +1,4 @@
 import dns from 'node:dns';
-import net from 'node:net';
 import {
   DOWNLOAD_HEADER_TIMEOUT_MS,
   DOWNLOAD_IDLE_TIMEOUT_MS,
@@ -10,8 +9,8 @@ import {
   type RemoteFileSource,
   type RemoteOpenOptions,
 } from '@assetforge/core';
-import { bounded } from './bounded.js';
-import { bareHost, fetchHop, type HopHeaders } from './hop-request.js';
+import { fetchHop, type HopHeaders } from './hop-request.js';
+import { askHopHeaders, parseHop, vetHopHost } from './hop-rules.js';
 import { isPublicAddress } from './public-address.js';
 import { failure } from './remote-failure.js';
 
@@ -97,7 +96,7 @@ async function openUrl(
     // An abort between two hops fails at once instead of waiting for the next hop's timeout.
     signal.throwIfAborted();
     const hopDeadline = Math.min(deadline, Date.now() + config.headerTimeoutMs);
-    const address = await vetHost(current, config, signal, hopDeadline);
+    const address = await vetHopHost(current, config, signal, hopDeadline);
     const headers = await hopHeaders(current, headersFor, config, signal, hopDeadline);
     const outcome = await fetchHop(
       { url: current, address, headers },
@@ -107,45 +106,6 @@ async function openUrl(
     if (hop >= config.maxRedirects || outcome.location === undefined) throw failure('rejected');
     current = parseHop(outcome.location, current);
   }
-}
-
-/**
- * The URL rule of one hop: parsable, `http:` or `https:`, no user info.
- *
- * @param text the URL or redirect target
- * @param base the URL a relative target is resolved against
- * @returns the parsed URL; throws `rejected` otherwise
- */
-function parseHop(text: string, base?: URL): URL {
-  let url: URL;
-  try {
-    url = new URL(text, base);
-  } catch {
-    throw failure('rejected');
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw failure('rejected');
-  if (url.username !== '' || url.password !== '') throw failure('rejected');
-  return url;
-}
-
-/**
- * Vets the host of a hop: an IP literal, or every address it resolves to, must pass the address policy.
- *
- * @param url the hop
- * @param config supplies the resolver and the address policy
- * @param signal aborts the lookup with its reason
- * @param until the hop's deadline
- * @returns the address the hop connects to: the literal, or the first of the resolved addresses once all of them
- *   passed; rejects `address_refused`, or `unreachable` when the host does not resolve
- */
-async function vetHost(url: URL, config: UrlSourceConfig, signal: AbortSignal, until: number): Promise<string> {
-  const host = bareHost(url);
-  const addresses = net.isIP(host) !== 0 ? [host] : await bounded(config.lookup(host), signal, until);
-  if (addresses.length === 0) throw failure('unreachable');
-  if (!addresses.every((address) => typeof address === 'string' && config.allowAddress(address))) {
-    throw failure('address_refused');
-  }
-  return addresses[0]!;
 }
 
 /**
@@ -167,12 +127,7 @@ async function hopHeaders(
   until: number,
 ): Promise<HopHeaders> {
   if (headersFor === undefined) return { userAgent: config.userAgent, cookie: null };
-  // `bounded` turns a rejection into `unreachable` without a cause and an abort into the abort reason.
-  const answer = await bounded(
-    Promise.resolve().then(() => headersFor(url.href)),
-    signal,
-    until,
-  );
+  const answer = await askHopHeaders(url, headersFor, signal, until);
   return {
     userAgent: sendable(answer?.userAgent) ?? config.userAgent,
     cookie: sendable(answer?.cookie),

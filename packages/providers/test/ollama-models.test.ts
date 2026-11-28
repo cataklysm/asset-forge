@@ -220,6 +220,48 @@ describe('listModels', () => {
     expect(((await listed) as JobError).code).toBe('provider_timeout');
   });
 
+  it.each([0, -1, Number.NaN])('takes the default list bound for a listTimeoutMs of %d', async (listTimeoutMs) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const stub = server(
+      () => hanging(stub.calls[0]!.init),
+      () => json(200, {}),
+    );
+    const listed = failureOf(
+      createOllamaVision({ baseUrl: BASE, fetch: stub.fetch, timeoutMs: 5_000, listTimeoutMs }).listModels(signal()),
+    );
+    let settled = false;
+    void listed.finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(((await listed) as JobError).code).toBe('provider_timeout');
+  });
+
+  it('caps a listTimeoutMs beyond the largest timer delay instead of timing out at once, and ends on a caller abort without a report', async () => {
+    const stub = server(
+      () => hanging(stub.calls[0]!.init),
+      () => json(200, {}),
+    );
+    const caller = new AbortController();
+    const reports: string[] = [];
+    const listed = failureOf(
+      createOllamaVision({
+        baseUrl: BASE,
+        fetch: stub.fetch,
+        listTimeoutMs: 3_000_000_000,
+        onFailure: (code) => reports.push(code),
+      }).listModels(caller.signal),
+    );
+    let settled = false;
+    void listed.finally(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    const reason = new Error('caller gone');
+    caller.abort(reason);
+    expect(await listed).toBe(reason);
+    expect(reports).toEqual([]);
+  });
+
   it.each([
     [401, 'provider_unauthorized'],
     [403, 'provider_unauthorized'],

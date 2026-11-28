@@ -5,6 +5,7 @@ import {
   MOCK_EDIT_MODEL,
   MOCK_FENCED_MODEL,
   MOCK_LEGACY_MODEL,
+  MOCK_MAX_RECORDED,
   MOCK_MODEL,
   MOCK_PROMPT_BUSY,
   MOCK_PROMPT_FAIL,
@@ -52,6 +53,15 @@ afterEach(async () => {
 });
 
 describe('mock provider', () => {
+  it('keeps only the latest recorded requests in the same array', async () => {
+    const mock = await start({ maxRecorded: 2 });
+    const recorded = mock.requests;
+    for (const path of ['/a', '/b', '/c']) await (await fetch(`${mock.url}${path}`)).text();
+    expect(mock.requests).toBe(recorded);
+    expect(mock.requests.map((entry) => entry.path)).toEqual(['/b', '/c']);
+    expect(MOCK_MAX_RECORDED).toBeGreaterThanOrEqual(100);
+  });
+
   it('lists a vision model, a text model and one without capabilities', async () => {
     const { url } = await start();
     const response = await fetch(`${url}/api/tags`);

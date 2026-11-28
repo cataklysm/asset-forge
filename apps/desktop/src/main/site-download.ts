@@ -1,5 +1,4 @@
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { belongsToSite } from '@assetforge/contracts';
 import {
   DOWNLOAD_HEADER_TIMEOUT_MS,
@@ -11,7 +10,7 @@ import {
   type RemoteFileSource,
   type RemoteOpenOptions,
 } from '@assetforge/core';
-import { bounded, isPublicAddress } from '@assetforge/storage';
+import { askHopHeaders, isPublicAddress, parseHop, vetHopHost } from '@assetforge/storage';
 import { failure } from './session-failure.js';
 import { sessionHop } from './session-hop.js';
 import type { SessionNetRequest } from './session-request.js';
@@ -144,26 +143,7 @@ async function openThroughSession(
 }
 
 /**
- * The URL rule of one hop: parsable, `http:` or `https:`, no user info.
- *
- * @param text the URL or redirect target
- * @param base the URL a relative target is resolved against
- * @returns the parsed URL; throws `rejected` otherwise
- */
-function parseHop(text: string, base?: URL): URL {
-  let url: URL;
-  try {
-    url = new URL(text, base);
-  } catch {
-    throw failure('rejected');
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw failure('rejected');
-  if (url.username !== '' || url.password !== '') throw failure('rejected');
-  return url;
-}
-
-/**
- * Vets the host of a session hop the way the Node source does: an IP literal or every resolved address must pass
+ * Vets the host of a session hop with the rule of the Node source: an IP literal or every resolved address must pass
  * `isPublicAddress`. The session request itself is not pinned to the vetted address; the session's request filter
  * vets it a second time.
  *
@@ -174,19 +154,7 @@ function parseHop(text: string, base?: URL): URL {
  * @returns nothing; throws `address_refused`, or `unreachable` when the host does not resolve
  */
 async function vetHost(url: URL, config: SessionDownloadConfig, signal: AbortSignal, until: number): Promise<void> {
-  let host = url.hostname;
-  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-  const addresses =
-    isIP(host) !== 0
-      ? [host]
-      : await bounded(
-          Promise.resolve().then(() => config.lookup(host)),
-          signal,
-          until,
-        );
-  if (addresses.length === 0) throw failure('unreachable');
-  if (!addresses.every((address) => typeof address === 'string' && isPublicAddress(address)))
-    throw failure('address_refused');
+  await vetHopHost(url, { lookup: config.lookup, allowAddress: isPublicAddress }, signal, until);
 }
 
 /**
@@ -200,11 +168,5 @@ async function vetHost(url: URL, config: SessionDownloadConfig, signal: AbortSig
  * @returns nothing; a rejecting callback fails the hop `unreachable`
  */
 async function askHeaders(url: URL, options: RemoteOpenOptions, signal: AbortSignal, until: number): Promise<void> {
-  const headersFor = options.headersFor;
-  if (headersFor === undefined) return;
-  await bounded(
-    Promise.resolve().then(() => headersFor(url.href)),
-    signal,
-    until,
-  );
+  await askHopHeaders(url, options.headersFor, signal, until);
 }

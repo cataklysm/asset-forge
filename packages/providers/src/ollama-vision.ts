@@ -1,6 +1,7 @@
 import { ModelNameSchema, type JobErrorCode, type VisionRequestOptions } from '@assetforge/contracts';
 import { JobError, type VisionProvider } from '@assetforge/core';
 import { createJsonRequester, type JsonRequest } from './json-request.js';
+import { listTimeoutOf, MAX_TIMER_MS } from './list-timeout.js';
 import { composeBody, DEFAULT_REQUEST_OPTIONS, ollamaFixedFields } from './request-options.js';
 
 /** The provider id of an Ollama entry, part of the analysis fingerprint. */
@@ -19,12 +20,6 @@ const SHOW_CONCURRENCY = 4;
 /** The time limit of one `/api/show` request. */
 const SHOW_TIMEOUT_MS = 10_000;
 
-/** Upper bound for the whole `listModels` call (`/api/tags` plus every `/api/show`). */
-export const LIST_MODELS_TIMEOUT_MS = 10_000;
-
-/** Largest delay `setTimeout` accepts; the deadline of `listModels` is the real bound of its `/api/tags` call. */
-const MAX_TIMER_MS = 2_147_483_647;
-
 /** What `createOllamaVision` is configured with. */
 export interface OllamaVisionOptions {
   /** The entry's base URL; the key goes to this origin only. */
@@ -33,7 +28,10 @@ export interface OllamaVisionOptions {
   apiKey?: () => string | null;
   /** The time limit of a chat request; default 120 s. */
   timeoutMs?: number;
-  /** Bound for the whole `listModels` call; default `min(timeoutMs, LIST_MODELS_TIMEOUT_MS)`. */
+  /**
+   * Bound for the whole `listModels` call, capped at the largest timer delay; default (also for a value that is not
+   * finite or below 1) `min(timeoutMs, LIST_MODELS_TIMEOUT_MS)`.
+   */
   listTimeoutMs?: number;
   /** Replaces the global fetch, for tests. */
   fetch?: typeof fetch;
@@ -143,7 +141,7 @@ class OllamaVision {
    */
   constructor(private readonly options: OllamaVisionOptions) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.listTimeoutMs = options.listTimeoutMs ?? Math.min(this.timeoutMs, LIST_MODELS_TIMEOUT_MS);
+    this.listTimeoutMs = listTimeoutOf(options.listTimeoutMs, this.timeoutMs);
     this.requestOptions = options.requestOptions ?? DEFAULT_REQUEST_OPTIONS;
     this.fixed = ollamaFixedFields(this.requestOptions);
     this.request = createJsonRequester(options);
@@ -187,6 +185,7 @@ class OllamaVision {
     const timer = setTimeout(() => deadline.abort(), this.listTimeoutMs);
     const signal = AbortSignal.any([callerSignal, deadline.signal]);
     try {
+      // The deadline above is the real bound of `/api/tags`; its own limit only has to never fire first.
       const names = await this.request({ path: '/api/tags', signal, timeoutMs: MAX_TIMER_MS }, modelNames);
 
       const vision: (boolean | null)[] = new Array<boolean | null>(names.length).fill(null);
