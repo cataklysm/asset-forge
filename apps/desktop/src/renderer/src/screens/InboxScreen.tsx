@@ -64,7 +64,7 @@ interface Props {
  */
 export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<BatchResult | null>(null);
+  const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<AssetView>('grid');
   const [selection, setSelection] = useState<FileSelection>(NO_SELECTION);
@@ -121,7 +121,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
 
   const studio = useStudio();
   const analysis = useAnalysisDialogs({
-    onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
+    onStarted: (counts) => setResult({ title: enqueueTitle(counts), failures: [] }),
     onChanged: reload,
     onLeave: () => detail.close(),
   });
@@ -145,7 +145,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
           setRunning(true);
           const results = await call('files:import', { sourcePaths, unpackArchives });
           const cancelled = cancelRequested.current;
-          setImportResult({
+          setResult({
             title: importTitle(results, { duplicates: true, cancelled }),
             failures: importFailures(results),
           });
@@ -204,7 +204,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
       async () => {
         try {
           const { doneIds, failures } = await runFileBatch('files:trashMany', files);
-          setImportResult(batchResult(doneIds.length, 'deleted', failures));
+          setResult(batchResult(doneIds.length, 'deleted', failures));
           moved(doneIds);
           trash.refresh();
         } catch (caught) {
@@ -273,11 +273,11 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
               </p>
             ),
         )}
-        {importResult !== null && (
+        {result !== null && (
           <ResultStrip
-            title={importResult.title}
-            failures={importResult.failures}
-            onDismiss={() => setImportResult(null)}
+            title={result.title}
+            failures={result.failures}
+            onDismiss={() => setResult(null)}
           />
         )}
         <SelectionBar count={selection.selected.size} onClear={() => setSelection(NO_SELECTION)}>

@@ -3,6 +3,7 @@ import type { AssetDetail, FileRole, FileTarget } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
 import { attempt } from '../attempt';
+import { runExclusive } from '../exclusive';
 import { useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetHeader, type AssetPatch } from '../components/AssetHeader';
@@ -91,11 +92,14 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   const [error, setError] = useState<string | null>(null);
   const [importRole, setImportRole] = useState<FileRole>('reference');
   const [importing, setImporting] = useState(false);
+  // Synchronous guard: a second activation before the re-render must not start a second import.
+  const importingRef = useRef(false);
   // The target of the open URL import dialog: the role as chosen when the dialog opened.
   const [urlImportTarget, setUrlImportTarget] = useState<FileTarget | null>(null);
   // The same for the open site import dialog.
   const [siteImportTarget, setSiteImportTarget] = useState<FileTarget | null>(null);
-  const [importResult, setImportResult] = useState<BatchResult | null>(null);
+  // The strip above the tabs: the result of an import or of an analysis start.
+  const [result, setResult] = useState<BatchResult | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   // A file a job added to this asset (or a reset of the change feed) changes the Files tab count; the
   // tab's list follows the change feed itself.
@@ -106,7 +110,7 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   // A tag rename re-reads the asset (its tags) and reloads the Files tab.
   const { renameToken } = useTags();
   const analysis = useAnalysisDialogs({
-    onStarted: (result) => setImportResult({ title: enqueueTitle(result), failures: [] }),
+    onStarted: (counts) => setResult({ title: enqueueTitle(counts), failures: [] }),
     onChanged: () => setReloadToken((token) => token + 1),
   });
   const zipChoice = useZipChoice();
@@ -149,35 +153,48 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
     if (!(await attempt(setError, action, describe))) throw new Error('reported');
   }
 
-  /** Picks files, asks about archives, imports them into the asset with the chosen role and shows the result. */
-  async function importFiles() {
-    setError(null);
-    setImporting(true);
-    try {
-      const sourcePaths = await call('dialog:pickFiles', {});
-      if (sourcePaths.length === 0) return;
-      const unpackArchives = await zipChoice.choose(sourcePaths);
-      if (unpackArchives === null) return;
-      // A cancel of an earlier import does not count for this one, even before the next render.
-      cancelRequested.current = false;
-      setRunning(true);
-      const results = await call('files:import', {
-        sourcePaths,
-        target: { assetId: id, role: importRole },
-        unpackArchives,
-      });
-      const cancelled = cancelRequested.current;
-      setImportResult({
-        title: importTitle(results, { duplicates: false, cancelled }),
-        failures: importFailures(results),
-      });
-      filesChanged();
-    } catch (caught) {
-      setError(describeError(caught));
-    } finally {
-      setRunning(false);
-      setImporting(false);
-    }
+  /**
+   * Picks files, asks about archives, imports them into the asset with the chosen role and shows the result; one
+   * import at a time.
+   */
+  function importFiles(): Promise<void> {
+    return runExclusive(
+      importingRef,
+      async () => {
+        try {
+          const sourcePaths = await call('dialog:pickFiles', {});
+          if (sourcePaths.length === 0) return;
+          const unpackArchives = await zipChoice.choose(sourcePaths);
+          if (unpackArchives === null) return;
+          // A cancel of an earlier import does not count for this one, even before the next render.
+          cancelRequested.current = false;
+          setRunning(true);
+          const results = await call('files:import', {
+            sourcePaths,
+            target: { assetId: id, role: importRole },
+            unpackArchives,
+          });
+          const cancelled = cancelRequested.current;
+          setResult({
+            title: importTitle(results, { duplicates: false, cancelled }),
+            failures: importFailures(results),
+          });
+          filesChanged();
+        } catch (caught) {
+          setError(describeError(caught));
+        }
+      },
+      {
+        onStart: () => {
+          setError(null);
+          setImporting(true);
+        },
+        onEnd: () => {
+          setRunning(false);
+          setImporting(false);
+        },
+      },
+    );
   }
 
   const breadcrumb = (
@@ -227,12 +244,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
         onAnalyse={() => analysis.start({ kind: 'asset', assetId: id })}
       />
 
-      {importResult !== null && (
-        <ResultStrip
-          title={importResult.title}
-          failures={importResult.failures}
-          onDismiss={() => setImportResult(null)}
-        />
+      {result !== null && (
+        <ResultStrip title={result.title} failures={result.failures} onDismiss={() => setResult(null)} />
       )}
 
       <Tabs<AssetTab>

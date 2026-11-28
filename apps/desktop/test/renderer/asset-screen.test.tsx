@@ -288,6 +288,22 @@ it('import shows the result strip with failed names and errors, and reports busy
   expect(screen.queryByText('1 imported, 1 failed')).toBeNull();
 });
 
+it('two activations of Import files before the re-render open the file picker once', async () => {
+  const asset = assetDetail();
+  const picked = deferred<string[]>();
+  const api = install(asset, { 'dialog:pickFiles': () => picked.promise });
+  render(<Harness id={asset.id} />);
+  const button = await screen.findByRole('button', { name: 'Import files' });
+  act(() => {
+    button.click();
+    button.click();
+  });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+  expect(callsOf(api, 'dialog:pickFiles')).toHaveLength(1);
+  await act(async () => picked.resolve([]));
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+});
+
 it('a picked ZIP asks first; Unpack imports the entries with the role and the strip counts them', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();
