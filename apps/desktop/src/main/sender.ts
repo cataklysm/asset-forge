@@ -1,5 +1,7 @@
 // Kept free of Electron imports so the sender check is unit-testable.
 
+import type { IpcResult } from '@assetforge/contracts';
+
 /** The part of a frame the check reads. */
 export interface SenderFrame {
   /** The frame's URL. */
@@ -44,4 +46,29 @@ export function isTrustedSender(
   const frame = event.senderFrame;
   if (frame === null || frame !== window.webContents.mainFrame) return false;
   return isAppUrl(frame.url);
+}
+
+/**
+ * Why an IPC request is refused before it reaches its handler. The sender is checked first, so an
+ * untrusted sender learns nothing about the app's state, not even that it is quitting.
+ *
+ * @param event the IPC event
+ * @param window the main window, or null
+ * @param isAppUrl whether a URL is the app page
+ * @param isShuttingDown whether quitting has begun
+ * @returns the refusal for the renderer, or null when the request may be served
+ */
+export function ipcRefusal(
+  event: SenderEvent,
+  window: SenderWindow | null,
+  isAppUrl: (url: string) => boolean,
+  isShuttingDown: boolean,
+): IpcResult<never> | null {
+  if (!isTrustedSender(event, window, isAppUrl)) {
+    return { ok: false, error: { code: 'forbidden_sender', message: 'IPC sender is not the main window' } };
+  }
+  if (isShuttingDown) {
+    return { ok: false, error: { code: 'shutting_down', message: 'The application is shutting down' } };
+  }
+  return null;
 }
