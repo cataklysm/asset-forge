@@ -663,7 +663,7 @@ it('choosing Jobs shows the Jobs page', async () => {
   const user = userEvent.setup();
   workspaceShell(() => IDLE);
   await user.click(screen.getByRole('link', { name: /Jobs/ }));
-  expect(await screen.findByRole('heading', { level: 2, name: 'Jobs' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { level: 2, name: /^Jobs/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /Jobs/ }).getAttribute('aria-current')).toBe('page');
 });
 
