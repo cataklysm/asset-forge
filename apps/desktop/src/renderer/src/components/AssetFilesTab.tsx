@@ -3,7 +3,7 @@ import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
 import { fileMenuItems } from '../file-actions';
-import { useStudio } from '../studio-context';
+import { useStudio } from '../studio-session';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useExclusiveGuard } from '../hooks/useExclusiveGuard';
 import { useFileDialog } from '../hooks/useFileDialog';

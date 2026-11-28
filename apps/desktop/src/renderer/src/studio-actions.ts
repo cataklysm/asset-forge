@@ -1,7 +1,7 @@
 import type { MutableRefObject } from 'react';
 import { JOB_ERROR_MESSAGES, type Generation, type IpcRequest, type UpscaleScale } from '@assetforge/contracts';
 import { call, messageOf } from './api';
-import type { StudioSession } from './studio-context';
+import type { StudioSession } from './studio-session';
 import type { StudioForm } from './studio-state';
 
 /** The request of `generations:start`. */

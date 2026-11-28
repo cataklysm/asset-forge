@@ -2,7 +2,7 @@ import type { FileRecord } from '@assetforge/contracts';
 import { analysable } from './analysis';
 import { call, describeError } from './api';
 import type { MenuItem } from './components/Menu';
-import type { StudioState } from './studio-context';
+import type { StudioState } from './studio-session';
 import {
   ANALYSE_LABEL,
   ANALYSE_TITLE,

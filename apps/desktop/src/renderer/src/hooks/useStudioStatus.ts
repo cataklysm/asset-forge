@@ -1,6 +1,6 @@
 import { useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Generation } from '@assetforge/contracts';
-import type { StudioSession } from '../studio-context';
+import type { StudioSession } from '../studio-session';
 import { freshFields } from '../studio-fields';
 import type { StudioFieldsState } from './useStudioFields';
 

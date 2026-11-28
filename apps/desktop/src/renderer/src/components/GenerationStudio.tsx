@@ -20,7 +20,7 @@ import {
   upscaleFile,
   type ResultContext,
 } from '../studio-actions';
-import { useStudio, useStudioSession } from '../studio-context';
+import { useStudio, useStudioSession } from '../studio-session';
 import { editBlocked, hasImageProvider, imageModelOf } from '../studio-gate';
 import { constrain } from '../studio-state';
 import { ALERT, BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';

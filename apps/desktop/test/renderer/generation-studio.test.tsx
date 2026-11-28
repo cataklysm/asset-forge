@@ -47,7 +47,8 @@ import {
   upscaleLabel,
 } from '../../src/renderer/src/labels';
 import { ProviderSettingsProvider, useProviders } from '../../src/renderer/src/provider-context';
-import { StudioProvider, useStudio } from '../../src/renderer/src/studio-context';
+import { StudioProvider } from '../../src/renderer/src/studio-context';
+import { useStudio } from '../../src/renderer/src/studio-session';
 import { SAFE_MODE_KEY } from '../../src/renderer/src/studio-state';
 import { TagsProvider } from '../../src/renderer/src/tags-context';
 import {
