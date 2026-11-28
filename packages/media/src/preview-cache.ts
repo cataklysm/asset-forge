@@ -1,7 +1,9 @@
 import { lstat, readdir, rm, stat, unlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { VideoFormat, VideoFrames, VideoInfo } from './video-frames.js';
+import type { VideoInfo } from './video-diagnostics.js';
+import type { VideoFormat } from './video-frame-arguments.js';
+import type { VideoFrames } from './video-frames.js';
 import type { WorkerPool } from './worker-pool.js';
 
 export type PreviewSize = 'thumb' | 'detail' | 'full';

@@ -16,12 +16,8 @@ export {
   previewRelativePath,
 } from './preview-cache.js';
 export type { PreviewRequest, PreviewService, PreviewServiceOptions, PreviewSize } from './preview-cache.js';
-export {
-  createVideoFrames,
-  FRAME_AT_SECONDS,
-  FRAME_EDGE,
-  VIDEO_FRAME_CONCURRENCY,
-  VIDEO_FRAME_TIMEOUT_MS,
-  VIDEO_MAX_PIXELS,
-} from './video-frames.js';
-export type { VideoFormat, VideoFrames, VideoFramesOptions, VideoInfo } from './video-frames.js';
+export { createVideoFrames, VIDEO_FRAME_CONCURRENCY, VIDEO_FRAME_TIMEOUT_MS } from './video-frames.js';
+export type { VideoFrames, VideoFramesOptions } from './video-frames.js';
+export { FRAME_AT_SECONDS, FRAME_EDGE, VIDEO_MAX_PIXELS } from './video-frame-arguments.js';
+export type { VideoFormat } from './video-frame-arguments.js';
+export type { VideoInfo } from './video-diagnostics.js';

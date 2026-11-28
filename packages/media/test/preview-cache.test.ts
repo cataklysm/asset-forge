@@ -22,7 +22,9 @@ import {
   previewRelativePath,
   type PreviewService,
 } from '../src/preview-cache.js';
-import { createVideoFrames, type VideoFormat, type VideoFrames, type VideoInfo } from '../src/video-frames.js';
+import type { VideoInfo } from '../src/video-diagnostics.js';
+import type { VideoFormat } from '../src/video-frame-arguments.js';
+import { createVideoFrames, type VideoFrames } from '../src/video-frames.js';
 import { createWorkerPool, type WorkerPool } from '../src/worker-pool.js';
 import { TEST_WORKER_URL } from './worker-url.js';
 
