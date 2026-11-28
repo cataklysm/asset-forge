@@ -271,6 +271,17 @@ it('Matching content shows only the answer for the current selection and reports
   expect(within(details()).getByText('Desert')).toBeTruthy();
 });
 
+it('a failed asset-type load is reported in Project details', async () => {
+  install({
+    'projects:list': listOf([projectSummary({ name: 'Forest' })]),
+    'assetTypes:list': () => {
+      throw fakeError('storage_unreachable');
+    },
+  });
+  render(<Harness />);
+  expect((await within(details()).findByRole('alert')).textContent).toContain('cannot be reached');
+});
+
 it('Show all opens the gallery filtered by project and tags', async () => {
   const user = userEvent.setup();
   const onShowAssets = vi.fn();
