@@ -53,7 +53,6 @@ export function useZipChoice(): {
   const [pending, setPending] = useState<Pending | null>(null);
   // The open question outside the render, so that a second `choose` and the unmount can end it.
   const pendingRef = useRef<Pending | null>(null);
-  const unpackRef = useRef<HTMLButtonElement>(null);
   useEffect(() => () => settle(pendingRef, null), []);
 
   function choose(sourcePaths: readonly string[]): Promise<Answer> {
@@ -73,26 +72,41 @@ export function useZipChoice(): {
     setPending(null);
   }
 
+  return { choose, dialog: <ZipChoiceDialog pending={pending} onAnswer={answer} /> };
+}
+
+/**
+ * The question's dialog: Cancel, Import as file and Unpack, which has the initial focus.
+ *
+ * @param props the open question (null: closed) and the answer's receiver
+ * @returns the dialog
+ */
+function ZipChoiceDialog({ pending, onAnswer }: { pending: Pending | null; onAnswer(value: Answer): void }) {
+  const unpackRef = useRef<HTMLButtonElement>(null);
   const zipPaths = pending?.zipPaths ?? [];
-  const dialog = (
-    <Dialog open={pending !== null} title={ZIP_ARCHIVE_TITLE} onClose={() => answer(null)} initialFocusRef={unpackRef}>
+  return (
+    <Dialog
+      open={pending !== null}
+      title={ZIP_ARCHIVE_TITLE}
+      onClose={() => onAnswer(null)}
+      initialFocusRef={unpackRef}
+    >
       <div className="space-y-4">
         <p className="break-words">
           {zipPaths.length === 1 ? baseName(zipPaths[0]!) : archiveCountLabel(zipPaths.length)}
         </p>
         <div className="flex justify-end gap-2">
-          <button type="button" className={BUTTON} title={ZIP_CANCEL_TITLE} onClick={() => answer(null)}>
+          <button type="button" className={BUTTON} title={ZIP_CANCEL_TITLE} onClick={() => onAnswer(null)}>
             {CANCEL_LABEL}
           </button>
-          <button type="button" className={BUTTON} title={IMPORT_AS_FILE_TITLE} onClick={() => answer(false)}>
+          <button type="button" className={BUTTON} title={IMPORT_AS_FILE_TITLE} onClick={() => onAnswer(false)}>
             {IMPORT_AS_FILE_LABEL}
           </button>
-          <button ref={unpackRef} type="button" className={BUTTON} title={UNPACK_TITLE} onClick={() => answer(true)}>
+          <button ref={unpackRef} type="button" className={BUTTON} title={UNPACK_TITLE} onClick={() => onAnswer(true)}>
             {UNPACK_LABEL}
           </button>
         </div>
       </div>
     </Dialog>
   );
-  return { choose, dialog };
 }

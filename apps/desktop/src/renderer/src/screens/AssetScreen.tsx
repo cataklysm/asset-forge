@@ -190,6 +190,8 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   /**
    * Picks files, asks about archives, imports them into the asset with the chosen role and shows the result; one
    * import at a time.
+   *
+   * @returns settles when the import ended or was ignored
    */
   function importFiles(): Promise<void> {
     return runExclusive(
