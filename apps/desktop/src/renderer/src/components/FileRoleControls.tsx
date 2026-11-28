@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FileRoleSchema, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { label } from '../labels';
