@@ -11,7 +11,7 @@ import {
   FFMPEG_UNAVAILABLE_WARNING,
   hashFile,
   resolveFfmpegBinary,
-  type FfmpegBinaryDeps,
+  type FfmpegBinaryDependencies,
 } from '../src/main/ffmpeg-binary.js';
 
 const CONTENT = Buffer.from('not really ffmpeg, but bytes to hash');
@@ -31,7 +31,7 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
-function deps(overrides: Partial<FfmpegBinaryDeps> = {}): FfmpegBinaryDeps {
+function deps(overrides: Partial<FfmpegBinaryDependencies> = {}): FfmpegBinaryDependencies {
   return { packagePath: binary, platform: 'test', arch: 'x1', checksums: { 'test-x1': SHA }, warn, ...overrides };
 }
 

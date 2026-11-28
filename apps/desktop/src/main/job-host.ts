@@ -21,6 +21,7 @@ import {
   type SiteAccess,
   type VisionProvider,
   type WorkspaceManager,
+  type WorkspaceSession,
 } from '@assetforge/core';
 import { createScheduler, DEFAULT_LIMITS, DEFAULT_TOTALS, type PauseGate, type Scheduler } from '@assetforge/jobs';
 import type { ChangeFeed } from './change-feed.js';
@@ -32,6 +33,7 @@ import type { ChangeFeed } from './change-feed.js';
 // lane of their provider entry (the entry id), a download job (io) in the lane of its URL's host; limit, claim
 // and pause work per resource class and lane.
 
+/** Starts and stops the scheduler of the open workspace and answers for its jobs, its pauses and its changes. */
 export interface JobHost extends JobControl {
   /** Starts a scheduler for the open workspace; no-op without one or when one runs. Never rejects. */
   workspaceOpened(): Promise<void>;
@@ -57,12 +59,27 @@ export interface JobHost extends JobControl {
 
 /** The scheduler's clock and timers. */
 export interface SchedulerClock {
+  /** @returns the current time */
   now(): Date;
-  setTimer(fn: () => void, ms: number): unknown;
+  /**
+   * Calls `callback` after `milliseconds`.
+   *
+   * @param callback what to call
+   * @param milliseconds how long to wait
+   * @returns a handle for `clearTimer`
+   */
+  setTimer(callback: () => void, milliseconds: number): unknown;
+  /**
+   * Cancels a timer.
+   *
+   * @param handle what `setTimer` answered
+   */
   clearTimer(handle: unknown): void;
 }
 
-export interface JobHostDeps {
+/** What the job host runs its schedulers with. */
+export interface JobHostDependencies {
+  /** The workspace manager. */
   manager: WorkspaceManager;
   /**
    * Takes every change: a job the scheduler changed, jobs changed in bulk, and what the handlers report. Cleared
@@ -71,9 +88,11 @@ export interface JobHostDeps {
   feed: ChangeFeed;
   /** The adapter of a lane (a provider entry id) when a job runs; null when no such entry exists. */
   vision: (lane: string | null) => VisionProvider | null;
+  /** Reads the JPEG an analysis sends. */
   images: ModelImageSource;
   /** The fingerprint provider id of a lane (the kind of its vision entry); null when the lane has no vision entry. */
   provider: (lane: string | null) => string | null;
+  /** The pause gate of the app session. */
   pause: PauseGate;
   /** The entry that active analysis jobs without a provider are assigned to when a workspace opens; null when there is none. */
   firstEntry: () => { id: string; name: string; taggingModel: string | null } | null;
@@ -85,6 +104,7 @@ export interface JobHostDeps {
   remote: RemoteFileSource;
   /** The logins of the site profiles for site downloads; without it a site download fails as its profile missing. */
   sites?: SiteAccess;
+  /** Running jobs per lane of a class; `DEFAULT_LIMITS` without it. */
   limits?: Record<ResourceClass, number>;
   /** Running jobs per class across all its lanes; `DEFAULT_TOTALS` without it. */
   totals?: Partial<Record<ResourceClass, number>>;
@@ -110,137 +130,258 @@ export const PROVIDER_CLASSES: readonly ResourceClass[] = [ANALYSIS_CLASS, GENER
 /** The queue whose lanes are download hosts: what `jobs:resumeHost` resumes. */
 export const DOWNLOAD_CLASSES: readonly ResourceClass[] = [DOWNLOAD_CLASS];
 
-export function createJobHost(deps: JobHostDeps): JobHost {
-  const { manager, pause, clock, feed } = deps;
-  let scheduler: Scheduler | null = null;
-  const changed = () => feed.jobs();
+/**
+ * Creates the job host of the app session.
+ *
+ * @param dependencies what the schedulers run with
+ * @returns the job host
+ */
+export function createJobHost(dependencies: JobHostDependencies): JobHost {
+  const host = new JobHostRunner(dependencies);
+  return {
+    workspaceOpened: () => host.workspaceOpened(),
+    workspaceClosing: () => host.workspaceClosing(),
+    wake: () => host.wake(),
+    cancel: (jobId, options) => host.cancel(jobId, options),
+    cancelAll: () => host.cancelAll(),
+    changes: () => dependencies.feed.total(),
+    changed: () => host.changed(),
+    changesSince: (cursor) => dependencies.feed.since(cursor),
+    paused: () => host.paused(),
+    resume: (lane, classes) => host.resume(lane, classes),
+  };
+}
+
+/** The job host with the scheduler of the open workspace, if one runs. */
+class JobHostRunner {
+  /** The scheduler of the open workspace; null when none runs or one is stopping. */
+  private scheduler: Scheduler | null = null;
+  // Opening and closing run one after the other, so a stop never overlaps the start of the next scheduler.
+  private lifecycle: Promise<void> = Promise.resolve();
+
+  /** @param dependencies what the schedulers run with */
+  constructor(private readonly dependencies: JobHostDependencies) {}
+
+  /** Tells the feed that jobs changed. */
+  changed(): void {
+    this.dependencies.feed.jobs();
+  }
+
+  /**
+   * Starts a scheduler for the open workspace; no-op without one or when one runs.
+   *
+   * @returns when it started; never rejects
+   */
+  workspaceOpened(): Promise<void> {
+    return this.serial(() => this.startScheduler());
+  }
+
+  /**
+   * Stops the scheduler and waits for its jobs; no-op without one.
+   *
+   * @returns when it stopped; never rejects
+   */
+  workspaceClosing(): Promise<void> {
+    return this.serial(() => this.stopScheduler());
+  }
+
+  /** Lets the scheduler look for work at once. */
+  wake(): void {
+    this.scheduler?.wake();
+  }
+
+  /**
+   * Cancels one job.
+   *
+   * @param jobId the job
+   * @param options passed to the scheduler
+   * @returns when it was cancelled
+   */
+  async cancel(jobId: string, options?: Parameters<Scheduler['cancel']>[1]): Promise<void> {
+    if (this.scheduler !== null) return this.scheduler.cancel(jobId, options);
+    await this.cancelWithoutScheduler(jobId);
+  }
+
+  /**
+   * Cancels every job that exists now.
+   *
+   * @returns how many were cancelled
+   */
+  async cancelAll(): Promise<number> {
+    return this.scheduler === null ? this.cancelWithoutScheduler() : this.scheduler.cancelAll();
+  }
+
+  /**
+   * The paused lanes of every pausable queue.
+   *
+   * @returns the lanes with their codes and classes
+   */
+  paused(): { lane: string | null; reason: JobErrorCode; resourceClass: ResourceClass }[] {
+    const { pause } = this.dependencies;
+    return PAUSABLE.flatMap((resourceClass) =>
+      pause.paused(resourceClass).map(({ lane, reason }) => ({ lane, reason, resourceClass })),
+    );
+  }
+
+  /**
+   * Ends the pause of one lane in the given queues and lets the scheduler claim again. Never throws.
+   *
+   * @param lane the lane
+   * @param classes the queues
+   */
+  resume(lane: string | null, classes: readonly ResourceClass[]): void {
+    for (const resourceClass of classes) {
+      try {
+        this.dependencies.pause.resume(resourceClass, lane);
+      } catch (cause) {
+        console.error('The job pause could not be ended', cause);
+      }
+    }
+    this.changed();
+    this.scheduler?.wake();
+  }
+
+  /**
+   * Runs one lifecycle step after the one before; a failure is logged, never passed on.
+   *
+   * @param step the step
+   * @returns when it ended
+   */
+  private serial(step: () => Promise<void>): Promise<void> {
+    const next = this.lifecycle.then(step).catch((error: unknown) => console.error('The job scheduler failed', error));
+    this.lifecycle = next;
+    return next;
+  }
+
+  /**
+   * Prepares the jobs of the open workspace and starts its scheduler.
+   *
+   * @returns when the scheduler started
+   */
+  private async startScheduler(): Promise<void> {
+    const { manager, feed } = this.dependencies;
+    // A cursor of the workspace before must never answer changes of this one.
+    feed.clear();
+    if (this.scheduler !== null || manager.current() === null) return;
+    // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
+    const session = await manager.read(async (current) => current);
+    await this.prepareJobs(session);
+    const created = createWorkspaceScheduler(this.dependencies, session);
+    this.scheduler = created;
+    await created.start();
+  }
+
+  /**
+   * Routes the jobs without a provider and closes pending generations whose job ended. A failure of either is
+   * logged and does not keep the scheduler from starting.
+   *
+   * @param session the open workspace
+   * @returns when both ran
+   */
+  private async prepareJobs(session: WorkspaceSession): Promise<void> {
+    // Before the scheduler claims, so every waiting job runs in the lane the list shows.
+    // A failure here must not keep the scheduler from starting: the jobs that already have a lane still run.
+    try {
+      const entry = await this.dependencies.firstEntry();
+      if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) this.changed();
+    } catch {
+      console.error('Jobs without a provider could not be assigned');
+    }
+    // Before every start, never after: a pending generation whose job already ended is closed. A failure
+    // leaves it pending until the next open, and the jobs still run.
+    try {
+      if ((await reconcileGenerations(session)) > 0) this.changed();
+    } catch {
+      console.error('Pending generations could not be reconciled');
+    }
+  }
+
+  /**
+   * Lets go of the scheduler and waits for it to stop.
+   *
+   * @returns when it stopped
+   */
+  private async stopScheduler(): Promise<void> {
+    const { feed } = this.dependencies;
+    feed.clear();
+    const running = this.scheduler;
+    if (running === null) return;
+    this.scheduler = null;
+    await running.stop();
+    // The stopped runs changed rows of the closing workspace.
+    feed.clear();
+  }
+
   /**
    * Without a scheduler (none started, or one stopping: the host lets go of it before the stop) nothing runs, so
-   * the waiting jobs, or the one named, are ended in the database and their generations settled cancelled. Answers
-   * how many; 0 without a workspace. A failed write rejects, so the caller is told the jobs were not cancelled.
-   * `read` does not queue, so a caller already inside a workspace read never waits on itself.
+   * the waiting jobs, or the one named, are ended in the database and their generations settled cancelled. A failed
+   * write rejects, so the caller is told the jobs were not cancelled. `read` does not queue, so a caller already
+   * inside a workspace read never waits on itself.
+   *
+   * @param jobId the one job to end; all waiting ones without it
+   * @returns how many were ended; 0 without a workspace
    */
-  const cancelWithoutScheduler = async (jobId?: string): Promise<number> => {
+  private async cancelWithoutScheduler(jobId?: string): Promise<number> {
+    const { manager } = this.dependencies;
     if (manager.current() === null) return 0;
-    const cancelled = await manager.read((s) =>
-      s.database.jobs.cancelPending({
+    const cancelled = await manager.read((session) =>
+      session.database.jobs.cancelPending({
         ...(jobId === undefined ? {} : { id: jobId }),
-        now: s.now().toISOString(),
+        now: session.now().toISOString(),
         settled: (job) => {
-          settleGenerationOfJob(s, job, { status: 'cancelled' });
+          settleGenerationOfJob(session, job, { status: 'cancelled' });
         },
       }),
     );
-    if (cancelled > 0) changed();
+    if (cancelled > 0) this.changed();
     return cancelled;
-  };
-  // Opening and closing run one after the other, so a stop never overlaps the start of the next scheduler.
-  let lifecycle: Promise<void> = Promise.resolve();
-  const serial = (fn: () => Promise<void>): Promise<void> => {
-    const next = lifecycle.then(fn).catch((error: unknown) => console.error('The job scheduler failed', error));
-    lifecycle = next;
-    return next;
-  };
+  }
+}
 
-  return {
-    workspaceOpened: () =>
-      serial(async () => {
-        // A cursor of the workspace before must never answer changes of this one.
-        feed.clear();
-        if (scheduler !== null || manager.current() === null) return;
-        // The session stays valid until `workspaceClosing` resolved: the workspace closes only after it.
-        const session = await manager.read(async (s) => s);
-        // Before the scheduler claims, so every waiting job runs in the lane the list shows.
-        // A failure here must not keep the scheduler from starting: the jobs that already have a lane still run.
-        try {
-          const entry = await deps.firstEntry();
-          if (entry !== null && (await assignUnroutedJobs(session, entry)) > 0) changed();
-        } catch {
-          console.error('Jobs without a provider could not be assigned');
-        }
-        // Before every start, never after: a pending generation whose job already ended is closed. A failure
-        // leaves it pending until the next open, and the jobs still run.
-        try {
-          if ((await reconcileGenerations(session)) > 0) changed();
-        } catch {
-          console.error('Pending generations could not be reconciled');
-        }
-        const created = createScheduler({
-          jobs: session.database.jobs,
-          handlers: {
-            [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
-              session,
-              vision: deps.vision,
-              images: deps.images,
-              provider: deps.provider,
-              effects: feed,
-            }),
-            [IMAGE_GENERATE_JOB]: createImageGenerateHandler({
-              session,
-              providers: deps.imageProviders,
-              images: deps.generationImages,
-              effects: feed,
-            }),
-            [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({
-              session,
-              remote: deps.remote,
-              effects: feed,
-              ...(deps.sites === undefined ? {} : { sites: deps.sites }),
-            }),
-          },
-          limits: deps.limits ?? DEFAULT_LIMITS,
-          totals: deps.totals ?? DEFAULT_TOTALS,
-          // A cancel of several rows at once names no job.
-          onChange: (jobId) => (jobId === null ? feed.jobs() : feed.job(jobId)),
-          pause,
-          ...(deps.laneLimit === undefined ? {} : { laneLimit: deps.laneLimit }),
-          ...(clock === undefined
-            ? {}
-            : { now: () => clock.now(), setTimer: (fn, ms) => clock.setTimer(fn, ms), clearTimer: (h) => clock.clearTimer(h) }),
-        });
-        scheduler = created;
-        await created.start();
+/**
+ * Creates the scheduler of one open workspace with the handlers of the three job types.
+ *
+ * @param dependencies what the scheduler runs with
+ * @param session the open workspace
+ * @returns the scheduler, not yet started
+ */
+function createWorkspaceScheduler(dependencies: JobHostDependencies, session: WorkspaceSession): Scheduler {
+  const { feed, clock } = dependencies;
+  return createScheduler({
+    jobs: session.database.jobs,
+    handlers: {
+      [ANALYZE_FILE_JOB]: createAnalyzeFileHandler({
+        session,
+        vision: dependencies.vision,
+        images: dependencies.images,
+        provider: dependencies.provider,
+        effects: feed,
       }),
-
-    workspaceClosing: () =>
-      serial(async () => {
-        feed.clear();
-        const running = scheduler;
-        if (running === null) return;
-        scheduler = null;
-        await running.stop();
-        // The stopped runs changed rows of the closing workspace.
-        feed.clear();
+      [IMAGE_GENERATE_JOB]: createImageGenerateHandler({
+        session,
+        providers: dependencies.imageProviders,
+        images: dependencies.generationImages,
+        effects: feed,
       }),
-
-    wake() {
-      scheduler?.wake();
+      [FILE_DOWNLOAD_JOB]: createFileDownloadHandler({
+        session,
+        remote: dependencies.remote,
+        effects: feed,
+        ...(dependencies.sites === undefined ? {} : { sites: dependencies.sites }),
+      }),
     },
-
-    async cancel(jobId, options) {
-      if (scheduler !== null) return scheduler.cancel(jobId, options);
-      await cancelWithoutScheduler(jobId);
-    },
-
-    cancelAll: async () => (scheduler === null ? cancelWithoutScheduler() : scheduler.cancelAll()),
-
-    changes: () => feed.total(),
-    changed,
-    changesSince: (cursor) => feed.since(cursor),
-
-    paused: () =>
-      PAUSABLE.flatMap((resourceClass) => pause.paused(resourceClass).map(({ lane, reason }) => ({ lane, reason, resourceClass }))),
-
-    resume(lane, classes) {
-      for (const resourceClass of classes) {
-        try {
-          pause.resume(resourceClass, lane);
-        } catch (cause) {
-          console.error('The job pause could not be ended', cause);
-        }
-      }
-      changed();
-      scheduler?.wake();
-    },
-  };
+    limits: dependencies.limits ?? DEFAULT_LIMITS,
+    totals: dependencies.totals ?? DEFAULT_TOTALS,
+    // A cancel of several rows at once names no job.
+    onChange: (jobId) => (jobId === null ? feed.jobs() : feed.job(jobId)),
+    pause: dependencies.pause,
+    ...(dependencies.laneLimit === undefined ? {} : { laneLimit: dependencies.laneLimit }),
+    ...(clock === undefined
+      ? {}
+      : {
+          now: () => clock.now(),
+          setTimer: (callback, milliseconds) => clock.setTimer(callback, milliseconds),
+          clearTimer: (handle) => clock.clearTimer(handle),
+        }),
+  });
 }
