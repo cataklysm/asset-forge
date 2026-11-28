@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { AssetSummary } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call } from '../api';
@@ -27,6 +27,7 @@ import {
 } from '../list-state';
 import { findLoaded, PAGE_SIZE } from '../paged-list';
 import { useRenamed, useTags } from '../tags-context';
+import { RETRY_LABEL } from '../labels';
 import { BUTTON, MUTED } from '../ui';
 import { renameInSummary } from './summary-rename';
 
@@ -154,8 +155,8 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
 
   // The selected asset as last seen, for when no loaded page holds it (any more).
   const lastSelected = useRef<AssetSummary | null>(null);
-  // A changed copy is shown at once, not only with the next render of the reload.
-  const [, setRenamedCopies] = useState(0);
+  // Renders a changed copy at once, not only with the next render of the reload; the ref holds no state.
+  const [, showRenamedCopy] = useReducer((renders: number) => renders + 1, 0);
   // The reload reaches the loaded pages; this copy follows the rename here.
   useRenamed((change) => {
     const asset = lastSelected.current;
@@ -163,7 +164,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
     const renamed = renameInSummary(asset, change);
     if (renamed === asset) return;
     lastSelected.current = renamed;
-    setRenamedCopies((count) => count + 1);
+    showRenamedCopy();
   });
   const loadedSelection = findLoaded(paged.state, state.selectedId);
   // A loaded page holds the newest copy, also of an asset selected before this mount.
@@ -300,7 +301,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
         {failedPage !== null ? (
           <div>
             <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-              Retry
+              {RETRY_LABEL}
             </button>
           </div>
         ) : total === null ? (
