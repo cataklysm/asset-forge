@@ -1,24 +1,17 @@
 import { Plus } from 'lucide-react';
-import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import type { PromptDetail, PromptSummary } from '@assetforge/contracts';
 import { call } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FilterBar } from '../components/FilterBar';
 import { Page } from '../components/Page';
 import { PromptEditor } from '../components/PromptEditor';
+import { PromptList } from '../components/PromptList';
 import { SearchField } from '../components/SearchField';
 import { TagFilter } from '../components/TagFilter';
-import { TagList } from '../components/TagList';
-import { pagesForRows, rowCount } from '../gallery';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { usePagedList } from '../hooks/usePagedList';
-import {
-  useElementSize,
-  useVirtualRows,
-  type ViewPosition,
-  type ViewRestore,
-  type VisibleRows,
-} from '../hooks/useVirtualRows';
+import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import {
   DISCARD_LABEL,
   NEW_PROMPT_LABEL,
@@ -33,11 +26,12 @@ import {
   UNSAVED_PROMPT_TITLE,
 } from '../labels';
 import { useLeaveGuard } from '../leave-guard';
-import { retryIndex, slotAt, type PagedState } from '../paged-list';
+import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
 import { renameInNames } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
-import { BORDER, BUTTON, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
+import { BUTTON, MUTED } from '../ui';
 
+/** The props of {@link PromptsScreen}. */
 interface Props {
   /** An import runs: New, Save, Delete and tag editing are disabled. */
   busy: boolean;
@@ -51,32 +45,34 @@ interface Editing {
   serial: number;
 }
 
+/** The number of skeleton rows while the first page loads. */
 const SKELETON_ROWS = 6;
-const ROW_HEIGHT = 72;
+/** The start of a list shown for the first time: the top, nothing focused. */
 const NO_POSITION: ViewRestore = { scrollOffset: 0, index: null, focus: false };
 
-const firstLine = (content: string) => content.split('\n', 1)[0] ?? '';
+/** What {@link usePromptPages} reads the list for. */
+interface PromptPagesInput {
+  query: string;
+  tagNames: readonly string[];
+  /** Raised after every save, tag change or delete. */
+  reload: number;
+  /** Raised after every tag rename. */
+  renameToken: number;
+}
 
-/** The prompt library: the searchable list on the left, the editor of the selected prompt on the right. */
-export function PromptsScreen({ busy, initialId = null }: Props) {
-  const [queryText, setQueryText] = useState('');
-  const [tagNames, setTagNames] = useState<readonly string[]>([]);
-  // Raised after every save, tag change or delete: the list reloads where it is.
-  const [reload, setReload] = useState(0);
-  const [editing, setEditing] = useState<Editing | null>(initialId === null ? null : { id: initialId, serial: 0 });
-  const [dirty, setDirty] = useState(false);
-  // The open question whether to discard the draft, answered by the dialog.
-  const [asking, setAsking] = useState<((discard: boolean) => void) | null>(null);
-
-  const query = useDebouncedValue(queryText.trim(), SEARCH_DEBOUNCE_MS);
-  const { renameToken } = useTags();
-  useRenamed((change) => setTagNames((names) => renameInNames(names, change)));
+/**
+ * The paged prompt list with its position: a reload keeps the displayed position, a new filter
+ * starts where `restore` was set (see `setFilter` in {@link PromptsScreen}).
+ *
+ * @param input the filter and the reload counters
+ * @returns the paged list, the start and position refs and the row callback
+ */
+function usePromptPages({ query, tagNames, reload, renameToken }: PromptPagesInput) {
   const key = JSON.stringify([query, tagNames, reload, renameToken]);
-
   const restore = useRef<ViewRestore>(NO_POSITION);
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastReload = useRef(`${reload}:${renameToken}`);
-  const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
+  const [rows, setRows] = useState<ShownRows | null>(null);
 
   const fetchPage = useCallback(
     (offset: number, limit: number) =>
@@ -87,18 +83,12 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   const paged = usePagedList<PromptSummary>(key, fetchPage, wanted);
   const total = paged.state.total;
   const viewKey = paged.state.key;
-  // A reload keeps the displayed position; a new filter starts at the top (see `setFilter`).
   if (lastReload.current !== `${reload}:${renameToken}`) {
     lastReload.current = `${reload}:${renameToken}`;
     const current = position.current?.viewKey === viewKey ? position.current.get() : null;
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: null, focus: false };
   }
-  const nextWanted =
-    total === null
-      ? [0]
-      : rows !== null && rows.viewKey === viewKey
-        ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
-        : [];
+  const nextWanted = wantedPages(total, rows, viewKey);
   if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
 
   const onRows = useCallback(
@@ -114,6 +104,32 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
       ),
     [viewKey],
   );
+  return { paged, restore, position, onRows };
+}
+
+/** The paged prompt list. */
+type PromptPages = ReturnType<typeof usePromptPages>;
+
+/**
+ * The prompt library: the searchable list on the left, the editor of the selected prompt on the right.
+ *
+ * @param props the busy flag and the prompt selected at first
+ * @returns the screen
+ */
+export function PromptsScreen({ busy, initialId = null }: Props) {
+  const [queryText, setQueryText] = useState('');
+  const [tagNames, setTagNames] = useState<readonly string[]>([]);
+  // Raised after every save, tag change or delete: the list reloads where it is.
+  const [reload, setReload] = useState(0);
+  const [editing, setEditing] = useState<Editing | null>(initialId === null ? null : { id: initialId, serial: 0 });
+  const [dirty, setDirty] = useState(false);
+  // The open question whether to discard the draft, answered by the dialog.
+  const [asking, setAsking] = useState<((discard: boolean) => void) | null>(null);
+
+  const query = useDebouncedValue(queryText.trim(), SEARCH_DEBOUNCE_MS);
+  const { renameToken } = useTags();
+  useRenamed((change) => setTagNames((names) => renameInNames(names, change)));
+  const pages = usePromptPages({ query, tagNames, reload, renameToken });
 
   const ask = useCallback(() => new Promise<boolean>((resolve) => setAsking(() => resolve)), []);
   useLeaveGuard(dirty ? ask : null);
@@ -131,7 +147,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }
 
   function setFilter(change: { query?: string; tagNames?: readonly string[] }) {
-    restore.current = NO_POSITION;
+    pages.restore.current = NO_POSITION;
     if (change.query !== undefined) setQueryText(change.query);
     if (change.tagNames !== undefined) setTagNames(change.tagNames);
   }
@@ -155,8 +171,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   }, [refresh]);
 
   const filtered = query !== '' || tagNames.length > 0;
-  const failedPage =
-    total === null ? ([...paged.state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
+  const total = pages.paged.state.total;
 
   return (
     <Page
@@ -182,35 +197,8 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
             />
             <TagFilter value={tagNames} title={PROMPT_TAG_FILTER_TITLE} onChange={(names) => setFilter({ tagNames: names })} />
           </FilterBar>
-          <div className="flex min-h-0 flex-1 flex-col" aria-busy={paged.pending || undefined}>
-            {failedPage !== null ? (
-              <div>
-                <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-                  {RETRY_LABEL}
-                </button>
-              </div>
-            ) : total === null ? (
-              <div className="flex flex-col gap-2" aria-busy="true">
-                {Array.from({ length: SKELETON_ROWS }, (_, i) => (
-                  <div key={i} data-skeleton="" className="h-16 animate-pulse rounded-control bg-raised" />
-                ))}
-              </div>
-            ) : total === 0 ? (
-              <p className={MUTED}>{filtered ? NO_MATCHING_PROMPTS_TEXT : NO_PROMPTS_TEXT}</p>
-            ) : (
-              <PromptList
-                key={viewKey}
-                viewKey={viewKey}
-                paged={paged.state}
-                total={total}
-                restore={restore.current}
-                selectedId={editing?.id ?? null}
-                onChoose={(prompt) => void edit(prompt.id)}
-                onRows={onRows}
-                onRetry={paged.retry}
-                positionRef={position}
-              />
-            )}
+          <div className="flex min-h-0 flex-1 flex-col" aria-busy={pages.paged.pending || undefined}>
+            {promptsBody(pages, filtered, editing?.id ?? null, (prompt) => void edit(prompt.id))}
           </div>
         </div>
         <div className="min-h-0 min-w-0 flex-1 overflow-auto">
@@ -241,124 +229,58 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
   );
 }
 
-interface ListProps {
-  viewKey: string;
-  paged: PagedState<PromptSummary>;
-  total: number;
-  restore: ViewRestore;
-  selectedId: string | null;
-  onChoose(prompt: PromptSummary): void;
-  onRows(rows: VisibleRows): void;
-  onRetry(page: number): void;
-  positionRef: { current: { viewKey: string; get(): ViewPosition } | null };
-}
-
-/** The virtualised prompt list: click, Enter or Space chooses a prompt; the arrow keys move the focus. */
-function PromptList(props: ListProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const size = useElementSize(scrollRef);
-  return (
-    <div
-      ref={scrollRef}
-      role="listbox"
-      aria-label={PROMPTS_LABEL}
-      aria-setsize={rowCount(props.total, 1)}
-      className="min-h-0 flex-1 overflow-y-auto"
-    >
-      {size !== null && size.height > 0 && <ListRows {...props} scrollRef={scrollRef} height={size.height} />}
-    </div>
-  );
-}
-
-const ROW_FOCUS = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent';
-
-function ListRows(props: ListProps & { scrollRef: RefObject<HTMLDivElement | null>; height: number }) {
-  const { viewKey, paged, total, restore, selectedId, onChoose, onRows, onRetry, positionRef } = props;
-  const rows = useVirtualRows({
-    scrollRef: props.scrollRef,
-    total,
-    columns: 1,
-    rowHeight: ROW_HEIGHT,
-    paddingStart: 0,
-    viewportHeight: props.height,
-    restore,
-    onRows,
-    viewKey,
-    positionRef,
-  });
-  const { virtualizer } = rows;
-
-  function onKeyDown(index: number, prompt: PromptSummary | null, event: KeyboardEvent) {
-    const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
-    if (plain && (event.key === 'Enter' || event.key === ' ')) {
-      event.preventDefault();
-      if (prompt) onChoose(prompt);
-      return;
-    }
-    rows.onItemKeyDown(index, event);
+/**
+ * The list column below the filters: Retry when the first page failed, skeleton rows while it
+ * loads, a note when nothing matches, else the list. A plain function, so every branch keeps the
+ * element it had inline.
+ *
+ * @param pages the paged list
+ * @param filtered whether a search or tag filter is set
+ * @param selectedId the prompt in the editor
+ * @param onChoose chooses a prompt
+ * @returns the column content
+ */
+function promptsBody(
+  pages: PromptPages,
+  filtered: boolean,
+  selectedId: string | null,
+  onChoose: (prompt: PromptSummary) => void,
+): ReactNode {
+  const { paged } = pages;
+  const total = paged.state.total;
+  const failedPage = failedFirstPage(paged.state);
+  if (failedPage !== null) {
+    return (
+      <div>
+        <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
+          {RETRY_LABEL}
+        </button>
+      </div>
+    );
   }
-
+  if (total === null) {
+    return (
+      <div className="flex flex-col gap-2" aria-busy="true">
+        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+          <div key={i} data-skeleton="" className="h-16 animate-pulse rounded-control bg-raised" />
+        ))}
+      </div>
+    );
+  }
+  if (total === 0) return <p className={MUTED}>{filtered ? NO_MATCHING_PROMPTS_TEXT : NO_PROMPTS_TEXT}</p>;
+  const viewKey = paged.state.key;
   return (
-    <div role="presentation" className="relative w-full text-sm" style={{ height: virtualizer.getTotalSize() }}>
-      {virtualizer.getVirtualItems().map((row) => {
-        const index = row.index;
-        const slot = slotAt(paged, index);
-        const style = { top: row.start, height: ROW_HEIGHT };
-        if (slot.kind === 'failed' && index === retryIndex(slot.page, rows.firstVisibleIndex)) {
-          return (
-            <div key={index} role="presentation" className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`} style={style}>
-              <button
-                type="button"
-                data-index={index}
-                className={BUTTON_INLINE}
-                tabIndex={index === rows.tabbableIndex ? 0 : -1}
-                onClick={() => {
-                  rows.refocus(index);
-                  onRetry(slot.page);
-                }}
-                onKeyDown={(e) => rows.onItemKeyDown(index, e)}
-                onFocus={() => rows.onItemFocus(index)}
-              >
-                {RETRY_LABEL}
-              </button>
-            </div>
-          );
-        }
-        const prompt = slot.kind === 'loaded' ? slot.item : null;
-        const selected = prompt !== null && prompt.id === selectedId;
-        return (
-          <div
-            key={index}
-            role="option"
-            aria-posinset={index + 1}
-            aria-setsize={total}
-            data-index={index}
-            tabIndex={index === rows.tabbableIndex ? 0 : -1}
-            aria-selected={selected}
-            aria-disabled={prompt === null ? true : undefined}
-            aria-busy={slot.kind === 'placeholder' ? true : undefined}
-            className={`absolute inset-x-0 flex cursor-default flex-col justify-center gap-1 border-b px-2 ${BORDER} ${
-              selected ? 'bg-accent-soft ring-2 ring-accent ring-inset' : ITEM_HOVER
-            } ${ROW_FOCUS}`}
-            style={style}
-            onClick={() => {
-              if (prompt) onChoose(prompt);
-            }}
-            onKeyDown={(e) => onKeyDown(index, prompt, e)}
-            onFocus={() => rows.onItemFocus(index)}
-          >
-            {prompt !== null && (
-              <>
-                <span className="truncate font-medium" title={prompt.title}>
-                  {prompt.title}
-                </span>
-                <span className={`truncate ${MUTED}`}>{firstLine(prompt.currentVersion.content)}</span>
-                <TagList tags={prompt.tags} kind="prompt" max={3} />
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
+    <PromptList
+      key={viewKey}
+      viewKey={viewKey}
+      paged={paged.state}
+      total={total}
+      restore={pages.restore.current}
+      selectedId={selectedId}
+      onChoose={onChoose}
+      onRows={pages.onRows}
+      onRetry={paged.retry}
+      positionRef={pages.position}
+    />
   );
 }

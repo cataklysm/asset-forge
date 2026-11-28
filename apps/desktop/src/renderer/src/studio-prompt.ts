@@ -17,7 +17,16 @@ export interface AttachedPrompt {
   values: Record<string, string>;
 }
 
-/** `version` of `detail` in use; a variable's value is `given` (case-insensitive), else recalled, else its default. */
+/**
+ * Puts `version` of `detail` in use. A variable's value is `given` (case-insensitive), else recalled, else its
+ * default.
+ *
+ * @param detail the loaded prompt
+ * @param version the version in use
+ * @param recall the value typed last in the studio session for a variable name, if any
+ * @param given values to apply first, keyed by any spelling
+ * @returns the attached prompt
+ */
 export function attach(
   detail: PromptDetail,
   version: PromptVersion,
@@ -32,20 +41,26 @@ export function attach(
   return { promptId: detail.id, title: detail.title, version, currentVersionId: detail.currentVersion.id, values };
 }
 
-/** The text the form shows: variables with a usable value replaced, the others left as written; why it cannot start. */
-export function preview(a: AttachedPrompt): { text: string; blocked: 'missing' | 'value_too_long' | null } {
-  const { content, variables } = a.version;
-  const full = resolvePromptText(content, variables, a.values);
+/**
+ * The text the form shows and why it cannot start: variables with a usable value are replaced, the others left
+ * as written.
+ *
+ * @param attached the prompt in use
+ * @returns the shown text and the reason a start is blocked, null when it is not
+ */
+export function preview(attached: AttachedPrompt): { text: string; blocked: 'missing' | 'value_too_long' | null } {
+  const { content, variables } = attached.version;
+  const full = resolvePromptText(content, variables, attached.values);
   if (full.ok) return { text: full.text, blocked: null };
   // Resolving only the usable values replaces exactly those placeholders.
   const usable = variables.filter((variable) => {
-    const value = (a.values[variable.name] ?? '').trim();
+    const value = (attached.values[variable.name] ?? '').trim();
     return value !== '' && value.length <= PROMPT_VARIABLE_VALUE_MAX;
   });
   const partial = resolvePromptText(
     content,
     usable,
-    Object.fromEntries(usable.map((variable) => [variable.name, a.values[variable.name] ?? ''])),
+    Object.fromEntries(usable.map((variable) => [variable.name, attached.values[variable.name] ?? ''])),
   );
   return { text: partial.ok ? partial.text : content, blocked: full.reason === 'value_too_long' ? 'value_too_long' : 'missing' };
 }

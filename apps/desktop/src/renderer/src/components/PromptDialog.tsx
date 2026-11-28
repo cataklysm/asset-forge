@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
 import { useProviderChoice } from '../provider-choice';
-import { useProviders } from '../provider-context';
+import { useProviders, type ProvidersState } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, FOCUS } from '../ui';
 import { Dialog } from './Dialog';
@@ -12,6 +12,7 @@ import { ProviderSelect } from './ProviderSelect';
 import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
+/** The props of `PromptDialog`. */
 interface Props {
   open: boolean;
   /** The image to describe; Generate is disabled without one. */
@@ -23,17 +24,23 @@ interface Props {
   settingsBlocked?: string | null;
 }
 
+/** The title of the Image to prompt dialog. */
 export const PROMPT_DIALOG_TITLE = 'Image to prompt';
 /** Shown when the main process is already describing another image. */
 export const PROMPT_BUSY_MESSAGE = 'Another prompt is being generated';
+/** Shown when the clipboard refused the text. */
 const COPY_FAILED_MESSAGE = 'The text could not be copied';
+/** Tooltip of Generate while a request runs. */
 const GENERATING_TITLE = 'The prompt is being generated';
+/** Tooltip of Generate without a file. */
 const NO_FILE_TITLE = 'No image to describe';
 
 /**
  * Image2Prompt: describes one image with a chosen provider and model and shows the text to copy.
  * The text lives only in this dialog's state; it is dropped when the dialog closes or another file
  * is shown, and a request still running then is cancelled.
+ *
+ * @param props the file, whether it is open and the handlers
  */
 export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBlocked = null }: Props) {
   return (
@@ -50,6 +57,102 @@ export function PromptDialog({ open, file, onClose, onOpenSettings, settingsBloc
   );
 }
 
+/**
+ * The tooltip of Generate.
+ *
+ * @param blocked why no request can start; null when one can
+ * @param running whether a request runs
+ * @param hasFile whether there is a file to describe
+ * @returns the tooltip, or undefined for none
+ */
+function generateTitle(blocked: string | null, running: boolean, hasFile: boolean): string | undefined {
+  if (blocked !== null) return blocked;
+  if (running) return GENERATING_TITLE;
+  return hasFile ? undefined : NO_FILE_TITLE;
+}
+
+/** The request of one describe. */
+interface DescribeRequest {
+  fileId: string;
+  model: string;
+  providerId: string;
+  promptId: string;
+}
+
+/** What a describe sets and records. */
+interface DescribeEffects {
+  /** The request whose answer is still wanted. */
+  request: MutableRefObject<string | null>;
+  setRunning(running: boolean): void;
+  setText(text: string | null): void;
+  setError(message: string | null): void;
+  /** Drops the owner's prompt pick. */
+  dropChosenPrompt(): void;
+  prompts: AnalysisPromptsState;
+  providers: ProvidersState;
+}
+
+/**
+ * Describes the image; only the answer of the request still wanted is shown.
+ *
+ * @param effects the request ref, the setters and where the start is recorded
+ * @param describe the request
+ * @returns resolves once done; never rejects
+ */
+async function describeImage(effects: DescribeEffects, describe: DescribeRequest): Promise<void> {
+  const { request, prompts, providers } = effects;
+  const requestId = crypto.randomUUID();
+  request.current = requestId;
+  effects.setRunning(true);
+  effects.setText(null);
+  effects.setError(null);
+  try {
+    const result = await call('analysis:describe', { requestId, ...describe });
+    // Every answer but `busy` means the describe started; a cancelled one too, also after closing.
+    if (result.ok || result.code !== 'busy') {
+      prompts.noteUsed('image_prompt', describe.promptId);
+      providers.noteUsed(describe.providerId);
+    }
+    if (request.current !== requestId) return;
+    if (result.ok) effects.setText(result.text);
+    else if (result.code === 'busy') effects.setError(PROMPT_BUSY_MESSAGE);
+    else if (result.code !== 'cancelled') effects.setError(JOB_ERROR_MESSAGES[result.code]);
+  } catch (error) {
+    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
+    if (error instanceof ApiError && error.code === 'not_found') {
+      void prompts.reload().catch(() => {});
+      if (request.current === requestId) effects.dropChosenPrompt();
+    }
+    if (request.current === requestId) effects.setError(describeError(error));
+  } finally {
+    if (request.current === requestId) {
+      request.current = null;
+      effects.setRunning(false);
+    }
+  }
+}
+
+/**
+ * Copies the text; a copy that works drops the message of an earlier one that failed.
+ *
+ * @param text the text
+ * @param setError the setter of the message
+ * @returns resolves once done; never rejects
+ */
+async function copyText(text: string, setError: Dispatch<SetStateAction<string | null>>): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    setError((current) => (current === COPY_FAILED_MESSAGE ? null : current));
+  } catch {
+    setError(COPY_FAILED_MESSAGE);
+  }
+}
+
+/**
+ * The body of the dialog, mounted per opening and file.
+ *
+ * @param props the file and the handlers
+ */
 function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: Omit<Props, 'open'>) {
   const providers = useProviders();
   const prompts = useAnalysisPrompts();
@@ -67,11 +170,10 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
   const gate = providerGate(providers, providerId, model);
   const blocked = gate.blocked ?? promptGate(prompts, promptId);
-
-  const blockedTitle = blocked ?? (running ? GENERATING_TITLE : file === null ? NO_FILE_TITLE : undefined);
   const canGenerate =
     blocked === null && !running && file !== null && providerId !== null && model !== null && promptId !== null;
 
+  /** Drops the answer of the running request and cancels it. */
   function cancel() {
     const requestId = request.current;
     request.current = null;
@@ -82,50 +184,22 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   // Closing the dialog or switching the file unmounts the body: a running request is cancelled.
   useEffect(() => () => cancel(), []);
 
-  async function generate() {
+  /** Starts a describe unless one cannot start. */
+  function generate() {
     if (!canGenerate || file === null || providerId === null || model === null || promptId === null) return;
-    const requestId = crypto.randomUUID();
-    request.current = requestId;
-    setRunning(true);
-    setText(null);
-    setError(null);
-    try {
-      const result = await call('analysis:describe', { requestId, fileId: file.id, model, providerId, promptId });
-      // Every answer but `busy` means the describe started; a cancelled one too, also after closing.
-      if (result.ok || result.code !== 'busy') {
-        prompts.noteUsed('image_prompt', promptId);
-        providers.noteUsed(providerId);
-      }
-      if (request.current !== requestId) return;
-      if (result.ok) setText(result.text);
-      else if (result.code === 'busy') setError(PROMPT_BUSY_MESSAGE);
-      else if (result.code !== 'cancelled') setError(JOB_ERROR_MESSAGES[result.code]);
-    } catch (e) {
-      // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-      if (e instanceof ApiError && e.code === 'not_found') {
-        void prompts.reload().catch(() => {});
-        if (request.current === requestId) setChosenPrompt(null);
-      }
-      if (request.current === requestId) setError(describeError(e));
-    } finally {
-      if (request.current === requestId) {
-        request.current = null;
-        setRunning(false);
-      }
-    }
+    const effects: DescribeEffects = {
+      request,
+      setRunning,
+      setText,
+      setError,
+      dropChosenPrompt: () => setChosenPrompt(null),
+      prompts,
+      providers,
+    };
+    void describeImage(effects, { fileId: file.id, model, providerId, promptId });
   }
 
-  async function copy() {
-    if (text === null) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      // A copy that works drops the message of an earlier one that failed.
-      setError((current) => (current === COPY_FAILED_MESSAGE ? null : current));
-    } catch {
-      setError(COPY_FAILED_MESSAGE);
-    }
-  }
-
+  /** Ignored while the settings screen cannot be shown. */
   function openSettings() {
     if (settingsBlocked !== null) return;
     onClose();
@@ -148,8 +222,8 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
           type="button"
           className={BUTTON}
           disabled={!canGenerate}
-          title={blockedTitle}
-          onClick={() => void generate()}
+          title={generateTitle(blocked, running, file !== null)}
+          onClick={generate}
         >
           Generate
         </button>
@@ -173,7 +247,14 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
         className={`h-48 w-full resize-none rounded-control border border-line bg-surface p-2.5 text-text ${FOCUS}`}
       />
       <div className="flex justify-end gap-2">
-        <button type="button" className={BUTTON} disabled={text === null} onClick={() => void copy()}>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={text === null}
+          onClick={() => {
+            if (text !== null) void copyText(text, setError);
+          }}
+        >
           Copy
         </button>
         <button type="button" className={BUTTON} onClick={onClose}>

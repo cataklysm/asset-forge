@@ -24,16 +24,21 @@ import { AnalysisResultDialog } from './AnalysisResultDialog';
 import { AnalysisStartDialog } from './AnalysisStartDialog';
 import { PromptDialog } from './PromptDialog';
 
-/** "Analyse all": disabled with `blocked` as tooltip. Used by the file lists and the asset gallery. */
-export function AnalyseAllButton({
-  blocked,
-  title = ANALYSE_ALL_TITLE,
-  onClick,
-}: {
+/** The props of `AnalyseAllButton`. */
+interface AnalyseAllButtonProps {
+  /** Why it is disabled; null when it is not. */
   blocked: string | null;
+  /** The tooltip while it is enabled. */
   title?: string;
   onClick(): void;
-}) {
+}
+
+/**
+ * "Analyse all": disabled with `blocked` as tooltip. Used by the file lists and the asset gallery.
+ *
+ * @param props the blocked reason, the tooltip and the click handler
+ */
+export function AnalyseAllButton({ blocked, title = ANALYSE_ALL_TITLE, onClick }: AnalyseAllButtonProps) {
   return (
     <button type="button" className={BUTTON} disabled={blocked !== null} title={blocked ?? title} onClick={onClick}>
       {ANALYSE_ALL_LABEL}
@@ -45,6 +50,9 @@ export function AnalyseAllButton({
  * The analysis buttons of a selection bar: Analyse (enabled when the selection holds an analysable
  * image; exactly one selected file opens the single-image dialog, more the start dialog for all of
  * them), and for exactly one analysable image Review tags (with a proposal) and Image to prompt.
+ *
+ * @param props.analysis the analysis dialogs of the screen
+ * @param props.selection the file selection
  */
 export function SelectionAnalysisButtons({ analysis, selection }: { analysis: AnalysisDialogs; selection: FileSelection }) {
   const none = analysableFiles(selection).length === 0;
@@ -81,6 +89,7 @@ export function SelectionAnalysisButtons({ analysis, selection }: { analysis: An
   );
 }
 
+/** The way to the settings screen. */
 export interface OpenSettings {
   /** Shows the settings screen. */
   open(): void;
@@ -88,32 +97,43 @@ export interface OpenSettings {
   blocked: string | null;
 }
 
+/** The way to the settings screen of the surrounding provider. */
 const OpenSettingsContext = createContext<OpenSettings>({ open: () => {}, blocked: null });
 
-/** Gives the analysis dialogs below it the way to the settings screen. */
-export function OpenSettingsProvider({
-  onOpenSettings,
-  blocked = null,
-  children,
-}: {
+/** The props of `OpenSettingsProvider`. */
+interface OpenSettingsProviderProps {
   onOpenSettings(): void;
+  /** Why the settings screen cannot be shown now; null when it can. */
   blocked?: string | null;
   children: ReactNode;
-}) {
+}
+
+/**
+ * Gives the analysis dialogs below it the way to the settings screen.
+ *
+ * @param props the open handler, its blocked reason and the tree
+ */
+export function OpenSettingsProvider({ onOpenSettings, blocked = null, children }: OpenSettingsProviderProps) {
   const value = useMemo(() => ({ open: onOpenSettings, blocked }), [onOpenSettings, blocked]);
   return <OpenSettingsContext.Provider value={value}>{children}</OpenSettingsContext.Provider>;
 }
 
-/** The way to the settings screen; outside an `OpenSettingsProvider` it does nothing. */
+/**
+ * The way to the settings screen.
+ *
+ * @returns the way; outside an `OpenSettingsProvider` it does nothing
+ */
 export function useOpenSettings(): OpenSettings {
   return useContext(OpenSettingsContext);
 }
 
+/** The open analysis dialog and what it shows. */
 type Open =
   | { kind: 'start'; target: AnalysisTarget }
   | { kind: 'result'; file: FileRecord }
   | { kind: 'prompt'; file: FileRecord };
 
+/** The options of `useAnalysisDialogs`. */
 interface Options {
   /** The counts of a started batch, for the host's result strip. */
   onStarted(result: EnqueueAnalysisResult): void;
@@ -123,6 +143,7 @@ interface Options {
   onLeave?(): void;
 }
 
+/** The analysis dialogs of one screen and the ways to open them. */
 export interface AnalysisDialogs {
   /**
    * Why no analysis can start (no provider entry exists), as tooltip of the disabled entries; null
@@ -147,6 +168,9 @@ export interface AnalysisDialogs {
 /**
  * The analysis dialogs of one screen: the start dialog (batches, apply), the result dialog (one
  * image, propose) and Image2Prompt. At most one is open; each chooses its model itself.
+ *
+ * @param options the host's start, change and leave handlers
+ * @returns the dialogs and the ways to open them
  */
 export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): AnalysisDialogs {
   const { list } = useProviders();
@@ -163,11 +187,16 @@ export function useAnalysisDialogs({ onStarted, onChanged, onLeave }: Options): 
     settingsRoute.open();
   };
 
+  /**
+   * Opens the result dialog for one file, the start dialog for several.
+   *
+   * @param files the chosen files
+   */
   function analyseFiles(files: readonly FileRecord[]) {
     const [first] = files;
     if (first === undefined) return;
     if (files.length === 1) setOpen({ kind: 'result', file: first });
-    else setOpen({ kind: 'start', target: { kind: 'files', fileIds: files.map((f) => f.id) } });
+    else setOpen({ kind: 'start', target: { kind: 'files', fileIds: files.map((file) => file.id) } });
   }
 
   const dialogs = (

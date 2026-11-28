@@ -1,64 +1,54 @@
-import { RotateCcw, X } from 'lucide-react';
-import { useCallback, useRef, useState, type RefObject } from 'react';
-import {
-  ACTIVE_JOB_STATUSES,
-  ANALYZE_FILE_JOB,
-  FILE_DOWNLOAD_JOB,
-  IMAGE_GENERATE_JOB,
-  MAX_CHOSEN_IDS,
-  type JobStatus,
-  type JobView,
-  type ProviderList,
-} from '@assetforge/contracts';
+import { useCallback, useRef, useState, type MutableRefObject } from 'react';
+import { MAX_CHOSEN_IDS, type Changes, type JobStatus, type JobView, type ProviderList } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
-import { laneName, MoveJobsDialog } from '../components/MoveJobsDialog';
+import { JobTable, type JobTableProps } from '../components/JobTable';
+import { MoveJobsDialog } from '../components/MoveJobsDialog';
 import { Page } from '../components/Page';
-import { formatDateTime, shortUrl } from '../format';
-import { pagesForRows, rowCount } from '../gallery';
 import { usePagedList } from '../hooks/usePagedList';
-import {
-  useElementSize,
-  useVirtualRows,
-  type ViewHandle,
-  type ViewRestore,
-  type VisibleRows,
-} from '../hooks/useVirtualRows';
+import type { ViewHandle, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { useChanges, useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
-  JOB_RESULT_LABELS,
   JOB_STATUS_LABELS,
-  JOB_TYPE_LABELS,
   JOBS_PROVIDER_HEADER,
   jobStatusLabel,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
 } from '../labels';
 import { useProviders } from '../provider-context';
-import { loadedIds, retryIndex, slotAt, type PagedState } from '../paged-list';
-import { ALERT, BORDER, BUTTON, BUTTON_INLINE, ICON_BUTTON, ITEM_HOVER, MUTED, SELECT } from '../ui';
+import { loadedIds, type PagedState } from '../paged-list';
+import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
+import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
 
-/** The scheduler's `MAX_ATTEMPTS` (packages/jobs), which the renderer does not import. */
-const MAX_ATTEMPTS = 3;
+/** The statuses of the status filter. */
 const STATUSES = Object.keys(JOB_STATUS_LABELS) as JobStatus[];
-const CANCELLABLE: ReadonlySet<JobStatus> = new Set(ACTIVE_JOB_STATUSES);
-const RETRYABLE: ReadonlySet<JobStatus> = new Set(['failed', 'cancelled']);
+/** The start of a fresh table. */
 const TOP: ViewRestore = { scrollOffset: 0, index: null, focus: false };
+/** The rows shown while the first page loads. */
 const SKELETON_ROWS = 6;
 
-const HEADER_HEIGHT = 32;
-const ROW_HEIGHT = 48;
-const ROW_FOCUS = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent';
-const COLUMNS =
-  'grid grid-cols-[9rem_minmax(8rem,1.2fr)_minmax(8rem,1fr)_6rem_5rem_10rem_minmax(8rem,1.5fr)_2.5rem] items-center gap-3 px-2';
-const HEADERS = ['Job', 'File', JOBS_PROVIDER_HEADER, 'Status', 'Attempt', 'Created', 'Error'];
+/** A listed provider entry. */
+type ProviderEntry = ProviderList['providers'][number];
 
-function jobLabel(type: string): string {
-  return JOB_TYPE_LABELS[type] ?? type;
+/** The paged list of jobs. */
+type PagedJobs = ReturnType<typeof usePagedList<JobView>>;
+/** The filter of `jobs:list` without paging. */
+type ListRequest = { status?: JobStatus; providerId?: string };
+
+/** The newest list state the change listener reads. */
+interface LatestList {
+  paged: PagedJobs;
+  key: string;
+  listRequest: ListRequest;
 }
 
-/** The index of the row that holds the focus inside `root`, or null. */
+/**
+ * The index of the row that holds the focus inside `root`.
+ *
+ * @param root the container of the table
+ * @returns the index, or null when no row holds the focus
+ */
 function focusedIndex(root: HTMLElement | null): number | null {
   const active = document.activeElement;
   if (root === null || !(active instanceof Element) || !root.contains(active)) return null;
@@ -67,15 +57,102 @@ function focusedIndex(root: HTMLElement | null): number | null {
   return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
-/** The jobs of the workspace, newest first, with a status filter, row and page actions. */
+/**
+ * Background changes reach the table in place: changed jobs are read again and patched, jobs added,
+ * removed or changed in bulk (or a reset) refresh the loaded pages.
+ *
+ * @param latest the newest list state
+ * @param changes the changes
+ */
+function applyChanges(latest: MutableRefObject<LatestList>, changes: Changes): void {
+  const { paged: current, key: startedKey, listRequest: request } = latest.current;
+  if (changes.reset || changes.jobs) {
+    current.refresh();
+    return;
+  }
+  const ids = loadedIds(current.state, changes.jobIds);
+  if (ids.length === 0) return;
+  if (ids.length > MAX_CHOSEN_IDS) {
+    current.refresh();
+    return;
+  }
+  // No check beyond the key: a workspace read runs synchronously when the main process receives it, and IPC
+  // answers arrive in the order asked, so a page requested after this read never answers before it.
+  call('jobs:list', { ...request, ids, offset: 0, limit: ids.length }).then(
+    (page) => {
+      // Started for another list: its rows must not reach this one. The current list may have been read
+      // before the change, so it is read again (queued while its first page is still loading).
+      if (latest.current.key !== startedKey) {
+        latest.current.paged.refresh();
+        return;
+      }
+      if (page.items.length > 0) latest.current.paged.patch(page.items);
+    },
+    // The change must not be lost: the loaded pages are read again instead.
+    () => latest.current.paged.refresh(),
+  );
+}
+
+/** What a screen action works with. */
+interface ActionRun {
+  busyRef: MutableRefObject<boolean>;
+  setBusy(busy: boolean): void;
+  setError(message: string | null): void;
+  /** Makes the jobs context poll at once. */
+  refresh(): void;
+  /** Reloads the list. */
+  reload(): void;
+}
+
+/**
+ * Runs one action of the screen; afterwards the jobs poll at once and the list is reloaded.
+ *
+ * @param run the context
+ * @param action the action
+ * @returns resolves once done; never rejects; nothing runs while another action does
+ */
+async function runAction(run: ActionRun, action: () => Promise<unknown>): Promise<void> {
+  // One action at a time; the ref also catches a second click before the busy render.
+  if (run.busyRef.current) return;
+  run.busyRef.current = true;
+  run.setBusy(true);
+  run.setError(null);
+  try {
+    await action();
+  } catch (error) {
+    run.setError(describeError(error));
+  } finally {
+    run.busyRef.current = false;
+    run.setBusy(false);
+    run.refresh();
+    run.reload();
+  }
+}
+
+/**
+ * The provider filter: the chosen entry while it is listed, else all.
+ *
+ * @param entries the listed entries
+ * @returns the chosen entry ('' for all) and its setter
+ */
+function useProviderFilter(entries: readonly ProviderEntry[]): [string, (value: string) => void] {
+  // The chosen provider filter; '' (all) once its entry is no longer listed.
+  const [chosenProvider, setChosenProvider] = useState('');
+  const providerId = entries.some((entry) => entry.id === chosenProvider) ? chosenProvider : '';
+  return [providerId, setChosenProvider];
+}
+
+/**
+ * The jobs of the workspace, newest first, with a status filter, row and page actions.
+ *
+ * @returns the screen
+ */
 export function JobsScreen() {
   const { summary, active, refresh } = useJobs();
   const [status, setStatus] = useState<JobStatus | ''>('');
   const providers = useProviders();
   const entries = providers.list?.providers ?? [];
-  // The chosen provider filter; '' (all) once its entry is no longer listed.
-  const [chosenProvider, setChosenProvider] = useState('');
-  const providerId = entries.some((p) => p.id === chosenProvider) ? chosenProvider : '';
+  const [providerId, setChosenProvider] = useProviderFilter(entries);
   const [moving, setMoving] = useState(false);
   // Bumped after every action of this screen; it reloads the list. Background changes follow the
   // change feed in place instead.
@@ -89,10 +166,10 @@ export function JobsScreen() {
   // Where the next mounted table starts; read once by each table when it mounts.
   const restore = useRef<ViewRestore>(TOP);
   const position = useRef<ViewHandle | null>(null);
-  const [rows, setRows] = useState<(VisibleRows & { viewKey: string }) | null>(null);
+  const [rows, setRows] = useState<ShownRows | null>(null);
 
   // The list's filter without paging; also the base of a read of chosen ids.
-  const listRequest = { ...(status === '' ? {} : { status }), ...(providerId === '' ? {} : { providerId }) };
+  const listRequest: ListRequest = { ...(status === '' ? {} : { status }), ...(providerId === '' ? {} : { providerId }) };
   const fetchPage = useCallback(
     (offset: number, limit: number) => call('jobs:list', { limit, offset, ...listRequest }),
     // `status` and `providerId` are all `listRequest` holds.
@@ -106,39 +183,9 @@ export function JobsScreen() {
   // Keyed by the displayed list: while a reload is pending, the old table stays where it was.
   const viewKey = paged.state.key;
 
-  const latest = useRef({ paged, key, listRequest });
+  const latest = useRef<LatestList>({ paged, key, listRequest });
   latest.current = { paged, key, listRequest };
-
-  // Background changes reach the table in place: changed jobs are read again and patched, jobs
-  // added, removed or changed in bulk (or a reset) refresh the loaded pages.
-  useChanges((changes) => {
-    const { paged: current, key: startedKey, listRequest: request } = latest.current;
-    if (changes.reset || changes.jobs) {
-      current.refresh();
-      return;
-    }
-    const ids = loadedIds(current.state, changes.jobIds);
-    if (ids.length === 0) return;
-    if (ids.length > MAX_CHOSEN_IDS) {
-      current.refresh();
-      return;
-    }
-    // No check beyond the key: a workspace read runs synchronously when the main process receives it, and IPC
-    // answers arrive in the order asked, so a page requested after this read never answers before it.
-    call('jobs:list', { ...request, ids, offset: 0, limit: ids.length }).then(
-      (page) => {
-        // Started for another list: its rows must not reach this one. The current list may have been read
-        // before the change, so it is read again (queued while its first page is still loading).
-        if (latest.current.key !== startedKey) {
-          latest.current.paged.refresh();
-          return;
-        }
-        if (page.items.length > 0) latest.current.paged.patch(page.items);
-      },
-      // The change must not be lost: the loaded pages are read again instead.
-      () => latest.current.paged.refresh(),
-    );
-  });
+  useChanges((changes) => applyChanges(latest, changes));
 
   // A reload keeps the position and the focused row: the table remounts with the new list.
   const lastReload = useRef(reloadToken);
@@ -149,12 +196,7 @@ export function JobsScreen() {
     restore.current = { scrollOffset: current?.scrollOffset ?? 0, index: focused, focus: focused !== null };
   }
 
-  const nextWanted =
-    total === null
-      ? [0]
-      : rows !== null && rows.viewKey === viewKey
-        ? pagesForRows(rows.firstRow, rows.lastRow, rows.columns, total)
-        : [];
+  const nextWanted = wantedPages(total, rows, viewKey);
   if (nextWanted.join(',') !== wanted.join(',')) setWanted(nextWanted);
 
   const onRows = useCallback(
@@ -173,7 +215,7 @@ export function JobsScreen() {
 
   function chooseStatus(value: string) {
     restore.current = TOP;
-    setStatus(STATUSES.find((s) => s === value) ?? '');
+    setStatus(STATUSES.find((listed) => listed === value) ?? '');
   }
 
   function chooseProvider(value: string) {
@@ -181,35 +223,126 @@ export function JobsScreen() {
     setChosenProvider(value);
   }
 
-  async function run(action: () => Promise<unknown>) {
-    // One action at a time; the ref also catches a second click before the busy render.
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-      refresh();
-      setReloadToken((n) => n + 1);
-    }
-  }
+  const reload = () => setReloadToken((n) => n + 1);
+  const run = (action: () => Promise<unknown>) => runAction({ busyRef, setBusy, setError, refresh, reload }, action);
 
   const finished = summary === null ? 0 : summary.succeeded + summary.failed + summary.cancelled;
   const retryable = summary === null ? 0 : summary.failed + summary.cancelled;
   const actions = (
+    <JobsActions
+      busy={busy}
+      cancellable={summary !== null && active !== 0}
+      retryable={retryable}
+      finished={finished}
+      onMove={() => setMoving(true)}
+      run={run}
+    />
+  );
+  const toolbar = (
+    <JobsToolbar
+      status={status}
+      providerId={providerId}
+      entries={entries}
+      onStatus={chooseStatus}
+      onProvider={chooseProvider}
+    />
+  );
+  const table = {
+    viewKey,
+    paged: paged.state,
+    restore: restore.current,
+    onRows,
+    onRetry: paged.retry,
+    positionRef: position,
+    onCancel: (job: JobView) => void run(() => call('jobs:cancel', { jobId: job.id })),
+    onRetryJob: (job: JobView) => void run(() => call('jobs:retry', { jobId: job.id })),
+  };
+
+  return (
+    <Page title="Jobs" count={total} countTitle="Jobs in this workspace" actions={actions} toolbar={toolbar}>
+      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3" aria-busy={paged.pending || undefined}>
+        {error !== null && (
+          <p role="alert" className={ALERT}>
+            {error}
+          </p>
+        )}
+        {jobsBody(paged.state, table)}
+      </div>
+      {moving && (
+        <MoveJobsDialog
+          source={undefined}
+          onClose={() => {
+            setMoving(false);
+            reload();
+          }}
+        />
+      )}
+    </Page>
+  );
+}
+
+/**
+ * The body of the screen: Retry when the first page failed, skeleton rows while it loads, a line for
+ * an empty list, else the table. A plain function, so every branch keeps its element as before.
+ *
+ * @param state the paged list
+ * @param table the table props without the total
+ * @returns the body
+ */
+function jobsBody(state: PagedState<JobView>, table: Omit<JobTableProps, 'total'>) {
+  const total = state.total;
+  const failedPage = failedFirstPage(state);
+  if (failedPage !== null) {
+    return (
+      <div>
+        <button type="button" className={BUTTON} onClick={() => table.onRetry(failedPage)}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (total === null) {
+    return (
+      <div className="flex flex-col gap-2" aria-busy="true">
+        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+          <div key={i} data-skeleton="" className="h-10 animate-pulse rounded-control bg-raised" />
+        ))}
+      </div>
+    );
+  }
+  if (total === 0) return <p className={MUTED}>No jobs</p>;
+  return <JobTable key={table.viewKey} {...table} total={total} />;
+}
+
+/** The props of {@link JobsActions}. */
+interface JobsActionsProps {
+  busy: boolean;
+  /** Some job is active. */
+  cancellable: boolean;
+  /** The failed and cancelled jobs. */
+  retryable: number;
+  /** The finished jobs. */
+  finished: number;
+  onMove(): void;
+  run(action: () => Promise<unknown>): Promise<void>;
+}
+
+/**
+ * The page actions: Move jobs, Cancel all, Retry failed, Clear finished.
+ *
+ * @param props the counts and the callbacks
+ * @returns the buttons
+ */
+function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: JobsActionsProps) {
+  return (
     <>
-      <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={() => setMoving(true)}>
+      <button type="button" className={BUTTON} title={MOVE_JOBS_TITLE} onClick={onMove}>
         {MOVE_JOBS_LABEL}
       </button>
       <button
         type="button"
         className={BUTTON}
-        disabled={busy || summary === null || active === 0}
+        disabled={busy || !cancellable}
         onClick={() => void run(() => call('jobs:cancelAll', {}))}
       >
         Cancel all
@@ -232,14 +365,31 @@ export function JobsScreen() {
       </button>
     </>
   );
+}
 
-  const toolbar = (
+/** The props of {@link JobsToolbar}. */
+interface JobsToolbarProps {
+  status: JobStatus | '';
+  providerId: string;
+  entries: readonly ProviderEntry[];
+  onStatus(value: string): void;
+  onProvider(value: string): void;
+}
+
+/**
+ * The filters: status and provider.
+ *
+ * @param props the filter values, the entries and the callbacks
+ * @returns the filter bar
+ */
+function JobsToolbar({ status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
+  return (
     <FilterBar resultCount={null} onClear={null}>
-      <select className={SELECT} aria-label="Status" value={status} onChange={(e) => chooseStatus(e.target.value)}>
+      <select className={SELECT} aria-label="Status" value={status} onChange={(event) => onStatus(event.target.value)}>
         <option value="">All</option>
-        {STATUSES.map((s) => (
-          <option key={s} value={s}>
-            {jobStatusLabel(s)}
+        {STATUSES.map((listed) => (
+          <option key={listed} value={listed}>
+            {jobStatusLabel(listed)}
           </option>
         ))}
       </select>
@@ -247,258 +397,15 @@ export function JobsScreen() {
         className={SELECT}
         aria-label={JOBS_PROVIDER_HEADER}
         value={providerId}
-        onChange={(e) => chooseProvider(e.target.value)}
+        onChange={(event) => onProvider(event.target.value)}
       >
         <option value="">{ALL_PROVIDERS}</option>
-        {entries.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
+        {entries.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {entry.name}
           </option>
         ))}
       </select>
     </FilterBar>
-  );
-
-  const failedPage =
-    total === null ? ([...paged.state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null) : null;
-
-  return (
-    <Page title="Jobs" count={total} countTitle="Jobs in this workspace" actions={actions} toolbar={toolbar}>
-      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3" aria-busy={paged.pending || undefined}>
-        {error !== null && (
-          <p role="alert" className={ALERT}>
-            {error}
-          </p>
-        )}
-        {failedPage !== null ? (
-          <div>
-            <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-              Retry
-            </button>
-          </div>
-        ) : total === null ? (
-          <div className="flex flex-col gap-2" aria-busy="true">
-            {Array.from({ length: SKELETON_ROWS }, (_, i) => (
-              <div key={i} data-skeleton="" className="h-10 animate-pulse rounded-control bg-raised" />
-            ))}
-          </div>
-        ) : total === 0 ? (
-          <p className={MUTED}>No jobs</p>
-        ) : (
-          <JobTable
-            key={viewKey}
-            viewKey={viewKey}
-            paged={paged.state}
-            total={total}
-            restore={restore.current}
-            onRows={onRows}
-            onRetry={paged.retry}
-            positionRef={position}
-            onCancel={(job) => void run(() => call('jobs:cancel', { jobId: job.id }))}
-            onRetryJob={(job) => void run(() => call('jobs:retry', { jobId: job.id }))}
-          />
-        )}
-      </div>
-      {moving && (
-        <MoveJobsDialog
-          source={undefined}
-          onClose={() => {
-            setMoving(false);
-            setReloadToken((n) => n + 1);
-          }}
-        />
-      )}
-    </Page>
-  );
-}
-
-interface JobTableProps {
-  viewKey: string;
-  paged: PagedState<JobView>;
-  total: number;
-  restore: ViewRestore;
-  onRows(rows: VisibleRows): void;
-  onRetry(page: number): void;
-  positionRef: { current: ViewHandle | null };
-  onCancel(job: JobView): void;
-  onRetryJob(job: JobView): void;
-}
-
-function JobTable(props: JobTableProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const size = useElementSize(scrollRef);
-  return (
-    <div
-      ref={scrollRef}
-      role="grid"
-      aria-label="Jobs"
-      aria-rowcount={rowCount(props.total, 1) + 1}
-      className="min-h-0 flex-1 overflow-y-scroll"
-    >
-      {size !== null && size.height > 0 && <JobRows {...props} scrollRef={scrollRef} height={size.height} />}
-    </div>
-  );
-}
-
-function JobRows(props: JobTableProps & { scrollRef: RefObject<HTMLDivElement | null>; height: number }) {
-  const { viewKey, paged, total, restore, onRows, onRetry, positionRef, onCancel, onRetryJob } = props;
-  const rows = useVirtualRows({
-    scrollRef: props.scrollRef,
-    total,
-    columns: 1,
-    rowHeight: ROW_HEIGHT,
-    paddingStart: HEADER_HEIGHT,
-    viewportHeight: props.height - HEADER_HEIGHT,
-    restore,
-    onRows,
-    viewKey,
-    positionRef,
-  });
-  const { virtualizer } = rows;
-
-  return (
-    <div role="presentation" className="relative w-full text-sm" style={{ height: virtualizer.getTotalSize() }}>
-      <div
-        role="row"
-        aria-rowindex={1}
-        className={`sticky top-0 z-10 border-b bg-surface ${BORDER} ${MUTED} ${COLUMNS}`}
-        style={{ height: HEADER_HEIGHT }}
-      >
-        {HEADERS.map((header) => (
-          <span key={header} role="columnheader" className="truncate">
-            {header}
-          </span>
-        ))}
-        <span role="columnheader" aria-label="Actions" />
-      </div>
-      {virtualizer.getVirtualItems().map((row) => {
-        const index = row.index;
-        const slot = slotAt(paged, index);
-        const style = { top: row.start, height: ROW_HEIGHT };
-        const tabbable = index === rows.tabbableIndex;
-        if (slot.kind === 'failed' && index === retryIndex(slot.page, rows.firstVisibleIndex)) {
-          return (
-            <div
-              key={index}
-              role="row"
-              aria-rowindex={index + 2}
-              className={`absolute inset-x-0 flex items-center border-b px-2 ${BORDER}`}
-              style={style}
-            >
-              <span role="gridcell">
-                <button
-                  type="button"
-                  data-index={index}
-                  className={BUTTON_INLINE}
-                  tabIndex={tabbable ? 0 : -1}
-                  onClick={() => {
-                    rows.refocus(index);
-                    onRetry(slot.page);
-                  }}
-                  onKeyDown={(e) => rows.onItemKeyDown(index, e)}
-                  onFocus={() => rows.onItemFocus(index)}
-                >
-                  Retry
-                </button>
-              </span>
-            </div>
-          );
-        }
-        const job = slot.kind === 'loaded' ? slot.item : null;
-        return (
-          <div
-            key={index}
-            role="row"
-            aria-rowindex={index + 2}
-            data-index={index}
-            tabIndex={tabbable ? 0 : -1}
-            aria-disabled={job === null ? true : undefined}
-            aria-busy={slot.kind === 'placeholder' ? true : undefined}
-            className={`absolute inset-x-0 cursor-default border-b ${BORDER} ${ITEM_HOVER} ${ROW_FOCUS} ${COLUMNS}`}
-            style={style}
-            onKeyDown={(e) => rows.onItemKeyDown(index, e)}
-            onFocus={() => rows.onItemFocus(index)}
-          >
-            {job !== null && (
-              <JobCells job={job} tabIndex={tabbable ? 0 : -1} onCancel={() => onCancel(job)} onRetry={() => onRetryJob(job)} />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * The provider of an analysis or generation job: the current entry name (or the stored one) and the
- * model when there is one (an upscale has none); the host of a download; '—' for other jobs.
- */
-function providerText(list: ProviderList | null, job: JobView): string {
-  if (job.type === FILE_DOWNLOAD_JOB) return job.host ?? '—';
-  if (job.type !== ANALYZE_FILE_JOB && job.type !== IMAGE_GENERATE_JOB) return '—';
-  const name = laneName(list, job.providerId, job.providerName);
-  return job.model === null ? name : `${name} · ${job.model}`;
-}
-
-function JobCells({ job, tabIndex, onCancel, onRetry }: { job: JobView; tabIndex: number; onCancel(): void; onRetry(): void }) {
-  const { list } = useProviders();
-  const provider = providerText(list, job);
-  // A download names its address until it has a file; the full address is in the tooltip.
-  const fileText = job.fileName ?? (job.url === null ? '—' : shortUrl(job.url));
-  const fileTitle = job.fileName ?? job.url ?? undefined;
-  const statusText =
-    job.status === 'succeeded' && job.result !== null ? JOB_RESULT_LABELS[job.result] : jobStatusLabel(job.status);
-  const waitTitle =
-    job.status === 'retry_wait' && job.runAfter !== null ? `Next try at ${formatDateTime(job.runAfter)}` : undefined;
-  return (
-    <>
-      <span role="gridcell" className="truncate">
-        {jobLabel(job.type)}
-      </span>
-      <span role="gridcell" className="truncate font-medium" title={fileTitle}>
-        {fileText}
-      </span>
-      <span role="gridcell" className="truncate" title={provider}>
-        {provider}
-      </span>
-      <span role="gridcell" className={`truncate ${job.status === 'failed' ? 'text-danger' : ''}`} title={waitTitle}>
-        {statusText}
-      </span>
-      <span role="gridcell" className="truncate tabular-nums">
-        {`${job.attempt} / ${MAX_ATTEMPTS}`}
-      </span>
-      <span role="gridcell" className="truncate">
-        {formatDateTime(job.createdAt)}
-      </span>
-      <span role="gridcell" className={`truncate ${MUTED}`} title={job.errorMessage ?? undefined}>
-        {job.errorMessage ?? ''}
-      </span>
-      <span role="gridcell" className="flex justify-end">
-        {CANCELLABLE.has(job.status) && (
-          <button
-            type="button"
-            className={ICON_BUTTON}
-            tabIndex={tabIndex}
-            title="Cancel job"
-            aria-label="Cancel job"
-            onClick={onCancel}
-          >
-            <X size={16} aria-hidden />
-          </button>
-        )}
-        {RETRYABLE.has(job.status) && (
-          <button
-            type="button"
-            className={ICON_BUTTON}
-            tabIndex={tabIndex}
-            title="Retry job"
-            aria-label="Retry job"
-            onClick={onRetry}
-          >
-            <RotateCcw size={16} aria-hidden />
-          </button>
-        )}
-      </span>
-    </>
   );
 }

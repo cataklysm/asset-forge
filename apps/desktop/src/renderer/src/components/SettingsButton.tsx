@@ -1,6 +1,11 @@
 import { BUTTON } from '../ui';
 
-/** The Settings button of the analysis and prompt dialogs: disabled with `blocked` as tooltip. */
+/**
+ * The Settings button of the analysis and prompt dialogs: disabled with `blocked` as tooltip.
+ *
+ * @param props.blocked why the settings cannot open now; null when they can
+ * @param props.onClick opens the settings
+ */
 export function SettingsButton({ blocked, onClick }: { blocked: string | null; onClick(): void }) {
   return (
     <button

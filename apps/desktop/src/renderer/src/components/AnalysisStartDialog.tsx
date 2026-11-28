@@ -1,8 +1,9 @@
 import { RotateCw } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
+import { useAnalysisPreview } from '../hooks/useAnalysisPreview';
 import { useJobs } from '../jobs-context';
 import {
   START_COUNTING,
@@ -14,7 +15,7 @@ import {
   START_RETRY_PREVIEW_LABEL,
 } from '../labels';
 import { useProviderChoice } from '../provider-choice';
-import { useProviders } from '../provider-context';
+import { useProviders, type ProvidersState } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
 import { ALERT, BUTTON, ICON_BUTTON, LABEL, MUTED } from '../ui';
 import { Dialog } from './Dialog';
@@ -23,6 +24,7 @@ import { ProviderSelect } from './ProviderSelect';
 import { PromptSelect } from './PromptSelect';
 import { SettingsButton } from './SettingsButton';
 
+/** The props of `AnalysisStartDialog`. */
 interface Props {
   open: boolean;
   /** What to analyse; nothing is previewed or started without one. */
@@ -36,14 +38,162 @@ interface Props {
   settingsBlocked?: string | null;
 }
 
+/** The title of the start dialog. */
 export const ANALYSIS_START_TITLE = 'Analyse';
 
 /**
  * How many files a start would enqueue. The preview counts are disjoint: `analysable` is what an
  * enqueue without `force` queues; `force` adds the files already analysed with this model.
+ *
+ * @param preview the preview counts
+ * @param force whether files already analysed are analysed again
+ * @returns the number of files
  */
 export function wouldEnqueue(preview: AnalysisPreview, force: boolean): number {
   return preview.analysable + (force ? preview.alreadyAnalysed : 0);
+}
+
+/**
+ * One count as shown: "Analyse again" moves the files already analysed with this model into "To analyse".
+ *
+ * @param preview the preview counts
+ * @param key the count
+ * @param force whether files already analysed are analysed again
+ * @returns the number shown
+ */
+function shownCount(preview: AnalysisPreview, key: keyof AnalysisPreview, force: boolean): number {
+  if (key === 'analysable') return wouldEnqueue(preview, force);
+  if (key === 'alreadyAnalysed' && force) return 0;
+  return preview[key];
+}
+
+/**
+ * Why the counts keep Start disabled.
+ *
+ * @param previewError the failure of the preview; null for none
+ * @param counting whether the counts are not there yet
+ * @param nothingToDo whether a start would enqueue nothing
+ * @returns the reason, or null when the counts allow a start
+ */
+function countsBlocked(previewError: string | null, counting: boolean, nothingToDo: boolean): string | null {
+  if (previewError !== null) return START_PREVIEW_FAILED;
+  if (counting) return START_COUNTING;
+  return nothingToDo ? START_NOTHING_TO_DO : null;
+}
+
+/** The request of one start. */
+interface StartRequest {
+  target: AnalysisTarget;
+  model: string;
+  providerId: string;
+  force: boolean;
+  promptId: string;
+}
+
+/** What a start sets and tells. */
+interface StartEffects {
+  startingRef: MutableRefObject<boolean>;
+  setStarting(starting: boolean): void;
+  setError(message: string | null): void;
+  /** Drops the owner's prompt pick. */
+  dropPromptChoice(): void;
+  prompts: AnalysisPromptsState;
+  providers: ProvidersState;
+  /** Makes the jobs context poll at once. */
+  refreshJobs(): void;
+  onStarted(result: EnqueueAnalysisResult): void;
+  onClose(): void;
+}
+
+/**
+ * Enqueues the batch in mode `apply`; on success the start is recorded and the dialog closes.
+ *
+ * @param effects the setters and handlers
+ * @param request the request
+ * @returns resolves once done; never rejects
+ */
+async function startAnalysis(effects: StartEffects, request: StartRequest): Promise<void> {
+  effects.startingRef.current = true;
+  effects.setStarting(true);
+  effects.setError(null);
+  const { target, model, providerId, force, promptId } = request;
+  try {
+    const result = await call('analysis:enqueue', { target, model, providerId, mode: 'apply', force, promptId });
+    effects.prompts.noteUsed('tagging', request.promptId);
+    effects.providers.noteUsed(request.providerId);
+    effects.refreshJobs();
+    effects.onStarted(result);
+    effects.onClose();
+  } catch (error) {
+    effects.setError(describeError(error));
+    // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
+    if (error instanceof ApiError && error.code === 'not_found') {
+      effects.dropPromptChoice();
+      void effects.prompts.reload().catch(() => {});
+    }
+  } finally {
+    effects.startingRef.current = false;
+    effects.setStarting(false);
+  }
+}
+
+/** The props of `PreviewFailure`. */
+interface PreviewFailureProps {
+  message: string;
+  starting: boolean;
+  onRetry(): void;
+}
+
+/**
+ * The failure of the preview with the action that reads the counts again.
+ *
+ * @param props the message, whether a start runs and the retry
+ */
+function PreviewFailure({ message, starting, onRetry }: PreviewFailureProps) {
+  return (
+    <div className="flex items-start gap-2">
+      <p role="alert" className={`min-w-0 flex-1 ${ALERT}`}>
+        {message}
+      </p>
+      <button
+        type="button"
+        className={ICON_BUTTON}
+        title={START_RETRY_PREVIEW_LABEL}
+        aria-label={START_RETRY_PREVIEW_LABEL}
+        disabled={starting}
+        onClick={onRetry}
+      >
+        <RotateCw size={16} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/** The props of `PreviewCounts`. */
+interface PreviewCountsProps {
+  preview: AnalysisPreview | null;
+  previewing: boolean;
+  force: boolean;
+}
+
+/**
+ * The preview counts; a dash for each while they are not there.
+ *
+ * @param props the counts, whether they are read and the force flag
+ */
+function PreviewCounts({ preview, previewing, force }: PreviewCountsProps) {
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-2" aria-busy={previewing || undefined}>
+      {START_COUNTS.map(({ key, label, title }) => (
+        <div key={key} className="flex flex-col" title={title}>
+          <dt className={LABEL}>{label}</dt>
+          <dd className={`text-lg tabular-nums ${preview === null ? MUTED : 'text-text'}`}>
+            {preview === null ? '–' : shownCount(preview, key, force)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 /**
@@ -51,6 +201,8 @@ export function wouldEnqueue(preview: AnalysisPreview, force: boolean): number {
  * (the one used last preselected, changeable), a tagging model (that entry's default preselected), a tagging prompt (the one used last
  * preselected, changeable), the preview counts for that model, "Analyse
  * again" (`force`) and Start, which enqueues in mode `apply`.
+ *
+ * @param props the target, whether it is open and the handlers
  */
 export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSettings, settingsBlocked = null }: Props) {
   const providers = useProviders();
@@ -62,13 +214,8 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
   // Null while the owner has not chosen: the tagging prompt used last (or the first) is in force.
   const [promptChoice, setPromptChoice] = useState<string | null>(null);
   const [force, setForce] = useState(false);
-  const [preview, setPreview] = useState<AnalysisPreview | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Rises with every retry of a failed preview, so the preview effect runs again.
-  const [previewRun, setPreviewRun] = useState(0);
   const startingRef = useRef(false);
 
   // Every opening starts from the stored default with nothing carried over.
@@ -84,79 +231,36 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
 
   // The prompt is not part of the preview: the counts do not depend on it.
   const promptId = promptChoice ?? defaultPromptId(prompts, 'tagging');
-
-  // The target as a value: a caller may pass an equal target as a new object on every render.
-  const targetKey = target === null ? null : JSON.stringify(target);
-  const targetRef = useRef(target);
-  targetRef.current = target;
-
-  useEffect(() => {
-    const current = targetRef.current;
-    setPreview(null);
-    setPreviewError(null);
-    if (!open || current === null || model === null || providerId === null) {
-      setPreviewing(false);
-      return;
-    }
-    let superseded = false;
-    setPreviewing(true);
-    call('analysis:preview', { target: current, model, providerId })
-      .then(
-        (next) => {
-          if (!superseded) setPreview(next);
-        },
-        (e: unknown) => {
-          if (!superseded) setPreviewError(describeError(e));
-        },
-      )
-      .finally(() => {
-        if (!superseded) setPreviewing(false);
-      });
-    return () => {
-      superseded = true;
-    };
-  }, [open, targetKey, model, providerId, previewRun]);
+  const { preview, previewing, previewError, retry } = useAnalysisPreview(open, target, model, providerId);
 
   const nothingToDo = preview !== null && wouldEnqueue(preview, force) === 0;
   // The way to the settings depends on the provider and the model only, never on the counts.
   const { blocked: providerBlocked, offerSettings } = providerGate(providers, providerId, model);
   const blocked =
-    providerBlocked ??
-    promptGate(prompts, promptId) ??
-    (previewError !== null
-      ? START_PREVIEW_FAILED
-      : previewing || preview === null
-        ? START_COUNTING
-        : nothingToDo
-          ? START_NOTHING_TO_DO
-          : null);
+    providerBlocked ?? promptGate(prompts, promptId) ?? countsBlocked(previewError, previewing || preview === null, nothingToDo);
   const canStart = blocked === null && !starting && target !== null;
 
-  async function start(event?: FormEvent) {
+  /**
+   * Starts the batch unless a start is in flight or cannot start.
+   *
+   * @param event the form submit
+   */
+  function start(event?: FormEvent) {
     event?.preventDefault();
     if (startingRef.current || !canStart || target === null || providerId === null || model === null || promptId === null)
       return;
-    startingRef.current = true;
-    setStarting(true);
-    setError(null);
-    try {
-      const result = await call('analysis:enqueue', { target, model, providerId, mode: 'apply', force, promptId });
-      prompts.noteUsed('tagging', promptId);
-      providers.noteUsed(providerId);
-      jobs.refresh();
-      onStarted(result);
-      onClose();
-    } catch (e) {
-      setError(describeError(e));
-      // The prompt may have been deleted meanwhile: list again and fall back to one that exists.
-      if (e instanceof ApiError && e.code === 'not_found') {
-        setPromptChoice(null);
-        void prompts.reload().catch(() => {});
-      }
-    } finally {
-      startingRef.current = false;
-      setStarting(false);
-    }
+    const effects: StartEffects = {
+      startingRef,
+      setStarting,
+      setError,
+      dropPromptChoice: () => setPromptChoice(null),
+      prompts,
+      providers,
+      refreshJobs: jobs.refresh,
+      onStarted,
+      onClose,
+    };
+    void startAnalysis(effects, { target, model, providerId, force, promptId });
   }
 
   /** Cancel, Esc and the backdrop; ignored while a start is in flight, which closes by itself. */
@@ -172,38 +276,15 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
     onOpenSettings();
   }
 
-  /** "Analyse again" moves the files already analysed with this model into "To analyse". */
-  function shown(p: AnalysisPreview, key: keyof AnalysisPreview): number {
-    if (key === 'analysable') return wouldEnqueue(p, force);
-    if (key === 'alreadyAnalysed' && force) return 0;
-    return p[key];
-  }
-
   return (
     <Dialog open={open} title={ANALYSIS_START_TITLE} onClose={close}>
-      <form className="flex flex-col gap-4" onSubmit={(e) => void start(e)}>
+      <form className="flex flex-col gap-4" onSubmit={(event) => start(event)}>
         {error !== null && (
           <p role="alert" className={ALERT}>
             {error}
           </p>
         )}
-        {previewError !== null && (
-          <div className="flex items-start gap-2">
-            <p role="alert" className={`min-w-0 flex-1 ${ALERT}`}>
-              {previewError}
-            </p>
-            <button
-              type="button"
-              className={ICON_BUTTON}
-              title={START_RETRY_PREVIEW_LABEL}
-              aria-label={START_RETRY_PREVIEW_LABEL}
-              disabled={starting}
-              onClick={() => setPreviewRun((n) => n + 1)}
-            >
-              <RotateCw size={16} aria-hidden />
-            </button>
-          </div>
-        )}
+        {previewError !== null && <PreviewFailure message={previewError} starting={starting} onRetry={retry} />}
         <ProviderSelect value={providerId} onChange={choice.setProvider} disabled={starting} />
         <ModelSelect
           providerId={providerId}
@@ -213,29 +294,13 @@ export function AnalysisStartDialog({ open, target, onClose, onStarted, onOpenSe
           disabled={starting || providerId === null}
         />
         <PromptSelect purpose="tagging" value={promptId} onChange={setPromptChoice} disabled={starting} />
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2" aria-busy={previewing || undefined}>
-          {START_COUNTS.map(({ key, label, title }) => (
-            <div key={key} className="flex flex-col" title={title}>
-              <dt className={LABEL}>{label}</dt>
-              <dd className={`text-lg tabular-nums ${preview === null ? MUTED : 'text-text'}`}>
-                {preview === null ? '–' : shown(preview, key)}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <PreviewCounts preview={preview} previewing={previewing} force={force} />
         <label className="flex items-center gap-2 text-sm" title={START_FORCE_TITLE}>
-          <input
-            type="checkbox"
-            checked={force}
-            disabled={starting}
-            onChange={(e) => setForce(e.target.checked)}
-          />
+          <input type="checkbox" checked={force} disabled={starting} onChange={(event) => setForce(event.target.checked)} />
           {START_FORCE_LABEL}
         </label>
         <div className="flex justify-end gap-2">
-          {offerSettings && (
-            <SettingsButton blocked={settingsBlocked} onClick={openSettings} />
-          )}
+          {offerSettings && <SettingsButton blocked={settingsBlocked} onClick={openSettings} />}
           <button type="button" className={BUTTON} disabled={starting} onClick={close}>
             Cancel
           </button>
