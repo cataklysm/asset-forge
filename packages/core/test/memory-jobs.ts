@@ -4,8 +4,6 @@ import {
   FINISHED_JOB_STATUSES,
   JOB_ERROR_MESSAGES,
   JobStatusSchema,
-  analysisJobFields,
-  downloadJobFields,
   type JobErrorCode,
   type JobResult,
   type JobStatus,
@@ -13,6 +11,7 @@ import {
 } from '@assetforge/contracts';
 import { InvalidOperationError } from '../src/errors.js';
 import type { Job, NewJob } from '../src/job-types.js';
+import { jobViewOf } from '../src/job-view.js';
 import type { JobRepository } from '../src/ports/job-repository.js';
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -383,28 +382,13 @@ export class InMemoryJobRepository implements JobRepository {
       .filter((r) => (q.status === undefined || r.status === q.status) && (q.lane === undefined || r.lane === q.lane))
       .filter((r) => q.ids === undefined || q.ids.includes(r.id))
       .sort((a, b) => oldestFirst(b, a));
-    const items = matching.slice(q.offset, q.offset + q.limit).map((r): JobView => {
-      const download = r.type === FILE_DOWNLOAD_JOB;
-      return {
-        ...(download ? { providerName: null, model: null } : analysisJobFields(r.payload)),
-        id: r.id,
-        type: r.type,
-        status: r.status,
-        attempt: r.attempt,
-        fileId: r.fileId,
+    const items = matching.slice(q.offset, q.offset + q.limit).map((r) =>
+      jobViewOf(r, {
         fileName: r.fileId === null ? null : this.fileName(r.fileId),
-        errorCode: r.errorCode,
-        errorMessage: r.errorMessage,
-        createdAt: r.createdAt,
-        startedAt: r.startedAt,
-        finishedAt: r.finishedAt,
-        runAfter: r.runAfter,
-        // A download's lane is its host, not a provider.
-        providerId: download ? null : r.lane,
-        ...(download ? downloadJobFields(r.payload) : { url: null, host: null }),
+        generation: null,
         result: this.results.get(r.id) ?? null,
-      };
-    });
+      }),
+    );
     return { items, total: matching.length };
   }
 

@@ -1,47 +1,12 @@
-import {
-  ANALYZE_FILE_JOB,
-  analysisJobFields,
-  normalizeTagName,
-  type JobView,
-  type ProposalView,
-} from '@assetforge/contracts';
+import { ANALYZE_FILE_JOB, normalizeTagName, type JobView, type ProposalView } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile, TRASHED_FILE_MESSAGE } from './file-trash.js';
-import type { Job } from './job-types.js';
+import { jobViewOf } from './job-view.js';
 import type { Proposal, ProposalAcceptance } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
 /** A proposal as it is read, with whether its file changed since. */
 type StoredProposal = Proposal & { stale: boolean };
-
-/**
- * The view of an analysis job.
- *
- * @param job the job
- * @param fileName the name of its file; null when it is gone
- * @returns the view with the analysis fields of its payload
- */
-function viewOf(job: Job, fileName: string | null): JobView {
-  return {
-    id: job.id,
-    type: job.type,
-    status: job.status,
-    attempt: job.attempt,
-    fileId: job.fileId,
-    fileName,
-    errorCode: job.errorCode,
-    errorMessage: job.errorMessage,
-    createdAt: job.createdAt,
-    startedAt: job.startedAt,
-    finishedAt: job.finishedAt,
-    runAfter: job.runAfter,
-    providerId: job.lane,
-    ...analysisJobFields(job.payload),
-    url: null,
-    host: null,
-    result: null,
-  };
-}
 
 /**
  * The view of a stored proposal.
@@ -75,7 +40,7 @@ export async function getProposal(
   const file = job === null ? null : await session.database.files.get(fileId);
   return {
     proposal: stored === null ? null : proposalViewOf(stored),
-    job: job === null ? null : viewOf(job, file?.originalName ?? null),
+    job: job === null ? null : jobViewOf(job, { fileName: file?.originalName ?? null, generation: null, result: null }),
   };
 }
 
