@@ -12,7 +12,11 @@ are, apart from imports and names they must follow.
   story, the steps hold the detail. As a guide, a body over about 40 lines wants splitting.
 - A function that returns a promise is not defined inside another function. It lives at module level and gets
   what it needs as parameters, or as one explicit state or dependencies object. Small synchronous closures
-  (a predicate, a mapper, an event listener of a few lines) may stay where they are used.
+  (a predicate, a mapper, an event listener of a few lines) may stay where they are used. So may a one-line
+  arrow that only hands its arguments to a module-level function (`open: (url) => openUrl(url, config)`), and
+  the settle-once helpers inside a promise executor.
+- Where several steps share mutable state, the state is one explicit object or a private class whose methods
+  are the steps. It is never a set of `let` variables closed over by nested functions.
 - A factory (`createX`) wires things together and returns the object; the work is done by module-level
   functions it calls.
 - Nesting stays shallow: early returns instead of nested conditions, no nested ternaries.
@@ -39,6 +43,7 @@ security rule are kept.
 
 - Names are written out: `session`, not `s`; `request` and `response`, not `r`, `req` or `res`; `options`, not
   `o` or `opts`; `context`, not `ctx`; `dependencies`, not `deps`; `resourceClass`, not `rc`; `error`, not `e`.
+  This holds for type names too: `JobHostDependencies`, not `JobHostDeps`.
 - Established short forms stay, because writing them out would be the odd choice: URL, URI, ID, IPC, API,
   HTTP, JSON, SQL, MIME, UI, DOM, CSS, EXIF, the format names (PNG, ZIP, ...) and the units `Ms` and `Bytes`.
   `props` and `ref` stay in React code, `i` stays for a plain index.
@@ -51,7 +56,7 @@ security rule are kept.
 
 - A file has one subject, and its name says which. Someone looking for one thing should find it by the file
   name, without reading a file that holds five other things.
-- As a guide, a file over about 300 lines is checked for a second subject. Types that belong to one module live
+- As a guide, a file over about 300 lines of code, comments not counted, is checked for a second subject. Types that belong to one module live
   with it, not in a collection file.
 - A package's `index.ts` only re-exports. Import paths of other packages stay stable through it.
 - A split keeps git history readable: move code unchanged first where practical, then rework it.
