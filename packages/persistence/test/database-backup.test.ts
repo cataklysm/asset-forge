@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import { AssetForgeError } from '@assetforge/core';
+import { createHash } from 'node:crypto';
+import { AssetForgeError, DatabaseUpdateFailedError } from '@assetforge/core';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
@@ -198,6 +199,23 @@ describe('backup before migrations', () => {
     expect(await backups()).toEqual(['assetforge.sqlite.backup-19-20261128100000']);
     expect(appliedCount(join(dir, 'assetforge.sqlite.backup-19-20261128100000'))).toBe(19);
     expect(appliedCount(dbPath)).toBe(19);
+  });
+
+  test('a failing migration answers DatabaseUpdateFailedError and leaves the file unchanged', async () => {
+    await createDatabaseWith(1);
+    const folder = await migrationsUpTo(1, [{ tag: '0001_broken', sql: 'CREATE TABLE broken (;' }]);
+    const before = createHash('sha256')
+      .update(await readFile(dbPath))
+      .digest('hex');
+
+    const failure = await openWorkspaceDatabase(dbPath, folder).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DatabaseUpdateFailedError);
+    expect((failure as Error).message).toBe('The database update failed. Nothing was changed');
+    const after = createHash('sha256')
+      .update(await readFile(dbPath))
+      .digest('hex');
+    expect(after).toBe(before);
   });
 
   test('a migration that keeps failing reuses its backup instead of piling up copies', async () => {

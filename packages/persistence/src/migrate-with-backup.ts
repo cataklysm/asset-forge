@@ -1,3 +1,4 @@
+import { DatabaseUpdateFailedError } from '@assetforge/core';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -26,7 +27,8 @@ export interface MigrationPlan {
  * Applies the pending migrations. An existing database with at least one pending migration is first copied
  * beside itself (naming and retention in `database-backup.ts`); a new or up-to-date one is not, and the derived
  * data step never asks for one. A failed backup refuses the migration, so the database stays as it was. A failed
- * migration is rolled back by Drizzle and thrown unchanged; its backup stays and nothing is restored. Old backups
+ * migration is rolled back by Drizzle and answered as `DatabaseUpdateFailedError`; its backup stays and nothing is
+ * restored. Old backups
  * are pruned only after a successful migration, and the backup of this migration is never pruned. A finished backup of
  * the same schema state is reused instead of copied again. Leftovers of an interrupted backup are removed first, every time.
  *
@@ -35,6 +37,7 @@ export interface MigrationPlan {
  * @param plan the file, the migrations, whether the file existed and the backup options
  * @returns resolves once the database is migrated
  * @throws InvalidOperationError when the backup cannot be made
+ * @throws DatabaseUpdateFailedError when a migration fails
  */
 export async function migrateWithBackup(
   sqlite: Database.Database,
@@ -45,8 +48,24 @@ export async function migrateWithBackup(
   const state = plan.existed ? readMigrationState(sqlite, plan.migrationsFolder) : undefined;
   const needsBackup = state !== undefined && state.pendingCount > 0;
   const backupPath = needsBackup ? await backupOrReuse(sqlite, plan, state.appliedCount) : null;
-  migrate(database, { migrationsFolder: plan.migrationsFolder });
+  applyMigrations(database, plan.migrationsFolder);
   if (backupPath !== null) await pruneBackups(plan.databaseFilePath, backupPath);
+}
+
+/**
+ * Runs Drizzle's migrator. Drizzle rolls a failed migration back, so the database is unchanged; the failure is
+ * reported with the fixed message and the original error is kept as the cause for the log only.
+ *
+ * @param database the Drizzle handle
+ * @param migrationsFolder the migrations to apply
+ * @throws DatabaseUpdateFailedError when a migration fails
+ */
+function applyMigrations(database: BetterSQLite3Database, migrationsFolder: string): void {
+  try {
+    migrate(database, { migrationsFolder });
+  } catch (error) {
+    throw new DatabaseUpdateFailedError({ cause: error });
+  }
 }
 
 /**

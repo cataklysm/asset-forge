@@ -49,6 +49,7 @@ export interface OpenWorkspaceDatabaseOptions {
  * @param options the options of the derived data step and of the backup
  * @returns the workspace database
  * @throws InvalidOperationError when the backup before pending migrations cannot be made; nothing is migrated then
+ * @throws DatabaseUpdateFailedError when a migration fails; it was rolled back
  */
 export async function openWorkspaceDatabase(
   databaseFilePath: string,

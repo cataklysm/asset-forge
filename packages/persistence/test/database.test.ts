@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { FileRecordSchema } from '@assetforge/contracts';
-import { InvalidOperationError, NotFoundError, type WorkspaceDatabase } from '@assetforge/core';
+import {
+  DatabaseUpdateFailedError,
+  InvalidOperationError,
+  NotFoundError,
+  type WorkspaceDatabase,
+} from '@assetforge/core';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
 
 const HASH_A = 'a'.repeat(64);
@@ -237,9 +242,11 @@ describe('opening the database', () => {
     }
   });
 
-  test('a failed migration closes the connection and rejects with its own error', async () => {
+  test('a failed migration closes the connection and rejects with the update error, its cause kept', async () => {
     const close = vi.spyOn(Database.prototype, 'close');
-    await expect(openWorkspaceDatabase(dbPath, await brokenMigrations())).rejects.toThrow(/Failed to run the query/);
+    const failure = await openWorkspaceDatabase(dbPath, await brokenMigrations()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DatabaseUpdateFailedError);
+    expect(((failure as Error).cause as Error).message).toMatch(/Failed to run the query/);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -250,6 +257,8 @@ describe('opening the database', () => {
       close.call(this);
       throw new Error('close failed');
     });
-    await expect(openWorkspaceDatabase(dbPath, await brokenMigrations())).rejects.toThrow(/Failed to run the query/);
+    await expect(openWorkspaceDatabase(dbPath, await brokenMigrations())).rejects.toBeInstanceOf(
+      DatabaseUpdateFailedError,
+    );
   });
 });

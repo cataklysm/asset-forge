@@ -10,6 +10,8 @@ export interface MigrationState {
   appliedCount: number;
   /** The number of migrations of the folder that the next `migrate` would apply. */
   pendingCount: number;
+  /** Whether the newest applied migration is later than the newest one of the folder: a newer app migrated it. */
+  newerThanApp: boolean;
 }
 
 /**
@@ -18,17 +20,19 @@ export interface MigrationState {
  *
  * @param sqlite the open connection
  * @param migrationsFolder the migrations that are about to be applied
- * @returns the applied and the pending count
+ * @returns the applied and the pending count, and whether a newer app migrated the database
  */
 export function readMigrationState(sqlite: Database.Database, migrationsFolder: string): MigrationState {
   const migrations = readMigrationFiles({ migrationsFolder });
-  if (!hasMigrationsTable(sqlite)) return { appliedCount: 0, pendingCount: migrations.length };
+  if (!hasMigrationsTable(sqlite)) return { appliedCount: 0, pendingCount: migrations.length, newerThanApp: false };
   const row = sqlite
     .prepare(`SELECT count(*) AS appliedCount, max(created_at) AS newest FROM ${MIGRATIONS_TABLE}`)
     .get() as { appliedCount: number; newest: number | string | null };
   const newest = row.newest === null ? undefined : Number(row.newest);
   const pendingCount = migrations.filter((migration) => newest === undefined || newest < migration.folderMillis).length;
-  return { appliedCount: row.appliedCount, pendingCount };
+  const newestKnown = Math.max(0, ...migrations.map((migration) => migration.folderMillis));
+  const newerThanApp = newest !== undefined && newest > newestKnown;
+  return { appliedCount: row.appliedCount, pendingCount, newerThanApp };
 }
 
 /**
