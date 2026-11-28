@@ -1,8 +1,9 @@
 import type { AssetWorkflow } from '@assetforge/contracts';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { WorkflowSection } from '../../src/renderer/src/components/WorkflowSection';
+import { useWorkflow } from '../../src/renderer/src/hooks/useWorkflow';
 import { deferred, fakeError, installFakeApi, type FakeHandlers } from './fake-api';
 import { nextId } from './fixtures';
 
@@ -94,6 +95,69 @@ it('of two saves in flight, the answer of the later one stays', async () => {
   await first.promise;
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(select.value).toBe('done');
+});
+
+it('an earlier save that fails after a later one succeeded still reports its error', async () => {
+  const workflow = workflowOf([{ name: 'Model', mandatory: true }]);
+  const done: AssetWorkflow = { ...workflow, steps: [{ ...workflow.steps[0]!, state: 'done' }] };
+  const first = deferred<AssetWorkflow>();
+  const second = deferred<AssetWorkflow>();
+  const answers = [first, second];
+  install({
+    'workflows:get': () => workflow,
+    'workflows:updateStep': () => answers.shift()!.promise,
+  });
+  const { result } = renderHook(() => useWorkflow(ASSET_ID, TYPE_ID));
+  await waitFor(() => expect(result.current.workflow).not.toBeNull());
+  const stepId = workflow.steps[0]!.id;
+
+  let firstSave!: Promise<boolean>;
+  act(() => {
+    firstSave = result.current.updateStep(stepId, { notes: 'first' });
+  });
+  let secondSave!: Promise<boolean>;
+  act(() => {
+    secondSave = result.current.updateStep(stepId, { state: 'done' });
+  });
+  await act(async () => {
+    second.resolve(done);
+    await secondSave;
+  });
+  let firstResult: boolean | undefined;
+  await act(async () => {
+    first.reject(fakeError('invalid_operation', 'The step could not be saved'));
+    firstResult = await firstSave;
+  });
+
+  expect(firstResult).toBe(false);
+  expect(result.current.error).toBe('The step could not be saved');
+});
+
+it('after a failed save the workflow is read back from the main process', async () => {
+  const user = userEvent.setup();
+  const workflow = workflowOf([{ name: 'Model', mandatory: true }]);
+  let stored = workflow;
+  const first = deferred<AssetWorkflow>();
+  let saves = 0;
+  install({
+    'workflows:get': () => stored,
+    'workflows:updateStep': () => {
+      saves += 1;
+      if (saves === 2) throw fakeError('invalid_operation', 'The step could not be saved');
+      stored = { ...workflow, steps: [{ ...workflow.steps[0]!, state: 'in_progress' }] };
+      return first.promise;
+    },
+  });
+  render(<WorkflowSection assetId={ASSET_ID} assetTypeId={TYPE_ID} />);
+  const select = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'State of Model' });
+
+  await user.selectOptions(select, 'in_progress');
+  await user.selectOptions(select, 'done');
+  await screen.findByText('The step could not be saved');
+  first.resolve(stored);
+  await first.promise;
+
+  await waitFor(() => expect(select.value).toBe('in_progress'));
 });
 
 it('two loads failing with the same message show two alert lines without a key clash', async () => {
