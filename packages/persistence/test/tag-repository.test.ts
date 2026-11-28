@@ -907,7 +907,13 @@ describe('unused tag rows', () => {
     await db.tags.removeFromAsset({ assetId: a.id, name: 'rusty' });
     expect(tagNames()).toEqual([]);
     expect((await db.analyses.getProposal(f))?.tags).toEqual([{ name: 'rusty', displayName: 'Rusty' }]);
-    const accepted = await db.analyses.acceptProposal({ fileId: f, sha256: SHA, tags: [typed('rusty')], now: T1 });
+    const accepted = await db.analyses.acceptProposal({
+      fileId: f,
+      sha256: SHA,
+      createdAt: T1,
+      tags: [typed('rusty')],
+      now: T1,
+    });
     expect(accepted).toBe('accepted');
     expect((await db.files.get(f))!.tags).toEqual([{ name: 'rusty', displayName: 'rusty', origin: 'ai' }]);
   });
