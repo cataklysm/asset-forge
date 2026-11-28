@@ -4,45 +4,76 @@ import type { ProjectQuery } from './ports/project-repositories.js';
 import type { WorkspaceSession } from './session.js';
 import { tagName } from './tags.js';
 
+/**
+ * Creates an active project.
+ *
+ * @param session the open workspace
+ * @param input the name and the optional description
+ * @returns the new project
+ */
 export async function createProject(
-  s: WorkspaceSession,
+  session: WorkspaceSession,
   input: { name: string; description?: string },
 ): Promise<Project> {
-  const now = s.now().toISOString();
+  const now = session.now().toISOString();
   const project: Project = {
-    id: s.newId(),
+    id: session.newId(),
     name: input.name,
     description: input.description ?? '',
     status: 'active',
     createdAt: now,
     updatedAt: now,
   };
-  await s.database.projects.insert(project);
+  await session.database.projects.insert(project);
   return project;
 }
 
+/**
+ * Changes the given fields of a project; `updatedAt` moves.
+ *
+ * @param session the open workspace
+ * @param id the project
+ * @param patch the fields to change
+ * @returns the changed project
+ * @throws `NotFoundError` for an unknown project
+ */
 export async function updateProject(
-  s: WorkspaceSession,
+  session: WorkspaceSession,
   id: string,
   patch: { name?: string; description?: string; status?: ProjectStatus },
 ): Promise<Project> {
-  const updated = await s.database.projects.update(id, { ...patch, updatedAt: s.now().toISOString() });
+  const updated = await session.database.projects.update(id, { ...patch, updatedAt: session.now().toISOString() });
   if (updated === null) throw new NotFoundError(`Project ${id} does not exist`);
   return updated;
 }
 
-export async function getProject(s: WorkspaceSession, id: string): Promise<Project> {
-  const project = await s.database.projects.get(id);
+/**
+ * A project that must exist.
+ *
+ * @param session the open workspace
+ * @param id the project
+ * @returns it
+ * @throws `NotFoundError` when it does not exist
+ */
+export async function getProject(session: WorkspaceSession, id: string): Promise<Project> {
+  const project = await session.database.projects.get(id);
   if (project === null) throw new NotFoundError(`Project ${id} does not exist`);
   return project;
 }
 
-/** Trims the query (dropped when empty) and normalises and de-duplicates the tag names, as `listAssets` does. */
-export async function listProjects(s: WorkspaceSession, q: ProjectQuery): Promise<ProjectList> {
-  const { query, tagNames, ...rest } = q;
+/**
+ * One page of projects. Trims the query (dropped when empty) and normalises and de-duplicates the tag names, as
+ * `listAssets` does.
+ *
+ * @param session the open workspace
+ * @param projectQuery the filter and the page
+ * @returns the page
+ */
+export async function listProjects(session: WorkspaceSession, projectQuery: ProjectQuery): Promise<ProjectList> {
+  const { query, tagNames, ...rest } = projectQuery;
   const text = query?.trim() ?? '';
-  const names = tagNames === undefined ? [] : [...new Set(tagNames.map((t) => tagName(t).name))];
-  return s.database.projects.list({
+  const names = tagNames === undefined ? [] : [...new Set(tagNames.map((tag) => tagName(tag).name))];
+  return session.database.projects.list({
     ...rest,
     ...(text.length > 0 && { query: text }),
     ...(names.length > 0 && { tagNames: names }),
