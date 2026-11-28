@@ -1,4 +1,4 @@
-// Focus rules of the virtual rows: when a pending item focus may still be applied, and how an item that lost
+// Focus rules of the virtual rows: when a pending item focus may still be applied or is dropped, and how an item that lost
 // the focus by changing its element (a placeholder turning into a Retry button) gets it back.
 
 /** An item focus that waits for the item's element to be rendered. */
@@ -33,6 +33,43 @@ export function pendingTarget(container: HTMLElement, pending: PendingFocus): Pe
     if (element.getAttribute('data-item-id') === pending.id) return element;
   }
   return atIndex?.hasAttribute('data-item-id') ? 'drop' : 'wait';
+}
+
+/** The user inputs after which a pending item focus by id is dropped, so a row never takes the focus late. */
+const USER_INPUT_EVENTS = ['keydown', 'wheel', 'touchmove', 'pointerdown'] as const;
+
+/**
+ * Calls `onInput` once, on the first key press, wheel turn, touch scroll or pointer press of the user,
+ * wherever it happens.
+ *
+ * @param onInput called on the first input
+ * @returns a function that stops listening
+ */
+export function onFirstUserInput(onInput: () => void): () => void {
+  const controller = new AbortController();
+  const handle = () => {
+    controller.abort();
+    onInput();
+  };
+  for (const type of USER_INPUT_EVENTS) {
+    window.addEventListener(type, handle, { capture: true, passive: true, signal: controller.signal });
+  }
+  return () => controller.abort();
+}
+
+/**
+ * Drops a pending item focus by id on the user's first input (see `onFirstUserInput`): the item may load
+ * long after the user has started doing something else.
+ *
+ * @param pendingFocus the pending item focus; left alone when it has no id or was replaced meanwhile
+ * @returns a function that stops listening
+ */
+export function dropPendingOnUserInput(pendingFocus: { current: PendingFocus | null }): () => void {
+  const pending = pendingFocus.current;
+  if (pending === null || pending.id === undefined || pending.id === null) return () => undefined;
+  return onFirstUserInput(() => {
+    if (pendingFocus.current === pending) pendingFocus.current = null;
+  });
 }
 
 /** The item element that had the focus while a render was computed. */

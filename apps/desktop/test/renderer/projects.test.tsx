@@ -510,6 +510,46 @@ it('the focus of a row coming back from its project does not take the focus from
   expect(document.activeElement).toBe(search);
 });
 
+it.each([
+  ['a key press', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+  ['a wheel turn', () => fireEvent.wheel(document.body, { deltaY: 120 })],
+])(
+  'after %s while the list loads, the row coming back from its project never takes the focus late',
+  async (_, input) => {
+    const items = many(20);
+    const first = deferred<ProjectList>();
+    install({
+      'projects:list': (request) => (request.limit === 60 ? first.promise : listOf(items)(request)),
+    });
+    render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: items[7]!.id }} />);
+    input();
+    await act(async () => first.resolve(pageOf(items.slice(0, 20), 20)));
+    await waitFor(() => rowOf('Project 7'));
+    expect(document.activeElement).toBe(document.body);
+  },
+);
+
+it.each([
+  ['a key press', () => fireEvent.keyDown(document.body, { key: 'PageDown' })],
+  ['a wheel turn', () => fireEvent.wheel(screen.getByRole('grid', { name: 'Projects' }), { deltaY: 120 })],
+])(
+  'after %s while its page loads in the shown table, the row coming back never takes the focus late',
+  async (_, input) => {
+    const items = many(80);
+    const second = deferred<ProjectList>();
+    install({
+      'projects:list': (request) => (request.offset === 60 ? second.promise : listOf(items)(request)),
+    });
+    render(<Harness initial={{ ...INITIAL, scrollOffset: 60 * 48, openedIndex: 70, selectedId: items[70]!.id }} />);
+    await screen.findByRole('grid', { name: 'Projects' });
+    await waitFor(() => expect(screen.getByRole('grid').querySelector('[data-index="70"]')).not.toBeNull());
+    input();
+    await act(async () => second.resolve(pageOf(items.slice(60, 80), 80)));
+    await waitFor(() => rowOf('Project 70'));
+    expect(document.activeElement).toBe(document.body);
+  },
+);
+
 it('New project creates a project with a description and opens it', async () => {
   const user = userEvent.setup();
   const onOpen = vi.fn();

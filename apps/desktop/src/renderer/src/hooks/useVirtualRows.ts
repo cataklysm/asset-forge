@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { nextFocusIndex, offsetShowingIndex, rowCount } from '../gallery';
 import {
+  dropPendingOnUserInput,
   focusedItem,
   focusSuccessor,
   mayTakeFocus,
@@ -204,6 +205,8 @@ export function useVirtualRows({
       : null,
   );
   const pendingFocus = useRef(initialFocus);
+  // Only the focus asked for on mount carries an id; the user's first input drops it.
+  useEffect(() => dropPendingOnUserInput(pendingFocus), []);
   // Read, not written, during the render: the commit after it hands a lost item focus on.
   const focusedBefore = focusedItem(scrollRef.current);
 

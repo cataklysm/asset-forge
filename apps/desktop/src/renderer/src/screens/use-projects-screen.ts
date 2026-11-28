@@ -3,6 +3,7 @@ import type { ProjectSummary } from '@assetforge/contracts';
 import { call } from '../api';
 import type { ProjectTableProps } from '../components/ProjectTable';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
+import { onFirstUserInput } from '../hooks/item-focus';
 import { usePagedList, type PagedList } from '../hooks/usePagedList';
 import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { listKey, toProjectQuery, type ProjectFilters, type ProjectListState } from '../list-state';
@@ -70,6 +71,16 @@ function useKeepPositionOnLeave(
 }
 
 /**
+ * A table start without the item focus.
+ *
+ * @param restore the start
+ * @returns the same start when it asks for no focus, otherwise a copy without it
+ */
+function withoutFocus(restore: ViewRestore): ViewRestore {
+  return restore.focus ? { ...restore, focus: false } : restore;
+}
+
+/**
  * Where the next mounted table starts; each table reads it once when it mounts. At first it is the kept
  * position, and back from a project its row takes the focus again unless the user put the focus elsewhere
  * first. After a tag rename the reloaded table starts where the displayed one is now.
@@ -94,6 +105,8 @@ function useTableRestore(
     // The opened project, wherever it is now: a rename while it was open may have moved it.
     focusId: state.selectedId,
   }));
+  // The table mounts only once its first page arrived; an input before that drops the focus already.
+  useEffect(() => onFirstUserInput(() => setRestore(withoutFocus)), []);
   const lastToken = useRef(renameToken);
   // The reloaded table mounts once its first page arrived, so a commit later is still in time.
   useLayoutEffect(() => {
