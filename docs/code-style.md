@@ -61,6 +61,24 @@ security rule are kept.
 - A package's `index.ts` only re-exports. Import paths of other packages stay stable through it.
 - A split keeps git history readable: move code unchanged first where practical, then rework it.
 
+## Checks
+
+`pnpm lint` runs ESLint (`eslint.config.js`) over the sources: `apps/desktop/src`, `packages/*/src` and the
+mock provider. Tests, build output and migrations are not checked. TypeScript 7 has no JavaScript compiler API,
+so the files are parsed by Babel's TypeScript grammar and no rule uses type information.
+
+- Errors, which the code passes completely and must keep passing: the abbreviated names above as bindings
+  (property names are not checked), the type name suffixes `Deps`, `Opts` and `Ctx`, names of one character
+  other than `i`, `x`, `y` and `_`, `@param` names that match the parameters, no types in doc tags, a nesting
+  depth of at most 4 and the rules of hooks.
+- Warnings, which the code does not pass yet: missing doc comments, `@param` and `@returns`, async functions
+  defined inside another function (a one-line async arrow is allowed), the missing dependencies of a hook, and
+  the guides: function bodies over 40 lines, files over 300 lines (blank lines and comments not counted) and
+  nested ternaries.
+
+A rule the code comes to pass completely is raised to an error. An `eslint-disable` comment is only allowed
+for an exception recorded here or in `docs/backlog.md`, with a one-line reason; an unused one is an error.
+
 ## What a clean-up does not do
 
 No behaviour change, no changed message text, no new dependency, no changed public channel or schema, no
