@@ -19,8 +19,10 @@ export const UrlImportResultSchema = z.object({
   alreadyQueued: count,
   invalid: z.array(z.object({ line: z.number().int().min(1), text: z.string().max(200) })),
 });
+/** The answer of `files:importUrls`. */
 export type UrlImportResult = z.infer<typeof UrlImportResultSchema>;
 
 /** An address a file was downloaded from. */
 export const FileOriginSchema = z.object({ id: IdSchema, url: z.string(), createdAt: z.iso.datetime() });
+/** An address a file was downloaded from. */
 export type FileOrigin = z.infer<typeof FileOriginSchema>;

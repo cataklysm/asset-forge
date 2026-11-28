@@ -1,24 +1,29 @@
 import { z } from 'zod';
-import { JobErrorCodeSchema, ModelNameSchema } from './jobs';
-import { MAX_PROVIDERS, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema, type VisionKind } from './provider-ref';
+import { PROVIDER_EXTRA_MAX } from './extra-parameters';
+import { MAX_PROVIDERS, ModelNameSchema, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
 
+/** Shortest request timeout of a provider entry, in seconds. */
 export const VISION_TIMEOUT_MIN_SECONDS = 10;
+/** Longest request timeout of a provider entry, in seconds. */
 export const VISION_TIMEOUT_MAX_SECONDS = 600;
+/** The request timeout a new provider entry starts with, in seconds. */
 export const VISION_TIMEOUT_DEFAULT_SECONDS = 120;
 
 const TimeoutSecondsSchema = z.number().int().min(VISION_TIMEOUT_MIN_SECONDS).max(VISION_TIMEOUT_MAX_SECONDS);
 
 /** Whether a vision request asks the model to think; `default` sends nothing about it. */
 export const ThinkingSchema = z.enum(['default', 'off', 'on']);
+/** Whether a vision request asks the model to think. */
 export type Thinking = z.infer<typeof ThinkingSchema>;
 
-export const PROVIDER_EXTRA_MAX = 4000;
-
-/** Analysis requests a vision entry gets at the same time. */
+/** Analysis requests a vision entry gets at the same time: the fewest. */
 export const PARALLEL_REQUESTS_MIN = 1;
+/** Analysis requests a vision entry gets at the same time: the most. */
 export const PARALLEL_REQUESTS_MAX = 64;
+/** Analysis requests a vision entry gets at the same time: the value of a new entry. */
 export const PARALLEL_REQUESTS_DEFAULT = 1;
 
+/** The analysis requests a vision entry gets at the same time: 1 to 64. */
 export const ParallelRequestsSchema = z.number().int().min(PARALLEL_REQUESTS_MIN).max(PARALLEL_REQUESTS_MAX);
 
 /**
@@ -33,8 +38,10 @@ export const ProviderOptionsSchema = z.object({
   extra: z.string().max(PROVIDER_EXTRA_MAX),
   parallelRequests: ParallelRequestsSchema,
 });
+/** The request options of a vision entry. */
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
 
+/** The options a new vision entry starts with; with them the `ollama` request body is unchanged. */
 export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   temperature: 0,
   thinking: 'default',
@@ -42,43 +49,6 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   extra: '',
   parallelRequests: PARALLEL_REQUESTS_DEFAULT,
 });
-
-/** Top-level keys the extra parameters must not set, because the adapter owns them. */
-export const RESERVED_EXTRA_KEYS: Record<VisionKind, readonly string[]> = Object.freeze({
-  ollama: Object.freeze(['model', 'messages', 'stream', 'format']),
-  openai: Object.freeze(['model', 'messages', 'stream', 'response_format', 'n', 'tools', 'tool_choice']),
-});
-
-export type ExtraParameters =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; reason: 'not_json' | 'not_object' }
-  | { ok: false; reason: 'reserved'; key: string };
-
-/**
- * Parses the extra parameters of a vision entry: empty or blank text is `{}`, otherwise the text
- * must be a JSON object without a top-level key reserved for the kind. Nested keys are not checked.
- */
-export function parseExtraParameters(text: string, kind: VisionKind): ExtraParameters {
-  if (text.trim() === '') return { ok: true, value: {} };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { ok: false, reason: 'not_json' };
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ok: false, reason: 'not_object' };
-  const value = parsed as Record<string, unknown>;
-  const key = RESERVED_EXTRA_KEYS[kind].find((reserved) => Object.hasOwn(value, reserved));
-  if (key !== undefined) return { ok: false, reason: 'reserved', key };
-  return { ok: true, value };
-}
-
-/** The fixed message of a refused text. */
-export function extraParametersMessage(refusal: Extract<ExtraParameters, { ok: false }>): string {
-  return refusal.reason === 'reserved'
-    ? `The extra parameters must not set ${refusal.key}`
-    : 'The extra parameters are not a JSON object';
-}
 
 /** What an adapter is built with: the fixed fields and the parsed extra object. */
 export interface VisionRequestOptions {
@@ -104,8 +74,10 @@ export const ProviderViewSchema = z.object({
   hasApiKey: z.boolean(),
   options: ProviderOptionsSchema.nullable(),
 });
+/** A provider entry as the renderer sees it. */
 export type ProviderView = z.infer<typeof ProviderViewSchema>;
 
+/** The answer of `providers:list`: every entry and the entries used last. */
 export const ProviderListSchema = z.object({
   providers: z.array(ProviderViewSchema).max(MAX_PROVIDERS),
   /** The entry used last for an analysis; null when none was used or it no longer exists. */
@@ -117,6 +89,7 @@ export const ProviderListSchema = z.object({
   /** The OS credential store can encrypt; without it no key can be saved. */
   canStoreKey: z.boolean(),
 });
+/** The answer of `providers:list`. */
 export type ProviderList = z.infer<typeof ProviderListSchema>;
 
 /** The refusal of an API key that holds a control character or another character a request header cannot carry. */
@@ -150,33 +123,5 @@ export const SaveProviderSchema = z.object({
     .optional(),
   options: ProviderOptionsSchema.optional(),
 });
+/** The request of `providers:save`. */
 export type SaveProvider = z.infer<typeof SaveProviderSchema>;
-
-/** A model of the provider; `vision` is null when the server does not report capabilities. */
-export const VisionModelSchema = z.object({ name: ModelNameSchema, vision: z.boolean().nullable() });
-export type VisionModel = z.infer<typeof VisionModelSchema>;
-
-export const ListModelsResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), models: z.array(VisionModelSchema).max(100) }),
-  z.object({ ok: z.literal(false), code: JobErrorCodeSchema }),
-]);
-export type ListModelsResult = z.infer<typeof ListModelsResultSchema>;
-
-const ImageConstraintListSchema = z.array(z.string().min(1).max(20)).max(50).nullable();
-
-/** An image edit model of a `venice` entry; a null constraint is one the provider does not report. */
-export const ImageModelSchema = z.object({
-  name: ModelNameSchema,
-  aspectRatios: ImageConstraintListSchema,
-  resolutions: ImageConstraintListSchema,
-  defaultResolution: z.string().min(1).max(20).nullable(),
-  promptCharacterLimit: z.number().int().positive().nullable(),
-  price: z.string().max(200).nullable(),
-});
-export type ImageModel = z.infer<typeof ImageModelSchema>;
-
-export const ListImageModelsResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), models: z.array(ImageModelSchema).max(200) }),
-  z.object({ ok: z.literal(false), code: JobErrorCodeSchema }),
-]);
-export type ListImageModelsResult = z.infer<typeof ListImageModelsResultSchema>;

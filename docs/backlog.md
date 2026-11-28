@@ -124,6 +124,11 @@ Asked for by the owner on 2026-11-26; none is designed or scheduled yet. Each ne
 - `FileBrowser.tsx` should hand its viewer state machine to a `useViewerList` hook.
 - The preview worker pool doc comments still say "none" for failed jobs.
 - Core ports split (2026-11-28, `packages/core/src/ports/`): the type names `StorageRef`, `GenerationFileRef`, `GenerationPromptRef` and `WorkspaceMeta` (and the field `NewGeneration.promptRef`) keep the short forms `Ref` and `Meta`, which the style file does not list as established; renaming them touches persistence, desktop and the core bodies. `GenerationRow` is a plain alias of the contracts type `Generation` and could go. `RemoteFileError` takes `retryAfterMs` as a positional parameter beside an options object holding `cause` and `status`. The repository methods still take their arguments as inline object types (one per method) rather than named request types, so implementers repeat them. `JobRepository` documents `FILE_DOWNLOAD_JOB` and `analysisJobFields`/`downloadJobFields` behaviour, so the persistence port knows two job types by name.
+- Contracts: the `FileIdsSchema` refine message `duplicate ids` is lower case, unlike every other message.
+- Contracts: `prompts.ts` re-exports `PROMPT_VARIABLE_NAME_MAX` and `PROMPT_VARIABLE_VALUE_MAX` from `prompt-template.ts`, so the index exposes them through two files.
+- Contracts: `AssignManyResultSchema` is only an alias of `FileBatchResultSchema`.
+- Contracts: the local `count` schema is declared again in `analysis.ts`, `jobs.ts`, `library.ts`, `paging.ts`, `site-import.ts` and `url-import.ts`; a local `IdSchema` exists beside the one in `ipc-shared.ts` (`generations.ts`, `url-import.ts`).
+- Contracts: several lines written before the split are longer than 120 characters (comments in `analysis.ts`, `files.ts`, `generations.ts`, `ipc-files.ts`, `ipc-sites.ts`, `prompt-template.ts`, `tags.ts`; code in `extra-parameters.ts`, `ipc-analysis.ts`, `job-payloads.ts`, `provider-settings.ts`).
 
 ## Tooling and tests
 

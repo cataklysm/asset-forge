@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+/** The codes of `AssetForgeError` that reach the renderer; anything unexpected arrives as `internal_error`. */
 export const ErrorCodeSchema = z.enum([
   'workspace_not_found',
   'storage_unreachable',
@@ -26,10 +27,13 @@ export const ErrorCodeSchema = z.enum([
   'credential_store_unavailable',
   'provider_not_configured',
 ]);
+/** A code of `AssetForgeError`. */
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;
 
+/** A refused IPC call: the code and a fixed message without cause, path or credential. */
 export const IpcErrorSchema = z.object({
   code: ErrorCodeSchema,
   message: z.string(),
 });
+/** A refused IPC call. */
 export type IpcError = z.infer<typeof IpcErrorSchema>;
