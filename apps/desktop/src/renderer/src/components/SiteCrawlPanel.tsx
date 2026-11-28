@@ -23,7 +23,7 @@ import { Field } from './SiteProfileForm';
 // The right half of the site import dialog: the gallery URL, the test with its progress, and the test's answer.
 
 /** The counts shown only when they are above 0. */
-const OPTIONAL_COUNTS = ['duplicates', 'filtered', 'disallowed', 'invalid', 'pageFailures'] as const;
+const OPTIONAL_COUNTS = ['duplicates', 'filtered', 'disallowed', 'invalid', 'offSite', 'pageFailures'] as const;
 
 /** The props of the crawl panel. */
 interface Props {

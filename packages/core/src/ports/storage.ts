@@ -84,7 +84,9 @@ export interface Storage {
   list(relativeDirectory: string): Promise<string[]>;
   /**
    * The absolute path of a path inside the storage root; validated like every other operation. Never sent to the
-   * renderer.
+   * renderer. It does not check that the storage can be reached: while it cannot, the path is still answered (a
+   * cached preview is served from it) and reading the path is what fails; callers that must refuse first ask
+   * `isReachable`.
    *
    * @param relativePath the entry, relative to the root
    * @returns its absolute path

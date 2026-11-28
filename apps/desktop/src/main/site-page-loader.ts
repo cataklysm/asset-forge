@@ -95,7 +95,9 @@ const isStatus = (status: number): boolean => Number.isInteger(status) && status
  * Every load stops the view when it ends: a page that answered loads nothing further, and a navigation still under
  * way cannot redirect, or report leaving the site, during the next load; a left-the-site signal or a status only
  * ever reaches the load that is running when it arrives. A main-frame status of 400 or more makes a load that found
- * nothing an `http_error`; a page that matches `waitFor` is a page whatever its status.
+ * nothing an `http_error`; a page that matches `waitFor` is a page whatever its status. A navigation replaced within
+ * the site counts as loaded only once a main-frame response of the load arrived, so a replacing navigation that never
+ * answers ends as `timeout`, not `no_match`.
  *
  * @param view the page of the window
  * @param site the profile's site
@@ -149,8 +151,12 @@ class PageLoad {
   private readonly ended: Promise<PageLoadResult>;
   private settle: (result: PageLoadResult) => void = () => {};
   private isDone = false;
-  /** The document arrived (the navigation resolved); a later miss is `no_match`, not `timeout`. */
+  /** A document of this load arrived; a later miss is `no_match`, not `timeout`. */
   private isLoaded = false;
+  /** A main-frame navigation of this load finished with a response, so a document was committed. */
+  private hasResponse = false;
+  /** The navigation was replaced; its load counts as settled only once the replacing document answered. */
+  private isReplaced = false;
   private status: number | null = null;
   /** When the navigation ended; null while the load is still under way. */
   private settledAt: number | null = null;
@@ -159,7 +165,10 @@ class PageLoad {
   private readonly onLeft = (target: string): void =>
     this.finish({ ok: false, reason: 'left_site', host: leftSiteHost(target) });
   private readonly onResponse = (answered: number): void => {
-    if (!this.isDone && isStatus(answered)) this.status = answered;
+    if (this.isDone) return;
+    if (isStatus(answered)) this.status = answered;
+    this.hasResponse = true;
+    if (this.isReplaced) this.markSettled();
   };
   private readonly onAbort = (): void => this.finish({ ok: false, reason: 'failed' });
   private readonly failed = (): void => this.finish({ ok: false, reason: 'failed' });
@@ -247,6 +256,7 @@ class PageLoad {
    */
   private async navigate(): Promise<void> {
     const navigation = await this.view.navigate(this.url, () => {
+      this.isLoaded = true;
       this.poll().catch(this.failed);
     });
     if (this.isDone) return;
@@ -254,9 +264,19 @@ class PageLoad {
       this.finish(this.missed('failed'));
       return;
     }
-    // `aborted`: a navigation within the site replaced the first one; its page is polled the same way.
-    this.settledAt = Date.now();
+    if (navigation === 'loaded' || this.hasResponse) this.markSettled();
+    // `aborted` without a response yet: a navigation within the site replaced the first one and its document has
+    // not answered, so the load is still under way; it is polled the same way, and the overall limit answers
+    // `timeout` when that document never comes.
+    else this.isReplaced = true;
     await this.poll();
+  }
+
+  /** The navigation ended with a document: the settle time starts, and a later miss is `no_match`. */
+  private markSettled(): void {
+    if (this.settledAt !== null) return;
+    this.isLoaded = true;
+    this.settledAt = Date.now();
   }
 
   /**
@@ -267,7 +287,6 @@ class PageLoad {
   private async poll(): Promise<void> {
     if (this.isPolling || this.isDone) return;
     this.isPolling = true;
-    this.isLoaded = true;
     /** The node counts of the last poll made while the load was still under way. */
     let seen = '';
     for (;;) {

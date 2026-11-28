@@ -4,7 +4,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { parseTags } from './proposal-tags.js';
 import { file, fileAnalysis, fileAnalysisProposal, fileTag } from './schema.js';
 import { reindexAssets } from './search-index.js';
-import { ensureTag, linkFileTags } from './tag-links.js';
+import { dropUnusedTags, ensureTag, linkFileTags } from './tag-links.js';
 
 /** What writing an analysis needs of a transaction handle. */
 type WriteTransaction = Pick<BetterSQLite3Database, 'select' | 'insert' | 'delete' | 'run' | 'all' | 'get'>;
@@ -80,6 +80,12 @@ function inTrash(transaction: WriteTransaction, fileId: string): boolean {
  * @returns nothing
  */
 function writeAnalysis(transaction: WriteTransaction, write: AnalysisWrite): void {
+  const replaced = transaction
+    .select({ tagId: fileTag.tagId })
+    .from(fileTag)
+    .where(and(eq(fileTag.fileId, write.fileId), eq(fileTag.origin, 'ai')))
+    .all()
+    .map((row) => row.tagId);
   transaction
     .delete(fileTag)
     .where(and(eq(fileTag.fileId, write.fileId), eq(fileTag.origin, 'ai')))
@@ -90,6 +96,8 @@ function writeAnalysis(transaction: WriteTransaction, write: AnalysisWrite): voi
     const tagId = ensureTag(transaction, { ...typed, now: write.analysis.analysedAt });
     linkFileTags(transaction, [write.fileId], tagId, 'ai', write.analysis.analysedAt);
   }
+  // After the new links, so a tag named again keeps its row.
+  dropUnusedTags(transaction, replaced);
   transaction
     .insert(fileAnalysis)
     .values({ fileId: write.fileId, ...write.analysis })

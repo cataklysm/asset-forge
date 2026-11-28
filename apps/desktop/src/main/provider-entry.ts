@@ -88,3 +88,34 @@ export function originOf(baseUrl: string): string | null {
     return null;
   }
 }
+
+/**
+ * Whether two URLs or origins name the same origin for keeping a stored key: `host.` and `host` are one DNS name, so
+ * a single trailing dot of the host is ignored. Which origin a key is sent to is still decided by `originOf` alone.
+ *
+ * @param first a URL or an origin
+ * @param second a URL or an origin
+ * @returns true when both parse and their origins match apart from a trailing dot of the host
+ */
+export function isSameKeyOrigin(first: string, second: string): boolean {
+  const firstOrigin = keyOriginOf(first);
+  return firstOrigin !== null && firstOrigin === keyOriginOf(second);
+}
+
+/**
+ * The origin of a URL with one trailing dot of the host removed.
+ *
+ * @param url a URL or an origin
+ * @returns the origin without the dot, null when it does not parse
+ */
+function keyOriginOf(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.origin === 'null') return null;
+  if (parsed.hostname.length > 1 && parsed.hostname.endsWith('.')) parsed.hostname = parsed.hostname.slice(0, -1);
+  return parsed.origin;
+}

@@ -225,7 +225,7 @@ describe('derived-data step', () => {
       thumbnail: true,
       previewable: false,
     });
-    expect(stamp()).toBe(2);
+    expect(stamp()).toBe(DERIVED_DATA_VERSION);
   });
 
   test('an interrupted rebuild keeps the old stamp and completes on the next run', async () => {
@@ -279,5 +279,112 @@ describe('derived-data step', () => {
     expect(seen[1]).toBeGreaterThan(seen[0]!);
     expect(snapshot()).toEqual(incremental);
     expect(stamp()).toBe(DERIVED_DATA_VERSION);
+  });
+});
+
+describe('stored tag cleaning', () => {
+  const T0 = '2025-12-31T00:00:00.000Z';
+  const NUL = String.fromCodePoint(0);
+  const ZERO_WIDTH = String.fromCodePoint(0x200b);
+  const BIDI = String.fromCodePoint(0x202e);
+  const DIRTY_BRASS = `bra${ZERO_WIDTH}ss`;
+  const tagAsset = (assetId: string, name: string, displayName: string, origin: 'manual' | 'ai', now = TS) =>
+    db.tags.addToAsset({ assetId, name, displayName, origin, newId: newId(), now });
+  const rows = <T>(query: string) => raw((s) => s.prepare(query).all() as T[]);
+
+  /** Tags as older versions stored them: with control and format characters, one only of them, one unused. */
+  async function buildDirtyTags(): Promise<{ file: string; prompt: string }> {
+    await db.assets.insert(asset(1, 'Lantern'));
+    await db.assets.insert(asset(2, 'Crate'));
+    await tagAsset(uuid(1), 'brass', 'Brass', 'manual');
+    await tagAsset(uuid(1), DIRTY_BRASS, `Bra${ZERO_WIDTH}ss`, 'ai', T0);
+    await tagAsset(uuid(2), DIRTY_BRASS, `Bra${ZERO_WIDTH}ss`, 'manual');
+    const file = await addFile(uuid(2), 'crate.png');
+    const invisible = `${ZERO_WIDTH}${BIDI}${NUL}`;
+    await db.tags.addToFile({
+      fileId: file,
+      name: invisible,
+      displayName: invisible,
+      origin: 'manual',
+      newId: newId(),
+      now: TS,
+    });
+    const prompt = newId();
+    await db.prompts.create({
+      id: prompt,
+      title: 'P',
+      titleKey: 'p',
+      description: '',
+      version: { id: newId(), content: 'x', variables: [] },
+      now: TS,
+    });
+    await db.prompts.addTag({
+      promptId: prompt,
+      name: `mo${NUL}ss`,
+      displayName: `Mo${NUL}ss`,
+      newId: newId(),
+      now: TS,
+      max: 50,
+    });
+    await db.analyses.propose({
+      fileId: file,
+      sha256: 'a'.repeat(64),
+      provider: 'ollama',
+      model: 'qwen',
+      promptVersion: 1,
+      tags: [
+        { name: DIRTY_BRASS, displayName: `Bra${ZERO_WIDTH}ss` },
+        { name: 'brass', displayName: 'brass' },
+        { name: invisible, displayName: invisible },
+        { name: 'iron', displayName: `Iron${BIDI}` },
+      ],
+      promptName: null,
+      createdAt: TS,
+    });
+    raw((s) =>
+      s
+        .prepare('insert into tag (id, name, display_name, created_at) values (?, ?, ?, ?)')
+        .run(newId(), 'unused', 'unused', TS),
+    );
+    return { file, prompt };
+  }
+
+  test('removes control and format characters, merges names that become equal and removes empty tags', async () => {
+    const { file, prompt } = await buildDirtyTags();
+    setStamp(2);
+
+    await db.ensureDerivedData();
+
+    expect(stamp()).toBe(DERIVED_DATA_VERSION);
+    expect(rows('select name, display_name from tag order by name')).toEqual([
+      { name: 'brass', display_name: 'Brass' },
+      { name: 'moss', display_name: 'Moss' },
+    ]);
+    // Manual wins and the earlier link date is kept, as a merge by rename does.
+    expect(await db.tags.listForAsset(uuid(1))).toEqual([{ name: 'brass', displayName: 'Brass', origin: 'manual' }]);
+    const linkDates = raw((s) => s.prepare('select created_at from asset_tag where asset_id = ?').all(uuid(1)));
+    expect(linkDates).toEqual([{ created_at: T0 }]);
+    expect(await db.tags.listForAsset(uuid(2))).toEqual([{ name: 'brass', displayName: 'Brass', origin: 'manual' }]);
+    expect((await db.files.get(file))!.tags).toEqual([]);
+    expect((await db.prompts.get(prompt))!.tags).toEqual([{ name: 'moss', displayName: 'Moss', origin: 'manual' }]);
+    expect((await db.analyses.getProposal(file))?.tags).toEqual([
+      { name: 'brass', displayName: 'Brass' },
+      { name: 'iron', displayName: 'Iron' },
+    ]);
+    const indexed = rows<{ asset_id: string; tags: string }>(SNAPSHOT_SQL).map((row) => [row.asset_id, row.tags]);
+    expect(indexed).toEqual([
+      [uuid(1), 'brass'],
+      [uuid(2), 'brass'],
+    ]);
+  });
+
+  test('a current stamp leaves the stored tags alone', async () => {
+    await buildDirtyTags();
+    setStamp(DERIVED_DATA_VERSION);
+    const before = rows('select * from tag order by id');
+
+    await db.ensureDerivedData();
+
+    expect(rows('select * from tag order by id')).toEqual(before);
   });
 });

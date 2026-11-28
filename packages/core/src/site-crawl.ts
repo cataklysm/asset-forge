@@ -157,6 +157,7 @@ class SiteCrawl {
     filtered: 0,
     disallowed: 0,
     invalid: 0,
+    offSite: 0,
     pageFailures: 0,
     truncated: null,
     cancelled: false,
@@ -173,6 +174,8 @@ class SiteCrawl {
   /** Pagination targets robots refused: counted once, never against maxPages. */
   private readonly refusedPages = new Set<string>();
   private readonly seenDetails = new Set<string>();
+  /** Pagination and detail links off the site: counted once each. */
+  private readonly offSiteLinks = new Set<string>();
   private readonly queue: string[];
   private loads = 0;
   private readonly galleryQueries: Record<string, string>;
@@ -272,7 +275,7 @@ class SiteCrawl {
   private async readDetailPage(detailUrl: string): Promise<void> {
     if (this.seenDetails.has(detailUrl)) return;
     if (!belongsToSite(detailUrl, this.profile.site)) {
-      this.problem(detailUrl, 'detail', 'off_site');
+      this.leftSite(detailUrl, 'detail');
       return;
     }
     this.seenDetails.add(detailUrl);
@@ -298,7 +301,7 @@ class SiteCrawl {
   private async queuePage(next: string): Promise<void> {
     if (this.seenPages.has(next) || this.redirectedPages.has(next) || this.refusedPages.has(next)) return;
     if (!belongsToSite(next, this.profile.site)) {
-      this.problem(next, 'gallery', 'off_site');
+      this.leftSite(next, 'gallery');
       return;
     }
     if (!(await this.allowed(next, 'gallery'))) {
@@ -344,6 +347,20 @@ class SiteCrawl {
       }
       this.answer.files.push(url);
     }
+  }
+
+  /**
+   * Counts a pagination or detail link off the site once and records it as a problem.
+   *
+   * @param url the link
+   * @param stage the page kind it would have been loaded as
+   */
+  private leftSite(url: string, stage: SiteCrawlStage): void {
+    if (!this.offSiteLinks.has(url)) {
+      this.offSiteLinks.add(url);
+      this.answer.offSite++;
+    }
+    this.problem(url, stage, 'off_site');
   }
 
   /**

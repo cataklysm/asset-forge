@@ -4,6 +4,9 @@ import type { FileRecord, TagAssignment, TagOrigin, TagSuggestion } from '@asset
  * Tags are keyed by normalised name; `displayName` is kept from the first creation. An owner carries
  * a tag at most once: a manual add replaces an AI assignment of that tag on that owner, an AI add does
  * nothing when the owner already carries the tag, and a removal deletes the assignment whatever its origin.
+ * A tag row lives only while an asset, a file (also one in the trash) or a prompt carries it: every write that
+ * removes the last link (a removal, a new analysis, a purge, deleting a prompt, a rename or merge) deletes the row
+ * in the same transaction. A waiting proposal only names a tag and keeps no row alive.
  */
 export interface TagRepository {
   /**

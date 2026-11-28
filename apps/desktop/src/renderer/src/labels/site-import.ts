@@ -70,6 +70,7 @@ export const SITE_CRAWL_COUNT_LABELS = {
   filtered: 'Filtered',
   disallowed: 'Disallowed',
   invalid: 'Not usable',
+  offSite: 'Off site',
   pageFailures: 'Page failures',
 } as const;
 /** Why a test stopped early, and the mark of a cancelled one. */

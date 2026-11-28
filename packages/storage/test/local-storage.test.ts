@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { PathEscapeError, StorageAccessDeniedError, StorageFullError } from '@assetforge/core';
 import { LocalFileSystemStorage } from '../src/index.js';
+import { describeStorageContract } from '../../core/test/storage-contract.js';
 
 const HELLO_SHA = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
 
@@ -539,4 +540,9 @@ describe('freeBytes', () => {
       spy.mockRestore();
     }
   });
+});
+
+describeStorageContract('LocalFileSystemStorage', {
+  reachable: async () => ({ storage }),
+  unreachable: async () => ({ storage: new LocalFileSystemStorage(path.join(tmp, 'missing-parent', 'ws')) }),
 });

@@ -4,6 +4,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { parseTags } from './proposal-tags.js';
 import { fileAnalysisProposal, tag } from './schema.js';
 import { reindexAssets } from './search-index.js';
+import { dropUnusedTags } from './tag-links.js';
 
 // Renaming a tag: a new display name, a new name, or a merge into the tag that already has the name.
 
@@ -60,6 +61,8 @@ export async function renameTag(
     }
     rewriteProposals(transaction, request);
     reindexAssets(transaction, affected);
+    // Moving links never empties a row that had some; a row older versions left without links goes here.
+    dropUnusedTags(transaction, target ? [source.id, target.id] : [source.id]);
     return { merged: target !== undefined };
   });
 }
@@ -73,7 +76,12 @@ export async function renameTag(
  * @param displayName the spelling the target takes
  * @returns nothing
  */
-function mergeTag(transaction: RenameTransaction, sourceId: string, targetId: string, displayName: string): void {
+export function mergeTag(
+  transaction: RenameTransaction,
+  sourceId: string,
+  targetId: string,
+  displayName: string,
+): void {
   mergeLinks(transaction, ASSET_LINKS, sourceId, targetId);
   mergeLinks(transaction, FILE_LINKS, sourceId, targetId);
   mergePromptLinks(transaction, sourceId, targetId);

@@ -211,6 +211,18 @@ describe('createWorkerPool', () => {
     expect(await crashing.jpeg('c')).toBeNull();
   });
 
+  it('drops a queued jpeg when its signal aborts, and never queues one whose signal already aborted', async () => {
+    const p = pool({ workerUrl: hangUrl, size: 1, timeoutMs: 30_000 });
+    const running = p.jpeg('a-hang');
+    const controller = new AbortController();
+    const queued = p.jpeg('b-hang', controller.signal);
+    controller.abort();
+    expect(await queued).toBeNull();
+    expect(await p.jpeg('c-hang', controller.signal)).toBeNull();
+    await p.close();
+    expect(await running).toBeNull();
+  });
+
   it.each([0, -1, 1.5, Number.NaN])('rejects a pool size of %s at once', (size) => {
     expect(() => createWorkerPool({ workerUrl: crashUrl, size, timeoutMs: 1_000 })).toThrow(RangeError);
   });

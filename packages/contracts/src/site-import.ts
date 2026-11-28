@@ -129,6 +129,8 @@ export const SiteCrawlResultSchema = z.object({
   filtered: CountSchema,
   disallowed: CountSchema,
   invalid: CountSchema,
+  /** Distinct pagination and detail links off the site, each counted once. */
+  offSite: CountSchema,
   pageFailures: CountSchema,
   truncated: z.enum(['pages', 'files']).nullable(),
   cancelled: z.boolean(),

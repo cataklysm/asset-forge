@@ -47,9 +47,12 @@ export interface WorkerPool {
    * A JPEG of the image for a vision model. Never rejects.
    *
    * @param sourcePath the image
-   * @returns the JPEG bytes; `null` for a crash, a timeout, a closed pool, an invalid answer or an unreadable image
+   * @param signal when it aborts while the JPEG still waits for a worker, the JPEG is dropped and answers `null`; one
+   *   already running finishes
+   * @returns the JPEG bytes; `null` for a crash, a timeout, a closed pool, an invalid answer, an unreadable image or
+   *   a dropped JPEG
    */
-  jpeg(sourcePath: string): Promise<Uint8Array | null>;
+  jpeg(sourcePath: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   /**
    * Moves a render that is still waiting for a worker to the newest place of the queue, so a tile asked for again is
    * served next; a render already running or not queued is left alone.
@@ -192,7 +195,7 @@ export function createWorkerPool(options: WorkerPoolOptions): WorkerPool {
   return {
     run: (job) => pool.submit({ kind: 'render', job }, 'none') as Promise<PreviewResult>,
     measure: (sourcePath) => pool.submit({ kind: 'measure', sourcePath }, null) as Promise<ImageSize | null>,
-    jpeg: (sourcePath) => pool.submit({ kind: 'jpeg', sourcePath }, null) as Promise<Uint8Array | null>,
+    jpeg: (sourcePath, signal) => pool.submit({ kind: 'jpeg', sourcePath }, null, signal) as Promise<Uint8Array | null>,
     prioritize: (targetPath) => pool.prioritize(targetPath),
     close: () => pool.close(),
   };
@@ -235,14 +238,37 @@ class PreviewWorkers {
    *
    * @param work the work for the worker
    * @param failure what the task resolves when it fails
+   * @param signal when it aborts while the task still waits for a worker, the task leaves the queue and resolves
+   *   its failure value; a running task is left alone
    * @returns the worker's valid answer or the failure value
    */
-  submit(work: WorkerJob, failure: 'none' | null): Promise<TaskResult> {
-    if (this.isClosed || this.isBackingOff()) return Promise.resolve(failure);
+  submit(work: WorkerJob, failure: 'none' | null, signal?: AbortSignal): Promise<TaskResult> {
+    if (this.isClosed || this.isBackingOff() || signal?.aborted === true) return Promise.resolve(failure);
     return new Promise<TaskResult>((resolve) => {
-      this.queue.push({ work, failure, resolve });
+      const task: Task = { work, failure, resolve };
+      if (signal !== undefined) {
+        const drop = (): void => this.dropQueued(task);
+        signal.addEventListener('abort', drop, { once: true });
+        task.resolve = (result) => {
+          signal.removeEventListener('abort', drop);
+          resolve(result);
+        };
+      }
+      this.queue.push(task);
       this.pump();
     });
+  }
+
+  /**
+   * Takes a task out of the queue and resolves its failure value; a task no longer waiting is left alone.
+   *
+   * @param task the task
+   */
+  private dropQueued(task: Task): void {
+    const index = this.queue.indexOf(task);
+    if (index < 0) return;
+    this.queue.splice(index, 1);
+    task.resolve(task.failure);
   }
 
   /**

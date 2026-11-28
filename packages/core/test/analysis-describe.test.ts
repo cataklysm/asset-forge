@@ -72,6 +72,28 @@ describe('describeImage', () => {
     expect(c.images.calls).toEqual([]);
   });
 
+  it('hands its signal to the image source, so a cancel drops a render still waiting for a worker', async () => {
+    const c = await setup();
+    const controller = new AbortController();
+    await describeWith(c, c.file.id, controller.signal);
+    expect(c.images.signals).toEqual([controller.signal]);
+  });
+
+  it('rethrows the reason when the image source gave nothing because the signal aborted', async () => {
+    const c = await setup();
+    const controller = new AbortController();
+    const reason = new Error('cancelled');
+    c.images.script = [
+      () => {
+        controller.abort(reason);
+        return null;
+      },
+    ];
+    await expect(describeWith(c, c.file.id, controller.signal)).rejects.toBe(reason);
+    expect(c.images.calls).toHaveLength(1);
+    expect(c.vision.describeCalls).toEqual([]);
+  });
+
   it('rethrows the reason of an aborted signal', async () => {
     const c = await setup();
     const controller = new AbortController();

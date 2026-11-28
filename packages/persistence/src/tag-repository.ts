@@ -5,7 +5,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { toRecords } from './file-records.js';
 import { assetTag, file, fileTag, promptTag, tag } from './schema.js';
 import { assetOfFile, reindexAsset, reindexAssets, type IndexTransaction } from './search-index.js';
-import { ensureTag, linkAssetTag, linkFileTags } from './tag-links.js';
+import { dropUnusedTags, ensureTag, linkAssetTag, linkFileTags, tagIdByName } from './tag-links.js';
 import { renameTag } from './tag-rename.js';
 
 /** Highest code point; sorts after every character that can follow a prefix in a name. */
@@ -100,6 +100,7 @@ async function removeFromAsset(
       .delete(assetTag)
       .where(and(eq(assetTag.assetId, request.assetId), eq(assetTag.tagId, tagIdOf(request.name))))
       .run();
+    dropTagNamed(transaction, request.name);
     reindexAsset(transaction, request.assetId);
   });
 }
@@ -138,6 +139,7 @@ async function removeFromFile(
       .delete(fileTag)
       .where(and(eq(fileTag.fileId, request.fileId), eq(fileTag.tagId, tagIdOf(request.name))))
       .run();
+    dropTagNamed(transaction, request.name);
     reindexAssets(transaction, [assetOfFile(transaction, request.fileId)]);
   });
 }
@@ -178,6 +180,7 @@ async function removeFromFiles(
       .delete(fileTag)
       .where(and(inArray(fileTag.fileId, [...request.fileIds]), eq(fileTag.tagId, tagIdOf(request.name))))
       .run();
+    dropTagNamed(transaction, request.name);
     return finishBatch(transaction, rows);
   });
 }
@@ -226,6 +229,18 @@ async function tagUsage(database: BetterSQLite3Database, name: string): Promise<
  */
 function tagIdOf(name: string) {
   return sql`(select ${tag.id} from ${tag} where ${tag.name} = ${name})`;
+}
+
+/**
+ * Deletes the tag with the name when a removal left it without links.
+ *
+ * @param transaction the caller's transaction
+ * @param name the normalised name
+ * @returns nothing
+ */
+function dropTagNamed(transaction: Pick<BetterSQLite3Database, 'delete' | 'select'>, name: string): void {
+  const tagId = tagIdByName(transaction, name);
+  if (tagId !== null) dropUnusedTags(transaction, [tagId]);
 }
 
 /**

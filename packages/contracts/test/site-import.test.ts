@@ -163,6 +163,7 @@ describe('site profile schemas', () => {
       filtered: 0,
       disallowed: 0,
       invalid: 0,
+      offSite: 0,
       pageFailures: 0,
       truncated: null,
       cancelled: false,

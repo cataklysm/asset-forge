@@ -3,13 +3,15 @@ import { asc, eq, gt, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { reindexAsset } from './search-index.js';
 import { asset, assetSearchMap, file, workspace } from './schema.js';
+import { cleanStoredTags } from './tag-cleaning.js';
 
 /**
  * Version of the data derived from stored rows: file kinds, the MIME type of videos and the search
  * index. Raise it whenever the derivation changes (new kind extensions, a different searchable
- * text), so the next open rebuilds everything once. Version 2 added the video kind.
+ * text, a different tag cleaning rule), so the next open rebuilds everything once. Version 2 added the video kind,
+ * version 3 cleans stored tags and waiting proposals (control and format characters).
  */
-export const DERIVED_DATA_VERSION = 2;
+export const DERIVED_DATA_VERSION = 3;
 
 /** Options of `ensureDerivedData`. */
 export interface DerivedDataOptions {
@@ -29,7 +31,7 @@ const DEFAULT_BATCH_SIZE = 500;
 const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
- * Recomputes every file's kind (and a video's MIME type) and rebuilds the search index unless the
+ * Recomputes every file's kind (and a video's MIME type), cleans the stored tags and rebuilds the search index unless the
  * stored stamp equals `DERIVED_DATA_VERSION`. Each batch is its own transaction and the stamp is written last, so an
  * interrupted run keeps the old stamp and the next open starts over. Each transaction is synchronous;
  * the function yields to the event loop after every batch.
@@ -46,6 +48,7 @@ export async function ensureDerivedData(
   if (stored?.version === DERIVED_DATA_VERSION) return;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
   await deriveFileKinds(database, batchSize);
+  await cleanStoredTags(database, batchSize);
   emptySearchIndex(database);
   await rebuildSearchIndex(database, batchSize, options.afterBatch);
   // The stamp, in its own statement.

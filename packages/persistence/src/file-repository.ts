@@ -13,6 +13,7 @@ import { countQuery, fileListWhere, live, pageQuery, trashed } from './file-list
 import { clearCoverOutside, toRecordWithTags, toRecords } from './file-records.js';
 import { file, fileAnalysis, fileAnalysisProposal, fileMove, fileOrigin, filePurge, fileTag, job } from './schema.js';
 import { assetOfFile, reindexAssets } from './search-index.js';
+import { dropUnusedTags } from './tag-links.js';
 
 /**
  * The file repository on the workspace database.
@@ -335,7 +336,12 @@ async function purge(database: BetterSQLite3Database, id: string, purgedAt: stri
     // Dependents first, so the foreign keys hold at every statement. A chosen cover is cleared by
     // its `set null` rule (only a failed inbox file could still be one; a trashed file is none), the
     // origins by their cascade.
+    const tagIds = transaction.select({ tagId: fileTag.tagId }).from(fileTag).where(eq(fileTag.fileId, id)).all();
     transaction.delete(fileTag).where(eq(fileTag.fileId, id)).run();
+    dropUnusedTags(
+      transaction,
+      tagIds.map((link) => link.tagId),
+    );
     transaction.delete(fileAnalysis).where(eq(fileAnalysis.fileId, id)).run();
     transaction.delete(fileAnalysisProposal).where(eq(fileAnalysisProposal.fileId, id)).run();
     transaction.delete(job).where(eq(job.fileId, id)).run();

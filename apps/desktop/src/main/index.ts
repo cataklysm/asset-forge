@@ -132,7 +132,7 @@ function start(): void {
     userDataPath: app.getPath('userData'),
     secrets: createSafeStorageCodec(),
     env: process.env,
-    images: { jpeg: (path) => pool.jpeg(path) },
+    images: { jpeg: (path, signal) => pool.jpeg(path, signal) },
     generationImages: createGenerationImageSource(previews),
     log: (line) => console.warn(line),
     appVersion: app.getVersion(),
