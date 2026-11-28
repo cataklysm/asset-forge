@@ -7,7 +7,13 @@ import { fileRecord } from './fixtures';
 it('a single failed item is thrown with its error code', async () => {
   installFakeApi({
     'files:trashMany': () => ({
-      items: [{ fileId: 'f1', error: { code: 'invalid_operation', message: 'This file is still being imported' } }],
+      items: [
+        {
+          fileId: 'f1',
+          file: null,
+          error: { code: 'invalid_operation' as const, message: 'This file is still being imported' },
+        },
+      ],
     }),
   });
   const { firstError } = await runFileBatch('files:trashMany', [fileRecord({ id: 'f1' })]);
@@ -23,7 +29,7 @@ it('a single failed item is thrown with its error code', async () => {
 });
 
 it('nothing is thrown when every item went through', async () => {
-  installFakeApi({ 'files:trashMany': () => ({ items: [{ fileId: 'f1', error: null }] }) });
+  installFakeApi({ 'files:trashMany': () => ({ items: [{ fileId: 'f1', file: null, error: null }] }) });
   const outcome = await runFileBatch('files:trashMany', [fileRecord({ id: 'f1' })]);
   expect(outcome).toEqual({ doneIds: ['f1'], failures: [], firstError: null });
   expect(() => throwFirst(outcome.firstError)).not.toThrow();
