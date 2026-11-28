@@ -1,32 +1,35 @@
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { FileRecord, TagAssignment } from '@assetforge/contracts';
+import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import type { FileRecord } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { fileMenuItems, type FileActionContext } from '../file-actions';
-import { formatBytes, formatDateTime, formatDuration } from '../format';
-import { DELETED_LABEL, DURATION_LABEL, label, ORIGIN_LABEL } from '../labels';
+import { label } from '../labels';
 import { formatLabel } from '../media-url';
-import { ALERT, BORDER, ICON_BUTTON, LABEL, MUTED, PANEL_TITLE, SECTION_TITLE } from '../ui';
+import { BORDER, ICON_BUTTON, MUTED, SECTION_TITLE } from '../ui';
+import { exitFullscreen, useFullscreen } from '../hooks/useFullscreen';
+import { useMeasuredFile, type Measured } from '../hooks/useMeasuredFile';
+import { useStageFocus } from '../hooks/useStageFocus';
 import { useViewerKeys } from '../hooks/useViewerKeys';
 import { Dialog } from './Dialog';
+import { FileDetailsPanel, type DialogAsset } from './FileDetailsPanel';
 import { FilmStrip } from './FilmStrip';
-import { FileOrigins } from './FileOrigins';
-import { fileOrigin } from './FileTile';
-import { GenerationDetails } from './GenerationDetails';
 import type { ViewerList } from './FileBrowser';
 import { ImageStage, type ViewerControls } from './ImageStage';
-import { Link } from './Link';
-import { Menu } from './Menu';
 import { ProposalMarker } from './ProposalMarker';
-import { TagList } from './TagList';
-import { TagRow } from './TagRow';
 import { VideoStage, videoControls } from './VideoStage';
 import { ViewerToolbar } from './ViewerToolbar';
 
+// The file detail dialog: the details column beside the zoomable image or the video stage, stepping through the list
+// it was opened from.
+
+export type { Measured };
+
+/** The props of the dialog. */
 interface Props {
+  /** The record to show. */
   file: FileRecord;
   /** `null` in the inbox. */
-  asset: { id: string; name: string; tags: readonly TagAssignment[] } | null;
+  asset: DialogAsset | null;
   /** Drives the "More" menu; its "Details" entry is not offered here. */
   actions: FileActionContext;
   /** Asset files: the role select. Inbox files: the assign control. Not shown for a trashed file; null shows no section. */
@@ -38,20 +41,55 @@ interface Props {
    * id `fileId`; merges only them into the shown record and must not reload the list.
    */
   onMeasured(fileId: string, size: Measured): void;
+  /** Opens the file's asset. */
   onOpenAsset?(assetId: string): void;
   /** The list of the file browser the dialog was opened from; steps through it. */
   list: ViewerList | null;
+  /** Closes the dialog. */
   onClose(): void;
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
+/**
+ * Wraps an action of the More menu so that its failure shows in the dialog; cover, detach and trash callers may be
+ * asynchronous.
+ *
+ * @param action the action; undefined stays undefined
+ * @param setError clears the dialog's error before the action
+ * @param report shows a failure
+ * @returns the wrapped action
+ */
+function guarded<A extends unknown[]>(
+  action: ((...args: A) => unknown) | undefined,
+  setError: (message: string | null) => void,
+  report: (message: string) => void,
+): ((...args: A) => void) | undefined {
+  if (action === undefined) return undefined;
+  return (...args: A) => {
+    setError(null);
+    Promise.resolve()
+      .then(() => action(...args))
+      .catch((error: unknown) => report(describeError(error)));
+  };
 }
 
-/** What a measurement adds to the record: the dimensions, for a video also the duration. */
-export type Measured = Dimensions & { durationMs?: number | null };
+/**
+ * The action of the Delete key: Delete permanently for a trashed file, nothing for a pending one, else Delete.
+ *
+ * @param file the shown record
+ * @param actions the dialog's actions
+ * @returns the action, or undefined when the key does nothing
+ */
+function removeActionOf(file: FileRecord, actions: FileActionContext): (() => void) | undefined {
+  if (file.deletedAt !== null) return actions.onPurge;
+  return file.status !== 'pending' ? actions.onDelete : undefined;
+}
 
+/**
+ * The file detail dialog.
+ *
+ * @param props the file, its asset, the actions, the role control, the list and the callbacks
+ * @returns the dialog
+ */
 export function FileDetailDialog({
   file: given,
   asset,
@@ -64,15 +102,10 @@ export function FileDetailDialog({
   onClose,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  // Files imported before dimensions were stored are measured once per dialog. The result is
-  // remembered, so a record without dimensions (the list's, when the viewer steps back to the file)
-  // shows it at once; failed measurements are not repeated and show nothing.
-  const measured = useRef(new Map<string, Measured | 'pending' | 'failed'>());
-  const remembered = measured.current.get(given.id);
-  const file = given.width === null && typeof remembered === 'object' ? { ...given, ...remembered } : given;
   // Error and viewer controls belong to the file they came from; stepping on leaves them behind.
   const [failure, setFailure] = useState<{ fileId: string; message: string } | null>(null);
   const [stage, setStage] = useState<{ fileId: string; controls: ViewerControls } | null>(null);
+  const file = useMeasuredFile(given, onMeasured);
   const error = failure?.fileId === file.id ? failure.message : null;
   const controls = stage?.fileId === file.id ? stage.controls : null;
   const fileId = file.id;
@@ -80,81 +113,29 @@ export function FileDetailDialog({
   const setControls = (next: ViewerControls) => setStage({ fileId, controls: next });
 
   const complete = file.status === 'complete';
-  // A file in the trash: read-only, without a role or assign control.
   const trashed = file.deletedAt !== null;
   const viewable = complete && file.previewable;
   // A video plays in the video stage; its toolbar has only the fullscreen button.
   const playable = complete && file.kind === 'video';
   const staged = viewable || playable;
 
-  const onMeasuredRef = useRef(onMeasured);
-  onMeasuredRef.current = onMeasured;
-  const unmeasured = staged && file.width === null;
-  useEffect(() => {
-    if (!unmeasured || measured.current.has(fileId)) return;
-    const results = measured.current;
-    results.set(fileId, 'pending');
-    call('files:measure', { fileId }).then(
-      (record) => {
-        if (record.width === null || record.height === null) {
-          results.set(fileId, 'failed');
-          return;
-        }
-        const size: Measured =
-          record.kind === 'video'
-            ? { width: record.width, height: record.height, durationMs: record.durationMs }
-            : { width: record.width, height: record.height };
-        results.set(fileId, size);
-        onMeasuredRef.current(fileId, size);
-      },
-      () => results.set(fileId, 'failed'),
-    );
-  }, [fileId, unmeasured]);
-
-  // Fullscreen shows the toolbar and the stage; the state follows the browser's event.
+  // Fullscreen shows the toolbar and the stage.
   const rootRef = useRef<HTMLDivElement>(null);
   const stageBox = useRef<HTMLDivElement>(null);
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => {
-    const sync = () => setFullscreen(document.fullscreenElement === stageBox.current && stageBox.current !== null);
-    document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
-  }, []);
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      Promise.resolve(document.exitFullscreen?.()).catch(() => {});
-      return;
-    }
-    try {
-      Promise.resolve(stageBox.current?.requestFullscreen?.()).catch(() => {});
-    } catch {
-      // Fullscreen is refused; the button stays unpressed.
-    }
-  };
+  const fullscreen = useFullscreen(stageBox);
   // Esc and Close leave fullscreen first.
   const close = () => {
     if (document.fullscreenElement) {
-      Promise.resolve(document.exitFullscreen?.()).catch(() => {});
+      exitFullscreen();
       return;
     }
     onClose();
   };
-  // The stage's video or image region is replaced when the file changes. When it held the focus,
-  // the focus goes to the stage box, so the viewer keys keep working; focus elsewhere is left alone.
-  const stageArea = useRef<HTMLDivElement>(null);
-  const stageFocus = useRef<Element | null>(null);
-  useLayoutEffect(() => {
-    const last = stageFocus.current;
-    const area = stageArea.current;
-    if (last === null || area === null || last.isConnected) return;
-    const active = document.activeElement;
-    if (active !== null && active !== document.body) return;
-    area.focus({ preventScroll: true });
-  });
+  const stageFocus = useStageFocus();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const video = playable ? videoControls(videoRef) : null;
   // The Delete key does what the More menu offers: Delete, or Delete permanently (which asks) in the trash.
-  const removeAction = trashed ? actions.onPurge : file.status !== 'pending' ? actions.onDelete : undefined;
+  const removeAction = removeActionOf(file, actions);
   useViewerKeys(rootRef, {
     previous: () => list?.show(list.index - 1),
     next: () => list?.show(list.index + 1),
@@ -164,7 +145,7 @@ export function FileDetailDialog({
     actual: () => controls?.actual(),
     rotate: () => controls?.rotate(),
     fullscreen: () => {
-      if (controls !== null || playable) toggleFullscreen();
+      if (controls !== null || playable) fullscreen.toggle();
     },
     ...(video === null ? {} : { seek: video.seek, togglePlayback: video.togglePlayback }),
     ...(removeAction === undefined ? {} : { remove: () => guard(removeAction)?.() }),
@@ -175,16 +156,8 @@ export function FileDetailDialog({
     setError(message);
     actions.onError?.(message);
   };
-  // Cover, detach and trash callers may be asynchronous; their failures show in the dialog.
   const guard = <A extends unknown[]>(action: ((...args: A) => unknown) | undefined) =>
-    action === undefined
-      ? undefined
-      : (...args: A) => {
-          setError(null);
-          Promise.resolve()
-            .then(() => action(...args))
-            .catch((e: unknown) => report(describeError(e)));
-        };
+    guarded(action, setError, report);
   const items = fileMenuItems(file, {
     ...actions,
     onSetCover: guard(actions.onSetCover),
@@ -199,177 +172,42 @@ export function FileDetailDialog({
   const canOpenExternally = complete && file.openable && !trashed;
   const openExternally = () => {
     setError(null);
-    call('files:openExternal', { fileId: file.id }).catch((e: unknown) => report(describeError(e)));
+    call('files:openExternal', { fileId: file.id }).catch((error: unknown) => report(describeError(error)));
   };
 
   async function changeTag(channel: 'files:addTag' | 'files:removeTag', name: string) {
     onFileChange(await call(channel, { fileId: file.id, name }));
   }
 
-  const image = file.kind === 'image';
-  const tagsLabel = image ? 'Image tags' : 'File tags';
   const browsing = list !== null && list.total >= 2 ? list : null;
-  // The header pair and the on-stage pair: same behaviour and tooltips, distinct accessible names.
-  const step = (direction: -1 | 1, look: { className: string; name?: string }) =>
-    list === null ? null : (
-      <button
-        type="button"
-        aria-label={look.name ?? (direction < 0 ? 'Previous file (←)' : 'Next file (→)')}
-        title={direction < 0 ? 'Previous file (←)' : 'Next file (→)'}
-        className={look.className}
-        disabled={direction < 0 ? list.index <= 0 : list.index >= list.total - 1}
-        onClick={() => list.show(list.index + direction)}
-      >
-        {direction < 0 ? <ChevronLeft size={18} aria-hidden /> : <ChevronRight size={18} aria-hidden />}
-      </button>
-    );
 
   return (
     <Dialog open title={title} onClose={close} initialFocusRef={closeRef} size="detail">
       <div ref={rootRef} className="flex h-full flex-col">
-        <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
-          <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
-            <span className="truncate">{file.originalName}</span>
-            {file.hasProposal && <ProposalMarker />}
-            {asset !== null && (
-              <>
-                <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />
-                <span className="truncate font-normal">{asset.name}</span>
-              </>
-            )}
-          </h2>
-          <div className="flex shrink-0 items-center gap-2">
-            {list !== null && (
-              <>
-                <span className={`mr-2 text-sm tabular-nums ${MUTED}`}>
-                  {list.index + 1} / {list.total}
-                </span>
-                {step(-1, { className: ICON_BUTTON })}
-                {step(1, { className: ICON_BUTTON })}
-              </>
-            )}
-            <button ref={closeRef} type="button" aria-label="Close" title="Close" className={`ml-2 ${ICON_BUTTON}`} onClick={close}>
-              <X size={18} aria-hidden />
-            </button>
-          </div>
-        </header>
+        <DetailHeader file={file} assetName={asset?.name ?? null} title={title} list={list} closeRef={closeRef} onClose={close} />
         <div className="flex min-h-0 flex-1">
-          <div className={`flex w-88 shrink-0 flex-col gap-6 overflow-y-auto border-r p-5 ${BORDER}`}>
-            <section aria-label="Details" className="space-y-2">
-              <h3 className={PANEL_TITLE}>{image ? 'Image details' : 'File details'}</h3>
-              <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm">
-                <dt className={LABEL}>Filename</dt>
-                <dd className="break-all">{file.originalName}</dd>
-                <dt className={LABEL}>Format</dt>
-                <dd title={file.mimeType}>{formatLabel(file.originalName)}</dd>
-                <dt className={LABEL}>Dimensions</dt>
-                <dd>{file.width !== null && file.height !== null ? `${file.width} × ${file.height} px` : '–'}</dd>
-                {file.durationMs !== null && (
-                  <>
-                    <dt className={LABEL}>{DURATION_LABEL}</dt>
-                    <dd className="tabular-nums">{formatDuration(file.durationMs)}</dd>
-                  </>
-                )}
-                <dt className={LABEL}>Size</dt>
-                <dd>{formatBytes(file.sizeBytes)}</dd>
-                <dt className={LABEL}>Imported</dt>
-                <dd>{formatDateTime(file.importedAt)}</dd>
-                {file.deletedAt !== null && (
-                  <>
-                    <dt className={LABEL}>{DELETED_LABEL}</dt>
-                    <dd>{formatDateTime(file.deletedAt)}</dd>
-                    <dt className={LABEL}>{ORIGIN_LABEL}</dt>
-                    <dd className="break-words">{fileOrigin(file)}</dd>
-                  </>
-                )}
-                {!complete && (
-                  <>
-                    <dt className={LABEL}>Status</dt>
-                    <dd>{label(file.status)}</dd>
-                  </>
-                )}
-              </dl>
-              {file.error !== null && (
-                <p role="alert" className={ALERT}>
-                  {file.error}
-                </p>
-              )}
-            </section>
-            {/* The inbox's assign control shows only for complete files. */}
-            {!trashed && roleControl !== null && (asset !== null || complete) && (
-              <section className="space-y-2">
-                <h3 className={PANEL_TITLE}>{asset !== null ? 'Role' : 'Assign'}</h3>
-                {/* Keyed by file: stepping on starts the controls afresh. */}
-                <Fragment key={`role-${file.id}`}>{roleControl}</Fragment>
-              </section>
-            )}
-            {/* In the trash the tags are kept but cannot be changed. */}
-            {trashed && file.tags.length > 0 && (
-              <section aria-label={tagsLabel} className="space-y-2">
-                <h3 className={PANEL_TITLE}>{tagsLabel}</h3>
-                <TagList tags={file.tags} kind="file" max={Number.MAX_SAFE_INTEGER} wrap />
-              </section>
-            )}
-            {!trashed && complete && (
-              <TagRow
-                key={`tags-${file.id}`}
-                label={tagsLabel}
-                kind="file"
-                layout="stacked"
-                tags={file.tags}
-                onAdd={(name) => changeTag('files:addTag', name)}
-                onRemove={(name) => changeTag('files:removeTag', name)}
-              />
-            )}
-            {/* Keyed by file: stepping on loads the next file's addresses afresh. */}
-            <FileOrigins key={`origins-${file.id}`} fileId={file.id} />
-            {complete && <GenerationDetails key={`generation-${file.id}`} fileId={file.id} />}
-            {asset !== null && (
-              <>
-                <hr className={`border-t ${BORDER}`} />
-                <section className="space-y-2">
-                  <h3 className={PANEL_TITLE}>Asset</h3>
-                  <div className="break-words">
-                    {onOpenAsset ? <Link onFollow={() => onOpenAsset(asset.id)}>{asset.name}</Link> : <span>{asset.name}</span>}
-                  </div>
-                </section>
-                {asset.tags.length > 0 && (
-                  <section className="space-y-2">
-                    <h3 className={PANEL_TITLE}>Asset tags</h3>
-                    <TagList tags={asset.tags} kind="asset" max={Number.MAX_SAFE_INTEGER} wrap />
-                  </section>
-                )}
-              </>
-            )}
-            {error !== null && (
-              <p role="alert" className={ALERT}>
-                {error}
-              </p>
-            )}
-            <div>
-              <Menu label="More" items={items} align="start" side="top" trigger="labelled" />
-            </div>
-          </div>
+          <FileDetailsPanel
+            file={file}
+            asset={asset}
+            roleControl={roleControl}
+            error={error}
+            items={items}
+            onChangeTag={changeTag}
+            onOpenAsset={onOpenAsset}
+          />
           <div ref={stageBox} className="flex min-w-0 flex-1 flex-col bg-surface">
             {staged && (
               <div className="shrink-0 px-4 py-3">
                 <div className="h-9">
-                  {(controls !== null || playable) && (
-                    <ViewerToolbar controls={controls} fullscreen={{ active: fullscreen, toggle: toggleFullscreen }} />
-                  )}
+                  {(controls !== null || playable) && <ViewerToolbar controls={controls} fullscreen={fullscreen} />}
                 </div>
               </div>
             )}
             <div
-              ref={stageArea}
+              ref={stageFocus.areaRef}
               tabIndex={-1}
-              onFocus={(event) => {
-                stageFocus.current = event.target;
-              }}
-              onBlur={(event) => {
-                const next = event.relatedTarget;
-                if (next instanceof Node && !event.currentTarget.contains(next)) stageFocus.current = null;
-              }}
+              onFocus={stageFocus.onFocus}
+              onBlur={stageFocus.onBlur}
               className={`relative min-h-0 flex-1 outline-none ${staged ? 'border-t' : ''} ${browsing !== null ? 'border-b' : ''} ${BORDER}`}
             >
               {playable ? (
@@ -389,8 +227,18 @@ export function FileDetailDialog({
               )}
               {browsing !== null && (
                 <>
-                  {step(-1, { className: `absolute left-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`, name: 'Previous file' })}
-                  {step(1, { className: `absolute right-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`, name: 'Next file' })}
+                  <StepButton
+                    list={browsing}
+                    direction={-1}
+                    className={`absolute left-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`}
+                    name="Previous file"
+                  />
+                  <StepButton
+                    list={browsing}
+                    direction={1}
+                    className={`absolute right-4 top-1/2 -translate-y-1/2 ${ICON_BUTTON}`}
+                    name="Next file"
+                  />
                 </>
               )}
             </div>
@@ -403,5 +251,94 @@ export function FileDetailDialog({
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** The props of the dialog's header. */
+interface DetailHeaderProps {
+  /** The shown record. */
+  file: FileRecord;
+  /** The asset's name; null in the inbox. */
+  assetName: string | null;
+  /** The dialog's title, also the heading's tooltip and name. */
+  title: string;
+  /** The list the dialog steps through; null shows no position or step buttons. */
+  list: ViewerList | null;
+  /** The Close button, which takes the initial focus. */
+  closeRef: RefObject<HTMLButtonElement | null>;
+  /** Closes the dialog, leaving fullscreen first. */
+  onClose(): void;
+}
+
+/**
+ * The header: the file name with the proposal marker and the asset's name, the position in the list, the step
+ * buttons and Close.
+ *
+ * @param props the file, the asset's name, the title, the list, the Close ref and the close action
+ * @returns the header
+ */
+function DetailHeader({ file, assetName, title, list, closeRef, onClose }: DetailHeaderProps) {
+  return (
+    <header className={`flex shrink-0 items-center gap-4 border-b py-3 pl-5 pr-4 ${BORDER}`}>
+      <h2 title={title} aria-label={title} className={`${SECTION_TITLE} flex min-w-0 flex-1 items-center gap-3`}>
+        <span className="truncate">{file.originalName}</span>
+        {file.hasProposal && <ProposalMarker />}
+        {assetName !== null && (
+          <>
+            <span aria-hidden className={`h-5 shrink-0 border-l ${BORDER}`} />
+            <span className="truncate font-normal">{assetName}</span>
+          </>
+        )}
+      </h2>
+      <div className="flex shrink-0 items-center gap-2">
+        {list !== null && (
+          <>
+            <span className={`mr-2 text-sm tabular-nums ${MUTED}`}>
+              {list.index + 1} / {list.total}
+            </span>
+            <StepButton list={list} direction={-1} className={ICON_BUTTON} />
+            <StepButton list={list} direction={1} className={ICON_BUTTON} />
+          </>
+        )}
+        <button ref={closeRef} type="button" aria-label="Close" title="Close" className={`ml-2 ${ICON_BUTTON}`} onClick={onClose}>
+          <X size={18} aria-hidden />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/** The props of a step button. */
+interface StepButtonProps {
+  /** The list to step through. */
+  list: ViewerList;
+  /** Back or on. */
+  direction: -1 | 1;
+  /** The classes that place it. */
+  className: string;
+  /** The accessible name; absent uses the tooltip. */
+  name?: string;
+}
+
+/**
+ * Previous or Next file. The header pair and the on-stage pair have the same behaviour and tooltips and distinct
+ * accessible names.
+ *
+ * @param props the list, the direction, the classes and the accessible name
+ * @returns the button
+ */
+function StepButton({ list, direction, className, name }: StepButtonProps) {
+  const tooltip = direction < 0 ? 'Previous file (←)' : 'Next file (→)';
+  return (
+    <button
+      type="button"
+      aria-label={name ?? tooltip}
+      title={tooltip}
+      className={className}
+      disabled={direction < 0 ? list.index <= 0 : list.index >= list.total - 1}
+      onClick={() => list.show(list.index + direction)}
+    >
+      {direction < 0 ? <ChevronLeft size={18} aria-hidden /> : <ChevronRight size={18} aria-hidden />}
+    </button>
   );
 }
