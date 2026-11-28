@@ -94,7 +94,7 @@ describe('dispatch', () => {
   });
 
   it('hides unexpected errors behind internal_error', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const failing: IpcHandlers = {
       ...handlers,
       'workspace:list': async () => {
@@ -108,7 +108,7 @@ describe('dispatch', () => {
   });
 
   it('rejects a handler response that violates the contract', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const broken = {
       ...handlers,
       'dialog:pickDirectory': async () => 42,

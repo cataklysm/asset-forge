@@ -1,5 +1,6 @@
 import type { Asset, AssetWorkflow, WorkflowStepState } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
+import type { NewAssetWorkflow } from './ports/workflow-repositories.js';
 import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -56,16 +57,36 @@ export async function startWorkflow(
   if ((await session.database.assetWorkflows.getByAsset(assetId)) !== null) {
     throw new InvalidOperationError(`Asset ${assetId} already has a workflow`);
   }
+  const planned = await newWorkflowOf(session, asset, templateId);
+  await session.database.assetWorkflows.insert(planned.workflow, planned.steps);
+  return (await session.database.assetWorkflows.getByAsset(assetId))!;
+}
+
+/**
+ * The rows of a new workflow of an asset, from the latest version of the given template or of the asset type's
+ * default; nothing is written. The asset need not be stored yet, so `createAsset` can write both in one go.
+ *
+ * @param session the open workspace
+ * @param asset the asset the workflow belongs to
+ * @param templateId the chosen template, if any
+ * @returns the workflow row and its step rows
+ * @throws `NotFoundError` for an unknown template, `InvalidOperationError` when the type has no default or the
+ *   template has no version
+ */
+export async function newWorkflowOf(
+  session: WorkspaceSession,
+  asset: Asset,
+  templateId?: string,
+): Promise<NewAssetWorkflow> {
   const resolvedId = await resolveTemplateId(session, asset, templateId);
   const version = await session.database.workflowTemplates.latestVersion(resolvedId);
   if (version === null) throw new InvalidOperationError(`Workflow template ${resolvedId} has no version`);
 
   const now = session.now().toISOString();
-  await session.database.assetWorkflows.insert(
-    { id: session.newId(), assetId, templateVersionId: version.id, createdAt: now },
-    version.steps.map((step) => ({ id: session.newId(), stepDefinitionId: step.id, updatedAt: now })),
-  );
-  return (await session.database.assetWorkflows.getByAsset(assetId))!;
+  return {
+    workflow: { id: session.newId(), assetId: asset.id, templateVersionId: version.id, createdAt: now },
+    steps: version.steps.map((step) => ({ id: session.newId(), stepDefinitionId: step.id, updatedAt: now })),
+  };
 }
 
 /**

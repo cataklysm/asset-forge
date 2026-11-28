@@ -11,6 +11,7 @@ import {
   createPauseGate,
   createScheduler,
   type PauseGate,
+  type RecoveredJobs,
   type Scheduler,
 } from '../src/index.js';
 
@@ -70,6 +71,7 @@ function setup(o: {
   repo?: (fake: InMemoryJobRepository) => JobRepository;
   pause?: PauseGate;
   laneLimit?: (resourceClass: ResourceClass, lane: string | null) => number | undefined;
+  onRecovered?: (counts: RecoveredJobs) => void;
 }) {
   let t = Date.parse('2026-01-01T00:00:00.000Z');
   const iso = () => new Date(t).toISOString();
@@ -96,6 +98,7 @@ function setup(o: {
     ...(o.totals ? { totals: o.totals } : {}),
     ...(o.pause ? { pause: o.pause } : {}),
     ...(o.laneLimit ? { laneLimit: o.laneLimit } : {}),
+    ...(o.onRecovered ? { onRecovered: o.onRecovered } : {}),
     now: () => new Date(t),
     setTimer: (fn, ms) => {
       const timer = { fn, ms };
@@ -2280,5 +2283,47 @@ describe('limit per lane', () => {
     const a = await s.enqueue('dl', 'io', 6, 'a');
     await s.scheduler.start();
     expect(running(s, a)).toHaveLength(4);
+  });
+});
+
+describe('createScheduler reporting a recovery', () => {
+  it('reports the released and the failed rows of a start once', async () => {
+    const requeued = controlled('cpu');
+    const paid = controlled('remote_api', 'fail');
+    const reports: RecoveredJobs[] = [];
+    const s = setup({
+      handlers: { t: requeued.handler, p: paid.handler },
+      onRecovered: (counts) => reports.push(counts),
+    });
+    await s.enqueue('t', 'cpu');
+    await s.enqueue('p', 'remote_api');
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso() });
+    await s.fake.claimNext({ resourceClass: 'remote_api', types: ['p'], now: s.iso() });
+    await s.scheduler.start();
+    expect(reports).toEqual([{ released: 1, retried: 0, failed: 1 }]);
+  });
+
+  it('reports nothing when no row was left running', async () => {
+    const h = controlled('cpu');
+    const reports: RecoveredJobs[] = [];
+    const s = setup({ handlers: { t: h.handler }, onRecovered: (counts) => reports.push(counts) });
+    await s.enqueue('t', 'cpu');
+    await s.scheduler.start();
+    expect(reports).toEqual([]);
+  });
+
+  it('logs a listener that throws and goes on', async () => {
+    const h = controlled('cpu');
+    const s = setup({
+      handlers: { t: h.handler },
+      onRecovered: () => {
+        throw new Error('listener gone');
+      },
+    });
+    const [id] = (await s.enqueue('t', 'cpu')) as [string];
+    await s.fake.claimNext({ resourceClass: 'cpu', types: ['t'], now: s.iso() });
+    await s.scheduler.start();
+    expect(s.logged.map((entry) => entry.message)).toEqual(['Job recovery listener failed']);
+    expect(h.runs.map((run) => run.job.id)).toEqual([id]);
   });
 });

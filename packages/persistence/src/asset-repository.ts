@@ -5,6 +5,7 @@ import {
   VIDEO_MIME_TYPES,
   type AssetCover,
   type AssetRepository,
+  type NewAssetWorkflow,
 } from '@assetforge/core';
 import { and, count, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -12,6 +13,7 @@ import { assetFilter, outerAssetId } from './asset-filters.js';
 import { toAsset } from './asset-rows.js';
 import { searchAssets } from './asset-search.js';
 import { sourcesOfAsset } from './asset-source-repository.js';
+import { writeWorkflow } from './asset-workflow-repository.js';
 import { automaticCovers, summaries, withTags } from './asset-summaries.js';
 import { qualified } from './qualified.js';
 import { asset, file } from './schema.js';
@@ -30,6 +32,7 @@ type AssetListQuery = Parameters<AssetRepository['list']>[0];
 export function createAssetRepository(database: BetterSQLite3Database): AssetRepository {
   return {
     insert: (newAsset) => insertAsset(database, newAsset),
+    insertWithWorkflow: (newAsset, workflow) => insertAssetWithWorkflow(database, newAsset, workflow),
     get: (id) => getAsset(database, id),
     update: (id, patch) => updateAsset(database, id, patch),
     list: (query) => listAssets(database, query),
@@ -47,21 +50,49 @@ export function createAssetRepository(database: BetterSQLite3Database): AssetRep
  * @returns nothing
  */
 async function insertAsset(database: BetterSQLite3Database, newAsset: Asset): Promise<void> {
+  database.transaction((transaction) => writeAsset(transaction, newAsset));
+}
+
+/**
+ * Inserts the asset, its search entry and its first workflow with the step rows in one transaction; a failure
+ * anywhere rolls all of it back.
+ *
+ * @param database the workspace database
+ * @param newAsset the asset
+ * @param workflow the workflow of the asset and its steps
+ * @returns nothing
+ */
+async function insertAssetWithWorkflow(
+  database: BetterSQLite3Database,
+  newAsset: Asset,
+  workflow: NewAssetWorkflow,
+): Promise<void> {
   database.transaction((transaction) => {
-    transaction
-      .insert(asset)
-      .values({
-        id: newAsset.id,
-        name: newAsset.name,
-        typeId: newAsset.typeId,
-        description: newAsset.description,
-        status: newAsset.status,
-        createdAt: newAsset.createdAt,
-        updatedAt: newAsset.updatedAt,
-      })
-      .run();
-    reindexAsset(transaction, newAsset.id);
+    writeAsset(transaction, newAsset);
+    writeWorkflow(transaction, workflow.workflow, workflow.steps);
   });
+}
+
+/**
+ * Writes the asset row and its search entry inside the caller's transaction.
+ *
+ * @param transaction the open transaction
+ * @param newAsset the asset
+ */
+function writeAsset(transaction: IndexTransaction, newAsset: Asset): void {
+  transaction
+    .insert(asset)
+    .values({
+      id: newAsset.id,
+      name: newAsset.name,
+      typeId: newAsset.typeId,
+      description: newAsset.description,
+      status: newAsset.status,
+      createdAt: newAsset.createdAt,
+      updatedAt: newAsset.updatedAt,
+    })
+    .run();
+  reindexAsset(transaction, newAsset.id);
 }
 
 /**

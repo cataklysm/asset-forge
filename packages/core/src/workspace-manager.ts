@@ -196,6 +196,7 @@ export class WorkspaceManager {
       videoProbe: this.host.videoProbe,
       newId: () => this.host.newId(),
       now: () => this.host.now(),
+      log: this.host.log,
     };
   }
 

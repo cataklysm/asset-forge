@@ -1,5 +1,5 @@
 import type { AssetWorkflow, WorkflowProgress, WorkflowStep } from '@assetforge/contracts';
-import type { AssetWorkflowRepository } from '@assetforge/core';
+import type { AssetWorkflowRepository, NewWorkflow, NewWorkflowStep } from '@assetforge/core';
 import { asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import {
@@ -12,6 +12,9 @@ import {
 
 /** What reading a workflow needs of a transaction handle. */
 type WorkflowReader = Pick<BetterSQLite3Database, 'select'>;
+
+/** What writing a workflow needs of a transaction handle. */
+export type WorkflowWriter = Pick<BetterSQLite3Database, 'insert'>;
 
 /**
  * `done` = mandatory steps in state `done`, `total` = mandatory steps.
@@ -50,34 +53,43 @@ export function createAssetWorkflowRepository(database: BetterSQLite3Database): 
  */
 async function insertWorkflow(
   database: BetterSQLite3Database,
-  workflow: Parameters<AssetWorkflowRepository['insert']>[0],
-  steps: Parameters<AssetWorkflowRepository['insert']>[1],
+  workflow: NewWorkflow,
+  steps: NewWorkflowStep[],
 ): Promise<void> {
-  database.transaction((transaction) => {
+  database.transaction((transaction) => writeWorkflow(transaction, workflow, steps));
+}
+
+/**
+ * Writes the workflow row and its step rows, all `not_started`, inside the caller's transaction.
+ *
+ * @param transaction the open transaction
+ * @param workflow the workflow
+ * @param steps its steps
+ */
+export function writeWorkflow(transaction: WorkflowWriter, workflow: NewWorkflow, steps: NewWorkflowStep[]): void {
+  transaction
+    .insert(assetWorkflow)
+    .values({
+      id: workflow.id,
+      assetId: workflow.assetId,
+      templateVersionId: workflow.templateVersionId,
+      createdAt: workflow.createdAt,
+    })
+    .run();
+  for (const step of steps) {
     transaction
-      .insert(assetWorkflow)
+      .insert(assetWorkflowStep)
       .values({
-        id: workflow.id,
-        assetId: workflow.assetId,
-        templateVersionId: workflow.templateVersionId,
-        createdAt: workflow.createdAt,
+        id: step.id,
+        assetWorkflowId: workflow.id,
+        stepDefinitionId: step.stepDefinitionId,
+        state: 'not_started',
+        notes: '',
+        updatedAt: step.updatedAt,
+        completedAt: null,
       })
       .run();
-    for (const step of steps) {
-      transaction
-        .insert(assetWorkflowStep)
-        .values({
-          id: step.id,
-          assetWorkflowId: workflow.id,
-          stepDefinitionId: step.stepDefinitionId,
-          state: 'not_started',
-          notes: '',
-          updatedAt: step.updatedAt,
-          completedAt: null,
-        })
-        .run();
-    }
-  });
+  }
 }
 
 /**

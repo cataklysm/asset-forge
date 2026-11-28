@@ -242,6 +242,7 @@ function createJobs(options: AnalysisServiceOptions, parts: JobParts): { host: J
     ...(options.totals === undefined ? {} : { totals: options.totals }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     laneLimit: (resourceClass, lane) => providerLimit(resourceClass, lane) ?? siteLimit(resourceClass, lane),
+    log: options.log,
   });
   created.host = host;
   return { host, pause };

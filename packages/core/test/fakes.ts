@@ -87,6 +87,7 @@ import type { TagRepository } from '../src/ports/tag-repository.js';
 import type { ModelImageSource, VisionProvider } from '../src/ports/vision-provider.js';
 import type {
   AssetWorkflowRepository,
+  NewAssetWorkflow,
   NewWorkflowStep,
   StepContext,
   StepDefinitionInput,
@@ -983,8 +984,15 @@ class InMemoryAnalysisTargets implements AnalysisTargetReader {
 
 class InMemoryFileMoves implements FileMoveRepository {
   readonly rows = new Map<string, FileMove>();
+  /** Errors the next commits reject with, one per commit, before anything is written. */
+  private readonly commitFailures: Error[] = [];
 
   constructor(private readonly files: InMemoryFiles) {}
+
+  /** Makes the next `times` commits reject with `error`, writing nothing. */
+  failCommits(times = 1, error: Error = new Error('database is locked')): void {
+    for (let i = 0; i < times; i++) this.commitFailures.push(error);
+  }
 
   async begin(move: FileMove): Promise<void> {
     if (this.rows.has(move.fileId)) throw new InvalidOperationError(`File ${move.fileId} is already being moved`);
@@ -992,6 +1000,8 @@ class InMemoryFileMoves implements FileMoveRepository {
   }
 
   async commit(fileId: string): Promise<FileRecord> {
+    const failure = this.commitFailures.shift();
+    if (failure !== undefined) throw failure;
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
     // Mirrors `refuseAgainstTrash` of the database: a kind that does not fit the file is refused and writes nothing.
@@ -1459,6 +1469,18 @@ class InMemoryAssets implements AssetRepository {
 
   async insert(asset: Asset): Promise<void> {
     this.rows.set(asset.id, asset);
+  }
+
+  /** Like the one transaction: the asset row goes again when the workflow cannot be inserted. */
+  async insertWithWorkflow(asset: Asset, workflow: NewAssetWorkflow): Promise<void> {
+    if (this.rows.has(asset.id)) throw new Error(`UNIQUE constraint failed: asset.id (${asset.id})`);
+    this.rows.set(asset.id, asset);
+    try {
+      await this.workflows.insert(workflow.workflow, workflow.steps);
+    } catch (error) {
+      this.rows.delete(asset.id);
+      throw error;
+    }
   }
 
   async get(id: string): Promise<Asset | null> {

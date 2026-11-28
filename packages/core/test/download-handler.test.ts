@@ -59,6 +59,9 @@ class FakeRemote implements RemoteFileSource {
 
 async function setup(o: { sites?: SiteAccess } = {}) {
   const fake = createFakeHost();
+  /** The lines the session's log took. */
+  const lines: string[] = [];
+  fake.host.log = (line) => lines.push(line);
   const manager = new WorkspaceManager(fake.host);
   const summary = await manager.create({ name: 'Demo', rootPath: ROOT });
   const db = fake.databases.get(summary.id)!;
@@ -133,6 +136,7 @@ async function setup(o: { sites?: SiteAccess } = {}) {
   };
   return {
     fake,
+    lines,
     db,
     storage,
     session,
@@ -426,6 +430,31 @@ describe('createFileDownloadHandler', () => {
     expect(codeOf(error)).toBe('internal_error');
     expect((error as Error).message).not.toContain('a.example');
     expect((error as Error).cause).toBeUndefined();
+  });
+
+  it('logs an unexpected failure with the job id and the error class only', async () => {
+    const t = await setup();
+    const url = 'https://SECRET_PATH_MARKER.example/x.png';
+    t.remote.answers.set(url, new TypeError(`Invalid URL ${url}`));
+    const { job } = await t.download(url);
+    expect(t.lines).toEqual([`Download failed unexpectedly: operation=download job=${job.id} error=TypeError`]);
+  });
+
+  it('logs a body that fails with a foreign error as an import line, without the URL', async () => {
+    const t = await setup();
+    const url = 'https://SECRET_PATH_MARKER.example/x.png';
+    t.remote.answers.set(url, { stream: failingAfterChunk(new Error(`boom ${url}`)) });
+    await t.download(url);
+    expect(t.lines.length).toBeGreaterThan(0);
+    for (const line of t.lines) expect(line).not.toContain('SECRET_PATH_MARKER');
+  });
+
+  it('logs nothing for a refused download', async () => {
+    const t = await setup();
+    t.remote.answers.set('https://a.example/x.png', { contentLength: 10 ** 12 });
+    t.storage.free = 0;
+    await t.download('https://a.example/x.png');
+    expect(t.lines).toEqual([]);
   });
 
   it('refuses without a request when the free space is below the reserve', async () => {

@@ -106,6 +106,23 @@ export interface SchedulerOptions {
    * @returns the lane's own limit, or anything else to keep the class limit
    */
   laneLimit?(resourceClass: ResourceClass, lane: string | null): number | undefined;
+  /**
+   * Told after a recovery of the jobs found `running` that changed at least one row; a throw is logged and changes
+   * nothing.
+   *
+   * @param counts how many rows were put back, scheduled for a retry and failed
+   */
+  onRecovered?(counts: RecoveredJobs): void;
+}
+
+/** What one recovery of the jobs found `running` did. */
+export interface RecoveredJobs {
+  /** Put back to `queued`: never launched, or interrupted with attempts left and no retry due. */
+  released: number;
+  /** Scheduled for another run after an interrupted one. */
+  retried: number;
+  /** Failed: a handler that fails on an interrupt, or no attempt left. */
+  failed: number;
 }
 
 /** One job the scheduler has launched and not yet finished. */
@@ -475,13 +492,21 @@ class JobScheduler {
    * @returns resolves once every such job is handled or a stop began
    */
   private async recover(): Promise<void> {
-    for (const job of await this.config.jobs.listByStatus('running')) {
-      if (this.stopping) break;
-      // A launched run stores its own outcome.
-      if (this.active.has(job.id)) continue;
-      const changedRow = await this.recoverRow(job);
-      this.leftovers.forget(job.id);
-      if (changedRow) this.changed(job.id);
+    const counts: RecoveredJobs = { released: 0, retried: 0, failed: 0 };
+    try {
+      for (const job of await this.config.jobs.listByStatus('running')) {
+        if (this.stopping) break;
+        // A launched run stores its own outcome.
+        if (this.active.has(job.id)) continue;
+        const step = await this.recoverRow(job);
+        this.leftovers.forget(job.id);
+        if (step === null) continue;
+        counts[step] += 1;
+        this.changed(job.id);
+      }
+    } finally {
+      // The rows changed before a failure count as well.
+      this.reportRecovered(counts);
     }
   }
 
@@ -489,15 +514,35 @@ class JobScheduler {
    * Applies the recovery step of one row found `running`.
    *
    * @param job the row
-   * @returns resolves to whether the row changed
+   * @returns resolves to the kind of change, or null when the row did not change
    */
-  private recoverRow(job: Job): Promise<boolean> {
+  private async recoverRow(job: Job): Promise<keyof RecoveredJobs | null> {
     const step = this.leftovers.stepOf(job, this.config.handlers[job.type]?.onInterrupted === 'fail');
     const errorCode = this.interruptedCodeOf(job);
-    if (step === 'release') return this.config.jobs.release(job.id, this.iso());
-    if (step === 'retry')
-      return this.config.jobs.scheduleRetry(job.id, { errorCode, runAfter: this.iso(), now: this.iso() });
-    return this.finishJob(job, { status: 'failed', errorCode });
+    if (step === 'release') return (await this.config.jobs.release(job.id, this.iso())) ? 'released' : null;
+    if (step === 'retry') {
+      const scheduled = await this.config.jobs.scheduleRetry(job.id, {
+        errorCode,
+        runAfter: this.iso(),
+        now: this.iso(),
+      });
+      return scheduled ? 'retried' : null;
+    }
+    return (await this.finishJob(job, { status: 'failed', errorCode })) ? 'failed' : null;
+  }
+
+  /**
+   * Hands the counts of a recovery to `onRecovered` when it changed a row.
+   *
+   * @param counts what the recovery did
+   */
+  private reportRecovered(counts: RecoveredJobs): void {
+    if (counts.released + counts.retried + counts.failed === 0) return;
+    try {
+      this.options.onRecovered?.(counts);
+    } catch (cause) {
+      this.config.log('Job recovery listener failed', cause);
+    }
   }
 
   /**

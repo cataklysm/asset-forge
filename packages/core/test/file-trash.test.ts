@@ -723,13 +723,13 @@ describe('sweepTrash', () => {
 });
 
 describe('an open move row before restore and purge', () => {
-  /** A trashed inbox file whose restore moved the binary back but whose commit failed. */
+  /** A trashed inbox file whose restore moved the binary back but whose commit and its immediate resolve failed. */
   async function failedRestoreCommit() {
     const ctx = await setup();
     const { session, storage, db, importOne, control } = ctx;
     const file = await importOne('a.png');
     ok(await trashFiles(session, control, [file.id]));
-    vi.spyOn(db.fileMoves, 'commit').mockRejectedValueOnce(new Error('database is locked'));
+    db.fileMoves.failCommits(2);
     const [failed] = await restoreFiles(session, [file.id]);
     expect(failed!.error).not.toBeNull();
     expect(db.files.records.get(file.id)!.deletedAt).not.toBeNull();
@@ -792,7 +792,7 @@ describe('an open move row before restore and purge', () => {
 
   it('purge is refused while the move row cannot be resolved; recovery then makes the file live', async () => {
     const { session, storage, db, file, control } = await failedRestoreCommit();
-    vi.spyOn(db.fileMoves, 'commit').mockRejectedValueOnce(new Error('database is locked'));
+    db.fileMoves.failCommits(1);
 
     const [item] = await purgeFiles(session, control, [file.id]);
 

@@ -17,8 +17,8 @@ interface Placement {
 /**
  * Attaches a complete file to an asset with a role (`target`), or detaches it back to the
  * inbox (`null`). A change of path is journaled: the move row is written before the file
- * moves and is committed together with the file row, so a crash in between is resolved by
- * `recoverFileMoves` on the next open. The target is never overwritten.
+ * moves and is committed together with the file row; a failed commit is resolved at once by `commitMove`, and a
+ * crash in between is resolved by `recoverFileMoves` on the next open. The target is never overwritten.
  *
  * @param session the open workspace
  * @param fileId the file to place
