@@ -19,7 +19,7 @@ import { fileKind } from './media-types.js';
 import type { RemoteFile, RemoteFileSource } from './ports/remote-files.js';
 import type { SiteAccess } from './ports/site-access.js';
 import type { WorkspaceSession } from './session.js';
-import { DOWNLOAD_FREE_SPACE_RESERVE } from './url-import.js';
+import { DOWNLOAD_FREE_SPACE_RESERVE } from './download-limits.js';
 
 /** What the `file.download` job needs. */
 export interface FileDownloadHandlerDependencies {

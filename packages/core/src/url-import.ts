@@ -2,39 +2,14 @@ import {
   FILE_DOWNLOAD_JOB,
   IMPORT_URL_LINE_MAX,
   type FileDownloadPayload,
-  type FileOrigin,
   type FileTarget,
   type SiteFilter,
   type UrlImportResult,
 } from '@assetforge/contracts';
 import { normalizeSourceUrl } from './asset-sources.js';
-import { NotFoundError } from './errors.js';
-import type { Job, NewJob } from './jobs.js';
+import type { NewJob } from './jobs.js';
 import type { WorkspaceSession } from './session.js';
 import { requireAsset } from './tags.js';
-
-/** The largest file one download stores (500 MiB). */
-export const MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024;
-/** How long a download waits for the response headers. */
-export const DOWNLOAD_HEADER_TIMEOUT_MS = 30_000;
-/** How long a download waits without receiving data. */
-export const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
-/** How long one download may take in total (30 min). */
-export const DOWNLOAD_TOTAL_TIMEOUT_MS = 1_800_000;
-/** How many redirects one download follows. */
-export const MAX_DOWNLOAD_REDIRECTS = 5;
-/** The free space a download leaves on the storage volume beyond the announced length (2 GiB). */
-export const DOWNLOAD_FREE_SPACE_RESERVE = 2 * 1024 ** 3;
-/** Bounds and default of the wait a throttled download takes. */
-export const RETRY_AFTER_MIN_MS = 5_000;
-export const RETRY_AFTER_MAX_MS = 900_000;
-export const RETRY_AFTER_DEFAULT_MS = 60_000;
-
-/** The wait of a throttled download: the server's wait clamped to 5 s – 15 min, 60 s when it gave none. */
-export function clampRetryAfterMs(ms: number | null): number {
-  if (ms === null || Number.isNaN(ms)) return RETRY_AFTER_DEFAULT_MS;
-  return Math.min(Math.max(ms, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
-}
 
 /** The text of an invalid line in the answer. */
 const INVALID_TEXT_MAX = 200;
@@ -122,44 +97,4 @@ export async function enqueueUrlImport(
   result.queued = inserted.length;
   result.alreadyQueued += jobs.length - inserted.length;
   return result;
-}
-
-/** The addresses a file was downloaded from, oldest first; an unknown file answers `not_found`. */
-export async function listFileOrigins(s: WorkspaceSession, fileId: string): Promise<FileOrigin[]> {
-  if ((await s.database.files.get(fileId)) === null) throw new NotFoundError(`File ${fileId} does not exist`);
-  return s.database.fileOrigins.listByFile(fileId);
-}
-
-/** The stored URL of an origin of the file, checked by the URL rule again before it is handed out. */
-export async function resolveFileOriginUrl(s: WorkspaceSession, r: { fileId: string; originId: string }): Promise<string> {
-  const origin = await s.database.fileOrigins.get(r.originId);
-  if (origin === null || origin.fileId !== r.fileId) throw new NotFoundError('Origin does not exist');
-  return normalizeDownloadUrl(origin.url);
-}
-
-/**
- * The failed downloads of one lane that a site's browser check refused (`download_browser_check`).
- *
- * @param s the open workspace
- * @param lane the download lane, for a site profile its site
- * @returns the jobs, oldest first
- */
-export async function browserCheckFailures(s: WorkspaceSession, lane: string): Promise<Job[]> {
-  return (await s.database.jobs.listByStatus('failed')).filter(
-    (job) => job.type === FILE_DOWNLOAD_JOB && job.lane === lane && job.errorCode === 'download_browser_check',
-  );
-}
-
-/**
- * Queues the downloads of one lane that a browser check refused once more, after the owner passed the check by hand.
- * A job whose URL another active job already holds stays failed.
- *
- * @param s the open workspace
- * @param lane the download lane, for a site profile its site
- * @returns how many jobs were queued
- */
-export async function retryBrowserCheckFailures(s: WorkspaceSession, lane: string): Promise<number> {
-  let queued = 0;
-  for (const job of await browserCheckFailures(s, lane)) queued += await s.database.jobs.retry({ id: job.id, now: s.now().toISOString() });
-  return queued;
 }
