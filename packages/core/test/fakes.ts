@@ -1505,9 +1505,10 @@ class InMemoryProjectAssets implements ProjectAssetRepository {
     private readonly assets: InMemoryAssets,
   ) {}
 
-  async insert(a: ProjectAssignment): Promise<void> {
-    if (this.links.has(assignmentKey(a))) throw new Error('UNIQUE constraint failed: project_asset');
+  async insert(a: ProjectAssignment): Promise<boolean> {
+    if (this.links.has(assignmentKey(a))) return false;
     this.links.set(assignmentKey(a), a);
+    return true;
   }
 
   async get(key: AssignmentKey): Promise<ProjectAssignment | null> {

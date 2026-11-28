@@ -64,14 +64,14 @@ export function createProjectAssetRepository(database: BetterSQLite3Database): P
 }
 
 /**
- * Inserts the assignment.
+ * Inserts the assignment unless the asset is already assigned to the project.
  *
  * @param database the workspace database
  * @param assignment the assignment
- * @returns nothing
+ * @returns whether a row was written; false when the assignment already existed
  */
-async function insertAssignment(database: BetterSQLite3Database, assignment: ProjectAssignment): Promise<void> {
-  database
+async function insertAssignment(database: BetterSQLite3Database, assignment: ProjectAssignment): Promise<boolean> {
+  const result = database
     .insert(projectAsset)
     .values({
       projectId: assignment.projectId,
@@ -83,7 +83,9 @@ async function insertAssignment(database: BetterSQLite3Database, assignment: Pro
       assignedAt: assignment.assignedAt,
       updatedAt: assignment.updatedAt,
     })
+    .onConflictDoNothing({ target: [projectAsset.projectId, projectAsset.assetId] })
     .run();
+  return result.changes > 0;
 }
 
 /**

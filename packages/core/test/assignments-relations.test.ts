@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   InvalidOperationError,
   NotFoundError,
@@ -55,6 +55,16 @@ describe('project assignments', () => {
     expect(again.priority).toBe('high');
     expect(again.assignedAt).toBe(first.assignedAt);
     await expect(listAssignmentsOfAsset(session, asset.id)).resolves.toHaveLength(1);
+  });
+
+  it('assignAsset writes in one insert and reads only when the assignment already existed', async () => {
+    const { session, project, asset } = await openSession();
+    const key = { projectId: project.id, assetId: asset.id };
+    const get = vi.spyOn(session.database.projectAssets, 'get');
+    await assignAsset(session, key);
+    expect(get).not.toHaveBeenCalled();
+    await assignAsset(session, key);
+    expect(get).toHaveBeenCalledTimes(1);
   });
 
   it('assignAsset rejects an unknown project or asset with not_found', async () => {
