@@ -26,6 +26,11 @@ export const DEFAULT_TOTALS: Partial<Record<ResourceClass, number>> = { io: 4 };
 export { MAX_ATTEMPTS };
 /** Delay before the second and before the third run. */
 export const RETRY_DELAYS_MS = [5_000, 30_000] as const;
+/**
+ * How long `stop` waits for aborted handlers. A handler still running then is given up: its row stays `running` for
+ * the recovery of the next start, and its late end is ignored.
+ */
+export const STOP_DEADLINE_MS = 10_000;
 
 /** The job control of the host plus the start and the stop of the scheduler. */
 export interface Scheduler extends JobControl {
@@ -37,7 +42,9 @@ export interface Scheduler extends JobControl {
   start(): Promise<void>;
   /**
    * Aborts running jobs and waits for them. An unfinished one goes back to `queued`, or ends `failed` with its
-   * handler's `interruptedCode` under `onInterrupted: 'fail'`.
+   * handler's `interruptedCode` under `onInterrupted: 'fail'`. A handler that has not ended after
+   * `STOP_DEADLINE_MS` is given up: its row stays `running` for the recovery of the next start, and nothing of its
+   * late end is written.
    *
    * @returns resolves once every run, pass and cancel has ended
    */
@@ -113,6 +120,8 @@ interface ActiveRun {
   cancelled: boolean;
   /** The handler has settled; a cancel no longer changes the outcome. */
   settled: boolean;
+  /** The stop gave up on the handler at its deadline; the run's late end is ignored. */
+  abandoned: boolean;
   /** Resolves once the outcome is stored and the run is gone from the active runs. */
   done: Promise<void>;
 }
@@ -240,6 +249,24 @@ function retryDelayMs(attempt: number, retryAfterMs: number | null): number {
   // `attempt` is at least 1 after a claim; the clamp keeps the index inside the table either way.
   const usual = RETRY_DELAYS_MS[Math.min(Math.max(attempt, 1), RETRY_DELAYS_MS.length) - 1]!;
   return retryAfterMs === null ? usual : Math.max(usual, retryAfterMs);
+}
+
+/**
+ * Waits for `work`, but no longer than `deadlineMs` on the configured timer.
+ *
+ * @param config the timers
+ * @param work the promise to wait for; it never rejects
+ * @param deadlineMs the longest wait in milliseconds
+ * @returns resolves to true when `work` ended in time, false at the deadline
+ */
+function waitAtMost(config: SchedulerConfig, work: Promise<void>, deadlineMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const handle = config.setTimer(() => resolve(false), deadlineMs);
+    void work.then(() => {
+      config.clearTimer(handle);
+      resolve(true);
+    });
+  });
 }
 
 /**
@@ -379,8 +406,32 @@ class JobScheduler {
     await this.passDone;
     // A pass that was in progress may have launched a run before it saw `stopping`.
     for (const run of this.active.values()) run.controller.abort();
+    if (await waitAtMost(this.config, this.endEverything(), STOP_DEADLINE_MS)) return;
+    this.abandonUnsettledRuns();
+    // What is left are cancels and the stores of settled runs: database work, not handlers.
+    await this.endEverything();
+  }
+
+  /**
+   * The cancels in progress, then every active run.
+   *
+   * @returns resolves once they have all ended
+   */
+  private async endEverything(): Promise<void> {
     await Promise.allSettled([...this.pendingCancels]);
     await Promise.all([...this.active.values()].map((run) => run.done));
+  }
+
+  /** Gives up on every run whose handler has not ended: it leaves the active runs and its late end is ignored. */
+  private abandonUnsettledRuns(): void {
+    let abandoned = 0;
+    for (const [id, run] of this.active) {
+      if (run.settled) continue;
+      run.abandoned = true;
+      this.active.delete(id);
+      abandoned++;
+    }
+    if (abandoned > 0) this.config.log('Job handlers did not end before the stop deadline', { abandoned });
   }
 
   /**
@@ -662,6 +713,7 @@ class JobScheduler {
       controller: new AbortController(),
       cancelled: false,
       settled: false,
+      abandoned: false,
       done: Promise.resolve(),
     };
     // A put-back whose answer was lost may have been written: the row was queued again and is launched now, so its
@@ -687,6 +739,8 @@ class JobScheduler {
     } catch (error) {
       outcome = { ok: false, error };
     }
+    // The stop has returned without this run; the database may be closed or another workspace's by now.
+    if (run.abandoned) return;
     run.settled = true;
     try {
       await this.settle(job, run, outcome);
