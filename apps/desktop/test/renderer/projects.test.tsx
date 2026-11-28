@@ -622,8 +622,34 @@ function member(projectId: string, name: string): ProjectMember {
     assignedAt: NOW,
     updatedAt: NOW,
     asset,
+    coverFileId: null,
   };
 }
+
+it('the member table shows the cover of each member asset', async () => {
+  const project: Project = {
+    id: nextId(),
+    name: 'Forest',
+    description: '',
+    status: 'active',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  const cover = nextId();
+  const members = [{ ...member(project.id, 'Covered'), coverFileId: cover }, member(project.id, 'Bare')];
+  installFakeApi({
+    'projects:get': () => project,
+    'assetTypes:list': () => [TYPE],
+    'assignments:listByProject': () => pageOf(members),
+    'assets:list': () => pageOf([]),
+  });
+  render(<ProjectScreen id={project.id} onNavigate={() => {}} />);
+  const table = await screen.findByRole('table', { name: 'Members' });
+  const covered = (await within(table).findByText('Covered')).closest('tr')!;
+  expect(covered.querySelector('img')?.getAttribute('src')).toContain(cover);
+  const bare = within(table).getByText('Bare').closest('tr')!;
+  expect(bare.querySelector('img')).toBeNull();
+});
 
 it('the project screen keeps the member pager and member editing', async () => {
   const user = userEvent.setup();

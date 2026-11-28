@@ -3,6 +3,7 @@ import type { AssignmentKey, ProjectAssetRepository } from '@assetforge/core';
 import { and, asc, count, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { toAsset } from './asset-rows.js';
+import { automaticCovers } from './asset-summaries.js';
 import { asset, project, projectAsset } from './schema.js';
 
 /**
@@ -152,7 +153,7 @@ async function listByAsset(database: BetterSQLite3Database, assetId: string): Pr
 }
 
 /**
- * One page of a project's members with their asset, by asset name, then id, with the total.
+ * One page of a project's members with their asset and its effective cover, by asset name, then id, with the total.
  *
  * @param database the workspace database
  * @param projectId the project
@@ -168,7 +169,7 @@ async function listByProject(
   // One read transaction, so the page and the total describe the same snapshot.
   return database.transaction(
     (transaction) => {
-      const items = transaction
+      const rows = transaction
         .select({ link: projectAsset, asset })
         .from(projectAsset)
         .innerJoin(asset, eq(asset.id, projectAsset.assetId))
@@ -176,8 +177,16 @@ async function listByProject(
         .orderBy(sql`lower(${asset.name})`, asc(asset.id))
         .limit(limit)
         .offset(offset)
-        .all()
-        .map((row) => ({ ...toAssignment(row.link), asset: toAsset(row.asset) }));
+        .all();
+      const automatic = automaticCovers(
+        transaction,
+        rows.filter((row) => row.asset.coverFileId === null).map((row) => row.asset.id),
+      );
+      const items = rows.map((row) => ({
+        ...toAssignment(row.link),
+        asset: toAsset(row.asset),
+        coverFileId: row.asset.coverFileId ?? automatic.get(row.asset.id) ?? null,
+      }));
       const total = transaction.select({ n: count() }).from(projectAsset).where(where).get()?.n ?? 0;
       return { items, total };
     },

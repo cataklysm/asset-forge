@@ -183,7 +183,11 @@ export const AssetAssignmentSchema = ProjectAssignmentSchema.extend({ project: P
 export type AssetAssignment = z.infer<typeof AssetAssignmentSchema>;
 
 /** An assignment seen from the project. */
-export const ProjectMemberSchema = ProjectAssignmentSchema.extend({ asset: AssetSchema });
+export const ProjectMemberSchema = ProjectAssignmentSchema.extend({
+  asset: AssetSchema,
+  /** The asset's effective cover, as in `AssetSummary`. */
+  coverFileId: id.nullable(),
+});
 /** An assignment seen from the project. */
 export type ProjectMember = z.infer<typeof ProjectMemberSchema>;
 

@@ -1415,7 +1415,7 @@ class InMemoryAssets implements AssetRepository {
     private readonly sources: InMemoryAssetSources,
   ) {}
 
-  private coverOf(assetId: string): AssetCover {
+  coverOf(assetId: string): AssetCover {
     const chosen = this.covers.get(assetId);
     if (chosen !== undefined) return { coverFileId: chosen, coverIsChosen: true };
     const files = [...this.files.records.values()].filter((f) => f.assetId === assetId);
@@ -1569,7 +1569,11 @@ class InMemoryProjectAssets implements ProjectAssetRepository {
   async listByProject(projectId: string, q: Page): Promise<ProjectMemberList> {
     const members = [...this.links.values()]
       .filter((l) => l.projectId === projectId)
-      .map((l) => ({ ...l, asset: this.assets.rows.get(l.assetId)! }))
+      .map((l) => ({
+        ...l,
+        asset: this.assets.rows.get(l.assetId)!,
+        coverFileId: this.assets.coverOf(l.assetId).coverFileId,
+      }))
       .sort((a, b) => byNameThenId(a.asset, b.asset));
     return { items: members.slice(q.offset, q.offset + q.limit), total: members.length };
   }

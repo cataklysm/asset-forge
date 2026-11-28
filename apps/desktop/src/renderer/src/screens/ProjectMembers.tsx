@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Fragment } from 'react';
 import type { ProjectMember } from '@assetforge/contracts';
 import { AssignmentFields } from '../components/AssignmentFields';
+import { CoverImage } from '../components/CoverImage';
 import { Link } from '../components/Link';
 import {
   label,
@@ -102,7 +103,10 @@ function MemberRows(props: MemberRowsProps) {
     <Fragment>
       <tr className={notesOpen ? '' : `border-b ${BORDER}`}>
         <td className="py-2 pr-3">
-          <Link onFollow={onOpenAsset}>{member.asset.name}</Link>
+          <div className="flex items-center gap-2">
+            <CoverImage fileId={member.coverFileId} size="thumb" fallback="" className="h-10 w-10 shrink-0" />
+            <Link onFollow={onOpenAsset}>{member.asset.name}</Link>
+          </div>
         </td>
         <td className="py-2 pr-3">{typeName}</td>
         <td className="py-2 pr-3">{label(member.asset.status)}</td>
