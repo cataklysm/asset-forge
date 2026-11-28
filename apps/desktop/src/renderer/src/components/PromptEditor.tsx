@@ -5,6 +5,7 @@ import {
   DELETE_LABEL,
   DELETE_PROMPT_TITLE,
   PROMPT_DESCRIPTION_LABEL,
+  PROMPT_SECTION_LABEL,
   PROMPT_TAGS_LABEL,
   PROMPT_TEXT_LABEL,
   PROMPT_TEXT_TITLE,
@@ -241,14 +242,14 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
 
   if (loadError !== null) {
     return (
-      <section aria-label="Prompt" className="flex flex-col gap-4">
+      <section aria-label={PROMPT_SECTION_LABEL} className="flex flex-col gap-4">
         <p role="alert" className={ALERT}>
           {loadError}
         </p>
       </section>
     );
   }
-  if (loading) return <section aria-label="Prompt" aria-busy="true" className="flex flex-col gap-4" />;
+  if (loading) return <section aria-label={PROMPT_SECTION_LABEL} aria-busy="true" className="flex flex-col gap-4" />;
 
   async function changeTags(channel: 'prompts:addTag' | 'prompts:removeTag', name: string) {
     if (detail === null) return;
@@ -272,7 +273,7 @@ export function PromptEditor({ promptId, busy, onDirtyChange, onSaved, onTagsCha
   const variables = viewing?.variables ?? variablesOf(draft);
 
   return (
-    <section aria-label="Prompt" className="flex flex-col gap-4">
+    <section aria-label={PROMPT_SECTION_LABEL} className="flex flex-col gap-4">
       <label className="flex flex-col gap-1">
         <span className={LABEL}>{PROMPT_TITLE_LABEL}</span>
         <input

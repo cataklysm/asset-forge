@@ -1,3 +1,4 @@
+import { SETTINGS_LABEL } from '../labels';
 import { BUTTON } from '../ui';
 
 /**
@@ -9,7 +10,7 @@ import { BUTTON } from '../ui';
 export function SettingsButton({ blocked, onClick }: { blocked: string | null; onClick(): void }) {
   return (
     <button type="button" className={BUTTON} disabled={blocked !== null} title={blocked ?? undefined} onClick={onClick}>
-      Settings
+      {SETTINGS_LABEL}
     </button>
   );
 }

@@ -1,8 +1,9 @@
 import type { FileRecord } from '@assetforge/contracts';
 import { ApiError, call, describeError } from './api';
-import { NOT_ANALYSABLE, PROPOSAL_CHANGED, namesOn, proposalKey, type Shown } from './analysis-result';
+import { namesOn, proposalKey, type Shown } from './analysis-result';
 import type { AnalysisPromptsState } from './analysis-prompts-context';
 import type { ProposalReader } from './hooks/useResultOpening';
+import { NOT_ANALYSABLE, PROPOSAL_CHANGED } from './labels';
 import type { ProvidersState } from './provider-context';
 
 /** What every action of the result dialog works with. */

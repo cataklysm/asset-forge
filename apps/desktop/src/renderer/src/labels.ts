@@ -1,13 +1,17 @@
 // Every UI text of the renderer, one file per subject under `labels/`; this file is the one entry point.
 export * from './labels/analysis';
+export * from './labels/analysis-dialogs';
 export * from './labels/analysis-prompts';
 export * from './labels/common';
 export * from './labels/files';
 export * from './labels/import';
 export * from './labels/jobs';
+export * from './labels/jobs-screen';
+export * from './labels/prompt-editor';
 export * from './labels/prompts';
 export * from './labels/providers';
 export * from './labels/relations';
+export * from './labels/settings';
 export * from './labels/site-import';
 export * from './labels/sources';
 export * from './labels/studio';

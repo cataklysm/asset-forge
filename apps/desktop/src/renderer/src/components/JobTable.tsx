@@ -18,7 +18,24 @@ import {
   type ViewRestore,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { JOB_RESULT_LABELS, JOB_TYPE_LABELS, JOBS_PROVIDER_HEADER, jobStatusLabel } from '../labels';
+import {
+  CANCEL_JOB_LABEL,
+  JOB_RESULT_LABELS,
+  JOB_TYPE_LABELS,
+  JOBS_ACTIONS_HEADER,
+  JOBS_ATTEMPT_HEADER,
+  JOBS_CREATED_HEADER,
+  JOBS_ERROR_HEADER,
+  JOBS_FILE_HEADER,
+  JOBS_PROVIDER_HEADER,
+  JOBS_STATUS_HEADER,
+  JOBS_TITLE,
+  JOBS_TYPE_HEADER,
+  jobStatusLabel,
+  nextTryTitle,
+  RETRY_JOB_LABEL,
+  RETRY_LABEL,
+} from '../labels';
 import { useProviders } from '../provider-context';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ICON_BUTTON, ITEM_HOVER, MUTED } from '../ui';
@@ -41,7 +58,15 @@ const ROW_FOCUS = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus
 const COLUMNS =
   'grid grid-cols-[9rem_minmax(8rem,1.2fr)_minmax(8rem,1fr)_6rem_5rem_10rem_minmax(8rem,1.5fr)_2.5rem] items-center gap-3 px-2';
 /** The column headers before the actions column. */
-const HEADERS = ['Job', 'File', JOBS_PROVIDER_HEADER, 'Status', 'Attempt', 'Created', 'Error'];
+const HEADERS = [
+  JOBS_TYPE_HEADER,
+  JOBS_FILE_HEADER,
+  JOBS_PROVIDER_HEADER,
+  JOBS_STATUS_HEADER,
+  JOBS_ATTEMPT_HEADER,
+  JOBS_CREATED_HEADER,
+  JOBS_ERROR_HEADER,
+];
 
 /**
  * The label of a job type.
@@ -81,7 +106,7 @@ export function JobTable(props: JobTableProps) {
     <div
       ref={scrollRef}
       role="grid"
-      aria-label="Jobs"
+      aria-label={JOBS_TITLE}
       aria-rowcount={rowCount(props.total, 1) + 1}
       className="min-h-0 flex-1 overflow-y-scroll"
     >
@@ -158,7 +183,7 @@ function HeaderRow() {
           {header}
         </span>
       ))}
-      <span role="columnheader" aria-label="Actions" />
+      <span role="columnheader" aria-label={JOBS_ACTIONS_HEADER} />
     </div>
   );
 }
@@ -201,7 +226,7 @@ function retryRow({ index, style, tabbable, rows, onRetry }: RetryRowProps) {
           onKeyDown={(event) => rows.onItemKeyDown(index, event)}
           onFocus={() => rows.onItemFocus(index)}
         >
-          Retry
+          {RETRY_LABEL}
         </button>
       </span>
     </div>
@@ -292,7 +317,7 @@ function JobCells({ job, tabIndex, onCancel, onRetry }: JobCellsProps) {
   const statusText =
     job.status === 'succeeded' && job.result !== null ? JOB_RESULT_LABELS[job.result] : jobStatusLabel(job.status);
   const waitTitle =
-    job.status === 'retry_wait' && job.runAfter !== null ? `Next try at ${formatDateTime(job.runAfter)}` : undefined;
+    job.status === 'retry_wait' && job.runAfter !== null ? nextTryTitle(formatDateTime(job.runAfter)) : undefined;
   return (
     <>
       <span role="gridcell" className="truncate">
@@ -335,8 +360,8 @@ function JobActions({ job, tabIndex, onCancel, onRetry }: JobCellsProps) {
           type="button"
           className={ICON_BUTTON}
           tabIndex={tabIndex}
-          title="Cancel job"
-          aria-label="Cancel job"
+          title={CANCEL_JOB_LABEL}
+          aria-label={CANCEL_JOB_LABEL}
           onClick={onCancel}
         >
           <X size={16} aria-hidden />
@@ -347,8 +372,8 @@ function JobActions({ job, tabIndex, onCancel, onRetry }: JobCellsProps) {
           type="button"
           className={ICON_BUTTON}
           tabIndex={tabIndex}
-          title="Retry job"
-          aria-label="Retry job"
+          title={RETRY_JOB_LABEL}
+          aria-label={RETRY_JOB_LABEL}
           onClick={onRetry}
         >
           <RotateCcw size={16} aria-hidden />

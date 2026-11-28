@@ -10,11 +10,20 @@ import type { ViewHandle, ViewRestore, VisibleRows } from '../hooks/useVirtualRo
 import { useChanges, useJobs } from '../jobs-context';
 import {
   ALL_PROVIDERS,
+  ALL_STATUSES,
+  CANCEL_ALL_LABEL,
+  CLEAR_FINISHED_LABEL,
   JOB_STATUS_LABELS,
+  JOBS_COUNT_TITLE,
   JOBS_PROVIDER_HEADER,
+  JOBS_STATUS_LABEL,
+  JOBS_TITLE,
   jobStatusLabel,
   MOVE_JOBS_LABEL,
   MOVE_JOBS_TITLE,
+  NO_JOBS,
+  RETRY_FAILED_LABEL,
+  RETRY_LABEL,
 } from '../labels';
 import { useProviders } from '../provider-context';
 import { loadedIds, type PagedState } from '../paged-list';
@@ -262,7 +271,7 @@ export function JobsScreen() {
   };
 
   return (
-    <Page title="Jobs" count={total} countTitle="Jobs in this workspace" actions={actions} toolbar={toolbar}>
+    <Page title={JOBS_TITLE} count={total} countTitle={JOBS_COUNT_TITLE} actions={actions} toolbar={toolbar}>
       <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3" aria-busy={paged.pending || undefined}>
         {error !== null && (
           <p role="alert" className={ALERT}>
@@ -299,7 +308,7 @@ function jobsBody(state: PagedState<JobView>, table: Omit<JobTableProps, 'total'
     return (
       <div>
         <button type="button" className={BUTTON} onClick={() => table.onRetry(failedPage)}>
-          Retry
+          {RETRY_LABEL}
         </button>
       </div>
     );
@@ -313,7 +322,7 @@ function jobsBody(state: PagedState<JobView>, table: Omit<JobTableProps, 'total'
       </div>
     );
   }
-  if (total === 0) return <p className={MUTED}>No jobs</p>;
+  if (total === 0) return <p className={MUTED}>{NO_JOBS}</p>;
   return <JobTable key={table.viewKey} {...table} total={total} />;
 }
 
@@ -348,7 +357,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         disabled={busy || !cancellable}
         onClick={() => void run(() => call('jobs:cancelAll', {}))}
       >
-        Cancel all
+        {CANCEL_ALL_LABEL}
       </button>
       <button
         type="button"
@@ -356,7 +365,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         disabled={busy || retryable === 0}
         onClick={() => void run(() => call('jobs:retryFailed', {}))}
       >
-        Retry failed
+        {RETRY_FAILED_LABEL}
       </button>
       <button
         type="button"
@@ -364,7 +373,7 @@ function JobsActions({ busy, cancellable, retryable, finished, onMove, run }: Jo
         disabled={busy || finished === 0}
         onClick={() => void run(() => call('jobs:clearFinished', {}))}
       >
-        Clear finished
+        {CLEAR_FINISHED_LABEL}
       </button>
     </>
   );
@@ -388,8 +397,13 @@ interface JobsToolbarProps {
 function JobsToolbar({ status, providerId, entries, onStatus, onProvider }: JobsToolbarProps) {
   return (
     <FilterBar resultCount={null} onClear={null}>
-      <select className={SELECT} aria-label="Status" value={status} onChange={(event) => onStatus(event.target.value)}>
-        <option value="">All</option>
+      <select
+        className={SELECT}
+        aria-label={JOBS_STATUS_LABEL}
+        value={status}
+        onChange={(event) => onStatus(event.target.value)}
+      >
+        <option value="">{ALL_STATUSES}</option>
         {STATUSES.map((listed) => (
           <option key={listed} value={listed}>
             {jobStatusLabel(listed)}

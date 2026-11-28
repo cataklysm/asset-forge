@@ -6,10 +6,13 @@ import { ApiError, call, describeError } from '../api';
 import { useAnalysisPreview } from '../hooks/useAnalysisPreview';
 import { useJobs } from '../jobs-context';
 import {
+  ANALYSIS_START_TITLE,
+  CANCEL_LABEL,
   START_COUNTING,
   START_COUNTS,
   START_FORCE_LABEL,
   START_FORCE_TITLE,
+  START_LABEL,
   START_NOTHING_TO_DO,
   START_PREVIEW_FAILED,
   START_RETRY_PREVIEW_LABEL,
@@ -37,9 +40,6 @@ interface Props {
   /** Why the settings screen cannot be shown now (Settings is disabled with it); null when it can. */
   settingsBlocked?: string | null;
 }
-
-/** The title of the start dialog. */
-export const ANALYSIS_START_TITLE = 'Analyse';
 
 /**
  * How many files a start would enqueue. The preview counts are disjoint: `analysable` is what an
@@ -323,10 +323,10 @@ export function AnalysisStartDialog({
         <div className="flex justify-end gap-2">
           {offerSettings && <SettingsButton blocked={settingsBlocked} onClick={openSettings} />}
           <button type="button" className={BUTTON} disabled={starting} onClick={close}>
-            Cancel
+            {CANCEL_LABEL}
           </button>
           <button type="submit" className={BUTTON} disabled={!canStart} title={blocked ?? undefined}>
-            Start
+            {START_LABEL}
           </button>
         </div>
       </form>

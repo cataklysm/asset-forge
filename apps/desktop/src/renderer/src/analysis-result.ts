@@ -7,12 +7,6 @@ import {
   type ProposalView,
 } from '@assetforge/contracts';
 
-/** Shown when an accept would act on a proposal other than the one on screen. */
-export const PROPOSAL_CHANGED = 'The proposal has changed. Review it again.';
-/** Shown when a start queued nothing for the file. */
-export const NOT_ANALYSABLE = 'This file cannot be analysed';
-/** Tooltip of the disabled Accept and of the marker of a stale proposal. */
-export const STALE_TITLE = 'The file changed after the analysis';
 /** The message of a failed job that carries neither a message nor a code. */
 const FAILED_FALLBACK = JOB_ERROR_MESSAGES.internal_error;
 

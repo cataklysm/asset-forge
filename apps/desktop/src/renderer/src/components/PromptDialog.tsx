@@ -2,6 +2,18 @@ import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
 import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
+import {
+  CANCEL_LABEL,
+  CLOSE_LABEL,
+  COPY_FAILED_MESSAGE,
+  COPY_LABEL,
+  DESCRIBE_LABEL,
+  GENERATING_TITLE,
+  NO_FILE_TITLE,
+  PROMPT_BUSY_MESSAGE,
+  PROMPT_DIALOG_TITLE,
+  PROMPT_RESULT_LABEL,
+} from '../labels';
 import { useProviderChoice } from '../provider-choice';
 import { useProviders, type ProvidersState } from '../provider-context';
 import { promptGate, providerGate } from '../provider-gate';
@@ -24,16 +36,7 @@ interface Props {
   settingsBlocked?: string | null;
 }
 
-/** The title of the Image to prompt dialog. */
-export const PROMPT_DIALOG_TITLE = 'Image to prompt';
-/** Shown when the main process is already describing another image. */
-export const PROMPT_BUSY_MESSAGE = 'Another prompt is being generated';
-/** Shown when the clipboard refused the text. */
-const COPY_FAILED_MESSAGE = 'The text could not be copied';
-/** Tooltip of Generate while a request runs. */
-const GENERATING_TITLE = 'The prompt is being generated';
-/** Tooltip of Generate without a file. */
-const NO_FILE_TITLE = 'No image to describe';
+export { PROMPT_BUSY_MESSAGE } from '../labels';
 
 /**
  * Image2Prompt: describes one image with a chosen provider and model and shows the text to copy.
@@ -225,11 +228,11 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
           title={generateTitle(blocked, running, file !== null)}
           onClick={generate}
         >
-          Generate
+          {DESCRIBE_LABEL}
         </button>
         {running && (
           <button type="button" className={BUTTON} onClick={cancel}>
-            Cancel
+            {CANCEL_LABEL}
           </button>
         )}
         {gate.offerSettings && <SettingsButton blocked={settingsBlocked} onClick={openSettings} />}
@@ -240,7 +243,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
         </p>
       )}
       <textarea
-        aria-label="Prompt"
+        aria-label={PROMPT_RESULT_LABEL}
         readOnly
         aria-busy={running || undefined}
         value={text ?? ''}
@@ -255,10 +258,10 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
             if (text !== null) void copyText(text, setError);
           }}
         >
-          Copy
+          {COPY_LABEL}
         </button>
         <button type="button" className={BUTTON} onClick={onClose}>
-          Close
+          {CLOSE_LABEL}
         </button>
       </div>
     </div>
