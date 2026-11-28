@@ -23,7 +23,7 @@ export function isSameRoot(first: string, second: string): boolean {
  * @param rootPath a root path
  * @returns the resolved path, lower-cased on Windows
  */
-function comparableRoot(rootPath: string): string {
+export function comparableRoot(rootPath: string): string {
   const resolved = path.resolve(rootPath);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }

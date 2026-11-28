@@ -22,8 +22,8 @@ export interface ListedBackup {
 
 /** The state of the backup place of the open workspace. */
 export interface BackupFolderStatus {
-  /** Where the regular backups go. */
-  location: BackupLocation;
+  /** Where the regular backups go; null when the place could not be resolved. */
+  location: BackupLocation | null;
   /** Whether the place could be listed. */
   reachable: boolean;
   /** Whether a backup is being made. */

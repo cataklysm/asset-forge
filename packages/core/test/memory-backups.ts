@@ -53,9 +53,22 @@ export class FakeWorkspaceBackups implements WorkspaceBackups {
   readonly installed: { workspaceId: string; source: BackupSource }[] = [];
   /** How many staged copies and snapshots were discarded. */
   discarded = 0;
+  /** The workspaces whose install was reverted, in order. */
+  readonly reverted: string[] = [];
+  /** While set, `StagedRestore.install` throws it. */
+  installFailure: Error | null = null;
+  /** While set, `StagedRestore.revert` throws it. */
+  revertFailure: Error | null = null;
+  /** Runs when an install succeeds; the fake host makes the database exist. */
+  onInstall: (workspaceId: string) => void = () => undefined;
+  /** Runs when a revert succeeds; the fake host puts the state before the install back. */
+  onRevert: (workspaceId: string) => void = () => undefined;
+  /** While set, every `snapshotClosed` waits for it after it started; an aborted one then still resolves. */
+  snapshotDelay: Promise<void> | null = null;
 
   async snapshotClosed(workspaceId: string, signal: AbortSignal): Promise<DatabaseSnapshot> {
     this.enter('snapshotClosed', [workspaceId], signal);
+    if (this.snapshotDelay !== null) await this.snapshotDelay;
     const facts = this.closedFacts.get(workspaceId) ?? {
       workspaceId,
       lineageId: this.lineages.get(workspaceId) ?? FAKE_LINEAGE_ID,
@@ -82,7 +95,14 @@ export class FakeWorkspaceBackups implements WorkspaceBackups {
     return {
       facts,
       install: async () => {
+        if (this.installFailure !== null) throw this.installFailure;
         this.installed.push({ workspaceId, source });
+        this.onInstall(workspaceId);
+      },
+      revert: async () => {
+        if (this.revertFailure !== null) throw this.revertFailure;
+        this.reverted.push(workspaceId);
+        this.onRevert(workspaceId);
       },
       discard: async () => {
         this.discarded++;

@@ -3,8 +3,8 @@ import { regularBackups } from './backup-listing.js';
 import { lineageShortId, parseBackupName } from './backup-names.js';
 import type { BackupFolderStatus } from './backup-types.js';
 import type { BackupTarget } from './backup-write.js';
-import { InvalidOperationError } from './errors.js';
-import type { BackupSource } from './ports/workspace-backups.js';
+import { BackupError, InvalidOperationError } from './errors.js';
+import type { BackupLocation, BackupSource } from './ports/workspace-backups.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 import { isSameRoot } from './workspace-manifest.js';
 
@@ -12,14 +12,15 @@ import { isSameRoot } from './workspace-manifest.js';
 // another lineage (a backup of the live lineage is only ever pruned by the retention).
 
 /**
- * The state of the backup place of the open workspace. A place that cannot be listed counts as unreachable with no
- * backups.
+ * The state of the backup place of the open workspace. A place that cannot be resolved or listed counts as
+ * unreachable with no backups.
  *
  * @param host gives the backup port
  * @param workspace the open workspace
  * @param liveLineage the lineage of its database; null when it has none
  * @param state whether a backup runs and the last attempt
- * @returns the place, the counts of the live lineage and the backups of other lineages
+ * @returns the place (null when it could not be resolved), the counts of the live lineage and the backups of other
+ *   lineages
  */
 export async function backupFolderStatus(
   host: WorkspaceHost,
@@ -27,8 +28,8 @@ export async function backupFolderStatus(
   liveLineage: string | null,
   state: BackupState,
 ): Promise<BackupFolderStatus> {
-  const location = await host.backups.locationOf(workspace);
-  const backups = await regularBackups(host, location.directory, liveLineage);
+  const location = await locationOrNull(host, workspace);
+  const backups = location === null ? null : await regularBackups(host, location.directory, liveLineage);
   const own = (backups ?? []).filter((backup) => backup.sameLineage);
   return {
     location,
@@ -49,7 +50,8 @@ export async function backupFolderStatus(
  * @param liveLineage the lineage of its database; null when it has none
  * @param source the backup
  * @returns resolves once it is gone
- * @throws InvalidOperationError when it is not a regular backup of another lineage in the place
+ * @throws InvalidOperationError when it is not a regular backup of another lineage in the place, or the live lineage
+ *   is unknown; BackupError `backup_location_unreachable` when the place cannot be resolved
  */
 export async function deleteOtherLineageBackup(
   host: WorkspaceHost,
@@ -58,11 +60,29 @@ export async function deleteOtherLineageBackup(
   source: BackupSource,
 ): Promise<void> {
   const parsed = parseBackupName(source.name);
-  const location = await host.backups.locationOf(workspace);
+  if (liveLineage === null || liveLineage === '' || parsed === null || source.origin !== 'regular') {
+    throw new InvalidOperationError(BACKUP_NOT_DELETABLE_MESSAGE);
+  }
+  const location = await locationOrNull(host, workspace);
+  if (location === null) throw new BackupError('backup_location_unreachable');
   const inPlace = source.directory !== null && isSameRoot(source.directory, location.directory);
-  const ownLineage = parsed !== null && liveLineage !== null && parsed.lineageShortId === lineageShortId(liveLineage);
-  if (source.origin !== 'regular' || !inPlace || parsed === null || ownLineage) {
+  if (!inPlace || parsed.lineageShortId === lineageShortId(liveLineage)) {
     throw new InvalidOperationError(BACKUP_NOT_DELETABLE_MESSAGE);
   }
   await host.backups.remove(location.directory, parsed.name);
+}
+
+/**
+ * The backup place of a workspace.
+ *
+ * @param host gives the backup port
+ * @param workspace the workspace
+ * @returns the place; null when it could not be resolved
+ */
+async function locationOrNull(host: WorkspaceHost, workspace: BackupTarget): Promise<BackupLocation | null> {
+  try {
+    return await host.backups.locationOf(workspace);
+  } catch {
+    return null;
+  }
 }

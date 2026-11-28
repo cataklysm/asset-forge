@@ -57,6 +57,16 @@ function setup() {
     order.push('moveToTrash');
     await moveToTrash(rootPath);
   };
+  const deleteDatabase = fake.host.deleteDatabase.bind(fake.host);
+  fake.host.deleteDatabase = async (workspaceId) => {
+    order.push('deleteDatabase');
+    await deleteDatabase(workspaceId);
+  };
+  const registryRemove = fake.host.registry.remove.bind(fake.host.registry);
+  fake.host.registry.remove = async (workspaceId) => {
+    order.push('registry.remove');
+    await registryRemove(workspaceId);
+  };
   const write = fake.backups.write.bind(fake.backups);
   fake.backups.write = async (...args) => {
     order.push('write');
@@ -75,7 +85,7 @@ describe('the final backup before a remove', () => {
     const before = writes().length;
 
     await manager.remove({ id, trashFolder: true });
-    expect(order).toEqual(['write', 'moveToTrash']);
+    expect(order).toEqual(['write', 'moveToTrash', 'deleteDatabase', 'registry.remove']);
     expect(writes()).toHaveLength(before + 1);
     expect(backups.calls.some((call) => call.method === 'snapshotClosed')).toBe(true);
   });
@@ -149,6 +159,56 @@ describe('the final backup before a remove', () => {
     expect(await host.registry.list()).toHaveLength(1);
     expect(databases.has(id)).toBe(true);
   });
+
+  it('a final backup cut off during the snapshot refuses only after the snapshot settled', async () => {
+    const { manager, backups, timers } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    await manager.close();
+    let release = () => {};
+    backups.snapshotDelay = new Promise((resolve) => (release = resolve));
+    const discardedBefore = backups.discarded;
+
+    let settled = false;
+    const outcome = manager.remove({ id, trashFolder: false }).catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    await settle();
+    timers.fire(BACKUP_QUIT_DEADLINE_MS);
+    await settle();
+    expect(settled).toBe(false);
+
+    release();
+    expect(await outcome).toMatchObject({ code: 'backup_failed' });
+    expect(backups.discarded).toBe(discardedBefore + 1);
+  });
+
+  it('removing the open workspace bounds the wait for a hanging backup, then makes the final backup', async () => {
+    const { manager, host, backups, databases, timers } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    let release = () => {};
+    backups.writeDelay = new Promise((resolve) => (release = resolve));
+    void manager.backupNow();
+    await settle();
+
+    const removal = manager.remove({ id, trashFolder: false });
+    await settle();
+    timers.fire(BACKUP_QUIT_DEADLINE_MS);
+    await settle();
+    expect(databases.get(id)!.closed).toBe(true);
+    expect(backups.calls.filter((call) => call.method === 'snapshotClosed')).toHaveLength(1);
+
+    release();
+    await expect(removal).resolves.toEqual({ folderTrashed: false });
+    expect(await host.registry.list()).toEqual([]);
+  });
+
+  it('a removed workspace whose folder was kept answers workspace_database_missing when opened again', async () => {
+    const { manager } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    await manager.remove({ id, trashFolder: false });
+    await expect(manager.open({ rootPath: ROOT })).rejects.toMatchObject({ code: 'workspace_database_missing' });
+  });
 });
 
 describe('backupStatus', () => {
@@ -164,7 +224,7 @@ describe('backupStatus', () => {
 
     const status = await manager.backupStatus();
     expect(status).toMatchObject({ reachable: true, running: false, last: null, count: 2, totalBytes: 150 });
-    expect(status.location.directory).toBe(DIRECTORY);
+    expect(status.location?.directory).toBe(DIRECTORY);
     expect(status.otherLineages.map((backup) => backup.source.name)).toEqual([other]);
   });
 
@@ -190,6 +250,30 @@ describe('backupStatus', () => {
   it('needs an open workspace', async () => {
     const { manager } = setup();
     await expect(manager.backupStatus()).rejects.toBeInstanceOf(NoWorkspaceOpenError);
+  });
+
+  it('a place that cannot be resolved answers like a failed listing', async () => {
+    const { manager, backups } = setup();
+    await manager.create({ name: 'Demo', rootPath: ROOT });
+    backups.failures.set('locationOf', new Error('settings gone'));
+    await expect(manager.backupStatus()).resolves.toMatchObject({
+      location: null,
+      reachable: false,
+      count: 0,
+      totalBytes: 0,
+      otherLineages: [],
+    });
+  });
+
+  it('a failing lineage read counts as an unknown lineage', async () => {
+    const { manager, databases, backups } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const lineageId = databases.get(id)!.meta.current!.lineageId;
+    backups.addFile(DIRECTORY, backupFileName(lineageId, NOW, 0), 100);
+    databases.get(id)!.meta.get = async () => {
+      throw new Error('closed');
+    };
+    await expect(manager.backupStatus()).resolves.toMatchObject({ reachable: true, count: 0 });
   });
 });
 
@@ -227,6 +311,33 @@ describe('deleteBackup', () => {
     }
     expect(backups.calls.some((call) => call.method === 'remove')).toBe(false);
     expect(backups.directories.get(DIRECTORY)!.has(own)).toBe(true);
+  });
+
+  it('refuses while the live lineage is unknown', async () => {
+    const { manager, backups, databases } = setup();
+    const { id } = await manager.create({ name: 'Demo', rootPath: ROOT });
+    const other = backupFileName(OTHER_LINEAGE, NOW, 1);
+    backups.addFile(DIRECTORY, other);
+    for (const lineageId of ['', null]) {
+      databases.get(id)!.meta.current = { ...databases.get(id)!.meta.current!, lineageId: lineageId as string };
+      await expect(manager.deleteBackup(regular(other))).rejects.toMatchObject({
+        message: BACKUP_NOT_DELETABLE_MESSAGE,
+      });
+    }
+    databases.get(id)!.meta.get = async () => {
+      throw new Error('closed');
+    };
+    await expect(manager.deleteBackup(regular(other))).rejects.toMatchObject({ message: BACKUP_NOT_DELETABLE_MESSAGE });
+    expect(backups.directories.get(DIRECTORY)!.has(other)).toBe(true);
+  });
+
+  it('a place that cannot be resolved answers backup_location_unreachable', async () => {
+    const { manager, backups } = setup();
+    await manager.create({ name: 'Demo', rootPath: ROOT });
+    backups.failures.set('locationOf', new Error('settings gone'));
+    const error = await manager.deleteBackup(regular(backupFileName(OTHER_LINEAGE, NOW, 1))).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BackupError);
+    expect(error).toMatchObject({ code: 'backup_location_unreachable' });
   });
 
   it('needs an open workspace', async () => {

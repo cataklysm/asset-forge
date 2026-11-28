@@ -26,13 +26,15 @@ const FOREIGN_LINEAGE = 'fedcba9876543210fedcba9876543210';
 function setup() {
   const fake = createFakeHost();
   fake.host.now = () => NOW;
+  const lines: string[] = [];
+  fake.host.log = (line) => lines.push(line);
   let databaseOpens = 0;
   const openDatabase = fake.host.openDatabase.bind(fake.host);
   fake.host.openDatabase = (id) => {
     databaseOpens++;
     return openDatabase(id);
   };
-  return { ...fake, manager: new WorkspaceManager(fake.host), databaseOpens: () => databaseOpens };
+  return { ...fake, lines, manager: new WorkspaceManager(fake.host), databaseOpens: () => databaseOpens };
 }
 
 /** A workspace created and closed again (its closing backup is in the place). */
@@ -149,6 +151,93 @@ describe('restore', () => {
     });
   });
 
+  it('an open that fails after the install reverts it and rethrows the error of the open', async () => {
+    const { manager, backups, summary, missingDatabases, lines } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    // The installed copy goes missing before the open: the open answers the missing database, never an empty one.
+    backups.onInstall = (workspaceId) => missingDatabases.add(workspaceId);
+    backups.onRevert = (workspaceId) => missingDatabases.delete(workspaceId);
+
+    await expect(manager.restore({ rootPath: ROOT, source: regular('good') })).rejects.toMatchObject({
+      code: 'workspace_database_missing',
+    });
+    expect(backups.reverted).toEqual([summary.id]);
+    expect(manager.current()).toBeNull();
+    expect(lines).toEqual([]);
+    // The original database is back.
+    await expect(manager.open({ rootPath: ROOT })).resolves.toMatchObject({ id: summary.id });
+  });
+
+  it('a failing revert is swallowed and logged once; the error of the open is rethrown', async () => {
+    const { manager, backups, summary, missingDatabases, lines } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    backups.onInstall = (workspaceId) => missingDatabases.add(workspaceId);
+    backups.revertFailure = new Error(`EBUSY ${ROOT}`);
+
+    await expect(manager.restore({ rootPath: ROOT, source: regular('good') })).rejects.toMatchObject({
+      code: 'workspace_database_missing',
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('Restore could not be undone');
+    expect(lines[0]).not.toContain(ROOT);
+  });
+
+  it('a failing install discards the stage and neither opens nor reverts', async () => {
+    const { manager, backups, summary, databaseOpens } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    backups.installFailure = new Error('swap failed');
+    const opensBefore = databaseOpens();
+    const discarded = backups.discarded;
+
+    await expect(manager.restore({ rootPath: ROOT, source: regular('good') })).rejects.toThrow();
+    expect(backups.discarded).toBe(discarded + 1);
+    expect(backups.reverted).toEqual([]);
+    expect(databaseOpens()).toBe(opensBefore);
+  });
+
+  it('hands the abort signal of the request to the stage', async () => {
+    const { manager, backups, summary } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    const controller = new AbortController();
+    const stageRestore = backups.stageRestore.bind(backups);
+    let seen: AbortSignal | null = null;
+    backups.stageRestore = async (workspaceId, source, signal) => {
+      seen = signal;
+      return stageRestore(workspaceId, source, signal);
+    };
+    await manager.restore({ rootPath: ROOT, source: regular('good'), signal: controller.signal });
+    expect(seen).toBe(controller.signal);
+  });
+
+  it('an aborted restore throws what the stage threw and installs nothing', async () => {
+    const { manager, backups, summary } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      manager.restore({ rootPath: ROOT, source: regular('good'), signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(backups.installed).toEqual([]);
+  });
+
+  it('a stage that resolves after the abort is discarded and never installed', async () => {
+    const { manager, backups, summary } = await closedWorkspace();
+    backups.stagedFacts.set('good', facts({ workspaceId: summary.id }));
+    const controller = new AbortController();
+    const stageRestore = backups.stageRestore.bind(backups);
+    backups.stageRestore = async (workspaceId, source, signal) => {
+      const staged = await stageRestore(workspaceId, source, signal);
+      controller.abort();
+      return staged;
+    };
+    const discarded = backups.discarded;
+    await expect(
+      manager.restore({ rootPath: ROOT, source: regular('good'), signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(backups.discarded).toBe(discarded + 1);
+    expect(backups.installed).toEqual([]);
+  });
+
   it('restore of the open workspace is refused', async () => {
     const { manager, backups, summary } = await closedWorkspace();
     await manager.open({ rootPath: ROOT });
@@ -234,6 +323,37 @@ describe('listBackups', () => {
     const open = await manager.listBackups({ workspace: { id: summary.id }, extraDirectory: null });
     expect(open.backups.map((backup) => backup.sameLineage)).toEqual([true]);
     expect(open.backups[0]!.source.name).toBe(backupFileName(lineageId, NOW, 0));
+  });
+
+  it('a failing lineage read counts as unknown and a failing place as unreachable', async () => {
+    const { manager, backups, summary } = await closedWorkspace();
+    backups.failures.set('localLineage', new Error('locked'));
+    const unknown = await manager.listBackups({ workspace: { id: summary.id }, extraDirectory: null });
+    expect(unknown.backups).toHaveLength(1);
+    expect(unknown.backups[0]!.sameLineage).toBe(false);
+    backups.failures.clear();
+
+    backups.failures.set('locationOf', new Error('settings gone'));
+    const offline = await manager.listBackups({ workspace: { id: summary.id }, extraDirectory: null });
+    expect(offline).toMatchObject({ unreachable: true, backups: [] });
+  });
+
+  it('a failing lineage read of the open database counts as unknown', async () => {
+    const { manager, databases, summary } = await closedWorkspace();
+    await manager.open({ rootPath: ROOT });
+    databases.get(summary.id)!.meta.get = async () => {
+      throw new Error('closed');
+    };
+    const listing = await manager.listBackups({ workspace: { id: summary.id }, extraDirectory: null });
+    expect(listing.backups.every((backup) => !backup.sameLineage)).toBe(true);
+  });
+
+  it('a picked folder that is the place itself, with a trailing separator, lists each backup once', async () => {
+    const { manager, backups, summary } = await closedWorkspace();
+    // The picked spelling lists the same files as the place.
+    backups.directories.set(`${DIRECTORY}/`, backups.directories.get(DIRECTORY)!);
+    const listing = await manager.listBackups({ workspace: { id: summary.id }, extraDirectory: `${DIRECTORY}/` });
+    expect(listing.backups).toHaveLength(1);
   });
 
   it('an unknown id is refused', async () => {

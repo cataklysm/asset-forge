@@ -7,7 +7,7 @@ import { WorkspaceNotFoundError } from './errors.js';
 import type { BackupFileInfo } from './ports/workspace-backups.js';
 import type { WorkspaceDatabase } from './ports/workspace-database.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
-import { readManifest } from './workspace-manifest.js';
+import { comparableRoot, readManifest } from './workspace-manifest.js';
 import { requireReachable } from './workspace-open.js';
 
 // The backups a workspace can be restored from: the copies made before pending migrations beside its local
@@ -78,7 +78,7 @@ export async function resolveBackupTarget(
  * @param host gives the backup port
  * @param workspaceId the workspace
  * @param openDatabase the open database of this workspace; null when it is not open
- * @returns the lineage; null when the database is missing or has none
+ * @returns the lineage; null when the database is missing, has none or could not be read
  */
 export async function liveLineageOf(
   host: WorkspaceHost,
@@ -86,8 +86,12 @@ export async function liveLineageOf(
   openDatabase: WorkspaceDatabase | null,
 ): Promise<string | null> {
   let lineageId: string | null | undefined;
-  if (openDatabase !== null) lineageId = (await openDatabase.meta.get())?.lineageId;
-  else if (await host.databaseExists(workspaceId)) lineageId = await host.backups.localLineage(workspaceId);
+  try {
+    if (openDatabase !== null) lineageId = (await openDatabase.meta.get())?.lineageId;
+    else if (await host.databaseExists(workspaceId)) lineageId = await host.backups.localLineage(workspaceId);
+  } catch {
+    return null; // An unknown lineage matches no backup, so nothing counts as the live one.
+  }
   return lineageId === undefined || lineageId === null || lineageId === '' ? null : lineageId;
 }
 
@@ -177,7 +181,8 @@ export async function regularBackups(
 }
 
 /**
- * Drops repeated backups (the same directory and name, as when the picked folder is the place itself).
+ * Drops repeated backups (the same directory, compared like workspace folders, and name, as when the picked folder
+ * is the place itself).
  *
  * @param backups the backups
  * @returns the first of each
@@ -185,7 +190,8 @@ export async function regularBackups(
 function unique(backups: readonly ListedBackup[]): ListedBackup[] {
   const seen = new Set<string>();
   return backups.filter((backup) => {
-    const key = `${backup.source.origin}\n${backup.source.directory ?? ''}\n${backup.source.name}`;
+    const directory = backup.source.directory === null ? '' : comparableRoot(backup.source.directory);
+    const key = `${backup.source.origin}\n${directory}\n${backup.source.name}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

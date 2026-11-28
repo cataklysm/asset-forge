@@ -5,7 +5,8 @@ import {
   WORKSPACE_FORMAT_VERSION,
   type WorkspaceManifest,
 } from '@assetforge/contracts';
-import { UnsupportedFormatVersionError, ValidationFailedError, WorkspaceMismatchError } from './errors.js';
+import { BackupError, UnsupportedFormatVersionError, ValidationFailedError, WorkspaceMismatchError } from './errors.js';
+import { errorLogLine, writeLine } from './log-line.js';
 import type { BackupSource, StagedRestore } from './ports/workspace-backups.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
 
@@ -44,20 +45,41 @@ export async function stageCheckedRestore(
  * @param host gives the backup port
  * @param manifest the manifest of the workspace
  * @param source the backup
- * @returns resolves once the backup is the live database
- * @throws what the check or the swap threw; the staged copy is discarded then
+ * @param signal aborts the copy; a stage that resolves after the abort is discarded and never installed
+ * @returns the installed copy, whose `revert()` undoes the install
+ * @throws what the check, the stage or the swap threw (BackupError `backup_failed` after an abort); the staged copy
+ *   is discarded then
  */
 export async function installBackup(
   host: WorkspaceHost,
   manifest: WorkspaceManifest,
   source: BackupSource,
-): Promise<void> {
-  const staged = await stageCheckedRestore(host, manifest, source, new AbortController().signal);
+  signal: AbortSignal,
+): Promise<StagedRestore> {
+  const staged = await stageCheckedRestore(host, manifest, source, signal);
   try {
+    if (signal.aborted) throw new BackupError('backup_failed');
     await staged.install();
+    return staged;
   } catch (error) {
     await staged.discard();
     throw error;
+  }
+}
+
+/**
+ * Undoes an install whose open failed; a failure is swallowed and logged once as a safe line.
+ *
+ * @param host gives the log
+ * @param workspaceId the workspace
+ * @param installed the installed copy
+ * @returns resolves once the revert ended either way
+ */
+export async function revertQuietly(host: WorkspaceHost, workspaceId: string, installed: StagedRestore): Promise<void> {
+  try {
+    await installed.revert();
+  } catch (error) {
+    writeLine(host.log, errorLogLine('Restore could not be undone', { workspace: workspaceId }, error));
   }
 }
 

@@ -258,3 +258,45 @@ describe('workspace backup service', () => {
     expect(manager.backupState()).toEqual({ workspaceId: null, running: false, last: null });
   });
 });
+
+describe('closing after a cut-off', () => {
+  it('a close cut off during the snapshot closes the database only after the snapshot settled and was discarded', async () => {
+    const { manager, database, timers } = await reopened();
+    database.events.length = 0; // The first close of the setup made a backup too.
+    const held = gate();
+    database.snapshotDelay = held.promise;
+    database.changes++;
+
+    const closing = manager.close();
+    await settle();
+    timers.fire(BACKUP_QUIT_DEADLINE_MS);
+    await settle();
+    expect(database.events).toEqual([]);
+    expect(database.closed).toBe(false);
+
+    held.open();
+    await closing;
+    expect(database.events).toEqual(['snapshot settled', 'snapshot discarded', 'close']);
+  });
+
+  it('a close cut off during the write closes the database without waiting for the write', async () => {
+    const { manager, database, backups, timers } = await reopened();
+    backups.writeDelay = new Promise(() => undefined);
+    database.changes++;
+
+    const closing = manager.close();
+    await settle();
+    timers.fire(BACKUP_QUIT_DEADLINE_MS);
+    await closing;
+    expect(database.closed).toBe(true);
+  });
+
+  it('endSession never rejects, even when the change count throws', async () => {
+    const { manager, database } = await reopened();
+    database.changeCount = () => {
+      throw new Error('gone');
+    };
+    await expect(manager.close()).resolves.toBeUndefined();
+    expect(database.closed).toBe(true);
+  });
+});

@@ -26,7 +26,7 @@ import type { WorkspaceSession } from './session.js';
 import { importSources, newImportProgress, requireTargetAsset, type ImportSourcesOptions } from './workspace-import.js';
 import type { Storage } from './ports/storage.js';
 import { holdsWorkspace, isSameRoot, newManifest, readManifest, writeManifest } from './workspace-manifest.js';
-import { installBackup } from './workspace-restore.js';
+import { installBackup, revertQuietly } from './workspace-restore.js';
 import { openWorkspaceDatabase, rejectCopy, requireReachable, type OpenWorkspace } from './workspace-open.js';
 
 /**
@@ -129,10 +129,10 @@ export class WorkspaceManager {
    * Replaces the local database of a closed workspace by a backup and opens it; another open workspace is closed
    * first. A damaged, foreign or newer backup is refused and the database stays as it was.
    *
-   * @param request the workspace folder and the backup
+   * @param request the workspace folder, the backup, and a signal that aborts the copy of the backup
    * @returns the opened workspace
    */
-  restore(request: { rootPath: string; source: BackupSource }): Promise<WorkspaceSummary> {
+  restore(request: { rootPath: string; source: BackupSource; signal?: AbortSignal }): Promise<WorkspaceSummary> {
     return this.queue.run(() => this.doRestore(request));
   }
 
@@ -358,12 +358,17 @@ export class WorkspaceManager {
   }
 
   /**
-   * Replaces the local database of a workspace that is not open by a checked backup, then opens it.
+   * Replaces the local database of a workspace that is not open by a checked backup, then opens it. When the open
+   * fails, the install is undone and the error of the open is thrown.
    *
-   * @param request the workspace folder and the backup
+   * @param request the workspace folder, the backup and an optional abort signal
    * @returns the opened workspace
    */
-  private async doRestore(request: { rootPath: string; source: BackupSource }): Promise<WorkspaceSummary> {
+  private async doRestore(request: {
+    rootPath: string;
+    source: BackupSource;
+    signal?: AbortSignal;
+  }): Promise<WorkspaceSummary> {
     const { rootPath, source } = request;
     this.refuseRestoreOfOpen(rootPath, null);
     const storage = this.host.createStorage(rootPath);
@@ -372,9 +377,15 @@ export class WorkspaceManager {
     this.refuseRestoreOfOpen(rootPath, manifest.id);
     await rejectCopy(this.host, manifest.id, rootPath);
     await this.doClose({ backupDeadlineMs: BACKUP_QUIT_DEADLINE_MS });
-    await installBackup(this.host, manifest, source);
-    // The restored state came from a backup, so it is not copied again until it changes.
-    return this.startOpen(storage, manifest, rootPath, { startEmpty: true, hasSameLineageBackup: true });
+    const signal = request.signal ?? new AbortController().signal;
+    const installed = await installBackup(this.host, manifest, source, signal);
+    try {
+      // The restored state came from a backup, so it is not copied again until it changes.
+      return await this.startOpen(storage, manifest, rootPath, { startEmpty: false, hasSameLineageBackup: true });
+    } catch (error) {
+      await revertQuietly(this.host, manifest.id, installed);
+      throw error;
+    }
   }
 
   /**
@@ -425,7 +436,9 @@ export class WorkspaceManager {
   }): Promise<{ folderTrashed: boolean }> {
     const entry = await this.host.registry.get(input.id);
     if (entry === null) return { folderTrashed: false };
-    if (this.open_?.summary.id === input.id) await this.doClose({ skip: true });
+    if (this.open_?.summary.id === input.id) {
+      await this.doClose({ skip: true, backupDeadlineMs: BACKUP_QUIT_DEADLINE_MS });
+    }
     if (input.skipFinalBackup !== true && (await this.host.databaseExists(input.id))) {
       await this.backups.finalBackup(entry, BACKUP_QUIT_DEADLINE_MS);
     }

@@ -86,6 +86,14 @@ export interface StagedRestore {
    */
   install(): Promise<void>;
   /**
+   * Undoes a resolved `install()`: removes the installed copy and puts the replaced database with its side files
+   * back, or only removes the installed copy when no database was replaced. Valid only after `install()` resolved.
+   *
+   * @returns resolves once the state before the install is back
+   * @throws BackupError when it could not be undone; never for a file that is missing already
+   */
+  revert(): Promise<void>;
+  /**
    * Removes the copy; never rejects.
    *
    * @returns resolves once it is gone

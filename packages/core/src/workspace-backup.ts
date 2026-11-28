@@ -36,6 +36,8 @@ interface RunningAttempt {
   controller: AbortController;
   /** Set when a deadline cut the attempt off; its later outcome is then neither recorded nor logged. */
   abandoned: boolean;
+  /** Settles once its snapshot settled (and a late one was discarded); resolved while no snapshot started. */
+  snapshotPhase: Promise<void>;
 }
 
 /** A deadline that may be reached. */
@@ -108,23 +110,24 @@ export class WorkspaceBackupService {
 
   /**
    * Ends the backups of the open workspace: waits for a running backup, then makes the closing one when it changed.
-   * Never rejects; a failure is recorded.
+   * After the deadline cut a backup off, it still waits until that backup's snapshot settled, so the database can be
+   * closed; never for its copy. Never rejects; a failure is recorded.
    *
    * @param options `backupDeadlineMs` bounds the whole wait, `skip` leaves out the closing backup
-   * @returns resolves once nothing runs any more (or the deadline passed)
+   * @returns resolves once nothing runs any more (or the deadline passed and no snapshot runs)
    */
   async endSession(options: { backupDeadlineMs?: number; skip?: boolean }): Promise<void> {
     const session = this.session;
     if (session === null) return;
     session.ending = true;
-    this.disarm(session);
     const deadline = this.startDeadline(options.backupDeadlineMs, () => this.running?.controller.abort());
     try {
-      const outcome = await Promise.race([
-        this.closingWork(session, options.skip === true, deadline),
-        deadline.reached,
-      ]);
-      if (outcome === 'deadline') this.cutOff(session);
+      this.disarm(session);
+      const work = this.closingWork(session, options.skip === true, deadline).catch(() => 'done' as const);
+      const outcome = await Promise.race([work, deadline.reached]);
+      if (outcome === 'deadline') await this.cutOff(session);
+    } catch {
+      // Ending never fails a close; what failed is recorded by the attempt.
     } finally {
       deadline.cancel();
       if (this.session === session) this.session = null;
@@ -143,10 +146,17 @@ export class WorkspaceBackupService {
     const controller = new AbortController();
     const deadline = this.startDeadline(deadlineMs, () => controller.abort());
     const takeSnapshot = (signal: AbortSignal) => this.host.backups.snapshotClosed(target.id, signal);
-    const work = writeBackup(this.host, target, takeSnapshot, controller.signal).then(() => 'done' as const);
+    let snapshotPhase = Promise.resolve();
+    const onSnapshotPhase = (settled: Promise<void>) => (snapshotPhase = settled);
+    const work = writeBackup(this.host, target, takeSnapshot, controller.signal, onSnapshotPhase).then(
+      () => 'done' as const,
+    );
     work.catch(() => undefined); // A late failure after a cut-off is not reported twice.
     try {
-      if ((await Promise.race([work, deadline.reached])) === 'deadline') throw new BackupError('backup_failed');
+      if ((await Promise.race([work, deadline.reached])) === 'deadline') {
+        await snapshotPhase; // A following remove must not meet the file still open by the snapshot.
+        throw new BackupError('backup_failed');
+      }
       this.attempts.set(target.id, succeededAttempt(this.host));
     } catch (error) {
       const attempt = failedAttempt(this.host, target.id, error);
@@ -218,10 +228,15 @@ export class WorkspaceBackupService {
    * @returns the running attempt
    */
   private start(session: BackupSession): RunningAttempt {
-    const attempt = { controller: new AbortController(), abandoned: false } as RunningAttempt;
+    const attempt = {
+      controller: new AbortController(),
+      abandoned: false,
+      snapshotPhase: Promise.resolve(),
+    } as RunningAttempt;
     const { controller } = attempt;
     const takeSnapshot = (signal: AbortSignal) => session.database.snapshot({ signal });
-    attempt.result = writeBackup(this.host, session.summary, takeSnapshot, controller.signal).then(
+    const onSnapshotPhase = (settled: Promise<void>) => (attempt.snapshotPhase = settled);
+    attempt.result = writeBackup(this.host, session.summary, takeSnapshot, controller.signal, onSnapshotPhase).then(
       (changeCount) => this.settle(session, attempt, () => this.succeeded(session, changeCount)),
       (error: unknown) => this.settle(session, attempt, () => failedAttempt(this.host, session.summary.id, error)),
     );
@@ -263,8 +278,9 @@ export class WorkspaceBackupService {
    * Gives up the running backup once the deadline of a close passed; it is recorded as failed.
    *
    * @param session the session being ended
+   * @returns resolves once the snapshot of the given-up backup settled (the database may be closed then)
    */
-  private cutOff(session: BackupSession): void {
+  private async cutOff(session: BackupSession): Promise<void> {
     const attempt = this.running;
     if (attempt === null) return;
     attempt.abandoned = true;
@@ -273,6 +289,7 @@ export class WorkspaceBackupService {
       session.summary.id,
       failedAttempt(this.host, session.summary.id, new BackupError('backup_failed')),
     );
+    await attempt.snapshotPhase;
   }
 
   /**

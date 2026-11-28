@@ -1832,6 +1832,10 @@ export class InMemoryDatabase implements WorkspaceDatabase {
   snapshotFailure: Error | null = null;
   /** How often `snapshot` ran. */
   snapshotCalls = 0;
+  /** While set, every `snapshot` waits for it after it started; an aborted one then still resolves. */
+  snapshotDelay: Promise<void> | null = null;
+  /** Tests record events in order here (`snapshot settled`, `close`). */
+  events: string[] = [];
   /** Answers the snapshots; shared with the fake host's backups so discards are counted there. */
   snapshotFake = new FakeWorkspaceBackups();
 
@@ -1845,11 +1849,23 @@ export class InMemoryDatabase implements WorkspaceDatabase {
     if (this.snapshotFailure !== null) throw this.snapshotFailure;
     const meta = this.meta.current;
     if (meta === null || options.signal.aborted) throw new BackupError('backup_failed');
+    if (this.snapshotDelay !== null) await this.snapshotDelay;
     const facts = { workspaceId: meta.id, lineageId: meta.lineageId, formatVersion: meta.formatVersion };
-    return this.snapshotFake.snapshotOf({ ...facts, appliedMigrations: 0, newerThanApp: false }, this.changes);
+    const snapshot = this.snapshotFake.snapshotOf(
+      { ...facts, appliedMigrations: 0, newerThanApp: false },
+      this.changes,
+    );
+    this.events.push('snapshot settled');
+    const discard = snapshot.discard;
+    snapshot.discard = async () => {
+      this.events.push('snapshot discarded');
+      await discard();
+    };
+    return snapshot;
   }
 
   async close(): Promise<void> {
+    this.events.push('close');
     this.closed = true;
   }
 }
@@ -2081,6 +2097,14 @@ export function createFakeHost(): {
   const archives = new FakeArchives();
   const probe = new FakeImageProbe();
   const videoProbe = new FakeVideoProbe();
+  // An install makes the database exist; a revert puts a database that was missing before missing again.
+  const missingBeforeInstall = new Set<string>();
+  backups.onInstall = (workspaceId) => {
+    if (missingDatabases.delete(workspaceId)) missingBeforeInstall.add(workspaceId);
+  };
+  backups.onRevert = (workspaceId) => {
+    if (missingBeforeInstall.delete(workspaceId)) missingDatabases.add(workspaceId);
+  };
   const host: WorkspaceHost = {
     registry: new InMemoryRegistry(),
     sources,

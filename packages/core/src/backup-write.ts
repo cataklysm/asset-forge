@@ -28,6 +28,8 @@ export interface BackupTarget {
  * @param target the workspace
  * @param takeSnapshot makes the snapshot (of the open or of the closed database)
  * @param signal aborts the snapshot and the copy
+ * @param onSnapshotPhase is handed, once the snapshot starts, a promise that settles (never rejects) when the
+ *   snapshot has settled and, when it resolved after the abort, was discarded
  * @returns the change count the snapshot was taken at
  * @throws BackupError or what the port threw
  */
@@ -36,11 +38,14 @@ export async function writeBackup(
   target: BackupTarget,
   takeSnapshot: (signal: AbortSignal) => Promise<DatabaseSnapshot>,
   signal: AbortSignal,
+  onSnapshotPhase: (settled: Promise<void>) => void = () => undefined,
 ): Promise<number> {
   throwIfAborted(signal);
   const location = await host.backups.locationOf(target);
   throwIfAborted(signal);
-  const snapshot = await takeSnapshot(signal);
+  const taking = takeSnapshot(signal).then((snapshot) => discardIfAborted(snapshot, signal));
+  onSnapshotPhase(taking.then(ignore, ignore));
+  const snapshot = await taking;
   try {
     if (snapshot.lineageId === null || snapshot.lineageId === '') throw new BackupError('backup_failed');
     throwIfAborted(signal);
@@ -131,6 +136,23 @@ async function discardQuietly(snapshot: DatabaseSnapshot): Promise<void> {
     // The port promises never to reject; a leftover temporary file is swept on the next open.
   }
 }
+
+/**
+ * The step after the snapshot: a snapshot that resolved after the abort is discarded and the backup fails.
+ *
+ * @param snapshot the snapshot just taken
+ * @param signal the signal of the backup
+ * @returns the snapshot while the backup was not aborted
+ * @throws BackupError `backup_failed` once a late snapshot was discarded
+ */
+async function discardIfAborted(snapshot: DatabaseSnapshot, signal: AbortSignal): Promise<DatabaseSnapshot> {
+  if (!signal.aborted) return snapshot;
+  await discardQuietly(snapshot);
+  throw new BackupError('backup_failed');
+}
+
+/** Ignores the outcome of a promise. */
+function ignore(): void {}
 
 /**
  * Stops a backup whose signal was aborted.
