@@ -21,9 +21,7 @@ let seen: JobState[] = [];
 function Probe() {
   const state = useJobs();
   seen.push(state);
-  return (
-    <output aria-label="Jobs">{`active ${state.active} changes ${state.changeToken}`}</output>
-  );
+  return <output aria-label="Jobs">{`active ${state.active} changes ${state.changeToken}`}</output>;
 }
 
 const latest = () => seen.at(-1)!;
