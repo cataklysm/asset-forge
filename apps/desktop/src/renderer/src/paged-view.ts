@@ -30,3 +30,17 @@ export function failedFirstPage<T>(state: PagedState<T>): number | null {
   if (state.total !== null) return null;
   return [...state.pages].find(([, entry]) => entry.status === 'failed')?.[0] ?? null;
 }
+
+/**
+ * The `data-index` of the item that holds the focus inside an element.
+ *
+ * @param root the element to look in; null finds nothing
+ * @returns the index, or null when the focus is not on an item inside `root`
+ */
+export function focusedIndex(root: HTMLElement | null): number | null {
+  const active = document.activeElement;
+  if (root === null || !(active instanceof Element) || !root.contains(active)) return null;
+  const value = active.closest('[data-index]')?.getAttribute('data-index');
+  const index = value === undefined || value === null ? NaN : Number(value);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}

@@ -2,6 +2,7 @@ import type { FileRecord, FileScope, IpcRequest } from '@assetforge/contracts';
 import type { PagedList } from '../hooks/usePagedList';
 import type { ViewHandle, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
 import { PAGE_SIZE, slotAt, type PagedState } from '../paged-list';
+import { focusedIndex } from '../paged-view';
 import { MAX_SELECTION } from '../selection';
 import type { FileBrowserProps } from './FileBrowser';
 
@@ -79,20 +80,6 @@ export function addsTo(scope: FileScope, assetId: string | null): boolean {
     case 'trash':
       return false;
   }
-}
-
-/**
- * The `data-index` of the item that holds the focus inside an element.
- *
- * @param root the element to look in; null finds nothing
- * @returns the index, or null when the focus is not on an item inside `root`
- */
-export function focusedIndex(root: HTMLElement | null): number | null {
-  const active = document.activeElement;
-  if (root === null || !(active instanceof Element) || !root.contains(active)) return null;
-  const value = active.closest('[data-index]')?.getAttribute('data-index');
-  const index = value === undefined || value === null ? NaN : Number(value);
-  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 /**

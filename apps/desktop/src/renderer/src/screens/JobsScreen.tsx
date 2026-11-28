@@ -27,7 +27,7 @@ import {
 } from '../labels';
 import { useProviders } from '../provider-context';
 import { loadedIds, type PagedState } from '../paged-list';
-import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
+import { failedFirstPage, focusedIndex, wantedPages, type ShownRows } from '../paged-view';
 import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
 
 /** The statuses of the status filter. */
@@ -50,20 +50,6 @@ interface LatestList {
   paged: PagedJobs;
   key: string;
   listRequest: ListRequest;
-}
-
-/**
- * The index of the row that holds the focus inside `root`.
- *
- * @param root the container of the table
- * @returns the index, or null when no row holds the focus
- */
-function focusedIndex(root: HTMLElement | null): number | null {
-  const active = document.activeElement;
-  if (root === null || !(active instanceof Element) || !root.contains(active)) return null;
-  const value = active.closest('[data-index]')?.getAttribute('data-index');
-  const index = value === undefined || value === null ? NaN : Number(value);
-  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 /**
