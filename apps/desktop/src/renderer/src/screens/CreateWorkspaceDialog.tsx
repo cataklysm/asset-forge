@@ -1,5 +1,15 @@
 import type { FormEvent, RefObject } from 'react';
 import { Dialog } from '../components/Dialog';
+import {
+  CANCEL_LABEL,
+  CHANGE_LOCATION_LABEL,
+  CHOOSE_LOCATION_LABEL,
+  CHOOSE_LOCATION_TITLE,
+  CREATE_LOCATION_TITLE,
+  CREATE_WORKSPACE_LABEL,
+  NEW_WORKSPACE_LABEL,
+  WORKSPACE_NAME_LABEL,
+} from '../labels';
 import { ALERT, BUTTON, INPUT, MUTED } from '../ui';
 
 /** The props of `CreateWorkspaceDialog`. */
@@ -33,7 +43,7 @@ interface Props {
 export function CreateWorkspaceDialog(props: Props) {
   const { open, nameRef, error, name, setName, parentPath, targetPath, busy, nameEmpty } = props;
   return (
-    <Dialog open={open} title="New workspace" initialFocusRef={nameRef} onClose={props.onCancel}>
+    <Dialog open={open} title={NEW_WORKSPACE_LABEL} initialFocusRef={nameRef} onClose={props.onCancel}>
       <form className="space-y-3" onSubmit={props.onSubmit}>
         {error !== null && (
           <p role="alert" className={ALERT}>
@@ -43,9 +53,9 @@ export function CreateWorkspaceDialog(props: Props) {
         <input
           ref={nameRef}
           autoFocus
-          aria-label="Workspace name"
+          aria-label={WORKSPACE_NAME_LABEL}
           aria-describedby={parentPath === null ? undefined : 'create-location'}
-          placeholder="Workspace name"
+          placeholder={WORKSPACE_NAME_LABEL}
           maxLength={200}
           className={`w-full ${INPUT}`}
           value={name}
@@ -56,29 +66,25 @@ export function CreateWorkspaceDialog(props: Props) {
             type="button"
             className={BUTTON}
             disabled={busy}
-            title="A folder named after the workspace is created inside the chosen location"
+            title={CHOOSE_LOCATION_TITLE}
             onClick={props.onChooseParent}
           >
-            {parentPath === null ? 'Choose location' : 'Change location'}
+            {parentPath === null ? CHOOSE_LOCATION_LABEL : CHANGE_LOCATION_LABEL}
           </button>
         </div>
         {/* Only the path itself; explanations live in tooltips, not in the layout. */}
         {parentPath !== null && (
-          <p
-            id="create-location"
-            title="Folder the workspace will be created in"
-            className={`text-sm break-all ${MUTED}`}
-          >
+          <p id="create-location" title={CREATE_LOCATION_TITLE} className={`text-sm break-all ${MUTED}`}>
             {targetPath ?? parentPath}
           </p>
         )}
         <div className="flex justify-end gap-2">
           <button type="button" className={BUTTON} onClick={props.onCancel}>
-            Cancel
+            {CANCEL_LABEL}
           </button>
           {/* Stays enabled without a location, so Enter in the name field opens the picker. */}
           <button type="submit" className={BUTTON} disabled={busy || nameEmpty}>
-            Create
+            {CREATE_WORKSPACE_LABEL}
           </button>
         </div>
       </form>

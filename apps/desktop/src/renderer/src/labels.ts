@@ -13,3 +13,4 @@ export * from './labels/sources';
 export * from './labels/studio';
 export * from './labels/tags';
 export * from './labels/trash';
+export * from './labels/workspaces';
