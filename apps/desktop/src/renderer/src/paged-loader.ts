@@ -12,16 +12,26 @@ import {
   type PagedState,
 } from './paged-list';
 
+// The loader of an endless list outside React: requests within the in-flight cap, epochs per key, refresh
+// rounds, and waits for the first pages.
+
+/** What the loader is built with. */
 export interface PagedLoaderOptions<T> {
+  /** Reads one page of the current key. */
   fetchPage(offset: number, limit: number): Promise<{ items: T[]; total: number }>;
   /** Called after every change of `state` while active. */
   onChange(): void;
+  /** The most requests in flight; `MAX_IN_FLIGHT` when left out. */
   maxInFlight?: number;
 }
 
+/** One pending `loadThrough`. */
 interface Through {
+  /** The items that must have settled. */
   count: number;
+  /** Ends the wait. */
   resolve(): void;
+  /** Ends the wait when the list changed first. */
   reject(reason: Error): void;
 }
 
@@ -39,10 +49,14 @@ interface Through {
  * cannot run yet is queued and runs once as soon as it can.
  */
 export class PagedLoader<T> {
+  /** The state of the current key. */
   state: PagedState<T>;
+  /** What the view shows: the current state, or the earlier key's until page 0 of the current one settled. */
   displayed: PagedState<T>;
   private currentKey: string;
+  /** Raised by every key change; part of the state's key. */
   private generation = 0;
+  /** Unsettled requests of every epoch. */
   private outstanding = 0;
   private wanted: readonly number[] = [];
   private throughs: Through[] = [];
@@ -62,6 +76,10 @@ export class PagedLoader<T> {
    */
   private refreshQueued = false;
 
+  /**
+   * @param key the first key
+   * @param options the page read, the change notice and the in-flight cap
+   */
   constructor(
     key: string,
     private readonly options: PagedLoaderOptions<T>,
@@ -85,6 +103,9 @@ export class PagedLoader<T> {
   /**
    * Starts a new epoch when `key` differs and requests its page 0; returns whether it did.
    * Never notifies: `displayed` does not change, and the caller reads `pending` itself.
+   *
+   * @param key the new key
+   * @returns whether the key changed
    */
   setKey(key: string): boolean {
     if (key === this.currentKey) return false;
@@ -99,24 +120,42 @@ export class PagedLoader<T> {
     return true;
   }
 
-  /** While inactive nothing is requested and nothing is notified; answers are still applied. */
+  /**
+   * While inactive nothing is requested and nothing is notified; answers are still applied.
+   *
+   * @param active whether the list is mounted
+   */
   setActive(active: boolean): void {
     this.active = active;
     if (!active) this.rejectThroughs();
     else this.runQueuedRefresh();
   }
 
+  /**
+   * Sets the pages the view needs and requests the missing ones.
+   *
+   * @param pages the pages in order of importance
+   */
   setWanted(pages: readonly number[]): void {
     this.wanted = pages;
     this.pump();
   }
 
+  /**
+   * Requests a failed page again.
+   *
+   * @param page the page
+   */
   retry(page: number): void {
     this.commit(retryPage(this.state, page));
     this.pump();
   }
 
-  /** Replaces loaded items that have the id of one of `items`; requests nothing. */
+  /**
+   * Replaces loaded items that have the id of one of `items`; requests nothing.
+   *
+   * @param items fresh items
+   */
   patch(items: readonly (T & { id: string })[]): void {
     this.commit(patchItems(this.state as PagedState<T & { id: string }>, items));
   }
@@ -158,6 +197,9 @@ export class PagedLoader<T> {
    * Requests every missing page below `ceil(min(count, total) / PAGE_SIZE)`, within the
    * in-flight cap. Resolves once they have settled (failed pages included); rejects when the
    * key changes or the loader turns inactive first.
+   *
+   * @param count the items that must have settled
+   * @returns the wait
    */
   loadThrough(count: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -171,10 +213,17 @@ export class PagedLoader<T> {
     });
   }
 
+  /** The state's key: the current key and its epoch. */
   private epochKey(): string {
     return `${this.currentKey}#${this.generation}`;
   }
 
+  /**
+   * Stores a new state, shows it once it may be shown, and notifies while active.
+   *
+   * @param next the new state; nothing happens when it is the current one
+   * @param notify whether `onChange` is called
+   */
   private commit(next: PagedState<T>, notify = true): void {
     if (next === this.state) return;
     this.state = next;
@@ -186,7 +235,7 @@ export class PagedLoader<T> {
   private throughPages(): number[] {
     const { total } = this.state;
     let count = 0;
-    for (const t of this.throughs) count = Math.max(count, t.count);
+    for (const through of this.throughs) count = Math.max(count, through.count);
     if (count <= 0) return [];
     if (total === null) return [0];
     const end = Math.ceil(Math.min(count, total) / PAGE_SIZE);
@@ -197,15 +246,22 @@ export class PagedLoader<T> {
   private candidates(): number[] {
     const { total } = this.state;
     // A wanted range can lag behind a shrunk total; pages past the end do not exist.
-    const existing = total === null ? this.wanted : this.wanted.filter((p) => p * PAGE_SIZE < total);
+    const existing = total === null ? this.wanted : this.wanted.filter((page) => page * PAGE_SIZE < total);
     return [...existing, ...this.throughPages()];
   }
 
+  /**
+   * Requests the missing pages within the in-flight cap: only page 0 while a key change loads.
+   *
+   * @param notify whether marking them loading calls `onChange`
+   */
   private pump(notify = true): void {
     if (!this.active) return;
     const { total } = this.state;
     // Page 0 is fetched even for an empty list: it is how an empty list learns of new rows.
-    if (total !== null) for (const p of this.refetch) if (p > 0 && p * PAGE_SIZE >= total) this.refetch.delete(p);
+    if (total !== null) {
+      for (const page of this.refetch) if (page > 0 && page * PAGE_SIZE >= total) this.refetch.delete(page);
+    }
     // A refetch is requested even when its page stopped being wanted, so its round can end.
     const candidates = this.pending ? [0] : [...this.candidates(), ...this.refetch];
     const pages = pagesToRequest(this.state, candidates, this.maxInFlight, this.outstanding, this.refetch);
@@ -221,8 +277,8 @@ export class PagedLoader<T> {
       let promise: Promise<{ items: T[]; total: number }>;
       try {
         promise = this.options.fetchPage(page * PAGE_SIZE, PAGE_SIZE);
-      } catch (e) {
-        promise = Promise.reject(e);
+      } catch (error) {
+        promise = Promise.reject(error);
       }
       promise.then(
         (result) =>
@@ -235,6 +291,13 @@ export class PagedLoader<T> {
   // Even a stale answer frees a slot, which the current epoch may be waiting for. An answer that
   // arrives while inactive is applied too, so its page does not stay "loading" for good. An
   // answer of an earlier round is dropped: a refreshed page must not be overwritten by it.
+  /**
+   * Applies one answer or failure and goes on with what it frees.
+   *
+   * @param round the round the request was started in
+   * @param counted whether the request counts for that round
+   * @param next the state with the answer applied
+   */
   private settle(round: number, counted: boolean, next: () => PagedState<T>): void {
     this.outstanding -= 1;
     const current = round === this.round;
@@ -246,6 +309,7 @@ export class PagedLoader<T> {
     this.endRoundIfSettled();
   }
 
+  /** Whether a refresh can run now. */
   private canRefresh(): boolean {
     return this.active && !this.inRound && !this.pending && firstPageSettled(this.state);
   }
@@ -257,47 +321,65 @@ export class PagedLoader<T> {
     return true;
   }
 
+  /** Ends the round once its requests have settled, then runs a queued refresh. */
   private endRoundIfSettled(): void {
     if (!this.inRound || this.roundOutstanding > 0 || this.refetch.size > 0) return;
     this.endRound();
     this.runQueuedRefresh();
   }
 
+  /** Leaves the refresh round. */
   private endRound(): void {
     this.inRound = false;
     this.roundOutstanding = 0;
     this.refetch.clear();
   }
 
+  /** Resolves every `loadThrough` whose pages have settled. */
   private checkThroughs(): void {
     if (this.throughs.length === 0) return;
-    const { total, pages } = this.state;
     const remaining: Through[] = [];
-    for (const t of this.throughs) {
-      let done: boolean;
-      if (t.count <= 0) done = true;
-      else if (total === null) done = pages.get(0)?.status === 'failed';
-      else {
-        const end = Math.ceil(Math.min(t.count, total) / PAGE_SIZE);
-        done = true;
-        for (let p = 0; p < end && done; p += 1) {
-          const status = pages.get(p)?.status;
-          done = status === 'loaded' || status === 'failed';
-        }
-      }
-      if (done) t.resolve();
-      else remaining.push(t);
+    for (const through of this.throughs) {
+      if (throughSettled(this.state, through.count)) through.resolve();
+      else remaining.push(through);
     }
     this.throughs = remaining;
   }
 
+  /** Rejects every pending `loadThrough`. */
   private rejectThroughs(): void {
     const throughs = this.throughs;
     this.throughs = [];
-    for (const t of throughs) t.reject(new Error('The list changed before its pages were loaded.'));
+    for (const through of throughs) through.reject(new Error('The list changed before its pages were loaded.'));
   }
 }
 
+/**
+ * Whether page 0 has settled: the total is known or page 0 failed.
+ *
+ * @param state the list
+ * @returns true once it has
+ */
 function firstPageSettled<T>(state: PagedState<T>): boolean {
   return state.total !== null || state.pages.get(0)?.status === 'failed';
+}
+
+/**
+ * Whether the pages of the first `count` items have settled (loaded or failed); until the total is known only a
+ * failed page 0 counts.
+ *
+ * @param state the list
+ * @param count the items asked for
+ * @returns true once they have
+ */
+function throughSettled<T>(state: PagedState<T>, count: number): boolean {
+  const { total, pages } = state;
+  if (count <= 0) return true;
+  if (total === null) return pages.get(0)?.status === 'failed';
+  const end = Math.ceil(Math.min(count, total) / PAGE_SIZE);
+  for (let page = 0; page < end; page += 1) {
+    const status = pages.get(page)?.status;
+    if (status !== 'loaded' && status !== 'failed') return false;
+  }
+  return true;
 }
