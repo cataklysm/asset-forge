@@ -8,7 +8,7 @@ import { useAnalysisDialogs } from '../components/AnalysisDialogs';
 import { AssetFilesTab } from '../components/AssetFilesTab';
 import { AssetHeader, type AssetPatch } from '../components/AssetHeader';
 import { IMPORT_BUSY, ProjectsPanel, RelationsPanel } from '../components/AssetPanels';
-import { Link } from '../components/Link';
+import { Breadcrumb } from '../components/Breadcrumb';
 import { importFailures, ResultStrip, type BatchResult } from '../components/ResultStrip';
 import { Tabs } from '../components/Tabs';
 import { WorkflowSection } from '../components/WorkflowSection';
@@ -19,6 +19,7 @@ import { useLoad } from '../hooks/useLoad';
 import { useImportProgress, useImportReload } from '../import-progress';
 import { importTitle } from '../import-result';
 import { useChanges } from '../jobs-context';
+import { ASSETS_BREADCRUMB_LINK } from '../labels';
 import type { AssetTab } from '../list-state';
 import { useTags } from '../tags-context';
 import { ALERT, MUTED } from '../ui';
@@ -234,11 +235,13 @@ export function AssetScreen({ id, tab, onTabChange, onBack, onOpenAsset, onOpenP
   }
 
   const breadcrumb = (
-    <nav aria-label="Breadcrumb" className={`text-sm ${MUTED}`}>
-      <Link onFollow={onBack} disabled={importing} title={importing ? IMPORT_BUSY : undefined}>
-        Assets
-      </Link>
-    </nav>
+    <Breadcrumb
+      listLabel={ASSETS_BREADCRUMB_LINK}
+      current={asset?.name ?? null}
+      onList={onBack}
+      disabled={importing}
+      title={importing ? IMPORT_BUSY : undefined}
+    />
   );
 
   if (asset === null) {

@@ -267,6 +267,14 @@ it('the breadcrumb is a link back to the gallery', async () => {
   expect(onBack).toHaveBeenCalledTimes(1);
 });
 
+it('the breadcrumb names the asset like the project breadcrumb names the project', async () => {
+  const asset = assetDetail({ name: 'Oak' });
+  install(asset);
+  render(<Harness id={asset.id} onBack={vi.fn()} />);
+  await screen.findByRole('textbox', { name: 'Name' });
+  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('Assets / Oak');
+});
+
 it('import shows the result strip with failed names and errors, and reports busy', async () => {
   const user = userEvent.setup();
   const asset = assetDetail();

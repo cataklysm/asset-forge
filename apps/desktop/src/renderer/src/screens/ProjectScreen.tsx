@@ -2,13 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ProjectStatusSchema, type Project } from '@assetforge/contracts';
 import { call, describeError } from '../api';
 import { AssetPicker } from '../components/AssetPicker';
+import { Breadcrumb } from '../components/Breadcrumb';
 import { CommitInput } from '../components/CommitInput';
-import { Link } from '../components/Link';
 import { Pager } from '../components/Pager';
 import { useLoad } from '../hooks/useLoad';
 import {
   ADD_ASSET_LABEL,
-  BREADCRUMB_LABEL,
   label,
   LOADING_LABEL,
   NO_ASSETS_ASSIGNED,
@@ -150,7 +149,11 @@ export function ProjectScreen({ id, onNavigate, initialMemberOffset = 0, onMembe
     (message): message is string => message !== null,
   );
   const breadcrumb = (
-    <Breadcrumb projectName={data?.name ?? null} onProjects={() => onNavigate({ name: 'projects' })} />
+    <Breadcrumb
+      listLabel={PROJECTS_BREADCRUMB_LINK}
+      current={data?.name ?? null}
+      onList={() => onNavigate({ name: 'projects' })}
+    />
   );
 
   if (data === null) {
@@ -206,26 +209,6 @@ export function ProjectScreen({ id, onNavigate, initialMemberOffset = 0, onMembe
         </div>
       </section>
     </div>
-  );
-}
-
-/**
- * The breadcrumb back to the projects list.
- *
- * @param props the project name once loaded, and the navigation to the list
- * @returns the breadcrumb navigation
- */
-function Breadcrumb({ projectName, onProjects }: { projectName: string | null; onProjects(): void }) {
-  return (
-    <nav aria-label={BREADCRUMB_LABEL} className={`text-sm ${MUTED}`}>
-      <Link onFollow={onProjects}>{PROJECTS_BREADCRUMB_LINK}</Link>
-      {projectName !== null && (
-        <>
-          <span> / </span>
-          <span className="text-text">{projectName}</span>
-        </>
-      )}
-    </nav>
   );
 }
 

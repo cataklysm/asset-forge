@@ -25,10 +25,12 @@ export const MATCHING_TYPE_TERM = 'Type';
 /** The status term of a matching asset. */
 export const MATCHING_STATUS_TERM = 'Status';
 
-/** The name of the project breadcrumb. */
+/** The name of the breadcrumb of a detail screen. */
 export const BREADCRUMB_LABEL = 'Breadcrumb';
 /** The breadcrumb link back to the projects list. */
 export const PROJECTS_BREADCRUMB_LINK = 'Projects';
+/** The breadcrumb link back to the asset gallery. */
+export const ASSETS_BREADCRUMB_LINK = 'Assets';
 /** The name input of the project screen. */
 export const PROJECT_NAME_FIELD = 'Name';
 /** The status select of the project screen. */
