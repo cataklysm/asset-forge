@@ -416,7 +416,7 @@ it('no selectable model: Generate is disabled with a title and Settings is offer
     ).toContain('text-only'),
   );
   expect(button('Generate').disabled).toBe(true);
-  expect(button('Generate').title).not.toBe('');
+  expect(button('Generate').title).toBe('The provider offers no model that can describe images');
   expect(button('Settings')).toBeTruthy();
 });
 

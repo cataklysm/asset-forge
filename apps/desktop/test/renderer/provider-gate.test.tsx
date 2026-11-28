@@ -8,8 +8,10 @@ import { expect, it } from 'vitest';
 import {
   CHOOSE_MODEL,
   CHOOSE_PROMPT,
+  MODEL_NOT_DESCRIBE,
   MODEL_NOT_LISTED,
   MODEL_NOT_VISION,
+  NO_DESCRIBE_MODEL,
   NO_VISION_MODEL,
   PROMPTS_LOAD_FAILED,
   PROVIDER_CHECKING,
@@ -127,6 +129,21 @@ it('a model missing from the entry list, one without vision, or none blocks', ()
   expect(providerGate(s, LOCAL.id, 'gone-model')).toEqual({ blocked: MODEL_NOT_LISTED, offerSettings: false });
   expect(providerGate(s, LOCAL.id, 'text-only')).toEqual({ blocked: MODEL_NOT_VISION, offerSettings: false });
   expect(providerGate(s, LOCAL.id, null)).toEqual({ blocked: CHOOSE_MODEL, offerSettings: false });
+});
+
+it('for Image to prompt the vision reasons speak of describing images', () => {
+  const textOnly = gateState({ [LOCAL.id]: { ok: true, models: [{ name: 'text-only', vision: false }] } });
+  expect(providerGate(textOnly, LOCAL.id, 'text-only', 'prompt')).toEqual({
+    blocked: NO_DESCRIBE_MODEL,
+    offerSettings: true,
+  });
+  const listed = gateState({ [LOCAL.id]: LISTED });
+  expect(providerGate(listed, LOCAL.id, 'text-only', 'prompt')).toEqual({
+    blocked: MODEL_NOT_DESCRIBE,
+    offerSettings: false,
+  });
+  expect(NO_DESCRIBE_MODEL).not.toBe(NO_VISION_MODEL);
+  expect(MODEL_NOT_DESCRIBE).not.toBe(MODEL_NOT_VISION);
 });
 
 it('no entry selected, or one not listed, is the not-configured state with Settings', () => {
