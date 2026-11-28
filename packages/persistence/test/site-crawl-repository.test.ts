@@ -110,7 +110,17 @@ describe('durable site crawl results', () => {
   test('preserves review results when finished job history is cleared', async () => {
     const row = { ...record(10), result: result(uuid(10)) };
     await db.jobs.enqueue({
-      jobs: [{ id: row.id, type: 'site.crawl', resourceClass: 'cpu', fileId: null, lane: 'site.crawl', payload: {}, dedupeKey: null }],
+      jobs: [
+        {
+          id: row.id,
+          type: 'site.crawl',
+          resourceClass: 'cpu',
+          fileId: null,
+          lane: 'site.crawl',
+          payload: {},
+          dedupeKey: null,
+        },
+      ],
       now: T0,
     });
     await db.siteCrawls.insert(row);
@@ -127,7 +137,17 @@ describe('durable site crawl results', () => {
     await db.siteCrawls.insert(row);
     expect(await db.siteCrawls.hasActiveProfile(profile.id)).toBe(false);
     await db.jobs.enqueue({
-      jobs: [{ id: row.id, type: 'site.crawl', resourceClass: 'cpu', fileId: null, lane: 'site.crawl', payload: {}, dedupeKey: null }],
+      jobs: [
+        {
+          id: row.id,
+          type: 'site.crawl',
+          resourceClass: 'cpu',
+          fileId: null,
+          lane: 'site.crawl',
+          payload: {},
+          dedupeKey: null,
+        },
+      ],
       now: T0,
     });
     expect(await db.siteCrawls.hasActiveProfile(profile.id)).toBe(true);
@@ -144,5 +164,20 @@ describe('durable site crawl results', () => {
     const saved = await db.siteCrawls.get(row.id);
     expect(saved).toEqual(row);
     expect(JSON.stringify(saved)).not.toContain('must-not-persist');
+  });
+
+  test('rejects invalid or excessive results without changing the saved review snapshot', async () => {
+    const row = record(10);
+    await db.siteCrawls.insert(row);
+    await expect(
+      db.siteCrawls.update(row.id, { progress: { pages: -1, files: 0, cancelling: false }, now: T1 }),
+    ).rejects.toThrow();
+    await expect(
+      db.siteCrawls.update(row.id, {
+        result: { ...result(row.id), files: Array(5001).fill('https://example.com/image.jpg') },
+        now: T1,
+      }),
+    ).rejects.toThrow();
+    expect(await db.siteCrawls.get(row.id)).toEqual(row);
   });
 });

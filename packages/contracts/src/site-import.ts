@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { FileKindSchema } from './files';
+import { FileKindSchema, FileTargetSchema } from './files';
+import { JobErrorCodeSchema } from './job-errors';
 import { CountSchema, IdSchema } from './ipc-shared';
 
 /** At most this many site profiles at app level. */
@@ -12,6 +13,12 @@ export const SITE_URL_CONTAINS_MAX = 200;
 export const SITE_MAX_PAGES = { min: 1, max: 200, default: 20 };
 /** File URLs one crawl may answer. */
 export const SITE_MAX_FILES = { min: 1, max: 5000, default: 1000 };
+/** Independent browser pages used to resolve gallery details. */
+export const SITE_DETAIL_CONCURRENCY = { min: 1, max: 6, default: 3 };
+/** Minimum interval between page-request starts for a site, in milliseconds. */
+export const SITE_REQUEST_GAP_MS = { min: 0, max: 10_000, default: 500 };
+/** Overall deadline of one browser page, in milliseconds. */
+export const SITE_PAGE_TIMEOUT_MS = { min: 5_000, max: 120_000, default: 30_000 };
 /** The longest profile name. */
 export const SITE_PROFILE_NAME_MAX = 60;
 /** The kinds a new profile wants. */
@@ -46,6 +53,9 @@ const profileFields = {
   urlContains: z.string().max(SITE_URL_CONTAINS_MAX),
   maxPages: z.number().int().min(SITE_MAX_PAGES.min).max(SITE_MAX_PAGES.max),
   maxFiles: z.number().int().min(SITE_MAX_FILES.min).max(SITE_MAX_FILES.max),
+  detailConcurrency: z.number().int().min(SITE_DETAIL_CONCURRENCY.min).max(SITE_DETAIL_CONCURRENCY.max).optional(),
+  requestGapMs: z.number().int().min(SITE_REQUEST_GAP_MS.min).max(SITE_REQUEST_GAP_MS.max).optional(),
+  pageTimeoutMs: z.number().int().min(SITE_PAGE_TIMEOUT_MS.min).max(SITE_PAGE_TIMEOUT_MS.max).optional(),
 };
 
 /** A site profile; `site` is taken from the URL typed at creation (`siteOf`) and never changes. */
@@ -144,3 +154,42 @@ export type SiteCrawlResult = z.infer<typeof SiteCrawlResultSchema>;
 export const SiteCrawlProgressSchema = z.object({ pages: CountSchema, files: CountSchema, cancelling: z.boolean() });
 /** The progress of the running crawl. */
 export type SiteCrawlProgress = z.infer<typeof SiteCrawlProgressSchema>;
+
+/** A discovered URL with its review-time asset-scoped filename match. */
+export const SiteImportCandidateSchema = z.object({
+  url: z.string().max(10_000),
+  sourcePageUrl: z.string().max(10_000),
+  expectedName: z.string().nullable(),
+  alreadyPresent: z.boolean(),
+});
+/** A discovered URL, retained even when an optional review filter excludes it. */
+export type SiteImportCandidate = z.infer<typeof SiteImportCandidateSchema>;
+
+/** A durable discovery task as shown by the site-import review UI. */
+export const SiteCrawlTaskSchema = z.object({
+  crawlId: IdSchema,
+  jobId: IdSchema,
+  profileId: IdSchema,
+  profileName: z.string(),
+  site: z.string(),
+  galleryUrl: z.string().max(2000),
+  target: FileTargetSchema.nullable(),
+  targetAssetName: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  status: z.enum(['queued', 'running', 'waiting', 'ready', 'failed', 'cancelled', 'imported']),
+  errorCode: JobErrorCodeSchema.nullable(),
+  errorMessage: z.string().nullable(),
+  progress: SiteCrawlProgressSchema,
+  result: SiteCrawlResultSchema.nullable(),
+  candidates: z.array(SiteImportCandidateSchema).max(SITE_MAX_FILES.max),
+});
+/** A persisted crawl with technical progress and independently reviewable results. */
+export type SiteCrawlTask = z.infer<typeof SiteCrawlTaskSchema>;
+/** Lightweight polling list; full candidate arrays are fetched only for the selected task. */
+export const SiteCrawlTaskSummarySchema = SiteCrawlTaskSchema.omit({ result: true, candidates: true });
+/** Queue summary without result and candidate arrays. */
+export type SiteCrawlTaskSummary = z.infer<typeof SiteCrawlTaskSummarySchema>;
+
+/** Job type of gallery discovery; downloads are explicitly queued after review. */
+export const SITE_CRAWL_JOB = 'site.crawl';

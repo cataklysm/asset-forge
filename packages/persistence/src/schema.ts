@@ -10,3 +10,4 @@ export * from './schema/prompts.js';
 export * from './schema/jobs.js';
 export * from './schema/analysis.js';
 export * from './schema/generations.js';
+export * from './schema/site-crawls.js';

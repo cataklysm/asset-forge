@@ -7,6 +7,9 @@ import {
   SiteCrawlProgressSchema,
   SiteCrawlResultSchema,
   SiteProfileSchema,
+  SiteCrawlTaskSchema,
+  SiteCrawlTaskSummarySchema,
+  SITE_MAX_FILES,
 } from './site-import';
 import { type ChannelContracts, EmptyRequestSchema, IdRequestSchema, IdSchema } from './ipc-shared';
 
@@ -49,6 +52,26 @@ export const siteChannels = {
     request: z.object({ profileId: IdSchema, url: z.string().max(2000) }),
     response: SiteCrawlResultSchema,
   },
+  /** Captures a workspace target and queues discovery without waiting for the browser. */
+  'sites:enqueueCrawl': {
+    request: z.object({ profileId: IdSchema, url: z.string().max(2000), target: FileTargetSchema.nullable() }),
+    response: z.object({ crawlId: IdSchema }),
+  },
+  /** Saved discovery tasks of the open workspace, newest first. */
+  'sites:listCrawls': {
+    request: z.object({ limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }),
+    response: z.object({ items: z.array(SiteCrawlTaskSummarySchema), total: z.number().int().min(0) }),
+  },
+  /** Reads one saved task and recomputes optional filename matches against its captured asset. */
+  'sites:getCrawl': {
+    request: z.object({ crawlId: IdSchema }),
+    response: SiteCrawlTaskSchema,
+  },
+  /** Retries saved discovery from its last checkpoint after a login or a transient failure. */
+  'sites:retryCrawl': {
+    request: z.object({ crawlId: IdSchema }),
+    response: z.object({ retried: z.boolean() }),
+  },
   /** The progress of the running crawl; null when none runs. */
   'sites:crawlProgress': {
     request: EmptyRequestSchema,
@@ -56,12 +79,18 @@ export const siteChannels = {
   },
   /** Marks the running crawl to stop; `cancelling` is false when none runs. */
   'sites:cancelCrawl': {
-    request: EmptyRequestSchema,
+    request: z.object({ crawlId: IdSchema.optional() }),
     response: z.object({ cancelling: z.boolean() }),
   },
   /** Queues the file URLs the crawl `crawlId` found; an unknown or replaced crawl is `invalid_operation`. */
   'sites:import': {
-    request: z.object({ crawlId: IdSchema, target: FileTargetSchema.nullable() }),
+    request: z.object({
+      crawlId: IdSchema,
+      target: FileTargetSchema.nullable().optional(),
+      selectedUrls: z.array(z.string().max(10_000)).max(SITE_MAX_FILES.max).optional(),
+      skipExistingNames: z.boolean().optional(),
+      includeExistingUrls: z.array(z.string().max(10_000)).max(SITE_MAX_FILES.max).optional(),
+    }),
     response: UrlImportResultSchema,
   },
 } as const satisfies ChannelContracts;

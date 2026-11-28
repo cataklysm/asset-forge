@@ -8,6 +8,7 @@ import type {
 import type { FileMoveRepository, FileOriginRepository, FileRepository } from './file-repositories.js';
 import type { GenerationRepository } from './generation-repository.js';
 import type { JobRepository } from './job-repository.js';
+import type { SiteCrawlRepository } from './site-crawl-repository.js';
 import type { ProjectAssetRepository, ProjectRepository } from './project-repositories.js';
 import type { PromptRepository } from './prompt-repository.js';
 import type { TagRepository } from './tag-repository.js';
@@ -102,6 +103,8 @@ export interface WorkspaceDatabase {
   fileOrigins: FileOriginRepository;
   /** The job queue. */
   jobs: JobRepository;
+  /** Saved site-discovery results and recovery checkpoints. */
+  siteCrawls: SiteCrawlRepository;
   /** The analysis records and tag proposals. */
   analyses: FileAnalysisRepository;
   /** The enumeration of analysis targets. */
