@@ -16,10 +16,10 @@ export function bounded<T>(promise: Promise<T>, signal: AbortSignal, until: numb
       reject(signal.reason);
       return;
     }
-    let finished = false;
+    let isFinished = false;
     const finish = (settle: () => void) => {
-      if (finished) return;
-      finished = true;
+      if (isFinished) return;
+      isFinished = true;
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
       settle();
