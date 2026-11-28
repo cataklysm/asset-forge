@@ -105,6 +105,14 @@ describe('assets', () => {
     expect(asset.createdAt).toBe(asset.updatedAt);
   });
 
+  it('the list sorts like lower(name) in SQLite: only A to Z are folded, then code point order', async () => {
+    const { session } = await openSession();
+    const [type] = await listAssetTypes(session);
+    for (const name of ['Zebra', 'Ärger', 'apple', 'ärmel']) await createAsset(session, { name, typeId: type!.id });
+    const names = (await listAssets(session, { limit: 10, offset: 0 })).items.map((a) => a.name);
+    expect(names).toEqual(['apple', 'Zebra', 'Ärger', 'ärmel']);
+  });
+
   it('createAsset starts the default workflow of the type; updateAsset leaves it alone', async () => {
     const { session } = await openSession();
     const types = await listAssetTypes(session);

@@ -1027,7 +1027,7 @@ class InMemoryAssetTypes implements AssetTypeRepository {
   readonly rows = new Map<string, AssetType>();
 
   async list(): Promise<AssetType[]> {
-    return [...this.rows.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    return [...this.rows.values()].sort((a, b) => a.sortOrder - b.sortOrder || compareBinary(a.name, b.name));
   }
 
   async get(id: string): Promise<AssetType | null> {
@@ -1250,8 +1250,33 @@ function progressOf(steps: readonly { mandatory: boolean; state: WorkflowStepSta
   return { done: mandatory.filter((s) => s.state === 'done').length, total: mandatory.length };
 }
 
+/**
+ * SQLite's built-in `lower()`: only the ASCII letters A to Z are folded.
+ *
+ * @param text the text
+ * @returns the text with A to Z in lower case
+ */
+export const sqliteLower = (text: string): string => text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+
+/**
+ * SQLite's default BINARY collation on UTF-8 text: code point order.
+ *
+ * @param a the first text
+ * @param b the second text
+ * @returns negative, zero or positive like a comparator
+ */
+export function compareBinary(a: string, b: string): number {
+  const left = [...a].map((c) => c.codePointAt(0)!);
+  const right = [...b].map((c) => c.codePointAt(0)!);
+  for (let index = 0; index < Math.min(left.length, right.length); index++) {
+    if (left[index] !== right[index]) return left[index]! - right[index]!;
+  }
+  return left.length - right.length;
+}
+
+/** `order by lower(name), id` as the SQLite repositories sort. */
 const byNameThenId = <T extends { name: string; id: string }>(a: T, b: T) =>
-  a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  compareBinary(sqliteLower(a.name), sqliteLower(b.name)) || compareBinary(a.id, b.id);
 
 function definedOnly<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
