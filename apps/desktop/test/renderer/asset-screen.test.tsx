@@ -262,7 +262,8 @@ it('import shows the result strip with failed names and errors, and reports busy
   await user.selectOptions(role, 'concept');
 
   await user.click(screen.getByRole('button', { name: 'Import files' }));
-  expect(screen.getByText('Importing…')).toBeTruthy();
+  // The file picker is open: busy, but nothing is imported yet.
+  expect(screen.queryByText('Importing…')).toBeNull();
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   expect(screen.getByRole('link', { name: 'Assets' }).getAttribute('aria-disabled')).toBe('true');
   picked.resolve(['C:\\in\\a.png', 'C:\\in\\b.exe']);

@@ -1,10 +1,30 @@
 import type { ImportProgress } from '@assetforge/contracts';
-import { importProgressValue } from '../import-progress';
-import { IMPORT_CANCEL_LABEL, IMPORT_CANCEL_TITLE, IMPORT_PROGRESS_LABEL, importCountText } from '../labels';
+import { importProgressValue, type ImportProgressState } from '../import-progress';
+import {
+  IMPORT_CANCEL_LABEL,
+  IMPORT_CANCEL_TITLE,
+  IMPORT_PROGRESS_LABEL,
+  importCountText,
+  IMPORTING_TEXT,
+} from '../labels';
 import { BUTTON, MUTED } from '../ui';
 
 // The progress of a running import in place of the import button.
 
+/**
+ * What a screen shows of its import: the progress once known, the plain busy text while the import call runs
+ * without one, and nothing while the file picker or the ZIP choice is still open.
+ *
+ * @param props the screen's import progress state
+ * @returns the status, or nothing
+ */
+export function ImportStatus({ state }: { state: ImportProgressState }) {
+  if (state.progress !== null) return <ImportProgressView progress={state.progress} onCancel={state.cancel} />;
+  if (!state.isRunning) return null;
+  return <span className={`text-sm ${MUTED}`}>{IMPORTING_TEXT}</span>;
+}
+
+/** The props of the progress view. */
 interface Props {
   /** The progress of the running import. */
   progress: ImportProgress;

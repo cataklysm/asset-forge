@@ -2,9 +2,9 @@ import { AssetStatusSchema, FileRoleSchema, type AssetDetail, type FileRole } fr
 import { ApiError, call, describeError } from '../api';
 import type { ImportProgressState } from '../import-progress';
 import { ANALYSE_ASSET_TITLE, ANALYSE_LABEL, label, SITE_IMPORT_LABEL, URL_IMPORT_LABEL } from '../labels';
-import { ALERT, BUTTON, MUTED, PAGE_TITLE, SELECT } from '../ui';
+import { ALERT, BUTTON, PAGE_TITLE, SELECT } from '../ui';
 import { CommitInput } from './CommitInput';
-import { ImportProgressView } from './ImportProgressView';
+import { ImportStatus } from './ImportProgressView';
 import { SourceList } from './SourceList';
 import { TagRow } from './TagRow';
 
@@ -156,11 +156,7 @@ function ImportControls(props: ImportControlsProps) {
       <button type="button" className={BUTTON} disabled={importing} onClick={props.onSiteImport}>
         {SITE_IMPORT_LABEL}
       </button>
-      {importProgress.progress !== null ? (
-        <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
-      ) : (
-        importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
-      )}
+      <ImportStatus state={importProgress} />
       <button
         type="button"
         className={BUTTON}

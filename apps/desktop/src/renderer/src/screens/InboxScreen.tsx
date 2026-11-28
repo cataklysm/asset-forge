@@ -6,7 +6,7 @@ import { SelectionAnalysisButtons, useAnalysisDialogs } from '../components/Anal
 import { FileBrowser } from '../components/FileBrowser';
 import { FileDetailDialog } from '../components/FileDetailDialog';
 import { AssignFileControl } from '../components/FileRoleControls';
-import { ImportProgressView } from '../components/ImportProgressView';
+import { ImportStatus } from '../components/ImportProgressView';
 import { InboxSelection } from '../components/InboxSelection';
 import { Page } from '../components/Page';
 import { batchResult, importFailures, ResultStrip, type BatchResult } from '../components/ResultStrip';
@@ -38,7 +38,7 @@ import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
-import { ALERT, BUTTON, MUTED } from '../ui';
+import { ALERT, BUTTON } from '../ui';
 
 // The inbox screen: import, the inbox file list with multi-select, and the batch actions on the selection.
 
@@ -243,11 +243,7 @@ export function InboxScreen({ state, onStateChange, onBusyChange }: Props) {
       countTitle="Files in the inbox"
       actions={
         <>
-          {importProgress.progress !== null ? (
-            <ImportProgressView progress={importProgress.progress} onCancel={importProgress.cancel} />
-          ) : (
-            importing && <span className={`text-sm ${MUTED}`}>Importing…</span>
-          )}
+          <ImportStatus state={importProgress} />
           {importButton}
           <button type="button" className={BUTTON} disabled={importing} onClick={() => setUrlImportOpen(true)}>
             {URL_IMPORT_LABEL}

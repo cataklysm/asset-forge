@@ -342,7 +342,8 @@ it('import results list imported, failed and duplicates', async () => {
   render(<Harness onBusyChange={onBusyChange} />);
   await screen.findByText('Inbox is empty');
   await user.click(screen.getAllByRole('button', { name: 'Import files' })[0]!);
-  expect(screen.getByText('Importing…')).toBeTruthy();
+  // The file picker is open: busy, but nothing is imported yet.
+  expect(screen.queryByText('Importing…')).toBeNull();
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   picked.resolve(['C:\\in\\a.png', 'C:\\in\\b.png', 'C:\\in\\c.exe']);
 

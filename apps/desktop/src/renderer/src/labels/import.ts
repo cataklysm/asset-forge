@@ -21,6 +21,8 @@ export function archiveCountLabel(count: number): string {
 
 /** The progress of a running file import (ImportProgressView). */
 export const IMPORT_PROGRESS_LABEL = 'Import progress';
+/** Shown while the import call runs and no progress is known yet. */
+export const IMPORTING_TEXT = 'Importing…';
 export const IMPORT_CANCEL_LABEL = 'Cancel';
 export const IMPORT_CANCEL_TITLE = 'Stops after the current file';
 
