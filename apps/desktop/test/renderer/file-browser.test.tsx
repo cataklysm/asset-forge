@@ -10,6 +10,7 @@ import { NO_FILE_FILTERS, type AssetView, type FileFilters } from '../../src/ren
 import { NO_SELECTION, type FileSelection } from '../../src/renderer/src/selection';
 import { JOB_POLL_MS, JobsProvider } from '../../src/renderer/src/jobs-context';
 import { deferred, installFakeApi, noChanges, type FakeHandlers } from './fake-api';
+import { settleQueued } from './settle';
 import { fileRecord, nextId, pageOf, tagOf, trashedRecord } from './fixtures';
 
 afterEach(() => {
@@ -19,11 +20,6 @@ afterEach(() => {
 type ListRequest = IpcRequest<'files:list'>;
 
 const ASSET_SCOPE: FileScope = { kind: 'asset', assetId: nextId() };
-
-/** Lets every answer and render that is already queued run, without waiting real time. */
-async function settleQueued(): Promise<void> {
-  for (let round = 0; round < 10; round += 1) await act(async () => {});
-}
 
 function many(count: number): FileRecord[] {
   return Array.from({ length: count }, (_, i) =>

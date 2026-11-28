@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import type { SetStateAction } from 'react';
-
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import type { FileListFilter, FileRecord, FileScope } from '@assetforge/contracts';
 import { call } from '../api';
 import { pagesForRows } from '../gallery';
@@ -13,18 +19,13 @@ import type { ViewHandle, ViewPosition, ViewRestore, VisibleRows } from '../hook
 import { hasFilters, listKey, NO_FILE_FILTERS, toFileQuery, type AssetView, type FileFilters } from '../list-state';
 import { PAGE_SIZE, slotAt, type Slot } from '../paged-list';
 import { clickSelect, NO_SELECTION, toggleSelect, type FileSelection, type ItemAt } from '../selection';
-import { BUTTON, MUTED } from '../ui';
 import { nextRows, reloadRestore, TOP, viewerPages, type BrowserLatest, type KeyedRows } from './file-browser-state';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
-import { FileGridView, TILE_HEIGHT, TILE_WIDTH } from './FileGridView';
-import { FileTable } from './FileTable';
+import { FileListBody } from './FileListBody';
 import type { FileViewProps } from './FileTile';
 import type { MenuItem } from './Menu';
 
 // The file list of the asset Files tab, the inbox and the trash.
-
-/** The number of placeholder tiles before the first page arrives. */
-const SKELETON_TILES = 6;
 
 /** What the host of a file browser gives it. */
 export interface FileBrowserProps {
@@ -343,64 +344,4 @@ function fileViewProps(source: ViewPropsSource): FileViewProps {
     positionRef: source.position,
     onDeleteKey: props.onDeleteKey,
   };
-}
-
-/** What the list part of the browser shows. */
-interface FileListBodyProps {
-  pending: boolean;
-  /** A failed page while the total is unknown; null when none failed. */
-  failedPage: number | null;
-  total: number | null;
-  /** The view's props; null while the list is unknown or empty. */
-  viewProps: FileViewProps | null;
-  filtered: boolean;
-  emptyText: string;
-  emptyAction?: ReactNode;
-  view: AssetView;
-  onRetry(page: number): void;
-}
-
-/**
- * The list part of the browser: Retry, the skeleton, the empty text or the grid or table view.
- *
- * @param props the state of the list
- * @returns the list part
- */
-function FileListBody(props: FileListBodyProps) {
-  const { failedPage, total, viewProps, filtered, emptyText } = props;
-  return (
-    <div className="flex min-h-0 flex-1 flex-col" aria-busy={props.pending || undefined}>
-      {failedPage !== null ? (
-        <div>
-          <button type="button" className={BUTTON} onClick={() => props.onRetry(failedPage)}>
-            Retry
-          </button>
-        </div>
-      ) : total === null ? (
-        <div className="flex flex-wrap gap-4" aria-busy="true">
-          {Array.from({ length: SKELETON_TILES }, (_, i) => (
-            <div
-              key={i}
-              data-skeleton=""
-              className="animate-pulse rounded-tile bg-raised"
-              style={{ width: TILE_WIDTH, height: TILE_HEIGHT }}
-            />
-          ))}
-        </div>
-      ) : viewProps === null ? (
-        filtered || props.emptyAction === undefined ? (
-          <p className={MUTED}>{filtered ? 'No matching files' : emptyText}</p>
-        ) : (
-          <div className="flex flex-col items-start gap-3">
-            <p className={MUTED}>{emptyText}</p>
-            {props.emptyAction}
-          </div>
-        )
-      ) : props.view === 'grid' ? (
-        <FileGridView key={viewProps.viewKey} {...viewProps} />
-      ) : (
-        <FileTable key={viewProps.viewKey} {...viewProps} />
-      )}
-    </div>
-  );
 }

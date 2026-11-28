@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode, useState } from 'react';
 import type { FileRecord } from '@assetforge/contracts';
@@ -12,6 +12,7 @@ import { fileMenuItems, type FileActionContext } from '../../src/renderer/src/fi
 import { formatDuration } from '../../src/renderer/src/format';
 import { previewUrl, videoUrl } from '../../src/renderer/src/media-url';
 import { fakeError, installFakeApi, type FakeHandlers } from './fake-api';
+import { settleQueued } from './settle';
 import { fileRecord, trashedRecord, videoRecord } from './fixtures';
 
 // jsdom has no media playback; the stage only needs play and pause to exist.
@@ -30,11 +31,6 @@ afterEach(() => {
 });
 
 const ACTIONS: FileActionContext = { cover: null, onDetails: () => {} };
-
-/** Lets every answer and render that is already queued run, without waiting real time. */
-async function settleQueued(): Promise<void> {
-  for (let round = 0; round < 10; round += 1) await act(async () => {});
-}
 
 function Harness(props: {
   file: FileRecord;

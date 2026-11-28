@@ -31,6 +31,7 @@ import {
   providerView,
   type FakeHandlers,
 } from './fake-api';
+import { settleQueued } from './settle';
 import { assetSummary, fileRecord, NONE_SKIPPED, nonImageRecord, pageOf, tagOf } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
 
@@ -38,11 +39,6 @@ const INITIAL: InboxListState = { filters: NO_FILE_FILTERS, scrollOffset: 0 };
 const OAK = assetSummary({ name: 'Oak' });
 
 type ListRequest = IpcRequest<'files:list'>;
-
-/** Lets every answer and render that is already queued run, without waiting real time. */
-async function settleQueued(): Promise<void> {
-  for (let round = 0; round < 10; round += 1) await act(async () => {});
-}
 
 /** Serves the files that `current()` returns, page by page; with `ids` only those. */
 function listOf(current: () => FileRecord[]) {
