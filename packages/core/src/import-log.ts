@@ -29,7 +29,7 @@ export interface ImportFailureIds {
  * @param log the host's log; nothing is written without one
  * @param operation what was being imported
  * @param ids the file row and the archive entry, where known
- * @param error what ended the import
+ * @param error what ended the import; never throws, even for a value with throwing getters
  */
 export function logImportFailure(
   log: LineLog | undefined,
@@ -37,9 +37,14 @@ export function logImportFailure(
   ids: ImportFailureIds,
   error: unknown,
 ): void {
-  if (log === undefined || !isUnexpectedFailure(error)) return;
-  const fields = { operation, file: ids.file ?? null, entry: ids.entry ?? null };
-  writeLine(log, errorLogLine(IMPORT_FAILED_EVENT, fields, error));
+  if (log === undefined) return;
+  try {
+    if (!isUnexpectedFailure(error)) return;
+    const fields = { operation, file: ids.file ?? null, entry: ids.entry ?? null };
+    writeLine(log, errorLogLine(IMPORT_FAILED_EVENT, fields, error));
+  } catch {
+    // A thrown value with throwing getters must not skip the cleanup that follows; the line is dropped.
+  }
 }
 
 /** The fixed event text of a download that ends as `internal_error`. */

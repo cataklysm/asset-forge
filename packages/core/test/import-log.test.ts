@@ -178,4 +178,23 @@ describe('import failure lines', () => {
       `${IMPORT_FAILED_EVENT}: operation=placement file=${results[0]!.file!.id} error=InvalidOperationError code=invalid_operation cause=(Error code=EBUSY syscall=write)`,
     ]);
   });
+
+  it('a thrown value with throwing getters never skips the cleanup that follows the line', async () => {
+    const { context, sources, storage, db, lines } = await setup();
+    sources.set('/src/ref.png', Buffer.from('hello'));
+    const hostile = new Error('boom');
+    Object.defineProperty(hostile, 'name', {
+      get() {
+        throw new Error('name getter');
+      },
+    });
+    storage.failNext('move', hostile);
+
+    const result = await importFile(context, '/src/ref.png');
+
+    expect(result.file?.status).toBe('failed');
+    expect(db.files.records.get(result.file!.id)?.status).toBe('failed');
+    expect([...storage.files.keys()].filter((path) => path.includes('staging'))).toEqual([]);
+    expect(lines).toEqual([]);
+  });
 });
