@@ -2,7 +2,7 @@ import type { AssetWorkflow, WorkflowTemplate } from '@assetforge/contracts';
 import { useState } from 'react';
 import { call, describeError } from '../api';
 import { pickTemplate } from '../progress';
-import { useLoad } from './useLoad';
+import { latestOnly, useLoad, type LatestResult } from './useLoad';
 
 /** The fields `workflows:updateStep` takes. */
 export type StepPatch = { state?: AssetWorkflow['steps'][number]['state']; notes?: string };
@@ -31,6 +31,61 @@ interface WorkflowState {
   start(): Promise<boolean>;
 }
 
+/** The workflow a mutation answered, for the asset it belongs to. */
+interface WorkflowOverride {
+  assetId: string;
+  workflow: AssetWorkflow | null;
+}
+
+/** What a workflow mutation works with. */
+interface MutationContext {
+  assetId: string;
+  setError(message: string | null): void;
+  setOverride(override: WorkflowOverride): void;
+  /** Reports whether a later mutation was started meanwhile. */
+  track(promise: Promise<AssetWorkflow | null | undefined>): Promise<LatestResult<AssetWorkflow | null | undefined>>;
+}
+
+/**
+ * Runs one mutation and shows the workflow it answers. Only the answer of the mutation started last is shown: the
+ * main process writes in the order the requests were sent, so that answer holds every earlier change too.
+ *
+ * @param context the asset, the state setters and the tracker
+ * @param request the mutation; resolves to the workflow to show, or undefined when nothing changed
+ * @returns false when the mutation failed, true otherwise (also when a later one superseded it)
+ */
+async function mutate(
+  context: MutationContext,
+  request: () => Promise<AssetWorkflow | null | undefined>,
+): Promise<boolean> {
+  context.setError(null);
+  const result = await context.track(request());
+  if (result.stale) return true;
+  if ('error' in result) {
+    context.setError(describeError(result.error));
+    return false;
+  }
+  if (result.value !== undefined) context.setOverride({ assetId: context.assetId, workflow: result.value });
+  return true;
+}
+
+/**
+ * Removes the asset's workflow (the main process asks first) and reads back what it holds afterwards.
+ *
+ * @param assetId the asset
+ * @returns the workflow after the removal, or undefined when nothing was removed
+ */
+async function removeAndReload(assetId: string): Promise<AssetWorkflow | null | undefined> {
+  const { removed } = await call('workflows:remove', { assetId });
+  if (!removed) return undefined;
+  try {
+    return await call('workflows:get', { assetId });
+  } catch {
+    // The removal is done; a failed read must not keep the removed workflow on screen.
+    return null;
+  }
+}
+
 /**
  * The workflow of one asset with its templates, and the actions on it. The workflow a mutation
  * answers replaces the loaded one without a reload.
@@ -43,10 +98,8 @@ export function useWorkflow(assetId: string, assetTypeId: string): WorkflowState
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState('');
   // The workflow returned by a mutation replaces the loaded one without a reload.
-  const [override, setOverride] = useState<{
-    assetId: string;
-    workflow: AssetWorkflow | null;
-  } | null>(null);
+  const [override, setOverride] = useState<WorkflowOverride | null>(null);
+  const [track] = useState(() => latestOnly<AssetWorkflow | null | undefined>());
 
   const loaded = useLoad(() => call('workflows:get', { assetId }), [assetId]);
   const templates = useLoad(() => call('workflowTemplates:list', {}), []);
@@ -54,17 +107,7 @@ export function useWorkflow(assetId: string, assetTypeId: string): WorkflowState
 
   const workflow = override?.assetId === assetId ? override.workflow : loaded.data;
   const resolved = override?.assetId === assetId || !loaded.loading;
-
-  async function run(action: () => Promise<void>): Promise<boolean> {
-    setError(null);
-    try {
-      await action();
-      return true;
-    } catch (failure) {
-      setError(describeError(failure));
-      return false;
-    }
-  }
+  const context: MutationContext = { assetId, setError, setOverride, track };
 
   const templateItems = templates.data ?? [];
   const typeDefault = (types.data ?? []).find((type) => type.id === assetTypeId)?.defaultWorkflowTemplateId ?? null;
@@ -90,21 +133,8 @@ export function useWorkflow(assetId: string, assetTypeId: string): WorkflowState
     ready,
     effectiveTemplate,
     choose: setChosen,
-    updateStep: (stepId, patch) =>
-      run(async () => {
-        const updated = await call('workflows:updateStep', { stepId, patch });
-        setOverride({ assetId, workflow: updated });
-      }),
-    remove: () =>
-      run(async () => {
-        const { removed } = await call('workflows:remove', { assetId });
-        if (!removed) return;
-        setOverride({ assetId, workflow: null });
-      }),
-    start: () =>
-      run(async () => {
-        const started = await call('workflows:start', { assetId, templateId: effectiveTemplate });
-        setOverride({ assetId, workflow: started });
-      }),
+    updateStep: (stepId, patch) => mutate(context, () => call('workflows:updateStep', { stepId, patch })),
+    remove: () => mutate(context, () => removeAndReload(assetId)),
+    start: () => mutate(context, () => call('workflows:start', { assetId, templateId: effectiveTemplate })),
   };
 }

@@ -78,7 +78,9 @@ function RunningWorkflow({ workflow, updateStep, remove }: RunningWorkflowProps)
         {workflow.templateName} <span className={MUTED}>v{workflow.templateVersion}</span>{' '}
         {formatProgress(workflow.progress)}
       </p>
-      <progress aria-label="Workflow progress" value={workflow.progress.done} max={workflow.progress.total} />
+      {workflow.progress.total > 0 && (
+        <progress aria-label="Workflow progress" value={workflow.progress.done} max={workflow.progress.total} />
+      )}
       <ul className="space-y-2">
         {workflow.steps.map((step) => (
           <StepItem key={step.id} step={step} updateStep={updateStep} />
