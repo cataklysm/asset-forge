@@ -115,7 +115,7 @@ export function AssetHeader(props: Props) {
         <ImportControls {...props} />
       </div>
       <AssetFields {...props} />
-      {errors.map((message) => (
+      {[...new Set(errors)].map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>

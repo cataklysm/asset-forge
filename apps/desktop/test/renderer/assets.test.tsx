@@ -498,6 +498,38 @@ it('project names that fail to load show an alert inside the column', async () =
   expect(alert.textContent).toBe('invalid_operation');
 });
 
+it('a failing library count shows its error in the toolbar', async () => {
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
+  install({
+    'assets:list': (request) => {
+      if (request.limit === 1 && Object.keys(request).length === 2) throw fakeError('invalid_operation');
+      return listOf([oak])(request);
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('Oak tree');
+  expect((await screen.findByRole('alert')).textContent).toContain('invalid_operation');
+});
+
+it('two loads failing with the same message show it once', async () => {
+  const oak = assetSummary({ name: 'Oak tree', typeId: TYPE.id });
+  install({
+    'assetTypes:list': () => {
+      throw fakeError('invalid_operation');
+    },
+    'assets:list': (request) => {
+      if (request.limit === 1 && Object.keys(request).length === 2) throw fakeError('invalid_operation');
+      return listOf([oak])(request);
+    },
+  });
+  render(<Harness />);
+  await screen.findByText('Oak tree');
+  await waitFor(() => expect(screen.getAllByText('invalid_operation')).toHaveLength(1));
+  // Both loads have answered by now, and still one line.
+  await act(async () => {});
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+
 it('New asset creates an asset in a dialog and opens it', async () => {
   const user = userEvent.setup();
   const onOpen = vi.fn();

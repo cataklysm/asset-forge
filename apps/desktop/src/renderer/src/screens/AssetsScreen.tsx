@@ -242,7 +242,7 @@ export function AssetsScreen({ state, onStateChange, onOpen }: Props) {
           onRetry: paged.retry,
           positionRef: position,
         };
-  const errors = [types.error, projects.error].filter((message): message is string => message !== null);
+  const errors = [types.error, projects.error, library.error].filter((message): message is string => message !== null);
 
   const toolbar = (
     <AssetToolbar

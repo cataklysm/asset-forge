@@ -69,7 +69,7 @@ export function AssetToolbar(props: Props) {
         <SearchRow {...props} />
         <FileRow filters={filters} onFilterChange={onFilterChange} />
       </FilterBar>
-      {errors.map((message) => (
+      {[...new Set(errors)].map((message) => (
         <p key={message} role="alert" className={ALERT}>
           {message}
         </p>
