@@ -100,30 +100,47 @@ function WorkspaceRow({ workspace, busy, onOpen, onRemove }: { workspace: Worksp
       </td>
       <td className={`whitespace-nowrap px-3 py-3 ${MUTED}`}>{formatDateTime(workspace.lastOpenedAt)}</td>
       <td className="px-3 py-2">
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            className={BUTTON_INLINE}
-            disabled={busy}
-            aria-label={openWorkspaceLabel(workspace.name)}
-            data-workspace-open=""
-            onClick={() => onOpen(workspace)}
-          >
-            {OPEN_WORKSPACE_BUTTON}
-          </button>
-          <Menu
-            label={workspaceActionsLabel(workspace.name)}
-            items={[
-              {
-                label: REMOVE_WORKSPACE_LABEL,
-                disabled: busy,
-                title: REMOVE_WORKSPACE_TITLE,
-                onSelect: () => onRemove(workspace),
-              },
-            ]}
-          />
-        </div>
+        <WorkspaceActions workspace={workspace} busy={busy} onOpen={onOpen} onRemove={onRemove} />
       </td>
     </tr>
+  );
+}
+
+/**
+ * The Open button and the Remove menu of one row.
+ *
+ * @param props the workspace, the busy flag and the callbacks
+ * @returns the actions
+ */
+function WorkspaceActions({
+  workspace,
+  busy,
+  onOpen,
+  onRemove,
+}: { workspace: WorkspaceSummary } & Omit<Props, 'sorted'>) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        className={BUTTON_INLINE}
+        disabled={busy}
+        aria-label={openWorkspaceLabel(workspace.name)}
+        data-workspace-open=""
+        onClick={() => onOpen(workspace)}
+      >
+        {OPEN_WORKSPACE_BUTTON}
+      </button>
+      <Menu
+        label={workspaceActionsLabel(workspace.name)}
+        items={[
+          {
+            label: REMOVE_WORKSPACE_LABEL,
+            disabled: busy,
+            title: REMOVE_WORKSPACE_TITLE,
+            onSelect: () => onRemove(workspace),
+          },
+        ]}
+      />
+    </div>
   );
 }
