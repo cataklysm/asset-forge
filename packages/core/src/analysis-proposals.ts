@@ -7,7 +7,7 @@ import {
 } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
-import type { Job } from './jobs.js';
+import type { Job } from './job-types.js';
 import type { Proposal } from './ports/analysis-repositories.js';
 import type { WorkspaceSession } from './session.js';
 
@@ -134,12 +134,15 @@ function chosenNames(proposal: StoredProposal, names: string[]): Set<string> {
 }
 
 /**
- * Deletes the file's proposal; no-op without one.
+ * Deletes the file's proposal; no-op without one. A trashed file keeps its proposal for a restore.
  *
  * @param session the open workspace
  * @param fileId the file
  * @returns resolves once it is deleted
+ * @throws `InvalidOperationError` for a file in the trash
  */
 export async function discardProposal(session: WorkspaceSession, fileId: string): Promise<void> {
+  const file = await session.database.files.get(fileId);
+  if (file !== null) requireLiveFile(file);
   await session.database.analyses.discardProposal(fileId);
 }

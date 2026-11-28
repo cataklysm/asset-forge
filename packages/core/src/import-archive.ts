@@ -1,6 +1,7 @@
 import type { ImportResult } from '@assetforge/contracts';
-import { ArchiveTooLargeError, ValidationFailedError } from './errors.js';
-import { importStream, safeErrorMessage, type ImportContext, type ImportOptions } from './import-file.js';
+import { ArchiveTooLargeError, safeErrorMessage, ValidationFailedError } from './errors.js';
+import { lastPathSegment } from './file-names.js';
+import { importStream, type ImportContext, type ImportOptions } from './import-file.js';
 import { isRefusedImportName, isZipArchive, REFUSED_IMPORT_MESSAGE } from './import-refusals.js';
 import type { ArchiveEntry, ArchiveReader, OpenArchive } from './ports/source-files.js';
 
@@ -203,7 +204,7 @@ async function importEntries(run: ArchiveRun): Promise<{ results: ImportResult[]
 async function importEntry(run: ArchiveRun, index: number, entry: ArchiveEntry): Promise<ImportResult> {
   const { sourcePath } = run;
   const entryName = entry.name;
-  const fileName = entryName.split(/[\\/]/).pop() ?? '';
+  const fileName = lastPathSegment(entryName);
   const refused = refusal(entry, fileName);
   if (refused !== null) return failedResult(sourcePath, entryName, refused);
   let stream;

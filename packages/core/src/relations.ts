@@ -1,19 +1,8 @@
 import type { AssetRelation, AssetRelationView } from '@assetforge/contracts';
-import { InvalidOperationError, NotFoundError } from './errors.js';
+import { InvalidOperationError } from './errors.js';
 import type { RelationKey } from './ports/asset-repositories.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
-
-/**
- * Refuses an unknown asset.
- *
- * @param session the open workspace
- * @param id the asset
- * @returns resolves when it exists
- * @throws `NotFoundError` otherwise
- */
-async function requireAsset(session: WorkspaceSession, id: string): Promise<void> {
-  if ((await session.database.assets.get(id)) === null) throw new NotFoundError(`Asset ${id} does not exist`);
-}
 
 /**
  * Relates two different assets; a relation that already exists is returned as stored.

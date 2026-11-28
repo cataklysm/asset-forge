@@ -1,11 +1,14 @@
 import type { FileTarget, ImportProgress, ImportResult } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
-import { NotFoundError } from './errors.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
-import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
+import { safeErrorMessage } from './errors.js';
+import { lastPathSegment } from './file-names.js';
+import { importContextOf } from './import-context.js';
+import { importFile, type ImportContext } from './import-file.js';
 import { isZipArchive } from './import-refusals.js';
 import type { ArchiveReader } from './ports/source-files.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /** How an import treats its sources. */
@@ -23,9 +26,7 @@ export interface ImportSourcesOptions {
  * @throws `NotFoundError` for an unknown asset
  */
 export async function requireTargetAsset(session: WorkspaceSession, target: FileTarget | null): Promise<void> {
-  if (target !== null && (await session.database.assets.get(target.assetId)) === null) {
-    throw new NotFoundError(`Asset ${target.assetId} does not exist`);
-  }
+  if (target !== null) await requireAsset(session, target.assetId);
 }
 
 /**
@@ -61,16 +62,6 @@ export function importSources(
   return new SourceImport(host, session, target, options, progress).run(sourcePaths);
 }
 
-/**
- * The last segment of a source path, split on either separator.
- *
- * @param sourcePath a source path
- * @returns the file name; '' for a path that ends in a separator
- */
-function lastPathSegment(sourcePath: string): string {
-  return sourcePath.split(/[\\/]/).pop() ?? '';
-}
-
 /** One import run; its steps share the import context, the archive budget and the live progress. */
 class SourceImport {
   private readonly context: ImportContext & { archives: ArchiveReader };
@@ -90,16 +81,7 @@ class SourceImport {
     private readonly options: ImportSourcesOptions,
     private readonly progress: ImportProgress,
   ) {
-    this.context = {
-      storage: session.storage,
-      storageId: session.storageId,
-      files: session.database.files,
-      sources: host.sources,
-      archives: host.archives,
-      probe: host.imageProbe,
-      newId: session.newId,
-      now: session.now,
-    };
+    this.context = { ...importContextOf(session, host.sources), archives: host.archives };
   }
 
   /**

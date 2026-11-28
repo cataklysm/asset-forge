@@ -77,7 +77,8 @@ export interface FileRepository {
    * The files with identical content, for duplicate detection.
    *
    * @param sha256 the checksum
-   * @returns complete files outside the trash with this checksum, oldest import first, then id
+   * @returns complete files outside the trash with this checksum, oldest import first, then id; a trashed file is no
+   *   duplicate
    */
   findCompleteBySha256(sha256: string): Promise<FileRecord[]>;
   /**
@@ -95,8 +96,9 @@ export interface FileRepository {
    */
   get(id: string): Promise<FileRecord | null>;
   /**
-   * Points the row at a new path, asset and role. Rejects with NotFoundError for an unknown id. Clears the chosen
-   * cover of any other asset than `placement.assetId` that uses this file.
+   * Points the row at a new path, asset and role. Rejects with NotFoundError for an unknown id and with
+   * InvalidOperationError for a file in the trash (only a `restore` move places it again). Clears the chosen cover of
+   * any other asset than `placement.assetId` that uses this file.
    *
    * @param id the file
    * @param placement the new path, asset and role
@@ -104,7 +106,8 @@ export interface FileRepository {
    */
   setPlacement(id: string, placement: FilePlacement): Promise<FileRecord>;
   /**
-   * One page of files, newest importedAt first.
+   * One page of files, newest importedAt first; in the trash newest deletion first. Every scope but `trash` leaves
+   * out the files in the trash.
    *
    * @param filter the scope, the filters and the page
    * @returns the page and the total
@@ -207,7 +210,9 @@ export interface FileMoveRepository {
   begin(move: FileMove): Promise<void>;
   /**
    * One transaction: copy the target into the file row, clear the chosen cover of any other asset
-   * than the target that uses this file, delete the move row. NotFoundError if there is no move row.
+   * than the target that uses this file, delete the move row. NotFoundError if there is no move row. Refused with
+   * InvalidOperationError, writing nothing, when the kind does not fit the file: a `relocate` or `trash` of a file in
+   * the trash, a `restore` of one outside it.
    *
    * @param fileId the file
    * @returns the updated record

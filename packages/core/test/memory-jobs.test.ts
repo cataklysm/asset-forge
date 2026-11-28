@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NewJob } from '../src/jobs.js';
+import type { NewJob } from '../src/job-types.js';
 import { InMemoryJobRepository } from './memory-jobs.js';
 
 const T = 'vision.analyze_file';

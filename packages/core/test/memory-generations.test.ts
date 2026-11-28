@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NewJob } from '../src/jobs.js';
+import type { NewJob } from '../src/job-types.js';
 import type { GenerationFileRef, NewGeneration } from '../src/ports/generation-repository.js';
 import { InMemoryGenerationRepository } from './memory-generations.js';
 import { InMemoryJobRepository } from './memory-jobs.js';

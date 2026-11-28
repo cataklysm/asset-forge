@@ -1,5 +1,5 @@
 import { FILE_DOWNLOAD_JOB } from '@assetforge/contracts';
-import type { Job } from './jobs.js';
+import type { Job } from './job-types.js';
 import type { WorkspaceSession } from './session.js';
 
 /**

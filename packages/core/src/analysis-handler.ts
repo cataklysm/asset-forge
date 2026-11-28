@@ -9,7 +9,7 @@ import {
   LEGACY_TAG_LIMIT,
   MAX_PROMPT_TEXT,
 } from './analysis.js';
-import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './jobs.js';
+import { JobError, reportEffect, type Job, type JobEffects, type JobHandler } from './job-types.js';
 import type { ModelImageSource, VisionProvider } from './ports/vision-provider.js';
 import type { WorkspaceSession } from './session.js';
 
