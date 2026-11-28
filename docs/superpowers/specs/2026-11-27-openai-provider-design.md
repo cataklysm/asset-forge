@@ -74,7 +74,7 @@ The base URL of an `openai` entry is the API root as OpenAI clients expect it, n
 
 ### 5.2 Request options
 
-Contracts (`settings.ts`):
+Contracts (`provider-settings.ts`, the extra-parameter rule in `extra-parameters.ts`):
 
 ```ts
 export const ThinkingSchema = z.enum(['default', 'off', 'on']);

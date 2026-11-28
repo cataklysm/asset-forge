@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { JobErrorCodeSchema, JobStatusSchema, ModelNameSchema } from './jobs';
-import { ProviderIdSchema, ProviderKindSchema } from './provider-ref';
+import { JobErrorCodeSchema } from './job-errors';
+import { JobStatusSchema } from './jobs';
+import { ModelNameSchema, ProviderIdSchema, ProviderKindSchema } from './provider-ref';
 
 const IdSchema = z.uuid();
 

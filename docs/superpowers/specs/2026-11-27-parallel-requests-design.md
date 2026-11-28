@@ -34,7 +34,7 @@ an entry gets at once.
 
 ## Design
 
-### Contract (`packages/contracts/src/settings.ts`)
+### Contract (`packages/contracts/src/provider-settings.ts`)
 
 - `PARALLEL_REQUESTS_MIN = 1`, `PARALLEL_REQUESTS_MAX = 64`, `PARALLEL_REQUESTS_DEFAULT = 1`.
 - `ProviderOptionsSchema` gets `parallelRequests`: an integer in that range. `DEFAULT_PROVIDER_OPTIONS` carries

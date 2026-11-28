@@ -7,7 +7,8 @@ import {
   FileRecordSchema,
   FileRecordsSchema,
 } from './files';
-import { FileRoleSchema, PageRequestSchema } from './library';
+import { FileRoleSchema } from './library';
+import { PageRequestSchema } from './paging';
 import { type ChannelContracts, ChosenIdsSchema, IdSchema } from './ipc-shared';
 
 export const fileChannels = {

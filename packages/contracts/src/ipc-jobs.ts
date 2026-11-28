@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { JobStatusSchema, JobSummarySchema, JobViewSchema, ModelNameSchema, WaitingByProviderSchema } from './jobs';
-import { PageRequestSchema, pageOf } from './library';
-import { ProviderIdSchema } from './provider-ref';
+import { JobStatusSchema, JobSummarySchema, JobViewSchema, WaitingByProviderSchema } from './jobs';
+import { PageRequestSchema, pageOf } from './paging';
+import { ModelNameSchema, ProviderIdSchema } from './provider-ref';
 import { type ChannelContracts, ChosenIdsSchema, EmptyRequestSchema, IdSchema } from './ipc-shared';
 
 export const jobChannels = {

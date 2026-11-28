@@ -32,3 +32,6 @@ export function isVisionKind(kind: ProviderKind): kind is VisionKind {
 
 /** The base URL a new `venice` entry starts with. */
 export const VENICE_DEFAULT_BASE_URL = 'https://api.venice.ai/api/v1';
+
+/** A model name as the provider lists it; stored and sent verbatim. */
+export const ModelNameSchema = z.string().min(1).max(200);

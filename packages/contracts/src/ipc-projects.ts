@@ -7,13 +7,13 @@ import {
   IntendedUseInputSchema,
   NameInputSchema,
   NotesInputSchema,
-  PageRequestSchema,
   ProjectAssignmentSchema,
   ProjectListSchema,
   ProjectMemberListSchema,
   ProjectSchema,
   ProjectStatusSchema,
 } from './library';
+import { PageRequestSchema } from './paging';
 import { type ChannelContracts, IdRequestSchema, IdSchema } from './ipc-shared';
 
 const AssignmentKeySchema = z.object({ projectId: IdSchema, assetId: IdSchema });

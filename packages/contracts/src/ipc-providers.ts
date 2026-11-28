@@ -1,12 +1,7 @@
 import { z } from 'zod';
+import { ListImageModelsResultSchema, ListModelsResultSchema } from './provider-models';
 import { ProviderIdSchema } from './provider-ref';
-import {
-  ListImageModelsResultSchema,
-  ListModelsResultSchema,
-  ProviderListSchema,
-  ProviderViewSchema,
-  SaveProviderSchema,
-} from './settings';
+import { ProviderListSchema, ProviderViewSchema, SaveProviderSchema } from './provider-settings';
 import { type ChannelContracts, EmptyRequestSchema } from './ipc-shared';
 
 export const providerChannels = {

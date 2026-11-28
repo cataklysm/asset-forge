@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChangesSchema } from './jobs';
+import { ChangesSchema } from './changes';
 import type { ChannelContracts } from './ipc-shared';
 
 export const changeChannels = {

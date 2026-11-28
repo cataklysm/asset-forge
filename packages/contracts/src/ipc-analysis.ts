@@ -7,8 +7,8 @@ import {
   EnqueueAnalysisResultSchema,
   ProposalViewSchema,
 } from './analysis';
-import { JobViewSchema, ModelNameSchema } from './jobs';
-import { ProviderIdSchema } from './provider-ref';
+import { JobViewSchema } from './jobs';
+import { ModelNameSchema, ProviderIdSchema } from './provider-ref';
 import { type ChannelContracts, IdSchema } from './ipc-shared';
 
 export const analysisChannels = {

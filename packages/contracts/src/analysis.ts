@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { FileIdsSchema, FileKindSchema, FileScopeSchema } from './files';
-import { JobErrorCodeSchema, ModelNameSchema } from './jobs';
+import { JobErrorCodeSchema } from './job-errors';
 import { AssetStatusSchema, FileRoleSchema } from './library';
+import { ModelNameSchema } from './provider-ref';
 
 const count = z.number().int().nonnegative();
 const TagNameSchema = z.string().max(200);
@@ -64,6 +65,10 @@ export const EnqueueAnalysisResultSchema = z.object({
   }),
 });
 export type EnqueueAnalysisResult = z.infer<typeof EnqueueAnalysisResultSchema>;
+
+/** Why a file was not queued by an enqueue; the IPC result carries counts per reason (`EnqueueAnalysisResultSchema`). */
+export const AnalysisSkipReasonSchema = z.enum(['not_found', 'not_analysable', 'already_queued', 'already_analysed']);
+export type AnalysisSkipReason = z.infer<typeof AnalysisSkipReasonSchema>;
 
 /** A tag of a proposal: normalised name and the text shown. */
 export const ProposalTagSchema = z.object({ name: z.string(), displayName: z.string() });

@@ -10,10 +10,10 @@ import {
   AssetTypeSchema,
   DescriptionInputSchema,
   NameInputSchema,
-  PageRequestSchema,
   RelationKindSchema,
   SetCoverRequestSchema,
 } from './library';
+import { PageRequestSchema } from './paging';
 import { type ChannelContracts, EmptyRequestSchema, IdRequestSchema, IdSchema } from './ipc-shared';
 
 const RelationKeySchema = z.object({

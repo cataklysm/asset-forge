@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { JobErrorCodeSchema, ModelNameSchema } from './jobs';
-import { MAX_PROVIDERS, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema, type VisionKind } from './provider-ref';
+import { PROVIDER_EXTRA_MAX } from './extra-parameters';
+import { MAX_PROVIDERS, ModelNameSchema, ProviderIdSchema, ProviderKindSchema, ProviderNameSchema } from './provider-ref';
 
 export const VISION_TIMEOUT_MIN_SECONDS = 10;
 export const VISION_TIMEOUT_MAX_SECONDS = 600;
@@ -11,8 +11,6 @@ const TimeoutSecondsSchema = z.number().int().min(VISION_TIMEOUT_MIN_SECONDS).ma
 /** Whether a vision request asks the model to think; `default` sends nothing about it. */
 export const ThinkingSchema = z.enum(['default', 'off', 'on']);
 export type Thinking = z.infer<typeof ThinkingSchema>;
-
-export const PROVIDER_EXTRA_MAX = 4000;
 
 /** Analysis requests a vision entry gets at the same time. */
 export const PARALLEL_REQUESTS_MIN = 1;
@@ -42,43 +40,6 @@ export const DEFAULT_PROVIDER_OPTIONS: ProviderOptions = Object.freeze({
   extra: '',
   parallelRequests: PARALLEL_REQUESTS_DEFAULT,
 });
-
-/** Top-level keys the extra parameters must not set, because the adapter owns them. */
-export const RESERVED_EXTRA_KEYS: Record<VisionKind, readonly string[]> = Object.freeze({
-  ollama: Object.freeze(['model', 'messages', 'stream', 'format']),
-  openai: Object.freeze(['model', 'messages', 'stream', 'response_format', 'n', 'tools', 'tool_choice']),
-});
-
-export type ExtraParameters =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; reason: 'not_json' | 'not_object' }
-  | { ok: false; reason: 'reserved'; key: string };
-
-/**
- * Parses the extra parameters of a vision entry: empty or blank text is `{}`, otherwise the text
- * must be a JSON object without a top-level key reserved for the kind. Nested keys are not checked.
- */
-export function parseExtraParameters(text: string, kind: VisionKind): ExtraParameters {
-  if (text.trim() === '') return { ok: true, value: {} };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { ok: false, reason: 'not_json' };
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ok: false, reason: 'not_object' };
-  const value = parsed as Record<string, unknown>;
-  const key = RESERVED_EXTRA_KEYS[kind].find((reserved) => Object.hasOwn(value, reserved));
-  if (key !== undefined) return { ok: false, reason: 'reserved', key };
-  return { ok: true, value };
-}
-
-/** The fixed message of a refused text. */
-export function extraParametersMessage(refusal: Extract<ExtraParameters, { ok: false }>): string {
-  return refusal.reason === 'reserved'
-    ? `The extra parameters must not set ${refusal.key}`
-    : 'The extra parameters are not a JSON object';
-}
 
 /** What an adapter is built with: the fixed fields and the parsed extra object. */
 export interface VisionRequestOptions {
@@ -151,32 +112,3 @@ export const SaveProviderSchema = z.object({
   options: ProviderOptionsSchema.optional(),
 });
 export type SaveProvider = z.infer<typeof SaveProviderSchema>;
-
-/** A model of the provider; `vision` is null when the server does not report capabilities. */
-export const VisionModelSchema = z.object({ name: ModelNameSchema, vision: z.boolean().nullable() });
-export type VisionModel = z.infer<typeof VisionModelSchema>;
-
-export const ListModelsResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), models: z.array(VisionModelSchema).max(100) }),
-  z.object({ ok: z.literal(false), code: JobErrorCodeSchema }),
-]);
-export type ListModelsResult = z.infer<typeof ListModelsResultSchema>;
-
-const ImageConstraintListSchema = z.array(z.string().min(1).max(20)).max(50).nullable();
-
-/** An image edit model of a `venice` entry; a null constraint is one the provider does not report. */
-export const ImageModelSchema = z.object({
-  name: ModelNameSchema,
-  aspectRatios: ImageConstraintListSchema,
-  resolutions: ImageConstraintListSchema,
-  defaultResolution: z.string().min(1).max(20).nullable(),
-  promptCharacterLimit: z.number().int().positive().nullable(),
-  price: z.string().max(200).nullable(),
-});
-export type ImageModel = z.infer<typeof ImageModelSchema>;
-
-export const ListImageModelsResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), models: z.array(ImageModelSchema).max(200) }),
-  z.object({ ok: z.literal(false), code: JobErrorCodeSchema }),
-]);
-export type ListImageModelsResult = z.infer<typeof ListImageModelsResultSchema>;
