@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PromptDetail, PromptSummary } from '@assetforge/contracts';
 import { call } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -159,13 +159,17 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
 
   const onDirtyChange = useCallback((next: boolean) => setDirty(next), []);
   const refresh = useCallback(() => setReload((token) => token + 1), []);
+  // The serial of the editor shown now, so that a late create answer of an editor left since is not taken.
+  const shownSerial = useRef<number | null>(editing?.serial ?? null);
+  useEffect(() => {
+    shownSerial.current = editing?.serial ?? null;
+  }, [editing]);
   const onSaved = useCallback(
-    (detail: PromptDetail, created: boolean) => {
+    (detail: PromptDetail, created: boolean, serial: number) => {
       refresh();
-      if (created) {
-        setDirty(false);
-        setEditing((current) => ({ id: detail.id, serial: (current?.serial ?? 0) + 1 }));
-      }
+      if (!created || shownSerial.current !== serial) return;
+      setDirty(false);
+      setEditing((current) => ({ id: detail.id, serial: (current?.serial ?? 0) + 1 }));
     },
     [refresh],
   );
@@ -219,7 +223,7 @@ export function PromptsScreen({ busy, initialId = null }: Props) {
               promptId={editing.id}
               busy={busy}
               onDirtyChange={onDirtyChange}
-              onSaved={onSaved}
+              onSaved={(detail, created) => onSaved(detail, created, editing.serial)}
               onTagsChanged={refresh}
               onDeleted={onDeleted}
             />

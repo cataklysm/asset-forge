@@ -293,6 +293,39 @@ it('while a new prompt is being created the fields take no typing, so no edit is
   expect(field('Text').value).toBe('A cat');
 });
 
+it('a late answer of a create does not replace the prompt chosen in the meantime', async () => {
+  const user = userEvent.setup();
+  const store = fakePrompts([promptDetail({ title: 'Other' })]);
+  const hold = gate();
+  const { api } = install([], {
+    ...store.handlers,
+    'prompts:create': async (request) => {
+      await hold.opened;
+      return store.handlers['prompts:create']!(request as never);
+    },
+  });
+  render(<PromptsScreen busy={false} />);
+  await option('Other');
+  await user.click(screen.getByRole('button', { name: 'New' }));
+  const title = () => within(editor()).getByRole<HTMLInputElement>('textbox', { name: 'Title' });
+  await user.type(title(), 'Hero');
+  await user.type(within(editor()).getByRole('textbox', { name: 'Text' }), 'A cat');
+  await user.click(saveButton());
+  await waitFor(() => expect(requests(api, 'prompts:create')).toHaveLength(1));
+
+  await user.click(await option('Other'));
+  const discard = await screen.findByRole('dialog', { name: 'Discard the unsaved changes?' });
+  await user.click(within(discard).getByRole('button', { name: 'Discard' }));
+  await waitFor(() => expect(title().value).toBe('Other'));
+
+  hold.release();
+  // The created prompt still reaches the list.
+  await waitFor(() => expect(requests(api, 'prompts:list')).toHaveLength(2));
+  await act(async () => {});
+  expect(title().value).toBe('Other');
+  expect(requests(api, 'prompts:get')).toHaveLength(1);
+});
+
 it('a failed saveVersion shows the message and keeps the draft', async () => {
   const user = userEvent.setup();
   install([promptDetail({ title: 'Hero', content: 'A {{view}}' })], {
