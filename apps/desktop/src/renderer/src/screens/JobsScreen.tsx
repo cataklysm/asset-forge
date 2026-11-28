@@ -11,6 +11,7 @@ import { call, describeError } from '../api';
 import { FilterBar } from '../components/FilterBar';
 import { JobTable, type JobTableProps } from '../components/JobTable';
 import { MoveJobsDialog } from '../components/MoveJobsDialog';
+import { ListRetry } from '../components/PageFailure';
 import { Page } from '../components/Page';
 import { usePagedList } from '../hooks/usePagedList';
 import type { ViewHandle, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
@@ -31,11 +32,10 @@ import {
   MOVE_JOBS_TITLE,
   NO_JOBS,
   RETRY_FAILED_LABEL,
-  RETRY_LABEL,
 } from '../labels';
 import { useProviders } from '../provider-context';
 import { loadedIds, type PagedState } from '../paged-list';
-import { failedFirstPage, focusedIndex, wantedPages, type ShownRows } from '../paged-view';
+import { failedFirstEntry, focusedIndex, wantedPages, type ShownRows } from '../paged-view';
 import { ALERT, BUTTON, MUTED, SELECT } from '../ui';
 
 /** The statuses of the status filter. */
@@ -304,16 +304,8 @@ export function JobsScreen() {
  */
 function jobsBody(state: PagedState<JobView>, table: Omit<JobTableProps, 'total'>) {
   const total = state.total;
-  const failedPage = failedFirstPage(state);
-  if (failedPage !== null) {
-    return (
-      <div>
-        <button type="button" className={BUTTON} onClick={() => table.onRetry(failedPage)}>
-          {RETRY_LABEL}
-        </button>
-      </div>
-    );
-  }
+  const failedPage = failedFirstEntry(state);
+  if (failedPage !== null) return <ListRetry failed={failedPage} onRetry={table.onRetry} />;
   if (total === null) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true">

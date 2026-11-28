@@ -5,6 +5,7 @@ import { call } from '../api';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FilterBar } from '../components/FilterBar';
 import { Page } from '../components/Page';
+import { ListRetry } from '../components/PageFailure';
 import { PromptEditor } from '../components/PromptEditor';
 import { PromptList } from '../components/PromptList';
 import { SearchField } from '../components/SearchField';
@@ -21,12 +22,11 @@ import {
   PROMPT_TAG_FILTER_TITLE,
   promptCountLabel,
   PROMPTS_LABEL,
-  RETRY_LABEL,
   SEARCH_PROMPTS_LABEL,
   UNSAVED_PROMPT_TITLE,
 } from '../labels';
 import { useLeaveGuard } from '../leave-guard';
-import { failedFirstPage, wantedPages, type ShownRows } from '../paged-view';
+import { failedFirstEntry, wantedPages, type ShownRows } from '../paged-view';
 import { renameInNames } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { BUTTON, MUTED } from '../ui';
@@ -259,16 +259,8 @@ function promptsBody(
 ): ReactNode {
   const { paged } = pages;
   const total = paged.state.total;
-  const failedPage = failedFirstPage(paged.state);
-  if (failedPage !== null) {
-    return (
-      <div>
-        <button type="button" className={BUTTON} onClick={() => paged.retry(failedPage)}>
-          {RETRY_LABEL}
-        </button>
-      </div>
-    );
-  }
+  const failedPage = failedFirstEntry(paged.state);
+  if (failedPage !== null) return <ListRetry failed={failedPage} onRetry={paged.retry} />;
   if (total === null) {
     return (
       <div className="flex flex-col gap-2" aria-busy="true">

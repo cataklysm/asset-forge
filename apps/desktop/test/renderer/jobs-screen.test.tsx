@@ -931,3 +931,20 @@ it('the move dialog does not offer the lane of a Venice entry as a source', asyn
   );
   expect(within(dialog).getByText('7 waiting')).toBeTruthy();
 });
+
+it('a failed first page names the failure beside Retry', async () => {
+  const user = userEvent.setup();
+  let fail = true;
+  install({
+    'jobs:list': (request) => {
+      if (fail) throw fakeError('storage_full');
+      return listOf([job({ fileName: 'back.png' })])(request);
+    },
+  });
+  renderScreen();
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  expect(screen.getByText('There is not enough free space in this folder.').getAttribute('role')).toBe('alert');
+  fail = false;
+  await user.click(retry);
+  expect(await screen.findByText('back.png')).toBeTruthy();
+});
