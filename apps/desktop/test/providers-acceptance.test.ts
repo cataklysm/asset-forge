@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ANALYZE_FILE_JOB, DEFAULT_PROVIDER_OPTIONS, type JobSummary, type ProviderView } from '@assetforge/contracts';
 import { MOCK_MODEL, type MockProvider } from '../../../docker/mock-provider/server.mjs';
 import { createProviderStore } from '../src/main/provider-store.js';
-import { providerLaneLimit } from '../src/main/composition.js';
+import { providerLaneLimit } from '../src/main/lane-limits.js';
 import { createHarness, filesBelow, NONE_SKIPPED, startTwoMocks, TEST_KEY, TEST_KEY_2, type Harness } from './analysis-harness.js';
 import { FakeCodec } from './fake-codec.js';
 

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SaveSiteProfile } from '@assetforge/contracts';
 import { RemoteFileError, type PageLoader, type PageLoadResult, type RemoteFileSource } from '@assetforge/core';
 import type { SiteSessions } from '../src/main/site-sessions.js';
-import { siteLaneLimit } from '../src/main/composition.js';
+import { siteLaneLimit } from '../src/main/lane-limits.js';
 import { abortableWait } from '../src/main/abortable-wait.js';
 import { createHarness, type Harness } from './analysis-harness.js';
 
