@@ -19,7 +19,7 @@ import {
   restoreTemporaryName,
   snapshotClosedDatabase,
 } from './database-snapshot.js';
-import { installDatabase } from './database-swap.js';
+import { installDatabase, revertInstall } from './database-swap.js';
 
 /** The options of `createDatabaseBackups`. */
 export interface DatabaseBackupsOptions {
@@ -50,7 +50,17 @@ export interface DatabaseBackupsOptions {
 }
 
 /** The database side of the workspace backup. */
-export type DatabaseBackups = Pick<WorkspaceBackups, 'snapshotClosed' | 'localLineage' | 'listLocal' | 'stageRestore'>;
+export type DatabaseBackups = Pick<WorkspaceBackups, 'snapshotClosed' | 'localLineage' | 'listLocal'> & {
+  /**
+   * Copies a backup into the local database directory of a workspace and checks it there.
+   *
+   * @param workspaceId the workspace
+   * @param source where the backup lies
+   * @param signal aborts the copy and the check
+   * @returns the staged copy, which can undo its install
+   */
+  stageRestore(workspaceId: string, source: BackupSource, signal: AbortSignal): Promise<RevertibleStagedRestore>;
+};
 
 /**
  * The database side of the workspace backup: snapshots of a closed database, its lineage, the copies made before
@@ -118,7 +128,7 @@ async function stageRestore(
   workspaceId: string,
   source: BackupSource,
   signal: AbortSignal,
-): Promise<StagedRestore> {
+): Promise<RevertibleStagedRestore> {
   const databaseFilePath = options.databaseFilePathOf(workspaceId);
   const stagedPath = join(dirname(databaseFilePath), restoreTemporaryName());
   try {
@@ -148,6 +158,26 @@ function stageFailure(error: unknown, signal: AbortSignal): Error {
   return new InvalidOperationError(BACKUP_UNREADABLE_MESSAGE, { cause: error });
 }
 
+/** A staged restore that can undo its install. */
+export type RevertibleStagedRestore = StagedRestore & {
+  /**
+   * Undoes a resolved install: removes the installed database with its side files and puts back the set the install
+   * moved aside. Does nothing before a resolved install and on every later call.
+   *
+   * @returns resolves once the original database is back, or no database is left when there was none
+   * @throws BackupError `backup_failed` when a file could not be removed or renamed for another reason than being gone
+   */
+  revert(): Promise<void>;
+};
+
+/** What a staged restore knows about its install. */
+interface InstallState {
+  /** Whether an install resolved and was not reverted yet. */
+  installed: boolean;
+  /** The name of the set the install moved aside; null when it replaced nothing. */
+  replacedSetName: string | null;
+}
+
 /**
  * The staged restore over a checked copy. Install refuses a copy whose check found no facts.
  *
@@ -162,11 +192,13 @@ function stagedRestore(
   stagedPath: string,
   facts: SnapshotFacts | null,
   now: () => Date,
-): StagedRestore {
+): RevertibleStagedRestore {
+  const state: InstallState = { installed: false, replacedSetName: null };
   return {
     facts,
-    install: () => installChecked(databaseFilePath, stagedPath, facts, now()),
+    install: () => installChecked(databaseFilePath, stagedPath, facts, now(), state),
     discard: () => removeAfterCheck(stagedPath),
+    revert: () => revertOnce(databaseFilePath, state),
   };
 }
 
@@ -177,6 +209,7 @@ function stagedRestore(
  * @param stagedPath the checked copy
  * @param facts what the check found
  * @param now the time of the replacement
+ * @param state records the install for a later revert
  * @returns resolves once the copy is the live database
  * @throws BackupError `backup_failed` when the check found no facts or the swap failed
  */
@@ -185,9 +218,25 @@ async function installChecked(
   stagedPath: string,
   facts: SnapshotFacts | null,
   now: Date,
+  state: InstallState,
 ): Promise<void> {
   if (facts === null) throw new BackupError('backup_failed');
-  await installDatabase(databaseFilePath, stagedPath, now);
+  state.replacedSetName = await installDatabase(databaseFilePath, stagedPath, now);
+  state.installed = true;
+}
+
+/**
+ * Reverts a resolved install once; the state is cleared first, so a second or concurrent call does nothing.
+ *
+ * @param databaseFilePath the live database file
+ * @param state the install state
+ * @returns resolves once reverted, or at once when there is nothing to revert
+ * @throws BackupError `backup_failed` when a file could not be removed or renamed for another reason than being gone
+ */
+async function revertOnce(databaseFilePath: string, state: InstallState): Promise<void> {
+  if (!state.installed) return;
+  state.installed = false;
+  await revertInstall(databaseFilePath, state.replacedSetName);
 }
 
 /**

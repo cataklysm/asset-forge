@@ -5,7 +5,7 @@ import { BackupError } from '@assetforge/core';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { isPreMigrationBackupName } from '../src/database-backup.js';
 import { LOCAL_TEMPORARY_PATTERN } from '../src/database-snapshot.js';
-import { installDatabase, replacedName, type SwapFileSystem } from '../src/database-swap.js';
+import { installDatabase, replacedName, revertInstall, type SwapFileSystem } from '../src/database-swap.js';
 
 const NOW = new Date('2026-11-28T09:05:03.456Z');
 const STAMP = 'assetforge.sqlite.replaced-20261128T090503Z';
@@ -159,6 +159,36 @@ describe('installDatabase', () => {
       `${future[1]}-wal`,
     ]);
     expect(await readFile(join(dir, STAMP), 'utf8')).toBe('live');
+  });
+
+  test('install answers the name of the set it created, or null when it replaced nothing', async () => {
+    expect(await installDatabase(live, staged, NOW)).toBeNull();
+    await writeFile(staged, 'second');
+    expect(await installDatabase(live, staged, NOW)).toBe(STAMP);
+  });
+
+  test('revertInstall puts the set back and leaves other sets alone', async () => {
+    await writeLive();
+    await writeFile(join(dir, `${STAMP}-2`), 'other set');
+    const created = await installDatabase(live, staged, NOW);
+    expect(created).toBe(STAMP);
+    await writeFile(`${live}-journal`, 'journal of the failed open');
+    await revertInstall(live, created);
+    expect(await names()).toEqual([
+      'assetforge.sqlite',
+      'assetforge.sqlite-shm',
+      'assetforge.sqlite-wal',
+      `${STAMP}-2`,
+    ]);
+    expect(await readFile(live, 'utf8')).toBe('live');
+  });
+
+  test('revertInstall without a set removes the installed database only', async () => {
+    await installDatabase(live, staged, NOW);
+    await writeFile(`${live}-wal`, 'wal');
+    await revertInstall(live, null);
+    expect(await names()).toEqual([]);
+    await expect(revertInstall(live, `${STAMP}-9`)).resolves.toBeUndefined();
   });
 
   test('replaced files are never matched by the pre-migration or temp patterns', () => {

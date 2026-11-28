@@ -253,6 +253,29 @@ describe('snapshot of a closed database', () => {
     expect(await readFile(`${path}-journal`, 'utf8')).toBe('journal');
   });
 
+  test('a closed snapshot aborted during a busy check rejects at once and its copy goes after the worker exited', async () => {
+    const { path } = await createWorkspaceDatabase(dir);
+    const busy = createBackupChecker({ workerUrl: BUSY_WORKER_URL, migrationsFolder: MIGRATIONS_FOLDER });
+    const controller = new AbortController();
+    let checked = '';
+    let abortedAt = 0;
+    const check: BackupChecker = (copy, checkSignal) => {
+      checked = copy;
+      setTimeout(() => {
+        abortedAt = Date.now();
+        controller.abort();
+      }, 300);
+      return busy(copy, checkSignal);
+    };
+    await expect(snapshotClosedDatabase(path, check, controller.signal)).rejects.toMatchObject({
+      code: 'backup_failed',
+    });
+    expect(Date.now() - abortedAt).toBeLessThan(200);
+    expect(isCheckRunning(checked)).toBe(true);
+    await checkExited(checked);
+    await vi.waitFor(async () => expect(await temporaryFiles()).toEqual([]));
+  }, 60_000);
+
   test('a missing database answers backup_failed', async () => {
     await expect(
       snapshotClosedDatabase(join(dir, 'assetforge.sqlite'), realChecker(), new AbortController().signal),

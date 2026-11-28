@@ -7,6 +7,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type { BackupChecker } from './backup-check.js';
 import { snapshotOpenDatabase, sweepLocalTemporary } from './database-snapshot.js';
 import { migrateWithBackup, type BackupOptions } from './migrate-with-backup.js';
+import { RunningSnapshots } from './running-snapshots.js';
 import { createAssetRepository } from './asset-repository.js';
 import { createAssetSourceRepository } from './asset-source-repository.js';
 import { createAssetTypeRepository } from './asset-type-repository.js';
@@ -104,13 +105,16 @@ interface OpenedDatabase {
 }
 
 /**
- * Every repository over the opened database, with the derived data step, the snapshot and close.
+ * Every repository over the opened database, with the derived data step, the snapshot and close. Close first stops
+ * the running snapshots and waits until they settled, so none runs on a closed connection. Close first stops the
+ * running snapshots and waits until they settled, so none runs on a closed connection.
  *
  * @param opened the connection, its Drizzle handle, the file and the options
  * @returns the workspace database
  */
 function workspaceDatabase(opened: OpenedDatabase): WorkspaceDatabase {
   const { sqlite, database, databaseFilePath, options } = opened;
+  const snapshots = new RunningSnapshots();
   return {
     meta: createMetaRepository(database),
     storages: createStorageRepository(database),
@@ -138,14 +142,35 @@ function workspaceDatabase(opened: OpenedDatabase): WorkspaceDatabase {
     changeCount() {
       return (sqlite.prepare('select total_changes() as n').get() as { n: number }).n;
     },
-    snapshot({ signal }) {
-      if (options.check === undefined) return snapshotWithoutCheck();
-      return snapshotOpenDatabase(sqlite, databaseFilePath, options.check, signal);
-    },
-    async close() {
-      if (sqlite.open) sqlite.close();
-    },
+    snapshot: ({ signal }) => snapshots.track(signal, (combined) => snapshotOf(opened, combined)),
+    close: () => closeAfterSnapshots(sqlite, snapshots),
   };
+}
+
+/**
+ * A snapshot of the opened database through its check.
+ *
+ * @param opened the connection, the file and the options
+ * @param signal aborts the copy and the check
+ * @returns the checked snapshot
+ * @throws BackupError `backup_failed` when the database was opened without a check, or the snapshot failed
+ */
+function snapshotOf(opened: OpenedDatabase, signal: AbortSignal): ReturnType<WorkspaceDatabase['snapshot']> {
+  const check = opened.options.check;
+  if (check === undefined) return snapshotWithoutCheck();
+  return snapshotOpenDatabase(opened.sqlite, opened.databaseFilePath, check, signal);
+}
+
+/**
+ * Stops the running snapshots, waits until they settled and closes the connection; a second call does nothing.
+ *
+ * @param sqlite the connection
+ * @param snapshots the snapshots running on it
+ * @returns resolves once closed
+ */
+async function closeAfterSnapshots(sqlite: Database.Database, snapshots: RunningSnapshots): Promise<void> {
+  await snapshots.stopAll();
+  if (sqlite.open) sqlite.close();
 }
 
 /**

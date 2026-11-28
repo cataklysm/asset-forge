@@ -79,7 +79,8 @@ export function replacedPattern(databaseFileName: string): RegExp {
  * @param stagedPath the checked copy in the same directory
  * @param now the time of the replacement
  * @param fileSystem the rename to use; the real one by default
- * @returns resolves once the copy is the live database and old replaced sets were pruned
+ * @returns the name of the replaced set this install created, once the copy is the live database and old replaced sets
+ *   were pruned; null when there was nothing to move aside
  * @throws BackupError `backup_failed` when a rename failed
  */
 export async function installDatabase(
@@ -87,7 +88,7 @@ export async function installDatabase(
   stagedPath: string,
   now: Date,
   fileSystem: SwapFileSystem = { rename },
-): Promise<void> {
+): Promise<string | null> {
   const targetName = await freeReplacedName(databaseFilePath, now);
   const target = join(dirname(databaseFilePath), targetName);
   const moved = await moveAside(databaseFilePath, target, fileSystem);
@@ -97,7 +98,51 @@ export async function installDatabase(
     await moveBack(databaseFilePath, target, moved, fileSystem);
     throw new BackupError('backup_failed', { cause: error });
   }
-  await pruneReplaced(databaseFilePath, moved.length > 0 ? targetName : null);
+  const created = moved.length > 0 ? targetName : null;
+  await pruneReplaced(databaseFilePath, created);
+  return created;
+}
+
+/**
+ * Undoes an install: removes the installed database with its side files and renames the set the install moved aside
+ * back to the live names. No connection may be open on the database. A missing file is not an error, so a second call
+ * does nothing; no other replaced set is touched.
+ *
+ * @param databaseFilePath the live database file
+ * @param replacedSetName the name of the set the install created; null when it replaced nothing
+ * @returns resolves once the original database is back, or no database is left when there was none
+ * @throws BackupError `backup_failed` when a file could not be removed or renamed for another reason than being gone
+ */
+export async function revertInstall(databaseFilePath: string, replacedSetName: string | null): Promise<void> {
+  let failure: unknown = null;
+  for (const suffix of MOVE_ORDER) {
+    try {
+      await rm(databaseFilePath + suffix, { force: true });
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (replacedSetName !== null) {
+    const target = join(dirname(databaseFilePath), replacedSetName);
+    for (const suffix of [...MOVE_ORDER].reverse()) {
+      try {
+        await rename(target + suffix, databaseFilePath + suffix);
+      } catch (error) {
+        if (!isMissing(error)) failure ??= error;
+      }
+    }
+  }
+  if (failure !== null) throw new BackupError('backup_failed', { cause: failure });
+}
+
+/**
+ * Whether a file operation failed because the file is gone.
+ *
+ * @param error the failure
+ * @returns true for `ENOENT`
+ */
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
 /**

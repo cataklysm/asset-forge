@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { BACKUP_UNREADABLE_MESSAGE } from '@assetforge/contracts';
 import { BackupError, InvalidOperationError, type BackupSource } from '@assetforge/core';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createDatabaseBackups, type DatabaseBackupsOptions } from '../src/database-backups.js';
 import { LOCAL_TEMPORARY_PATTERN } from '../src/database-snapshot.js';
 import { MIGRATIONS_FOLDER, openWorkspaceDatabase } from '../src/index.js';
@@ -232,6 +232,82 @@ describe('stageRestore', () => {
   });
 });
 
+describe('revert of an installed restore', () => {
+  const OLDER_SET = 'assetforge.sqlite.replaced-20261127T080000Z';
+
+  /**
+   * Stages the good copy in `regular` over the live database.
+   *
+   * @returns the staged restore
+   */
+  async function stageGood(): Promise<Awaited<ReturnType<ReturnType<typeof backups>['stageRestore']>>> {
+    await createWorkspaceDatabase(regular, 'good.sqlite');
+    return backups().stageRestore(
+      WORKSPACE_ID,
+      { origin: 'regular', directory: regular, name: 'good.sqlite' },
+      signal(),
+    );
+  }
+
+  test('revert after an install over a database puts the original with its side files back', async () => {
+    await createWorkspaceDatabase(databaseDirectory);
+    await writeFile(`${live}-wal`, 'original wal');
+    await writeFile(`${live}-shm`, 'original shm');
+    await writeFile(join(databaseDirectory, OLDER_SET), 'older');
+    const before = await checksum(live);
+    const staged = await stageGood();
+    await staged.install();
+    await writeFile(`${live}-wal`, 'wal of the failed open');
+    await writeFile(`${live}-journal`, 'journal of the failed open');
+    await staged.revert();
+    expect((await readdir(databaseDirectory)).sort()).toEqual([
+      'assetforge.sqlite',
+      'assetforge.sqlite-shm',
+      'assetforge.sqlite-wal',
+      OLDER_SET,
+    ]);
+    expect(await checksum(live)).toBe(before);
+    expect(await readFile(`${live}-wal`, 'utf8')).toBe('original wal');
+    expect(await readFile(`${live}-shm`, 'utf8')).toBe('original shm');
+  });
+
+  test('revert after an install without a database leaves no database', async () => {
+    const staged = await stageGood();
+    await staged.install();
+    await writeFile(`${live}-wal`, 'wal of the failed open');
+    await staged.revert();
+    expect(await readdir(databaseDirectory)).toEqual([]);
+  });
+
+  test('revert twice or with the files already gone does not throw', async () => {
+    await createWorkspaceDatabase(databaseDirectory);
+    const before = await checksum(live);
+    const staged = await stageGood();
+    await staged.install();
+    await staged.revert();
+    await staged.revert();
+    expect(await checksum(live)).toBe(before);
+    const second = await backups().stageRestore(
+      WORKSPACE_ID,
+      { origin: 'regular', directory: regular, name: 'good.sqlite' },
+      signal(),
+    );
+    await second.install();
+    await rm(databaseDirectory, { recursive: true, force: true });
+    await expect(second.revert()).resolves.toBeUndefined();
+  });
+
+  test('revert before an install changes nothing', async () => {
+    await createWorkspaceDatabase(databaseDirectory);
+    const before = await checksum(live);
+    const staged = await stageGood();
+    await staged.revert();
+    expect(await checksum(live)).toBe(before);
+    await staged.discard();
+    expect(await temporaryFiles()).toEqual([]);
+  });
+});
+
 describe('local database', () => {
   test('localLineage of a missing file is null', async () => {
     expect(await backups().localLineage('22222222-2222-4222-8222-222222222222')).toBeNull();
@@ -296,6 +372,63 @@ describe('snapshot of an opened workspace database', () => {
     } finally {
       await database.close();
     }
+  });
+
+  /**
+   * A workspace database with about 40 MB of filler rows, so its online backup takes about a hundred steps.
+   *
+   * @returns resolves once written and closed
+   */
+  async function largeWorkspaceDatabase(): Promise<void> {
+    await createWorkspaceDatabase(databaseDirectory);
+    const sqlite = new Database(live);
+    try {
+      sqlite.exec('CREATE TABLE filler (id INTEGER PRIMARY KEY, pad BLOB)');
+      const insert = sqlite.prepare('INSERT INTO filler (pad) VALUES (?)');
+      sqlite.transaction(() => {
+        for (let row = 0; row < 20_000; row++) insert.run(Buffer.alloc(2000, 7));
+      })();
+    } finally {
+      sqlite.close();
+    }
+  }
+
+  test('an abort during the online backup rejects within a step, leaves no temp file and close works', async () => {
+    await largeWorkspaceDatabase();
+    const database = await openWorkspaceDatabase(live, MIGRATIONS_FOLDER, { check: realChecker() });
+    const controller = new AbortController();
+    const snapshot = database.snapshot({ signal: controller.signal });
+    let abortedAt = 0;
+    setTimeout(() => {
+      abortedAt = Date.now();
+      controller.abort();
+    }, 5);
+    await expect(snapshot).rejects.toMatchObject({ code: 'backup_failed' });
+    expect(abortedAt).toBeGreaterThan(0);
+    expect(Date.now() - abortedAt).toBeLessThan(500);
+    expect(await temporaryFiles()).toEqual([]);
+    await expect(database.close()).resolves.toBeUndefined();
+  });
+
+  test('close during a running snapshot stops it first and leaves no temp file', async () => {
+    await largeWorkspaceDatabase();
+    const database = await openWorkspaceDatabase(live, MIGRATIONS_FOLDER, { check: realChecker() });
+    const snapshot = database.snapshot({ signal: signal() });
+    const settled = snapshot.catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await database.close();
+    expect(await settled).toMatchObject({ code: 'backup_failed' });
+    await vi.waitFor(async () => expect(await temporaryFiles()).toEqual([]));
+    await expect(database.close()).resolves.toBeUndefined();
+  });
+
+  test('close after a finished snapshot keeps that snapshot', async () => {
+    await createWorkspaceDatabase(databaseDirectory);
+    const database = await openWorkspaceDatabase(live, MIGRATIONS_FOLDER, { check: realChecker() });
+    const snapshot = await database.snapshot({ signal: signal() });
+    await database.close();
+    expect((await readdir(databaseDirectory)).filter((name) => LOCAL_TEMPORARY_PATTERN.test(name))).toHaveLength(1);
+    await snapshot.discard();
   });
 
   test('the open sweeps leftover temporary files', async () => {
