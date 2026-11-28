@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { nextFocusIndex, offsetShowingIndex, rowCount } from '../gallery';
+import { focusedItem, focusSuccessor, mayTakeFocus, type FocusedItem, type PendingFocus } from './item-focus';
 
 // Row windowing for grids and tables, with a roving tab stop and keyboard focus that reaches rows not rendered yet.
 
@@ -12,6 +13,11 @@ export interface ViewRestore {
   index: number | null;
   /** Focus the item at `index` once it is rendered (returning from its detail screen). */
   focus: boolean;
+  /**
+   * The element that had the focus when the screen asked for `focus`; the item focus is dropped once the
+   * user puts the focus anywhere else. Without it, the element focused when the view mounts counts.
+   */
+  focusFrom?: Element | null;
 }
 
 /** Where a mounted view is scrolled to. */
@@ -66,6 +72,36 @@ export function useElementSize(ref: RefObject<HTMLElement | null>): { width: num
     return () => observer.disconnect();
   }, [ref]);
   return size;
+}
+
+/**
+ * Applies the focus after a commit: a pending item focus once its element exists and the user has not put
+ * the focus elsewhere meanwhile (then it is dropped), otherwise the focus of an item whose element was
+ * replaced or became unfocusable in this commit.
+ *
+ * @param container the scrolling element of the rows; null when unmounted
+ * @param pendingFocus the pending item focus; cleared once applied or dropped
+ * @param focusedBefore the item that had the focus while the render was computed
+ */
+function applyFocus(
+  container: HTMLElement | null,
+  pendingFocus: { current: PendingFocus | null },
+  focusedBefore: FocusedItem | null,
+): void {
+  if (container === null) return;
+  const pending = pendingFocus.current;
+  if (pending === null) {
+    focusSuccessor(container, focusedBefore)?.focus({ preventScroll: true });
+    return;
+  }
+  if (!mayTakeFocus(container, pending)) {
+    pendingFocus.current = null;
+    return;
+  }
+  const element = container.querySelector<HTMLElement>(`[data-index="${pending.index}"]`);
+  if (!element) return;
+  pendingFocus.current = null;
+  element.focus({ preventScroll: true });
 }
 
 /** What `useVirtualRows` lays out. */
@@ -146,9 +182,17 @@ export function useVirtualRows({
 
   const clampIndex = (index: number) => Math.min(Math.max(0, index), Math.max(0, total - 1));
   const [activeIndex, setActiveIndex] = useState(() => clampIndex(restore.index ?? 0));
-  const pendingFocus = useRef<number | null>(
-    restore.focus && restore.index !== null ? clampIndex(restore.index) : null,
+  const [initialFocus] = useState<PendingFocus | null>(() =>
+    restore.focus && restore.index !== null
+      ? {
+          index: clampIndex(restore.index),
+          from: restore.focusFrom === undefined ? document.activeElement : restore.focusFrom,
+        }
+      : null,
   );
+  const pendingFocus = useRef(initialFocus);
+  // Read, not written, during the render: the commit after it hands a lost item focus on.
+  const focusedBefore = focusedItem(scrollRef.current);
 
   const scrollOffset = () => virtualizer.scrollOffset ?? initialOffset;
   const firstVisibleRow = () => Math.max(0, Math.floor(scrollOffset() / rowHeight));
@@ -171,15 +215,8 @@ export function useVirtualRows({
     if (lastRow >= firstRow) onRowsRef.current({ firstRow, lastRow, columns });
   }, [firstRow, lastRow, columns]);
 
-  // Moves focus to a pending item as soon as its element exists.
-  useEffect(() => {
-    const index = pendingFocus.current;
-    if (index === null) return;
-    const element = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${index}"]`);
-    if (!element) return;
-    pendingFocus.current = null;
-    element.focus({ preventScroll: true });
-  });
+  // Moves focus to a pending item as soon as its element exists, or back to an item whose element changed.
+  useEffect(() => applyFocus(scrollRef.current, pendingFocus, focusedBefore));
 
   const activeRow = Math.floor(activeIndex / columns);
   const activeRendered = items.some((item) => item.index === activeRow);
@@ -198,7 +235,7 @@ export function useVirtualRows({
   /** Makes `target` the active item, scrolls its row into view and focuses it now or once rendered. */
   function moveFocus(target: number) {
     setActiveIndex(target);
-    pendingFocus.current = target;
+    pendingFocus.current = { index: target, from: document.activeElement };
     virtualizer.scrollToIndex(Math.floor(target / columns), { align: 'auto' });
     const element = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${target}"]`);
     if (element) {
@@ -214,7 +251,7 @@ export function useVirtualRows({
     onItemKeyDown,
     onItemFocus: setActiveIndex,
     refocus: (index: number) => {
-      pendingFocus.current = index;
+      pendingFocus.current = { index, from: document.activeElement };
     },
     scrollOffset,
   };

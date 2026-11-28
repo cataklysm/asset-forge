@@ -1,7 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import type { AssetList, AssetType, IpcRequest, Project, ProjectMember, ProjectSummary } from '@assetforge/contracts';
+import type {
+  AssetList,
+  AssetType,
+  IpcRequest,
+  Project,
+  ProjectList,
+  ProjectMember,
+  ProjectSummary,
+} from '@assetforge/contracts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkspaceShell } from '../../src/renderer/src/components/WorkspaceShell';
 import {
@@ -417,6 +425,45 @@ it('a failed first page shows Retry', async () => {
   fail = false;
   await user.click(retry);
   expect(await screen.findByText('Back')).toBeTruthy();
+});
+
+it('a focused placeholder row that turns into Retry hands the focus to the Retry button', async () => {
+  const items = many(61);
+  const second = deferred<ProjectList>();
+  install({
+    'projects:list': (request) => (request.offset === 60 ? second.promise : listOf(items)(request)),
+  });
+  render(<Harness />);
+  await screen.findByText('Project 0');
+  const grid = screen.getByRole('grid', { name: 'Projects' });
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, value: 59 * 48 });
+  fireEvent.scroll(grid);
+  const placeholder = await waitFor(() => {
+    const row = grid.querySelector<HTMLElement>('[data-index="60"]');
+    expect(row?.getAttribute('aria-busy')).toBe('true');
+    return row!;
+  });
+  act(() => placeholder.focus());
+  expect(document.activeElement).toBe(placeholder);
+
+  await act(async () => second.reject(fakeError('internal_error')));
+  const retry = await screen.findByRole('button', { name: 'Retry' });
+  await waitFor(() => expect(document.activeElement).toBe(retry));
+});
+
+it('the focus of a row coming back from its project does not take the focus from the search field', async () => {
+  const user = userEvent.setup();
+  const items = many(20);
+  const first = deferred<ProjectList>();
+  install({
+    'projects:list': (request) => (request.limit === 60 ? first.promise : listOf(items)(request)),
+  });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: items[7]!.id }} />);
+  const search = screen.getByRole('searchbox', { name: 'Search projects' });
+  await user.click(search);
+  await act(async () => first.resolve(pageOf(items.slice(0, 20), 20)));
+  await waitFor(() => rowOf('Project 7'));
+  expect(document.activeElement).toBe(search);
 });
 
 it('New project creates a project with a description and opens it', async () => {

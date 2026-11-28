@@ -108,11 +108,13 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   const key = listKey(effective, String(renameToken));
 
   // Where the next mounted table starts; read once by each table when it mounts.
-  // Back from a project, its row takes the focus again.
+  // Back from a project, its row takes the focus again, unless the user put the focus elsewhere first.
+  const [focusFrom] = useState(() => document.activeElement);
   const restore = useRef<ViewRestore>({
     scrollOffset: state.scrollOffset,
     index: state.openedIndex,
     focus: state.openedIndex !== null,
+    focusFrom,
   });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastToken = useRef(renameToken);
