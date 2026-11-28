@@ -1,9 +1,22 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JsonWorkspaceRegistry } from '../src/main/json-registry.js';
+
+const renameFailure = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...original,
+    rename: async (from: string, to: string) => {
+      if (renameFailure.enabled) throw new Error('rename refused');
+      return original.rename(from, to);
+    },
+  };
+});
 
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
@@ -74,5 +87,41 @@ describe('JsonWorkspaceRegistry', () => {
   it('remove on a missing file creates nothing', async () => {
     await new JsonWorkspaceRegistry(join(dir, 'settings.json')).remove(ID_A);
     expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('keeps every entry of concurrent upserts', async () => {
+    const registry = new JsonWorkspaceRegistry(join(dir, 'settings.json'));
+    const ids = Array.from({ length: 8 }, (_, i) => `${String(i).repeat(8)}-1111-4111-8111-111111111111`);
+    await Promise.all(ids.map((id, i) => registry.upsert(entry(id, `w${i}`, '2026-01-01T00:00:00.000Z'))));
+    expect((await registry.list()).map((workspace) => workspace.id).sort()).toEqual([...ids].sort());
+  });
+
+  it('sets an unreadable file aside once for concurrent reads', async () => {
+    const file = join(dir, 'settings.json');
+    await writeFile(file, 'not json');
+    const registry = new JsonWorkspaceRegistry(file);
+    expect(await Promise.all([registry.list(), registry.list(), registry.get(ID_A)])).toEqual([[], [], null]);
+    expect((await readdir(dir)).filter((name) => name.startsWith('settings.json.corrupt-'))).toHaveLength(1);
+  });
+
+  it('keeps unknown top-level keys when it writes', async () => {
+    const file = join(dir, 'settings.json');
+    await writeFile(file, JSON.stringify({ theme: 'dark', workspaces: [] }));
+    await new JsonWorkspaceRegistry(file).upsert(entry(ID_A, 'one', '2026-01-01T00:00:00.000Z'));
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      theme: 'dark',
+      workspaces: [entry(ID_A, 'one', '2026-01-01T00:00:00.000Z')],
+    });
+  });
+
+  it('removes the temporary file when the rename fails and keeps serving afterwards', async () => {
+    const file = join(dir, 'settings.json');
+    const registry = new JsonWorkspaceRegistry(file);
+    renameFailure.enabled = true;
+    await expect(registry.upsert(entry(ID_A, 'one', '2026-01-01T00:00:00.000Z'))).rejects.toThrow('rename refused');
+    renameFailure.enabled = false;
+    expect(await readdir(dir)).toEqual([]);
+    await registry.upsert(entry(ID_B, 'other', '2026-01-03T00:00:00.000Z'));
+    expect(await registry.list()).toEqual([entry(ID_B, 'other', '2026-01-03T00:00:00.000Z')]);
   });
 });
