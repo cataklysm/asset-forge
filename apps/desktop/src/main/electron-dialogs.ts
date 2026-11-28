@@ -69,16 +69,25 @@ export class ElectronDialogs implements Dialogs {
   }
 
   /**
-   * Asks whether a workspace may be removed although its final backup failed. Not built yet: always declines.
+   * Asks whether a workspace may be removed although its final backup failed.
    *
    * @param workspace the workspace to remove
    * @param message the fixed message of the failed backup
-   * @returns false
+   * @returns true when the user chose to remove it anyway
    */
   async confirmRemoveWithoutBackup(workspace: WorkspaceSummary, message: string): Promise<boolean> {
-    void workspace;
-    void message;
-    return false;
+    const options: MessageBoxOptions = {
+      type: 'warning',
+      title: 'Remove workspace',
+      message: `The final backup of "${workspace.name}" failed. Remove it anyway?`,
+      detail: message,
+      buttons: ['Cancel', 'Remove anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const { response } = await this.showMessageBox(options);
+    return response === 1;
   }
 
   /**

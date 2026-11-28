@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
+  BackupError,
   errorLogLine,
-  InvalidOperationError,
   SerialQueue,
   workspaceFolderName,
   writeLine,
@@ -11,6 +11,7 @@ import {
 import { createAnalysisHandlers } from './analysis-handlers.js';
 import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
+import { createBackupHandlers, type BackupWiring } from './backup-handlers.js';
 import type { DescribeController } from './describe-controller.js';
 import { createFileHandlers } from './file-handlers.js';
 import { createGenerationHandlers } from './generation-handlers.js';
@@ -45,6 +46,8 @@ export interface AppServices {
   sites: SiteHandlers;
   /** Whether a download lane is the site of a site profile; without it no lane is. */
   isSiteLane?: (host: string) => boolean;
+  /** The host side of the backup channels; without it the backup place cannot be changed. */
+  backup?: BackupWiring;
 }
 
 /**
@@ -73,7 +76,12 @@ export function createWorkspaceHandlers(
     'workspace:open': (request) => lifecycle.run(() => manager.open(request)),
     'workspace:remove': (request) => lifecycle.remove(request),
     'workspace:close': () => lifecycle.close(),
-    ...UNBUILT_BACKUP_HANDLERS,
+    ...createBackupHandlers({
+      manager,
+      dialogs,
+      runLifecycle: (step) => lifecycle.run(step),
+      ...(services.backup === undefined ? {} : { wiring: services.backup }),
+    }),
     ...createFileHandlers({ manager, host, jobs }),
     ...createLibraryHandlers({ manager, dialogs, host }),
     ...createAnalysisHandlers({
@@ -149,7 +157,8 @@ class WorkspaceLifecycle {
   }
 
   /**
-   * Removes a workspace after the user chose how.
+   * Removes a workspace after the user chose how. When its final backup fails, the user is asked whether to remove
+   * it anyway; the workspace stays closed either way.
    *
    * @param request the workspace's id
    * @returns whether it was removed and its folder trashed
@@ -159,12 +168,30 @@ class WorkspaceLifecycle {
     if (!workspace) return { removed: false, folderTrashed: false };
     const choice = await this.dialogs.confirmRemoveWorkspace(workspace);
     if (choice === 'cancel') return { removed: false, folderTrashed: false };
-    const remove = () => this.manager.remove({ id, trashFolder: choice === 'forget_and_trash_folder' });
-    // Only the open workspace is closed by a remove; a foreign one must not stop the scheduler.
-    const { folderTrashed } = await this.queue.run(() =>
-      this.manager.current()?.id === id ? this.withNotifications(remove) : remove(),
-    );
-    return { removed: true, folderTrashed };
+    const trashFolder = choice === 'forget_and_trash_folder';
+    try {
+      return { removed: true, ...(await this.removeOnce(id, trashFolder, false)) };
+    } catch (error) {
+      if (!(error instanceof BackupError)) throw error;
+      if (!(await this.dialogs.confirmRemoveWithoutBackup(workspace, error.message))) {
+        return { removed: false, folderTrashed: false };
+      }
+      return { removed: true, ...(await this.removeOnce(id, trashFolder, true)) };
+    }
+  }
+
+  /**
+   * One remove attempt in the queue. Only the open workspace is closed by a remove, with the notifications around
+   * it; a foreign one must not stop the scheduler.
+   *
+   * @param id the workspace's id
+   * @param trashFolder whether its folder goes to the trash
+   * @param skipFinalBackup whether to remove it without the final backup
+   * @returns whether the folder was trashed
+   */
+  private removeOnce(id: string, trashFolder: boolean, skipFinalBackup: boolean): Promise<{ folderTrashed: boolean }> {
+    const remove = () => this.manager.remove({ id, trashFolder, skipFinalBackup });
+    return this.queue.run(() => (this.manager.current()?.id === id ? this.withNotifications(remove) : remove()));
   }
 
   /**
@@ -177,37 +204,6 @@ class WorkspaceLifecycle {
     return null;
   }
 }
-
-/**
- * The handler of a backup channel that is not built yet.
- *
- * @returns never; always rejects with `invalid_operation`
- */
-async function backupChannelNotBuilt(): Promise<never> {
-  throw new InvalidOperationError('Not implemented');
-}
-
-/** The backup channels until they are built: each one refuses. */
-const UNBUILT_BACKUP_HANDLERS: Pick<
-  IpcHandlers,
-  | 'workspace:backups'
-  | 'workspace:restore'
-  | 'backup:state'
-  | 'backup:status'
-  | 'backup:changeLocation'
-  | 'backup:resetLocation'
-  | 'backup:now'
-  | 'backup:delete'
-> = {
-  'workspace:backups': backupChannelNotBuilt,
-  'workspace:restore': backupChannelNotBuilt,
-  'backup:state': backupChannelNotBuilt,
-  'backup:status': backupChannelNotBuilt,
-  'backup:changeLocation': backupChannelNotBuilt,
-  'backup:resetLocation': backupChannelNotBuilt,
-  'backup:now': backupChannelNotBuilt,
-  'backup:delete': backupChannelNotBuilt,
-};
 
 /**
  * Calls one lifecycle hook. The hooks never reject by contract; a broken one must not fail the channel either.

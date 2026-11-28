@@ -16,7 +16,9 @@ import {
 import { createAnalysisServices, type AnalysisServices } from './analysis-services.js';
 import { restrictAppPermissions } from './app-permissions.js';
 import { closeApp } from './app-shutdown.js';
-import { createWorkspaceManager } from './composition.js';
+import { createWorkspaceManager, sweepAllLocalTemporary } from './composition.js';
+import { JsonWorkspaceRegistry } from './json-registry.js';
+import { RunningRestores } from './running-restores.js';
 import { ElectronDialogs } from './electron-dialogs.js';
 import { resolveFfmpegBinary } from './ffmpeg-binary.js';
 import { createImportDirectoryMemory, IMPORT_DIRECTORY_FILE } from './import-directory.js';
@@ -74,6 +76,8 @@ interface AppParts {
   siteSessions: ElectronSiteSessions;
   /** The analysis services and the job host. */
   services: AnalysisServices;
+  /** The restores in progress, aborted on quit and when the main window closes. */
+  restores: RunningRestores;
 }
 
 /** Wires the app together and registers its event handlers. */
@@ -102,9 +106,14 @@ function start(): void {
   const frames = createVideoFrames({ binaryPath: ffmpegBinary });
   const previews = createPreviewService({ cacheDir: join(app.getPath('userData'), 'cache'), pool, frames });
 
+  // One registry for the manager and the backup channels, so a changed backup folder is seen by both.
+  const registry = new JsonWorkspaceRegistry(join(app.getPath('userData'), 'settings.json'));
+  const restores = new RunningRestores();
   const manager = createWorkspaceManager({
     userDataPath: app.getPath('userData'),
     migrationsFolder: __ASSETFORGE_DEV_MIGRATIONS_FOLDER__ ?? join(outMainDir, 'migrations'),
+    registry,
+    backupWorkerUrl: new URL('./backup-check-worker.js', import.meta.url),
     moveToTrash: (absolutePath) => shell.trashItem(absolutePath),
     imageProbe: { measure: (path) => pool.measure(path) },
     videoProbe: { measure: (path, format) => previews.measureVideo(path, format) },
@@ -145,7 +154,7 @@ function start(): void {
     appVersion: app.getVersion(),
     siteSessions,
   });
-  const parts: AppParts = { state, previews, manager, siteSessions, services };
+  const parts: AppParts = { state, previews, manager, siteSessions, services, restores };
 
   const handlers = createWorkspaceHandlers(
     manager,
@@ -158,7 +167,7 @@ function start(): void {
       workspaceClosing: () => services.workspaceClosing(),
     },
     services.jobHost,
-    services,
+    { ...services, backup: { registry, userDataPath: app.getPath('userData'), restores } },
   );
   for (const channel of Object.keys(ipcContract)) {
     ipcMain.handle(channel, (event, request: unknown) => handleIpc(state, handlers, appUrl, channel, event, request));
@@ -172,6 +181,9 @@ function start(): void {
 
   app
     .whenReady()
+    // Leftover snapshot and restore files of an earlier session, removed before a window can open a workspace and
+    // make new ones; best effort, never rejects.
+    .then(() => sweepAllLocalTemporary(app.getPath('userData')))
     .then(() => {
       // The main window's session grants only what the app page uses; site sessions are hardened on their own. This
       // must stay on the default session and before openMainWindow: until a handler is installed, Electron grants
@@ -289,6 +301,7 @@ function openMainWindow(parts: AppParts, windowOptions: MainWindowOptions): void
     state.mainWindow = null;
     parts.siteSessions.shutdown();
     parts.manager.cancelImport();
+    parts.restores.abortAll();
   });
 }
 
