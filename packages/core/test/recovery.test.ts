@@ -120,6 +120,20 @@ describe('recoverFileMoves for the trash', () => {
     expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
   });
 
+  it('discards a moved row whose commit no longer fits the file instead of failing on every open', async () => {
+    const { storage, db } = await trashed();
+    await db.fileMoves.abort(ID1);
+    const relocate = { ...trashMove(ID1, 'a.png'), kind: 'relocate' as const, targetRelativePath: 'assets/x/a.png' };
+    await db.fileMoves.begin(relocate);
+    storage.files.set('assets/x/a.png', Buffer.from('a'));
+
+    const result = await recoverFileMoves({ storage, files: db.files, fileMoves: db.fileMoves });
+
+    expect(result).toEqual({ completed: [], discarded: [ID1] });
+    await expect(db.fileMoves.list()).resolves.toEqual([]);
+    expect(db.files.records.get(ID1)).toMatchObject({ relativePath: trashPath(ID1, 'a.png'), deletedAt: TS });
+  });
+
   it('keeps an open move row while the storage is not reachable', async () => {
     const { storage, db } = await setup();
     await complete(db, ID1, 'a.png');

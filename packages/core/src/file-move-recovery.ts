@@ -1,3 +1,4 @@
+import { InvalidOperationError } from './errors.js';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
 import { requireReachableStorage } from './storage-reachability.js';
@@ -43,6 +44,26 @@ export async function recoverFileMoves(
 }
 
 /**
+ * Commits a move whose binary already moved; a commit the repository refuses because the kind no longer fits the
+ * file (a relocate or trash of a file in the trash, a restore of one outside it) would be refused on every open and
+ * block restore and purge, so its row is discarded instead.
+ *
+ * @param dependencies the storage, the files and the move rows of the workspace
+ * @param fileId the file of the open move row
+ * @returns how the row was resolved
+ */
+async function commitOrDiscard(dependencies: MoveRecoveryDependencies, fileId: string): Promise<MoveResolution> {
+  try {
+    await dependencies.fileMoves.commit(fileId);
+    return 'completed';
+  } catch (error) {
+    if (!(error instanceof InvalidOperationError)) throw error;
+    await dependencies.fileMoves.abort(fileId);
+    return 'discarded';
+  }
+}
+
+/**
  * The recovery rule for one move row: commit when the target exists and the source is gone, else abort while the
  * storage is still reachable after the checks.
  *
@@ -57,11 +78,9 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
     file !== null &&
     (await dependencies.storage.exists(move.targetRelativePath)) &&
     !(await dependencies.storage.exists(file.relativePath));
-  // A target that answers "exists" is a positive observation no dropped share can fake, so a commit needs no check.
-  if (isMoved) {
-    await dependencies.fileMoves.commit(move.fileId);
-    return 'completed';
-  }
+  // The move is one atomic rename, so an existing target means it happened; a source that only looked missing
+  // because the share dropped can at most leave an orphan behind, never a row that points at nothing.
+  if (isMoved) return commitOrDiscard(dependencies, move.fileId);
   // A share that dropped during the checks answers "missing"; never take that for a move that did not happen.
   await requireReachableStorage(dependencies.storage);
   await dependencies.fileMoves.abort(move.fileId);

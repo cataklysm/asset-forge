@@ -986,6 +986,10 @@ class InMemoryFileMoves implements FileMoveRepository {
   async commit(fileId: string): Promise<FileRecord> {
     const move = this.rows.get(fileId);
     if (!move) throw new NotFoundError(`File ${fileId} has no move in progress`);
+    // Mirrors the database: a kind that does not fit the file is refused and writes nothing.
+    if (this.files.isTrashed(fileId) !== (move.kind === 'restore')) {
+      throw new InvalidOperationError(`A ${move.kind} move does not fit file ${fileId}`);
+    }
     const placement = { relativePath: move.targetRelativePath, assetId: move.targetAssetId, role: move.targetRole };
     let next: FileRecord;
     switch (move.kind) {
