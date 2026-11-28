@@ -548,21 +548,35 @@ describe('GenerationStudio', () => {
     const ready = generation(fileRecord());
     const outputId = ready.outputs[0]!.fileId!;
     let failResults = false;
-    const { state } = setup({
+    // Holds the upscales read after the change, so that it answers only after the results read failed.
+    let upscalesHeld: ReturnType<typeof deferred<void>> | null = null;
+    const { api, state } = setup({
       results: [ready],
       handlers: {
-        'generations:forFile': ({ fileId }) => {
-          if (fileId !== outputId && failResults) throw fakeError('invalid_operation', 'Results unreadable');
-          return { madeBy: null, results: fileId === outputId ? [] : [structuredClone(ready)] };
+        'generations:forFile': async ({ fileId }) => {
+          if (fileId === outputId) {
+            if (upscalesHeld !== null) await upscalesHeld.promise;
+            return { madeBy: null, results: [] };
+          }
+          if (failResults) throw fakeError('invalid_operation', 'Results unreadable');
+          return { madeBy: null, results: [structuredClone(ready)] };
         },
       },
     });
+    const upscaleReads = () =>
+      callsOf(api, 'generations:forFile').filter((entry) => (entry.request as { fileId: string }).fileId === outputId)
+        .length;
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'file edit 1.png' }));
     await waitFor(() => expect(button('Open')).toBeTruthy());
+    const readsBefore = upscaleReads();
+    const held = deferred<void>();
+    upscalesHeld = held;
     failResults = true;
     state.summary = { ...IDLE, changes: 1 };
     await screen.findByText('Results unreadable', undefined, { timeout: 5000 });
+    expect(upscaleReads()).toBe(readsBefore + 1);
+    await act(async () => held.resolve());
     await act(async () => {});
     expect(screen.getByText('Results unreadable')).toBeTruthy();
   });
