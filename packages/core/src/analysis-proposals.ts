@@ -134,12 +134,15 @@ function chosenNames(proposal: StoredProposal, names: string[]): Set<string> {
 }
 
 /**
- * Deletes the file's proposal; no-op without one.
+ * Deletes the file's proposal; no-op without one. A trashed file keeps its proposal for a restore.
  *
  * @param session the open workspace
  * @param fileId the file
  * @returns resolves once it is deleted
+ * @throws `InvalidOperationError` for a file in the trash
  */
 export async function discardProposal(session: WorkspaceSession, fileId: string): Promise<void> {
+  const file = await session.database.files.get(fileId);
+  if (file !== null) requireLiveFile(file);
   await session.database.analyses.discardProposal(fileId);
 }

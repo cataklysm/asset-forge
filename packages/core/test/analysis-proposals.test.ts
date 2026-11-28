@@ -224,4 +224,14 @@ describe('trashed files', () => {
     expect(await c.db.analyses.getProposal(c.file.id)).not.toBeNull();
     expect(c.db.tags.forFile(c.file.id)).toEqual([]);
   });
+
+  it('discardProposal refuses a trashed file and keeps its proposal for a restore', async () => {
+    const c = await setup();
+    await proposeFor(c, c.file.id);
+    await trashForTest(c.session, [c.file.id]);
+    const error = await discardProposal(c.session, c.file.id).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvalidOperationError);
+    expect((error as Error).message).toBe('The file is in the trash');
+    expect(await c.db.analyses.getProposal(c.file.id)).not.toBeNull();
+  });
 });
