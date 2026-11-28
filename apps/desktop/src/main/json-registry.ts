@@ -174,7 +174,8 @@ function unknownEntryKeys(raw: unknown[], workspaces: WorkspaceSummary[]): Map<s
   const keys = new Map<string, Record<string, unknown>>();
   workspaces.forEach((workspace, index) => {
     const stored = raw[index] as Record<string, unknown>;
-    const unknown = Object.entries(stored).filter(([key]) => !(key in workspace));
+    // `__proto__` would set the prototype of the entry when spread back on write, so it is never kept.
+    const unknown = Object.entries(stored).filter(([key]) => key !== '__proto__' && !Object.hasOwn(workspace, key));
     if (unknown.length > 0) keys.set(workspace.id, Object.fromEntries(unknown));
   });
   return keys;

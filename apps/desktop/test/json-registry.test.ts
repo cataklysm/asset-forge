@@ -141,6 +141,21 @@ describe('JsonWorkspaceRegistry', () => {
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ workspaces: [{ ...second, colour: 'blue' }] });
   });
 
+  it('keeps an unknown entry key named like an inherited property and drops __proto__', async () => {
+    const file = join(dir, 'settings.json');
+    const first = entry(ID_A, 'one', '2026-01-01T00:00:00.000Z');
+    const stored = JSON.stringify({ ...first, toString: 'kept' }).replace(/}$/, ',"__proto__":{"polluted":true}}');
+    await writeFile(file, `{"workspaces":[${stored}]}`);
+    const registry = new JsonWorkspaceRegistry(file);
+    await registry.upsert(entry(ID_A, 'renamed', '2026-01-02T00:00:00.000Z'));
+    const written = await readFile(file, 'utf8');
+    expect(written).not.toContain('__proto__');
+    expect(JSON.parse(written)).toEqual({
+      workspaces: [{ ...entry(ID_A, 'renamed', '2026-01-02T00:00:00.000Z'), toString: 'kept' }],
+    });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it('removes the temporary file when the rename fails and keeps serving afterwards', async () => {
     const file = join(dir, 'settings.json');
     const registry = new JsonWorkspaceRegistry(file);
