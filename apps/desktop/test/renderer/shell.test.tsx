@@ -23,6 +23,7 @@ import { ProviderSettingsProvider } from '../../src/renderer/src/provider-contex
 import { deferred, fakeError, fakePrompts, installFakeApi, promptDetail, type FakeHandlers } from './fake-api';
 import { assetSummary, fileRecord, pageOf, tagOf, trashedRecord } from './fixtures';
 import { renameHandlers, renameThroughDialog } from './rename-flow';
+import { readySiteCrawl } from './site-crawl-fixtures';
 
 type Section = 'assets' | 'projects' | 'prompts' | 'inbox' | 'trash' | 'jobs' | 'settings';
 
@@ -789,12 +790,44 @@ it('Settings on a line paused as not configured shows the Settings page of the w
   expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe('page');
 });
 
-it('Prompts follows Projects and Trash follows Inbox in the navigation', () => {
+it('Extractions follows Jobs in the workspace navigation', () => {
   render(shell({}));
   const names = within(screen.getByRole('navigation', { name: 'Main' }))
     .getAllByRole('link')
     .map((link) => link.textContent);
-  expect(names).toEqual(['Assets', 'Projects', 'Prompts', 'Inbox', 'Trash', 'Jobs', 'Settings']);
+  expect(names).toEqual(['Assets', 'Projects', 'Prompts', 'Inbox', 'Trash', 'Jobs', 'Extractions', 'Settings']);
+});
+
+it('opens saved extractions directly from navigation without entering an asset', async () => {
+  const user = userEvent.setup();
+  const profile = {
+    id: '22222222-2222-4222-8222-222222222222', name: 'Gallery', site: 'example.com',
+    thumbnails: '//a/@href', pagination: '', file: '', kinds: ['image' as const], minBytes: 0,
+    urlContains: '', maxPages: 20, maxFiles: 1000,
+  };
+  const task = readySiteCrawl(profile, { assetId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', role: 'reference' });
+  task.targetAssetName = 'Captured asset';
+  const api = workspaceShell(() => IDLE, () => {}, {
+    'sites:list': () => ({ profiles: [profile] }),
+    'sites:listCrawls': () => ({ items: [task], total: 1 }),
+    'sites:getCrawl': () => structuredClone(task),
+    'sites:import': () => ({ queued: 1, alreadyImported: 0, alreadyQueued: 0, invalid: [] }),
+  });
+  await user.click(screen.getByRole('link', { name: 'Extractions' }));
+  expect(await screen.findByRole('heading', { name: 'Extractions', level: 2 })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Extractions' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await user.click(await within(screen.getByRole('list', { name: 'Extractions' })).findByRole('button'));
+  expect(await screen.findByText('Target: Captured asset · reference')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Import selected' }));
+  await waitFor(() => expect(api.calls.filter((call) => call.channel === 'sites:import')).toHaveLength(1));
+  expect(api.calls.find((call) => call.channel === 'sites:import')?.request).toMatchObject({ crawlId: task.crawlId });
+  expect(api.calls.filter((call) => call.channel === 'assets:get')).toHaveLength(0);
+  await user.click(screen.getByRole('link', { name: /^Jobs/ }));
+  await screen.findByRole('heading', { name: 'Jobs', level: 2 });
+  await user.click(screen.getByRole('link', { name: 'Extractions' }));
+  expect(await within(screen.getByRole('list', { name: 'Extractions' })).findByRole('button')).toBeTruthy();
+  expect(api.calls.filter((call) => call.channel === 'sites:cancelCrawl')).toHaveLength(0);
 });
 
 it('the trash entry shows its count and names it "Trash, 3 files"', async () => {
