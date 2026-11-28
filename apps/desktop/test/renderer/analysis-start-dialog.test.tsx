@@ -18,6 +18,7 @@ import { JobsProvider } from '../../src/renderer/src/jobs-context';
 import {
   MODEL_NOT_LISTED,
   PROMPTS_LOAD_FAILED,
+  RELOAD_PROMPTS_LABEL,
   PROVIDER_STATE_LABELS,
   SETTINGS_LOAD_FAILED,
   START_COUNTING,
@@ -653,6 +654,26 @@ it('a failed prompt load blocks Start with its own reason', async () => {
   await previewShown();
   await waitFor(() => expect(startButton().title).toBe(PROMPTS_LOAD_FAILED));
   expect(startButton().disabled).toBe(true);
+});
+
+it('a failed prompt load offers a retry in the dialog that frees Start once the prompts are read', async () => {
+  let fail = true;
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  const api = install({
+    'analysisPrompts:list': (request) => {
+      if (fail) throw fakeError('internal_error');
+      return prompts.handlers['analysisPrompts:list'](request);
+    },
+  });
+  renderDialog();
+  await previewShown();
+  await waitFor(() => expect(startButton().title).toBe(PROMPTS_LOAD_FAILED));
+  fail = false;
+  const lists = callsOf(api, 'analysisPrompts:list').length;
+  await userEvent.click(screen.getByRole('button', { name: RELOAD_PROMPTS_LABEL }));
+  await waitFor(() => expect(startButton().disabled).toBe(false));
+  expect(callsOf(api, 'analysisPrompts:list')).toHaveLength(lists + 1);
+  expect(screen.queryByRole('button', { name: RELOAD_PROMPTS_LABEL })).toBeNull();
 });
 
 it('a start refused with not_found shows the error and falls back to an existing prompt', async () => {

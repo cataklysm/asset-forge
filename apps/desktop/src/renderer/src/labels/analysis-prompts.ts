@@ -11,6 +11,8 @@ export const PROMPT_PURPOSE_TITLES: Record<AnalysisPromptPurpose, string> = {
   image_prompt: 'Prompts Image to prompt can send with an image',
 };
 export const PROMPTS_LOAD_FAILED = 'The analysis prompts could not be read';
+/** The retry beside the prompt select of the analysis dialogs after a failed load. */
+export const RELOAD_PROMPTS_LABEL = 'Read the analysis prompts again';
 export const ANALYSIS_NEW_PROMPT_LABEL = 'New';
 export const NEW_PROMPT_TITLE = 'Adds a prompt with the built-in text';
 /** The name of a new prompt: 'New prompt', then 'New prompt 2', … */
