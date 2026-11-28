@@ -15,6 +15,7 @@ export * from './trash-sweep.js';
 export * from './assignments.js';
 export * from './assets.js';
 export * from './backup-names.js';
+export * from './backup-retention.js';
 export * from './backup-types.js';
 export * from './errors.js';
 export * from './error-description.js';
