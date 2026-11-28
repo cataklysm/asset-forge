@@ -16,6 +16,7 @@ import { createFileOriginRepository } from './file-origin-repository.js';
 import { createFileRepository } from './file-repository.js';
 import { createGenerationRepository } from './generation-repository.js';
 import { createJobRepository } from './job-repository.js';
+import { createSiteCrawlRepository } from './site-crawl-repository.js';
 import { createMetaRepository } from './meta-repository.js';
 import { createAssetRelationRepository } from './asset-relation-repository.js';
 import { createProjectAssetRepository } from './project-asset-repository.js';
@@ -113,6 +114,7 @@ function workspaceDatabase(
     assetSources: createAssetSourceRepository(database),
     fileOrigins: createFileOriginRepository(database),
     jobs: createJobRepository(database),
+    siteCrawls: createSiteCrawlRepository(database),
     analyses: createFileAnalysisRepository(database),
     analysisTargets: createAnalysisTargetReader(database),
     generations: createGenerationRepository(database),

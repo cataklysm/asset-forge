@@ -1,0 +1,48 @@
+import type { FileTarget, SiteCrawlProgress, SiteCrawlResult, SiteProfile } from '@assetforge/contracts';
+import type { NewJob } from '../job-types.js';
+
+/** Saved discovery state, independent of the dialog and technical job retention. */
+export interface SiteCrawlRecord {
+  id: string;
+  profile: SiteProfile;
+  galleryUrl: string;
+  target: FileTarget | null;
+  targetAssetName: string | null;
+  progress: SiteCrawlProgress;
+  result: SiteCrawlResult | null;
+  checkpoint: unknown | null;
+  importedAt: string | null;
+  /** Set only after discovery completes successfully, independent of technical job-history retention. */
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Queue-list projection that never reads or decodes large result/checkpoint JSON columns. */
+export type SiteCrawlSummaryRecord = Omit<SiteCrawlRecord, 'result' | 'checkpoint'> & { cancelled: boolean };
+
+/** Workspace-local discovery results and recovery checkpoints. */
+export interface SiteCrawlRepository {
+  /** @param record captured profile and destination, without credentials @param queuedJob optional job inserted atomically */
+  insert(record: SiteCrawlRecord, queuedJob?: NewJob): Promise<void>;
+  /** @param id the crawl and associated job id @returns saved state or null */
+  get(id: string): Promise<SiteCrawlRecord | null>;
+  /** @param page pagination @returns newest saved tasks first */
+  list(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlRecord[]; total: number }>;
+  /** @param page pagination @returns lightweight queue metadata without result/checkpoint arrays */
+  listSummaries(page: { limit: number; offset: number }): Promise<{ items: SiteCrawlSummaryRecord[]; total: number }>;
+  /** @param id crawl id @param update checkpoint or review changes @returns whether the crawl exists */
+  update(
+    id: string,
+    update: {
+      progress?: SiteCrawlProgress;
+      result?: SiteCrawlResult | null;
+      checkpoint?: unknown | null;
+      importedAt?: string | null;
+      completedAt?: string | null;
+      now: string;
+    },
+  ): Promise<boolean>;
+  /** @param profileId site profile @returns whether active jobs still depend on this profile */
+  hasActiveProfile(profileId: string): Promise<boolean>;
+}

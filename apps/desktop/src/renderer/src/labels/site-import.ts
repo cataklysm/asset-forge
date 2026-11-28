@@ -40,6 +40,79 @@ export const CRAWL_PROGRESS_LABEL = 'Test progress';
 export const CRAWL_CANCEL_LABEL = 'Cancel';
 export const CRAWL_CANCEL_TITLE = 'Stops the test and keeps what was found';
 export const FOUND_FILES_LABEL = 'Found files';
+export const SITE_QUEUE_LABEL = 'Queue extraction';
+export const SITE_QUEUE_TITLE = 'Extracts URLs in the background; downloads start only after your review';
+export const SITE_URLS_LABEL = 'Gallery URLs';
+export const SITE_URLS_HINT = 'One gallery URL per line. You can close this window while extraction continues.';
+export const SITE_TASKS_LABEL = 'Extractions';
+export const SITE_TASKS_EMPTY = 'No extractions yet. Queue a gallery to get started.';
+export const SITE_REVIEW_LABEL = 'Review results';
+export const SITE_REVIEW_EMPTY = 'Select an extraction to see its progress or review its results.';
+export const SITE_SKIP_NAMES_LABEL = 'Skip filenames already in this asset';
+export const SITE_PRESENT_LABEL = 'Already present - filename';
+export const SITE_UNKNOWN_NAME_LABEL = 'Filename determined during download';
+export const SITE_AVAILABLE_LABEL = 'Ready to download';
+export const SITE_IMPORT_SELECTED_LABEL = 'Import selected';
+export const SITE_SELECT_ALL_LABEL = 'Select all eligible files';
+export const SITE_CLEAR_SELECTION_LABEL = 'Clear selection';
+export const SITE_INBOX_TARGET_LABEL = 'Inbox';
+export const SITE_RESUME_LABEL = 'Resume extraction';
+export const SITE_RETRY_LABEL = 'Retry extraction';
+export const SITE_BACKGROUND_HINT = 'Extraction runs in the background. Review each result before importing.';
+export const SITE_PARALLEL_LABEL = 'Parallel detail pages';
+export const SITE_PARALLEL_TITLE = 'Independent browser pages used to resolve file URLs';
+export const SITE_GAP_LABEL = 'Request interval (ms)';
+export const SITE_GAP_TITLE = 'Minimum interval between page request starts for this site';
+export const SITE_TIMEOUT_LABEL = 'Page timeout (seconds)';
+export const SITE_TIMEOUT_TITLE = 'Maximum time allowed for a page to return usable URLs';
+/** Fixed captions of extraction summaries and result controls. */
+export const SITE_REVIEW_TEXT = {
+  details: 'Extraction details',
+  target: 'Target',
+  newExtractions: 'New extractions',
+  currentAsset: 'current asset',
+  asset: 'Asset',
+  importColumn: 'Import',
+  fileColumn: 'File / source page',
+  statusColumn: 'Status',
+  previousFiles: 'Previous files',
+  nextFiles: 'Next files',
+  previousTasks: 'Previous extractions',
+  nextTasks: 'Next extractions',
+};
+
+/**
+ * The number of chosen candidates across all result pages.
+ *
+ * @param selected chosen URLs
+ * @param total complete saved candidate count
+ * @returns selection text
+ */
+export function selectedSiteFilesText(selected: number, total: number): string {
+  return `${selected} of ${total} selected`;
+}
+
+/**
+ * The outcome of explicitly importing reviewed candidates.
+ *
+ * @param queued newly queued downloads
+ * @param imported already imported URLs
+ * @param pending already queued URLs
+ * @param invalid refused candidates
+ * @returns the import outcome
+ */
+export function siteImportOutcomeText(queued: number, imported: number, pending: number, invalid: number): string {
+  return `Queued ${queued} · Already imported ${imported} · Already queued ${pending} · Not imported ${invalid}`;
+}
+export const SITE_TASK_STATUS = {
+  queued: 'Queued',
+  running: 'Extracting',
+  waiting: 'Waiting for login',
+  ready: 'Ready for review',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  imported: 'Import queued',
+} as const;
 
 /**
  * '3 pages, 40 files'.

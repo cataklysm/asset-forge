@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SITE_DEFAULT_KINDS,
+  SITE_DETAIL_CONCURRENCY,
   SITE_MAX_FILES,
   SITE_MAX_PAGES,
   SITE_MIN_BYTES_MAX,
   SITE_PROFILE_NAME_MAX,
+  SITE_PAGE_TIMEOUT_MS,
+  SITE_REQUEST_GAP_MS,
   SITE_URL_CONTAINS_MAX,
   SITE_XPATH_MAX,
   type FileKind,
@@ -55,6 +58,12 @@ export interface ProfileDraft {
   maxPages: string;
   /** The most files found. */
   maxFiles: string;
+  /** The number of independently loaded detail pages. */
+  detailConcurrency: string;
+  /** The minimum time between page-request starts. */
+  requestGapMs: string;
+  /** Maximum page-load duration, typed in seconds. */
+  pageTimeoutSeconds: string;
 }
 
 const KIND_ORDER = FILE_KIND_OPTIONS.map((option) => option.kind);
@@ -86,6 +95,9 @@ export function newDraft(): ProfileDraft {
     urlContains: '',
     maxPages: String(SITE_MAX_PAGES.default),
     maxFiles: String(SITE_MAX_FILES.default),
+    detailConcurrency: String(SITE_DETAIL_CONCURRENCY.default),
+    requestGapMs: String(SITE_REQUEST_GAP_MS.default),
+    pageTimeoutSeconds: String(SITE_PAGE_TIMEOUT_MS.default / 1000),
   };
 }
 
@@ -107,6 +119,9 @@ export function draftOf(profile: SiteProfile): ProfileDraft {
     urlContains: profile.urlContains,
     maxPages: String(profile.maxPages),
     maxFiles: String(profile.maxFiles),
+    detailConcurrency: String(profile.detailConcurrency ?? SITE_DETAIL_CONCURRENCY.default),
+    requestGapMs: String(profile.requestGapMs ?? SITE_REQUEST_GAP_MS.default),
+    pageTimeoutSeconds: String((profile.pageTimeoutMs ?? SITE_PAGE_TIMEOUT_MS.default) / 1000),
   };
 }
 
@@ -165,7 +180,19 @@ export function saveRequestOf(draft: ProfileDraft, id: string | null): SaveSiteP
   const minBytes = bytesOfKb(draft.minKb);
   const maxPages = integerIn(draft.maxPages, SITE_MAX_PAGES.min, SITE_MAX_PAGES.max);
   const maxFiles = integerIn(draft.maxFiles, SITE_MAX_FILES.min, SITE_MAX_FILES.max);
+  const detailConcurrency = integerIn(
+    draft.detailConcurrency,
+    SITE_DETAIL_CONCURRENCY.min,
+    SITE_DETAIL_CONCURRENCY.max,
+  );
+  const requestGapMs = integerIn(draft.requestGapMs, SITE_REQUEST_GAP_MS.min, SITE_REQUEST_GAP_MS.max);
+  const pageTimeoutSeconds = integerIn(
+    draft.pageTimeoutSeconds,
+    SITE_PAGE_TIMEOUT_MS.min / 1000,
+    SITE_PAGE_TIMEOUT_MS.max / 1000,
+  );
   if (minBytes === null || maxPages === null || maxFiles === null) return null;
+  if (detailConcurrency === null || requestGapMs === null || pageTimeoutSeconds === null) return null;
   const site = draft.siteAddress.trim();
   if (id === null && (site === '' || site.length > 2000)) return null;
   return {
@@ -179,6 +206,9 @@ export function saveRequestOf(draft: ProfileDraft, id: string | null): SaveSiteP
     urlContains: draft.urlContains,
     maxPages,
     maxFiles,
+    detailConcurrency,
+    requestGapMs,
+    pageTimeoutMs: pageTimeoutSeconds * 1000,
   };
 }
 

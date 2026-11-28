@@ -1,5 +1,7 @@
 import {
   belongsToSite,
+  SITE_DETAIL_CONCURRENCY,
+  SITE_REQUEST_GAP_MS,
   SITE_MAX_PROBLEMS,
   type SiteCrawlProblemReason,
   type SiteCrawlResult,
@@ -7,12 +9,17 @@ import {
   type SiteProfile,
 } from '@assetforge/contracts';
 import { InvalidOperationError, ValidationFailedError } from './errors.js';
-import { fileKind } from './media-types.js';
 import type { PageLoader, PageLoadResult } from './ports/page-loader.js';
 import type { RobotsAnswer } from './robots-reader.js';
-import { robotsAllows } from './robots.js';
+import { CrawlRobots } from './site-crawl-robots.js';
+import { CrawlSchedule, SiteCrawlBlockedError } from './site-crawl-schedule.js';
+export { SiteCrawlBlockedError } from './site-crawl-schedule.js';
 import { cutValue, safeHost } from './site-crawl-problems.js';
 import { normalizeDownloadUrl } from './download-url.js';
+import { SiteCrawlState, type SiteCrawlCheckpoint } from './site-crawl-checkpoint.js';
+import { DECIDED_KINDS, finalPageOf, kindOfUrl, originAndPath, siteGalleryUrl } from './site-crawl-links.js';
+export { siteGalleryUrl } from './site-crawl-links.js';
+export { parseSiteCrawlCheckpoint, type SiteCrawlCheckpoint } from './site-crawl-checkpoint.js';
 
 /** What a crawl needs from its host. */
 export interface SiteCrawlDependencies {
@@ -22,6 +29,8 @@ export interface SiteCrawlDependencies {
   robots: (origin: string, signal: AbortSignal) => Promise<RobotsAnswer>;
   /** Resolves after `ms`; rejects once `signal` aborts. */
   wait: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Milliseconds used to pace navigation starts; defaults to Date.now. */
+  now?: () => number;
 }
 
 /** One crawl: the profile, the gallery URL as typed, the cancel signal and an optional progress report. */
@@ -30,6 +39,10 @@ export interface SiteCrawlRequest {
   url: string;
   signal: AbortSignal;
   onProgress?: (progress: { pages: number; files: number }) => void;
+  /** Restores the saved result and skips details that completed before interruption. */
+  checkpoint?: SiteCrawlCheckpoint;
+  /** Saves a detached checkpoint; calls are serialized and awaited before the crawl ends. */
+  onCheckpoint?: (checkpoint: SiteCrawlCheckpoint) => void | Promise<void>;
 }
 
 /** The least time between two page loads of one crawl. */
@@ -44,8 +57,6 @@ const INVALID_XPATH: Readonly<Record<string, string>> = {
   [SITE_QUERY.pagination]: 'The pagination expression is not valid XPath',
   [SITE_QUERY.file]: 'The file expression is not valid XPath',
 };
-/** The message for a gallery URL that is no usable URL or lies off the profile's site. */
-const OFF_SITE = "This address does not belong to the profile's site";
 /** The message when the gallery origin's robots.txt cannot be read. */
 const ROBOTS_UNREADABLE = "The site's robots.txt could not be read";
 
@@ -58,78 +69,9 @@ type CrawlAnswer = Omit<SiteCrawlResult, 'crawlId'>;
 /** A page load that gave nothing. */
 type FailedLoad = Exclude<PageLoadResult, { ok: true }>;
 
-/** The kinds the extension rule decides at crawl time; any other URL passes and is decided at download. */
-const DECIDED_KINDS = new Set(['image', 'video', 'model', 'document']);
-
-/**
- * The final URL of a loaded page as the crawl compares pages: normalised, and only when it belongs to the site.
- *
- * @param finalUrl the main frame's URL after the load, as the page loader reported it
- * @param site the profile's site
- * @returns the normalised URL; null when it is no URL or not on the site
- */
-function finalPageOf(finalUrl: string, site: string): string | null {
-  let url: string;
-  try {
-    url = normalizeDownloadUrl(finalUrl);
-  } catch {
-    return null;
-  }
-  return belongsToSite(url, site) ? url : null;
-}
-
-/**
- * The file kind the name rule gives the last path segment of a URL.
- *
- * @param url a normalised URL
- * @returns the kind
- */
-function kindOfUrl(url: string): string {
-  const path = new URL(url).pathname;
-  let name = path.slice(path.lastIndexOf('/') + 1);
-  try {
-    name = decodeURIComponent(name);
-  } catch {
-    // Keep the raw segment.
-  }
-  return fileKind(name);
-}
-
-/**
- * The normalised gallery URL a crawl of `url` would start from. Throws ValidationFailedError with the fixed
- * off-site message for anything that is no usable URL or does not belong to the profile's site, so a caller can
- * refuse it before any page window opens.
- *
- * @param profile the profile, for its site
- * @param url the gallery URL as typed
- * @returns the normalised gallery URL
- * @throws ValidationFailedError for an unusable or off-site URL
- */
-export function siteGalleryUrl(profile: Pick<SiteProfile, 'site'>, url: string): string {
-  let galleryUrl: string;
-  try {
-    galleryUrl = normalizeDownloadUrl(url);
-  } catch {
-    throw new ValidationFailedError(OFF_SITE);
-  }
-  if (!belongsToSite(galleryUrl, profile.site)) throw new ValidationFailedError(OFF_SITE);
-  return galleryUrl;
-}
-
-/**
- * Origin and path of a URL, the part robots rules and a redirect check look at.
- *
- * @param url a URL
- * @returns origin and path without query or fragment
- */
-function originAndPath(url: string): string {
-  const parsed = new URL(url);
-  return `${parsed.origin}${parsed.pathname}`;
-}
-
 /**
  * Reads a gallery with the profile's expressions and answers the file URLs found (spec "The crawl"). Pages are
- * loaded one after another with PAGE_GAP_MS between two loads. A cancel answers what was found so far with
+ * loaded through bounded detail workers with a shared interval between navigation starts. A cancel answers what was found so far with
  * `cancelled: true`. Throws ValidationFailedError for a gallery URL off the site or an invalid expression, and
  * InvalidOperationError when the robots.txt of the gallery URL's origin cannot be read.
  *
@@ -149,35 +91,11 @@ class SiteCrawl {
   private readonly request: SiteCrawlRequest;
   private readonly profile: SiteProfile;
   private readonly signal: AbortSignal;
+  private readonly schedule: CrawlSchedule;
   private readonly galleryUrl: string;
-  private readonly answer: CrawlAnswer = {
-    files: [],
-    pages: 0,
-    duplicates: 0,
-    filtered: 0,
-    disallowed: 0,
-    invalid: 0,
-    offSite: 0,
-    pageFailures: 0,
-    truncated: null,
-    cancelled: false,
-    problems: [],
-    problemsDropped: 0,
-  };
-  private readonly problemKeys = new Set<string>();
+  private readonly state: SiteCrawlState;
   private readonly contains: string;
-  private readonly robotsByOrigin = new Map<string, Promise<RobotsAnswer>>();
-  private readonly seenFiles = new Set<string>();
-  private readonly seenPages: Set<string>;
-  /** The final URLs of redirected gallery pages: seen like a loaded page, never counted against maxPages. */
-  private readonly redirectedPages = new Set<string>();
-  /** Pagination targets robots refused: counted once, never against maxPages. */
-  private readonly refusedPages = new Set<string>();
-  private readonly seenDetails = new Set<string>();
-  /** Pagination and detail links off the site: counted once each. */
-  private readonly offSiteLinks = new Set<string>();
-  private readonly queue: string[];
-  private loads = 0;
+  private readonly policy: CrawlRobots;
   private readonly galleryQueries: Record<string, string>;
   private readonly detailQueries: Record<string, string>;
 
@@ -192,11 +110,21 @@ class SiteCrawl {
     this.dependencies = dependencies;
     this.request = request;
     this.profile = request.profile;
-    this.signal = request.signal;
+    this.schedule = new CrawlSchedule(
+      request.signal,
+      request.profile.detailConcurrency ?? SITE_DETAIL_CONCURRENCY.default,
+      request.profile.requestGapMs ?? SITE_REQUEST_GAP_MS.default,
+      dependencies.wait,
+      dependencies.now ?? Date.now,
+    );
+    this.signal = this.schedule.signal;
     this.galleryUrl = galleryUrl;
     this.contains = this.profile.urlContains.toLowerCase();
-    this.seenPages = new Set<string>([galleryUrl]);
-    this.queue = [galleryUrl];
+    this.state = new SiteCrawlState(galleryUrl, request.checkpoint, request.onCheckpoint);
+    this.policy = new CrawlRobots(dependencies.robots, this.signal, (url, stage, reason, detail) => {
+      this.state.answer.disallowed++;
+      this.problem(url, stage, reason, detail);
+    });
     this.galleryQueries = { [SITE_QUERY.thumbnails]: this.profile.thumbnails };
     if (this.profile.pagination !== '') this.galleryQueries[SITE_QUERY.pagination] = this.profile.pagination;
     this.detailQueries = { [SITE_QUERY.file]: this.profile.file };
@@ -211,25 +139,31 @@ class SiteCrawl {
     try {
       await this.crawl();
     } catch (error) {
-      if (error instanceof Stop || this.signal.aborted) {
-        this.answer.cancelled = this.signal.aborted;
-        return this.answer;
+      if (error instanceof Stop || this.request.signal.aborted) {
+        this.state.answer.cancelled = this.request.signal.aborted;
+        return this.state.answer;
       }
       throw error;
+    } finally {
+      this.schedule.close();
+      await this.state.save();
     }
-    return this.answer;
+    return this.state.answer;
   }
 
   /** Checks the gallery origin's robots.txt, then reads the gallery pages in queue order. */
   private async crawl(): Promise<void> {
     // The gallery origin's robots.txt must be readable; any other origin's failure only drops its URLs.
-    const galleryRobots = await this.robotsOf(new URL(this.galleryUrl).origin);
+    const galleryRobots = await this.policy.robotsOf(new URL(this.galleryUrl).origin);
     this.checkCancel();
     if (galleryRobots.kind === 'unavailable') throw new InvalidOperationError(ROBOTS_UNREADABLE);
-    if (!(await this.allowed(this.galleryUrl, 'gallery'))) return;
+    if (!(await this.policy.allowed(this.galleryUrl, 'gallery'))) return;
 
-    while (this.queue.length > 0) {
-      await this.readGalleryPage(this.queue.shift()!);
+    while (this.state.queue.length > 0) {
+      this.state.currentGallery = this.state.queue.shift()!;
+      await this.readGalleryPage(this.state.currentGallery);
+      this.state.currentGallery = null;
+      await this.state.save();
     }
   }
 
@@ -242,29 +176,32 @@ class SiteCrawl {
     const page = await this.load(pageUrl, this.galleryQueries, SITE_QUERY.thumbnails);
     if (!page.ok) {
       this.pageFailed(pageUrl, 'gallery', page);
-      this.progress();
+      await this.progress();
       return;
     }
     const pageBase = await this.baseOf(page, pageUrl, 'gallery');
     if (pageBase === null) {
-      this.progress();
+      await this.progress();
       return;
     }
-    this.answer.pages++;
+    if (!this.state.loadedGalleries.has(pageUrl)) {
+      this.state.loadedGalleries.add(pageUrl);
+      this.state.answer.pages++;
+    }
     const finalPage = finalPageOf(page.finalUrl, this.profile.site);
-    if (finalPage !== null && !this.seenPages.has(finalPage)) this.redirectedPages.add(finalPage);
+    if (finalPage !== null && !this.state.seenPages.has(finalPage)) this.state.redirectedPages.add(finalPage);
 
     const thumbnails = this.resolveAll(page.results[SITE_QUERY.thumbnails], pageBase);
     if (this.profile.file === '') {
-      await this.addFiles(thumbnails);
+      await this.addFiles(thumbnails, finalPage ?? pageUrl);
     } else {
-      for (const detailUrl of thumbnails) await this.readDetailPage(detailUrl);
+      await this.schedule.details(thumbnails, (url) => this.readDetailPage(url));
     }
 
     if (this.profile.pagination !== '') {
       for (const next of this.resolveAll(page.results[SITE_QUERY.pagination], pageBase)) await this.queuePage(next);
     }
-    this.progress();
+    await this.progress();
   }
 
   /**
@@ -273,24 +210,30 @@ class SiteCrawl {
    * @param detailUrl the detail page
    */
   private async readDetailPage(detailUrl: string): Promise<void> {
-    if (this.seenDetails.has(detailUrl)) return;
+    if (this.state.seenDetails.has(detailUrl) || this.state.completedDetails.has(detailUrl)) return;
     if (!belongsToSite(detailUrl, this.profile.site)) {
       this.leftSite(detailUrl, 'detail');
       return;
     }
-    this.seenDetails.add(detailUrl);
-    if (!(await this.allowed(detailUrl, 'detail'))) return;
+    this.state.seenDetails.add(detailUrl);
+    if (!(await this.policy.allowed(detailUrl, 'detail'))) return;
     const detail = await this.load(detailUrl, this.detailQueries, SITE_QUERY.file);
     if (!detail.ok) {
       this.pageFailed(detailUrl, 'detail', detail);
-      this.progress();
+      this.state.completedDetails.add(detailUrl);
+      await this.progress();
       return;
     }
     const finalDetail = finalPageOf(detail.finalUrl, this.profile.site);
-    if (finalDetail !== null) this.seenDetails.add(finalDetail);
+    if (finalDetail !== null) {
+      this.state.seenDetails.add(finalDetail);
+    }
     const detailBase = await this.baseOf(detail, detailUrl, 'detail');
-    if (detailBase !== null) await this.addFiles(this.resolveAll(detail.results[SITE_QUERY.file], detailBase));
-    this.progress();
+    if (detailBase !== null)
+      await this.addFiles(this.resolveAll(detail.results[SITE_QUERY.file], detailBase), finalDetail ?? detailUrl);
+    this.state.completedDetails.add(detailUrl);
+    if (finalDetail !== null) this.state.completedDetails.add(finalDetail);
+    await this.progress();
   }
 
   /**
@@ -299,53 +242,65 @@ class SiteCrawl {
    * @param next the target
    */
   private async queuePage(next: string): Promise<void> {
-    if (this.seenPages.has(next) || this.redirectedPages.has(next) || this.refusedPages.has(next)) return;
+    if (this.state.seenPages.has(next) || this.state.redirectedPages.has(next) || this.state.refusedPages.has(next))
+      return;
     if (!belongsToSite(next, this.profile.site)) {
       this.leftSite(next, 'gallery');
       return;
     }
-    if (!(await this.allowed(next, 'gallery'))) {
-      this.refusedPages.add(next);
+    if (!(await this.policy.allowed(next, 'gallery'))) {
+      this.state.refusedPages.add(next);
       return;
     }
-    if (this.seenPages.size >= this.profile.maxPages) {
-      this.answer.truncated ??= 'pages';
+    if (this.state.seenPages.size >= this.profile.maxPages) {
+      this.state.answer.truncated ??= 'pages';
       return;
     }
-    this.seenPages.add(next);
-    this.queue.push(next);
+    this.state.seenPages.add(next);
+    this.state.queue.push(next);
   }
 
   /**
    * Takes file URLs through uniqueness, urlContains, kind, robots and maxFiles (spec "The crawl", step 5).
    *
    * @param urls the resolved file URLs
+   * @param sourcePage the page where the URLs were found
    * @throws Stop once maxFiles is reached
    */
-  private async addFiles(urls: readonly string[]): Promise<void> {
+  private async addFiles(urls: readonly string[], sourcePage: string): Promise<void> {
     for (const url of urls) {
-      if (this.seenFiles.has(url)) {
-        this.answer.duplicates++;
+      if (this.state.seenFiles.has(url)) {
+        this.state.answer.duplicates++;
         continue;
       }
-      this.seenFiles.add(url);
       if (this.contains !== '' && !url.toLowerCase().includes(this.contains)) {
-        this.answer.filtered++;
+        this.state.seenFiles.add(url);
+        this.state.answer.filtered++;
         this.problem(url, 'file', 'filtered_text');
         continue;
       }
       const kind = kindOfUrl(url);
       if (DECIDED_KINDS.has(kind) && !(this.profile.kinds as readonly string[]).includes(kind)) {
-        this.answer.filtered++;
+        this.state.seenFiles.add(url);
+        this.state.answer.filtered++;
         this.problem(url, 'file', 'filtered_kind');
         continue;
       }
-      if (!(await this.allowed(url, 'file'))) continue;
-      if (this.answer.files.length >= this.profile.maxFiles) {
-        this.answer.truncated = 'files';
+      if (!(await this.policy.allowed(url, 'file'))) {
+        this.state.seenFiles.add(url);
+        continue;
+      }
+      if (this.state.seenFiles.has(url)) {
+        this.state.answer.duplicates++;
+        continue;
+      }
+      if (this.state.answer.files.length >= this.profile.maxFiles) {
+        this.state.answer.truncated = 'files';
         throw new Stop();
       }
-      this.answer.files.push(url);
+      this.state.seenFiles.add(url);
+      this.state.answer.files.push(url);
+      this.state.sourcePages[url] = sourcePage;
     }
   }
 
@@ -356,9 +311,9 @@ class SiteCrawl {
    * @param stage the page kind it would have been loaded as
    */
   private leftSite(url: string, stage: SiteCrawlStage): void {
-    if (!this.offSiteLinks.has(url)) {
-      this.offSiteLinks.add(url);
-      this.answer.offSite++;
+    if (!this.state.offSiteLinks.has(url)) {
+      this.state.offSiteLinks.add(url);
+      this.state.answer.offSite++;
     }
     this.problem(url, stage, 'off_site');
   }
@@ -378,10 +333,11 @@ class SiteCrawl {
     detail: string | null = null,
   ): void {
     const key = `${stage}\n${reason}\n${url}\n${detail ?? ''}`;
-    if (this.problemKeys.has(key)) return;
-    this.problemKeys.add(key);
-    if (this.answer.problems.length < SITE_MAX_PROBLEMS) this.answer.problems.push({ url, stage, reason, detail });
-    else this.answer.problemsDropped++;
+    if (this.state.problemKeys.has(key)) return;
+    this.state.problemKeys.add(key);
+    if (this.state.answer.problems.length < SITE_MAX_PROBLEMS)
+      this.state.answer.problems.push({ url, stage, reason, detail });
+    else this.state.answer.problemsDropped++;
   }
 
   /**
@@ -391,46 +347,6 @@ class SiteCrawl {
    */
   private checkCancel(): void {
     if (this.signal.aborted) throw new Stop();
-  }
-
-  /**
-   * The robots.txt of an origin, read once per crawl; a failure other than the abort answers `unavailable`.
-   *
-   * @param origin the origin
-   * @returns the shared answer
-   */
-  private robotsOf(origin: string): Promise<RobotsAnswer> {
-    let pending = this.robotsByOrigin.get(origin);
-    if (pending === undefined) {
-      pending = this.dependencies.robots(origin, this.signal).catch((): RobotsAnswer => {
-        if (this.signal.aborted) throw new Stop();
-        return { kind: 'unavailable' };
-      });
-      this.robotsByOrigin.set(origin, pending);
-    }
-    return pending;
-  }
-
-  /**
-   * True when robots lets the crawl use `url`; otherwise counts it as disallowed and records why.
-   *
-   * @param url the URL
-   * @param stage where in the crawl it is used
-   * @returns true when allowed
-   */
-  private async allowed(url: string, stage: SiteCrawlStage): Promise<boolean> {
-    const robots = await this.robotsOf(new URL(url).origin);
-    this.checkCancel();
-    if (robots.kind === 'none') return true;
-    if (robots.kind === 'unavailable') {
-      this.answer.disallowed++;
-      this.problem(url, stage, 'robots_unavailable', safeHost(new URL(url).host));
-      return false;
-    }
-    if (robotsAllows(robots.rules, url)) return true;
-    this.answer.disallowed++;
-    this.problem(url, stage, 'robots_disallowed');
-    return false;
   }
 
   /**
@@ -448,7 +364,7 @@ class SiteCrawl {
         if (text === '') throw new Error('empty');
         urls.push(normalizeDownloadUrl(new URL(text, pageUrl).href));
       } catch {
-        this.answer.invalid++;
+        this.state.answer.invalid++;
         this.problem(pageUrl, 'link', 'invalid_link', cutValue(text));
       }
     }
@@ -463,7 +379,7 @@ class SiteCrawl {
    * @param result the failed load
    */
   private pageFailed(url: string, stage: 'gallery' | 'detail', result: FailedLoad): void {
-    this.answer.pageFailures++;
+    this.state.answer.pageFailures++;
     switch (result.reason) {
       case 'no_match':
         this.problem(url, stage, stage === 'gallery' ? 'no_thumbnails' : 'no_file');
@@ -483,7 +399,7 @@ class SiteCrawl {
   }
 
   /**
-   * Loads one page, keeping PAGE_GAP_MS after the previous load.
+   * Loads one page, spacing starts across every concurrent worker of this crawl.
    *
    * @param url the page
    * @param queries the expressions by query name
@@ -493,13 +409,14 @@ class SiteCrawl {
    */
   private async load(url: string, queries: Record<string, string>, waitFor: string): Promise<PageLoadResult> {
     this.checkCancel();
-    if (this.loads > 0) await this.dependencies.wait(PAGE_GAP_MS, this.signal);
-    this.checkCancel();
-    this.loads++;
+    await this.schedule.pace();
     const result = await this.dependencies.pages.load(url, { queries, waitFor, signal: this.signal });
     this.checkCancel();
     if (!result.ok && result.reason === 'invalid_xpath') {
       throw new ValidationFailedError(INVALID_XPATH[result.query] ?? INVALID_XPATH[SITE_QUERY.thumbnails]!);
+    }
+    if (!result.ok && result.reason === 'http_error' && [401, 403, 429].includes(result.status)) {
+      throw new SiteCrawlBlockedError(result.status as 401 | 403 | 429);
     }
     return result;
   }
@@ -522,12 +439,13 @@ class SiteCrawl {
       return requested;
     }
     if (!belongsToSite(base, this.profile.site)) return requested;
-    if (originAndPath(base) !== originAndPath(requested) && !(await this.allowed(base, stage))) return null;
+    if (originAndPath(base) !== originAndPath(requested) && !(await this.policy.allowed(base, stage))) return null;
     return base;
   }
 
   /** Reports the pages read and the files found so far. */
-  private progress(): void {
-    this.request.onProgress?.({ pages: this.answer.pages, files: this.answer.files.length });
+  private async progress(): Promise<void> {
+    this.request.onProgress?.({ pages: this.state.answer.pages, files: this.state.answer.files.length });
+    await this.state.save();
   }
 }

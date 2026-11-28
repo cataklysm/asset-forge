@@ -200,6 +200,10 @@ describe('site profile schemas', () => {
       'sites:openLogin',
       'sites:openCheck',
       'sites:crawl',
+      'sites:enqueueCrawl',
+      'sites:listCrawls',
+      'sites:getCrawl',
+      'sites:retryCrawl',
       'sites:crawlProgress',
       'sites:cancelCrawl',
       'sites:import',
@@ -215,7 +219,7 @@ describe('site profile schemas', () => {
     ).toBe(false);
     expect(ipcContract['sites:crawl'].request.safeParse({ profileId: uuid }).success).toBe(false);
     expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid, target: null }).success).toBe(true);
-    expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid }).success).toBe(false);
+    expect(ipcContract['sites:import'].request.safeParse({ crawlId: uuid }).success).toBe(true);
     expect(ipcContract['sites:crawlProgress'].response.safeParse(null).success).toBe(true);
   });
 });

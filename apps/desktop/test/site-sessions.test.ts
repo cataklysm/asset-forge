@@ -206,7 +206,7 @@ describe('page loader', () => {
       baseUrl: '',
       finalUrl: '',
     });
-    expect(view.calls()).toBe(3);
+    expect(view.calls()).toBe(4);
   });
 
   it("answers the main frame's URL after the load as the final URL", async () => {
@@ -436,10 +436,10 @@ describe('page loader', () => {
     finishLoad('loaded');
   });
 
-  it('takes the first match at once after the load finished', async () => {
+  it('takes a stable match after the load finished without waiting the full settling timeout', async () => {
     const view = fakeView({ evaluate: () => ({ results: { thumbnails: ['/a'] }, counts: { thumbnails: 1 } }) });
     expect((await createPageLoader(view, 'example.com', fast).load('https://example.com/g', request())).ok).toBe(true);
-    expect(view.calls()).toBe(1);
+    expect(view.calls()).toBe(2);
   });
 
   it('does not answer no_match while the load is still under way, and counts the wait from its end', async () => {
@@ -664,6 +664,26 @@ const decide = (s: ReturnType<typeof fakeSession>, url: string, resourceType = '
   new Promise<{ cancel?: boolean }>((resolve) => s.beforeRequest!({ url, resourceType, webContentsId }, resolve));
 
 describe('electron site sessions', () => {
+  it('uses independent bounded page windows for simultaneous navigation in one crawl', async () => {
+    const e = electron();
+    const configured = { ...profile, detailConcurrency: 3, requestGapMs: 0 };
+    const crawl = e.site.openPage(configured);
+    const answers = await Promise.all(
+      ['/d/1', '/d/2', '/d/3'].map((path) => crawl.loader.load(`https://example.com${path}`, request())),
+    );
+    expect(e.windows).toHaveLength(3);
+    expect(answers.map((answer) => (answer.ok ? answer.finalUrl : null))).toEqual([
+      'https://example.com/d/1',
+      'https://example.com/d/2',
+      'https://example.com/d/3',
+    ]);
+    expect(
+      e.windows.every((window) => window.options.webPreferences?.session === (e.session() as unknown as Session)),
+    ).toBe(true);
+    crawl.close();
+    expect(e.windows.every((window) => window.destroyed)).toBe(true);
+  });
+
   it('hardens each partition once: no permission, no download, only public hosts', async () => {
     const e = electron();
     e.site.openLogin(profile, 'https://example.com/');

@@ -33,6 +33,7 @@ function profile(over: Partial<SiteProfile> = {}): SiteProfile {
     urlContains: '',
     maxPages: 20,
     maxFiles: 1000,
+    detailConcurrency: 1,
     ...over,
   };
 }
@@ -59,7 +60,9 @@ function deps(
   const waits: number[] = [];
   const robotsAsked: string[] = [];
   const events: string[] = [];
+  let now = 0;
   return {
+    now: () => now,
     loads,
     waits,
     robotsAsked,
@@ -83,6 +86,7 @@ function deps(
       return answer;
     },
     async wait(ms) {
+      now += ms;
       waits.push(ms);
       events.push(`wait ${ms}`);
     },
@@ -95,7 +99,7 @@ const PAGE_FAILURES: readonly PageLoadResult[] = [
   { ok: false, reason: 'no_match' },
   { ok: false, reason: 'left_site', host: 'login.other.test' },
   { ok: false, reason: 'left_site', host: '' },
-  { ok: false, reason: 'http_error', status: 403 },
+  { ok: false, reason: 'http_error', status: 502 },
   { ok: false, reason: 'failed' },
 ];
 

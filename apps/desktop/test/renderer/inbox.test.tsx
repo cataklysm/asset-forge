@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readySiteCrawl } from './site-crawl-fixtures';
 import { useState } from 'react';
 import {
   JOB_ERROR_MESSAGES,
@@ -1274,9 +1275,13 @@ it('Import from site follows Import from URLs, is disabled while importing and i
     maxFiles: 1000,
   };
   const crawlId = '33333333-3333-4333-8333-333333333333';
+  const savedCrawl = readySiteCrawl(profile);
   const api = install([], {
     'dialog:pickFiles': () => picked.promise,
     'sites:list': () => ({ profiles: [profile] }),
+    'sites:enqueueCrawl': () => ({ crawlId }),
+    'sites:listCrawls': () => ({ items: [savedCrawl], total: 1 }),
+    'sites:getCrawl': () => savedCrawl,
     'sites:crawl': () => ({
       crawlId,
       files: ['https://example.com/a.png'],
@@ -1311,12 +1316,17 @@ it('Import from site follows Import from URLs, is disabled while importing and i
   await waitFor(() =>
     expect((within(dialog).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Shop'),
   );
-  await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URL' }), 'https://example.com/g');
-  await user.click(within(dialog).getByRole('button', { name: 'Test' }));
-  await within(dialog).findByRole('list', { name: 'Found files' });
-  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
-  expect(await within(dialog).findByText('Queued 1')).toBeTruthy();
-  expect(callsOf(api, 'sites:import')).toEqual([{ crawlId, target: null }]);
+  await user.type(within(dialog).getByRole('textbox', { name: 'Gallery URLs' }), 'https://example.com/g');
+  await user.click(within(dialog).getByRole('button', { name: 'Queue extraction' }));
+  await within(dialog).findByRole('button', { name: 'Import selected' });
+  await user.click(within(dialog).getByRole('button', { name: 'Import selected' }));
+  expect(await within(dialog).findByText(/Queued 1/)).toBeTruthy();
+  expect(callsOf(api, 'sites:enqueueCrawl')).toEqual([
+    { profileId: profile.id, url: 'https://example.com/g', target: null },
+  ]);
+  expect(callsOf(api, 'sites:import')).toEqual([
+    { crawlId, selectedUrls: savedCrawl.result!.files, skipExistingNames: false, includeExistingUrls: [] },
+  ]);
   await user.click(within(dialog).getByRole('button', { name: 'Close' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });

@@ -127,7 +127,10 @@ describe('backup before migrations', () => {
     expect(await backups()).toEqual(['assetforge.sqlite.backup-18-20261128090807']);
     const backupPath = join(dir, 'assetforge.sqlite.backup-18-20261128090807');
     expect(appliedCount(backupPath)).toBe(18);
-    expect(appliedCount(dbPath)).toBe(19);
+    const shipped = JSON.parse(await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8')) as {
+      entries: unknown[];
+    };
+    expect(appliedCount(dbPath)).toBe(shipped.entries.length);
     const sqlite = new Database(backupPath, { readonly: true });
     try {
       expect(sqlite.pragma('integrity_check', { simple: true })).toBe('ok');
