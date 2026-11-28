@@ -134,6 +134,44 @@ it('keeps importing disabled for a failed extraction with partial candidates', a
   expect(screen.getByRole('button', { name: /Retry|Resume/ })).toBeTruthy();
 });
 
+it('offers a deliberate way to remove an imported extraction without cancelling its downloads', async () => {
+  const task = taskOf(profileOf(), { status: 'imported' });
+  const { api, user } = setup([task]);
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Remove extraction' }));
+  const confirmation = await screen.findByRole('dialog', { name: 'Remove extraction?' });
+  expect(within(confirmation).getByText('Only saved extraction results are removed. Queued downloads continue in Jobs.')).toBeTruthy();
+  expect(requests(api, 'sites:cancelCrawl')).toEqual([]);
+  expect(requests(api, 'sites:removeCrawl')).toEqual([]);
+});
+
+it('loads the selected extraction live profile for editing instead of the first profile', async () => {
+  const unrelated = { ...profileOf(), name: 'Other profile' };
+  const liveProfile = { ...profileOf(), name: 'Live gallery', file: '//a/@href' };
+  const task = taskOf(liveProfile, { profileName: 'Name when extracted', status: 'imported' });
+  const { user } = setup([task], null, { 'sites:list': () => ({ profiles: [unrelated, liveProfile] }) });
+  await waitFor(() => expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Other profile'));
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Edit profile' }));
+  expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Live gallery');
+  expect((screen.getByRole('textbox', { name: 'File XPath' }) as HTMLInputElement).value).toBe('//a/@href');
+  expect(screen.getByText('Profile changes apply to future extractions. Saved results keep their captured settings.')).toBeTruthy();
+});
+
+it('extracts again using the saved profile and captured destination rather than current asset navigation', async () => {
+  const profile = profileOf();
+  const captured: FileTarget = { assetId: nextId(), role: 'reference' };
+  const current: FileTarget = { assetId: nextId(), role: 'final' };
+  const task = taskOf(profile, { target: captured, targetAssetName: 'Captured asset', status: 'imported' });
+  const { api, state, user } = setup([task], current, { 'sites:list': () => ({ profiles: [profile] }) });
+  await user.click(await within(taskList()).findByRole('button'));
+  await user.click(await screen.findByRole('button', { name: 'Extract again' }));
+  await waitFor(() => expect(requests(api, 'sites:enqueueCrawl')).toHaveLength(1));
+  expect(requests(api, 'sites:enqueueCrawl')[0]).toEqual({ profileId: task.profileId, url: task.galleryUrl, target: captured });
+  expect(state.tasks.some((entry) => entry.crawlId === task.crawlId && entry.status === 'imported')).toBe(true);
+  expect(state.tasks).toHaveLength(2);
+});
+
 async function readyForm() {
   await waitFor(() =>
     expect((screen.getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('Gallery'),
