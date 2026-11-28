@@ -212,24 +212,24 @@ class OllamaVision {
   /**
    * One chat request.
    *
-   * @param r the image, the prompt, the model and the signal
+   * @param input the image, the prompt, the model and the signal
    * @param format the answer format; undefined for free text
    * @returns the message content
    */
-  private chat(r: ChatInput, format?: unknown): Promise<string> {
+  private chat(input: ChatInput, format?: unknown): Promise<string> {
     const request: JsonRequest = {
       path: '/api/chat',
-      signal: r.signal,
+      signal: input.signal,
       timeoutMs: this.timeoutMs,
       // The adapter's own fields come last: `extra` can never change the model, the stream or the format.
       body: composeBody(
         this.fixed,
         this.requestOptions.extra,
         {
-          model: r.model,
+          model: input.model,
           stream: false,
           ...(format === undefined ? {} : { format }),
-          messages: [{ role: 'user', content: r.prompt, images: [Buffer.from(r.image).toString('base64')] }],
+          messages: [{ role: 'user', content: input.prompt, images: [Buffer.from(input.image).toString('base64')] }],
         },
         OLLAMA_DEEP_KEYS,
       ),

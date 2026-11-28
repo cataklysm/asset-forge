@@ -88,7 +88,7 @@ export async function evictLeastRecentlyUsed(
   let total = state.entries.reduce((sum, entry) => sum + entry.size, 0);
   if (total <= limitBytes) return { removedFiles: state.removedFiles };
   const target = limitBytes * targetRatio;
-  state.entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  state.entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
   for (const entry of state.entries) {
     if (total <= target) break;
     if (await removeIfPresent(entry.path)) state.removedFiles++;

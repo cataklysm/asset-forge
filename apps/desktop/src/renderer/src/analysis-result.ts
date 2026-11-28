@@ -52,13 +52,13 @@ export const isActive = (job: JobView | null) =>
   job !== null && (ACTIVE_JOB_STATUSES as readonly string[]).includes(job.status);
 
 /**
- * Whether ISO time `a` is later than `b`.
+ * Whether ISO time `time` is later than `other`.
  *
- * @param a the one time
- * @param b the other time
- * @returns true when `a` is later
+ * @param time the one time
+ * @param other the other time
+ * @returns true when `time` is later
  */
-const newer = (a: string, b: string) => Date.parse(a) > Date.parse(b);
+const newer = (time: string, other: string) => Date.parse(time) > Date.parse(other);
 
 /**
  * Shows `stored` for `id`; the names switched off survive only while it is the same proposal of the same file.

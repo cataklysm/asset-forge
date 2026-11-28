@@ -195,7 +195,7 @@ function WorkspaceProviders({ onRenamed, children }: { onRenamed(change: TagRena
 }
 
 /** What `screenFor` needs beside the view. */
-interface ScreenDeps {
+interface ScreenDependencies {
   shell: ReturnType<typeof useShellState>;
   busy: boolean;
   setBusy(busy: boolean): void;
@@ -210,7 +210,7 @@ interface ScreenDeps {
  * @param deps the list state, the busy flag and the navigation of the frame
  * @returns the screen element
  */
-function screenFor(view: View, { shell: state, busy, setBusy, setView, showAssets }: ScreenDeps): ReactNode {
+function screenFor(view: View, { shell: state, busy, setBusy, setView, showAssets }: ScreenDependencies): ReactNode {
   const { shell } = state;
   switch (view.name) {
     case 'assets':

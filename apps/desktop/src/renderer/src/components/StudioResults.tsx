@@ -104,12 +104,12 @@ const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3';
 /**
  * The file of a generation's ready output.
  *
- * @param g the generation
+ * @param generation the generation
  * @returns the output and its file, or null while the generation has no ready output
  */
-function readyOutput(g: Generation): { name: string; fileId: string } | null {
-  const output = g.outputs[0];
-  if (tileState(g) !== 'ready' || output === undefined || output.fileId === null) return null;
+function readyOutput(generation: Generation): { name: string; fileId: string } | null {
+  const output = generation.outputs[0];
+  if (tileState(generation) !== 'ready' || output === undefined || output.fileId === null) return null;
   return { name: output.name, fileId: output.fileId };
 }
 
@@ -132,12 +132,12 @@ interface UpscaleTilesProps {
 function UpscaleTiles({ upscales, busy, onOpen, onDelete, onRetry, onRemove }: UpscaleTilesProps) {
   return (
     <ul aria-label={UPSCALES_LABEL} className={GRID}>
-      {upscales.map((g) => {
-        const output = readyOutput(g);
-        if (output === null) return <MarkTile key={g.id} g={g} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
+      {upscales.map((upscale) => {
+        const output = readyOutput(upscale);
+        if (output === null) return <MarkTile key={upscale.id} g={upscale} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
         const fileId = output.fileId;
         return (
-          <li key={g.id} aria-label={output.name} title={output.name} className="flex flex-col gap-2">
+          <li key={upscale.id} aria-label={output.name} title={output.name} className="flex flex-col gap-2">
             <CoverImage fileId={fileId} size="thumb" fallback={formatLabel(output.name)} className={`aspect-square w-full border ${BORDER}`} />
             <div className="flex flex-wrap justify-center gap-2">
               <button type="button" className={BUTTON_INLINE} onClick={() => onOpen(fileId)}>
@@ -220,7 +220,7 @@ function SelectedResult(props: SelectedResultProps) {
  */
 export function StudioResults(props: Props) {
   const { generations, selectedId, onSelect, busy, onRetry, onRemove } = props;
-  const selected = generations.find((g) => g.id === selectedId && tileState(g) === 'ready') ?? null;
+  const selected = generations.find((generation) => generation.id === selectedId && tileState(generation) === 'ready') ?? null;
   const selectedOutput = selected?.outputs[0] ?? null;
   const selectedFileId = selectedOutput?.fileId ?? null;
 
@@ -231,18 +231,18 @@ export function StudioResults(props: Props) {
         <SelectedResult {...props} selected={selected} name={selectedOutput.name} fileId={selectedFileId} />
       )}
       <ul aria-label={RESULTS_LABEL} className={GRID}>
-        {generations.map((g) => {
-          const output = readyOutput(g);
-          if (output === null) return <MarkTile key={g.id} g={g} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
-          const pressed = g.id === selectedId;
+        {generations.map((generation) => {
+          const output = readyOutput(generation);
+          if (output === null) return <MarkTile key={generation.id} g={generation} busy={busy} onRetry={onRetry} onRemove={onRemove} />;
+          const pressed = generation.id === selectedId;
           return (
-            <li key={g.id} aria-label={output.name} title={output.name}>
+            <li key={generation.id} aria-label={output.name} title={output.name}>
               <button
                 type="button"
                 aria-label={output.name}
                 aria-pressed={pressed}
                 className={`block w-full rounded-control ${FOCUS}`}
-                onClick={() => onSelect(pressed ? null : g.id)}
+                onClick={() => onSelect(pressed ? null : generation.id)}
               >
                 <CoverImage
                   fileId={output.fileId}

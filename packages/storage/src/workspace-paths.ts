@@ -28,7 +28,7 @@ export function workspaceSegments(relativePath: string, allowRoot: boolean): str
   ) {
     throw new PathEscapeError('Absolute path not allowed');
   }
-  const segments = relativePath.split(/[\\/]/).filter((s) => s !== '' && s !== '.');
+  const segments = relativePath.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.');
   if (segments.includes('..')) {
     throw new PathEscapeError('Path escapes the workspace');
   }

@@ -182,8 +182,8 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
               upscaleBlocked={upscaleBlocked}
               onUseSettings={applySettings}
               onDelete={(fileId) => void trash(fileId)}
-              onRetry={(g) => void retry(g)}
-              onRemove={(g) => void remove(g)}
+              onRetry={(generation) => void retry(generation)}
+              onRemove={(generation) => void remove(generation)}
               busy={busy || upscaleBusy(selectedFileId)}
             />
           </section>

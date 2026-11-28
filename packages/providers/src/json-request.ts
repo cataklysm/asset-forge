@@ -139,24 +139,24 @@ class JsonCall {
    * @returns the result
    */
   async send<T>(interpret: (body: unknown) => T): Promise<T> {
-    const r = this.request;
+    const request = this.request;
     const { options } = this.connection;
-    r.signal.throwIfAborted();
-    const timer = setTimeout(() => this.timeout.abort(), r.timeoutMs);
-    const combined = AbortSignal.any([r.signal, this.timeout.signal]);
+    request.signal.throwIfAborted();
+    const timer = setTimeout(() => this.timeout.abort(), request.timeoutMs);
+    const combined = AbortSignal.any([request.signal, this.timeout.signal]);
 
     try {
       // Read per request: a key changed or removed in the settings applies to the next call.
       const key = options.apiKey?.() ?? null;
-      const headers = requestHeaders(r.body, key);
+      const headers = requestHeaders(request.body, key);
 
       const fetchImpl = this.connection.fetchImpl;
       let response: Response;
       try {
-        response = await fetchImpl(`${this.connection.base}${r.path}`, {
-          method: r.body === undefined ? 'GET' : 'POST',
+        response = await fetchImpl(`${this.connection.base}${request.path}`, {
+          method: request.body === undefined ? 'GET' : 'POST',
           headers,
-          ...(r.body === undefined ? {} : { body: JSON.stringify(r.body) }),
+          ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
           signal: combined,
           redirect: 'manual',
         });
@@ -205,7 +205,9 @@ class JsonCall {
       }
     } catch (error) {
       // Only the code and the status leave the adapter; a caller abort is not a provider failure.
-      if (error instanceof JobError && !r.signal.aborted && !r.silent) options.onFailure?.(error.code, this.status);
+      if (error instanceof JobError && !request.signal.aborted && !request.silent) {
+        options.onFailure?.(error.code, this.status);
+      }
       throw error;
     } finally {
       clearTimeout(timer);
@@ -221,8 +223,8 @@ class JsonCall {
    * @returns never; always throws the caller's abort reason, `provider_timeout` or a `JobError` of `code`
    */
   private fail(code: JobErrorCode, cause: unknown): never {
-    const r = this.request;
-    if (r.signal.aborted) throw r.signal.reason;
+    const request = this.request;
+    if (request.signal.aborted) throw request.signal.reason;
     if (this.timeout.signal.aborted) throw new JobError('provider_timeout', { cause });
     const error = new JobError(code, { cause });
     if (this.status !== null) statuses.set(error, this.status);

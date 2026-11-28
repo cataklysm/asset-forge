@@ -223,7 +223,7 @@ export function JobsScreen() {
     setChosenProvider(value);
   }
 
-  const reload = () => setReloadToken((n) => n + 1);
+  const reload = () => setReloadToken((token) => token + 1);
   const run = (action: () => Promise<unknown>) => runAction({ busyRef, setBusy, setError, refresh, reload }, action);
 
   const finished = summary === null ? 0 : summary.succeeded + summary.failed + summary.cancelled;
