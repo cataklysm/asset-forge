@@ -39,6 +39,11 @@ const OAK = assetSummary({ name: 'Oak' });
 
 type ListRequest = IpcRequest<'files:list'>;
 
+/** Lets every answer and render that is already queued run, without waiting real time. */
+async function settleQueued(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) await act(async () => {});
+}
+
 /** Serves the files that `current()` returns, page by page; with `ids` only those. */
 function listOf(current: () => FileRecord[]) {
   return (request: ListRequest) => {
@@ -294,7 +299,7 @@ it('a late shared-tag answer does not bring back a cleared selection', async () 
 
   answer.resolve({ items: [c1, c2].map((f) => ({ ...f, tags: [] })) });
   await waitFor(() => expect(screen.getByText('c1.png')).toBeTruthy());
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settleQueued();
   expect(screen.queryByRole('complementary')).toBeNull();
   expect(screen.queryByText('2 selected')).toBeNull();
 });

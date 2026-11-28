@@ -20,6 +20,11 @@ type ListRequest = IpcRequest<'files:list'>;
 
 const ASSET_SCOPE: FileScope = { kind: 'asset', assetId: nextId() };
 
+/** Lets every answer and render that is already queued run, without waiting real time. */
+async function settleQueued(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) await act(async () => {});
+}
+
 function many(count: number): FileRecord[] {
   return Array.from({ length: count }, (_, i) =>
     fileRecord({
@@ -554,7 +559,7 @@ it('a reload with a fresh record of the viewed file hands it to the viewer once'
   // The same records again: nothing to hand over.
   await user.click(screen.getByRole('button', { name: 'Reload' }));
   await waitFor(() => expect(listRequests(api)).toHaveLength(3));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settleQueued();
   expect(onView).toHaveBeenCalledTimes(1);
 });
 
