@@ -33,8 +33,9 @@ export function WorkflowSection({ assetId, assetTypeId }: Props) {
           {error}
         </p>
       )}
-      {state.loadErrors.map((message) => (
-        <p key={message} role="alert" className={ALERT}>
+      {/* Two loads can fail with the same message, so the position is the key. */}
+      {state.loadErrors.map((message, index) => (
+        <p key={index} role="alert" className={ALERT}>
           {message}
         </p>
       ))}
@@ -78,7 +79,9 @@ function RunningWorkflow({ workflow, updateStep, remove }: RunningWorkflowProps)
         {workflow.templateName} <span className={MUTED}>v{workflow.templateVersion}</span>{' '}
         {formatProgress(workflow.progress)}
       </p>
-      <progress aria-label="Workflow progress" value={workflow.progress.done} max={workflow.progress.total} />
+      {workflow.progress.total > 0 && (
+        <progress aria-label="Workflow progress" value={workflow.progress.done} max={workflow.progress.total} />
+      )}
       <ul className="space-y-2">
         {workflow.steps.map((step) => (
           <StepItem key={step.id} step={step} updateStep={updateStep} />

@@ -23,6 +23,8 @@ interface Props {
   onKeyDown?(event: KeyboardEvent<HTMLInputElement>): void;
   /** Disables the input. */
   disabled?: boolean;
+  /** Keeps the input focusable but refuses typing (for a full filter, so the focus is not lost). */
+  readOnly?: boolean;
   /** `box` (the default) is a bordered input; `inline` reads as an action in a row of chips. */
   look?: 'box' | 'inline';
 }
@@ -57,6 +59,7 @@ export function TagCombobox({
   inputRef,
   onKeyDown,
   disabled = false,
+  readOnly = false,
   look = 'box',
 }: Props) {
   const listId = useId();
@@ -72,6 +75,8 @@ export function TagCombobox({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // Keys that pick or confirm characters of an input method (IME) belong to that method.
+    if (event.nativeEvent.isComposing) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (!expanded) {
@@ -105,12 +110,13 @@ export function TagCombobox({
         role="combobox"
         aria-label={label}
         aria-expanded={expanded}
-        aria-controls={listId}
+        aria-controls={expanded ? listId : undefined}
         aria-autocomplete="list"
         aria-activedescendant={expanded && active >= 0 ? optionId(active) : undefined}
         placeholder={placeholder}
         title={title}
         disabled={disabled}
+        readOnly={readOnly}
         maxLength={200}
         value={value}
         onChange={(event) => {

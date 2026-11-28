@@ -37,6 +37,59 @@ it('workspaces are sorted by last opened, newest first, and the row menu removes
   expect(screen.getByText('1 workspace')).toBeTruthy();
 });
 
+it('after a removal the focus moves to the neighbour row, and to New workspace when none is left', async () => {
+  const user = userEvent.setup();
+  const third = workspace('Third', '2026-02-01T00:00:00.000Z');
+  let list = [OLD, NEW, third];
+  installFakeApi({
+    'workspace:list': () => list,
+    'workspace:remove': (request) => {
+      list = list.filter((entry) => entry.id !== (request as { id: string }).id);
+      return { removed: true, folderTrashed: false };
+    },
+  });
+  render(<WorkspaceScreen onOpened={() => {}} />);
+  await screen.findByText('Newer');
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Third' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Remove' }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open workspace Old' })));
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Old' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Remove' }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open workspace Newer' })),
+  );
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Newer' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Remove' }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'New workspace' })));
+});
+
+it('a declined removal leaves the focus alone', async () => {
+  const user = userEvent.setup();
+  installFakeApi({
+    'workspace:list': () => [OLD, NEW],
+    'workspace:remove': () => ({ removed: false, folderTrashed: false }),
+  });
+  render(<WorkspaceScreen onOpened={() => {}} />);
+  await screen.findByText('Newer');
+  const menu = screen.getByRole('button', { name: 'Actions for Newer' });
+  await user.click(menu);
+  await user.click(screen.getByRole('menuitem', { name: 'Remove' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Open workspace Old' }).hasAttribute('disabled')).toBe(false),
+  );
+  expect(document.activeElement).toBe(menu);
+});
+
+it('the start screen has one top-level heading', async () => {
+  installFakeApi({ 'workspace:list': () => [] });
+  render(<WorkspaceScreen onOpened={() => {}} />);
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('AssetForge');
+  await screen.findByRole('button', { name: 'New workspace' });
+});
+
 it('shows skeleton rows while loading', () => {
   const pending = deferred<WorkspaceSummary[]>();
   installFakeApi({ 'workspace:list': () => pending.promise });

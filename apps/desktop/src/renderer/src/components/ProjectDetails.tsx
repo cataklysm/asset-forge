@@ -37,6 +37,11 @@ export function ProjectDetails({ project, tagNames, onOpenAsset, onShowAll }: Pr
   return (
     <div className="flex flex-col gap-4">
       <h2 className={SECTION_TITLE}>Project details</h2>
+      {types.error !== null && (
+        <p role="alert" className={`text-sm ${ALERT}`}>
+          {types.error}
+        </p>
+      )}
       {project !== null && (
         <>
           <p className="text-[17px] font-semibold break-words">{project.name}</p>

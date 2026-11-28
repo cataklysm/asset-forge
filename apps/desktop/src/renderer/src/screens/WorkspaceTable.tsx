@@ -2,6 +2,16 @@ import { Folder } from 'lucide-react';
 import type { WorkspaceSummary } from '@assetforge/contracts';
 import { Menu } from '../components/Menu';
 import { formatDateTime } from '../format';
+import {
+  OPEN_WORKSPACE_BUTTON,
+  REMOVE_WORKSPACE_LABEL,
+  REMOVE_WORKSPACE_TITLE,
+  WORKSPACE_LAST_OPENED_COLUMN,
+  WORKSPACE_LOCATION_COLUMN,
+  WORKSPACE_NAME_COLUMN,
+  openWorkspaceLabel,
+  workspaceActionsLabel,
+} from '../labels';
 import { BORDER, BUTTON_INLINE, MUTED } from '../ui';
 
 /** The props of `WorkspaceTable`. */
@@ -12,6 +22,9 @@ interface Props {
   onOpen(workspace: WorkspaceSummary): void;
   onRemove(workspace: WorkspaceSummary): void;
 }
+
+/** Selects the Open buttons of the rows, so the screen can move the focus to a neighbour after a removal. */
+export const WORKSPACE_OPEN_SELECTOR = '[data-workspace-open]';
 
 /**
  * The table of known workspaces, with three skeleton rows while the list loads.
@@ -26,13 +39,13 @@ export function WorkspaceTable({ sorted, busy, onOpen, onRemove }: Props) {
       <thead>
         <tr className={`border-b ${BORDER}`}>
           <th scope="col" className={headerCell}>
-            Name
+            {WORKSPACE_NAME_COLUMN}
           </th>
           <th scope="col" className={headerCell}>
-            Location
+            {WORKSPACE_LOCATION_COLUMN}
           </th>
           <th scope="col" className={headerCell}>
-            Last opened
+            {WORKSPACE_LAST_OPENED_COLUMN}
           </th>
           <th scope="col" className={headerCell}>
             <span className="sr-only" />
@@ -87,29 +100,47 @@ function WorkspaceRow({ workspace, busy, onOpen, onRemove }: { workspace: Worksp
       </td>
       <td className={`whitespace-nowrap px-3 py-3 ${MUTED}`}>{formatDateTime(workspace.lastOpenedAt)}</td>
       <td className="px-3 py-2">
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            className={BUTTON_INLINE}
-            disabled={busy}
-            aria-label={`Open workspace ${workspace.name}`}
-            onClick={() => onOpen(workspace)}
-          >
-            Open
-          </button>
-          <Menu
-            label={`Actions for ${workspace.name}`}
-            items={[
-              {
-                label: 'Remove',
-                disabled: busy,
-                title: 'Remove this workspace from AssetForge; asks before anything is removed',
-                onSelect: () => onRemove(workspace),
-              },
-            ]}
-          />
-        </div>
+        <WorkspaceActions workspace={workspace} busy={busy} onOpen={onOpen} onRemove={onRemove} />
       </td>
     </tr>
+  );
+}
+
+/**
+ * The Open button and the Remove menu of one row.
+ *
+ * @param props the workspace, the busy flag and the callbacks
+ * @returns the actions
+ */
+function WorkspaceActions({
+  workspace,
+  busy,
+  onOpen,
+  onRemove,
+}: { workspace: WorkspaceSummary } & Omit<Props, 'sorted'>) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        className={BUTTON_INLINE}
+        disabled={busy}
+        aria-label={openWorkspaceLabel(workspace.name)}
+        data-workspace-open=""
+        onClick={() => onOpen(workspace)}
+      >
+        {OPEN_WORKSPACE_BUTTON}
+      </button>
+      <Menu
+        label={workspaceActionsLabel(workspace.name)}
+        items={[
+          {
+            label: REMOVE_WORKSPACE_LABEL,
+            disabled: busy,
+            title: REMOVE_WORKSPACE_TITLE,
+            onSelect: () => onRemove(workspace),
+          },
+        ]}
+      />
+    </div>
   );
 }

@@ -5,17 +5,30 @@ const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB'] as const;
  * A file size for display: '512 B', '1.5 MiB'.
  *
  * @param bytes the size, or null when unknown
- * @returns the size in the largest unit below 1024, '–' for null
+ * @returns the size in the largest unit whose rounded value stays below 1024, '–' for null, a negative
+ *   or a non-finite value
  */
 export function formatBytes(bytes: number | null): string {
-  if (bytes === null) return '–';
+  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return '–';
   let value = bytes;
   let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
+  // Compare the rounded value, so 1048575 bytes reads '1.0 MiB' rather than '1024.0 KiB'.
+  while (roundedForDisplay(value, unit) >= 1024 && unit < UNITS.length - 1) {
     value /= 1024;
     unit += 1;
   }
   return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${UNITS[unit]}`;
+}
+
+/**
+ * The value as `formatBytes` would show it in that unit: whole bytes, otherwise one decimal.
+ *
+ * @param value the size in the given unit
+ * @param unit the index into `UNITS`
+ * @returns the value rounded the way it is displayed
+ */
+function roundedForDisplay(value: number, unit: number): number {
+  return unit === 0 ? value : Number(value.toFixed(1));
 }
 
 /**

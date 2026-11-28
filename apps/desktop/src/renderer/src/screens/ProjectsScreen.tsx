@@ -12,7 +12,20 @@ import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValu
 import { useLoad } from '../hooks/useLoad';
 import { usePagedList } from '../hooks/usePagedList';
 import type { ViewPosition, ViewRestore, VisibleRows } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import {
+  ALL_PROJECT_STATUSES_LABEL,
+  label,
+  NEW_PROJECT_LABEL,
+  NO_MATCHING_PROJECTS,
+  NO_PROJECTS,
+  projectCount,
+  PROJECT_STATUS_FILTER_LABEL,
+  PROJECT_TAG_FILTER_TITLE,
+  PROJECTS_COUNT_TITLE,
+  PROJECTS_TITLE,
+  RETRY_LABEL,
+  SEARCH_PROJECTS_LABEL,
+} from '../labels';
 import {
   hasFilters,
   listKey,
@@ -69,7 +82,7 @@ function useKeepPositionOnLeave(
     () => () => {
       const current = latest.current;
       if (opened.current || position.current?.viewKey !== current.viewKey) return;
-      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset });
+      current.onStateChange({ ...current.state, scrollOffset: position.current.get().scrollOffset, openedIndex: null });
     },
     [],
   );
@@ -95,7 +108,12 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
   const key = listKey(effective, String(renameToken));
 
   // Where the next mounted table starts; read once by each table when it mounts.
-  const restore = useRef<ViewRestore>({ scrollOffset: state.scrollOffset, index: null, focus: false });
+  // Back from a project, its row takes the focus again.
+  const restore = useRef<ViewRestore>({
+    scrollOffset: state.scrollOffset,
+    index: state.openedIndex,
+    focus: state.openedIndex !== null,
+  });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastToken = useRef(renameToken);
   const [rows, setRows] = useState<ReportedRows | null>(null);
@@ -133,7 +151,7 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
 
   function setFilter(change: Partial<ProjectFilters>) {
     restore.current = { scrollOffset: 0, index: null, focus: false };
-    onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0 });
+    onStateChange({ ...state, filters: { ...filters, ...change }, scrollOffset: 0, openedIndex: null });
   }
 
   const onRows = useCallback((visible: VisibleRows) => setRows((old) => nextRows(old, visible, viewKey)), [viewKey]);
@@ -143,10 +161,10 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     if (state.selectedId !== project.id) onStateChange({ ...state, selectedId: project.id });
   }
 
-  function openProject(project: ProjectSummary, scrollOffset: number) {
+  function openProject(project: ProjectSummary, scrollOffset: number, index: number) {
     opened.current = true;
     lastSelected.current = project;
-    onStateChange({ ...state, scrollOffset, selectedId: project.id });
+    onStateChange({ ...state, scrollOffset, openedIndex: index, selectedId: project.id });
     onOpen(project.id);
   }
 
@@ -170,13 +188,13 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
 
   return (
     <Page
-      title="Projects"
+      title={PROJECTS_TITLE}
       count={all.data?.total ?? null}
-      countTitle="Projects in the workspace"
+      countTitle={PROJECTS_COUNT_TITLE}
       actions={
         <button type="button" className={BUTTON} onClick={() => setCreating(true)}>
           <Plus size={16} aria-hidden />
-          New project
+          {NEW_PROJECT_LABEL}
         </button>
       }
       toolbar={<ProjectsToolbar filters={filters} total={total} allError={all.error} setFilter={setFilter} />}
@@ -233,23 +251,23 @@ function ProjectsToolbar({ filters, total, allError, setFilter }: ToolbarProps) 
   return (
     <div className="flex flex-col gap-3">
       <FilterBar
-        resultCount={total === null ? null : `${total} ${total === 1 ? 'project' : 'projects'}`}
+        resultCount={total === null ? null : projectCount(total)}
         onClear={hasFilters(filters) ? () => setFilter(NO_PROJECT_FILTERS) : null}
       >
         <>
           <SearchField
-            label="Search projects"
-            placeholder="Search projects"
+            label={SEARCH_PROJECTS_LABEL}
+            placeholder={SEARCH_PROJECTS_LABEL}
             value={filters.query}
             onChange={(text) => setFilter({ query: text })}
           />
           <select
             className={SELECT}
-            aria-label="Status"
+            aria-label={PROJECT_STATUS_FILTER_LABEL}
             value={filters.status}
             onChange={(event) => setFilter({ status: STATUSES.find((status) => status === event.target.value) ?? '' })}
           >
-            <option value="">All statuses</option>
+            <option value="">{ALL_PROJECT_STATUSES_LABEL}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
                 {label(status)}
@@ -258,7 +276,7 @@ function ProjectsToolbar({ filters, total, allError, setFilter }: ToolbarProps) 
           </select>
           <TagFilter
             value={filters.tagNames}
-            title="Projects with one member asset that carries all these tags, on the asset or on one of its files"
+            title={PROJECT_TAG_FILTER_TITLE}
             onChange={(tagNames) => setFilter({ tagNames })}
           />
         </>
@@ -296,7 +314,7 @@ function ProjectListBody({ failedPage, total, tableProps, filtered, viewKey, onR
     return (
       <div>
         <button type="button" className={BUTTON} onClick={() => onRetry(failedPage)}>
-          Retry
+          {RETRY_LABEL}
         </button>
       </div>
     );
@@ -310,6 +328,6 @@ function ProjectListBody({ failedPage, total, tableProps, filtered, viewKey, onR
       </div>
     );
   }
-  if (tableProps === null) return <p className={MUTED}>{filtered ? 'No matching projects' : 'No projects'}</p>;
+  if (tableProps === null) return <p className={MUTED}>{filtered ? NO_MATCHING_PROJECTS : NO_PROJECTS}</p>;
   return <ProjectTable key={viewKey} {...tableProps} />;
 }
