@@ -115,6 +115,8 @@ export function ProjectsScreen({ state, onStateChange, onOpen, onOpenAsset, onSh
     index: state.openedIndex,
     focus: state.openedIndex !== null,
     focusFrom,
+    // The opened project, wherever it is now: a rename while it was open may have moved it.
+    focusId: state.selectedId,
   });
   const position = useRef<{ viewKey: string; get(): ViewPosition } | null>(null);
   const lastToken = useRef(renameToken);

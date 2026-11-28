@@ -7,6 +7,32 @@ export interface PendingFocus {
   index: number;
   /** The element that had the focus when the item focus was asked for; null for none. */
   from: Element | null;
+  /**
+   * The id of the item to focus (its element's `data-item-id`); when given, the item is looked for by id, so
+   * a list that changed its order meanwhile never focuses another item at the same position.
+   */
+  id?: string | null;
+}
+
+/** What `pendingTarget` found: the element to focus, nothing yet (wait), or that the focus is to be dropped. */
+export type PendingTarget = HTMLElement | 'wait' | 'drop';
+
+/**
+ * The element a pending item focus goes to. Without an id it is the element at the index. With an id it is
+ * the rendered element of that item; while the element at the index is not a loaded item yet (a placeholder
+ * or Retry) the focus waits, and once a loaded other item stands there the focus is dropped.
+ *
+ * @param container the scrolling element of the rows
+ * @param pending the pending focus
+ * @returns the element, `wait` or `drop`
+ */
+export function pendingTarget(container: HTMLElement, pending: PendingFocus): PendingTarget {
+  const atIndex = container.querySelector<HTMLElement>(`[data-index="${pending.index}"]`);
+  if (pending.id === undefined || pending.id === null) return atIndex ?? 'wait';
+  for (const element of container.querySelectorAll<HTMLElement>('[data-item-id]')) {
+    if (element.getAttribute('data-item-id') === pending.id) return element;
+  }
+  return atIndex?.hasAttribute('data-item-id') ? 'drop' : 'wait';
 }
 
 /** The item element that had the focus while a render was computed. */

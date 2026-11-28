@@ -227,6 +227,7 @@ function TableRow(props: TableRowProps) {
       role="row"
       aria-rowindex={index + 2}
       data-index={index}
+      data-item-id={project?.id}
       tabIndex={index === rows.tabbableIndex ? 0 : -1}
       aria-selected={selected}
       aria-disabled={project === null ? true : undefined}

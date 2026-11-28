@@ -396,6 +396,26 @@ it('opening a project keeps the scroll offset and the selection', async () => {
   await waitFor(() => expect(document.activeElement).toBe(rowOf('Project 7')));
 });
 
+it('back from a project that moved in the list, its own row takes the focus, not the one at its position', async () => {
+  const items = many(20);
+  const opened = items[7]!;
+  // The project was renamed while open and now sorts third.
+  const reordered = [...items.slice(0, 2), opened, ...items.slice(2, 7), ...items.slice(8)];
+  install({ 'projects:list': listOf(reordered) });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: opened.id }} />);
+  await waitFor(() => expect(document.activeElement).toBe(rowOf('Project 7')));
+});
+
+it('back from a project that left the loaded rows, no other row takes the focus', async () => {
+  const items = many(20);
+  const opened = items[7]!;
+  install({ 'projects:list': listOf(items.filter((item) => item !== opened)) });
+  render(<Harness initial={{ ...INITIAL, openedIndex: 7, selectedId: opened.id }} />);
+  await waitFor(() => rowOf('Project 8'));
+  expect(document.activeElement).toBe(document.body);
+  expect(rowOf('Project 8').getAttribute('aria-selected')).toBe('false');
+});
+
 it('empty and no-result states', async () => {
   const user = userEvent.setup();
   const api = install({ 'projects:list': listOf([]) });

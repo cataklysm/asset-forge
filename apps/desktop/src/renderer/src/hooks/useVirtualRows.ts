@@ -1,7 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { nextFocusIndex, offsetShowingIndex, rowCount } from '../gallery';
-import { focusedItem, focusSuccessor, mayTakeFocus, type FocusedItem, type PendingFocus } from './item-focus';
+import {
+  focusedItem,
+  focusSuccessor,
+  mayTakeFocus,
+  pendingTarget,
+  type FocusedItem,
+  type PendingFocus,
+} from './item-focus';
 
 // Row windowing for grids and tables, with a roving tab stop and keyboard focus that reaches rows not rendered yet.
 
@@ -18,6 +25,11 @@ export interface ViewRestore {
    * user puts the focus anywhere else. Without it, the element focused when the view mounts counts.
    */
   focusFrom?: Element | null;
+  /**
+   * The id of the item to focus, matched against the `data-item-id` of the rendered items: the focus then
+   * follows the item, not the position, and is dropped when another loaded item stands at `index`.
+   */
+  focusId?: string | null;
 }
 
 /** Where a mounted view is scrolled to. */
@@ -98,10 +110,10 @@ function applyFocus(
     pendingFocus.current = null;
     return;
   }
-  const element = container.querySelector<HTMLElement>(`[data-index="${pending.index}"]`);
-  if (!element) return;
+  const target = pendingTarget(container, pending);
+  if (target === 'wait') return;
   pendingFocus.current = null;
-  element.focus({ preventScroll: true });
+  if (target !== 'drop') target.focus({ preventScroll: true });
 }
 
 /** What `useVirtualRows` lays out. */
@@ -187,6 +199,7 @@ export function useVirtualRows({
       ? {
           index: clampIndex(restore.index),
           from: restore.focusFrom === undefined ? document.activeElement : restore.focusFrom,
+          id: restore.focusId,
         }
       : null,
   );
