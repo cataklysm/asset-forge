@@ -1726,6 +1726,8 @@ export class InMemoryDatabase implements WorkspaceDatabase {
       this.proposals.delete(fileId);
       const jobs = this.jobs.rows;
       jobs.splice(0, jobs.length, ...jobs.filter((j) => j.fileId !== fileId));
+      // `asset.cover_file_id` is `set null` in SQLite.
+      for (const [assetId, coverId] of this.covers) if (coverId === fileId) this.covers.delete(assetId);
     };
   }
 
