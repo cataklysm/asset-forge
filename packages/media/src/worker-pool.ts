@@ -123,7 +123,8 @@ function validResult(task: Task, result: unknown): TaskResult {
  * start lazily; further jobs wait and are served newest first, so the tiles requested last (the
  * ones in view after a fast scroll) are generated before those scrolled past. A worker that
  * fails, crashes or exceeds `timeoutMs` fails its job (`none` or `null`) and is dropped, so the next job
- * gets a fresh worker; a worker error or a failed start is logged as one line.
+ * gets a fresh worker; a worker error or a failed start is logged as one line, and the same line again only after a
+ * worker answered in between.
  *
  * @param options the worker entry, the size, the time limit and the log
  * @returns the pool, with no worker started yet
@@ -154,6 +155,8 @@ class PreviewWorkers {
   private nextId = 1;
   /** `close` was called. */
   private isClosed = false;
+  /** The failure line logged last since a worker last answered; null when none was. */
+  private lastReported: string | null = null;
 
   /**
    * @param options the worker entry, the size and the time limit
@@ -218,19 +221,31 @@ class PreviewWorkers {
     try {
       worker = new Worker(this.options.workerUrl);
     } catch (error) {
-      this.log(`Preview worker failed to start (${failureKind(error)})`);
+      this.report(`Preview worker failed to start (${failureKind(error)})`);
       return undefined;
     }
     const slot: Slot = { worker };
     worker.on('message', (message: unknown) => this.answer(slot, message));
     worker.on('error', (error: unknown) => {
       // A failed start arrives here as well; only the first failure of a slot is logged.
-      if (this.slots.has(slot)) this.log(`Preview worker failed (${failureKind(error)})`);
+      if (this.slots.has(slot)) this.report(`Preview worker failed (${failureKind(error)})`);
       this.dropAndTerminate(slot);
     });
     worker.on('exit', () => this.dropExited(slot));
     this.slots.add(slot);
     return slot;
+  }
+
+  /**
+   * Logs a worker failure unless the same line was logged since a worker last answered, so a module that cannot load
+   * gives one line rather than one per queued job.
+   *
+   * @param line the failure line, without a path
+   */
+  private report(line: string): void {
+    if (line === this.lastReported) return;
+    this.lastReported = line;
+    this.log(line);
   }
 
   /**
@@ -241,6 +256,8 @@ class PreviewWorkers {
    */
   private answer(slot: Slot, message: unknown): void {
     if (!isResponse(message) || !this.slots.has(slot) || slot.current?.id !== message.id) return;
+    // A worker answered, so the module loads again: the next failure is news and is logged.
+    this.lastReported = null;
     this.finish(slot, validResult(slot.current.task, message.result));
     this.pump();
   }
