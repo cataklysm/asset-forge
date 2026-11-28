@@ -235,3 +235,22 @@ export function defaultPromptId(
   const last = state.lastUsed[lastUsedKey(purpose)];
   return own.find((prompt) => prompt.id === last)?.id ?? own[0]?.id ?? null;
 }
+
+/**
+ * The prompt a dialog uses: the user's choice while the list holds it for the purpose, otherwise
+ * (no choice, or the chosen prompt vanished through a reload) the one `defaultPromptId` preselects.
+ *
+ * @param state the prompts and the ones used last
+ * @param purpose the purpose of the dialog
+ * @param chosen the user's choice; null when there is none
+ * @returns the prompt; null when there is none or nothing is loaded
+ */
+export function effectivePromptId(
+  state: Pick<AnalysisPromptsState, 'prompts' | 'lastUsed'>,
+  purpose: AnalysisPromptPurpose,
+  chosen: string | null,
+): string | null {
+  if (chosen === null || state.prompts === null) return defaultPromptId(state, purpose);
+  const held = state.prompts.some((prompt) => prompt.id === chosen && prompt.purpose === purpose);
+  return held ? chosen : defaultPromptId(state, purpose);
+}

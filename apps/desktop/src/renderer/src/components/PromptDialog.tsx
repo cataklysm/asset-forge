@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { JOB_ERROR_MESSAGES, type FileRecord } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
+import { effectivePromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
 import {
   CANCEL_LABEL,
@@ -220,7 +220,7 @@ function PromptBody({ file, onClose, onOpenSettings, settingsBlocked = null }: O
   });
   useRunningFocus(running, focusTargets.current);
 
-  const promptId = chosenPrompt ?? defaultPromptId(prompts, 'image_prompt');
+  const promptId = effectivePromptId(prompts, 'image_prompt', chosenPrompt);
   const gate = providerGate(providers, providerId, model, 'prompt');
   const blocked = gate.blocked ?? promptGate(prompts, promptId, 'image_prompt');
   const canGenerate =

@@ -1,5 +1,5 @@
 import type { FileRecord } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts } from '../analysis-prompts-context';
+import { effectivePromptId, useAnalysisPrompts } from '../analysis-prompts-context';
 import { failedMessageOf, isActive, namesOn, type Shown } from '../analysis-result';
 import { acceptProposal, analyseFile, cancelJob, discardProposal, type ResultAction } from '../analysis-result-actions';
 import { useResultOpening } from '../hooks/useResultOpening';
@@ -126,8 +126,8 @@ export function AnalysisResultDialog({
   const opening = useResultOpening(fileId, changeToken);
   const { shown, error, busy, chosenPrompt, run } = opening;
 
-  const promptId =
-    chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : defaultPromptId(prompts, 'tagging');
+  const chosenHere = chosenPrompt !== null && chosenPrompt.fileId === fileId ? chosenPrompt.id : null;
+  const promptId = effectivePromptId(prompts, 'tagging', chosenHere);
 
   /**
    * The context of one action of the current opening.

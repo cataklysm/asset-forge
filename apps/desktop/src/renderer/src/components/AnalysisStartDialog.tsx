@@ -1,7 +1,7 @@
 import { RotateCw } from 'lucide-react';
 import { useRef, useState, type FormEvent, type MutableRefObject } from 'react';
 import type { AnalysisPreview, AnalysisTarget, EnqueueAnalysisResult } from '@assetforge/contracts';
-import { defaultPromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
+import { effectivePromptId, useAnalysisPrompts, type AnalysisPromptsState } from '../analysis-prompts-context';
 import { ApiError, call, describeError } from '../api';
 import { useAnalysisPreview } from '../hooks/useAnalysisPreview';
 import { useJobs } from '../jobs-context';
@@ -237,7 +237,7 @@ export function AnalysisStartDialog({
   }
 
   // The prompt is not part of the preview: the counts do not depend on it.
-  const promptId = promptChoice ?? defaultPromptId(prompts, 'tagging');
+  const promptId = effectivePromptId(prompts, 'tagging', promptChoice);
   const { preview, previewing, previewError, retry } = useAnalysisPreview(open, target, model, providerId);
 
   const nothingToDo = preview !== null && wouldEnqueue(preview, force) === 0;

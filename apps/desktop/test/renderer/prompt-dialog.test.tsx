@@ -10,7 +10,7 @@ import {
 } from '@assetforge/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PromptDialog, PROMPT_BUSY_MESSAGE } from '../../src/renderer/src/components/PromptDialog';
-import { AnalysisPromptsProvider } from '../../src/renderer/src/analysis-prompts-context';
+import { AnalysisPromptsProvider, useAnalysisPrompts } from '../../src/renderer/src/analysis-prompts-context';
 import {
   MODEL_NOT_LISTED,
   PROMPTS_LOAD_FAILED,
@@ -571,6 +571,31 @@ it('a Generate refused with not_found shows the error and falls back to an exist
       .getAllByRole('option')
       .map((o) => o.textContent),
   ).toEqual(['Describe']);
+});
+
+it('a chosen prompt that vanishes through a reload falls back to the default', async () => {
+  const user = userEvent.setup();
+  const prompts = fakeAnalysisPrompts({ prompts: PROMPTS });
+  install(CONFIGURED, MODELS, prompts.handlers);
+  let reload: (() => Promise<void>) | null = null;
+  function PromptsProbe() {
+    reload = useAnalysisPrompts().reload;
+    return null;
+  }
+  render(
+    <ProviderSettingsProvider>
+      <AnalysisPromptsProvider>
+        <PromptsProbe />
+        <PromptDialog open file={FILE} onClose={() => {}} onOpenSettings={() => {}} />
+      </AnalysisPromptsProvider>
+    </ProviderSettingsProvider>,
+  );
+  await ready();
+  await user.selectOptions(promptSelect(), IMAGE_SHORT.id);
+  prompts.state.prompts = prompts.state.prompts.filter((p) => p.id !== IMAGE_SHORT.id);
+  await act(() => reload!());
+  expect(promptSelect().value).toBe(IMAGE_DEFAULT.id);
+  expect(button('Generate').disabled).toBe(false);
 });
 
 describe('provider choice', () => {
