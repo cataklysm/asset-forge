@@ -15,7 +15,8 @@ import {
   type MockProvider,
 } from '../../../docker/mock-provider/server.mjs';
 import { createGenerationImageSource } from '../src/main/generation-image-source.js';
-import { createGenerationHandlers, createImageProviderDirectory } from '../src/main/generation-handlers.js';
+import { createGenerationHandlers } from '../src/main/generation-handlers.js';
+import { createImageProviderDirectory } from '../src/main/image-provider-directory.js';
 import type { JobHost } from '../src/main/job-host.js';
 import type { ProviderGateway } from '../src/main/provider-gateway.js';
 import type { ProviderEntry } from '../src/main/provider-entry.js';

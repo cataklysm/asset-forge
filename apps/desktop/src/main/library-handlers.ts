@@ -1,80 +1,48 @@
 import {
   addAssetSource,
   addAssetTag,
-  addFileTag,
-  addFileTags,
   addRelation,
   assignAsset,
-  assignFiles,
   createAsset,
   createProject,
-  emptyTrash,
-  enqueueUrlImport,
   getAsset,
   getAssetDetail,
   getProject,
   getWorkflow,
-  InvalidOperationError,
   listAssets,
   listAssetTypes,
   listAssignmentsOfAsset,
-  listFileOrigins,
   listMembersOfProject,
   listProjects,
   listRelations,
   listWorkflowTemplates,
-  relocateFile,
   removeAssetSource,
   removeAssetTag,
   removeAssignment,
-  removeFileTag,
-  removeFileTags,
   removeRelation,
   removeWorkflow,
   renameTag,
   resolveAssetSourceUrl,
-  resolveFileOriginUrl,
-  purgeFiles,
-  resolveFilePath,
-  restoreFiles,
   setAssetCover,
   startWorkflow,
   suggestTags,
   tagUsage,
-  trashCount,
-  trashFiles,
-  type FileBatchItem,
   updateAsset,
   updateAssignment,
   updateProject,
   updateWorkflowStep,
   type WorkspaceManager,
+  type WorkspaceSession,
 } from '@assetforge/core';
-import type { FileBatchResult, IpcChannel } from '@assetforge/contracts';
-import type { Dialogs, HostActions } from './host-actions.js';
-import { toIpcError, type IpcHandlers } from './ipc.js';
-import type { JobHost } from './job-host.js';
+import { openStoredUrl, type Dialogs, type HostActions } from './host-actions.js';
+import type { IpcHandlers, IpcRequest, IpcResponse } from './ipc.js';
 
 // Kept free of Electron imports. Reads bypass the serial queue; every write goes through
 // `exclusive` because several use cases check before they write.
 
+/** The channels of asset types, projects, assets, tags, assignments, relations and workflows. */
 export type LibraryHandlers = Pick<
   IpcHandlers,
-  | 'files:import'
-  | 'files:importProgress'
-  | 'files:cancelImport'
-  | 'files:importUrls'
-  | 'files:origins'
-  | 'files:openOrigin'
-  | 'files:list'
-  | 'files:assign'
-  | 'files:unassign'
-  | 'files:assignMany'
-  | 'files:trashMany'
-  | 'files:restoreMany'
-  | 'files:purgeMany'
-  | 'trash:empty'
-  | 'trash:summary'
   | 'assetTypes:list'
   | 'projects:list'
   | 'projects:get'
@@ -93,13 +61,6 @@ export type LibraryHandlers = Pick<
   | 'assets:addSource'
   | 'assets:removeSource'
   | 'assets:openSource'
-  | 'files:addTag'
-  | 'files:removeTag'
-  | 'files:addTagMany'
-  | 'files:removeTagMany'
-  | 'files:measure'
-  | 'files:openExternal'
-  | 'files:showInFolder'
   | 'assignments:listByAsset'
   | 'assignments:listByProject'
   | 'assignments:assign'
@@ -115,163 +76,162 @@ export type LibraryHandlers = Pick<
   | 'workflows:remove'
 >;
 
-export function createLibraryHandlers(
-  manager: WorkspaceManager,
-  dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>,
-  host: Pick<HostActions, 'openPath' | 'showItemInFolder' | 'openExternal'>,
-  jobs: Pick<JobHost, 'cancel' | 'cancelAll' | 'changed' | 'wake'>,
-): LibraryHandlers {
-  /** Runs a channel that may have cancelled jobs; raises the counter and wakes the scheduler even when it fails. */
-  const touchingJobs = async <T>(fn: () => Promise<T>): Promise<T> => {
-    try {
-      return await fn();
-    } finally {
-      jobs.changed();
-      jobs.wake();
-    }
-  };
+/** What the library channels work with. */
+export interface LibraryHandlerDependencies {
+  /** The workspace manager. */
+  manager: WorkspaceManager;
+  /** Asks before a workflow is removed. */
+  dialogs: Pick<Dialogs, 'confirmRemoveWorkflow'>;
+  /** Opens a stored source address. */
+  host: Pick<HostActions, 'openExternal'>;
+}
 
+/**
+ * Builds the library channels.
+ *
+ * @param dependencies what the channels work with
+ * @returns one handler per channel
+ */
+export function createLibraryHandlers(dependencies: LibraryHandlerDependencies): LibraryHandlers {
+  const { manager } = dependencies;
   return {
-    'files:import': (r) => manager.importFiles(r.sourcePaths, r.target ?? null, { unpackArchives: r.unpackArchives }),
-    // Both read or mark the running import without the queue, which that import holds; neither needs a workspace.
-    'files:importProgress': async () => manager.importProgress(),
-    'files:cancelImport': async () => ({ cancelling: manager.cancelImport() }),
-    // Only the enqueue runs in the serial queue; the downloads are jobs and never hold it.
-    'files:importUrls': async (r) => {
-      const result = await manager.exclusive((s) =>
-        enqueueUrlImport(s, { urls: r.urls, target: r.target ?? null, skipDuplicates: r.skipDuplicates ?? true }),
-      );
-      jobs.changed();
-      jobs.wake();
-      return result;
-    },
-    'files:origins': (r) => manager.read((s) => listFileOrigins(s, r.fileId)),
-    // Only a stored origin of the file is opened, checked by the URL rule again; the renderer never sends an address.
-    'files:openOrigin': async (r) => {
-      const url = await manager.read((s) => resolveFileOriginUrl(s, r));
-      try {
-        await host.openExternal(url);
-      } catch {
-        // The shell's error may carry paths or the address; it is never forwarded.
-        throw new InvalidOperationError('This source could not be opened');
-      }
-      return {};
-    },
-    'files:list': (r) => manager.listFiles(r),
-    'files:assign': (r) =>
-      manager.exclusive((s) => relocateFile(s, r.fileId, { assetId: r.assetId, role: r.role })),
-    'files:unassign': (r) => manager.exclusive((s) => relocateFile(s, r.fileId, null)),
-    'files:assignMany': async (r) => batch('files:assignMany', await manager.exclusive((s) => assignFiles(s, r))),
+    'assetTypes:list': () => manager.read((session) => listAssetTypes(session)),
 
-    // Deleting and purging cancel the jobs of a file, and a restore makes its finished jobs retryable
-    // again, so the job counter goes up and the scheduler looks again afterwards, also when an item failed.
-    'files:trashMany': (r) =>
-      touchingJobs(async () => batch('files:trashMany', await manager.exclusive((s) => trashFiles(s, jobs, r.fileIds)))),
-    'files:restoreMany': (r) =>
-      touchingJobs(async () => batch('files:restoreMany', await manager.exclusive((s) => restoreFiles(s, r.fileIds)))),
-    'files:purgeMany': (r) =>
-      touchingJobs(async () => batch('files:purgeMany', await manager.exclusive((s) => purgeFiles(s, jobs, r.fileIds)))),
-    'trash:empty': () => touchingJobs(() => manager.exclusive((s) => emptyTrash(s, jobs))),
-    'trash:summary': async () => ({ count: await manager.read((s) => trashCount(s)) }),
+    'projects:list': (request) => manager.read((session) => listProjects(session, request)),
+    'projects:get': (request) => manager.read((session) => getProject(session, request.id)),
+    'projects:create': (request) => manager.exclusive((session) => createProject(session, request)),
+    'projects:update': (request) => manager.exclusive((session) => updateProject(session, request.id, request.patch)),
 
-    'assetTypes:list': () => manager.read((s) => listAssetTypes(s)),
-
-    'projects:list': (r) => manager.read((s) => listProjects(s, r)),
-    'projects:get': (r) => manager.read((s) => getProject(s, r.id)),
-    'projects:create': (r) => manager.exclusive((s) => createProject(s, r)),
-    'projects:update': (r) => manager.exclusive((s) => updateProject(s, r.id, r.patch)),
-
-    'assets:list': (r) => manager.read((s) => listAssets(s, r)),
-    'assets:get': (r) => manager.read((s) => getAssetDetail(s, r.id)),
-    'assets:create': (r) => manager.exclusive((s) => createAsset(s, r)),
-    'assets:update': (r) =>
-      manager.exclusive(async (s) => {
-        await updateAsset(s, r.id, r.patch);
-        return getAssetDetail(s, r.id);
-      }),
+    'assets:list': (request) => manager.read((session) => listAssets(session, request)),
+    'assets:get': (request) => manager.read((session) => getAssetDetail(session, request.id)),
+    'assets:create': (request) => manager.exclusive((session) => createAsset(session, request)),
+    'assets:update': (request) => manager.exclusive((session) => updateAndRead(session, request)),
     // Validation and the two-step write must not interleave with a file move.
-    'assets:setCover': (r) => manager.exclusive((s) => setAssetCover(s, r)),
+    'assets:setCover': (request) => manager.exclusive((session) => setAssetCover(session, request)),
 
-    'tags:suggest': (r) => manager.read((s) => suggestTags(s, r)),
-    'tags:usage': (r) => manager.read((s) => tagUsage(s, r)),
-    'tags:rename': (r) => manager.exclusive((s) => renameTag(s, r)),
-    'assets:addTag': (r) => manager.exclusive((s) => addAssetTag(s, r)),
-    'assets:removeTag': (r) => manager.exclusive((s) => removeAssetTag(s, r)),
+    'tags:suggest': (request) => manager.read((session) => suggestTags(session, request)),
+    'tags:usage': (request) => manager.read((session) => tagUsage(session, request)),
+    'tags:rename': (request) => manager.exclusive((session) => renameTag(session, request)),
+    'assets:addTag': (request) => manager.exclusive((session) => addAssetTag(session, request)),
+    'assets:removeTag': (request) => manager.exclusive((session) => removeAssetTag(session, request)),
 
-    'assets:addSource': (r) => manager.exclusive((s) => addAssetSource(s, r)),
-    'assets:removeSource': (r) => manager.exclusive((s) => removeAssetSource(s, r)),
-    // Only a stored source of the open workspace is opened, checked by the URL rule again.
-    'assets:openSource': async (r) => {
-      const url = await manager.read((s) => resolveAssetSourceUrl(s, r));
-      try {
-        await host.openExternal(url);
-      } catch {
-        // The shell's error may carry paths or the address; it is never forwarded.
-        throw new InvalidOperationError('This source could not be opened');
-      }
-      return null;
-    },
-    'files:addTag': (r) => manager.exclusive((s) => addFileTag(s, r)),
-    'files:removeTag': (r) => manager.exclusive((s) => removeFileTag(s, r)),
-    'files:addTagMany': async (r) => ({ items: await manager.exclusive((s) => addFileTags(s, r)) }),
-    'files:removeTagMany': async (r) => ({ items: await manager.exclusive((s) => removeFileTags(s, r)) }),
+    'assets:addSource': (request) => manager.exclusive((session) => addAssetSource(session, request)),
+    'assets:removeSource': (request) => manager.exclusive((session) => removeAssetSource(session, request)),
+    'assets:openSource': (request) => openSource(dependencies, request),
 
-    // The probe runs outside the workspace queue; only storing its result is queued.
-    'files:measure': (r) => manager.measureFile(r.fileId),
-    'files:openExternal': async (r) => {
-      const path = await manager.read((s) => resolveFilePath(s, r.fileId, 'open'));
-      // The shell's text may contain paths; it is never forwarded.
-      if ((await host.openPath(path)) !== '') {
-        throw new InvalidOperationError('No application could open this file');
-      }
-      return null;
-    },
-    'files:showInFolder': async (r) => {
-      host.showItemInFolder(await manager.read((s) => resolveFilePath(s, r.fileId, 'reveal')));
-      return null;
-    },
-
-    'assignments:listByAsset': (r) => manager.read((s) => listAssignmentsOfAsset(s, r.assetId)),
+    'assignments:listByAsset': (request) => manager.read((session) => listAssignmentsOfAsset(session, request.assetId)),
     'assignments:listByProject': ({ projectId, ...page }) =>
-      manager.read((s) => listMembersOfProject(s, projectId, page)),
-    'assignments:assign': (r) => manager.exclusive((s) => assignAsset(s, r)),
-    'assignments:update': ({ patch, ...key }) =>
-      manager.exclusive((s) => updateAssignment(s, key, patch)),
-    'assignments:remove': async (r) => {
-      await manager.exclusive((s) => removeAssignment(s, r));
-      return null;
-    },
+      manager.read((session) => listMembersOfProject(session, projectId, page)),
+    'assignments:assign': (request) => manager.exclusive((session) => assignAsset(session, request)),
+    'assignments:update': ({ patch, ...key }) => manager.exclusive((session) => updateAssignment(session, key, patch)),
+    'assignments:remove': (request) => removeAssignmentOf(manager, request),
 
-    'relations:list': (r) => manager.read((s) => listRelations(s, r.assetId)),
-    'relations:add': (r) => manager.exclusive((s) => addRelation(s, r)),
-    'relations:remove': async (r) => {
-      await manager.exclusive((s) => removeRelation(s, r));
-      return null;
-    },
+    'relations:list': (request) => manager.read((session) => listRelations(session, request.assetId)),
+    'relations:add': (request) => manager.exclusive((session) => addRelation(session, request)),
+    'relations:remove': (request) => removeRelationOf(manager, request),
 
-    'workflowTemplates:list': () => manager.read((s) => listWorkflowTemplates(s)),
-    'workflows:get': (r) => manager.read((s) => getWorkflow(s, r.assetId)),
-    'workflows:start': (r) => manager.exclusive((s) => startWorkflow(s, r.assetId, r.templateId)),
-    'workflows:updateStep': (r) => manager.exclusive((s) => updateWorkflowStep(s, r.stepId, r.patch)),
-    'workflows:remove': async (r) => {
-      const { name, hasWorkflow } = await manager.read(async (s) => ({
-        name: (await getAsset(s, r.assetId)).name,
-        hasWorkflow: (await getWorkflow(s, r.assetId)) !== null,
-      }));
-      if (!hasWorkflow) return { removed: false };
-      if (!(await dialogs.confirmRemoveWorkflow(name))) return { removed: false };
-      return { removed: await manager.exclusive((s) => removeWorkflow(s, r.assetId)) };
-    },
+    'workflowTemplates:list': () => manager.read((session) => listWorkflowTemplates(session)),
+    'workflows:get': (request) => manager.read((session) => getWorkflow(session, request.assetId)),
+    'workflows:start': (request) =>
+      manager.exclusive((session) => startWorkflow(session, request.assetId, request.templateId)),
+    'workflows:updateStep': (request) =>
+      manager.exclusive((session) => updateWorkflowStep(session, request.stepId, request.patch)),
+    'workflows:remove': (request) => removeWorkflowOf(dependencies, request),
   };
 }
 
-/** Per-item results for the renderer: each error mapped like a channel error, so no cause or path leaks. */
-function batch(channel: IpcChannel, items: FileBatchItem[]): FileBatchResult {
+/**
+ * Changes an asset and reads it back in the same queue slot.
+ *
+ * @param session the open workspace
+ * @param request the asset and the patch
+ * @returns the changed asset
+ */
+async function updateAndRead(
+  session: WorkspaceSession,
+  request: IpcRequest<'assets:update'>,
+): Promise<IpcResponse<'assets:update'>> {
+  await updateAsset(session, request.id, request.patch);
+  return getAssetDetail(session, request.id);
+}
+
+/**
+ * Opens a stored source of the open workspace, checked by the URL rule again.
+ *
+ * @param dependencies the manager and the host
+ * @param request the asset and its source
+ * @returns null
+ */
+async function openSource(
+  dependencies: LibraryHandlerDependencies,
+  request: IpcRequest<'assets:openSource'>,
+): Promise<IpcResponse<'assets:openSource'>> {
+  const url = await dependencies.manager.read((session) => resolveAssetSourceUrl(session, request));
+  await openStoredUrl(dependencies.host, url);
+  return null;
+}
+
+/**
+ * Removes an asset from a project.
+ *
+ * @param manager the workspace manager
+ * @param request the assignment
+ * @returns null
+ */
+async function removeAssignmentOf(
+  manager: WorkspaceManager,
+  request: IpcRequest<'assignments:remove'>,
+): Promise<IpcResponse<'assignments:remove'>> {
+  await manager.exclusive((session) => removeAssignment(session, request));
+  return null;
+}
+
+/**
+ * Removes a relation between two assets.
+ *
+ * @param manager the workspace manager
+ * @param request the relation
+ * @returns null
+ */
+async function removeRelationOf(
+  manager: WorkspaceManager,
+  request: IpcRequest<'relations:remove'>,
+): Promise<IpcResponse<'relations:remove'>> {
+  await manager.exclusive((session) => removeRelation(session, request));
+  return null;
+}
+
+/**
+ * Removes the workflow of an asset after the user agreed.
+ *
+ * @param dependencies the manager and the dialogs
+ * @param request the asset
+ * @returns whether the workflow was removed
+ */
+async function removeWorkflowOf(
+  dependencies: LibraryHandlerDependencies,
+  request: IpcRequest<'workflows:remove'>,
+): Promise<IpcResponse<'workflows:remove'>> {
+  const { manager, dialogs } = dependencies;
+  const { name, hasWorkflow } = await manager.read((session) => workflowOfAsset(session, request.assetId));
+  if (!hasWorkflow) return { removed: false };
+  if (!(await dialogs.confirmRemoveWorkflow(name))) return { removed: false };
+  return { removed: await manager.exclusive((session) => removeWorkflow(session, request.assetId)) };
+}
+
+/**
+ * The asset's name and whether it has a workflow.
+ *
+ * @param session the open workspace
+ * @param assetId the asset
+ * @returns the name and the answer
+ */
+async function workflowOfAsset(
+  session: WorkspaceSession,
+  assetId: string,
+): Promise<{ name: string; hasWorkflow: boolean }> {
   return {
-    items: items.map(({ fileId, file, error }) => ({
-      fileId,
-      file,
-      error: error === null ? null : toIpcError(error, channel),
-    })),
+    name: (await getAsset(session, assetId)).name,
+    hasWorkflow: (await getWorkflow(session, assetId)) !== null,
   };
 }

@@ -23,7 +23,7 @@ import { createUrlSource, LocalFileSystemStorage, NodeSourceFiles, ZipArchiveRea
 import { createAnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import { createAnalysisPromptStore } from './analysis-prompts.js';
 import { createDescribeController } from './describe-controller.js';
-import { createImageProviderDirectory } from './generation-handlers.js';
+import { createImageProviderDirectory } from './image-provider-directory.js';
 import type { AppServices } from './workspace-handlers.js';
 import { createChangeFeed } from './change-feed.js';
 import { createJobHost, PROVIDER_CLASSES, type JobHost, type SchedulerClock } from './job-host.js';

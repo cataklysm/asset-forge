@@ -1,4 +1,5 @@
 import type { WorkspaceSummary } from '@assetforge/contracts';
+import { InvalidOperationError } from '@assetforge/core';
 
 // What the handlers ask of the host (Electron): its dialogs and the actions only it can perform. Tests fake both.
 
@@ -60,4 +61,20 @@ export interface HostActions {
   workspaceOpened(): Promise<void>;
   /** Called before a workspace lifecycle channel calls the manager. Never rejects. */
   workspaceClosing(): Promise<void>;
+}
+
+/**
+ * Hands a stored, re-checked address to the system browser.
+ *
+ * @param host the host
+ * @param url the address, read from the workspace and checked by the URL rule again
+ * @throws InvalidOperationError with a fixed message when the shell fails
+ */
+export async function openStoredUrl(host: Pick<HostActions, 'openExternal'>, url: string): Promise<void> {
+  try {
+    await host.openExternal(url);
+  } catch {
+    // The shell's error may carry paths or the address; it is never forwarded.
+    throw new InvalidOperationError('This source could not be opened');
+  }
 }

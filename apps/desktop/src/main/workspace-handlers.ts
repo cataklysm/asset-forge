@@ -4,6 +4,7 @@ import { createAnalysisHandlers } from './analysis-handlers.js';
 import type { AnalysisPromptHandlers } from './analysis-prompt-handlers.js';
 import type { AnalysisPromptStore } from './analysis-prompts.js';
 import type { DescribeController } from './describe-controller.js';
+import { createFileHandlers } from './file-handlers.js';
 import { createGenerationHandlers } from './generation-handlers.js';
 import type { Dialogs, HostActions } from './host-actions.js';
 import type { IpcHandlers, IpcRequest, IpcResponse } from './ipc.js';
@@ -64,7 +65,8 @@ export function createWorkspaceHandlers(
     'workspace:open': (request) => lifecycle.run(() => manager.open(request)),
     'workspace:remove': (request) => lifecycle.remove(request),
     'workspace:close': () => lifecycle.close(),
-    ...createLibraryHandlers(manager, dialogs, host, jobs),
+    ...createFileHandlers({ manager, host, jobs }),
+    ...createLibraryHandlers({ manager, dialogs, host }),
     ...createAnalysisHandlers({
       manager,
       jobs,
