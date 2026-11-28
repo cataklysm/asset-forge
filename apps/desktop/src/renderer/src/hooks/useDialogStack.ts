@@ -5,11 +5,11 @@ export type StackedDialog = 'studio' | 'linked';
 
 /** What `useDialogStack` offers. */
 export interface DialogStack {
-  /** The key part of the studio; rises when the studio is raised over the linked file dialog. */
-  studioKey: number;
-  /** The key part of the linked file dialog; rises when it is raised over the studio. */
-  linkedKey: number;
-  /** Puts `which` on top, mounting it anew when the other one is on top. */
+  /** The raise counter of the studio; rises when the studio is raised over the linked file dialog. */
+  studioRaise: number;
+  /** The raise counter of the linked file dialog; rises when it is raised over the studio. */
+  linkedRaise: number;
+  /** Puts `which` on top, raising it when the other one is on top. */
   raise(which: StackedDialog): void;
   /** Records that `which` closed; the other one, if still open, is now on top. */
   lower(which: StackedDialog, otherOpen: boolean): void;
@@ -27,19 +27,18 @@ const otherOf = (which: StackedDialog): StackedDialog => (which === 'studio' ? '
 
 /**
  * Which of the two dialogs is on top. A native dialog keeps its place in the top layer while it
- * stays open, so the one requested while the other is on top is mounted anew (a new key), which
- * shows it again above the other. The studio's form and starts in flight outlive that remount
- * (`StudioSession`).
+ * stays open, so the one requested while the other is on top gets a new raise counter, which makes
+ * its `Dialog` show the mounted element again above the other (`useModalDialog`); nothing remounts.
  *
- * @returns the keys and the stack operations
+ * @returns the raise counters and the stack operations
  */
 export function useDialogStack(): DialogStack {
   const top = useRef<StackedDialog | null>(null);
-  const [studioKey, setStudioKey] = useState(0);
-  const [linkedKey, setLinkedKey] = useState(0);
+  const [studioRaise, setStudioRaise] = useState(0);
+  const [linkedRaise, setLinkedRaise] = useState(0);
   const raise = useCallback((which: StackedDialog) => {
     if (top.current !== null && top.current !== which)
-      (which === 'studio' ? setStudioKey : setLinkedKey)((key) => key + 1);
+      (which === 'studio' ? setStudioRaise : setLinkedRaise)((count) => count + 1);
     top.current = which;
   }, []);
   // The one closed was on top; the other one, if still open, is now.
@@ -50,5 +49,5 @@ export function useDialogStack(): DialogStack {
   const clear = useCallback(() => {
     top.current = null;
   }, []);
-  return { studioKey, linkedKey, raise, lower, clear };
+  return { studioRaise, linkedRaise, raise, lower, clear };
 }

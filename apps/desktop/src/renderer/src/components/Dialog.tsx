@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
-import { useModalDialog } from '../hooks/useModalDialog';
+import { isReshowing, useModalDialog } from '../hooks/useModalDialog';
 import { BORDER, SECTION_TITLE } from '../ui';
 
 /** The props of `Dialog`. */
@@ -14,6 +14,8 @@ interface Props {
   initialFocusRef?: RefObject<HTMLElement | null>;
   /** `detail` renders its content edge to edge; the content brings its own header. */
   size?: 'form' | 'wide' | 'detail';
+  /** A counter; every change while open brings the mounted dialog to the top again. */
+  raise?: number;
   /** The content, rendered only while open. */
   children: ReactNode;
 }
@@ -58,10 +60,10 @@ function DialogBody({
 /**
  * A modal native `<dialog>`. Esc calls `onClose`; when it closes, focus returns to where it was before opening.
  *
- * @param props the open flag, the title, the close callback, the initial focus, the size and the content
+ * @param props the open flag, the title, the close callback, the initial focus, the size, the raise counter and the content
  * @returns the dialog element
  */
-export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', children }: Props) {
+export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', raise = 0, children }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const openRef = useRef(open);
@@ -71,7 +73,7 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
     openRef.current = open;
     onCloseRef.current = onClose;
   });
-  useModalDialog(ref, open, initialFocusRef);
+  useModalDialog(ref, open, initialFocusRef, raise);
 
   const detail = size === 'detail';
   return (
@@ -79,12 +81,18 @@ export function Dialog({ open, title, onClose, initialFocusRef, size = 'form', c
       ref={ref}
       aria-labelledby={detail ? undefined : titleId}
       aria-label={detail ? title : undefined}
+      // React passes the cancel and close events of a dialog nested in the content on to this one;
+      // only those of this element count.
       onCancel={(event) => {
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onCloseRef.current();
       }}
-      onClose={() => {
+      onClose={(event) => {
+        if (event.target !== event.currentTarget) return;
         // Closed by the browser (e.g. a `method="dialog"` form) while the caller still holds it open.
+        // A re-show on top closes the element and opens it again; that is no close.
+        if (isReshowing(ref.current) || ref.current?.open === true) return;
         if (openRef.current) onCloseRef.current();
       }}
       className={`m-auto rounded-dialog border bg-surface p-0 text-text backdrop:bg-bg/70 ${BORDER} ${SIZE[size]}`}

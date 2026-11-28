@@ -49,7 +49,7 @@ export function useStudioStatus(fileId: string, session: StudioSession, form: St
   const [upscales, setUpscales] = useState<Generation[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Also kept in the session, so that a start failing after a raise shows in the instance mounted anew
+  // Also kept in the session, so that a start failing after the studio was closed shows when it opens again
   // (outside a provider the session keeps nothing and this instance's own copy shows it).
   const [ownStartError, setOwnStartError] = useState<string | null>(null);
   const startError = session.startError(fileId) ?? ownStartError;

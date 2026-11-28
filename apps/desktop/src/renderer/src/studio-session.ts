@@ -57,8 +57,9 @@ export const StudioContext = createContext<StudioState>(EMPTY);
 export type StartKind = 'edit' | 'upscale';
 
 /**
- * What outlives one instance of the studio dialog while the studio stays open (raising it mounts it
- * anew): the starts in flight and the form of the shown source.
+ * What the studio of the workspace keeps beside its dialog (a raise keeps the dialog mounted): the
+ * starts in flight, the form of the shown source until the studio closes, and the last start error
+ * per source, also of a start that failed after the studio was closed.
  */
 export interface StudioSession {
   /** A start of `kind` for the source `fileId` is in flight. */
@@ -69,9 +70,9 @@ export interface StudioSession {
   draft(fileId: string): StudioForm | undefined;
   /** Keeps the studio form of `fileId` until the studio closes or shows another file. */
   keepDraft(fileId: string, form: StudioForm): void;
-  /** Why the last edit start for the source `fileId` failed; null when it did not or the studio was closed since. */
+  /** Why the last edit start for the source `fileId` failed; null when it did not or the studio was closed since it failed. */
   startError(fileId: string): string | null;
-  /** Sets (or with null clears) the start error of `fileId`; it outlives a raise and goes on close. */
+  /** Sets (or with null clears) the start error of `fileId`; it goes when the studio closes, and a start failing after that keeps it until the next close. */
   setStartError(fileId: string, message: string | null): void;
 }
 

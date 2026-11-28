@@ -35,6 +35,8 @@ import { StudioResults } from './StudioResults';
 export interface GenerationStudioProps {
   /** The source image. */
   file: FileRecord;
+  /** A counter; every change brings the open studio to the top again, without a remount. */
+  raise?: number;
   onClose(): void;
   /** Opens a result (or the source) in the file detail dialog; rejects when the file cannot be read. */
   onOpenFile(fileId: string): Promise<void>;
@@ -48,7 +50,7 @@ export interface GenerationStudioProps {
  * @param props the source image and the callbacks
  * @returns the dialog
  */
-export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudioProps): JSX.Element | null {
+export function GenerationStudio({ file, raise, onClose, onOpenFile }: GenerationStudioProps): JSX.Element | null {
   const providers = useProviders();
   const { changeToken, refresh } = useJobs();
   const { recallVariable, rememberVariables } = useStudio();
@@ -61,7 +63,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
   const status = useStudioStatus(file.id, session, fieldsState);
   const { results, upscales, recent, selectedId, setSelectedId, startError, setStartError } = status;
   const { actionError, setActionError, loadError, promptRef, shownFileId, busy, setBusy, starting } = status;
-  // A start of this instance, or one sent from an instance before a raise.
+  // A start of this instance, or one sent from an earlier opening of the studio.
   const startBusy = starting || session.starting(file.id, 'edit');
   const upscaleBusy = (fileId: string | null) => fileId !== null && session.starting(fileId, 'upscale');
 
@@ -145,7 +147,7 @@ export function GenerationStudio({ file, onClose, onOpenFile }: GenerationStudio
 
   const title = `${STUDIO_TITLE} ${file.originalName}`;
   return (
-    <Dialog open title={title} onClose={onClose} size="detail" initialFocusRef={promptRef}>
+    <Dialog open title={title} onClose={onClose} size="detail" initialFocusRef={promptRef} raise={raise}>
       <div className="flex h-full flex-col">
         <StudioHeader title={title} name={file.originalName} onClose={onClose} />
         <div className="flex min-h-0 flex-1">

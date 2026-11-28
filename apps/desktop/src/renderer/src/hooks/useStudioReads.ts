@@ -139,7 +139,7 @@ export function useStudioReads(input: StudioReadsInput): StudioReads {
     void loadRecent();
   }, [loadRecent]);
 
-  // A start sent before a raise ends after this instance read its results: they are read again.
+  // A start sent from an earlier opening ends after this instance read its results: they are read again.
   const wasStarting = useRef(sessionStarting);
   useEffect(() => {
     if (wasStarting.current && !sessionStarting) {

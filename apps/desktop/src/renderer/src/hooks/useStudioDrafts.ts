@@ -7,13 +7,11 @@ export interface StudioDrafts {
   draft(fileId: string): StudioForm | undefined;
   /** Keeps the studio form of `fileId` until the studio closes or shows another file. */
   keepDraft(fileId: string, form: StudioForm): void;
-  /** Why the last edit start for the source `fileId` failed; null when it did not or the studio was closed since. */
+  /** Why the last edit start for the source `fileId` failed; null when it did not or the studio was closed since it failed. */
   startError(fileId: string): string | null;
-  /** Sets (or with null clears) the start error of `fileId`; it outlives a raise and goes on close. */
+  /** Sets (or with null clears) the start error of `fileId`; it goes when the studio closes, and a start failing after that keeps it until the next close. */
   setStartError(fileId: string, message: string | null): void;
-  /** Marks the studio open, so start errors are kept again. */
-  opened(): void;
-  /** Marks the studio closed and drops the kept form and every start error. */
+  /** Drops the kept form and every start error so far, when the studio closes. */
   forget(): void;
 }
 
@@ -38,34 +36,28 @@ function withStartError(
 }
 
 /**
- * What outlives one instance of the studio dialog while the studio stays open: the form of the shown
- * source and the last start error per source.
+ * What the studio session keeps beside the mounted dialog: the form of the shown source, dropped on
+ * close, and the last start error per source. A start that fails after the studio was closed keeps
+ * its error, so that the studio of that source shows it when it opens again.
  *
- * @returns the drafts, the start errors and the open and close marks
+ * @returns the drafts, the start errors and the close mark
  */
 export function useStudioDrafts(): StudioDrafts {
-  // Whether the studio is open: a start answering after a close (which drops every start error) shows nothing later.
-  const studioOpen = useRef(false);
-  // The form of the studio's source, so that a raise (a remount) shows it as it was; dropped on close.
+  // The form of the studio's source, read when the studio shows the source again; dropped on close.
   const kept = useRef<{ fileId: string; form: StudioForm } | null>(null);
   const draft = useCallback((fileId: string) => (kept.current?.fileId === fileId ? kept.current.form : undefined), []);
   const keepDraft = useCallback((fileId: string, form: StudioForm) => {
     kept.current = { fileId, form };
   }, []);
-  // The last start error per source, so that a start failing after a raise shows in the new instance.
+  // The last start error per source, also of a start that failed after the studio was closed.
   const [startErrors, setStartErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const startError = useCallback((fileId: string) => startErrors.get(fileId) ?? null, [startErrors]);
   const setStartError = useCallback((fileId: string, message: string | null) => {
-    if (message !== null && !studioOpen.current) return;
     setStartErrors((current) => withStartError(current, fileId, message));
-  }, []);
-  const opened = useCallback(() => {
-    studioOpen.current = true;
   }, []);
   const forget = useCallback(() => {
     kept.current = null;
-    studioOpen.current = false;
     setStartErrors(new Map());
   }, []);
-  return { draft, keepDraft, startError, setStartError, opened, forget };
+  return { draft, keepDraft, startError, setStartError, forget };
 }

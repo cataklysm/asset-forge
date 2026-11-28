@@ -20,20 +20,36 @@ for (const property of ['clientHeight', 'offsetHeight'])
 HTMLElement.prototype.getBoundingClientRect = () =>
   ({ x: 0, y: 0, top: 0, left: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON: () => ({}) }) as DOMRect;
 
-// jsdom implements <dialog> only partly.
+// jsdom implements <dialog> only partly. Like a browser, the modal dialogs form a top layer in the
+// order of their `showModal()` calls.
+const topLayer: HTMLDialogElement[] = [];
 HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
   this.open = true;
+  topLayer.splice(topLayer.indexOf(this) >>> 0, 1);
+  topLayer.push(this);
 };
 HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+  const index = topLayer.indexOf(this);
+  if (index >= 0) topLayer.splice(index, 1);
   if (!this.open) return;
   this.open = false;
   this.dispatchEvent(new Event('close'));
 };
+/**
+ * The dialog on top: the last one shown as a modal that is still open and in the document, else the
+ * last open one in document order.
+ *
+ * @returns the dialog, or undefined when none is open
+ */
+function topDialog(): HTMLDialogElement | undefined {
+  const modal = topLayer.filter((d) => d.open && d.isConnected).at(-1);
+  return modal ?? [...document.querySelectorAll('dialog')].filter((d) => d.open).at(-1);
+}
 // Like a browser, Esc that nobody handled fires a cancelable `cancel` on the topmost open dialog
 // and closes it unless `cancel` is prevented.
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || event.defaultPrevented) return;
-  const dialog = [...document.querySelectorAll('dialog')].filter((d) => d.open).at(-1);
+  const dialog = topDialog();
   if (dialog === undefined) return;
   if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();
 });
