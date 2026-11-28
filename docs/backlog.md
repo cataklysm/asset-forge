@@ -550,6 +550,7 @@ Not covered by any automated check: the real windows. The hidden page window, th
 - `emptyTrash` in `packages/core/src/file-trash.ts` drops the per-item errors, so `trash:empty` cannot log their codes, and it counts a lost purge race (`not_found`) as failed.
 - A timed-out `stat` of the remembered import directory keeps a libuv thread busy on a hung share; keep one check in flight per directory.
 - Renaming a provider that is not paused no longer raises the change counter (invisible today, since no list shows the provider name from the feed).
+- The in-memory job fake (`packages/core/test/memory-jobs.ts`): `list` ignores the `ids` filter, which the SQLite repository applies.
 - Contracts: local count and id schema copies remain in `files.ts`, `tags.ts`, `ipc-jobs.ts`, `jobs.ts`, `prompts.ts`, `library.ts` and `workflows.ts`.
 - `recoverFileMoves` keeps open move rows when the storage is unreachable (intended); no test at that level pins it.
 - The literal `'The storage of this workspace is not reachable'` is duplicated in `file-move-recovery.ts` and `file-trash.ts`.
