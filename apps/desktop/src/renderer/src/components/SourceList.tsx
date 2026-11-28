@@ -49,12 +49,12 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
   const removingRef = useRef(false);
 
   // The input loses focus while it is disabled; it gets it back once the add has finished, unless the
-  // user has put the focus somewhere else meanwhile.
+  // user has put the focus somewhere else meanwhile. The disabled input may still count as the active element.
   useEffect(() => {
     if (adding || !refocus.current) return;
     refocus.current = false;
     const focused = document.activeElement;
-    if (focused === null || focused === document.body) input.current?.focus();
+    if (focused === null || focused === document.body || focused === input.current) input.current?.focus();
   }, [adding]);
 
   // A removed source takes its focused button with it; focus moves to the next source, else the previous one.

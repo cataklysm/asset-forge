@@ -114,6 +114,18 @@ it('after an add the input takes the focus back when it fell to the page', async
   await waitFor(() => expect(document.activeElement).toBe(input()));
 });
 
+it('after an add the input is focused again when the disabled input still counted as focused', async () => {
+  const pending = deferred<void>();
+  const { user } = setup({ onAdd: vi.fn(() => pending.promise) });
+  await user.type(input(), 'https://example.org/b{Enter}');
+  expect(input().disabled).toBe(true);
+  expect(document.activeElement).toBe(input());
+  const focus = vi.spyOn(input(), 'focus');
+  pending.resolve();
+  await waitFor(() => expect(focus).toHaveBeenCalled());
+  expect(document.activeElement).toBe(input());
+});
+
 it('Enter adds the typed URL once and clears the input after it resolved', async () => {
   const pending = deferred<void>();
   const { user, props } = setup({ onAdd: vi.fn(() => pending.promise) });
