@@ -78,19 +78,27 @@ async function loadAnalysable(session: WorkspaceSession, fileId: string): Promis
  * @param session the open workspace
  * @param images makes the JPEG
  * @param file the file
+ * @param signal aborts the run; a render still waiting for a worker is then dropped
  * @returns the JPEG; null when none could be made from that path
- * @throws `JobError('file_unavailable')` when the path cannot be resolved or the read fails
+ * @throws `JobError('file_unavailable')` when the path cannot be resolved or the read fails, or the signal's reason
+ *   when it aborted meanwhile
  */
 async function jpegOf(
   session: WorkspaceSession,
   images: ModelImageSource,
   file: FileRecord,
+  signal: AbortSignal,
 ): Promise<Uint8Array | null> {
+  let image: Uint8Array | null;
   try {
-    return await images.jpeg(await session.storage.absolutePath(file.relativePath));
+    image = await images.jpeg(await session.storage.absolutePath(file.relativePath), signal);
   } catch (cause) {
+    signal.throwIfAborted();
     throw new JobError('file_unavailable', { cause });
   }
+  // A dropped render answers null; that is the cancel, not a file that cannot be read.
+  signal.throwIfAborted();
+  return image;
 }
 
 /**
@@ -99,22 +107,25 @@ async function jpegOf(
  * @param session the open workspace
  * @param images makes the JPEG
  * @param fileId the file
+ * @param signal aborts the run
  * @returns the JPEG and the checksum
- * @throws `JobError('file_unavailable')` when the file is unknown, not analysable or no image can be produced
+ * @throws `JobError('file_unavailable')` when the file is unknown, not analysable or no image can be produced, or the
+ *   signal's reason when it aborted meanwhile
  */
 async function readModelImage(
   session: WorkspaceSession,
   images: ModelImageSource,
   fileId: string,
+  signal: AbortSignal,
 ): Promise<ModelImage> {
   let file = await loadAnalysable(session, fileId);
-  let image = await jpegOf(session, images, file);
+  let image = await jpegOf(session, images, file, signal);
   if (image === null) {
     // The file may have been assigned or moved while it was read: try once more at its new path.
     const again = await loadAnalysable(session, fileId);
     if (again.relativePath === file.relativePath) throw new JobError('file_unavailable');
     file = again;
-    image = await jpegOf(session, images, file);
+    image = await jpegOf(session, images, file, signal);
     if (image === null) throw new JobError('file_unavailable');
   }
   return { image, sha256: file.sha256! };
@@ -161,7 +172,7 @@ async function runAnalysis(dependencies: AnalyzeFileHandlerDependencies, job: Jo
   if (vision === null) throw new JobError('provider_not_configured');
   const provider = dependencies.provider(job.lane);
   if (provider === null) throw new JobError('provider_not_configured');
-  const { image, sha256 } = await readModelImage(session, dependencies.images, fileId);
+  const { image, sha256 } = await readModelImage(session, dependencies.images, fileId, signal);
   signal.throwIfAborted();
   const answer = await vision.analyzeImage({ image, prompt: request.prompt, schema: ANALYSIS_SCHEMA, model, signal });
   // Nothing is awaited between this check and the write, so a cancelled run never writes.
@@ -217,7 +228,7 @@ export async function describeImage(
   signal.throwIfAborted();
   const vision = dependencies.vision();
   if (vision === null) throw new JobError('provider_not_configured');
-  const { image } = await readModelImage(dependencies.session, dependencies.images, request.fileId);
+  const { image } = await readModelImage(dependencies.session, dependencies.images, request.fileId, signal);
   signal.throwIfAborted();
   const answer: unknown = await vision.describeImage({ image, prompt: request.prompt, model: request.model, signal });
   signal.throwIfAborted();

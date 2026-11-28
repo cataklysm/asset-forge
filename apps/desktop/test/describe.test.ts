@@ -140,6 +140,34 @@ describe('analysis:describe', () => {
     });
   });
 
+  it('hands the request signal to the model JPEG, so a cancel drops a JPEG still waiting for a worker', async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await h.close();
+    h = await createHarness({
+      images: {
+        jpeg: async (path, signal) => {
+          signals.push(signal);
+          await held;
+          return readFile(path);
+        },
+      },
+    });
+    mock = await startMockProvider({ port: 0, apiKey: TEST_KEY });
+    await h.provider({ url: mock.url, apiKey: TEST_KEY });
+    await h.ok('workspace:create', { name: 'Describe', rootPath: join(h.base, 'workspace') });
+    const [fileId] = await h.importImages(1);
+
+    const first = h.ok('analysis:describe', { requestId: ids.a, fileId: fileId!, model: MOCK_MODEL });
+    await until(() => signals.length === 1);
+    expect(signals[0]?.aborted).toBe(false);
+    await h.ok('analysis:cancelDescribe', { requestId: ids.a });
+    expect(signals[0]?.aborted).toBe(true);
+    release();
+    expect(await first).toEqual({ ok: false, code: 'cancelled' });
+  });
+
   it('answers busy once too many cancelled runs still settle', async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));

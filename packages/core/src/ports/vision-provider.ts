@@ -39,7 +39,9 @@ export interface ModelImageSource {
    * Renders the image a vision model is sent.
    *
    * @param absolutePath the image file
+   * @param signal when it aborts, a render still waiting for a worker is dropped and answers null; one already
+   *   running may finish
    * @returns a JPEG of the image, longest edge at most 1024 px, EXIF-oriented; null when it cannot be produced
    */
-  jpeg(absolutePath: string): Promise<Uint8Array | null>;
+  jpeg(absolutePath: string, signal?: AbortSignal): Promise<Uint8Array | null>;
 }

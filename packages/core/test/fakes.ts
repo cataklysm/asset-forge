@@ -1942,7 +1942,11 @@ export class FakeModelImageSource implements ModelImageSource {
     new Uint8Array([0xff, 0xd8, 0xff]),
   ];
 
-  async jpeg(absolutePath: string): Promise<Uint8Array | null> {
+  /** The signal of every call, in call order. */
+  readonly signals: (AbortSignal | undefined)[] = [];
+
+  async jpeg(absolutePath: string, signal?: AbortSignal): Promise<Uint8Array | null> {
+    this.signals.push(signal);
     const call = this.calls.push(absolutePath) - 1;
     const step = this.script[Math.min(call, this.script.length - 1)]!;
     if (step instanceof Error) throw step;

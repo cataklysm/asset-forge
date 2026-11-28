@@ -64,9 +64,9 @@ export interface DescribeControllerDependencies {
 }
 
 /**
- * How many cancelled runs may still be settling before a new request answers `busy`. A cancelled run keeps
- * its media worker busy until the model JPEG is made, so repeated Generate and Cancel would otherwise pile
- * them up without bound.
+ * How many cancelled runs may still be settling before a new request answers `busy`. A cancel drops a model
+ * JPEG still waiting for a media worker, but one already rendering keeps its worker until it is made, so
+ * repeated Generate and Cancel would otherwise pile them up without bound.
  */
 export const MAX_SETTLING_RUNS = 4;
 
