@@ -26,7 +26,7 @@ export function renameInMatched(matched: readonly MatchedTag[], change: TagRenam
     return matched.map((tag) => (tag === hit ? merged : tag));
   }
   const first = matched.findIndex(touched);
-  return matched.flatMap((tag, index) => (index === first ? [merged] : touched(tag) ? [] : [tag]));
+  return matched.filter((tag, index) => index === first || !touched(tag)).map((tag) => (touched(tag) ? merged : tag));
 }
 
 /**
