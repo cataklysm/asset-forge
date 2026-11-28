@@ -71,6 +71,12 @@ describe('createPauseGate', () => {
     expect(g.reason('cpu', null)).toBe('provider_timeout');
   });
 
+  it('refuses a threshold that is not an integer of at least 1', () => {
+    for (const threshold of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => createPauseGate({ threshold })).toThrow(RangeError);
+    }
+  });
+
   it('keeps the pause and its reason until resume, then counts from zero', () => {
     const { g, changes } = gate();
     g.record('local_gpu', null, 'provider_unauthorized');

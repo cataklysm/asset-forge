@@ -76,9 +76,13 @@ export interface PauseGateOptions {
  *
  * @param options the threshold and the change listener
  * @returns the gate, with no lane paused
+ * @throws RangeError when the threshold is not an integer of at least 1
  */
 export function createPauseGate(options: PauseGateOptions): PauseGate {
-  const gate = new LanePauses(options, options.threshold ?? DEFAULT_PAUSE_THRESHOLD);
+  const threshold = options.threshold ?? DEFAULT_PAUSE_THRESHOLD;
+  // A threshold of 0, a fraction or NaN would pause on the first run or never; that is a wiring mistake.
+  if (!Number.isInteger(threshold) || threshold < 1) throw new RangeError('The pause threshold must be at least 1');
+  const gate = new LanePauses(options, threshold);
   return {
     reason: (resourceClass, lane) => gate.reason(resourceClass, lane),
     record: (resourceClass, lane, outcome) => gate.record(resourceClass, lane, outcome),
