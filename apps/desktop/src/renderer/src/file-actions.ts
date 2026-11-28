@@ -22,12 +22,17 @@ import {
   upscaleLabel,
 } from './labels';
 
+// The "…" menu of one file: which actions a file offers where, in a fixed order.
+
+/** What the host of a file menu offers. */
 export interface FileActionContext {
   /** The file's cover state within its asset; null where there is no asset (the inbox). */
   cover: { isEffective: boolean; isChosen: boolean } | null;
+  /** Opens the file detail dialog. */
   onDetails(): void;
   /** A file id makes it the chosen cover, null returns to the automatic cover. */
   onSetCover?(fileId: string | null): void;
+  /** Moves the file out of its asset into the inbox. */
   onDetach?(): void;
   /** Opens the single-image analysis; offered only for analysable images. */
   onAnalyse?(): void;
@@ -50,60 +55,104 @@ export interface FileActionContext {
 }
 
 /**
+ * A menu item that is disabled with the reason as its tooltip while something blocks it.
+ *
+ * @param blocked why the action cannot be used; null when it can
+ * @param label the item's label
+ * @param title the item's tooltip while it can be used
+ * @param onSelect the action
+ * @returns the item
+ */
+function blockable(blocked: string | null, label: string, title: string, onSelect: () => void): MenuItem {
+  return blocked === null ? { label, title, onSelect } : { label, title: blocked, disabled: true, onSelect };
+}
+
+/**
+ * Analyse, Review tags (with a proposal) and Image to prompt, for an analysable image.
+ *
+ * @param file the file
+ * @param context what the host offers
+ * @returns the items; none for another file
+ */
+function analysisItems(file: FileRecord, context: FileActionContext): MenuItem[] {
+  const items: MenuItem[] = [];
+  if (!analysable(file)) return items;
+  const { onAnalyse, onReviewTags, onImageToPrompt } = context;
+  const blocked = context.analysisBlocked ?? null;
+  if (onAnalyse !== undefined) items.push(blockable(blocked, ANALYSE_LABEL, ANALYSE_TITLE, onAnalyse));
+  if (onReviewTags !== undefined && file.hasProposal) {
+    items.push({ label: REVIEW_TAGS_LABEL, title: REVIEW_TAGS_TITLE, onSelect: onReviewTags });
+  }
+  if (onImageToPrompt !== undefined) items.push(blockable(blocked, IMAGE_TO_PROMPT_LABEL, IMAGE_TO_PROMPT_TITLE, onImageToPrompt));
+  return items;
+}
+
+/**
+ * Generate from image and the two upscales, for a complete previewable file.
+ *
+ * @param file the file
+ * @param context what the host offers
+ * @returns the items; none without the studio or for another file
+ */
+function studioItems(file: FileRecord, context: FileActionContext): MenuItem[] {
+  const { studio } = context;
+  if (studio === undefined || file.status !== 'complete' || !file.previewable) return [];
+  const items = [blockable(studio.blocked, GENERATE_LABEL, GENERATE_TITLE, () => studio.open(file))];
+  for (const scale of [2, 4] as const) {
+    items.push(
+      blockable(studio.blocked, upscaleLabel(scale), UPSCALE_TITLE, () => {
+        studio.upscale(file, scale).catch((error: unknown) => context.onError?.(describeError(error)));
+      }),
+    );
+  }
+  return items;
+}
+
+/**
+ * Use automatic cover for the chosen cover, otherwise Use as cover for a complete file with a thumbnail.
+ *
+ * @param file the file
+ * @param context what the host offers
+ * @returns the item; none outside an asset
+ */
+function coverItems(file: FileRecord, context: FileActionContext): MenuItem[] {
+  const { cover, onSetCover } = context;
+  if (cover === null || onSetCover === undefined) return [];
+  if (cover.isChosen) return [{ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) }];
+  if (file.status !== 'complete' || !file.thumbnail) return [];
+  const title = file.kind === 'video' ? 'Show this video as the asset cover' : 'Show this image as the asset cover';
+  return [{ label: 'Use as cover', title, onSelect: () => onSetCover(file.id) }];
+}
+
+/**
  * The actions of one file's "…" menu. A trashed file offers only Details, Restore and Delete
  * permanently. A live file offers Details; Open externally and Show in folder for completely
  * imported files (opening only when the type may be opened); Analyse, Review tags (with a
  * proposal) and Image to prompt for analysable images when the host offers them; Generate from
  * image and the upscales for complete previewable files when the host offers the studio; the cover choice
  * where the file belongs to an asset; Detach when the host offers it; Delete last.
+ *
+ * @param file the file
+ * @param context what the host offers
+ * @returns the menu's items in order
  */
-export function fileMenuItems(file: FileRecord, ctx: FileActionContext): MenuItem[] {
+export function fileMenuItems(file: FileRecord, context: FileActionContext): MenuItem[] {
   const complete = file.status === 'complete';
   const shell = (channel: 'files:openExternal' | 'files:showInFolder') => () => {
-    call(channel, { fileId: file.id }).catch((error: unknown) => ctx.onError?.(describeError(error)));
+    call(channel, { fileId: file.id }).catch((error: unknown) => context.onError?.(describeError(error)));
   };
-  const items: MenuItem[] = [{ label: 'Details', onSelect: ctx.onDetails }];
+  const items: MenuItem[] = [{ label: 'Details', onSelect: context.onDetails }];
   if (file.deletedAt !== null) {
-    if (ctx.onRestore !== undefined) items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: ctx.onRestore });
-    if (ctx.onPurge !== undefined) items.push({ label: PURGE_LABEL, title: PURGE_TITLE, onSelect: ctx.onPurge });
+    if (context.onRestore !== undefined) items.push({ label: RESTORE_LABEL, title: RESTORE_TITLE, onSelect: context.onRestore });
+    if (context.onPurge !== undefined) items.push({ label: PURGE_LABEL, title: PURGE_TITLE, onSelect: context.onPurge });
     return items;
   }
   if (complete && file.openable) items.push({ label: 'Open externally', onSelect: shell('files:openExternal') });
   if (complete) items.push({ label: 'Show in folder', onSelect: shell('files:showInFolder') });
-  const { cover, onSetCover, onDetach, onAnalyse, onReviewTags, onImageToPrompt } = ctx;
-  const blocked = ctx.analysisBlocked ?? null;
-  const provider = (label: string, title: string, onSelect: () => void): MenuItem =>
-    blocked === null ? { label, title, onSelect } : { label, title: blocked, disabled: true, onSelect };
-  if (analysable(file)) {
-    if (onAnalyse !== undefined) items.push(provider(ANALYSE_LABEL, ANALYSE_TITLE, onAnalyse));
-    if (onReviewTags !== undefined && file.hasProposal) {
-      items.push({ label: REVIEW_TAGS_LABEL, title: REVIEW_TAGS_TITLE, onSelect: onReviewTags });
-    }
-    if (onImageToPrompt !== undefined) items.push(provider(IMAGE_TO_PROMPT_LABEL, IMAGE_TO_PROMPT_TITLE, onImageToPrompt));
-  }
-  const { studio } = ctx;
-  if (studio !== undefined && complete && file.previewable) {
-    const generation = (label: string, title: string, onSelect: () => void): MenuItem =>
-      studio.blocked === null ? { label, title, onSelect } : { label, title: studio.blocked, disabled: true, onSelect };
-    items.push(generation(GENERATE_LABEL, GENERATE_TITLE, () => studio.open(file)));
-    for (const scale of [2, 4] as const) {
-      items.push(
-        generation(upscaleLabel(scale), UPSCALE_TITLE, () => {
-          studio.upscale(file, scale).catch((error: unknown) => ctx.onError?.(describeError(error)));
-        }),
-      );
-    }
-  }
-  if (cover !== null && onSetCover !== undefined) {
-    if (cover.isChosen) items.push({ label: 'Use automatic cover', title: 'Return to the first image as the cover', onSelect: () => onSetCover(null) });
-    else if (complete && file.thumbnail) {
-      const title = file.kind === 'video' ? 'Show this video as the asset cover' : 'Show this image as the asset cover';
-      items.push({ label: 'Use as cover', title, onSelect: () => onSetCover(file.id) });
-    }
-  }
-  if (onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: onDetach });
-  if (ctx.onDelete !== undefined && file.status !== 'pending') {
-    items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: ctx.onDelete });
+  items.push(...analysisItems(file, context), ...studioItems(file, context), ...coverItems(file, context));
+  if (context.onDetach !== undefined) items.push({ label: 'Detach', title: 'The file is kept and moves to the inbox', onSelect: context.onDetach });
+  if (context.onDelete !== undefined && file.status !== 'pending') {
+    items.push({ label: DELETE_LABEL, title: DELETE_TITLE, onSelect: context.onDelete });
   }
   return items;
 }

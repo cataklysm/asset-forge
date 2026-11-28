@@ -9,34 +9,52 @@ import {
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { nextFocusIndex, offsetShowingIndex, rowCount } from '../gallery';
 
+// Row windowing for grids and tables, with a roving tab stop and keyboard focus that reaches rows not rendered yet.
+
 /** Where a freshly mounted view starts: a saved offset, optionally adjusted so `index` is visible. */
 export interface ViewRestore {
+  /** The saved scroll offset in pixels. */
   scrollOffset: number;
+  /** The item that must be visible; null for none. */
   index: number | null;
   /** Focus the item at `index` once it is rendered (returning from its detail screen). */
   focus: boolean;
 }
 
+/** Where a mounted view is scrolled to. */
 export interface ViewPosition {
+  /** The scroll offset in pixels. */
   scrollOffset: number;
+  /** The first item of the topmost visible row. */
   firstIndex: number;
 }
 
 /** What a mounted view offers its host through `positionRef`. */
 export interface ViewHandle {
+  /** The view the handle belongs to. */
   viewKey: string;
+  /** The current position. */
   get(): ViewPosition;
   /** Scrolls the item's row into view and focuses the item, once it is rendered. */
   reveal(index: number): void;
 }
 
+/** The rendered rows. */
 export interface VisibleRows {
+  /** The first rendered row. */
   firstRow: number;
+  /** The last rendered row. */
   lastRow: number;
+  /** The items per row. */
   columns: number;
 }
 
-/** Content-box size of an element, measured before the first paint and kept current. */
+/**
+ * Content-box size of an element, measured before the first paint and kept current.
+ *
+ * @param ref the element
+ * @returns its size; null before the first measurement
+ */
 export function useElementSize(ref: RefObject<HTMLElement | null>): { width: number; height: number } | null {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   useLayoutEffect(() => {
@@ -45,7 +63,9 @@ export function useElementSize(ref: RefObject<HTMLElement | null>): { width: num
     const measure = () => {
       const width = element.clientWidth;
       const height = element.clientHeight;
-      setSize((old) => (old && old.width === width && old.height === height ? old : { width, height }));
+      setSize((previous) =>
+        previous && previous.width === width && previous.height === height ? previous : { width, height },
+      );
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -55,16 +75,23 @@ export function useElementSize(ref: RefObject<HTMLElement | null>): { width: num
   return size;
 }
 
+/** What `useVirtualRows` lays out. */
 interface Options {
+  /** The scrolling element. */
   scrollRef: RefObject<HTMLDivElement | null>;
+  /** The number of items. */
   total: number;
+  /** The items per row. */
   columns: number;
+  /** The height of one row in pixels. */
   rowHeight: number;
   /** Space above the first row inside the scroll content (a sticky header, a focus-ring margin). */
   paddingStart: number;
   /** The part of the viewport rows can be seen in (without a sticky header). */
   viewportHeight: number;
+  /** Where the view starts; read on mount only. */
   restore: ViewRestore;
+  /** Receives the rendered rows whenever they change. */
   onRows(rows: VisibleRows): void;
   /** Identifies this mounted view, so a stale position is never mistaken for the current one. */
   viewKey: string;
@@ -72,22 +99,30 @@ interface Options {
   positionRef: { current: ViewHandle | null } | { current: Omit<ViewHandle, 'reveal'> | null };
 }
 
+/** What `useVirtualRows` answers. */
 export interface VirtualRows {
+  /** The row virtualizer. */
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   /** The one item that is reachable with Tab (roving tab index). */
   tabbableIndex: number;
   /** The first item of the topmost row in the viewport. */
   firstVisibleIndex: number;
+  /** Moves the focus on the arrow keys, Home and End. */
   onItemKeyDown(index: number, event: KeyboardEvent): void;
+  /** Makes a focused item the tab stop. */
   onItemFocus(index: number): void;
   /** Focuses the item once it is rendered again (its element may be replaced). */
   refocus(index: number): void;
+  /** The current scroll offset in pixels. */
   scrollOffset(): number;
 }
 
 /**
  * Row windowing over `total` items laid out in `columns`, with keyboard focus that follows
  * the arrow keys, Home and End even into rows that are not rendered yet.
+ *
+ * @param options the scrolling element, the layout, the start and the handle
+ * @returns the virtualizer, the tab stop and the keyboard handlers
  */
 export function useVirtualRows({
   scrollRef,
@@ -156,6 +191,7 @@ export function useVirtualRows({
   // After the total shrinks the active item may no longer exist; a tab stop must remain.
   const tabbableIndex = activeRendered && activeIndex < total ? activeIndex : clampIndex(firstVisibleRow() * columns);
 
+  /** Moves the focus for an unmodified navigation key. */
   function onItemKeyDown(index: number, event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const target = nextFocusIndex(index, event.key, columns, total);

@@ -7,10 +7,19 @@ import { CoverImage } from './CoverImage';
 import type { ViewerList } from './FileBrowser';
 import { VideoMark } from './FileTile';
 
+// The film strip of the file detail dialog.
+
+/** The tile size in pixels. */
 const TILE = 96;
+/** The gap between tiles in pixels. */
 const GAP = 8;
 
-/** One row of thumbnails below the stage; a click shows that file. Hidden for fewer than two files. */
+/**
+ * One row of thumbnails below the stage; a click shows that file. Hidden for fewer than two files.
+ *
+ * @param props the list the dialog was opened from
+ * @returns the strip, or nothing
+ */
 export function FilmStrip({ list }: { list: ViewerList }) {
   const scroller = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({

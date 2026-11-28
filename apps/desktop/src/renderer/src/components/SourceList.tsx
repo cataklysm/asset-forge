@@ -11,19 +11,27 @@ import {
 import { ALERT, ICON_BUTTON_INLINE, INPUT, LABEL } from '../ui';
 import { Link } from './Link';
 
+// The source URLs of an asset in its header.
+
 interface Props {
+  /** The asset's sources, oldest first. */
   sources: readonly AssetSource[];
   /** Disables adding and removing (e.g. while an import runs); open and copy stay usable. */
   disabled: boolean;
   /** Rejects when the source was not added; the caller reports the error, the typed text stays. */
   onAdd(url: string): Promise<void>;
+  /** Rejects when the source was not removed; the caller reports the error. */
   onRemove(sourceId: string): Promise<void>;
+  /** Asks the main process to open a source; the caller reports a failure. */
   onOpen(sourceId: string): Promise<void>;
 }
 
 /**
  * The web addresses an asset's material came from. A source opens through `onOpen` with its ID only:
  * no anchor ever carries the address, so the window never navigates.
+ *
+ * @param props the sources, the disabled state and the actions
+ * @returns the group
  */
 export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props) {
   const labelId = useId();
@@ -47,12 +55,13 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
   // A removed source takes its focused button with it; focus moves to the next source, else the previous one.
   useEffect(() => {
     const pending = pendingFocus.current;
-    if (pending === null || sources.some((s) => s.id === pending.id)) return;
+    if (pending === null || sources.some((source) => source.id === pending.id)) return;
     pendingFocus.current = null;
     const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>('button[data-remove]') ?? [])];
     (buttons[pending.index] ?? buttons[pending.index - 1] ?? input.current)?.focus();
   }, [sources]);
 
+  /** Removes a source and remembers where focus goes once it is gone. */
   async function remove(id: string, index: number) {
     pendingFocus.current = { id, index };
     try {
@@ -63,6 +72,7 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
     }
   }
 
+  /** Adds the typed address once at a time and clears the input when it was added. */
   async function add() {
     const url = text.trim();
     if (url === '' || addingRef.current) return;
@@ -80,12 +90,14 @@ export function SourceList({ sources, disabled, onAdd, onRemove, onOpen }: Props
     }
   }
 
+  /** Enter adds. */
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
     void add();
   }
 
+  /** Copies an address to the clipboard. */
   async function copy(url: string) {
     try {
       await navigator.clipboard.writeText(url);

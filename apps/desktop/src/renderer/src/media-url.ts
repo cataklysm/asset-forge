@@ -1,19 +1,44 @@
 import { viewSource, type FileRecord, type ViewSource } from '@assetforge/contracts';
 
+// The `assetforge-media://` URLs the renderer shows media through, and the format label of a file without one.
+
+/**
+ * A cached rendition of a file.
+ *
+ * @param fileId the file
+ * @param size the thumbnail, the detail preview or the full-size rendition
+ * @returns the URL
+ */
 export function previewUrl(fileId: string, size: 'thumb' | 'detail' | 'full'): string {
   return `assetforge-media://preview/${fileId}?size=${size}`;
 }
 
+/**
+ * The original of a file.
+ *
+ * @param fileId the file
+ * @returns the URL
+ */
 export function originalUrl(fileId: string): string {
   return `assetforge-media://original/${fileId}`;
 }
 
-/** The original video, streamed with byte ranges by the main process. */
+/**
+ * The original video, streamed with byte ranges by the main process.
+ *
+ * @param fileId the file
+ * @returns the URL
+ */
 export function videoUrl(fileId: string): string {
   return `assetforge-media://video/${fileId}`;
 }
 
-/** The large image of the viewer; null for `none`. */
+/**
+ * The large image of the viewer.
+ *
+ * @param file the file's id, type and size
+ * @returns which source is shown and its URL; null for `none`
+ */
 export function viewUrl(file: Pick<FileRecord, 'id' | 'mimeType' | 'width' | 'height'>): {
   source: ViewSource;
   url: string | null;
@@ -32,7 +57,12 @@ export function viewUrl(file: Pick<FileRecord, 'id' | 'mimeType' | 'width' | 'he
   }
 }
 
-/** Upper-cased extension after stripping trailing dots/spaces; 'FILE' when there is none. */
+/**
+ * Upper-cased extension after stripping trailing dots/spaces.
+ *
+ * @param originalName the file's name
+ * @returns the extension; 'FILE' when there is none
+ */
 export function formatLabel(originalName: string): string {
   const name = originalName.replace(/[. ]+$/, '');
   const dot = name.lastIndexOf('.');

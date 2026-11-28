@@ -4,6 +4,8 @@ import { OPEN_EXTERNALLY_LABEL, VIDEO_LABEL, VIDEO_UNPLAYABLE_TEXT } from '../la
 import { previewUrl, videoUrl } from '../media-url';
 import { BUTTON, MUTED } from '../ui';
 
+// The video of the file detail dialog, with the element's own controls and the volume of the app session.
+
 /** Volume and mute of the app session: every video starts with the values the last one ended with. */
 const session = { volume: 1, muted: false };
 
@@ -15,11 +17,18 @@ export function resetVideoSession(): void {
 
 /** Seeks and toggles the video the stage shows; the dialog's keys call it. */
 export interface VideoControls {
+  /** Moves the play position by seconds, within the video. */
   seek(seconds: number): void;
+  /** Plays a paused video, else pauses it. */
   togglePlayback(): void;
 }
 
-/** The controls of the element `ref` points to; nothing happens while there is none. */
+/**
+ * The controls of the element `ref` points to; nothing happens while there is none.
+ *
+ * @param ref the video element
+ * @returns the controls
+ */
 export function videoControls(ref: RefObject<HTMLVideoElement | null>): VideoControls {
   return {
     seek(seconds) {
@@ -38,16 +47,22 @@ export function videoControls(ref: RefObject<HTMLVideoElement | null>): VideoCon
 }
 
 interface Props {
+  /** The shown file. */
   file: FileRecord;
+  /** Receives the video element, for the dialog's keys. */
   videoRef: RefObject<HTMLVideoElement | null>;
   /** Opening externally is offered when the element cannot play the file; disabled while false. */
   canOpenExternally: boolean;
+  /** Opens the file in the system's program. */
   onOpenExternally(): void;
 }
 
 /**
  * A video with the element's own controls, in the place of the image stage. Mount it keyed by the
  * file id, so leaving the file starts the next one afresh.
+ *
+ * @param props the file, the element ref and the external opening
+ * @returns the stage
  */
 export function VideoStage({ file, videoRef, canOpenExternally, onOpenExternally }: Props) {
   const [failed, setFailed] = useState(false);

@@ -5,15 +5,38 @@ import { label } from '../labels';
 import { ALERT, BUTTON, INPUT } from '../ui';
 import { AssetPicker } from './AssetPicker';
 
+// The role select of an asset's file and the assign control of an inbox file.
+
+/** Every file role, in the order of the schema. */
 const ROLES = FileRoleSchema.options;
 
-/** The role select of a file that belongs to an asset; a change goes through `files:assign`. */
+/**
+ * One option per file role.
+ *
+ * @returns the options
+ */
+function roleOptions() {
+  return ROLES.map((option) => (
+    <option key={option} value={option}>
+      {label(option)}
+    </option>
+  ));
+}
+
+/**
+ * The role select of a file that belongs to an asset; a change goes through `files:assign`.
+ *
+ * @param props the file, the change callback and the width
+ * @returns the select and its error
+ */
 export function FileRoleSelect({
   file,
   onChanged,
   fullWidth = false,
 }: {
+  /** The file. */
   file: FileRecord;
+  /** Receives the file with its new role. */
   onChanged(file: FileRecord): void;
   /** Stretches the select to the width of its container. */
   fullWidth?: boolean;
@@ -23,6 +46,7 @@ export function FileRoleSelect({
   // Synchronous guard: a second activation before the re-render must not send a second request.
   const busyRef = useRef(false);
 
+  /** Assigns the file again with another role. */
   async function change(role: FileRole) {
     if (busyRef.current || file.assetId === null) return;
     busyRef.current = true;
@@ -30,8 +54,8 @@ export function FileRoleSelect({
     setError(null);
     try {
       onChanged(await call('files:assign', { fileId: file.id, assetId: file.assetId, role }));
-    } catch (e) {
-      setError(describeError(e));
+    } catch (caught) {
+      setError(describeError(caught));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -45,13 +69,9 @@ export function FileRoleSelect({
         disabled={busy}
         aria-label={`Role of ${file.originalName}`}
         value={file.role ?? 'other'}
-        onChange={(e) => void change(FileRoleSchema.parse(e.target.value))}
+        onChange={(event) => void change(FileRoleSchema.parse(event.target.value))}
       >
-        {ROLES.map((r) => (
-          <option key={r} value={r}>
-            {label(r)}
-          </option>
-        ))}
+        {roleOptions()}
       </select>
       {error !== null && (
         <p role="alert" className={ALERT}>
@@ -62,13 +82,20 @@ export function FileRoleSelect({
   );
 }
 
-/** The assign control of an inbox file: role and asset picker behind one "Assign" button. */
+/**
+ * The assign control of an inbox file: role and asset picker behind one "Assign" button.
+ *
+ * @param props the file, the assigned callback and the width
+ * @returns the control; nothing for a file that is not complete
+ */
 export function AssignFileControl({
   file,
   onAssigned,
   fullWidth = false,
 }: {
+  /** The inbox file. */
   file: FileRecord;
+  /** Called once the file belongs to an asset. */
   onAssigned(): void;
   /** Stretches the button, the select and the asset search to the width of their container. */
   fullWidth?: boolean;
@@ -78,13 +105,14 @@ export function AssignFileControl({
   const [role, setRole] = useState<FileRole>('reference');
   const [error, setError] = useState<string | null>(null);
 
+  /** Assigns the file to the picked asset with the chosen role. */
   async function assign(assetId: string) {
     setError(null);
     try {
       await call('files:assign', { fileId: file.id, assetId, role });
       onAssigned();
-    } catch (e) {
-      setError(describeError(e));
+    } catch (caught) {
+      setError(describeError(caught));
     }
   }
 
@@ -97,13 +125,9 @@ export function AssignFileControl({
             className={`${INPUT} ${width}`}
             aria-label="Role"
             value={role}
-            onChange={(e) => setRole(FileRoleSchema.parse(e.target.value))}
+            onChange={(event) => setRole(FileRoleSchema.parse(event.target.value))}
           >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {label(r)}
-              </option>
-            ))}
+            {roleOptions()}
           </select>
           <AssetPicker fullWidth={fullWidth} onPick={(asset) => assign(asset.id)} />
         </>

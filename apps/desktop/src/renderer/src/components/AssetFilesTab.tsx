@@ -1,53 +1,71 @@
 import { useRef, useState } from 'react';
-import { FileRoleSchema, type AssetDetail, type FileRecord, type FileRole } from '@assetforge/contracts';
+import type { AssetDetail, FileRecord, FileRole } from '@assetforge/contracts';
 import { enqueueTitle } from '../analysis';
 import { call, describeError } from '../api';
+import { runExclusive } from '../exclusive';
 import { fileMenuItems } from '../file-actions';
 import { useStudio } from '../studio-context';
 import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useFileDialog } from '../hooks/useFileDialog';
-import { DELETE_LABEL, DELETE_SELECTION_TITLE, label } from '../labels';
+import { DELETE_LABEL, DELETE_SELECTION_TITLE } from '../labels';
 import { hasFilters, NO_FILE_FILTERS, renameInFilters, type AssetView, type FileFilters } from '../list-state';
-import {
-  dropSelected,
-  eligibleFiles,
-  NO_SELECTION,
-  NONE_ELIGIBLE,
-  refreshSelected,
-  sharedTags,
-  type FileSelection,
-} from '../selection';
+import { dropSelected, eligibleFiles, NO_SELECTION, NONE_ELIGIBLE, refreshSelected, type FileSelection } from '../selection';
 import { renameInRecord, renameInSelection } from '../tag-rename';
 import { useRenamed, useTags } from '../tags-context';
 import { runFileBatch, throwFirst } from '../trash-actions';
 import { useTrash } from '../trash-context';
-import { ALERT, BUTTON, SELECT } from '../ui';
+import { ALERT, BUTTON } from '../ui';
 import { SelectionAnalysisButtons, useAnalysisDialogs } from './AnalysisDialogs';
-import { Dialog } from './Dialog';
+import { AddTagsDialog, SetRoleDialog } from './AssetBatchDialogs';
 import { FileBrowser } from './FileBrowser';
 import { FileDetailDialog } from './FileDetailDialog';
 import { FileRoleSelect } from './FileRoleControls';
-import { assignFailures, ResultStrip, type ResultFailure } from './ResultStrip';
+import { assignFailures, batchResult, ResultStrip, type BatchResult, type ResultFailure } from './ResultStrip';
 import { SelectionBar } from './SelectionBar';
-import { TagRow } from './TagRow';
 
-const ROLES = FileRoleSchema.options;
+// The asset's Files tab: the file browser with the selection bar, its batch dialogs and the file detail dialog.
 
+/** The props of the tab. */
 interface Props {
+  /** The asset whose files are shown. */
   asset: AssetDetail;
   /** Bumped by the host (e.g. after an import) and by `onFilesChanged`; refetches the list. */
   reloadToken: number;
   /** After any change to the asset's files: the host bumps `reloadToken` and re-reads the asset. */
   onFilesChanged(): void;
+  /** Receives the updated asset after a cover change. */
   onAssetChange(asset: AssetDetail): void;
   /** The unfiltered number of files, whenever the browser shows it. */
   onCountChange(total: number): void;
 }
 
 /**
+ * Detaches files one call per file, in selection order; a failure does not stop the rest.
+ *
+ * @param files the files to detach
+ * @returns the ids of the detached files and one failure per file that was not
+ */
+async function unassignEach(files: readonly FileRecord[]): Promise<{ detached: string[]; failures: ResultFailure[] }> {
+  const failures: ResultFailure[] = [];
+  const detached: string[] = [];
+  for (const file of files) {
+    try {
+      await call('files:unassign', { fileId: file.id });
+      detached.push(file.id);
+    } catch (error) {
+      failures.push({ key: file.id, name: file.originalName, message: describeError(error) });
+    }
+  }
+  return { detached, failures };
+}
+
+/**
  * The asset's files: the file browser with its own filters, view and selection (none of them
  * persisted), the selection bar (Add tags, Analyse, Set role, Detach, Delete) and the file detail
  * dialog.
+ *
+ * @param props the asset, the reload token and the callbacks
+ * @returns the tab
  */
 export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChange, onCountChange }: Props) {
   const [filters, setFilters] = useState<FileFilters>(NO_FILE_FILTERS);
@@ -57,7 +75,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const [batchRole, setBatchRole] = useState<FileRole>('reference');
   const [batchBusy, setBatchBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ title: string; failures: ResultFailure[] } | null>(null);
+  const [result, setResult] = useState<BatchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const detailDialog = useFileDialog(containerRef);
@@ -94,7 +112,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   const unfiltered = !hasFilters(filters) && debouncedQuery === '';
 
   const eligible = eligibleFiles(selection);
-  const eligibleIds = eligible.map((f) => f.id);
+  const eligibleIds = eligible.map((file) => file.id);
 
   const openDetail = detailDialog.open;
   const closeDetail = detailDialog.close;
@@ -106,25 +124,15 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onFilesChanged();
   }
 
-  /** Runs one cover or detach action at a time; later activations while it runs are ignored. */
-  async function exclusive(action: () => Promise<void>): Promise<void> {
-    if (acting.current) return;
-    acting.current = true;
-    try {
-      await action();
-    } finally {
-      acting.current = false;
-    }
-  }
-
+  // One cover, detach or delete action at a time; later activations while it runs are ignored.
   const setCover = (fileId: string | null) =>
-    exclusive(async () => {
+    runExclusive(acting, async () => {
       onAssetChange(await call('assets:setCover', { assetId: asset.id, fileId }));
       onFilesChanged();
     });
 
   const detach = (file: FileRecord) =>
-    exclusive(async () => {
+    runExclusive(acting, async () => {
       await call('files:unassign', { fileId: file.id });
       setSelection((current) => dropSelected(current, [file.id]));
       // The reload moves the dialog on to the file that follows (FileBrowser `viewer`).
@@ -132,7 +140,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     });
 
   const remove = (file: FileRecord) =>
-    exclusive(async () => {
+    runExclusive(acting, async () => {
       const { failures } = await runFileBatch('files:trashMany', [file]);
       throwFirst(failures);
       setSelection((current) => dropSelected(current, [file.id]));
@@ -144,7 +152,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   /** For the tile menu: failures show above the list. */
   const reported = (action: () => Promise<void>) => () => {
     setError(null);
-    action().catch((e: unknown) => setError(describeError(e)));
+    action().catch((caught: unknown) => setError(describeError(caught)));
   };
 
   async function changeTags(channel: 'files:addTagMany' | 'files:removeTagMany', name: string) {
@@ -153,19 +161,16 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
     onFilesChanged();
   }
 
-  async function batch(action: () => Promise<void>) {
-    if (batching.current) return;
-    batching.current = true;
-    setBatchBusy(true);
-    setError(null);
-    setDialogError(null);
-    try {
-      await action();
-    } finally {
-      batching.current = false;
-      setBatchBusy(false);
-    }
-  }
+  /** Runs one batch at a time; it clears both errors and disables the batch buttons while it runs. */
+  const batch = (action: () => Promise<void>) =>
+    runExclusive(batching, action, {
+      onStart: () => {
+        setBatchBusy(true);
+        setError(null);
+        setDialogError(null);
+      },
+      onEnd: () => setBatchBusy(false),
+    });
 
   const nameOf = (fileId: string) => selection.selected.get(fileId)?.originalName ?? fileId;
 
@@ -174,34 +179,23 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       let items;
       try {
         ({ items } = await call('files:assignMany', { fileIds: eligibleIds, assetId: asset.id, role: batchRole }));
-      } catch (e) {
-        setDialogError(describeError(e));
+      } catch (caught) {
+        setDialogError(describeError(caught));
         return;
       }
       const failures = assignFailures(items, nameOf);
       const changed = items.flatMap((item) => (item.file === null ? [] : [item.file]));
       setSelection((current) => refreshSelected(current, changed));
-      setResult(failures.length === 0 ? null : { title: `${changed.length} updated, ${failures.length} failed`, failures });
+      setResult(batchResult(changed.length, 'updated', failures));
       setDialog(null);
       onFilesChanged();
     });
 
-  // One call per file, in selection order (a failure does not stop the rest).
   const detachSelected = () =>
     batch(async () => {
-      const files = eligible;
-      const failures: ResultFailure[] = [];
-      const detached: string[] = [];
-      for (const file of files) {
-        try {
-          await call('files:unassign', { fileId: file.id });
-          detached.push(file.id);
-        } catch (e) {
-          failures.push({ key: file.id, name: file.originalName, message: describeError(e) });
-        }
-      }
+      const { detached, failures } = await unassignEach(eligible);
       setSelection((current) => dropSelected(current, detached));
-      setResult(failures.length === 0 ? null : { title: `${detached.length} detached, ${failures.length} failed`, failures });
+      setResult(batchResult(detached.length, 'detached', failures));
       onFilesChanged();
     });
 
@@ -213,13 +207,13 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       let outcome;
       try {
         outcome = await runFileBatch('files:trashMany', files);
-      } catch (e) {
-        setError(describeError(e));
+      } catch (caught) {
+        setError(describeError(caught));
         return;
       }
       const { doneIds, failures } = outcome;
       setSelection((current) => dropSelected(current, doneIds));
-      setResult(failures.length === 0 ? null : { title: `${doneIds.length} deleted, ${failures.length} failed`, failures });
+      setResult(batchResult(doneIds.length, 'deleted', failures));
       onFilesChanged();
       trash.refresh();
     });
@@ -238,6 +232,10 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
   });
 
   const noneEligible = eligible.length === 0;
+  const openDialog = (kind: 'tags' | 'role') => {
+    setDialogError(null);
+    setDialog(kind);
+  };
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 pt-4">
@@ -253,10 +251,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
           className={BUTTON}
           disabled={noneEligible || batchBusy}
           title={noneEligible ? NONE_ELIGIBLE : undefined}
-          onClick={() => {
-            setDialogError(null);
-            setDialog('tags');
-          }}
+          onClick={() => openDialog('tags')}
         >
           Add tags
         </button>
@@ -266,10 +261,7 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
           className={BUTTON}
           disabled={noneEligible || batchBusy}
           title={noneEligible ? NONE_ELIGIBLE : undefined}
-          onClick={() => {
-            setDialogError(null);
-            setDialog('role');
-          }}
+          onClick={() => openDialog('role')}
         >
           Set role
         </button>
@@ -354,52 +346,17 @@ export function AssetFilesTab({ asset, reloadToken, onFilesChanged, onAssetChang
       />
       {analysis.dialogs}
 
-      <Dialog open={dialog === 'tags'} title="Add tags" onClose={() => setDialog(null)}>
-        <div className="space-y-4">
-          <TagRow
-            label="Image tags"
-            kind="file"
-            tags={sharedTags(eligible)}
-            onAdd={(name) => changeTags('files:addTagMany', name)}
-            onRemove={(name) => changeTags('files:removeTagMany', name)}
-          />
-          <div className="flex justify-end">
-            <button type="button" className={BUTTON} onClick={() => setDialog(null)}>
-              Done
-            </button>
-          </div>
-        </div>
-      </Dialog>
+      <AddTagsDialog open={dialog === 'tags'} files={eligible} onChangeTag={changeTags} onClose={() => setDialog(null)} />
 
-      <Dialog open={dialog === 'role'} title="Set role" onClose={() => setDialog(null)}>
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <select
-              className={SELECT}
-              aria-label="Role"
-              value={batchRole}
-              onChange={(e) => setBatchRole(FileRoleSchema.parse(e.target.value))}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {label(r)}
-                </option>
-              ))}
-            </select>
-            <button type="button" className={BUTTON} disabled={batchBusy} onClick={() => void applyRole()}>
-              Apply
-            </button>
-            <button type="button" className={BUTTON} onClick={() => setDialog(null)}>
-              Cancel
-            </button>
-          </div>
-          {dialogError !== null && (
-            <p role="alert" className={ALERT}>
-              {dialogError}
-            </p>
-          )}
-        </div>
-      </Dialog>
+      <SetRoleDialog
+        open={dialog === 'role'}
+        role={batchRole}
+        onRoleChange={setBatchRole}
+        busy={batchBusy}
+        error={dialogError}
+        onApply={() => void applyRole()}
+        onClose={() => setDialog(null)}
+      />
     </div>
   );
 }

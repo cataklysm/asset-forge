@@ -4,18 +4,26 @@ import { call } from '../api';
 import { useLoad } from '../hooks/useLoad';
 import { ALERT, BORDER, INPUT, ITEM_HOVER, MUTED } from '../ui';
 
+// A search field that picks one asset.
+
 interface Props {
+  /** Assets that are never offered. */
   excludeIds?: readonly string[];
+  /** Receives the picked asset; a second pick waits until it has settled. */
   onPick(asset: Asset): void | Promise<void>;
   /** Stretches the search input to the width of its container. */
   fullWidth?: boolean;
 }
 
+/** The number of results shown. */
 const RESULTS = 10;
 
 /**
  * An ARIA 1.2 combobox that finds an asset by name: typing filters, ↓/↑ move through the
  * results, Enter or a click picks, Esc closes the list.
+ *
+ * @param props the excluded assets, the pick callback and the width
+ * @returns the combobox
  */
 export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Props) {
   const [query, setQuery] = useState('');
@@ -39,6 +47,7 @@ export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Prop
   const current = active >= 0 && active < items.length ? active : -1;
   const expanded = open && data !== null;
 
+  /** Closes the list and hands the asset on, once at a time. */
   async function pick(asset: Asset) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -51,6 +60,7 @@ export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Prop
     }
   }
 
+  /** Arrow keys move the active result, Enter picks it, Esc closes the list. */
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -86,8 +96,8 @@ export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Prop
         aria-activedescendant={expanded && current >= 0 ? optionId(current) : undefined}
         placeholder="Search assets"
         value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
+        onChange={(event) => {
+          setQuery(event.target.value);
           setActive(-1);
           setOpen(true);
         }}
@@ -116,7 +126,7 @@ export function AssetPicker({ excludeIds = [], onPick, fullWidth = false }: Prop
               title={asset.name}
               className={`cursor-default truncate px-3 py-1.5 ${ITEM_HOVER} ${index === current ? 'bg-raised' : ''}`}
               // Keep the focus in the input; the click picks.
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => void pick(asset)}
             >
               {asset.name}

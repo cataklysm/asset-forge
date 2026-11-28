@@ -8,9 +8,13 @@ import { AssetPicker } from './AssetPicker';
 import { assignFailures, ResultStrip, type ResultFailure } from './ResultStrip';
 import { TagRow } from './TagRow';
 
+// The Selection column of the inbox.
+
+/** Every file role, in the order of the schema. */
 const ROLES = FileRoleSchema.options;
 
 interface Props {
+  /** The selected files. */
   selection: FileSelection;
   /** The shared tag input; the selection bar's "Add tags" focuses it. */
   tagInputRef: RefObject<HTMLInputElement | null>;
@@ -23,14 +27,50 @@ interface Props {
   onFilesChanged(items: FileRecord[]): void;
 }
 
+/**
+ * A count with its noun.
+ *
+ * @param count the count
+ * @param one the noun for one
+ * @param many the noun for any other count
+ * @returns for example `3 files`
+ */
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+/** The marker after a selected file's name. */
+interface Marker {
+  /** The text. */
+  text: string;
+  /** The tooltip. */
+  title: string | undefined;
+  /** Shown in the danger colour. */
+  failed: boolean;
+}
+
+/**
+ * The marker of a selected file: its assign error, else its import status when it is not complete.
+ *
+ * @param file the file
+ * @param assignError the error of the last assign; undefined when it did not fail
+ * @returns the marker; null for none
+ */
+function markerOf(file: FileRecord, assignError: string | undefined): Marker | null {
+  return assignError !== undefined
+    ? { text: label('failed'), title: assignError, failed: true }
+    : file.status !== 'complete'
+      ? { text: label(file.status), title: file.error ?? undefined, failed: file.status === 'failed' }
+      : null;
 }
 
 /**
  * The Selection column of the inbox: the size of the selection, its shared image tags, the batch
  * assign to an asset and the selected names. Files that are not completely imported are marked
  * and left out of tagging and assigning.
+ *
+ * @param props the selection, the tag input and the callbacks
+ * @returns the column
  */
 export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChanged }: Props) {
   const [asset, setAsset] = useState<Asset | null>(null);
@@ -47,15 +87,17 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
 
   const files = [...selection.selected.values()];
   const eligible = eligibleFiles(selection);
-  const eligibleIds = eligible.map((f) => f.id);
-  const allImages = files.length > 0 && files.every((f) => f.kind === 'image');
-  const failedMessage = new Map(result?.failures.map((f) => [f.key, f.message]) ?? []);
+  const eligibleIds = eligible.map((file) => file.id);
+  const allImages = files.length > 0 && files.every((file) => file.kind === 'image');
+  const failedMessage = new Map(result?.failures.map((failure) => [failure.key, failure.message]) ?? []);
 
+  /** Adds or removes a tag on every eligible file. */
   async function changeTags(channel: 'files:addTagMany' | 'files:removeTagMany', name: string) {
     const { items } = await call(channel, { fileIds: eligibleIds, name });
     onFilesChanged(items);
   }
 
+  /** Assigns every eligible file to the picked asset, once at a time, and reports per-file failures. */
   async function assign() {
     if (assigning.current || asset === null || eligibleIds.length === 0) return;
     assigning.current = true;
@@ -68,8 +110,8 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
       const moved = items.flatMap((item) => (item.error === null ? [item.fileId] : []));
       setResult(failures.length === 0 ? null : { title: `${moved.length} assigned, ${failures.length} failed`, failures });
       onAssigned(moved);
-    } catch (e) {
-      setError(describeError(e));
+    } catch (caught) {
+      setError(describeError(caught));
     } finally {
       assigning.current = false;
       setBusy(false);
@@ -109,11 +151,11 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
           className={SELECT}
           aria-label="Role"
           value={role}
-          onChange={(e) => setRole(FileRoleSchema.parse(e.target.value))}
+          onChange={(event) => setRole(FileRoleSchema.parse(event.target.value))}
         >
-          {ROLES.map((r) => (
-            <option key={r} value={r}>
-              {label(r)}
+          {ROLES.map((option) => (
+            <option key={option} value={option}>
+              {label(option)}
             </option>
           ))}
         </select>
@@ -138,13 +180,7 @@ export function InboxSelection({ selection, tagInputRef, onAssigned, onFilesChan
 
       <ul aria-label="Selected files" className="flex flex-col gap-1 text-sm">
         {files.map((file) => {
-          const assignError = failedMessage.get(file.id);
-          const marker =
-            assignError !== undefined
-              ? { text: label('failed'), title: assignError, failed: true }
-              : file.status !== 'complete'
-                ? { text: label(file.status), title: file.error ?? undefined, failed: file.status === 'failed' }
-                : null;
+          const marker = markerOf(file, failedMessage.get(file.id));
           return (
             <li key={file.id} className="flex min-w-0 items-baseline gap-2">
               <span className="min-w-0 truncate" title={file.originalName}>

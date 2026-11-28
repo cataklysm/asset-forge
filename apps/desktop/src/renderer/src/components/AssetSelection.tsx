@@ -7,9 +7,14 @@ import { matchedNames } from './AssetGrid';
 import { CoverImage } from './CoverImage';
 import { TagList } from './TagList';
 
+// The Selection column of the assets screen.
+
 interface Props {
+  /** The selected asset; null for none. */
   asset: AssetSummary | null;
+  /** The name of an asset type. */
   typeName(id: string): string;
+  /** Opens the asset's screen. */
   onOpen(): void;
   /** Opens the start dialog for the images of the asset; without it there is no Analyse button. */
   onAnalyse?(assetId: string): void;
@@ -17,9 +22,15 @@ interface Props {
   analyseBlocked?: string | null;
 }
 
+/** The project names of an asset, or why they could not be loaded. */
 type Projects = { assetId: string; names: string[] } | { assetId: string; error: string };
 
-/** The Selection column of the assets screen: a summary of the selected asset. */
+/**
+ * The Selection column of the assets screen: a summary of the selected asset.
+ *
+ * @param props the asset and the actions
+ * @returns the column
+ */
 export function AssetSelection({ asset, typeName, onOpen, onAnalyse, analyseBlocked = null }: Props) {
   const [projects, setProjects] = useState<Projects | null>(null);
   const assetId = asset?.id ?? null;
@@ -29,10 +40,10 @@ export function AssetSelection({ asset, typeName, onOpen, onAnalyse, analyseBloc
     let active = true;
     call('assignments:listByAsset', { assetId }).then(
       (list) => {
-        if (active) setProjects({ assetId, names: list.map((a) => a.project.name) });
+        if (active) setProjects({ assetId, names: list.map((assignment) => assignment.project.name) });
       },
-      (e: unknown) => {
-        if (active) setProjects({ assetId, error: describeError(e) });
+      (caught: unknown) => {
+        if (active) setProjects({ assetId, error: describeError(caught) });
       },
     );
     return () => {
@@ -110,6 +121,12 @@ export function AssetSelection({ asset, typeName, onOpen, onAnalyse, analyseBloc
   );
 }
 
+/**
+ * One term and its value in the description list.
+ *
+ * @param props the term and the value
+ * @returns the pair
+ */
 function Field({ name, children }: { name: string; children: ReactNode }) {
   return (
     <>

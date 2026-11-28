@@ -13,21 +13,29 @@ import {
 import { BUTTON } from '../ui';
 import { Dialog } from './Dialog';
 
+// The question whether picked ZIP archives are unpacked, asked before an import starts.
+
 /** true = unpack, false = import as file, null = cancelled. */
 type Answer = boolean | null;
 
+/** The open question. */
 interface Pending {
+  /** The picked ZIP archives. */
   zipPaths: readonly string[];
+  /** Ends the wait of `choose`. */
   resolve(answer: Answer): void;
 }
 
 /**
  * Asks whether picked ZIP archives are unpacked or imported as files, before an import starts.
  * The screen renders `dialog` and awaits `choose`; Unpack has the initial focus, Esc cancels.
+ *
+ * @returns the question and the dialog to render
  */
 export function useZipChoice(): {
   /** true = unpack, false = import as file, null = cancelled. Resolves false at once, without a dialog, when no path is a ZIP. */
   choose(sourcePaths: readonly string[]): Promise<Answer>;
+  /** The dialog; open while a question waits. */
   dialog: ReactNode;
 } {
   const [pending, setPending] = useState<Pending | null>(null);

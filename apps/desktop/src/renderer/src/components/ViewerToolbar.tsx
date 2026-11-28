@@ -2,6 +2,8 @@ import { Maximize, Minimize, RotateCw, TriangleAlert, ZoomIn, ZoomOut } from 'lu
 import { BUTTON, ICON_BUTTON } from '../ui';
 import type { ViewerControls } from './ImageStage';
 
+// The toolbar above the viewer's stage.
+
 interface Props {
   /** `null` (a video) renders only the fullscreen button. */
   controls: ViewerControls | null;
@@ -9,7 +11,12 @@ interface Props {
   fullscreen: { active: boolean; toggle(): void } | null;
 }
 
-/** Zoom, rotation and fullscreen controls above the stage. */
+/**
+ * Zoom, rotation and fullscreen controls above the stage.
+ *
+ * @param props the image controls and the fullscreen state
+ * @returns the toolbar
+ */
 export function ViewerToolbar({ controls, fullscreen }: Props) {
   return (
     <div role="toolbar" aria-label="Viewer" className="flex items-center gap-2">
@@ -30,6 +37,12 @@ export function ViewerToolbar({ controls, fullscreen }: Props) {
   );
 }
 
+/**
+ * Fit, 100 %, zoom out, the percentage with its marker, zoom in and rotate.
+ *
+ * @param props the image controls
+ * @returns the buttons
+ */
 function ImageControls({ controls }: { controls: ViewerControls }) {
   const { zoom, percent, marker, canActual } = controls;
   return (

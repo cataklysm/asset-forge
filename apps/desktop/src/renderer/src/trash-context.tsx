@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { call } from './api';
 
+// The trash count shown in the navigation, loaded once and again after every change to the trash.
+
+/** What the trash context offers. */
 export interface TrashState {
   /** The number of files in the trash; null until the first answer. */
   count: number | null;
@@ -8,6 +11,7 @@ export interface TrashState {
   refresh(): void;
 }
 
+/** Outside a provider: no count, and a refresh that does nothing. */
 const INERT: TrashState = { count: null, refresh: () => {} };
 
 const TrashContext = createContext<TrashState>(INERT);
@@ -15,6 +19,9 @@ const TrashContext = createContext<TrashState>(INERT);
 /**
  * Loads `trash:summary` on mount and on every `refresh()`, one request at a time: a refresh while
  * a request runs loads once more after it. A failed request keeps the last count and is not reported.
+ *
+ * @param props the subtree that reads the count
+ * @returns the provider
  */
 export function TrashProvider({ children }: { children: ReactNode }) {
   const [count, setCount] = useState<number | null>(null);
@@ -25,6 +32,7 @@ export function TrashProvider({ children }: { children: ReactNode }) {
     let inFlight = false;
     let again = false;
 
+    /** Loads the count, or marks one more load while a request runs. */
     function load() {
       if (disposed) return;
       if (inFlight) {
@@ -60,7 +68,11 @@ export function TrashProvider({ children }: { children: ReactNode }) {
   return <TrashContext.Provider value={value}>{children}</TrashContext.Provider>;
 }
 
-/** The trash count of the surrounding `TrashProvider`; outside one no count and a no-op refresh. */
+/**
+ * The trash count of the surrounding `TrashProvider`; outside one no count and a no-op refresh.
+ *
+ * @returns the count and its refresh
+ */
 export function useTrash(): TrashState {
   return useContext(TrashContext);
 }
