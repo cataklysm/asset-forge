@@ -200,12 +200,7 @@ function handleIpc(
   event: IpcMainInvokeEvent,
   request: unknown,
 ): Promise<IpcResult<unknown>> {
-  const refusal = ipcRefusal(
-    event,
-    state.mainWindow,
-    (url) => isAppUrl(url, appUrl),
-    state.shutdown !== 'running',
-  );
+  const refusal = ipcRefusal(event, state.mainWindow, (url) => isAppUrl(url, appUrl), state.shutdown !== 'running');
   if (refusal !== null) return Promise.resolve(refusal);
   return dispatch(handlers, channel, request);
 }
