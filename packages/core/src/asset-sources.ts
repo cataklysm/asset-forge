@@ -2,7 +2,7 @@ import type { AssetDetail } from '@assetforge/contracts';
 import { getAssetDetail } from './asset-cover.js';
 import { InvalidOperationError, NotFoundError, ValidationFailedError } from './errors.js';
 import type { WorkspaceSession } from './session.js';
-import { requireAsset } from './tags.js';
+import { requireAsset } from './require-asset.js';
 
 /** How many sources one asset can carry. */
 export const MAX_ASSET_SOURCES = 50;

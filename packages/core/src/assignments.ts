@@ -8,6 +8,7 @@ import type {
 import { NotFoundError } from './errors.js';
 import type { Page } from './ports/page.js';
 import type { AssignmentKey } from './ports/project-repositories.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /**
@@ -20,18 +21,6 @@ import type { WorkspaceSession } from './session.js';
  */
 async function requireProject(session: WorkspaceSession, id: string): Promise<void> {
   if ((await session.database.projects.get(id)) === null) throw new NotFoundError(`Project ${id} does not exist`);
-}
-
-/**
- * Refuses an unknown asset.
- *
- * @param session the open workspace
- * @param id the asset
- * @returns resolves when it exists
- * @throws `NotFoundError` otherwise
- */
-async function requireAsset(session: WorkspaceSession, id: string): Promise<void> {
-  if ((await session.database.assets.get(id)) === null) throw new NotFoundError(`Asset ${id} does not exist`);
 }
 
 /**

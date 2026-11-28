@@ -1,11 +1,11 @@
 import type { FileTarget, ImportProgress, ImportResult } from '@assetforge/contracts';
 import { relocateFile } from './asset-files.js';
-import { NotFoundError } from './errors.js';
 import { importArchive, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, type ArchiveBudget } from './import-archive.js';
 import { importFile, safeErrorMessage, type ImportContext } from './import-file.js';
 import { isZipArchive } from './import-refusals.js';
 import type { ArchiveReader } from './ports/source-files.js';
 import type { WorkspaceHost } from './ports/workspace-host.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /** How an import treats its sources. */
@@ -23,9 +23,7 @@ export interface ImportSourcesOptions {
  * @throws `NotFoundError` for an unknown asset
  */
 export async function requireTargetAsset(session: WorkspaceSession, target: FileTarget | null): Promise<void> {
-  if (target !== null && (await session.database.assets.get(target.assetId)) === null) {
-    throw new NotFoundError(`Asset ${target.assetId} does not exist`);
-  }
+  if (target !== null) await requireAsset(session, target.assetId);
 }
 
 /**

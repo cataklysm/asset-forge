@@ -12,6 +12,7 @@ import {
 import { getAssetDetail } from './asset-cover.js';
 import { NotFoundError, ValidationFailedError } from './errors.js';
 import { requireLiveFile } from './file-trash.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /**
@@ -76,18 +77,6 @@ export function suggestTags(
   request: { prefix: string; limit: number },
 ): Promise<TagSuggestion[]> {
   return session.database.tags.suggest({ prefix: normalizeTagPrefix(request.prefix), limit: request.limit });
-}
-
-/**
- * Refuses an unknown asset.
- *
- * @param session the open workspace
- * @param assetId the asset
- * @returns resolves when it exists
- * @throws `NotFoundError` (`not_found`) otherwise
- */
-export async function requireAsset(session: WorkspaceSession, assetId: string): Promise<void> {
-  if ((await session.database.assets.get(assetId)) === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
 }
 
 /**

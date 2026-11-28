@@ -1,5 +1,6 @@
 import type { Asset, AssetWorkflow, WorkflowStepState } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from './errors.js';
+import { requireAsset } from './require-asset.js';
 import type { WorkspaceSession } from './session.js';
 
 /** The fields of a step a change writes. */
@@ -12,20 +13,6 @@ interface StepWrite {
   completedAt?: string | null;
   /** The time of the change. */
   updatedAt: string;
-}
-
-/**
- * An asset that must exist.
- *
- * @param session the open workspace
- * @param assetId the asset
- * @returns it
- * @throws `NotFoundError` otherwise
- */
-async function requireAsset(session: WorkspaceSession, assetId: string): Promise<Asset> {
-  const asset = await session.database.assets.get(assetId);
-  if (asset === null) throw new NotFoundError(`Asset ${assetId} does not exist`);
-  return asset;
 }
 
 /**

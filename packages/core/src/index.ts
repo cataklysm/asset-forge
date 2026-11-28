@@ -37,6 +37,7 @@ export * from './download-limits.js';
 export * from './file-origins.js';
 export * from './browser-check-failures.js';
 export * from './relations.js';
+export * from './require-asset.js';
 export * from './ports/analysis-repositories.js';
 export * from './ports/asset-repositories.js';
 export * from './ports/file-repositories.js';

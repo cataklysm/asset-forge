@@ -9,7 +9,7 @@ import {
 import { normalizeSourceUrl } from './asset-sources.js';
 import type { NewJob } from './jobs.js';
 import type { WorkspaceSession } from './session.js';
-import { requireAsset } from './tags.js';
+import { requireAsset } from './require-asset.js';
 
 /** The text of an invalid line in the answer. */
 const INVALID_TEXT_MAX = 200;
