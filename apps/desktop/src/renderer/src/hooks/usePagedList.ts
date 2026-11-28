@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PagedState } from '../paged-list';
 import { PagedLoader } from '../paged-loader';
 
@@ -38,15 +38,20 @@ export function usePagedList<T extends { id: string }>(
 ): PagedList<T> {
   const [version, setVersion] = useState(0);
   const fetchRef = useRef(fetchPage);
-  fetchRef.current = fetchPage;
   const loaderRef = useRef<PagedLoader<T> | null>(null);
   loaderRef.current ??= new PagedLoader<T>(key, {
     fetchPage: (offset, limit) => fetchRef.current(offset, limit),
     onChange: () => setVersion((count) => count + 1),
   });
   const loader = loaderRef.current;
-  // A new key requests its page 0 at once, through `fetchRef`, which already holds this render's fetcher.
-  loader.setKey(key);
+  // Applied once the render is committed, so a render that is thrown away requests nothing: the latest
+  // fetcher first, then a new key, which requests its page 0 through it.
+  useLayoutEffect(() => {
+    fetchRef.current = fetchPage;
+    loader.setKey(key);
+  });
+  // Until that effect ran, a new key is pending as well: the previous results are still the displayed ones.
+  const pending = loader.key !== key || loader.pending;
 
   // Inactive after unmount: no requests, no state updates.
   useEffect(() => {
@@ -65,5 +70,5 @@ export function usePagedList<T extends { id: string }>(
   const loadThrough = useCallback((count: number) => loader.loadThrough(count), [loader]);
   const patch = useCallback((items: readonly T[]) => loader.patch(items), [loader]);
   const refresh = useCallback(() => loader.refresh(), [loader]);
-  return { state: loader.displayed, pending: loader.pending, retry, loadThrough, patch, refresh };
+  return { state: loader.displayed, pending, retry, loadThrough, patch, refresh };
 }
