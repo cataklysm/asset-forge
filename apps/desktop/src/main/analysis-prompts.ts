@@ -27,7 +27,8 @@ export const LAST_USED_WRITE_FAILED = 'The analysis prompt used last could not b
 
 const NOT_FOUND = 'The analysis prompt does not exist';
 const DUPLICATE_NAME = 'An analysis prompt with this name already exists';
-const TOO_MANY = `No more than ${ANALYSIS_PROMPTS_PER_PURPOSE} analysis prompts per purpose`;
+// A fixed text; `analysis-prompts.test.ts` pins that it matches `ANALYSIS_PROMPTS_PER_PURPOSE`.
+const TOO_MANY = 'No more than 50 analysis prompts per purpose';
 const LAST_OF_PURPOSE = 'The last analysis prompt of a purpose cannot be deleted';
 const PURPOSE_CHANGED = 'The purpose of an analysis prompt cannot be changed';
 const INVALID = 'The analysis prompt is not valid';

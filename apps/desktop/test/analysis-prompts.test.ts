@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AnalysisPromptPurpose } from '@assetforge/contracts';
+import { ANALYSIS_PROMPTS_PER_PURPOSE, type AnalysisPromptPurpose } from '@assetforge/contracts';
 import { InvalidOperationError, NotFoundError } from '@assetforge/core';
 import {
   ANALYSIS_PROMPTS_FILE,
@@ -136,6 +136,8 @@ describe('analysis prompt store', () => {
   });
 
   it('refuses the 51st prompt of a purpose', () => {
+    // The refusal is a fixed text naming 50; it must follow the contract's limit.
+    expect(ANALYSIS_PROMPTS_PER_PURPOSE).toBe(50);
     const store = open();
     for (let i = 1; i < 50; i++) store.save({ purpose: 'image_prompt', name: `P${i}`, text: 't' });
     expectError(
