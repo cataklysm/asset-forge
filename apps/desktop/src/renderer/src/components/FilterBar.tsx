@@ -1,4 +1,5 @@
 import { Children, type ReactNode } from 'react';
+import { CLEAR_FILTERS_LABEL } from '../labels';
 import { BUTTON } from '../ui';
 
 /** The props of `FilterBar`. */
@@ -30,7 +31,7 @@ export function FilterBar({ children, resultCount, onClear, countTitle }: Props)
       )}
       {onClear !== null && (
         <button type="button" className={BUTTON} onClick={onClear}>
-          Clear filters
+          {CLEAR_FILTERS_LABEL}
         </button>
       )}
     </div>

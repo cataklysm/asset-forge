@@ -5,6 +5,8 @@ export * from './labels/common';
 export * from './labels/files';
 export * from './labels/import';
 export * from './labels/jobs';
+export * from './labels/list-controls';
+export * from './labels/projects';
 export * from './labels/prompts';
 export * from './labels/providers';
 export * from './labels/relations';

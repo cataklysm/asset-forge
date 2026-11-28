@@ -10,7 +10,18 @@ import {
   type VirtualRows,
   type VisibleRows,
 } from '../hooks/useVirtualRows';
-import { label } from '../labels';
+import {
+  label,
+  OPEN_PROJECT_BUTTON,
+  openProjectLabel,
+  PROJECT_ACTIONS_COLUMN,
+  PROJECT_ASSETS_COLUMN,
+  PROJECT_COLUMN,
+  PROJECT_MATCHING_TAGS_COLUMN,
+  PROJECT_STATUS_COLUMN,
+  PROJECTS_TITLE,
+  RETRY_LABEL,
+} from '../labels';
 import { retryIndex, slotAt, type PagedState, type Slot } from '../paged-list';
 import { BORDER, BUTTON_INLINE, ITEM_HOVER, MUTED } from '../ui';
 import { TagList } from './TagList';
@@ -73,7 +84,7 @@ export function ProjectTable(props: ProjectTableProps) {
     <div
       ref={scrollRef}
       role="grid"
-      aria-label="Projects"
+      aria-label={PROJECTS_TITLE}
       aria-rowcount={rowCount(props.total, 1) + 1}
       className="min-h-0 flex-1 overflow-y-scroll"
     >
@@ -133,7 +144,8 @@ function TableRows(props: TableRowsProps) {
  * @returns the header row
  */
 function HeaderRow({ tagged, columns }: { tagged: boolean; columns: string }) {
-  const headers = tagged ? ['Project', 'Status', 'Assets', 'Matching tags'] : ['Project', 'Status', 'Assets'];
+  const plain = [PROJECT_COLUMN, PROJECT_STATUS_COLUMN, PROJECT_ASSETS_COLUMN];
+  const headers = tagged ? [...plain, PROJECT_MATCHING_TAGS_COLUMN] : plain;
   return (
     <div
       role="row"
@@ -146,7 +158,7 @@ function HeaderRow({ tagged, columns }: { tagged: boolean; columns: string }) {
           {header}
         </span>
       ))}
-      <span role="columnheader" aria-label="Actions" />
+      <span role="columnheader" aria-label={PROJECT_ACTIONS_COLUMN} />
     </div>
   );
 }
@@ -192,7 +204,7 @@ function TableRow(props: TableRowProps) {
             onKeyDown={(event) => rows.onItemKeyDown(index, event)}
             onFocus={() => rows.onItemFocus(index)}
           >
-            Retry
+            {RETRY_LABEL}
           </button>
         </span>
       </div>
@@ -275,14 +287,14 @@ function ProjectCells({ project, tagged, onOpen }: { project: ProjectSummary; ta
           type="button"
           tabIndex={-1}
           className={BUTTON_INLINE}
-          aria-label={`Open ${project.name}`}
+          aria-label={openProjectLabel(project.name)}
           onClick={(event) => {
             event.stopPropagation();
             onOpen();
           }}
           onDoubleClick={(event) => event.stopPropagation()}
         >
-          Open
+          {OPEN_PROJECT_BUTTON}
         </button>
       </span>
     </>
