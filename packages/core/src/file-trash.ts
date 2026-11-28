@@ -1,6 +1,6 @@
 import { IMAGE_GENERATE_JOB, type FileRecord, type FileRole } from '@assetforge/contracts';
 import { resolvePendingFileMove } from './file-move-recovery.js';
-import { InvalidOperationError, NotFoundError, StorageUnreachableError } from './errors.js';
+import { InvalidOperationError, NotFoundError } from './errors.js';
 import { eachFile, type FileBatchItem } from './file-batch.js';
 import { settleGenerationOfJob } from './generations.js';
 import { moveAndCommit } from './journaled-move.js';
@@ -8,6 +8,7 @@ import type { JobControl } from './job-types.js';
 import { cancelJob } from './jobs.js';
 import { assetFilePath, inboxPath, stagingPath, TRASH_DIR, trashPath } from './paths.js';
 import type { WorkspaceSession } from './session.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /** Where a restored file goes: its relative path, and its asset and role (both null in the inbox). */
 interface RestorePlacement {
@@ -53,10 +54,8 @@ export function requireLiveFile(file: FileRecord): void {
  * @returns resolves when the storage is reachable
  * @throws StorageUnreachableError otherwise
  */
-async function requireReachable(session: WorkspaceSession): Promise<void> {
-  if (!(await session.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
+function requireReachable(session: WorkspaceSession): Promise<void> {
+  return requireReachableStorage(session.storage);
 }
 
 /**

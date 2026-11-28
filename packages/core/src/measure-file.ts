@@ -1,8 +1,9 @@
 import type { FileRecord } from '@assetforge/contracts';
-import { NotFoundError, StorageUnreachableError } from './errors.js';
+import { NotFoundError } from './errors.js';
 import { isPreviewable, type VideoFormat, videoFormat } from './media-types.js';
 import type { VideoInfo } from './ports/media-probes.js';
 import type { WorkspaceSession } from './session.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /**
  * Whether a probed value is usable.
@@ -55,9 +56,7 @@ export async function planMeasurement(
   const video = videoFormat(file.mimeType);
   if (file.status !== 'complete' || (video === null && !isPreviewable(file.mimeType))) return { file, target: null };
   if (file.width !== null && file.height !== null) return { file, target: null };
-  if (!(await session.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
+  await requireReachableStorage(session.storage);
   if (!(await session.storage.exists(file.relativePath))) return { file, target: null };
   return { file, target: { file, absolutePath: await session.storage.absolutePath(file.relativePath), video } };
 }

@@ -1,6 +1,6 @@
-import { StorageUnreachableError } from './errors.js';
 import type { FileMove, FileMoveRepository, FileRepository } from './ports/file-repositories.js';
 import type { Storage } from './ports/storage.js';
+import { requireReachableStorage } from './storage-reachability.js';
 
 /** What the recovery of moves reads and writes. */
 export interface MoveRecoveryDependencies {
@@ -62,9 +62,7 @@ async function resolveFileMove(dependencies: MoveRecoveryDependencies, move: Fil
     return 'completed';
   }
   // A share that dropped during the checks answers "missing"; never take that for a move that did not happen.
-  if (!(await dependencies.storage.isReachable())) {
-    throw new StorageUnreachableError('The storage of this workspace is not reachable');
-  }
+  await requireReachableStorage(dependencies.storage);
   await dependencies.fileMoves.abort(move.fileId);
   return 'discarded';
 }
