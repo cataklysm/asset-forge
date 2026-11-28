@@ -120,21 +120,30 @@ export async function getPrompt(session: WorkspaceSession, promptId: string): Pr
   return prompt;
 }
 
+/** At most this many query words reach the repository, each one search term per searched column. */
+export const MAX_PROMPT_QUERY_WORDS = 20;
+
 /**
- * The distinct query words, split on whitespace and folded.
+ * The distinct query words, split on whitespace and folded. A word contained in another word is left out, since
+ * a column that contains the longer word contains it too; of the rest the `MAX_PROMPT_QUERY_WORDS` longest are kept.
  *
  * @param query the query as typed
- * @returns the words
+ * @returns the words, longest first
  */
 function queryWords(query: string): string[] {
-  return [
+  const words = [
     ...new Set(
       query
         .split(/\s+/u)
         .filter((word) => word !== '')
         .map(foldSearchWord),
     ),
-  ];
+  ].sort((a, b) => b.length - a.length);
+  const kept: string[] = [];
+  for (const word of words) {
+    if (!kept.some((longer) => longer.includes(word))) kept.push(word);
+  }
+  return kept.slice(0, MAX_PROMPT_QUERY_WORDS);
 }
 
 /**
